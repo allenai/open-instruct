@@ -23,12 +23,12 @@ curl -X POST http://localhost:1234/test_program -H "Content-Type: application/js
 
 import logging
 import traceback
-from typing import Any, List
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from open_instruct.code.code_utils import get_successful_tests_fast, get_successful_tests_stdio
+from open_instruct.code.code_utils import decode_tests, get_successful_tests_fast, get_successful_tests_stdio
 
 app = FastAPI()
 
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 class TestRequest(BaseModel):
     program: str
-    tests: List[Any]
+    tests: Any
     max_execution_time: float = 1.0
 
 
@@ -51,10 +51,11 @@ async def health_check():
 async def test_program(request: TestRequest):
     try:
         # logger.info("Executing tests for program: %s", request.program)
-        results = get_successful_tests_fast(
-            program=request.program, tests=request.tests, max_execution_time=request.max_execution_time
+        decoded_tests = decode_tests(request.tests)
+        results, runtimes = get_successful_tests_fast(
+            program=request.program, tests=decoded_tests, max_execution_time=request.max_execution_time
         )
-        return {"results": results}
+        return {"results": results, "runtimes": runtimes}
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -64,10 +65,11 @@ async def test_program(request: TestRequest):
 async def test_program_stdio(request: TestRequest):
     # run tests with the stdio format
     try:
-        results = get_successful_tests_stdio(
-            program=request.program, tests=request.tests, max_execution_time=request.max_execution_time
+        decoded_tests = decode_tests(request.tests)
+        results, runtimes = get_successful_tests_stdio(
+            program=request.program, tests=decoded_tests, max_execution_time=request.max_execution_time
         )
-        return {"results": results}
+        return {"results": results, "runtimes": runtimes}
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

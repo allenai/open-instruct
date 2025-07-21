@@ -1,14 +1,20 @@
+import base64
+import json
 import logging
 import math
 import multiprocessing
 import os
+import pickle
 import shutil
-from ctypes import c_int
+import sys
+import time
+import zlib
 from typing import Any, Dict, List, Optional
 
 from .testing_util import grade_stdio
 
 # taken from https://github.com/TIGER-AI-Lab/AceCoder/blob/62bb7fc25d694fed04a5270c89bf2cdc282804f7/data/inference/EvaluateInferencedCode.py#L372
+# DANGEROUS_MODULES = ["os", "sys", "shutil", "subprocess", "socket", "urllib", "requests", "pathlib", "glob", "cgi", "cgitb", "xml", "pickle", "eval", "exec"]
 # we save the current working directory and restore them later
 cwd = os.getcwd()
 cache_wd = cwd + "/cache"
@@ -30,61 +36,56 @@ logger = logging.getLogger(__name__)
 # -------------------------------------------------------------
 # The slow but  accurate version
 # -------------------------------------------------------------
-return_var = multiprocessing.Value(c_int, 0)
+original_builtins = __builtins__
+return_var = multiprocessing.Value("i", 0)
 
 
-def run_single_test_against_program_helper(func: str, test: str) -> int:
-    """Return 1 if func finish running, 0 otherwise"""
-    # Apply reliability guard in the child process
-    reliability_guard()
-
-    try:
-        execution_context = {}
-        execution_context.update({"__builtins__": __builtins__})
-        try:
-            exec(func, execution_context)
-            exec(test, execution_context)
-            return_var.value = 1
-            return 1
-        except Exception:
-            return_var.value = 0
-            return 0
-    finally:
-        # Restore in child process (though it will terminate anyway)
-        partial_undo_reliability_guard()
+def encode_tests(tests: list) -> str:
+    if not tests:
+        return ""
+    pickled_data = pickle.dumps(tests)
+    compressed_data = zlib.compress(pickled_data)
+    b64_encoded_data = base64.b64encode(compressed_data)
+    return b64_encoded_data.decode("utf-8")
 
 
-# very unstable, seems to work, seeing there are no uses will be deprecated for now.
-def get_successful_tests_slow(program: str, tests: List[str], max_execution_time: float = 1.0) -> List[int]:
-    """Run a program against a list of tests, if the program exited successfully then we consider
-    the test to be passed. Note that you SHOULD ONLY RUN THIS FUNCTION IN A VIRTUAL ENVIRONMENT
-    as we do not gurantee the safety of the program provided.
-
-    Parameter:
-        program: a string representation of the python program you want to run
-        tests: a list of assert statements which are considered to be the test cases
-        max_execution_time: the number of second each individual test can run before
-            it is considered failed and terminated
-
-    Return:
-        a list of 0/1 indicating passed or not"""
-    test_ct = len(tests)
-    if test_ct == 0:
+def decode_tests(tests: Any) -> list:
+    if not tests:
         return []
-    if not should_execute(program=program, tests=tests):
-        return [0] * len(tests)
+    if isinstance(tests, list):
+        return tests
+    if isinstance(tests, str):
+        try:
+            # First, try to decode as a plain JSON string
+            return json.loads(tests)
+        except json.JSONDecodeError:
+            # If that fails, try to decode from the compressed format
+            try:
+                b64_decoded = base64.b64decode(tests.encode("utf-8"))
 
-    result = []
-    for test in tests:
-        return_var.value = 0
-        p = multiprocessing.Process(target=run_single_test_against_program_helper, args=(program, test))
-        p.start()
-        p.join(timeout=max_execution_time)
-        if p.is_alive():
-            p.kill()
-        result.append(return_var.value)
+                # Use a streaming decompressor to handle potentially very large test cases
+                # without allocating a massive buffer upfront. This is more memory-efficient.
+                decompressor = zlib.decompressobj()
+                decompressed_chunks = []
+                total_decompressed_size = 0
 
-    return result
+                # Process in chunks to avoid holding the entire decompressed data in memory at once.
+                chunk_size = 256 * 1024  # 256KB chunks
+                for i in range(0, len(b64_decoded), chunk_size):
+                    chunk = b64_decoded[i : i + chunk_size]
+                    decompressed_chunk = decompressor.decompress(chunk)
+                    total_decompressed_size += len(decompressed_chunk)
+                    decompressed_chunks.append(decompressed_chunk)
+
+                decompressed_chunks.append(decompressor.flush())
+
+                decompressed_data = b"".join(decompressed_chunks)
+                return json.loads(pickle.loads(decompressed_data))
+            except Exception:
+                # Log the problematic data before returning an empty list
+                logger.error(f"Failed to decode test data: {tests}")
+                return []
+    return []
 
 
 # -------------------------------------------------------------
@@ -120,7 +121,7 @@ def run_tests_against_program_helper_2(func: str, tests: List[str], shared_resul
         partial_undo_reliability_guard()
 
 
-def run_individual_test_helper(func: str, test: str, result_array, index: int) -> None:
+def run_individual_test_helper(func: str, test: str, result_array, index: int, runtimes_array) -> None:
     """Run a single test and store result in shared array at given index"""
     # Apply reliability guard in the child process
     reliability_guard()
@@ -130,10 +131,14 @@ def run_individual_test_helper(func: str, test: str, result_array, index: int) -
         execution_context.update({"__builtins__": __builtins__})
         try:
             exec(func, execution_context)
+            start_time = time.time()
             exec(test, execution_context)
+            end_time = time.time()
             result_array[index] = 1
+            runtimes_array[index] = end_time - start_time
         except Exception:
             result_array[index] = 0
+            runtimes_array[index] = -1.0
     finally:
         # Restore in child process (though it will terminate anyway)
         partial_undo_reliability_guard()
@@ -161,26 +166,31 @@ def get_successful_tests_fast(program: str, tests: List[str], max_execution_time
 
     # Run each test individually to handle timeouts properly
     shared_test_results = multiprocessing.Array("i", len(tests))
+    shared_runtimes = multiprocessing.Array("d", len(tests))
 
     # Initialize results
     for i in range(len(tests)):
         shared_test_results[i] = 0
+        shared_runtimes[i] = -1.0
 
     # Run each test in its own process
     for idx, test in enumerate(tests):
-        p = multiprocessing.Process(target=run_individual_test_helper, args=(program, test, shared_test_results, idx))
+        p = multiprocessing.Process(
+            target=run_individual_test_helper, args=(program, test, shared_test_results, idx, shared_runtimes)
+        )
         p.start()
         p.join(timeout=max_execution_time)
         if p.is_alive():
             p.kill()
 
-    return [shared_test_results[i] for i in range(len(tests))]
+    return [shared_test_results[i] for i in range(len(tests))], [shared_runtimes[i] for i in range(len(tests))]
 
 
 # -------------------------------------------------------------
 # Stdio format - mostly copied from livecodebench
 # -------------------------------------------------------------
 stdio_test_results = multiprocessing.Array("i", 1000)  # Support up to 1000 tests for stdio
+stdio_runtimes = multiprocessing.Array("d", 1000)
 
 
 def run_tests_stdio_helper(program: str, tests: List[Any], max_execution_time: float):
@@ -190,13 +200,14 @@ def run_tests_stdio_helper(program: str, tests: List[Any], max_execution_time: f
         all_inputs = [test["input"] for test in tests]
         all_outputs = [test["output"] for test in tests]
         timeout = math.ceil(max_execution_time)
-        results, _ = grade_stdio(program, all_inputs, all_outputs, timeout)
+        results, runtimes = grade_stdio(program, all_inputs, all_outputs, timeout)
 
         if results is not None:
             processed_results = [1 if r is True else int(r) for r in results]
             for i, res in enumerate(processed_results):
                 if i < len(stdio_test_results):
                     stdio_test_results[i] = res
+                    stdio_runtimes[i] = runtimes[i]
     except Exception:
         # On any failure, results in the shared array will remain as they were initialized (0), indicating failure.
         pass
@@ -223,6 +234,7 @@ def get_successful_tests_stdio(program: str, tests: List[Any], max_execution_tim
 
     for i in range(test_ct):
         stdio_test_results[i] = 0  # Initialize results to 0 (failure)
+        stdio_runtimes[i] = -1.0
 
     # Total timeout needs to account for all tests running sequentially.
     total_timeout = max_execution_time * test_ct + 5.0
@@ -234,7 +246,9 @@ def get_successful_tests_stdio(program: str, tests: List[Any], max_execution_tim
     if p.is_alive():
         p.kill()
 
-    return [1 if stdio_test_results[i] == 1 else 0 for i in range(test_ct)]
+    return [1 if stdio_test_results[i] == 1 else 0 for i in range(test_ct)], [
+        stdio_runtimes[i] for i in range(test_ct)
+    ]
 
 
 # -------------------------------------------------------------
@@ -367,8 +381,6 @@ def reliability_guard(maximum_memory_bytes: Optional[int] = None):
     subprocess.Popen = None  # type: ignore
 
     # __builtins__['help'] = None
-
-    import sys
 
     sys.modules["ipdb"] = None
     sys.modules["joblib"] = None

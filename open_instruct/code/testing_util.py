@@ -237,6 +237,7 @@ def grade_stdio(code: str, all_inputs: list, all_outputs: list, timeout: int):
         return ([-1] * len(all_outputs), {"error_code": -1, "error_message": "Method not found"})
 
     all_results = []
+    all_runtimes = []
     total_execution_time = 0
     first_failure_info = None
     for idx, (gt_inp, gt_out) in enumerate(zip(all_inputs, all_outputs)):
@@ -248,13 +249,16 @@ def grade_stdio(code: str, all_inputs: list, all_outputs: list, timeout: int):
             with Capturing() as captured_output:
                 start = time.time()
                 call_method(method, gt_inp)
-                total_execution_time += time.time() - start
+                end_time = time.time()
+                total_execution_time += end_time - start
+                all_runtimes.append(end_time - start)
                 # reset the alarm
             signal.alarm(0)
             prediction = captured_output[0] if captured_output else ""
 
         except Exception as e:
             signal.alarm(0)
+            all_runtimes.append(-1.0)
             if "timeoutexception" in repr(e).lower():
                 all_results.append(-3)
                 if not first_failure_info:
@@ -316,4 +320,4 @@ def grade_stdio(code: str, all_inputs: list, all_outputs: list, timeout: int):
     if first_failure_info:
         return all_results, first_failure_info
 
-    return all_results, {"execution time": total_execution_time}
+    return all_results, all_runtimes
