@@ -77,6 +77,7 @@ from torch.utils.tensorboard import SummaryWriter
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForSequenceClassification,
+    GenerationConfig,
     PreTrainedModel,
     PreTrainedTokenizer,
     get_scheduler,
@@ -1509,13 +1510,26 @@ class PolicyTrainerRayProcess(RayProcess):
             shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
         print("finished training")
 
-    def save_model(self, model_to_save: PreTrainedModel, output_dir: str) -> None:
+    def save_model(
+        self, model_to_save: PreTrainedModel, chat_template_name: str, tokenizer: PreTrainedTokenizer, output_dir: str
+    ) -> None:
         if self.rank == 0:
             os.makedirs(output_dir, exist_ok=True)
 
         # save model weights for ZeRO2/3
         if hasattr(model_to_save, "module"):
             model_to_save = model_to_save.module
+
+        if "olmo" in chat_template_name:
+            # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
+            model_to_save.generation_config = GenerationConfig(
+                temperature=None,
+                top_p=None,
+                eos_token_id=[
+                    tokenizer.convert_tokens_to_ids("<|im_end|>"),
+                    tokenizer.convert_tokens_to_ids("<|endoftext|>"),
+                ],
+            )
 
         # gather parameters
         output_state_dict = {}

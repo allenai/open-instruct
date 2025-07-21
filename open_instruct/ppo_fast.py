@@ -76,6 +76,7 @@ from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
     AutoModelForSequenceClassification,
+    GenerationConfig,
     PreTrainedModel,
     PreTrainedTokenizer,
     get_scheduler,
@@ -1070,7 +1071,7 @@ class PolicyTrainerRayProcess(RayProcess):
             self.offload_to_cpu(self.model)
         return metrics_list
 
-    def save_model(self, output_dir: str) -> None:
+    def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
         model_to_save = self.model
         if self.rank == 0:
             os.makedirs(output_dir, exist_ok=True)
@@ -1078,6 +1079,17 @@ class PolicyTrainerRayProcess(RayProcess):
         # save model weights for ZeRO2/3
         if hasattr(model_to_save, "module"):
             model_to_save = model_to_save.module
+
+        if "olmo" in chat_template_name:
+            # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
+            model_to_save.generation_config = GenerationConfig(
+                temperature=None,
+                top_p=None,
+                eos_token_id=[
+                    tokenizer.convert_tokens_to_ids("<|im_end|>"),
+                    tokenizer.convert_tokens_to_ids("<|endoftext|>"),
+                ],
+            )
 
         # gather parameters
         output_state_dict = {}
@@ -1813,7 +1825,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                         checkpoint_dir = f"{args.output_dir}_checkpoints"
                         step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
                         print(f"Saving model at step {training_step} to {step_dir}")
-                        ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
+                        ray.get(
+                            [
+                                policy_group.models[i].save_model.remote(step_dir, tc.chat_template_name, tokenizer)
+                                for i in range(args.world_size)
+                            ]
+                        )
                         if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                             leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
                             for i in range(args.world_size):
@@ -1883,7 +1900,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         with Timer("[Main Thread] 🗡️ Saving model"):
-            ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
+            ray.get(
+                [
+                    policy_group.models[i].save_model.remote(args.output_dir, tc.chat_template_name, tokenizer)
+                    for i in range(args.world_size)
+                ]
+            )
             if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                 leaderboard_name = args.hf_repo_revision
                 for i in range(args.world_size):

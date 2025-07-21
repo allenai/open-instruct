@@ -417,8 +417,8 @@ def save_with_accelerate(
             top_p=None,
             eos_token_id=[
                 tokenizer.convert_tokens_to_ids("<|im_end|>"),
-                tokenizer.convert_tokens_to_ids("<|endoftext|>")
-            ]
+                tokenizer.convert_tokens_to_ids("<|endoftext|>"),
+            ],
         )
     else:
         model.generation_config = transformers.GenerationConfig(
