@@ -270,6 +270,7 @@ for TASK in "${TASKS[@]}"; do
             --model "$MODEL_NAME" \
             --beaker-workspace "ai2/tulu-3-results" \
             --beaker-budget ai2/oe-adapt \
+            --beaker-timeout 48h \
             --task "$TASK" \
             $MODEL_TYPE \
             --batch-size "$BATCH_SIZE" \
@@ -290,6 +291,7 @@ for TASK in "${TASKS[@]}"; do
         --model "$MODEL_NAME" \
         --beaker-workspace "ai2/tulu-3-results" \
         --beaker-budget ai2/oe-adapt \
+        --beaker-timeout 48h \
         --task "$TASK" \
         $MODEL_TYPE \
         --batch-size "$BATCH_SIZE" \
