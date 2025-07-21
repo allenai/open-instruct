@@ -2102,7 +2102,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     # Start vLLM engines to process from queues
     for engine in vllm_engines:
         engine.process_from_queue.remote(
-            generation_config, eval_generation_config, args.local_eval_freq, args.num_training_steps, resume_training_step
+            generation_config,
+            eval_generation_config,
+            args.local_eval_freq,
+            args.num_training_steps,
+            resume_training_step,
         )
     logger.info("======== ✅ vllm engines started processing from queues =========")
 

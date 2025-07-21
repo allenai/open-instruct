@@ -2409,7 +2409,7 @@ requires-dist = [
     { name = "debugpy", specifier = ">=1.8.13" },
     { name = "deepspeed", specifier = "==0.15.4" },
     { name = "fastapi", marker = "extra == 'code'", specifier = ">=0.100.0" },
-    { name = "flash-attn", marker = "extra == 'compile'", specifier = ">=2.8.0.post1" },
+    { name = "flash-attn", marker = "extra == 'compile'", specifier = ">=2.8.0.post2" },
     { name = "flashinfer-python", marker = "extra == 'compile'", specifier = ">=0.2.7.post1" },
     { name = "hf-transfer", specifier = ">=0.1.8" },
     { name = "immutabledict", specifier = "==1.2.0" },
