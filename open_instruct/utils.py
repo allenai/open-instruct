@@ -546,10 +546,27 @@ class ArgumentParserPlus(HfArgumentParser):
             [`List[dataclass]`]: a list of dataclasses with the values from the YAML file and the command line
         """
         arg_list = self.parse_yaml_file(os.path.abspath(yaml_arg))
+        #arg_list = self.parse_yaml_file(os.path.abspath(yaml_arg))
+
+        cli_overrides = {}
+        for tok in other_args or []:
+            if not tok.startswith("--"):
+                continue
+            if "=" in tok:
+                k, v = tok[2:].split("=", 1)
+            else:
+                k, v = tok[2:], "true"
+
+            cli_overrides[k] = v
 
         outputs = []
         # strip other args list into dict of key-value pairs
-        other_args = {arg.split("=")[0].strip("-"): arg.split("=")[1] for arg in other_args}
+        # other_args = {arg.split("=")[0].strip("-"): arg.split("=")[1] for arg in other_args}
+        used_args = {}
+
+        outputs = []
+        # strip other args list into dict of key-value pairs
+        #other_args = {arg.split("=")[0].strip("-"): arg.split("=")[1] for arg in other_args}
         used_args = {}
 
         # overwrite the default/loaded value with the value provided to the command line
