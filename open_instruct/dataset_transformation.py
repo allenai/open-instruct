@@ -978,6 +978,7 @@ def preference_tulu_tokenize_and_truncate_v1_2(
 def preference_tulu_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
     return any(x != -100 for x in row[CHOSEN_LABELS_KEY]) and any(x != -100 for x in row[REJECTED_LABELS_KEY])
 
+
 def rlvr_tokenize_v1(
     row: Dict[str, Any],
     tokenizer: PreTrainedTokenizer,
