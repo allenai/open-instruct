@@ -47,7 +47,7 @@ import multiprocessing
 import os
 from dataclasses import asdict, dataclass, field
 from functools import cached_property
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import torch
 import transformers
@@ -1290,6 +1290,7 @@ class DatasetConfig:
 
     # for tracking purposes
     dataset_commit_hash: Optional[str] = None
+    frac_or_num_samples: Optional[Union[int, float]] = None
 
     def __post_init__(self):
         # if the file exists locally, use the local file
@@ -1466,35 +1467,98 @@ class LocalDatasetTransformationCache:
             json.dump(config_dict, f, indent=2)
 
     def load_or_transform_dataset(
-        self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
-    ) -> Dataset:
+        self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False, return_statistics: bool = False
+    ) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
         """Load dataset from local cache if it exists, otherwise transform and cache it locally."""
         cache_path = self.get_cache_path()
 
         # Check if the cache exists
         if os.path.exists(cache_path) and not dataset_skip_cache:
             print(f"✅ Found cached dataset at {cache_path}")
-            return Dataset.load_from_disk(cache_path, keep_in_memory=True)
+            dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
+            if return_statistics:
+                # Load statistics from cache if available
+                stats_path = os.path.join(cache_path, "dataset_statistics.json")
+                if os.path.exists(stats_path):
+                    with open(stats_path, "r") as f:
+                        statistics = json.load(f)
+                    return dataset, statistics
+                else:
+                    # Return empty statistics if not cached
+                    return dataset, {"per_dataset_stats": [], "dataset_order": []}
+            return dataset
 
         print(f"Cache not found or invalid, transforming datasets...")
 
-        # Transform each dataset
+        # Transform each dataset and collect statistics
         transformed_datasets = []
+        dataset_statistics = []
+        dataset_order = []
+        
         for dc in dcs:
+            # Get initial dataset info
+            initial_size = len(dc.dataset) if dc.dataset else 0
+            
             dataset = get_dataset_v1(dc, tc)
             transformed_datasets.append(dataset)
+            
+            # Collect statistics for this dataset
+            stats = {
+                "dataset_name": dc.dataset_name,
+                "dataset_split": dc.dataset_split,
+                "initial_instances": initial_size,
+                "final_instances": len(dataset),
+                "instances_filtered": initial_size - len(dataset),
+                "frac_or_num_samples": dc.frac_or_num_samples,
+            }
+            
+            # Count tokens if the dataset has been tokenized
+            if INPUT_IDS_KEY in dataset.column_names:
+                total_tokens = 0
+                trainable_tokens = 0
+                for sample in dataset:
+                    tokens = len(sample[INPUT_IDS_KEY])
+                    total_tokens += tokens
+                    if LABELS_KEY in sample:
+                        trainable_tokens += sum(1 for label in sample[LABELS_KEY] if label != -100)
+                
+                stats["total_tokens"] = total_tokens
+                stats["trainable_tokens"] = trainable_tokens
+                stats["avg_tokens_per_instance"] = total_tokens / len(dataset) if len(dataset) > 0 else 0
+            
+            dataset_statistics.append(stats)
+            dataset_order.append(dc.dataset_name)
 
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
+        
+        # Prepare return statistics
+        all_statistics = {
+            "per_dataset_stats": dataset_statistics,
+            "dataset_order": dataset_order,
+        }
+        
         if dataset_skip_cache:
+            if return_statistics:
+                return combined_dataset, all_statistics
             return combined_dataset
 
         # Save to local cache
         combined_dataset.save_to_disk(cache_path)
         self.save_config(self.config_hash, dcs, tc)
+        
+        # Save statistics to cache
+        stats_path = os.path.join(cache_path, "dataset_statistics.json")
+        with open(stats_path, "w") as f:
+            json.dump(all_statistics, f, indent=2)
+        
         print(f"🚀 Saved transformed dataset to {cache_path}")
         print(f"✅ Found cached dataset at {cache_path}")
-        return Dataset.load_from_disk(cache_path, keep_in_memory=True)
+        
+        loaded_dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
+        if return_statistics:
+            return loaded_dataset, all_statistics
+        return loaded_dataset
 
 
 def get_cached_dataset(
@@ -1503,12 +1567,13 @@ def get_cached_dataset(
     hf_entity: Optional[str] = None,
     dataset_local_cache_dir: Optional[str] = None,
     dataset_skip_cache: bool = False,
-) -> Dataset:
+    return_statistics: bool = False,
+) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
     if dataset_local_cache_dir is not None:
         cache = LocalDatasetTransformationCache(dataset_local_cache_dir=dataset_local_cache_dir)
     else:
         cache = DatasetTransformationCache(hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
+    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache, return_statistics=return_statistics)
 
 
 def get_cached_dataset_tulu(
@@ -1523,7 +1588,8 @@ def get_cached_dataset_tulu(
     hf_entity: Optional[str] = None,
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
-) -> Dataset:
+    return_statistics: bool = False,
+) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
     dcs = []
     if dataset_config_hash is None:
         if len(dataset_mixer_list_splits) == 1:
@@ -1550,6 +1616,7 @@ def get_cached_dataset_tulu(
                 transform_fn=dataset_transform_fn,
                 transform_fn_args=transform_fn_args,
                 target_columns=target_columns,
+                frac_or_num_samples=frac_or_num_samples,
             )
             if frac_or_num_samples > 1.0:
                 new_range = int(frac_or_num_samples)
@@ -1564,7 +1631,7 @@ def get_cached_dataset_tulu(
         )
     elif dataset_cache_mode == "hf":
         cache = DatasetTransformationCache(config_hash=dataset_config_hash, hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
+    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache, return_statistics=return_statistics)
 
 
 def test_sft_dpo_same_tokenizer():

@@ -40,7 +40,8 @@ import os
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, List, Literal, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
 from tqdm import tqdm
@@ -158,7 +159,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         ("sft_tulu_filter_v1", {}),  # remove examples that don't have any labels
     ]
 
-    train_dataset = get_cached_dataset_tulu(
+    result = get_cached_dataset_tulu(
         dataset_mixer_list=args.dataset_mixer_list,
         dataset_mixer_list_splits=args.dataset_mixer_list_splits,
         tc=tc,
@@ -169,7 +170,11 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         dataset_config_hash=args.dataset_config_hash,
         dataset_local_cache_dir=args.dataset_local_cache_dir,
         dataset_skip_cache=args.dataset_skip_cache,
+        return_statistics=True,
     )
+    
+    # Unpack the result
+    train_dataset, dataset_statistics = result
 
     train_dataset = train_dataset.shuffle()
 
@@ -190,23 +195,35 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     num_samples_skipped = 0
     document_boundaries = []
     current_position = 0
+    
+    # Track per-dataset indices if we have dataset order info
+    dataset_instance_boundaries = []
+    if "dataset_order" in dataset_statistics and dataset_statistics["dataset_order"]:
+        # Create a mapping to track which instances belong to which dataset
+        dataset_names = dataset_statistics["dataset_order"]
+        per_dataset_counts = {name: 0 for name in dataset_names}
+        per_dataset_tokens = {name: 0 for name in dataset_names}
+        per_dataset_trainable_tokens = {name: 0 for name in dataset_names}
 
-    for sample in tqdm(  # type: ignore
+    for idx, sample in enumerate(tqdm(  # type: ignore
         train_dataset,
         desc="Collecting tokens",
         file=sys.stdout,
         bar_format="{l_bar}{bar}{r_bar}\n",  # better printing in beaker
         mininterval=10.0,
-    ):
+    )):
         sample_length = len(sample[INPUT_IDS_KEY])
-        token_ids.extend(sample[INPUT_IDS_KEY])
-        labels_mask.extend([1 if label != -100 else 0 for label in sample[LABELS_KEY]])
+        sample_tokens = sample[INPUT_IDS_KEY]
+        sample_labels = sample[LABELS_KEY]
+        
+        token_ids.extend(sample_tokens)
+        labels_mask.extend([1 if label != -100 else 0 for label in sample_labels])
 
         # Record document boundary (start, end)
         document_boundaries.append((current_position, current_position + sample_length))
         current_position += sample_length
 
-        if all(label == -100 for label in sample[LABELS_KEY]):
+        if all(label == -100 for label in sample_labels):
             num_samples_skipped += 1
 
         # Assert that attention mask is all 1s
@@ -214,10 +231,15 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
             f"Expected all attention mask values to be 1, but found: {sample[ATTENTION_MASK_KEY]}"
         )
 
-    print(f"Total sequences: {len(train_dataset)}")
-    print(f"Total tokens: {len(token_ids)}")
+    # Calculate final statistics
+    total_instances = len(train_dataset)
+    total_tokens = len(token_ids)
+    total_trainable_tokens = sum(labels_mask)
+    
+    print(f"Total sequences: {total_instances}")
+    print(f"Total tokens: {total_tokens}")
     print(f"Maximum token ID: {max(token_ids)}")
-    print(f"Labels mask sum (trainable tokens): {sum(labels_mask)}")
+    print(f"Labels mask sum (trainable tokens): {total_trainable_tokens}")
     print("Writing data to numpy files...")
     print(f"Number of samples that should be skipped: {num_samples_skipped}")
 
@@ -290,6 +312,115 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         print(f"Written {filename} ({len(chunk_data) * np.dtype(np.bool_).itemsize / 1024**3:.2f} GB)")
 
     print("Data conversion completed successfully!")
+    
+    # Write dataset statistics
+    write_dataset_statistics(
+        output_dir=output_dir,
+        dataset_statistics=dataset_statistics,
+        total_instances=total_instances,
+        total_tokens=total_tokens,
+        total_trainable_tokens=total_trainable_tokens,
+        num_samples_skipped=num_samples_skipped,
+        tokenizer_name=tc.tokenizer_name_or_path,
+        max_seq_length=args.max_seq_length,
+        chat_template_name=tc.chat_template_name,
+    )
+
+
+def write_dataset_statistics(
+    output_dir: str,
+    dataset_statistics: Dict[str, Any],
+    total_instances: int,
+    total_tokens: int,
+    total_trainable_tokens: int,
+    num_samples_skipped: int,
+    tokenizer_name: str,
+    max_seq_length: Optional[int],
+    chat_template_name: Optional[str],
+):
+    """Write dataset statistics to both text and JSON files."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Prepare statistics data
+    stats_data = {
+        "timestamp": timestamp,
+        "output_directory": output_dir,
+        "configuration": {
+            "tokenizer": tokenizer_name,
+            "max_sequence_length": max_seq_length,
+            "chat_template": chat_template_name,
+        },
+        "per_dataset_statistics": dataset_statistics.get("per_dataset_stats", []),
+        "overall_statistics": {
+            "total_datasets": len(dataset_statistics.get("per_dataset_stats", [])),
+            "total_instances": total_instances,
+            "total_tokens": total_tokens,
+            "trainable_tokens": total_trainable_tokens,
+            "trainable_percentage": (total_trainable_tokens / total_tokens * 100) if total_tokens > 0 else 0,
+            "instances_filtered": num_samples_skipped,
+            "average_sequence_length": total_tokens / total_instances if total_instances > 0 else 0,
+        }
+    }
+    
+    # Calculate percentages for each dataset
+    for stat in stats_data["per_dataset_statistics"]:
+        if "total_tokens" in stat:
+            stat["percentage_of_total_tokens"] = (stat["total_tokens"] / total_tokens * 100) if total_tokens > 0 else 0
+    
+    # Write JSON file
+    json_path = os.path.join(output_dir, "dataset_statistics.json")
+    with open(json_path, "w") as f:
+        json.dump(stats_data, f, indent=2)
+    print(f"Written dataset statistics to {json_path}")
+    
+    # Write human-readable text file
+    text_path = os.path.join(output_dir, "dataset_statistics.txt")
+    with open(text_path, "w") as f:
+        f.write("Dataset Statistics Report\n")
+        f.write("=" * 80 + "\n")
+        f.write(f"Generated: {timestamp}\n")
+        f.write(f"Output Directory: {output_dir}\n\n")
+        
+        f.write("Configuration:\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"- Tokenizer: {tokenizer_name}\n")
+        f.write(f"- Max Sequence Length: {max_seq_length}\n")
+        f.write(f"- Chat Template: {chat_template_name}\n\n")
+        
+        f.write("Per-Dataset Statistics:\n")
+        f.write("=" * 80 + "\n")
+        
+        for stat in stats_data["per_dataset_statistics"]:
+            f.write(f"\nDataset: {stat['dataset_name']}\n")
+            f.write(f"- Split: {stat['dataset_split']}\n")
+            f.write(f"- Instances loaded: {stat.get('initial_instances', 'N/A')}\n")
+            f.write(f"- Instances after filtering: {stat.get('final_instances', 'N/A')}\n")
+            f.write(f"- Instances filtered out: {stat.get('instances_filtered', 'N/A')}\n")
+            
+            if "total_tokens" in stat:
+                f.write(f"- Total tokens: {stat['total_tokens']:,}\n")
+                f.write(f"- Trainable tokens: {stat.get('trainable_tokens', 'N/A'):,}\n")
+                f.write(f"- Average tokens per instance: {stat.get('avg_tokens_per_instance', 0):.1f}\n")
+                f.write(f"- Percentage of total tokens: {stat.get('percentage_of_total_tokens', 0):.1f}%\n")
+            
+            if stat.get('frac_or_num_samples') is not None:
+                if isinstance(stat['frac_or_num_samples'], float):
+                    f.write(f"- Sampling fraction: {stat['frac_or_num_samples']}\n")
+                else:
+                    f.write(f"- Sample count: {stat['frac_or_num_samples']}\n")
+        
+        f.write("\n" + "=" * 80 + "\n")
+        f.write("Overall Statistics:\n")
+        f.write("=" * 80 + "\n")
+        f.write(f"- Total datasets: {stats_data['overall_statistics']['total_datasets']}\n")
+        f.write(f"- Total instances: {stats_data['overall_statistics']['total_instances']:,}\n")
+        f.write(f"- Total tokens: {stats_data['overall_statistics']['total_tokens']:,}\n")
+        f.write(f"- Trainable tokens: {stats_data['overall_statistics']['trainable_tokens']:,} ")
+        f.write(f"({stats_data['overall_statistics']['trainable_percentage']:.1f}%)\n")
+        f.write(f"- Instances filtered out: {stats_data['overall_statistics']['instances_filtered']}\n")
+        f.write(f"- Average sequence length: {stats_data['overall_statistics']['average_sequence_length']:.1f}\n")
+    
+    print(f"Written human-readable statistics to {text_path}")
 
 
 if __name__ == "__main__":
