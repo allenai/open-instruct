@@ -42,6 +42,8 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 RUN python -m nltk.downloader punkt
 RUN python -m nltk.downloader punkt_tab
+COPY rl-rag-mcp/requirements.txt mcp-requirements.txt
+RUN pip install -r mcp-requirements.txt
 
 COPY open_instruct open_instruct
 COPY oe-eval-internal oe-eval-internal

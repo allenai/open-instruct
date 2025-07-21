@@ -1407,9 +1407,9 @@ def launch_mcp_subprocess(use_mcp_tools: bool, run_mcp_command: str) -> Optional
     print(f"🚀 Launching MCP server subprocess: {run_mcp_command}")
     
     # Create log files for MCP server output
-    os.makedirs("mcp_logs", exist_ok=True)
-    mcp_stdout = open("mcp_logs/mcp_server_stdout.log", "w")
-    mcp_stderr = open("mcp_logs/mcp_server_stderr.log", "w")
+    os.makedirs("/output/mcp_logs", exist_ok=True)
+    mcp_stdout = open("/output/mcp_logs/mcp_server_stdout.log", "w")
+    mcp_stderr = open("/output/mcp_logs/mcp_server_stderr.log", "w")
     
     mcp_process = subprocess.Popen(
         [run_mcp_command],
