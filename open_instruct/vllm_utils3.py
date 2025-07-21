@@ -15,6 +15,7 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
+import dataclasses
 import os
 from datetime import timedelta
 from typing import Any, List, Optional, Union
@@ -22,6 +23,7 @@ from typing import Any, List, Optional, Union
 import ray
 import torch
 import torch.distributed
+import vllm
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed.distributed_c10d import (
@@ -33,6 +35,40 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+
+
+@dataclasses.dataclass
+class RequestInfo:
+    """Container for tool usage information."""
+
+    num_calls: List[int]
+    timeouts: List[int]
+    tool_errors: List[str]
+    tool_outputs: List[str]
+    tool_runtimes: List[float]
+    tool_calleds: List[bool]
+
+
+@dataclasses.dataclass
+class GenerationResult:
+    """Container for generation results from vLLM."""
+
+    responses: List[List[int]]
+    finish_reasons: List[str]
+    masks: List[List[int]]
+    request_info: RequestInfo
+    is_eval: bool = False
+    dataset_index: Optional[List[int]] = None
+
+
+@dataclasses.dataclass
+class PromptRequest:
+    """Container for a single prompt request to vLLM."""
+
+    prompt: List[int]  # Single prompt
+    training_step: Optional[int] = None
+    eval_prompts: Optional[List[List[int]]] = None  # Keep as list for eval
+    dataset_index: Optional[int] = None  # Single dataset index
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -116,7 +152,16 @@ def init_process_group(
 
 @ray.remote
 class LLMRayActor:
-    def __init__(self, *args, bundle_indices: list = None, tool_use: bool = False, **kwargs):
+    def __init__(
+        self,
+        *args,
+        bundle_indices: list = None,
+        tool_use: bool = False,
+        prompt_queue=None,
+        results_queue=None,
+        eval_results_queue=None,
+        **kwargs,
+    ):
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
@@ -145,8 +190,99 @@ class LLMRayActor:
 
             self.llm = LLM(*args, **kwargs)
 
+        self.prompt_queue = prompt_queue
+        self.results_queue = results_queue
+        self.eval_results_queue = eval_results_queue
+        self.tool_use = tool_use
+
     def generate(self, *args, **kwargs):
         return self.llm.generate(*args, **kwargs)
+
+    def process_from_queue(
+        self,
+        sampling_params: vllm.SamplingParams,
+        eval_sampling_params: Optional[vllm.SamplingParams] = None,
+        eval_freq: Optional[int] = None,
+        num_training_steps: Optional[int] = None,
+        resume_training_step: int = 1,
+        batch_size: Optional[int] = None,
+    ) -> None:
+        """Process prompts from the queue and put results in the results queue."""
+        for training_step in range(resume_training_step, num_training_steps + 1):
+            prompts_batch = []
+            dataset_indices_batch = []
+            eval_prompts = None
+
+            while len(prompts_batch) < batch_size:
+                request: PromptRequest = self.prompt_queue.get()
+
+                prompts_batch.append(request.prompt)
+                if request.dataset_index is not None:
+                    dataset_indices_batch.append(request.dataset_index)
+
+                if eval_prompts is None and request.eval_prompts is not None:
+                    eval_prompts = request.eval_prompts
+
+            results = self._generate_batch(prompts_batch, sampling_params, dataset_indices_batch)
+
+            for result in results:
+                self.results_queue.put(result)
+
+            if eval_prompts is not None and eval_sampling_params is not None and (training_step - 1) % eval_freq == 0:
+                eval_results = self._generate_batch(eval_prompts, eval_sampling_params, None)
+                for eval_result in eval_results:
+                    eval_result.is_eval = True
+                    self.eval_results_queue.put(eval_result)
+
+    def _generate_batch(
+        self, prompts: List[List[int]], sampling_params, dataset_indices: Optional[List[int]] = None
+    ) -> List[GenerationResult]:
+        """Generate responses for a batch of prompts and return individual results."""
+        outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
+
+        # Process outputs and create individual GenerationResult objects
+        results = []
+        for i, output in enumerate(outputs):
+            response_ids = [list(out.token_ids) for out in output.outputs]
+            finish_reasons = [out.finish_reason for out in output.outputs]
+
+            if self.tool_use:
+                masks = [out.mask for out in output.outputs]
+                num_calls = [out.num_calls for out in output.outputs]
+                timeouts = [out.timeout for out in output.outputs]
+                tool_errors = [out.tool_error for out in output.outputs]
+                tool_outputs = [out.tool_output for out in output.outputs]
+                tool_runtimes = [out.tool_runtime for out in output.outputs]
+                tool_calleds = [out.tool_called for out in output.outputs]
+            else:
+                masks = [[1] * len(resp) for resp in response_ids]
+                num_calls = [0] * len(response_ids)
+                timeouts = [0] * len(response_ids)
+                tool_errors = [""] * len(response_ids)
+                tool_outputs = [""] * len(response_ids)
+                tool_runtimes = [0] * len(response_ids)
+                tool_calleds = [False] * len(response_ids)
+
+            request_info = RequestInfo(
+                num_calls=num_calls,
+                timeouts=timeouts,
+                tool_errors=tool_errors,
+                tool_outputs=tool_outputs,
+                tool_runtimes=tool_runtimes,
+                tool_calleds=tool_calleds,
+            )
+
+            results.append(
+                GenerationResult(
+                    responses=response_ids,
+                    finish_reasons=finish_reasons,
+                    masks=masks,
+                    request_info=request_info,
+                    dataset_index=[dataset_indices[i]],
+                )
+            )
+
+        return results
 
     def init_process_group(
         self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
@@ -188,6 +324,9 @@ def create_vllm_engines(
     vllm_enable_sleep=False,
     tools: Optional[List[Any]] = None,
     max_tool_calls: List[int] = [5],
+    prompt_queue=None,
+    results_queue=None,
+    eval_results_queue=None,
 ) -> list[LLMRayActor]:
     import vllm
 
@@ -265,6 +404,9 @@ def create_vllm_engines(
                 enable_sleep_mode=vllm_enable_sleep,
                 noset_visible_devices=ray_noset_visible_devices(),
                 tool_use=tool_use,
+                prompt_queue=prompt_queue,
+                results_queue=results_queue,
+                eval_results_queue=eval_results_queue,
                 **additional_kwargs,
             )
         )

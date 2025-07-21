@@ -11,7 +11,7 @@ RUN apt-get update --no-install-recommends && apt-get install -y nginx && mkdir 
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 RUN pip install torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128 --no-cache-dir
 RUN pip install packaging --no-cache-dir
-RUN pip install flash-attn==2.8.0.post2 --no-build-isolation --no-cache-dir
+RUN pip install flash-attn==2.8.0.post2 flashinfer-python>=0.2.7.post1 --no-build-isolation --no-cache-dir
 COPY requirements.txt .
 RUN pip install -r requirements.txt --no-cache-dir
 RUN python -m nltk.downloader punkt
