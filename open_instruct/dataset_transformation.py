@@ -48,6 +48,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from functools import cached_property, partial
 from typing import Any, Dict, List, Literal, Optional
+import numpy as np
 
 import torch
 import transformers
@@ -66,6 +67,7 @@ from transformers import (
 from transformers.utils.hub import _CACHED_NO_EXIST, TRANSFORMERS_CACHE, extract_commit_hash, try_to_load_from_cache
 
 from open_instruct.utils import hf_whoami
+import time
 
 # MOVE THIS SOMEWHERE
 def load_dataset(
@@ -189,6 +191,29 @@ def visualize_token_role(tokens: list[int], masks: list[int], tokenizer: PreTrai
         decoded_token = tokenizer.decode(token)
         rich_text.append(f"{decoded_token}", style=color)
     console.print(rich_text)
+
+
+def visualize_token_label(tokens: list[int], labels: list[int], tokenizer: PreTrainedTokenizer,ignore_label: int = -100):
+    console = Console()
+    rich_text = Text()
+    # Visualize all tokens decoded back to text (skip color for tokens having ignored labels)
+    for token, label in zip(tokens, labels):
+        decoded_token = tokenizer.decode([token], clean_up_tokenization_spaces=False)
+        if label != ignore_label:
+            color = COLORS[label % len(COLORS)]
+            rich_text.append(decoded_token, style=color)
+        else:
+            rich_text.append(decoded_token)  # no color for ignore_label
+
+    console.print("\n== Decoded text (no color for ignored labels):")
+    console.print(rich_text)
+
+    # Visual tokens (decoded back to text) excluding those having ignored labels.
+    # They are grount-truth tokens/text to be predicted:
+    decoded_labels = tokenizer.decode(
+        [id for id in labels if id != ignore_label], skip_special_tokens=False
+    )
+    console.print(f"\n== Ground-truth decoded text (excluding ignore_label):\n{decoded_labels}")
 
 
 # ----------------------------------------------------------------------------
@@ -933,6 +958,11 @@ def sft_span_seach_mask_out(
         add_generation_prompt=False,
         **additional_inputs,
     )
+
+    # Heuristic: assume truncation if hitting the exact max length (for downstream data filtering)
+    was_truncated = input_ids.shape[1] == max_seq_length
+    row["was_truncated"] = was_truncated
+
     attention_mask = torch.ones_like(input_ids)
     labels = masking_strategy_span_search(
         input_ids, tokenizer,
@@ -1012,6 +1042,13 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreT
 
 def sft_tulu_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
     return any(x != -100 for x in row[LABELS_KEY])
+
+def sft_tulu_filter_truncated_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
+    # Filter out rows being truncated to ensure proper conversations.
+    return (
+        any(x != -100 for x in row[LABELS_KEY])  # keep if at least one valid label
+        and not row.get("was_truncated", False)  # and was not truncated
+    )
 
 
 def preference_tokenize_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
@@ -1247,6 +1284,7 @@ TRANSFORM_FNS = {
     "sft_tulu_tokenize_and_truncate_v1": (sft_tulu_tokenize_and_truncate_v1, "map"),
     "sft_span_seach_mask_out": (sft_span_seach_mask_out, "map"),
     "sft_tulu_filter_v1": (sft_tulu_filter_v1, "filter"),
+    "sft_tulu_filter_truncated_v1": (sft_tulu_filter_truncated_v1, "filter"),
     "preference_tokenize_v1": (preference_tokenize_v1, "map"),
     "preference_filter_v1": (preference_filter_v1, "filter"),
     "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1_2, "map"),
@@ -1346,13 +1384,15 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     tokenizer = tc.tokenizer
     dataset = dc.dataset
-    for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
+
+    for i,(fn_name, fn_args) in enumerate(zip(dc.transform_fn, dc.transform_fn_args)):
         fn, fn_type = TRANSFORM_FNS[fn_name]
         # always pass in tokenizer and other args if needed
         fn_kwargs = {"tokenizer": tokenizer}
         fn_kwargs.update(fn_args)
 
         # perform the transformation
+        print(f'== Perform transformation {i+1}/{len(dc.transform_fn)} {fn.__name__} with fn_args {fn_args}...')
         target_columns = dataset.column_names if dc.target_columns is None else dc.target_columns
         if fn_type == "map":
             dataset = dataset.map(
@@ -1360,6 +1400,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
                 fn_kwargs=fn_kwargs,
                 remove_columns=[col for col in dataset.column_names if col not in target_columns],
                 num_proc=get_num_proc(len(dataset), num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
+                load_from_cache_file=False, # XH: force running from scratch!
             )
         elif fn_type == "filter":
             dataset = dataset.filter(
@@ -1497,13 +1538,31 @@ class LocalDatasetTransformationCache:
             print(f"✅ Found cached dataset at {cache_path}")
             return Dataset.load_from_disk(cache_path, keep_in_memory=True)
 
-        print(f"Cache not found or invalid, transforming datasets...")
+        print(f"\n== Cache not found or invalid, transforming datasets...\n")
 
         # Transform each dataset
         transformed_datasets = []
-        for dc in dcs:
+        total_left_samples = 0
+        for i,dc in enumerate(dcs):
+            print(f"\n\n**** {i+1}. Processing `{dc.dataset_name}` having {len(dc.dataset):,} samples...")
+            start_time = time.time()
             dataset = get_dataset_v1(dc, tc)
+            total_tokens, avg_tokens, std_tokens = count_total_tokens(dataset)
+            duration = time.time() - start_time
+            print(
+                f"\n**** Summary for {dc.dataset_name}:\n"
+                f" - Original samples: {len(dc.dataset):,}\n"
+                f" - Samples after processing: {len(dataset):,}\n"
+                f" - Total tokens: {total_tokens:,}\n"
+                f" - Avg tokens per sample: {avg_tokens:,.1f}\n"
+                f" - Stddev tokens per sample: {std_tokens:.2f}\n"
+                f" - Processing time: {duration:.2f} seconds\n"
+            )
+            # print(f"\n**** Summary: {dc.dataset_name} has {len(dc.dataset):,} samples and after processing {len(dataset):,} samples left (total tokens: {total_tokens:,} avg_tkn per samples: {avg_tokens:,1} stddev: {std_tokens}). Took {duration:.2f} seconds.")
+            total_left_samples+=len(dataset)
             transformed_datasets.append(dataset)
+
+        print(f"\n**** TOTAL NUM.SAMPLES AFTER DATA TRANSFORMATION: {total_left_samples:,} ****\n")
 
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
@@ -1516,6 +1575,25 @@ class LocalDatasetTransformationCache:
         print(f"🚀 Saved transformed dataset to {cache_path}")
         print(f"✅ Found cached dataset at {cache_path}")
         return Dataset.load_from_disk(cache_path, keep_in_memory=True)
+
+
+def count_total_tokens(dataset):
+    # count num.tokens per ds:
+    def get_token_count(row):
+        return {"num_tokens": len(row[INPUT_IDS_KEY])}
+
+    num_proc = int(float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", multiprocessing.cpu_count())))
+    token_counts = dataset.map(get_token_count, num_proc=num_proc)
+    total_tokens = sum(token_counts["num_tokens"])
+    token_lengths = np.array(token_counts["num_tokens"])
+
+    total_tokens = token_lengths.sum()
+    avg_tokens = token_lengths.mean()
+    std_tokens = token_lengths.std()
+    # print(f"== Total tokens: {total_tokens:,}")
+    # print(f"== Average tokens per example: {avg_tokens:.2f}")
+    # print(f"== Stddev of tokens per example: {std_tokens:.2f}")
+    return total_tokens, avg_tokens, std_tokens
 
 
 def get_cached_dataset(

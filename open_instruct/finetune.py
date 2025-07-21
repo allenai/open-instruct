@@ -54,10 +54,12 @@ from transformers.training_args import _convert_str_dict
 
 from open_instruct.dataset_transformation import (
     INPUT_IDS_KEY,
+    LABELS_KEY,
     TOKENIZED_SFT_DATASET_KEYS,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
+    visualize_token_label,
 )
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
@@ -518,7 +520,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")
     if accelerator.is_main_process:
-        visualize_token(train_dataset[0][INPUT_IDS_KEY], tokenizer)
+        print(f"\n== train_dataset[0]: {train_dataset[0]}")
+        # visualize_token(train_dataset[0][INPUT_IDS_KEY], tokenizer)
+        visualize_token_label(train_dataset[0][INPUT_IDS_KEY], train_dataset[0][LABELS_KEY], tokenizer)
 
     if args.cache_dataset_only:
         return
