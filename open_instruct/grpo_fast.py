@@ -1593,7 +1593,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
     # ------------------------------------------------------------
     # Create the model and optimizer
-    ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
+    try:
+        ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
+    except:
+        ray_temp_dir = os.path.join("/tmp", f"ray-{os.getpid()}")
+        ray.init(dashboard_host="0.0.0.0", _temp_dir=ray_temp_dir)  # enable debugging from a different machine (e.g., phobos)
     pg = None
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
