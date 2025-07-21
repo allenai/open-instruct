@@ -403,6 +403,14 @@ def batch_generation(
     return torch.cat(query_responses, 0), torch.cat(logitss, 0)
 
 
+def get_olmo3_generation_config(tokenizer):
+    return transformers.GenerationConfig(
+        temperature=None,
+        top_p=None,
+        eos_token_id=[tokenizer.convert_tokens_to_ids("<|im_end|>"), tokenizer.convert_tokens_to_ids("<|endoftext|>")],
+    )
+
+
 def save_with_accelerate(
     accelerator: Accelerator,
     model: torch.nn.Module,
@@ -419,14 +427,7 @@ def save_with_accelerate(
     if "olmo" in chat_template_name:
         # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
         logger.log(f"Detected olmo chat template: {chat_template_name}, updating model generation config.")
-        model.generation_config = transformers.GenerationConfig(
-            temperature=None,
-            top_p=None,
-            eos_token_id=[
-                tokenizer.convert_tokens_to_ids("<|im_end|>"),
-                tokenizer.convert_tokens_to_ids("<|endoftext|>"),
-            ],
-        )
+        model.generation_config = get_olmo3_generation_config(tokenizer)
     else:
         model.generation_config = transformers.GenerationConfig(
             temperature=None, top_p=None, eos_token_id=tokenizer.eos_token_id, bos_token_id=tokenizer.bos_token_id

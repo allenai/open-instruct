@@ -76,7 +76,6 @@ from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
     AutoModelForSequenceClassification,
-    GenerationConfig,
     PreTrainedModel,
     PreTrainedTokenizer,
     get_scheduler,
@@ -102,6 +101,7 @@ from open_instruct.model_utils import (
     apply_verifiable_reward,
     disable_dropout_in_model,
     entropy_from_logits,
+    get_olmo3_generation_config,
     log_softmax_and_gather,
     print_rich_single_line_metrics,
     print_rich_table,
@@ -1086,14 +1086,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         if "olmo" in chat_template_name:
             # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
-            model_to_save.generation_config = GenerationConfig(
-                temperature=None,
-                top_p=None,
-                eos_token_id=[
-                    tokenizer.convert_tokens_to_ids("<|im_end|>"),
-                    tokenizer.convert_tokens_to_ids("<|endoftext|>"),
-                ],
-            )
+            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
         # gather parameters
         output_state_dict = {}
