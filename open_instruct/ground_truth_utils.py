@@ -794,19 +794,7 @@ class CodeVerifier(VerifierFunction):
         Returns:
             VerificationResult with score as the pass rate of test cases
         """
-        # Parse label to get test cases
-        if isinstance(label, str):
-            try:
-                tests = json.loads(label)
-            except json.JSONDecodeError:
-                logger.warning(f"Failed to parse label as JSON: {label}")
-                return VerificationResult(score=0.0)
-        else:
-            tests = label
-
-        if not isinstance(tests, list):
-            logger.warning(f"Label must be a list of test cases, got: {type(tests)}")
-            return VerificationResult(score=0.0)
+        tests = label
 
         if not tests:
             logger.warning("No test cases provided")

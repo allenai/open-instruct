@@ -1065,7 +1065,7 @@ python scripts/submit_eval_jobs.py \
 --location {path} \
 --cluster {cluster} \
 --is_tuned \
---workspace "tulu-3-results" \
+--workspace "oe-adapt-code" \
 --priority {eval_priority} \
 --preemptible \
 --use_hf_tokenizer_template \
