@@ -85,7 +85,9 @@ except:
     )
     def test_dangerous_imports_with_networking(self, name, program):
         """Test that certain networking-related imports are blocked."""
-        result, _ = code_utils.get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
+        result, _ = code_utils.get_successful_tests_fast(
+            program=program, tests=["assert True"], max_execution_time=0.5
+        )
         self.assertEqual(result, [0])
 
 
@@ -190,7 +192,9 @@ except:
 import os
 exit_code = os.system('echo hello')
 """
-        result, _ = code_utils.get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
+        result, _ = code_utils.get_successful_tests_fast(
+            program=program, tests=["assert True"], max_execution_time=0.5
+        )
         self.assertEqual(result, [0])
 
     def test_os_operations_without_import(self):
@@ -276,7 +280,9 @@ class ReliabilityGuardModuleImportTests(unittest.TestCase):
     def test_dangerous_imports_blocked(self, name, program):
         """Test that imports of dangerous modules fail."""
         # These are checked by should_execute function
-        result, _ = code_utils.get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
+        result, _ = code_utils.get_successful_tests_fast(
+            program=program, tests=["assert True"], max_execution_time=0.5
+        )
         self.assertEqual(result, [0])
 
     @parameterized.parameterized.expand(
@@ -335,7 +341,9 @@ except:
 import shutil
 shutil.rmtree('/tmp/test')
 """
-        result, _ = code_utils.get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
+        result, _ = code_utils.get_successful_tests_fast(
+            program=program, tests=["assert True"], max_execution_time=0.5
+        )
         self.assertEqual(result, [0])
 
 
