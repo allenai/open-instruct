@@ -5,6 +5,7 @@ import os
 import shutil
 from ctypes import c_int
 from typing import Any, Dict, List, Optional
+import time
 
 from .testing_util import grade_stdio
 
@@ -120,7 +121,7 @@ def run_tests_against_program_helper_2(func: str, tests: List[str], shared_resul
         partial_undo_reliability_guard()
 
 
-def run_individual_test_helper(func: str, test: str, result_array, index: int) -> None:
+def run_individual_test_helper(func: str, test: str, result_array, index: int, runtimes_array) -> None:
     """Run a single test and store result in shared array at given index"""
     # Apply reliability guard in the child process
     reliability_guard()
@@ -130,10 +131,14 @@ def run_individual_test_helper(func: str, test: str, result_array, index: int) -
         execution_context.update({"__builtins__": __builtins__})
         try:
             exec(func, execution_context)
+            start_time = time.time()
             exec(test, execution_context)
+            end_time = time.time()
             result_array[index] = 1
+            runtimes_array[index] = end_time - start_time
         except Exception:
             result_array[index] = 0
+            runtimes_array[index] = -1.0
     finally:
         # Restore in child process (though it will terminate anyway)
         partial_undo_reliability_guard()
@@ -161,26 +166,31 @@ def get_successful_tests_fast(program: str, tests: List[str], max_execution_time
 
     # Run each test individually to handle timeouts properly
     shared_test_results = multiprocessing.Array("i", len(tests))
+    shared_runtimes = multiprocessing.Array("d", len(tests))
 
     # Initialize results
     for i in range(len(tests)):
         shared_test_results[i] = 0
+        shared_runtimes[i] = -1.0
 
     # Run each test in its own process
     for idx, test in enumerate(tests):
-        p = multiprocessing.Process(target=run_individual_test_helper, args=(program, test, shared_test_results, idx))
+        p = multiprocessing.Process(
+            target=run_individual_test_helper, args=(program, test, shared_test_results, idx, shared_runtimes)
+        )
         p.start()
         p.join(timeout=max_execution_time)
         if p.is_alive():
             p.kill()
 
-    return [shared_test_results[i] for i in range(len(tests))]
+    return [shared_test_results[i] for i in range(len(tests))], [shared_runtimes[i] for i in range(len(tests))]
 
 
 # -------------------------------------------------------------
 # Stdio format - mostly copied from livecodebench
 # -------------------------------------------------------------
 stdio_test_results = multiprocessing.Array("i", 1000)  # Support up to 1000 tests for stdio
+stdio_runtimes = multiprocessing.Array("d", 1000)
 
 
 def run_tests_stdio_helper(program: str, tests: List[Any], max_execution_time: float):
@@ -190,13 +200,14 @@ def run_tests_stdio_helper(program: str, tests: List[Any], max_execution_time: f
         all_inputs = [test["input"] for test in tests]
         all_outputs = [test["output"] for test in tests]
         timeout = math.ceil(max_execution_time)
-        results, _ = grade_stdio(program, all_inputs, all_outputs, timeout)
+        results, runtimes = grade_stdio(program, all_inputs, all_outputs, timeout)
 
         if results is not None:
             processed_results = [1 if r is True else int(r) for r in results]
             for i, res in enumerate(processed_results):
                 if i < len(stdio_test_results):
                     stdio_test_results[i] = res
+                    stdio_runtimes[i] = runtimes[i]
     except Exception:
         # On any failure, results in the shared array will remain as they were initialized (0), indicating failure.
         pass
@@ -223,6 +234,7 @@ def get_successful_tests_stdio(program: str, tests: List[Any], max_execution_tim
 
     for i in range(test_ct):
         stdio_test_results[i] = 0  # Initialize results to 0 (failure)
+        stdio_runtimes[i] = -1.0
 
     # Total timeout needs to account for all tests running sequentially.
     total_timeout = max_execution_time * test_ct + 5.0
@@ -234,7 +246,9 @@ def get_successful_tests_stdio(program: str, tests: List[Any], max_execution_tim
     if p.is_alive():
         p.kill()
 
-    return [1 if stdio_test_results[i] == 1 else 0 for i in range(test_ct)]
+    return [1 if stdio_test_results[i] == 1 else 0 for i in range(test_ct)], [
+        stdio_runtimes[i] for i in range(test_ct)
+    ]
 
 
 # -------------------------------------------------------------

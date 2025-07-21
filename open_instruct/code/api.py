@@ -51,10 +51,10 @@ async def health_check():
 async def test_program(request: TestRequest):
     try:
         # logger.info("Executing tests for program: %s", request.program)
-        results = get_successful_tests_fast(
+        results, runtimes = get_successful_tests_fast(
             program=request.program, tests=request.tests, max_execution_time=request.max_execution_time
         )
-        return {"results": results}
+        return {"results": results, "runtimes": runtimes}
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -64,10 +64,10 @@ async def test_program(request: TestRequest):
 async def test_program_stdio(request: TestRequest):
     # run tests with the stdio format
     try:
-        results = get_successful_tests_stdio(
+        results, runtimes = get_successful_tests_stdio(
             program=request.program, tests=request.tests, max_execution_time=request.max_execution_time
         )
-        return {"results": results}
+        return {"results": results, "runtimes": runtimes}
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
