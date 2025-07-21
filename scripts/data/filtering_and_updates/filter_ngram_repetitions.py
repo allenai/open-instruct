@@ -437,12 +437,12 @@ def detect_exact_block_repetition(text: str, min_repetitions: int = 10, min_sent
     
     return False, None, None
 
-def detect_repetitive_patterns(example: dict, column: str = "assistant", sentence_level: bool = True) -> dict:
+def detect_repetitive_patterns(example: dict, column: str = "message", sentence_level: bool = True) -> dict:
     """Detect various types of repetitive patterns in text, focusing on consecutive repetitions."""
     text = extract_assistant_content(example, column)
     
     # Use the new detection function with updated thresholds
-    has_repetition, reason, details = detect_exact_block_repetition(text, min_repetitions=10, min_sentence_repetitions=40, min_consecutive_sentence_repetitions=4)
+    has_repetition, reason, details = detect_exact_block_repetition(text, min_repetitions=25, min_sentence_repetitions=40, min_consecutive_sentence_repetitions=20)
     
     # Always create repetition_examples field with consistent structure
     # This avoids type inference issues in multiprocessing
