@@ -9,7 +9,7 @@ import shutil
 import sys
 import time
 import zlib
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .testing_util import grade_stdio
 
@@ -144,7 +144,9 @@ def run_individual_test_helper(func: str, test: str, result_array, index: int, r
         partial_undo_reliability_guard()
 
 
-def get_successful_tests_fast(program: str, tests: List[str], max_execution_time: float = 1.0) -> List[int]:
+def get_successful_tests_fast(
+    program: str, tests: List[str], max_execution_time: float = 1.0
+) -> Tuple[List[int], List[float]]:
     """Run a program against a list of tests, if the program exited successfully then we consider
     the test to be passed. Note that you SHOULD ONLY RUN THIS FUNCTION IN A VIRTUAL ENVIRONMENT
     as we do not guarantee the safety of the program provided.
@@ -156,13 +158,14 @@ def get_successful_tests_fast(program: str, tests: List[str], max_execution_time
             it is considered failed and terminated
 
     Return:
-        a list of 0/1 indicating passed or not"""
+        a tuple of (results, runtimes). results is a list of 0/1 indicating
+        passed or not, runtimes is a list of execution times for each test."""
     test_ct = len(tests)
     if test_ct == 0:
-        return []
+        return [], []
     if not should_execute(program=program, tests=tests):
         logger.info("Not executing program %s", program)
-        return [0] * len(tests)
+        return [0] * len(tests), [-1.0] * len(tests)
 
     # Run each test individually to handle timeouts properly
     shared_test_results = multiprocessing.Array("i", len(tests))
