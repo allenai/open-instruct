@@ -48,9 +48,11 @@ from tqdm import tqdm
 
 from open_instruct.dataset_transformation import (
     ATTENTION_MASK_KEY,
+    DATASET_SOURCE_KEY,
     INPUT_IDS_KEY,
     LABELS_KEY,
     TOKENIZED_SFT_DATASET_KEYS,
+    TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
@@ -85,7 +87,7 @@ class ConvertSFTDataArguments:
     )
 
     """The columns to use for the dataset."""
-    dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS)
+    dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE)
 
     """The mode to use for caching the dataset."""
     dataset_cache_mode: Literal["hf", "local"] = "local"
@@ -196,14 +198,11 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     document_boundaries = []
     current_position = 0
     
-    # Track per-dataset indices if we have dataset order info
-    dataset_instance_boundaries = []
-    if "dataset_order" in dataset_statistics and dataset_statistics["dataset_order"]:
-        # Create a mapping to track which instances belong to which dataset
-        dataset_names = dataset_statistics["dataset_order"]
-        per_dataset_counts = {name: 0 for name in dataset_names}
-        per_dataset_tokens = {name: 0 for name in dataset_names}
-        per_dataset_trainable_tokens = {name: 0 for name in dataset_names}
+    # Track per-dataset statistics using dataset_source field
+    per_dataset_counts = {}
+    per_dataset_tokens = {}
+    per_dataset_trainable_tokens = {}
+    per_dataset_filtered = {}
 
     for idx, sample in enumerate(tqdm(  # type: ignore
         train_dataset,
@@ -215,6 +214,20 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         sample_length = len(sample[INPUT_IDS_KEY])
         sample_tokens = sample[INPUT_IDS_KEY]
         sample_labels = sample[LABELS_KEY]
+        dataset_source = sample.get(DATASET_SOURCE_KEY, "unknown")
+        
+        # Initialize counters for new datasets
+        if dataset_source not in per_dataset_counts:
+            per_dataset_counts[dataset_source] = 0
+            per_dataset_tokens[dataset_source] = 0
+            per_dataset_trainable_tokens[dataset_source] = 0
+            per_dataset_filtered[dataset_source] = 0
+        
+        # Update per-dataset statistics
+        per_dataset_counts[dataset_source] += 1
+        per_dataset_tokens[dataset_source] += sample_length
+        trainable_tokens_in_sample = sum(1 for label in sample_labels if label != -100)
+        per_dataset_trainable_tokens[dataset_source] += trainable_tokens_in_sample
         
         token_ids.extend(sample_tokens)
         labels_mask.extend([1 if label != -100 else 0 for label in sample_labels])
@@ -225,6 +238,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
 
         if all(label == -100 for label in sample_labels):
             num_samples_skipped += 1
+            per_dataset_filtered[dataset_source] += 1
 
         # Assert that attention mask is all 1s
         assert all(mask == 1 for mask in sample[ATTENTION_MASK_KEY]), (
@@ -324,6 +338,10 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         tokenizer_name=tc.tokenizer_name_or_path,
         max_seq_length=args.max_seq_length,
         chat_template_name=tc.chat_template_name,
+        per_dataset_counts=per_dataset_counts,
+        per_dataset_tokens=per_dataset_tokens,
+        per_dataset_trainable_tokens=per_dataset_trainable_tokens,
+        per_dataset_filtered=per_dataset_filtered,
     )
 
 
@@ -337,9 +355,41 @@ def write_dataset_statistics(
     tokenizer_name: str,
     max_seq_length: Optional[int],
     chat_template_name: Optional[str],
+    per_dataset_counts: Dict[str, int],
+    per_dataset_tokens: Dict[str, int],
+    per_dataset_trainable_tokens: Dict[str, int],
+    per_dataset_filtered: Dict[str, int],
 ):
     """Write dataset statistics to both text and JSON files."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Merge pre-transformation stats with post-shuffle actual counts
+    merged_stats = []
+    pre_transform_stats = {stat["dataset_name"]: stat for stat in dataset_statistics.get("per_dataset_stats", [])}
+    
+    for dataset_name in per_dataset_counts:
+        pre_stat = pre_transform_stats.get(dataset_name, {})
+        merged_stat = {
+            "dataset_name": dataset_name,
+            "dataset_split": pre_stat.get("dataset_split", "unknown"),
+            "initial_instances": pre_stat.get("initial_instances", "N/A"),
+            "instances_after_transformation": pre_stat.get("final_instances", "N/A"),
+            "instances_filtered_during_transformation": pre_stat.get("instances_filtered", "N/A"),
+            "frac_or_num_samples": pre_stat.get("frac_or_num_samples"),
+            # Upsampling information
+            "original_dataset_size": pre_stat.get("original_dataset_size"),
+            "is_upsampled": pre_stat.get("is_upsampled", False),
+            "upsampling_factor": pre_stat.get("upsampling_factor", 1.0),
+            # Post-shuffle actual statistics
+            "final_instances_in_output": per_dataset_counts[dataset_name],
+            "final_tokens_in_output": per_dataset_tokens[dataset_name],
+            "final_trainable_tokens_in_output": per_dataset_trainable_tokens[dataset_name],
+            "instances_filtered_after_tokenization": per_dataset_filtered[dataset_name],
+            "avg_tokens_per_instance": per_dataset_tokens[dataset_name] / per_dataset_counts[dataset_name] if per_dataset_counts[dataset_name] > 0 else 0,
+            "percentage_of_total_tokens": (per_dataset_tokens[dataset_name] / total_tokens * 100) if total_tokens > 0 else 0,
+            "percentage_of_total_instances": (per_dataset_counts[dataset_name] / total_instances * 100) if total_instances > 0 else 0,
+        }
+        merged_stats.append(merged_stat)
     
     # Prepare statistics data
     stats_data = {
@@ -350,9 +400,9 @@ def write_dataset_statistics(
             "max_sequence_length": max_seq_length,
             "chat_template": chat_template_name,
         },
-        "per_dataset_statistics": dataset_statistics.get("per_dataset_stats", []),
+        "per_dataset_statistics": merged_stats,
         "overall_statistics": {
-            "total_datasets": len(dataset_statistics.get("per_dataset_stats", [])),
+            "total_datasets": len(per_dataset_counts),
             "total_instances": total_instances,
             "total_tokens": total_tokens,
             "trainable_tokens": total_trainable_tokens,
@@ -361,11 +411,6 @@ def write_dataset_statistics(
             "average_sequence_length": total_tokens / total_instances if total_instances > 0 else 0,
         }
     }
-    
-    # Calculate percentages for each dataset
-    for stat in stats_data["per_dataset_statistics"]:
-        if "total_tokens" in stat:
-            stat["percentage_of_total_tokens"] = (stat["total_tokens"] / total_tokens * 100) if total_tokens > 0 else 0
     
     # Write JSON file
     json_path = os.path.join(output_dir, "dataset_statistics.json")
@@ -393,21 +438,34 @@ def write_dataset_statistics(
         for stat in stats_data["per_dataset_statistics"]:
             f.write(f"\nDataset: {stat['dataset_name']}\n")
             f.write(f"- Split: {stat['dataset_split']}\n")
-            f.write(f"- Instances loaded: {stat.get('initial_instances', 'N/A')}\n")
-            f.write(f"- Instances after filtering: {stat.get('final_instances', 'N/A')}\n")
-            f.write(f"- Instances filtered out: {stat.get('instances_filtered', 'N/A')}\n")
             
-            if "total_tokens" in stat:
-                f.write(f"- Total tokens: {stat['total_tokens']:,}\n")
-                f.write(f"- Trainable tokens: {stat.get('trainable_tokens', 'N/A'):,}\n")
-                f.write(f"- Average tokens per instance: {stat.get('avg_tokens_per_instance', 0):.1f}\n")
-                f.write(f"- Percentage of total tokens: {stat.get('percentage_of_total_tokens', 0):.1f}%\n")
+            # Pre-transformation statistics
+            f.write("\nPre-transformation:\n")
+            f.write(f"  - Instances loaded: {stat.get('initial_instances', 'N/A')}\n")
+            f.write(f"  - Instances after transformation: {stat.get('instances_after_transformation', 'N/A')}\n")
+            f.write(f"  - Instances filtered during transformation: {stat.get('instances_filtered_during_transformation', 'N/A')}\n")
             
             if stat.get('frac_or_num_samples') is not None:
                 if isinstance(stat['frac_or_num_samples'], float):
-                    f.write(f"- Sampling fraction: {stat['frac_or_num_samples']}\n")
+                    f.write(f"  - Sampling fraction: {stat['frac_or_num_samples']}\n")
                 else:
-                    f.write(f"- Sample count: {stat['frac_or_num_samples']}\n")
+                    f.write(f"  - Sample count: {stat['frac_or_num_samples']}\n")
+            
+            # Show upsampling information if applicable
+            if stat.get('is_upsampled', False):
+                f.write(f"  - Original dataset size: {stat.get('original_dataset_size', 'N/A')}\n")
+                f.write(f"  - Upsampling factor: {stat.get('upsampling_factor', 1.0):.2f}x\n")
+                f.write(f"  - Upsampled to: {stat.get('instances_after_transformation', 'N/A')} instances\n")
+            
+            # Post-shuffle statistics (actual output)
+            f.write("\nFinal output statistics (after shuffling):\n")
+            f.write(f"  - Instances in output: {stat['final_instances_in_output']:,}\n")
+            f.write(f"  - Total tokens: {stat['final_tokens_in_output']:,}\n")
+            f.write(f"  - Trainable tokens: {stat['final_trainable_tokens_in_output']:,}\n")
+            f.write(f"  - Instances with no labels: {stat['instances_filtered_after_tokenization']}\n")
+            f.write(f"  - Average tokens per instance: {stat['avg_tokens_per_instance']:.1f}\n")
+            f.write(f"  - Percentage of total tokens: {stat['percentage_of_total_tokens']:.1f}%\n")
+            f.write(f"  - Percentage of total instances: {stat['percentage_of_total_instances']:.1f}%\n")
         
         f.write("\n" + "=" * 80 + "\n")
         f.write("Overall Statistics:\n")

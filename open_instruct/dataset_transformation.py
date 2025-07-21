@@ -49,6 +49,7 @@ from dataclasses import asdict, dataclass, field
 from functools import cached_property
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
+import numpy as np
 import torch
 import transformers
 from datasets import Dataset, concatenate_datasets, load_dataset
@@ -770,7 +771,9 @@ class TokenizerConfig:
 INPUT_IDS_KEY = "input_ids"
 ATTENTION_MASK_KEY = "attention_mask"
 LABELS_KEY = "labels"
+DATASET_SOURCE_KEY = "dataset_source"
 TOKENIZED_SFT_DATASET_KEYS = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY]
+TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY, DATASET_SOURCE_KEY]
 
 # Preference dataset
 # NOTE (Costa): the `INPUT_IDS_PROMPT_KEY` is just for visualization purposes only
@@ -1291,6 +1294,8 @@ class DatasetConfig:
     # for tracking purposes
     dataset_commit_hash: Optional[str] = None
     frac_or_num_samples: Optional[Union[int, float]] = None
+    original_dataset_size: Optional[int] = None
+    is_upsampled: bool = False
 
     def __post_init__(self):
         # if the file exists locally, use the local file
@@ -1312,9 +1317,44 @@ class DatasetConfig:
 
     def update_range(self, dataset_range: int):
         self.dataset_range = dataset_range
-        if self.dataset_range > len(self.dataset):
-            raise ValueError("Dataset range exceeds dataset length")
-        self.dataset = self.dataset.select(range(self.dataset_range))
+        original_size = len(self.dataset)
+        self.original_dataset_size = original_size
+        
+        if self.dataset_range <= original_size:
+            # Normal case: select subset
+            self.dataset = self.dataset.select(range(self.dataset_range))
+            self.is_upsampled = False
+        else:
+            # Upsampling case: need more samples than dataset has
+            self.dataset = self._upsample_dataset(self.dataset_range)
+            self.is_upsampled = True
+    
+    def _upsample_dataset(self, target_size: int):
+        """Upsample dataset to target_size by repeating samples."""
+        original_size = len(self.dataset)
+        
+        # Calculate how many full repeats and how many extra samples
+        full_repeats = target_size // original_size
+        extra_samples = target_size % original_size
+        
+        # Create indices for upsampling
+        indices = []
+        
+        # Add full repeats
+        for _ in range(full_repeats):
+            indices.extend(range(original_size))
+        
+        # Add randomly sampled extra samples
+        if extra_samples > 0:
+            # Use numpy for reproducible random sampling
+            rng = np.random.RandomState(42)  # Fixed seed for reproducibility
+            extra_indices = rng.choice(original_size, size=extra_samples, replace=False)
+            indices.extend(extra_indices.tolist())
+        
+        print(f"Upsampling dataset {self.dataset_name} from {original_size} to {target_size} samples "
+              f"({full_repeats} full repeats + {extra_samples} random samples)")
+        
+        return self.dataset.select(indices)
 
 
 def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
@@ -1326,6 +1366,13 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     tokenizer = tc.tokenizer
     dataset = dc.dataset
+    
+    # Add dataset source field to track origin after shuffling
+    dataset = dataset.map(
+        lambda example: {**example, DATASET_SOURCE_KEY: dc.dataset_name},
+        num_proc=num_proc,
+        desc=f"Adding dataset source field for {dc.dataset_name}"
+    )
     for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
         fn, fn_type = TRANSFORM_FNS[fn_name]
         # always pass in tokenizer and other args if needed
@@ -1334,6 +1381,10 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
         # perform the transformation
         target_columns = dataset.column_names if dc.target_columns is None else dc.target_columns
+        # Always preserve dataset_source if it exists
+        if DATASET_SOURCE_KEY in dataset.column_names and DATASET_SOURCE_KEY not in target_columns:
+            target_columns = target_columns + [DATASET_SOURCE_KEY]
+        
         if fn_type == "map":
             dataset = dataset.map(
                 fn,
@@ -1510,6 +1561,9 @@ class LocalDatasetTransformationCache:
                 "final_instances": len(dataset),
                 "instances_filtered": initial_size - len(dataset),
                 "frac_or_num_samples": dc.frac_or_num_samples,
+                "original_dataset_size": dc.original_dataset_size,
+                "is_upsampled": dc.is_upsampled,
+                "upsampling_factor": dc.dataset_range / dc.original_dataset_size if dc.original_dataset_size and dc.original_dataset_size > 0 else 1.0,
             }
             
             # Count tokens if the dataset has been tokenized
@@ -1618,10 +1672,20 @@ def get_cached_dataset_tulu(
                 target_columns=target_columns,
                 frac_or_num_samples=frac_or_num_samples,
             )
-            if frac_or_num_samples > 1.0:
-                new_range = int(frac_or_num_samples)
+            
+            # Calculate target size properly handling fractional upsampling
+            original_size = len(dataset_config.dataset)
+            if isinstance(frac_or_num_samples, int) and frac_or_num_samples > original_size:
+                # Absolute number larger than dataset size - use as-is for upsampling
+                new_range = frac_or_num_samples
+            elif isinstance(frac_or_num_samples, float):
+                # Fractional sampling (can be > 1.0 for upsampling)
+                new_range = int(frac_or_num_samples * original_size)
             else:
-                new_range = int(frac_or_num_samples * len(dataset_config.dataset))
+                # Integer <= dataset size, use as absolute count
+                new_range = int(frac_or_num_samples)
+            
+            print(f"Dataset {dataset_name}: {original_size} -> {new_range} samples (factor: {frac_or_num_samples})")
             dataset_config.update_range(new_range)
             dcs.append(dataset_config)
         dataset_config_hash = compute_config_hash(dcs, tc)
