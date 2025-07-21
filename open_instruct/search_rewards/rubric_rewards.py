@@ -74,20 +74,23 @@ def compute_rubric_reward(response: str, ground_truth: Dict[str, Any]) -> Dict[s
         }
         return result
 
-    question = ground_truth["Question"]
+    question = ground_truth["Question"] if "Question" in ground_truth else ground_truth["query"]
     
     rubric_scores = {}
-    
-    rubric_categories = ["Answer Critical", "Valuable", "Context"]
-    
-    for category in rubric_categories:
-        if category in ground_truth:
-            for rubric in ground_truth[category]:
-                handle = rubric.get("Handle")
-                ingredient = rubric.get("Ingredient")
-                if handle and ingredient:
-                    score = _score_property(extracted_answer, question, ingredient)
-                    rubric_scores[handle] = score
+    if "rubric" in ground_truth:
+        for rubric in ground_truth["rubric"]:
+            handle = rubric.get("type")
+            rubric_text = rubric["rubric_item"]
+            score = _score_property(extracted_answer, question, rubric_text)
+            rubric_scores[handle] = score
+    elif "Answer Critical" in ground_truth:
+        for rubric in ground_truth["Answer Critical"]:
+            handle = rubric.get("Handle")
+            rubric_text = rubric["Ingredient"]
+            score = _score_property(extracted_answer, question, rubric_text)
+            rubric_scores[handle] = score
+    else:
+        raise ValueError(f"Unsupported rubric format found in ground truth: {ground_truth}")
                     
     result["rubric_scores"] = rubric_scores
     result["reward"] = 0.8 * sum(rubric_scores.values()) / len(rubric_scores) \
