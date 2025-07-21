@@ -1319,41 +1319,37 @@ class DatasetConfig:
         self.dataset_range = dataset_range
         original_size = len(self.dataset)
         self.original_dataset_size = original_size
-        
-        if self.dataset_range <= original_size:
-            # Normal case: select subset
-            self.dataset = self.dataset.select(range(self.dataset_range))
-            self.is_upsampled = False
-        else:
-            # Upsampling case: need more samples than dataset has
-            self.dataset = self._upsample_dataset(self.dataset_range)
-            self.is_upsampled = True
-    
-    def _upsample_dataset(self, target_size: int):
+
+        self.dataset = self.select_samples(self.dataset_range)
+        self.is_upsampled = dataset_range > original_size
+
+    def select_samples(self, target_size: int):
         """Upsample dataset to target_size by repeating samples."""
         original_size = len(self.dataset)
-        
+
         # Calculate how many full repeats and how many extra samples
         full_repeats = target_size // original_size
         extra_samples = target_size % original_size
-        
+
         # Create indices for upsampling
         indices = []
-        
+
         # Add full repeats
         for _ in range(full_repeats):
             indices.extend(range(original_size))
-        
+
         # Add randomly sampled extra samples
         if extra_samples > 0:
             # Use numpy for reproducible random sampling
             rng = np.random.RandomState(42)  # Fixed seed for reproducibility
             extra_indices = rng.choice(original_size, size=extra_samples, replace=False)
             indices.extend(extra_indices.tolist())
-        
-        print(f"Upsampling dataset {self.dataset_name} from {original_size} to {target_size} samples "
-              f"({full_repeats} full repeats + {extra_samples} random samples)")
-        
+
+        print(
+            f"Upsampling dataset {self.dataset_name} from {original_size} to {target_size} samples "
+            f"({full_repeats} full repeats + {extra_samples} random samples)"
+        )
+
         return self.dataset.select(indices)
 
 
@@ -1366,12 +1362,12 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     tokenizer = tc.tokenizer
     dataset = dc.dataset
-    
+
     # Add dataset source field to track origin after shuffling
     dataset = dataset.map(
         lambda example: {**example, DATASET_SOURCE_KEY: dc.dataset_name},
         num_proc=num_proc,
-        desc=f"Adding dataset source field for {dc.dataset_name}"
+        desc=f"Adding dataset source field for {dc.dataset_name}",
     )
     for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
         fn, fn_type = TRANSFORM_FNS[fn_name]
@@ -1384,7 +1380,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # Always preserve dataset_source if it exists
         if DATASET_SOURCE_KEY in dataset.column_names and DATASET_SOURCE_KEY not in target_columns:
             target_columns = target_columns + [DATASET_SOURCE_KEY]
-        
+
         if fn_type == "map":
             dataset = dataset.map(
                 fn,
@@ -1518,7 +1514,11 @@ class LocalDatasetTransformationCache:
             json.dump(config_dict, f, indent=2)
 
     def load_or_transform_dataset(
-        self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False, return_statistics: bool = False
+        self,
+        dcs: List[DatasetConfig],
+        tc: TokenizerConfig,
+        dataset_skip_cache: bool = False,
+        return_statistics: bool = False,
     ) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
         """Load dataset from local cache if it exists, otherwise transform and cache it locally."""
         cache_path = self.get_cache_path()
@@ -1545,14 +1545,14 @@ class LocalDatasetTransformationCache:
         transformed_datasets = []
         dataset_statistics = []
         dataset_order = []
-        
+
         for dc in dcs:
             # Get initial dataset info
             initial_size = len(dc.dataset) if dc.dataset else 0
-            
+
             dataset = get_dataset_v1(dc, tc)
             transformed_datasets.append(dataset)
-            
+
             # Collect statistics for this dataset
             stats = {
                 "dataset_name": dc.dataset_name,
@@ -1563,9 +1563,11 @@ class LocalDatasetTransformationCache:
                 "frac_or_num_samples": dc.frac_or_num_samples,
                 "original_dataset_size": dc.original_dataset_size,
                 "is_upsampled": dc.is_upsampled,
-                "upsampling_factor": dc.dataset_range / dc.original_dataset_size if dc.original_dataset_size and dc.original_dataset_size > 0 else 1.0,
+                "upsampling_factor": dc.dataset_range / dc.original_dataset_size
+                if dc.original_dataset_size and dc.original_dataset_size > 0
+                else 1.0,
             }
-            
+
             # Count tokens if the dataset has been tokenized
             if INPUT_IDS_KEY in dataset.column_names:
                 total_tokens = 0
@@ -1575,23 +1577,20 @@ class LocalDatasetTransformationCache:
                     total_tokens += tokens
                     if LABELS_KEY in sample:
                         trainable_tokens += sum(1 for label in sample[LABELS_KEY] if label != -100)
-                
+
                 stats["total_tokens"] = total_tokens
                 stats["trainable_tokens"] = trainable_tokens
                 stats["avg_tokens_per_instance"] = total_tokens / len(dataset) if len(dataset) > 0 else 0
-            
+
             dataset_statistics.append(stats)
             dataset_order.append(dc.dataset_name)
 
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
-        
+
         # Prepare return statistics
-        all_statistics = {
-            "per_dataset_stats": dataset_statistics,
-            "dataset_order": dataset_order,
-        }
-        
+        all_statistics = {"per_dataset_stats": dataset_statistics, "dataset_order": dataset_order}
+
         if dataset_skip_cache:
             if return_statistics:
                 return combined_dataset, all_statistics
@@ -1600,15 +1599,15 @@ class LocalDatasetTransformationCache:
         # Save to local cache
         combined_dataset.save_to_disk(cache_path)
         self.save_config(self.config_hash, dcs, tc)
-        
+
         # Save statistics to cache
         stats_path = os.path.join(cache_path, "dataset_statistics.json")
         with open(stats_path, "w") as f:
             json.dump(all_statistics, f, indent=2)
-        
+
         print(f"🚀 Saved transformed dataset to {cache_path}")
         print(f"✅ Found cached dataset at {cache_path}")
-        
+
         loaded_dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
         if return_statistics:
             return loaded_dataset, all_statistics
@@ -1627,7 +1626,9 @@ def get_cached_dataset(
         cache = LocalDatasetTransformationCache(dataset_local_cache_dir=dataset_local_cache_dir)
     else:
         cache = DatasetTransformationCache(hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache, return_statistics=return_statistics)
+    return cache.load_or_transform_dataset(
+        dcs, tc, dataset_skip_cache=dataset_skip_cache, return_statistics=return_statistics
+    )
 
 
 def get_cached_dataset_tulu(
@@ -1672,7 +1673,7 @@ def get_cached_dataset_tulu(
                 target_columns=target_columns,
                 frac_or_num_samples=frac_or_num_samples,
             )
-            
+
             # Calculate target size properly handling fractional upsampling
             original_size = len(dataset_config.dataset)
             if isinstance(frac_or_num_samples, int) and frac_or_num_samples > original_size:
@@ -1684,7 +1685,7 @@ def get_cached_dataset_tulu(
             else:
                 # Integer <= dataset size, use as absolute count
                 new_range = int(frac_or_num_samples)
-            
+
             print(f"Dataset {dataset_name}: {original_size} -> {new_range} samples (factor: {frac_or_num_samples})")
             dataset_config.update_range(new_range)
             dcs.append(dataset_config)
@@ -1695,7 +1696,9 @@ def get_cached_dataset_tulu(
         )
     elif dataset_cache_mode == "hf":
         cache = DatasetTransformationCache(config_hash=dataset_config_hash, hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache, return_statistics=return_statistics)
+    return cache.load_or_transform_dataset(
+        dcs, tc, dataset_skip_cache=dataset_skip_cache, return_statistics=return_statistics
+    )
 
 
 def test_sft_dpo_same_tokenizer():
