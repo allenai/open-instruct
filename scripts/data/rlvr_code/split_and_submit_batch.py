@@ -1,11 +1,11 @@
 import os
 import time
-from openai import AzureOpenAI
+from openai import AzureOpenAI, OpenAI
 import json
 import argparse
 
 # Number of lines to include in each smaller batch file
-CHUNK_SIZE = 20_000
+CHUNK_SIZE = 18_000
 
 def main():
     """
@@ -33,11 +33,15 @@ def main():
     parser.add_argument("source_batch_file", type=str, help="The full path to the large batch file.")
     parser.add_argument("--batch_ids_file", type=str, help="The name for the file to store submitted batch IDs.")
     args = parser.parse_args()
-
+    """
     client = AzureOpenAI(
         api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
         azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
         api_version="2024-12-01-preview"
+    )
+    """
+    client = OpenAI(
+        api_key=os.environ.get("OPENAI_API_KEY"),
     )
 
     if not os.path.exists(args.source_batch_file):

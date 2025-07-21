@@ -10,6 +10,36 @@ python scripts/data/rlvr/filter_existing_dataset_correctness.py \
 
 If you have code data, you might have to launch code server too before running:
 bash configs/beaker_configs/code_api_setup.sh
+
+
+
+
+
+python mason.py \
+  --cluster ai2/augusta-google-1 \
+  --image nathanl/open_instruct_auto --pure_docker_mode \
+  --workspace ai2/oe-adapt-code \
+  --description "filtering open code reasoning stdio full" \
+  --priority high \
+  --preemptible \
+  --gpus 1 \
+  --num_nodes 1 \
+  --budget ai2/oe-adapt \
+  --max_retries 0 \
+  -- bash configs/beaker_configs/code_api_setup.sh && python scripts/data/rlvr/filter_existing_dataset_correctness.py \
+  --dataset \
+  saurabh5/saurabh5-rlvr_acecoder_filtered-offline-results-full-chunk-0 \
+  saurabh5/saurabh5-rlvr_acecoder_filtered-offline-results-full-chunk-10000 \
+  saurabh5/saurabh5-rlvr_acecoder_filtered-offline-results-full-chunk-20000 \
+  saurabh5/saurabh5-rlvr_acecoder_filtered-offline-results-full-chunk-30000 \
+  saurabh5/saurabh5-rlvr_acecoder_filtered-offline-results-full-chunk-40000 \
+  saurabh5/saurabh5-rlvr_acecoder_filtered-offline-results-full-chunk-50000 \
+  saurabh5/saurabh5-rlvr_acecoder_filtered-offline-results-full-chunk-60000 \
+--code_api_url http://localhost:1234/test_program \
+--push_to_hub saurabh5/rlvr_acecoder_ot_diff_filtered \
+--upper_bound 0.8
+
+
 """
 import argparse
 import json
@@ -65,9 +95,9 @@ def main():
     )
     parser.add_argument(
         "--dataset",
-        type=str,
+        nargs="+",
         default=None,
-        help="HF dataset name (e.g. squad). Mutually exclusive with --files."
+        help="One or more HF dataset names (e.g. squad). Mutually exclusive with --files."
     )
     parser.add_argument(
         "--split",
@@ -96,19 +126,19 @@ def main():
     parser.add_argument(
         "--hist_file_name",
         type=str,
-        default="hist2.png",
+        default="hist.png",
         help="Name of the histogram file"
     )
     parser.add_argument(
         "--violin_plot_file_name",
         type=str,
-        default="difficulty_score_violin2.png",
+        default="difficulty_score_violin.png",
         help="Name of the violin plot file for score vs difficulty."
     )
     parser.add_argument(
         "--solvable_plot_file_name",
         type=str,
-        default="difficulty_solvable_bar2.png",
+        default="difficulty_solvable_bar.png",
         help="Name of the bar plot file for solvability rate vs difficulty."
     )
     parser.add_argument(
@@ -168,6 +198,8 @@ def main():
 
     if args.code_api_url is None:
         api_url_from_env = os.environ.get("CODE_API_URL")
+        if api_url_from_env:
+            api_url_from_env = api_url_from_env.strip()
         if not api_url_from_env:
             raise ValueError("CODE_API_URL environment variable not set and --code_api_url not provided.")
         args.code_api_url = f"{api_url_from_env}/test_program"
@@ -187,8 +219,10 @@ def main():
         pass
 
     if args.dataset:
-        print(f"Loading dataset {args.dataset} from the Hub...")
-        samples = list(load_dataset(args.dataset, split=args.split))
+        print(f"Loading and concatenating datasets from the Hub: {args.dataset}")
+        samples = []
+        for dataset_name in args.dataset:
+            samples.extend(load_dataset(dataset_name, split=args.split))
     else:
         print(f"Loading samples from local files: {args.files}")
         samples = list(load_samples(args.files))

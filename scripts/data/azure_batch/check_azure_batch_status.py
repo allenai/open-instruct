@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the status of an Azure OpenAI batch job.
+"""Check the status of an OpenAI batch job.
 
 Usage:
 
@@ -21,41 +21,40 @@ import time
 from argparse import ArgumentParser, Namespace
 from typing import List
 
-import requests
+from openai import OpenAI
 
 # Constants
 POLL_INTERVAL = 15  # seconds between status checks
 
+# Initialize OpenAI client
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
 
 def download_file(file_id: str, dest: pathlib.Path) -> None:
-    """Download a file from Azure OpenAI API to the specified destination."""
-    endpoint = os.environ["AZURE_OPENAI_ENDPOINT"].rstrip("/")
-    url = f"{endpoint}/openai/files/{file_id}/content?api-version=2024-07-01-preview"
-
-    response = requests.get(
-        url,
-        headers={"api-key": os.environ["AZURE_OPENAI_API_KEY"]},
-        timeout=120
-    )
-    response.raise_for_status()
-
+    """Download a file from OpenAI API to the specified destination."""
+    response = client.files.content(file_id)
     with dest.open("wb") as f:
         f.write(response.content)
 
 
-def print_status(job: dict) -> None:
-    c = job.get("request_counts", {})
-    errors = job.get("errors", [])
-    print(f'{errors=}')
-    error_str = "-" if not errors else ";".join(
-        f"{e.get('code') or e.get('error_code')}:{e.get('message')}" for e in errors
-    )
+def print_status(job) -> None:
+    """Prints the status of a batch job."""
+    c = job.request_counts
+    total_requests = c.total if c else "?"
+    completed_requests = c.completed if c else 0
+    failed_requests = c.failed if c else 0
+
+    error_str = "-"
+    if job.errors and job.errors.data:
+        errors = job.errors.data
+        error_str = ";".join(f"{e.code}:{e.message}" for e in errors)
+
     line = (
-        f"{job['status']}"
-        f" | ok {c.get('completed', 0)}/{c.get('total', '?')}"
-        f" | fail {c.get('failed', 0)}"
+        f"{job.status}"
+        f" | ok {completed_requests}/{total_requests}"
+        f" | fail {failed_requests}"
         f" | errors {error_str}"
-        f" | id={job['id']}"
+        f" | id={job.id}"
     )
     print(line, flush=True)
 
@@ -66,44 +65,28 @@ def load_jsonl(file_path: pathlib.Path) -> List[dict]:
         return [json.loads(line) for line in f]
 
 
-def show_errors_with_requests(job: dict) -> None:
-    """Download and display errors alongside their corresponding requests."""
-    if not job.get("error_file_id"):
+def show_errors(job) -> None:
+    """Download and display errors."""
+    if not job.error_file_id:
         print("No error file available")
         return
 
     # Create temporary files for downloads
     error_file = pathlib.Path(".errors.jsonl")
-    result_file = pathlib.Path(".results.jsonl")
 
     try:
         # Download error file
-        download_file(job["error_file_id"], error_file)
+        download_file(job.error_file_id, error_file)
         errors = load_jsonl(error_file)
 
-        # If we have a result file, download it too
-        results_by_id = {}
-        if job.get("result_file_id"):
-            download_file(job["result_file_id"], result_file)
-            results = load_jsonl(result_file)
-            results_by_id = {r.get("id"): r for r in results}
-
-        print("\nErrors with corresponding requests (showing first 10):")
+        print("\nErrors (showing first 10):")
         print("-" * 80)
 
         for error in errors[:10]:  # Only show first 10 errors
-            request_id = error.get("id")
-            result = results_by_id.get(request_id, {})
-
-            print(f"\nError ID: {request_id}")
-            print(f"Error: {error.get('error', {}).get('message', 'Unknown error')}")
-
-            # Show the original request data from the error file
-            if "request" in error:
-                print(f"Original Request: {json.dumps(error['request'], indent=2)}")
-            # Fall back to result file data if available
-            elif result:
-                print(f"Request: {json.dumps(result.get('request', {}), indent=2)}")
+            custom_id = error.get("custom_id", "N/A")
+            error_details = error.get("error", {})
+            print(f"\nCustom ID: {custom_id}")
+            print(f"Error: {json.dumps(error_details, indent=2)}")
             print("-" * 80)
 
         if len(errors) > 10:
@@ -112,11 +95,10 @@ def show_errors_with_requests(job: dict) -> None:
     finally:
         # Clean up temporary files
         error_file.unlink(missing_ok=True)
-        result_file.unlink(missing_ok=True)
 
 
 def cli() -> Namespace:
-    p = ArgumentParser(description="Check Azure OpenAI batch job status")
+    p = ArgumentParser(description="Check OpenAI batch job status")
     p.add_argument("batch_ids", help="Single batch ID or comma-separated list of batch IDs")
     p.add_argument("--watch", action="store_true", help="poll until terminal state")
     return p.parse_args()
@@ -128,23 +110,15 @@ def check_batch_status(batch_id: str) -> tuple[bool, bool]:
     Returns:
         tuple[bool, bool]: (is_terminal_state, is_success)
     """
-    endpoint = os.environ["AZURE_OPENAI_ENDPOINT"].rstrip("/")
-    url = f"{endpoint}/openai/batches/{batch_id}?api-version=2024-07-01-preview"
-    r = requests.get(
-        url,
-        headers={"api-key": os.environ["AZURE_OPENAI_API_KEY"]},
-        timeout=30,
-    )
-    r.raise_for_status()
-    job = r.json()
+    job = client.batches.retrieve(batch_id)
 
     print(f"\nBatch ID: {batch_id}")
     print_status(job)
 
-    if job["status"] in {"completed", "failed", "cancelled", "expired"}:
-        if job.get("error_file_id"):
-            show_errors_with_requests(job)
-        return True, job["status"] == "completed"
+    if job.status in {"completed", "failed", "cancelled", "expired"}:
+        if job.error_file_id:
+            show_errors(job)
+        return True, job.status == "completed"
 
     return False, False
 
@@ -152,6 +126,10 @@ def check_batch_status(batch_id: str) -> tuple[bool, bool]:
 def main() -> None:
     args = cli()
     batch_ids = [id.strip() for id in args.batch_ids.split(",")]
+
+    if "OPENAI_API_KEY" not in os.environ:
+        print("Error: OPENAI_API_KEY environment variable not set.", file=sys.stderr)
+        sys.exit(1)
 
     while True:
         all_terminal = True

@@ -29,11 +29,11 @@ The output dataset has the following columns:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-INPUT_HF_DATASET = "saurabh5/rlvr-code-data-Java"
-OUTPUT_HF_DATASET = "saurabh5/rlvr-code-data-Java-sft"
+INPUT_HF_DATASET = "saurabh5/llama-nemotron-rlvr-code-stdio"
+OUTPUT_HF_DATASET = "saurabh5/llama-nemotron-rlvr-code-stdio-sft"
 
-STDIN_INPUT_COLUMN_NAME = "translated_problem"
-STDIN_SOLUTION_COLUMN_NAME = "translated_solution"
+STDIN_INPUT_COLUMN_NAME = "rewritten_input"
+STDIN_SOLUTION_COLUMN_NAME = "rewritten_solution"
 
 def validate_row(row):
     """Validate that a row has all required fields."""

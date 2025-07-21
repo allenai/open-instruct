@@ -47,6 +47,23 @@ The script updates the target HuggingFace dataset with validated code solutions.
 - `good_program`: A quality flag from the generation process.
 - `rewritten_solution`: The validated stdio-based code solution.
 - `rewritten_input`: The stdio-based problem description.
+
+
+
+
+
+
+
+python mason.py \
+    --cluster ai2/saturn-cirrascale \
+    --workspace ai2/oe-adapt-code \
+    --priority high \
+    --preemptible \
+    --gpus 0 \
+    --description "ocr original problems batch" \
+    --max_retries 0 \
+    --budget ai2/oe-adapt \
+    -- source configs/beaker_configs/code_api_setup.sh \&\& python scripts/data/rlvr_code/code_upload_batch_stdio.py ocr_batch_ids2.json
 """
 import hashlib
 import json
@@ -57,28 +74,38 @@ from typing import List
 
 import requests
 from datasets import Dataset
-from openai import AzureOpenAI
+from openai import AzureOpenAI, OpenAI
+from tqdm import tqdm
 from pydantic import BaseModel
 
+"""
 client = AzureOpenAI(
     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
     azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
     api_version="2024-12-01-preview"
 )
+"""
 
-OUTPUT_HF_DATASET = "saurabh5/open-code-reasoning-rlvr-2"
+client = OpenAI(
+    api_key=os.environ.get("OPENAI_API_KEY"),
+)
+
+OUTPUT_HF_DATASET = "saurabh5/open-code-reasoning-rlvr-original-problems"
+WD = os.getcwd()
+ORIGNAL_PROBLEM_FILE_NAME = f"{WD}/ocr_original_problems.jsonl"
 SPLIT = "python"
 
 
 def get_input(row):
     return row['input'][0]['content']
 
-def get_id(row):
-    input_str = get_input(row)
-    if input_str:
-        id = hashlib.sha256(input_str.encode('utf-8')).hexdigest()
-        return id
-    return None
+def load_original_problems_by_id(filename):
+    id_to_row = {}
+    with open(filename, "r") as f:
+        for line in f:
+            row = json.loads(line)
+            id_to_row[row['id']] = row
+    return id_to_row
 
 def extract_id_from_custom_id(custom_id: str) -> str:
     # get rid of the timestamp
@@ -142,6 +169,9 @@ def get_batch_results(batch_id: str) -> list:
 
 def process_batch_results(batch_ids: List[str]):
     """Process the batch results and upload to Hugging Face."""
+    id_to_original_row = load_original_problems_by_id(ORIGNAL_PROBLEM_FILE_NAME)
+    print(f"Loaded {len(id_to_original_row)} original problems")
+    print(f"Sample original problem: {[list(id_to_original_row.items())[0]]}")
     all_batch_results = []
     for batch_id in batch_ids:
         if not check_batch_status(batch_id):
@@ -162,21 +192,22 @@ def process_batch_results(batch_ids: List[str]):
     print(f"Sample result: {all_batch_results[0]}")
 
     # Filter and validate results
-    url = "http://localhost:1234/test_program_stdio"
+    base_url = os.environ.get("CODE_API_URL", "http://localhost:1234")
+    base_url = base_url.strip()
+    print(f"Using code API URL: {base_url}")
+    url = f"{base_url}/test_program_stdio"
     new_results = []
     #original_dataset = load_dataset(INPUT_HF_DATASET, "SFT", split=SPLIT)
 
     # Create a lookup dictionary for O(1) access
-    print('here')
-    #id_to_row = {get_id(row): row for row in original_dataset}
     print("created id_to_row")
-    for result in all_batch_results:
+    for result in tqdm(all_batch_results, desc="Processing batch results"):
         try:
             # Look up the row directly using the ID
-            #if result['id'] not in id_to_row:
-            #    print(f"No matching row found for ID: {result['id']}")
-            #    continue
-            #original_dataset_row = id_to_row[result['id']]
+            if result['id'] not in id_to_original_row:
+                print(f"No matching row found for ID: {result['id']}")
+                continue
+            original_row = id_to_original_row[result['id']]
 
             test_cases_raw = result['test_cases']
             if isinstance(test_cases_raw, list) and len(test_cases_raw) > 0 and isinstance(test_cases_raw[0], str):
@@ -200,19 +231,17 @@ def process_batch_results(batch_ids: List[str]):
             if response.ok and sum(response_json['results']) >= 0.8 * len(test_cases):
                 # Keep only passed test cases
                 passed_test_cases = [test_cases[j] for j in range(len(test_cases)) if response_json['results'][j] == 1]
-
                 new_results.append({
-                    #**original_dataset_row,
+                    **original_row,
                     "messages": [{
                         "role": "user",
-                        "content": result['rewritten_input']
+                        "content": original_row['original_input']
                     }],
-                    #"original_input": get_input(original_dataset_row),
                     "ground_truth": json.dumps(passed_test_cases),
                     "dataset": "code_stdio",
                     "good_program": result["good_program"],
                     "rewritten_solution": rewritten_solution,
-                    "rewritten_input": result['rewritten_input'],
+                    "rewritten_input": result['rewritten_input']
                 })
             else:
                 print(f"Not adding. Test results: {response_json}")
@@ -222,7 +251,6 @@ def process_batch_results(batch_ids: List[str]):
             print(traceback.format_exc())
 
     print(f"After filtering, {len(new_results)} results out of {len(all_batch_results)} remain. Do you want to upload?")
-    breakpoint()
 
     # Upload to Hugging Face
     if new_results:

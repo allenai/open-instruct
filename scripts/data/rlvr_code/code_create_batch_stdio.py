@@ -46,21 +46,28 @@ import time
 from typing import List
 
 from datasets import load_dataset
-from openai import AzureOpenAI
+from openai import AzureOpenAI, OpenAI
+from tqdm import tqdm
 from pydantic import BaseModel, ConfigDict
 
-client = AzureOpenAI(
-    api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
-    azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
-    api_version="2024-12-01-preview"
+#client = AzureOpenAI(
+#    api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
+#    azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
+#    api_version="2024-12-01-preview"
+#)
+
+client = OpenAI(
+    api_key=os.environ.get("OPENAI_API_KEY")
 )
 
-MODEL = "o3"
+MODEL = "gpt-4.1-2025-04-14"
 SAMPLE_LIMIT = 200_000
 WD = os.getcwd()
 TIMESTAMP = int(time.time())
 BATCH_FILE_NAME = f"{WD}/batch_files/{TIMESTAMP}.jsonl"
+ORIGNAL_PROBLEM_FILE_NAME = f"{WD}/ocr_original_problems.jsonl"
 os.makedirs(f"{WD}/batch_files", exist_ok=True)
+BUILD_ORIGINAL_PROBLEM_FILE = False
 
 INPUT_HF_DATASET = "nvidia/OpenCodeReasoning-2"
 SPLIT = "python"
@@ -172,6 +179,18 @@ def create_batch_file(prompts):
             }
             f.write(json.dumps(batch_request) + "\n")
 
+def estimate_cost(prompts, master_prompt):
+    cost = 0
+    # 50% off for using batch
+    cost_per_1m_input = 1.00
+    cost_per_1m_cached_input = 0.25
+    cost_per_1m_output = 4.00
+    for id, prompt in prompts:
+        # assume each token is like 6 chars.
+        cost += cost_per_1m_cached_input * len(master_prompt) / (1000000 * 6) # cached input
+        cost += cost_per_1m_input * (len(prompt) - len(master_prompt)) / (1000000 * 6) # input
+        cost += cost_per_1m_output * (len(prompt) - len(master_prompt)) / (1000000 * 6) # output
+    return cost
 
 def find_cached_results(id: str):
     response_dir = f"{WD}/open_ai_responses/"
@@ -309,14 +328,15 @@ Now that you've seen an example, time for the real problem.
 """
 
     prompts = []
-    for row in sampled_rows:
+    for row in tqdm(sampled_rows, desc="Processing rows"):
         input_text = get_input(row)
         if input_text is None:
             continue
         solution_text = get_solution(row)
 
         # Using an f-string for performance
-        prompt = f"""{master_prompt}## Problem
+        prompt = f"""{master_prompt}
+## Problem
 Here is the problem input:
 <INPUT>
 {input_text}
@@ -335,15 +355,32 @@ Output should be a JSON object with this structure:
     "good_program": true/false
 }}
 """
-        prompts.append((get_id(row), prompt))
+        id = get_id(row)
+        prompts.append((id, prompt))
+        if BUILD_ORIGINAL_PROBLEM_FILE:
+            saved_row = {
+                "original_input": input_text,
+                "judge_input": row['judgement'],
+                "license": row['license'],
+                "dataset": row['dataset'],
+                "split": row['split'],
+                "index": row['index'],
+                "id": id,
+            }
+            with open(ORIGNAL_PROBLEM_FILE_NAME, "a") as f:
+                f.write(json.dumps(saved_row) + "\n")
+
 
     print(f"Creating batch file with {len(prompts)} prompts...")
     print(f"First prompt: {prompts[0]}")
-    breakpoint()
     create_batch_file(prompts)
     print(f"Created batch file at {BATCH_FILE_NAME}")
 
     # Submit the batch job
+    estimated_cost = estimate_cost(prompts, master_prompt)
+    print(f"Estimated cost: ${estimated_cost}, continue? (y/n)")
+    if input() != "y":
+        return
     print("Submitting batch job to Azure OpenAI...")
     batch_file = client.files.create(
         file=open(BATCH_FILE_NAME, "rb"),
