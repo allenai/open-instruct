@@ -612,6 +612,7 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
     parser.add_argument("--push-to-hf", action="store_true", help="Push filtered dataset to HuggingFace")
     parser.add_argument("--num-proc", type=int, default=mp.cpu_count(), help="Number of processes for parallel processing")
+    parser.add_argument("--manual-filter", action="store_true", help="Manually review and filter flagged repetitions")
     
     args = parser.parse_args()
     
@@ -707,14 +708,81 @@ def main():
     # Print examples for manual inspectisi
     if args.debug or len(repetitive_dataset) > 0:
         print_repetitive_examples(repetitive_dataset, column=args.column)
+
+    # Manual filtering option
+    if args.manual_filter and len(repetitive_dataset) > 0:
+        proceed = input("Do you want to manually filter flagged repetitions? (y/n): ").strip().lower()
+        if proceed == 'y':
+            print("\nManual filtering enabled. For each flagged example, enter 'y' to keep or 'n' to remove.")
+            indices_to_keep = []
+            for i, example in enumerate(repetitive_dataset):
+                print(f"\n{'='*80}")
+                print(f"🚫 FILTERED #{i+1}: {example.get('repetition_reason', 'unknown')}")
+                print(f"📁 Source: {example.get('source', 'unknown')}")
+                reason = example.get('repetition_reason', '')
+                if 'paragraph' in reason:
+                    block_type = 'paragraph'
+                elif 'line' in reason:
+                    block_type = 'line'
+                else:
+                    block_type = 'unknown'
+                import re
+                count_match = re.search(r'(\d+)x', reason)
+                total_repetitions = int(count_match.group(1)) if count_match else 0
+                consecutive_repetitions = 1 if 'consecutive' not in reason else total_repetitions
+                print(f"🔄 Block type: {block_type}")
+                print(f"📈 Total repetitions: {total_repetitions}")
+                print(f"➡️  Consecutive repetitions: {consecutive_repetitions}")
+                if example.get('repetition_examples'):
+                    repeated_block = example['repetition_examples'][0]
+                    text = extract_assistant_content(example, args.column)
+                    if block_type == 'paragraph':
+                        items = split_into_paragraphs(text)
+                    else:
+                        items = split_into_sentences(text)
+                    positions = [i for i, item in enumerate(items) if item.strip() == repeated_block.strip()]
+                    print(f"📍 Found at positions: {positions}")
+                    print(f"🔁 Repeated block:")
+                    print(f"   '{repeated_block}'")
+                else:
+                    print(f"📍 Repetition details from reason: {reason}")
+                assistant_content = extract_assistant_content(example, args.column)
+                print(f"📄 Assistant content ({len(assistant_content)} chars) [TRIGGERED FILTERING]:")
+                print(assistant_content)
+                print(f"{'='*80}")
+                keep = input("Keep this example? (y/n): ").strip().lower()
+                if keep == 'y':
+                    indices_to_keep.append(i)
+            # Filter repetitive_dataset to only those the user wants to keep
+            mask = [i in indices_to_keep for i in range(len(repetitive_dataset))]
+            repetitive_dataset = repetitive_dataset.select(indices_to_keep)
+            print(f"\nAfter manual filtering, {len(repetitive_dataset)} repetitive examples remain and will be kept.")
+        else:
+            print("Skipping manual filtering.")
     
     # Filter out repetitive examples
     print(f"\nRemoving repetitive examples (num_proc={args.num_proc}):")
-    filtered_dataset = dataset_with_flags.filter(
-        filter_repetitive_examples,
-        num_proc=args.num_proc,
-        desc="Removing repetitive examples"
-    )
+    # If manual filtering was done, we want to keep the manually approved repetitive examples
+    if args.manual_filter and len(repetitive_dataset) > 0 and proceed == 'y':
+        # Get the indices of the repetitive examples in the original dataset
+        repetitive_indices = set(repetitive_dataset._indices if hasattr(repetitive_dataset, '_indices') else [])
+        def filter_with_manual_keep(example, idx):
+            # If this example was flagged as repetitive, only keep if it was manually approved
+            if idx in repetitive_indices:
+                return True
+            return not example.get('has_repetition', False)
+        filtered_dataset = dataset_with_flags.filter(
+            filter_with_manual_keep,
+            with_indices=True,
+            num_proc=args.num_proc,
+            desc="Removing repetitive examples (manual keep)"
+        )
+    else:
+        filtered_dataset = dataset_with_flags.filter(
+            filter_repetitive_examples,
+            num_proc=args.num_proc,
+            desc="Removing repetitive examples"
+        )
     
     print(f"\nFiltered dataset size: {len(filtered_dataset)}")
     print(f"Removed {len(dataset) - len(filtered_dataset)} examples ({(len(dataset) - len(filtered_dataset))/len(dataset)*100:.2f}%)")
