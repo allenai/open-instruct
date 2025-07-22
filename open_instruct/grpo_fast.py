@@ -401,7 +401,7 @@ class Args:
     code_tool_api_endpoint: Optional[str] = None
 
     def __post_init__(self):
-        if self.num_unique_prompts_rollout * self.num_samples_per_prompt_rollout % args.vllm_num_engines != 0:
+        if self.num_unique_prompts_rollout * self.num_samples_per_prompt_rollout % self.vllm_num_engines != 0:
             raise ValueError(
                 "The number of unique prompts times the number of samples per prompt must be divisible by the number of vLLM engines."
         )
