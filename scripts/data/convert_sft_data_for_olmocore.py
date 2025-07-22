@@ -48,7 +48,7 @@ from tqdm import tqdm
 
 from open_instruct.dataset_transformation import (
     ATTENTION_MASK_KEY,
-    DATASET_SOURCE_KEY,
+    DATASET_ORIGIN_KEY,
     INPUT_IDS_KEY,
     LABELS_KEY,
     TOKENIZED_SFT_DATASET_KEYS,
@@ -214,7 +214,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         sample_length = len(sample[INPUT_IDS_KEY])
         sample_tokens = sample[INPUT_IDS_KEY]
         sample_labels = sample[LABELS_KEY]
-        dataset_source = sample.get(DATASET_SOURCE_KEY, "unknown")
+        dataset_source = sample.get(DATASET_ORIGIN_KEY, "unknown")
         
         # Initialize counters for new datasets
         if dataset_source not in per_dataset_counts:
