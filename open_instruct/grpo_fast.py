@@ -2039,7 +2039,10 @@ def make_reward_fn(args: Args) -> Callable:
         infos: List[List[int]],
         queries: Optional[List[str]] = None,
     ) -> List[float]:
-        _, timeouts, tool_errors, tool_outputs, _, tool_calleds = infos
+        timeouts = infos.timeouts
+        tool_errors = infos.tool_errors
+        tool_outputs = infos.tool_outputs
+        tool_calleds = infos.tool_calleds
         good_outputs = [
             len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
             for i in range(len(tool_outputs))
@@ -2183,7 +2186,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             "The number of unique prompts times the number of samples per prompt must be divisible by the number of vLLM engines."
         )
     batch_size_per_engine = (
-        args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+        args.num_unique_prompts_rollout #* args.num_samples_per_prompt_rollout
     ) // args.vllm_num_engines
     for engine in vllm_engines:
         engine.process_from_queue.remote(
