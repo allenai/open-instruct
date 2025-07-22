@@ -84,9 +84,9 @@ from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
 from open_instruct.dataset_transformation import (
-    DATASET_SOURCE_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
+    VERIFIER_SOURCE_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
@@ -1685,7 +1685,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     if eval_dataset is not None:
         eval_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
         eval_ground_truths = eval_dataset[:num_eval_samples][GROUND_TRUTHS_KEY]
-        eval_dataset_names = eval_dataset[:num_eval_samples][DATASET_SOURCE_KEY]
+        eval_dataset_names = eval_dataset[:num_eval_samples][VERIFIER_SOURCE_KEY]
     thread = threading.Thread(
         target=vllm_generate_thread,
         args=(
@@ -1723,7 +1723,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     data_next = train_dataset[next(iter_dataloader)]
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-    datasets_next = data_next[DATASET_SOURCE_KEY]
+    datasets_next = data_next[VERIFIER_SOURCE_KEY]
     queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
     param_prompt_Q.put((None, queries_next))
 
@@ -1743,7 +1743,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     data_next = train_dataset[next(iter_dataloader)]
                     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
                     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-                    datasets_next = data_next[DATASET_SOURCE_KEY]
+                    datasets_next = data_next[VERIFIER_SOURCE_KEY]
                     with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
                         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
                 queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
@@ -1755,7 +1755,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     data_next = train_dataset[next(iter_dataloader)]
                     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
                     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-                    datasets_next = data_next[DATASET_SOURCE_KEY]
+                    datasets_next = data_next[VERIFIER_SOURCE_KEY]
                     with Timer("🔄 Loading weights using shared memory"):
                         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
                     queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))

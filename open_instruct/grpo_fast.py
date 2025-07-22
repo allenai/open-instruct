@@ -41,7 +41,6 @@ try:
 except Exception:
     pass
 # isort: on
-
 import asyncio
 import json
 import logging
@@ -77,9 +76,9 @@ from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
 from open_instruct.dataset_transformation import (
-    DATASET_SOURCE_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
+    VERIFIER_SOURCE_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
@@ -1729,7 +1728,7 @@ def sync_weights_and_prepare_prompts(
         data_next = train_dataset[dataset_indices]
         queries_next = data_next[INPUT_IDS_PROMPT_KEY]
         ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-        datasets_next = data_next[DATASET_SOURCE_KEY]
+        datasets_next = data_next[VERIFIER_SOURCE_KEY]
         with Timer(
             "[Main Thread] 🔄 Loading weights using shared memory"
             if args.async_mode
@@ -2119,7 +2118,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     if eval_dataset is not None:
         eval_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
         eval_ground_truths = eval_dataset[:num_eval_samples][GROUND_TRUTHS_KEY]
-        eval_dataset_names = eval_dataset[:num_eval_samples][DATASET_SOURCE_KEY]
+        eval_dataset_names = eval_dataset[:num_eval_samples][VERIFIER_SOURCE_KEY]
     reward_fn = make_reward_fn(args)
 
     # Start vLLM engines to process from queues
@@ -2153,7 +2152,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     data_next = train_dataset[dataset_indices]
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-    datasets_next = data_next[DATASET_SOURCE_KEY]
+    datasets_next = data_next[VERIFIER_SOURCE_KEY]
 
     # Split the initial batch using the split_and_insert_batch function
     split_and_insert_batch(

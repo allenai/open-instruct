@@ -92,9 +92,9 @@ from vllm import SamplingParams
 
 from open_instruct.dataset_processor import SimpleGenerateCollatorWithGroundTruth
 from open_instruct.dataset_transformation import (
-    DATASET_SOURCE_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
+    VERIFIER_SOURCE_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
@@ -1022,7 +1022,7 @@ class PolicyTrainerRayProcess(RayProcess):
         ].tolist()  # can be simplified since we `remove_padding` later anyway
         queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
         ground_truths_next = data[GROUND_TRUTHS_KEY]
-        datasets_next = data[DATASET_SOURCE_KEY]
+        datasets_next = data[VERIFIER_SOURCE_KEY]
         if self.rank == 0:
             param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
 
@@ -1060,7 +1060,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist()
                 queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
                 ground_truths_next = data[GROUND_TRUTHS_KEY]
-                datasets_next = data[DATASET_SOURCE_KEY]
+                datasets_next = data[VERIFIER_SOURCE_KEY]
                 with Timer("🔥🔥🔥 Loading weights using shared memory", noop=self.rank != 0):
                     broadcast_to_vllm()
             if self.rank == 0:
