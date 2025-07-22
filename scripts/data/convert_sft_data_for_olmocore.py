@@ -88,10 +88,10 @@ class ConvertSFTDataArguments:
     )
     
     """Use optimized tokenization for faster processing"""
-    use_optimized_tokenization: bool = field(default=False)
+    use_optimized_tokenization: bool = field(default=True)
     
     """Enable timing information for debugging"""
-    enable_timing: bool = field(default=False)
+    enable_timing: bool = field(default=True)
 
     """The columns to use for the dataset."""
     dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE)

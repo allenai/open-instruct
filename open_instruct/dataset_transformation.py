@@ -69,14 +69,6 @@ from transformers.utils.hub import _CACHED_NO_EXIST, TRANSFORMERS_CACHE, extract
 from open_instruct.utils import hf_whoami
 
 
-def get_num_cpus() -> int:
-    """Get the number of CPUs to use, respecting BEAKER_ASSIGNED_CPU_COUNT if available."""
-    if "BEAKER_ASSIGNED_CPU_COUNT" in os.environ:
-        # beaker specific logic; we may get assigned 15.5 CPU, so we convert it to float then int
-        return int(float(os.environ["BEAKER_ASSIGNED_CPU_COUNT"]))
-    return multiprocessing.cpu_count()
-
-
 # ----------------------------------------------------------------------------
 # Utilities
 def custom_cached_file(model_name_or_path: str, filename: str, revision: str = None, repo_type: str = "model"):
@@ -1545,7 +1537,12 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     assert len(dc.transform_fn) == len(dc.transform_fn_args), (
         f"transform_fn and transform_fn_args must have the same length: {dc.transform_fn=} != {dc.transform_fn_args=}"
     )
-    num_proc = get_num_cpus()
+
+    if "BEAKER_ASSIGNED_CPU_COUNT" in os.environ:
+            # beaker specific logic; we may get assigned 15.5 CPU, so we convert it to float then int
+        num_proc = int(float(os.environ["BEAKER_ASSIGNED_CPU_COUNT"]))
+    else:
+        num_proc = 1
 
     tokenizer = tc.tokenizer
     dataset = dc.dataset
