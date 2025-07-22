@@ -33,6 +33,8 @@ import os
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     import deepspeed
+    from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF, UlyssesSPDataLoaderAdapter
+    from deepspeed.utils import groups
 
     # @vwxyzjn: when importing on CPU-only machines, we get the following error:
     # RuntimeError: 0 active drivers ([]). There should only be one.
@@ -120,6 +122,7 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     sync_gs_bucket,
+    UlyssesSPSplitter,
 )
 from open_instruct.vllm_utils3 import (
     GenerationResult,
@@ -315,6 +318,9 @@ class Args:
     num_learners_per_node: List[int] = field(default_factory=lambda: [1])
     """number of GPU deepspeed learners per node (e.g., --num_learners_per_node 2 4 means 2 learner processes
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
+    sequence_parallel_size: int = 1
+    """sequence parallel size - how many GPUs we will parallelize sequences across during training.
+    Useful for super-long context lengths."""
     vllm_num_engines: int = 1
     """number of vLLM Engines, set to 0 to disable vLLM"""
     vllm_tensor_parallel_size: int = 1
@@ -536,7 +542,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.device = torch.device(self.local_rank)
         deepspeed.init_distributed()
 
-        ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
+        ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True, sequence_parallel_size=args.sequence_parallel_size)
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
         # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
@@ -548,6 +554,18 @@ class PolicyTrainerRayProcess(RayProcess):
         else:
             dschf = None
         logger.info(f"Deepspeed config: {dschf=}")
+
+        # set sequence parallel
+        self.mpu = None
+        if args.sequence_parallel_size > 1:
+            self.mpu = UlyssesSPAttentionHF.register_with_transformers(
+                model_name_or_path=model_config.model_name_or_path,
+                core_attn_implementation="flash_attention_2",
+                sequence_parallel_size=args.sequence_parallel_size,
+                max_length=args.max_token_length,
+                micro_batch_size=args.per_device_train_batch_size,
+                seq_length_is_variable=True,
+            )
 
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
@@ -582,6 +600,7 @@ class PolicyTrainerRayProcess(RayProcess):
             config=ds_config,
             lr_scheduler=scheduler,
             dist_init_required=True,
+            mpu=self.mpu,
         )
         optimization_steps_done = 0
         if args.checkpoint_state_dir:
@@ -630,9 +649,23 @@ class PolicyTrainerRayProcess(RayProcess):
             use_cache=False,
         )
         disable_dropout_in_model(self.ref_policy)
-        self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
+        self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config, mpu=self.mpu)
         self.ref_policy.eval()
         self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
+
+        if self.mpu is not None:
+            self.sp_group = groups._get_sequence_parallel_group()
+            self.sp_world_size = groups._get_sequence_parallel_world_size()
+            self.sp_rank = groups._get_sequence_parallel_rank()
+            self.splitter = UlyssesSPSplitter(
+                sp_rank=self.sp_rank,
+                sp_group=self.sp_group,
+                sp_world_size=self.sp_world_size,
+                device=self.device
+            )
+        else:
+            self.splitter = None
+
         return optimization_steps_done
 
     def forward(
@@ -792,6 +825,25 @@ class PolicyTrainerRayProcess(RayProcess):
         # recalculate the "real" number of mini-batches
         num_mini_batches = len(collated_query_responses) // accumulation_steps
 
+        if self.splitter is not None:
+            sharded_batches = self.splitter.split_batch({
+                "input_ids": collated_query_responses,
+                "attention_mask": collated_attention_masks,
+                "position_ids": collated_position_ids,
+                "response_masks": collated_response_masks,
+                "tool_masks": collated_tool_masks,
+                "advantages": collated_advantages,
+            })
+            # TODO: i actually don't know what sharded_batches looks like yet.
+
+            # replace non-sharded batches with sharded batches
+            collated_query_responses = [batch["input_ids"] for batch in sharded_batches]
+            collated_attention_masks = [batch["attention_mask"] for batch in sharded_batches]
+            collated_position_ids = [batch["position_ids"] for batch in sharded_batches]
+            collated_response_masks = [batch["response_masks"] for batch in sharded_batches]
+            collated_tool_masks = [batch["tool_masks"] for batch in sharded_batches]
+            collated_advantages = [batch["advantages"] for batch in sharded_batches]
+
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
         with Timer("Inference Calculation", noop=self.rank != 0):
@@ -921,8 +973,19 @@ class PolicyTrainerRayProcess(RayProcess):
                     elif args.kl_estimator == "kl4":
                         kl = kl4
 
-                    # grpo change: directly subtract KL in loss (add)
-                    loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
+                    if args.sequence_parallel_size == 1:
+                        # grpo change: directly subtract KL in loss (add)
+                        loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
+                    else:
+                        # if SP, compute per-token loss, then we need to gather across SP ranks
+                        per_tok_loss = pg_loss_max + (args.beta * kl) * mb_response_masks_bool.float()
+                        losses_per_rank = torch.distributed.nn.functional.all_gather(per_tok_loss, group=self.sp_group)
+                        non_masked_tokens = mb_response_masks_bool.sum()
+                        non_masked_tokens_per_rank = torch.distributed.nn.functional.all_gather(non_masked_tokens, group=self.sp_group)
+                        total_loss = sum(losses_per_rank[rank] * non_masked_tokens_per_rank[rank] for rank in range(self.sp_world_size))
+                        total_non_masked_tokens = sum(non_masked_tokens_per_rank)
+                        loss = total_loss / total_non_masked_tokens
+                    # TODO: do we still need grad acc...? I think so.
                     loss = loss / accumulation_steps
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:

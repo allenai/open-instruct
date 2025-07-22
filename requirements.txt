@@ -2,7 +2,7 @@
 #    uv export --format requirements-txt --no-hashes --all-extras --no-emit-project
 absl-py==2.3.0
     # via tensorboard
-accelerate==1.8.1
+accelerate==1.9.0
     # via
     #   open-instruct
     #   peft
@@ -108,7 +108,7 @@ datasets==3.6.0
     # via open-instruct
 debugpy==1.8.14
     # via open-instruct
-deepspeed==0.15.4
+deepspeed==0.17.2
     # via open-instruct
 deprecated==1.2.18
     # via
@@ -137,6 +137,7 @@ docker-pycreds==0.4.0
     # via wandb
 einops==0.8.1
     # via
+    #   deepspeed
     #   flash-attn
     #   flashinfer-python
     #   vllm
