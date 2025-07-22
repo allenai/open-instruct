@@ -12,6 +12,28 @@ Usage:
         --output_dir ./data/tulu-3-sft-olmo-2-mixture-0225-olmocore \
         --chat_template_name olmo
 
+Memory Requirements:
+    For large datasets (20B+ tokens), memory usage can be significant:
+    - ~4 bytes per token for token IDs (uint32)
+    - ~1 byte per token for labels mask 
+    - Additional overhead for processing
+    
+    For a 20B token dataset, expect ~100GB+ RAM usage in normal mode.
+    
+    To handle large datasets with limited memory:
+    1. Use --streaming_mode to process data in chunks
+    2. Set MAX_PARALLEL_WORKERS environment variable to limit CPU usage
+    3. Use --streaming_chunk_size to control chunk size (default 1B tokens)
+    
+    Example for large dataset:
+        export MAX_PARALLEL_WORKERS=8  # Limit to 8 parallel workers
+        python scripts/data/convert_sft_data_for_olmocore.py \
+            --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
+            --dataset_mixer_list your-large-dataset 1.0 \
+            --output_dir ./output \
+            --streaming_mode \
+            --streaming_chunk_size 500000000  # 500M tokens per chunk
+
 Ai2 Internal Usage:
     gantry run --cluster ai2/neptune-cirrascale --timeout -1 -y --budget ai2/oe-training --workspace ai2/jacobm \
         --install "curl -LsSf https://astral.sh/uv/install.sh | sh && /root/.local/bin/uv sync" \
@@ -45,6 +67,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
+import psutil
 from tqdm import tqdm
 
 from open_instruct.dataset_transformation import (
@@ -92,6 +115,12 @@ class ConvertSFTDataArguments:
     
     """Enable timing information for debugging"""
     enable_timing: bool = field(default=True)
+    
+    """Use streaming mode for large datasets to avoid memory issues"""
+    streaming_mode: bool = field(default=False)
+    
+    """Chunk size for streaming mode (in tokens)"""
+    streaming_chunk_size: int = field(default=1_000_000_000)  # 1B tokens per chunk
 
     """The columns to use for the dataset."""
     dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE)
@@ -119,6 +148,194 @@ class ConvertSFTDataArguments:
 
     """Only write the tokenizer config to the output directory"""
     tokenizer_config_only: bool = field(default=False)
+
+
+def process_dataset_streaming(
+    train_dataset,
+    output_dir: str,
+    token_dtype: np.dtype,
+    chunk_size: int,
+    enable_timing: bool,
+    tokenizer_name: str,
+    max_seq_length: Optional[int],
+    chat_template_name: Optional[str],
+    dataset_statistics: Dict[str, Any],
+):
+    """Process dataset in streaming mode to avoid memory issues."""
+    print("Processing dataset in streaming mode...")
+    
+    # Initialize tracking variables
+    chunk_idx = 0
+    current_chunk_tokens = []
+    current_chunk_labels_mask = []
+    current_chunk_boundaries = []
+    current_position_in_chunk = 0
+    global_position = 0
+    
+    # Track per-dataset statistics
+    per_dataset_counts = {}
+    per_dataset_tokens = {}
+    per_dataset_trainable_tokens = {}
+    per_dataset_filtered = {}
+    
+    num_samples_skipped = 0
+    total_instances = 0
+    total_tokens = 0
+    total_trainable_tokens = 0
+    
+    # Create output files
+    token_files = []
+    label_files = []
+    metadata_files = []
+    
+    if enable_timing:
+        start_time = time.time()
+    
+    def write_current_chunk():
+        nonlocal chunk_idx, current_chunk_tokens, current_chunk_labels_mask, current_chunk_boundaries
+        nonlocal current_position_in_chunk, token_files, label_files, metadata_files
+        
+        if not current_chunk_tokens:
+            return
+            
+        # Write token IDs
+        token_filename = f"{output_dir}/token_ids_part_{chunk_idx:04d}.npy"
+        token_mmap = np.memmap(token_filename, mode="w+", dtype=token_dtype, shape=(len(current_chunk_tokens),))
+        token_mmap[:] = current_chunk_tokens
+        token_mmap.flush()
+        del token_mmap  # Free memory
+        token_files.append(token_filename)
+        
+        # Write labels mask
+        label_filename = f"{output_dir}/labels_mask_part_{chunk_idx:04d}.npy"
+        label_mmap = np.memmap(label_filename, mode="w+", dtype=np.bool_, shape=(len(current_chunk_labels_mask),))
+        label_mmap[:] = current_chunk_labels_mask
+        label_mmap.flush()
+        del label_mmap  # Free memory
+        label_files.append(label_filename)
+        
+        # Write metadata
+        metadata_filename = f"{output_dir}/token_ids_part_{chunk_idx:04d}.csv.gz"
+        with gzip.open(metadata_filename, "wt") as f:
+            for start, end in current_chunk_boundaries:
+                f.write(f"{start},{end}\n")
+        metadata_files.append(metadata_filename)
+        
+        print(f"Written chunk {chunk_idx}: {len(current_chunk_tokens):,} tokens")
+        
+        # Reset for next chunk
+        chunk_idx += 1
+        current_chunk_tokens = []
+        current_chunk_labels_mask = []
+        current_chunk_boundaries = []
+        current_position_in_chunk = 0
+    
+    # Process dataset
+    for idx, sample in enumerate(tqdm(
+        train_dataset,
+        desc="Processing dataset (streaming)",
+        file=sys.stdout,
+        bar_format="{l_bar}{bar}{r_bar}\n",
+        mininterval=10.0,
+    )):
+        sample_length = len(sample[INPUT_IDS_KEY])
+        sample_tokens = sample[INPUT_IDS_KEY]
+        sample_labels = sample[LABELS_KEY]
+        dataset_source = sample.get(DATASET_ORIGIN_KEY, "unknown")
+        
+        # Initialize counters for new datasets
+        if dataset_source not in per_dataset_counts:
+            per_dataset_counts[dataset_source] = 0
+            per_dataset_tokens[dataset_source] = 0
+            per_dataset_trainable_tokens[dataset_source] = 0
+            per_dataset_filtered[dataset_source] = 0
+        
+        # Update statistics
+        per_dataset_counts[dataset_source] += 1
+        per_dataset_tokens[dataset_source] += sample_length
+        trainable_tokens_in_sample = sum(1 for label in sample_labels if label != -100)
+        per_dataset_trainable_tokens[dataset_source] += trainable_tokens_in_sample
+        
+        total_instances += 1
+        total_tokens += sample_length
+        total_trainable_tokens += trainable_tokens_in_sample
+        
+        if all(label == -100 for label in sample_labels):
+            num_samples_skipped += 1
+            per_dataset_filtered[dataset_source] += 1
+        
+        # Check if adding this sample would exceed chunk size
+        if current_position_in_chunk + sample_length > chunk_size and current_chunk_tokens:
+            write_current_chunk()
+        
+        # Add to current chunk
+        current_chunk_tokens.extend(sample_tokens)
+        current_chunk_labels_mask.extend([1 if label != -100 else 0 for label in sample_labels])
+        current_chunk_boundaries.append((current_position_in_chunk, current_position_in_chunk + sample_length))
+        
+        current_position_in_chunk += sample_length
+        global_position += sample_length
+    
+    # Write final chunk
+    write_current_chunk()
+    
+    if enable_timing:
+        elapsed = time.time() - start_time
+        print(f"Streaming processing took {elapsed:.2f} seconds")
+        print(f"Processing rate: {total_tokens / elapsed / 1_000_000:.2f} M tokens/second")
+    
+    print(f"Total sequences: {total_instances}")
+    print(f"Total tokens: {total_tokens}")
+    print(f"Total chunks: {chunk_idx}")
+    print(f"Labels mask sum (trainable tokens): {total_trainable_tokens}")
+    print(f"Number of samples that should be skipped: {num_samples_skipped}")
+    
+    print("Data conversion completed successfully!")
+    
+    # Write dataset statistics
+    write_dataset_statistics(
+        output_dir=output_dir,
+        dataset_statistics=dataset_statistics,
+        total_instances=total_instances,
+        total_tokens=total_tokens,
+        total_trainable_tokens=total_trainable_tokens,
+        num_samples_skipped=num_samples_skipped,
+        tokenizer_name=tokenizer_name,
+        max_seq_length=max_seq_length,
+        chat_template_name=chat_template_name,
+        per_dataset_counts=per_dataset_counts,
+        per_dataset_tokens=per_dataset_tokens,
+        per_dataset_trainable_tokens=per_dataset_trainable_tokens,
+        per_dataset_filtered=per_dataset_filtered,
+    )
+
+
+def estimate_memory_usage(num_tokens: int, vocab_size: int) -> Dict[str, float]:
+    """Estimate memory usage in GB for processing the dataset."""
+    # Determine token dtype size
+    token_dtype = None
+    for dtype in (np.uint8, np.uint16, np.uint32, np.uint64):
+        if (vocab_size - 1) <= np.iinfo(dtype).max:
+            token_dtype = dtype
+            break
+    
+    token_size = np.dtype(token_dtype).itemsize
+    bool_size = np.dtype(np.bool_).itemsize
+    
+    # Memory estimates in GB
+    token_ids_memory = (num_tokens * token_size) / (1024**3)
+    labels_mask_memory = (num_tokens * bool_size) / (1024**3)
+    # Overhead for document boundaries and other data structures (rough estimate)
+    overhead_memory = 2.0  # GB
+    
+    total_memory = token_ids_memory + labels_mask_memory + overhead_memory
+    
+    return {
+        "token_ids": token_ids_memory,
+        "labels_mask": labels_mask_memory,
+        "overhead": overhead_memory,
+        "total": total_memory
+    }
 
 
 def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
@@ -197,6 +414,30 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         print(f"Processing rate: {len(train_dataset) / elapsed:.2f} examples/second")
 
     train_dataset = train_dataset.shuffle()
+    
+    # Estimate memory usage and warn if needed
+    if len(train_dataset) > 0:
+        # Sample first few examples to estimate average tokens per example
+        sample_size = min(100, len(train_dataset))
+        avg_tokens = sum(len(train_dataset[i][INPUT_IDS_KEY]) for i in range(sample_size)) / sample_size
+        estimated_total_tokens = int(avg_tokens * len(train_dataset))
+        
+        memory_estimate = estimate_memory_usage(estimated_total_tokens, tc.tokenizer.vocab_size)
+        available_memory = psutil.virtual_memory().available / (1024**3)  # GB
+        
+        print(f"\nMemory usage estimation:")
+        print(f"- Estimated total tokens: {estimated_total_tokens:,} (~{estimated_total_tokens/1e9:.1f}B)")
+        print(f"- Token IDs memory: {memory_estimate['token_ids']:.1f} GB")
+        print(f"- Labels mask memory: {memory_estimate['labels_mask']:.1f} GB")
+        print(f"- Estimated total memory needed: {memory_estimate['total']:.1f} GB")
+        print(f"- Available system memory: {available_memory:.1f} GB")
+        
+        if memory_estimate['total'] > available_memory * 0.8:  # Use 80% as threshold
+            print(f"\n⚠️  WARNING: Estimated memory usage ({memory_estimate['total']:.1f} GB) exceeds 80% of available memory!")
+            print(f"Consider using --streaming_mode for this large dataset.")
+            if not args.streaming_mode and estimated_total_tokens > 10e9:  # 10B tokens
+                print(f"Automatically enabling streaming mode due to large dataset size.")
+                args.streaming_mode = True
 
     if args.visualize:
         print("Visualizing first example...")
@@ -207,124 +448,6 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     if args.num_examples > 0:
         print(f"Selecting {args.num_examples} examples for debugging")
         train_dataset = train_dataset.select(range(args.num_examples))
-
-    print("Collecting tokens from dataset...")
-    if args.enable_timing:
-        collection_start = time.time()
-    
-    token_ids = []
-    labels_mask = []
-    sample: Mapping[str, Any]
-    num_samples_skipped = 0
-    document_boundaries = []
-    current_position = 0
-    
-    # Track per-dataset statistics using dataset_source field
-    per_dataset_counts = {}
-    per_dataset_tokens = {}
-    per_dataset_trainable_tokens = {}
-    per_dataset_filtered = {}
-
-    for idx, sample in enumerate(tqdm(  # type: ignore
-        train_dataset,
-        desc="Collecting tokens",
-        file=sys.stdout,
-        bar_format="{l_bar}{bar}{r_bar}\n",  # better printing in beaker
-        mininterval=10.0,
-    )):
-        sample_length = len(sample[INPUT_IDS_KEY])
-        sample_tokens = sample[INPUT_IDS_KEY]
-        sample_labels = sample[LABELS_KEY]
-        dataset_source = sample.get(DATASET_ORIGIN_KEY, "unknown")
-        
-        # Initialize counters for new datasets
-        if dataset_source not in per_dataset_counts:
-            per_dataset_counts[dataset_source] = 0
-            per_dataset_tokens[dataset_source] = 0
-            per_dataset_trainable_tokens[dataset_source] = 0
-            per_dataset_filtered[dataset_source] = 0
-        
-        # Update per-dataset statistics
-        per_dataset_counts[dataset_source] += 1
-        per_dataset_tokens[dataset_source] += sample_length
-        trainable_tokens_in_sample = sum(1 for label in sample_labels if label != -100)
-        per_dataset_trainable_tokens[dataset_source] += trainable_tokens_in_sample
-        
-        token_ids.extend(sample_tokens)
-        labels_mask.extend([1 if label != -100 else 0 for label in sample_labels])
-
-        # Record document boundary (start, end)
-        document_boundaries.append((current_position, current_position + sample_length))
-        current_position += sample_length
-
-        if all(label == -100 for label in sample_labels):
-            num_samples_skipped += 1
-            per_dataset_filtered[dataset_source] += 1
-
-        # Assert that attention mask is all 1s
-        assert all(mask == 1 for mask in sample[ATTENTION_MASK_KEY]), (
-            f"Expected all attention mask values to be 1, but found: {sample[ATTENTION_MASK_KEY]}"
-        )
-
-    # Calculate final statistics
-    total_instances = len(train_dataset)
-    total_tokens = len(token_ids)
-    total_trainable_tokens = sum(labels_mask)
-    
-    if args.enable_timing:
-        collection_elapsed = time.time() - collection_start
-        print(f"Token collection took {collection_elapsed:.2f} seconds")
-        print(f"Collection rate: {total_tokens / collection_elapsed / 1_000_000:.2f} M tokens/second")
-    
-    print(f"Total sequences: {total_instances}")
-    print(f"Total tokens: {total_tokens}")
-    print(f"Maximum token ID: {max(token_ids)}")
-    print(f"Labels mask sum (trainable tokens): {total_trainable_tokens}")
-    print("Writing data to numpy files...")
-    print(f"Number of samples that should be skipped: {num_samples_skipped}")
-
-    def write_memmap_chunked(base_filename, data, dtype, max_size_gb=1):
-        """Write data to multiple memmap files if size exceeds max_size_gb."""
-        # Calculate size in bytes
-        item_size = np.dtype(dtype).itemsize
-        max_size_bytes = max_size_gb * 1024**3
-
-        chunk_size = max_size_bytes // item_size
-        chunks = []
-        chunk_boundaries = []
-
-        for i in range(0, len(data), chunk_size):
-            chunk_data = data[i : i + chunk_size]
-            filename = f"{base_filename}_part_{i // chunk_size:04d}.npy"
-            mmap = np.memmap(filename, mode="w+", dtype=dtype, shape=(len(chunk_data),))
-            mmap[:] = chunk_data
-            mmap.flush()
-            chunks.append(mmap)
-            chunk_boundaries.append((i, i + len(chunk_data)))
-            print(f"Written {filename} ({len(chunk_data) * item_size / 1024**3:.2f} GB)")
-
-        return chunks, chunk_boundaries
-
-    def write_metadata_for_chunks(base_filename, document_boundaries, chunk_boundaries):
-        """Write metadata files for each chunk with document boundaries."""
-
-        for chunk_idx, (chunk_start, chunk_end) in enumerate(chunk_boundaries):
-            metadata_filename = f"{base_filename}_part_{chunk_idx:04d}.csv.gz"
-
-            with gzip.open(metadata_filename, "wt") as f:
-                # Find all documents that overlap with this chunk
-                for doc_start, doc_end in document_boundaries:
-                    # Check if document overlaps with chunk
-                    if doc_end > chunk_start and doc_start < chunk_end:
-                        # Adjust boundaries relative to chunk start
-                        adjusted_start = max(0, doc_start - chunk_start)
-                        adjusted_end = min(chunk_end - chunk_start, doc_end - chunk_start)
-
-                        # Only write if there's actual content in this chunk
-                        if adjusted_end > adjusted_start:
-                            f.write(f"{adjusted_start},{adjusted_end}\n")
-
-            print(f"Written metadata {metadata_filename}")
 
     # Choose dtype based on vocab size - Olmo-core does the
     # same operation to infer the dtype of the token_ids array.
@@ -337,38 +460,171 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
             break
     if token_dtype is None:
         raise ValueError(f"Vocab size {vocab_size} is too big for any numpy integer dtype!")
-
-    print(f"Writing converted data to {output_dir}")
-    _, token_chunk_boundaries = write_memmap_chunked(f"{output_dir}/token_ids", token_ids, token_dtype)
-    write_metadata_for_chunks(f"{output_dir}/token_ids", document_boundaries, token_chunk_boundaries)
-
-    # Write labels_mask using the same chunk boundaries as token_ids
-    for i, (start, end) in enumerate(token_chunk_boundaries):
-        chunk_data = labels_mask[start:end]
-        filename = f"{output_dir}/labels_mask_part_{i:04d}.npy"
-        mmap = np.memmap(filename, mode="w+", dtype=np.bool_, shape=(len(chunk_data),))
-        mmap[:] = chunk_data
-        mmap.flush()
-        print(f"Written {filename} ({len(chunk_data) * np.dtype(np.bool_).itemsize / 1024**3:.2f} GB)")
-
-    print("Data conversion completed successfully!")
     
-    # Write dataset statistics
-    write_dataset_statistics(
-        output_dir=output_dir,
-        dataset_statistics=dataset_statistics,
-        total_instances=total_instances,
-        total_tokens=total_tokens,
-        total_trainable_tokens=total_trainable_tokens,
-        num_samples_skipped=num_samples_skipped,
-        tokenizer_name=tc.tokenizer_name_or_path,
-        max_seq_length=args.max_seq_length,
-        chat_template_name=tc.chat_template_name,
-        per_dataset_counts=per_dataset_counts,
-        per_dataset_tokens=per_dataset_tokens,
-        per_dataset_trainable_tokens=per_dataset_trainable_tokens,
-        per_dataset_filtered=per_dataset_filtered,
-    )
+    if args.streaming_mode:
+        print(f"Using streaming mode with chunk size: {args.streaming_chunk_size:,} tokens")
+        process_dataset_streaming(
+            train_dataset=train_dataset,
+            output_dir=args.output_dir,
+            token_dtype=token_dtype,
+            chunk_size=args.streaming_chunk_size,
+            enable_timing=args.enable_timing,
+            tokenizer_name=tc.tokenizer_name_or_path,
+            max_seq_length=args.max_seq_length,
+            chat_template_name=tc.chat_template_name,
+            dataset_statistics=dataset_statistics,
+        )
+    else:
+        # Original non-streaming implementation
+        print("Collecting tokens from dataset...")
+        if args.enable_timing:
+            collection_start = time.time()
+        
+        token_ids = []
+        labels_mask = []
+        sample: Mapping[str, Any]
+        num_samples_skipped = 0
+        document_boundaries = []
+        current_position = 0
+        
+        # Track per-dataset statistics using dataset_source field
+        per_dataset_counts = {}
+        per_dataset_tokens = {}
+        per_dataset_trainable_tokens = {}
+        per_dataset_filtered = {}
+
+        for idx, sample in enumerate(tqdm(  # type: ignore
+            train_dataset,
+            desc="Collecting tokens",
+            file=sys.stdout,
+            bar_format="{l_bar}{bar}{r_bar}\n",  # better printing in beaker
+            mininterval=10.0,
+        )):
+            sample_length = len(sample[INPUT_IDS_KEY])
+            sample_tokens = sample[INPUT_IDS_KEY]
+            sample_labels = sample[LABELS_KEY]
+            dataset_source = sample.get(DATASET_ORIGIN_KEY, "unknown")
+            
+            # Initialize counters for new datasets
+            if dataset_source not in per_dataset_counts:
+                per_dataset_counts[dataset_source] = 0
+                per_dataset_tokens[dataset_source] = 0
+                per_dataset_trainable_tokens[dataset_source] = 0
+                per_dataset_filtered[dataset_source] = 0
+            
+            # Update per-dataset statistics
+            per_dataset_counts[dataset_source] += 1
+            per_dataset_tokens[dataset_source] += sample_length
+            trainable_tokens_in_sample = sum(1 for label in sample_labels if label != -100)
+            per_dataset_trainable_tokens[dataset_source] += trainable_tokens_in_sample
+            
+            token_ids.extend(sample_tokens)
+            labels_mask.extend([1 if label != -100 else 0 for label in sample_labels])
+
+            # Record document boundary (start, end)
+            document_boundaries.append((current_position, current_position + sample_length))
+            current_position += sample_length
+
+            if all(label == -100 for label in sample_labels):
+                num_samples_skipped += 1
+                per_dataset_filtered[dataset_source] += 1
+
+            # Assert that attention mask is all 1s
+            assert all(mask == 1 for mask in sample[ATTENTION_MASK_KEY]), (
+                f"Expected all attention mask values to be 1, but found: {sample[ATTENTION_MASK_KEY]}"
+            )
+
+        # Calculate final statistics
+        total_instances = len(train_dataset)
+        total_tokens = len(token_ids)
+        total_trainable_tokens = sum(labels_mask)
+        
+        if args.enable_timing:
+            collection_elapsed = time.time() - collection_start
+            print(f"Token collection took {collection_elapsed:.2f} seconds")
+            print(f"Collection rate: {total_tokens / collection_elapsed / 1_000_000:.2f} M tokens/second")
+        
+        print(f"Total sequences: {total_instances}")
+        print(f"Total tokens: {total_tokens}")
+        print(f"Maximum token ID: {max(token_ids)}")
+        print(f"Labels mask sum (trainable tokens): {total_trainable_tokens}")
+        print("Writing data to numpy files...")
+        print(f"Number of samples that should be skipped: {num_samples_skipped}")
+
+        def write_memmap_chunked(base_filename, data, dtype, max_size_gb=1):
+            """Write data to multiple memmap files if size exceeds max_size_gb."""
+            # Calculate size in bytes
+            item_size = np.dtype(dtype).itemsize
+            max_size_bytes = max_size_gb * 1024**3
+
+            chunk_size = max_size_bytes // item_size
+            chunks = []
+            chunk_boundaries = []
+
+            for i in range(0, len(data), chunk_size):
+                chunk_data = data[i : i + chunk_size]
+                filename = f"{base_filename}_part_{i // chunk_size:04d}.npy"
+                mmap = np.memmap(filename, mode="w+", dtype=dtype, shape=(len(chunk_data),))
+                mmap[:] = chunk_data
+                mmap.flush()
+                chunks.append(mmap)
+                chunk_boundaries.append((i, i + len(chunk_data)))
+                print(f"Written {filename} ({len(chunk_data) * item_size / 1024**3:.2f} GB)")
+
+            return chunks, chunk_boundaries
+
+        def write_metadata_for_chunks(base_filename, document_boundaries, chunk_boundaries):
+            """Write metadata files for each chunk with document boundaries."""
+
+            for chunk_idx, (chunk_start, chunk_end) in enumerate(chunk_boundaries):
+                metadata_filename = f"{base_filename}_part_{chunk_idx:04d}.csv.gz"
+
+                with gzip.open(metadata_filename, "wt") as f:
+                    # Find all documents that overlap with this chunk
+                    for doc_start, doc_end in document_boundaries:
+                        # Check if document overlaps with chunk
+                        if doc_end > chunk_start and doc_start < chunk_end:
+                            # Adjust boundaries relative to chunk start
+                            adjusted_start = max(0, doc_start - chunk_start)
+                            adjusted_end = min(chunk_end - chunk_start, doc_end - chunk_start)
+
+                            # Only write if there's actual content in this chunk
+                            if adjusted_end > adjusted_start:
+                                f.write(f"{adjusted_start},{adjusted_end}\n")
+
+                print(f"Written metadata {metadata_filename}")
+
+        print(f"Writing converted data to {args.output_dir}")
+        _, token_chunk_boundaries = write_memmap_chunked(f"{args.output_dir}/token_ids", token_ids, token_dtype)
+        write_metadata_for_chunks(f"{args.output_dir}/token_ids", document_boundaries, token_chunk_boundaries)
+
+        # Write labels_mask using the same chunk boundaries as token_ids
+        for i, (start, end) in enumerate(token_chunk_boundaries):
+            chunk_data = labels_mask[start:end]
+            filename = f"{args.output_dir}/labels_mask_part_{i:04d}.npy"
+            mmap = np.memmap(filename, mode="w+", dtype=np.bool_, shape=(len(chunk_data),))
+            mmap[:] = chunk_data
+            mmap.flush()
+            print(f"Written {filename} ({len(chunk_data) * np.dtype(np.bool_).itemsize / 1024**3:.2f} GB)")
+
+        print("Data conversion completed successfully!")
+        
+        # Write dataset statistics
+        write_dataset_statistics(
+            output_dir=args.output_dir,
+            dataset_statistics=dataset_statistics,
+            total_instances=total_instances,
+            total_tokens=total_tokens,
+            total_trainable_tokens=total_trainable_tokens,
+            num_samples_skipped=num_samples_skipped,
+            tokenizer_name=tc.tokenizer_name_or_path,
+            max_seq_length=args.max_seq_length,
+            chat_template_name=tc.chat_template_name,
+            per_dataset_counts=per_dataset_counts,
+            per_dataset_tokens=per_dataset_tokens,
+            per_dataset_trainable_tokens=per_dataset_trainable_tokens,
+            per_dataset_filtered=per_dataset_filtered,
+        )
 
 
 def write_dataset_statistics(
