@@ -1811,7 +1811,7 @@ def sync_weights_and_prepare_prompts(
             param_prompt_Q,
             eval_prompt_token_ids,
         )
-    return queries_next, ground_truths_next, datasets_next
+    return queries_next, ground_truths_next, datasets_next, dataset_indices
 
 
 def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
@@ -2241,7 +2241,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
             )  # each sample is an episode
 
-            queries_next, ground_truths_next, datasets_next = sync_weights_and_prepare_prompts(
+            queries_next, ground_truths_next, datasets_next, dataset_indices = sync_weights_and_prepare_prompts(
                 training_step,
                 args,
                 train_dataset,
