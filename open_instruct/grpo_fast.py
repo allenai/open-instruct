@@ -1592,7 +1592,9 @@ def create_model_and_optimizer(
 ) -> tuple[ModelGroup, list[LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Ray initialization
-    ray.init(dashboard_host="0.0.0.0", ignore_reinit_error=True)  # enable debugging from a different machine (e.g., phobos)
+    ray.init(
+        dashboard_host="0.0.0.0", ignore_reinit_error=True
+    )  # enable debugging from a different machine (e.g., phobos)
 
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -1733,7 +1735,7 @@ def sync_weights_and_prepare_prompts(
             param_prompt_Q,
             eval_prompt_token_ids,
         )
-    
+
     return queries_next, ground_truths_next, datasets_next, dataset_indices
 
 
