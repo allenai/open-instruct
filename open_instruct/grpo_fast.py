@@ -41,7 +41,6 @@ try:
 except Exception:
     pass
 # isort: on
-
 import asyncio
 import json
 import logging
@@ -77,9 +76,9 @@ from vllm import SamplingParams
 
 import wandb
 from open_instruct.dataset_transformation import (
-    DATASET_SOURCE_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
+    VERIFIER_SOURCE_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
@@ -94,6 +93,7 @@ from open_instruct.model_utils import (
     apply_verifiable_reward,
     disable_dropout_in_model,
     entropy_from_logits,
+    get_olmo3_generation_config,
     log_softmax_and_gather,
     print_rich_single_line_metrics,
     print_rich_table,
@@ -985,8 +985,12 @@ class PolicyTrainerRayProcess(RayProcess):
                     checkpoint_state_dir, args.gs_checkpoint_state_dir
                 )
 
-    def save_model(self, output_dir: str) -> None:
+    def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
         model_to_save = self.model
+        if "olmo" in chat_template_name:
+            # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
+            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
+
         if self.rank == 0:
             os.makedirs(output_dir, exist_ok=True)
 
@@ -1728,7 +1732,7 @@ def sync_weights_and_prepare_prompts(
         data_next = train_dataset[dataset_indices]
         queries_next = data_next[INPUT_IDS_PROMPT_KEY]
         ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-        datasets_next = data_next[DATASET_SOURCE_KEY]
+        datasets_next = data_next[VERIFIER_SOURCE_KEY]
         with Timer(
             "[Main Thread] 🔄 Loading weights using shared memory"
             if args.async_mode
@@ -1778,6 +1782,7 @@ def one_training_step(
     train_dataset,
     writer,
     wandb_url,
+    chat_template_name,
 ):
     """Train the model for one step."""
     update_ref_policy_future = []
@@ -1824,7 +1829,12 @@ def one_training_step(
                 checkpoint_dir = f"{args.output_dir}_checkpoints"
                 step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
                 logger.info(f"Saving model at step {training_step} to {step_dir}")
-                ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
+                ray.get(
+                    [
+                        policy_group.models[i].save_model.remote(step_dir, chat_template_name, tokenizer)
+                        for i in range(args.world_size)
+                    ]
+                )
                 if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                     leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
                     for i in range(args.world_size):
@@ -1869,7 +1879,7 @@ def maybe_evaluate(
     try:
         # timeout 0.01 if this is the last training step or we're not evaluating
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
-        timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else 100
+        timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_freq < 0) else 100
         eval_result = evaluation_inference_results_Q.get(timeout=timeout)
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -1921,11 +1931,23 @@ def maybe_evaluate(
         logger.warning("[Main Thread] 🙈 Evaluation responses not received")
 
 
-def save_final_model(args: Args, policy_group: ModelGroup, training_step: int, wandb_url: str):
+def save_final_model(
+    args: Args,
+    policy_group: ModelGroup,
+    tokenizer: PreTrainedTokenizer,
+    training_step: int,
+    wandb_url: str,
+    chat_template_name: str,
+):
     """Save the final model and launch evaluation jobs if configured."""
     logger.info(f"Saving final model at step {training_step} to {args.output_dir}")
     with Timer("[Main Thread] 🗡️ Saving model"):
-        ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
+        ray.get(
+            [
+                policy_group.models[i].save_model.remote(args.output_dir, chat_template_name, tokenizer)
+                for i in range(args.world_size)
+            ]
+        )
         if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
             leaderboard_name = args.hf_repo_revision
             for i in range(args.world_size):
@@ -2100,13 +2122,17 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     if eval_dataset is not None:
         eval_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
         eval_ground_truths = eval_dataset[:num_eval_samples][GROUND_TRUTHS_KEY]
-        eval_dataset_names = eval_dataset[:num_eval_samples][DATASET_SOURCE_KEY]
+        eval_dataset_names = eval_dataset[:num_eval_samples][VERIFIER_SOURCE_KEY]
     reward_fn = make_reward_fn(args)
 
     # Start vLLM engines to process from queues
     for engine in vllm_engines:
         engine.process_from_queue.remote(
-            generation_config, eval_generation_config, args.eval_freq, args.num_training_steps, resume_training_step
+            generation_config,
+            eval_generation_config,
+            args.local_eval_freq,
+            args.num_training_steps,
+            resume_training_step,
         )
     logger.info("======== ✅ vllm engines started processing from queues =========")
 
@@ -2130,7 +2156,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     data_next = train_dataset[dataset_indices]
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-    datasets_next = data_next[DATASET_SOURCE_KEY]
+    datasets_next = data_next[VERIFIER_SOURCE_KEY]
 
     # Split the initial batch using the split_and_insert_batch function
     split_and_insert_batch(
@@ -2189,6 +2215,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 train_dataset,
                 writer,
                 wandb_url,
+                tc.chat_template_name,
             )
 
             maybe_evaluate(
@@ -2204,7 +2231,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 writer,
             )
 
-        save_final_model(args, policy_group, training_step, wandb_url)
+        save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
     except Exception as e:
         logger.error(f"Training error occurred: {str(e)}\n{traceback.format_exc()}")

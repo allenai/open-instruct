@@ -487,7 +487,7 @@ def get_datasets(beaker_datasets, cluster: List[str]):
     """if pure docker mode we don't mount the NFS; so we can run it on jupiter2"""
     res = []
     # if all cluster is in weka, we mount the weka
-    elif all(c in WEKA_CLUSTERS for c in cluster):
+    if all(c in WEKA_CLUSTERS for c in cluster):
         res = [
             beaker.DataMount(
                 source=beaker.DataSource(weka="oe-adapt-default"),
