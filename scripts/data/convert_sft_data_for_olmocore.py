@@ -193,8 +193,8 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     
     # Set default num_proc if not specified
     if args.num_proc is None:
-        # Use BEAKER_ASSIGNED_CPU_COUNT if available, otherwise use all CPUs
-        args.num_proc = int(float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", multiprocessing.cpu_count())))
+        # Use BEAKER_ASSIGNED_CPU_COUNT if available, otherwise use 1
+        args.num_proc = int(float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", 1)))
     
     print(f"Using {args.num_proc} processes for parallel processing")
 
