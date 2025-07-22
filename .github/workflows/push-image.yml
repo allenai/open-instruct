@@ -60,8 +60,12 @@ jobs:
           # ghcr_user: ${{ secrets.GHCR_USER }}
 
       # big images fail, trying this
+      # reference for big files in runner: https://github.com/actions/runner-images/issues/10386
       - name: Delete huge unnecessary tools folder
-        run: rm -rf /opt/hostedtoolcache /usr/share/dotnet "$AGENT_TOOLSDIRECTORY"
+        run: rm -rf /opt/hostedtoolcache /usr/share/dotnet "$AGENT_TOOLSDIRECTORY" /usr/local/lib/android/sdk/ndk
+
+      - name: Check remaining disk space
+        run: df -h
   
       - name: Build image
         run: |
