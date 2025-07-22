@@ -54,39 +54,35 @@ def parse_env_var(env_var_str: str) -> Dict[str, str]:
         raise argparse.ArgumentTypeError("Environment variable name cannot be empty")
     return {"name": name, "value": value}
 
-
-NFS_CLUSTERS = [
-    "ai2/allennlp-cirrascale",
-    "ai2/aristo-cirrascale",
-    "ai2/climate-cirrascale",
-    "ai2/general-cirrascale",
-    "ai2/general-cirrascale-a5000",
-    "ai2/mosaic-cirrascale",
-    "ai2/mosaic-cirrascale-a100",
-    "ai2/pluto-cirrascale",
-    "ai2/prior-cirrascale",
-    "ai2/s2-cirrascale",
-    "ai2/s2-cirrascale-l40",
-]
-
 WEKA_CLUSTERS = [
     "ai2/jupiter-cirrascale-2",
+    "ai2/jupiter",
     "ai2/saturn-cirrascale",
     "ai2/titan-cirrascale",
+    "ai2/titan",
     "ai2/neptune-cirrascale",
+    "ai2/neptune",
     "ai2/ceres-cirrascale",
+    "ai2/ceres",
     "ai2/triton-cirrascale",
+    "ai2/triton",
     "ai2/rhea-cirrascale",
+    "ai2/rhea",
 ]
 GCP_CLUSTERS = [
-    "ai2/augusta-google-1"
+    "ai2/augusta-google-1",
+    "ai2/augusta"
 ]
 
 INTERCONNECT_CLUSTERS = [
     "ai2/jupiter-cirrascale-2",
+    "ai2/jupiter",
     "ai2/ceres-cirrascale",
+    "ai2/ceres",
     "ai2/titan-cirrascale",
+    "ai2/titan",
     "ai2/augusta-google-1",
+    "ai2/augusta",
 ]
 
 
@@ -490,16 +486,8 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
 def get_datasets(beaker_datasets, cluster: List[str]):
     """if pure docker mode we don't mount the NFS; so we can run it on jupiter2"""
     res = []
-    # if none of the cluster is in weka, we mount the NFS
-    if all(c in NFS_CLUSTERS for c in cluster):
-        res = [
-            beaker.DataMount(
-                source=beaker.DataSource(host_path="/net/nfs.cirrascale"),
-                mount_path="/net/nfs.cirrascale",
-            ),
-        ]
     # if all cluster is in weka, we mount the weka
-    elif all(c in WEKA_CLUSTERS for c in cluster):
+    if all(c in WEKA_CLUSTERS for c in cluster):
         res = [
             beaker.DataMount(
                 source=beaker.DataSource(weka="oe-adapt-default"),
