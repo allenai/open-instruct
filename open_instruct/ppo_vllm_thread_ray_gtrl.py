@@ -86,9 +86,9 @@ from vllm import SamplingParams
 
 from open_instruct.dataset_processor import SimpleGenerateCollatorWithGroundTruth
 from open_instruct.dataset_transformation import (
-    VERIFIER_SOURCE_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
+    VERIFIER_SOURCE_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
