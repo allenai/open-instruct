@@ -1205,10 +1205,7 @@ def data_preparation_thread(
         # Accumulate results from multiple vLLM engines into a single training batch
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             result, queries, ground_truths, datasets = accumulate_inference_batches(
-                inference_results_Q,
-                pending_queries_map,
-                args.num_unique_prompts_rollout,
-                training_step,
+                inference_results_Q, pending_queries_map, args.num_unique_prompts_rollout, training_step
             )
 
         # ------------------------------------------------------------------------------------------------
