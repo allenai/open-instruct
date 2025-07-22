@@ -1,0 +1,9 @@
+--- open_instruct/code/test_code_utils.py	2025-07-21 13:59:51.841647346 -0700
++++ open_instruct/code/test_code_utils.py.corrected	2025-07-21 14:00:28.661290879 -0700
+@@ -343,4 +343,4 @@
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    unittest.main() 
+\ No newline at end of file
