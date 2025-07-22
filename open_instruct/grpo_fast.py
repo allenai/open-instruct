@@ -63,7 +63,6 @@ import ray
 import torch
 import torch.utils
 import torch.utils.data
-import wandb
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util import queue as ray_queue
@@ -75,6 +74,7 @@ from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokeni
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
+import wandb
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -302,6 +302,8 @@ class Args:
     """the max execution time to use for the code verifier"""
     code_pass_rate_reward_threshold: float = 0.0
     """the pass rate reward threshold for the code verifier. If pass rate is less than this threshold, reward is 0.0, otherwise reward is pass rate"""
+    code_add_perf_penalty: bool = False
+    """whether to add a performance penalty to the code verifier"""
 
     # -- non stop penalty
     non_stop_penalty: bool = False
@@ -1597,7 +1599,9 @@ def create_model_and_optimizer(
 ) -> tuple[ModelGroup, list[LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Ray initialization
-    ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
+    ray.init(
+        dashboard_host="0.0.0.0", ignore_reinit_error=True
+    )  # enable debugging from a different machine (e.g., phobos)
 
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]

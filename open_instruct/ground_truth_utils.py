@@ -78,6 +78,7 @@ class CodeVerifierConfig(VerifierConfig):
     code_api_url: str
     code_max_execution_time: float
     code_pass_rate_reward_threshold: float
+    code_add_perf_penalty: bool
 
 
 @dataclass
@@ -764,6 +765,7 @@ class CodeVerifier(VerifierFunction):
     def __init__(self, verifier_config: CodeVerifierConfig) -> None:
         super().__init__("code", verifier_config=verifier_config, weight=1.0)
         self.pass_rate_reward_threshold = verifier_config.code_pass_rate_reward_threshold
+        self.add_perf_penalty = verifier_config.code_add_perf_penalty
 
     def extract_python_code(self, model_output: str) -> str:
         """Extract the last code block between ``` markers from the model output."""
@@ -792,19 +794,7 @@ class CodeVerifier(VerifierFunction):
         Returns:
             VerificationResult with score as the pass rate of test cases
         """
-        # Parse label to get test cases
-        if isinstance(label, str):
-            try:
-                tests = json.loads(label)
-            except json.JSONDecodeError:
-                logger.warning(f"Failed to parse label as JSON: {label}")
-                return VerificationResult(score=0.0)
-        else:
-            tests = label
-
-        if not isinstance(tests, list):
-            logger.warning(f"Label must be a list of test cases, got: {type(tests)}")
-            return VerificationResult(score=0.0)
+        tests = label
 
         if not tests:
             logger.warning("No test cases provided")
@@ -833,6 +823,16 @@ class CodeVerifier(VerifierFunction):
             passes = result["results"]
             pass_rate = sum(passes) / len(passes) if passes else 0.0
             score = 0.0 if pass_rate < self.pass_rate_reward_threshold else pass_rate
+            if self.add_perf_penalty and score > 0.0:
+                runtimes = result["runtimes"]
+                # for each runtime, multiply by (timeout - runtime) / timeout, i.e. the percent of the timeout that was used
+                multipliers = [
+                    (self.verifier_config.code_max_execution_time - runtime)
+                    / self.verifier_config.code_max_execution_time
+                    for runtime in runtimes
+                ]
+                penalized_passes = [passes[i] * multipliers[i] for i in range(len(passes))]
+                score = sum(penalized_passes) / len(penalized_passes)
             return VerificationResult(score=score)
         except Exception as e:
             logger.warning(f"Error verifying code sample: {e}")
@@ -886,7 +886,6 @@ def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
             instance = CodeVerifier(stdio_config)
             instance.name = "code_stdio"
             verifiers["code_stdio"] = instance
-
     for judge_type in JUDGE_PROMPT_MAP.keys():
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args))
         verifiers[instance.name.lower()] = instance

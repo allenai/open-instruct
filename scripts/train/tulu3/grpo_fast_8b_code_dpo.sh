@@ -1,11 +1,10 @@
-base=DPO
-description="4 dataset code mix (ocr personas algorithm acecoder) on top of Tulu ${base}"
-exp_name=rlvr_tulu3.1_8b_${base}_grpo_fast_code
+base=base
+description="5 dataset code mix (ocr personas algorithm acecoder nemotron) on top of Qwen 2.5 7B ${base}"
+exp_name=rlvr_qwen2.5_7b_${base}_grpo_fast_code
 python mason.py \
-    --cluster ai2/augusta-google-1 \
-    --image saurabhs/code \
-    --pure_docker_mode \
+    --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/oe-adapt-code \
+    --image saurabhs/code_dev --pure_docker_mode \
     --priority high \
     --preemptible \
     --num_nodes 2 \
@@ -19,19 +18,19 @@ python mason.py \
     --try_launch_beaker_eval_jobs_on_weka \
     --kl_estimator kl3 \
     --learning_rate 5e-7 \
-    --dataset_mixer_list saurabh5/open-code-reasoning-rlvr 1.0 saurabh5/tulu-3-personas-code-rlvr 1.0 saurabh5/rlvr_acecoder 1.0 saurabh5/the-algorithm-python 1.0\
+    --dataset_mixer_list saurabh5/open-code-reasoning-rlvr-stdio 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list saurabh5/open-code-reasoning-rlvr 16 saurabh5/tulu-3-personas-code-rlvr 16 saurabh5/rlvr_acecoder 16 saurabh5/the-algorithm-python 16 \
+    --dataset_mixer_eval_list saurabh5/open-code-reasoning-rlvr-stdio 4 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 6144 \
     --max_prompt_token_length 2048 \
     --response_length 4096 \
     --pack_length 6144 \
-    --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-DPO \
+    --model_name_or_path Qwen/Qwen2.5-7B \
     --apply_verifiable_reward true \
     --code_api_url \$CODE_API_URL/test_program \
     --non_stop_penalty True \
-    --oe_eval_tasks gsm8k::tulu,bbh:cot-v1::tulu,codex_humanevalplus:0-shot-chat-n5,mbppplus::openinstruct,truthfulqa::tulu,cruxeval_input:pass@5,cruxeval_output:pass@5,ifeval::tulu \
+    --oe_eval_tasks codex_humanevalplus:0-shot-chat::tulu-thinker,mbppplus:0-shot-chat-v1,livecodebench_codegeneration::tulu-thinker \
     --non_stop_penalty_value 0.0 \
     --temperature 1.0 \
     --chat_template_name tulu \
@@ -50,6 +49,8 @@ python mason.py \
     --gradient_checkpointing \
     --with_tracking 
 
+# dataset_mixer_list saurabh5/rlvr_acecoder_filtered 63033 \
+# dataset_mixer_list saurabh5/rlvr_acecoder_filtered 37657 saurabh5/open-code-reasoning-rlvr-stdio 25376 \
 
 
 #--model_name_or_path allenai/open_instruct_dev \

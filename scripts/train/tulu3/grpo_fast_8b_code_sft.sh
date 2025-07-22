@@ -1,10 +1,8 @@
 base=SFT
-description="test of https://github.com/allenai/open-instruct/pull/631"
+description="5 dataset code mix (ocr personas algorithm acecoder nemotron) on top of Tulu ${base} (thinker)"
 exp_name=rlvr_tulu3.1_8b_${base}_grpo_fast_code
 python mason.py \
-    --cluster ai2/augusta-google-1 \
-    --image saurabhs/code_dev \
-    --pure_docker_mode \
+    --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/oe-adapt-code \
     --priority high \
     --preemptible \
@@ -32,7 +30,7 @@ python mason.py \
     --apply_verifiable_reward true \
     --code_api_url \$CODE_API_URL/test_program \
     --non_stop_penalty True \
-    --oe_eval_tasks codex_humanevalplus:0-shot-chat-n5,mbppplus::openinstruct,cruxeval_input:pass@5,cruxeval_output:pass@5 \
+    --oe_eval_tasks codex_humanevalplus:0-shot-chat::tulu-thinker,mbppplus:0-shot-chat-v1,cruxeval_input:pass@5,cruxeval_output:pass@5,livecodebench_codegeneration::tulu-thinker \
     --non_stop_penalty_value 0.0 \
     --temperature 1.0 \
     --chat_template_name tulu_thinker_r1_style \
