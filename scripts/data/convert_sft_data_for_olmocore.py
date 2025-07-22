@@ -282,16 +282,46 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     
     print(f"Processing {total_samples} samples in {len(batches)} batches using {args.num_proc} processes...")
     
-    # Process batches in parallel
-    with multiprocessing.Pool(processes=args.num_proc) as pool:
-        results = list(tqdm(
-            pool.imap(process_batch, batches),
-            total=len(batches),
-            desc="Processing batches",
-            file=sys.stdout,
-            bar_format="{l_bar}{bar}{r_bar}\n",  # better printing in beaker
-            mininterval=10.0,
-        ))
+    # Try parallel processing with proper error handling
+    try:
+        with multiprocessing.Pool(processes=args.num_proc) as pool:
+            # Process batches and collect results with error handling
+            results = []
+            failed_batches = []
+            
+            # Create an iterator for imap
+            batch_iterator = pool.imap(process_batch, batches)
+            
+            # Process results with progress bar
+            with tqdm(total=len(batches), desc="Processing batches", file=sys.stdout, 
+                     bar_format="{l_bar}{bar}{r_bar}\n", mininterval=10.0) as pbar:
+                for i in range(len(batches)):
+                    try:
+                        result = next(batch_iterator)
+                        results.append(result)
+                        pbar.update(1)
+                    except Exception as e:
+                        print(f"\nError processing batch {i}: {str(e)}")
+                        failed_batches.append(i)
+                        pbar.update(1)
+            
+            if failed_batches:
+                raise RuntimeError(f"Failed to process {len(failed_batches)} batches: {failed_batches}")
+    
+    except Exception as e:
+        print(f"\nParallel processing failed: {str(e)}")
+        print("Falling back to sequential processing...")
+        
+        # Fallback to sequential processing
+        results = []
+        for i, batch_data in enumerate(tqdm(batches, desc="Processing batches (sequential)", 
+                                           file=sys.stdout, bar_format="{l_bar}{bar}{r_bar}\n")):
+            try:
+                result = process_batch(batch_data)
+                results.append(result)
+            except Exception as batch_e:
+                print(f"\nError processing batch {i}: {str(batch_e)}")
+                raise
     
     # Combine results from all batches
     token_ids = []
@@ -305,21 +335,22 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     per_dataset_filtered = {}
     num_samples_skipped = 0
     
-    # Adjust document boundaries to global positions
-    global_position = 0
+    # Track global position correctly
+    global_token_position = 0
     
-    for batch_tokens, batch_labels, batch_boundaries, batch_stats in results:
+    for batch_idx, (batch_tokens, batch_labels, batch_boundaries, batch_stats) in enumerate(results):
+        batch_token_count = len(batch_tokens)
+        
         # Extend tokens and labels
         token_ids.extend(batch_tokens)
         labels_mask.extend(batch_labels)
         
-        # Adjust and extend document boundaries
+        # Adjust document boundaries to global positions
         for start, end in batch_boundaries:
-            document_boundaries.append((global_position + start, global_position + end))
+            document_boundaries.append((global_token_position + start, global_token_position + end))
         
-        # Update global position
-        if batch_boundaries:
-            global_position += batch_boundaries[-1][1]
+        # Update global position with actual token count
+        global_token_position += batch_token_count
         
         # Merge statistics
         for dataset_name in batch_stats["per_dataset_counts"]:
@@ -329,11 +360,35 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
             per_dataset_filtered[dataset_name] = per_dataset_filtered.get(dataset_name, 0) + batch_stats["per_dataset_filtered"][dataset_name]
         
         num_samples_skipped += batch_stats["num_samples_skipped"]
+    
+    # Verify data integrity
+    if len(token_ids) != len(labels_mask):
+        raise ValueError(f"Token and label counts don't match: {len(token_ids)} vs {len(labels_mask)}")
+    
+    print(f"Successfully processed {len(results)} batches")
+    print(f"Total tokens collected: {len(token_ids)}")
 
     # Calculate final statistics
     total_instances = len(train_dataset)
     total_tokens = len(token_ids)
     total_trainable_tokens = sum(labels_mask)
+    
+    # Additional data integrity checks
+    expected_samples = sum(len(batch[1]) for batch in batches)
+    if expected_samples != total_instances:
+        print(f"WARNING: Expected {expected_samples} samples in batches but dataset has {total_instances}")
+    
+    # Verify trainable tokens match sum from per-dataset stats
+    stats_trainable_tokens = sum(per_dataset_trainable_tokens.values())
+    if stats_trainable_tokens != total_trainable_tokens:
+        print(f"WARNING: Trainable token mismatch - stats sum: {stats_trainable_tokens}, actual: {total_trainable_tokens}")
+        print(f"Difference: {abs(stats_trainable_tokens - total_trainable_tokens)} tokens")
+    
+    # Verify total tokens match
+    stats_total_tokens = sum(per_dataset_tokens.values())
+    if stats_total_tokens != total_tokens:
+        print(f"WARNING: Total token mismatch - stats sum: {stats_total_tokens}, actual: {total_tokens}")
+        print(f"Difference: {abs(stats_total_tokens - total_tokens)} tokens")
     
     print(f"Total sequences: {total_instances}")
     print(f"Total tokens: {total_tokens}")
