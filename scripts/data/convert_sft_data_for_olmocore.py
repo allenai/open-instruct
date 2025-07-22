@@ -36,12 +36,13 @@ Recommendations:
 
 import gzip
 import json
+import multiprocessing
 import os
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 from tqdm import tqdm
@@ -58,6 +59,69 @@ from open_instruct.dataset_transformation import (
     visualize_token,
 )
 from open_instruct.utils import ArgumentParserPlus, is_beaker_job
+
+
+def process_batch(batch_data: Tuple[int, List[Mapping[str, Any]]]) -> Tuple[List[int], List[int], List[Tuple[int, int]], Dict[str, Any]]:
+    """Process a batch of samples and return tokens, labels mask, document boundaries, and statistics."""
+    start_idx, samples = batch_data
+    
+    token_ids = []
+    labels_mask = []
+    document_boundaries = []
+    
+    # Statistics tracking
+    per_dataset_counts = {}
+    per_dataset_tokens = {}
+    per_dataset_trainable_tokens = {}
+    per_dataset_filtered = {}
+    num_samples_skipped = 0
+    
+    current_position = 0
+    
+    for idx, sample in enumerate(samples):
+        sample_length = len(sample[INPUT_IDS_KEY])
+        sample_tokens = sample[INPUT_IDS_KEY]
+        sample_labels = sample[LABELS_KEY]
+        dataset_source = sample.get(DATASET_SOURCE_KEY, "unknown")
+        
+        # Initialize counters for new datasets
+        if dataset_source not in per_dataset_counts:
+            per_dataset_counts[dataset_source] = 0
+            per_dataset_tokens[dataset_source] = 0
+            per_dataset_trainable_tokens[dataset_source] = 0
+            per_dataset_filtered[dataset_source] = 0
+        
+        # Update per-dataset statistics
+        per_dataset_counts[dataset_source] += 1
+        per_dataset_tokens[dataset_source] += sample_length
+        trainable_tokens_in_sample = sum(1 for label in sample_labels if label != -100)
+        per_dataset_trainable_tokens[dataset_source] += trainable_tokens_in_sample
+        
+        token_ids.extend(sample_tokens)
+        labels_mask.extend([1 if label != -100 else 0 for label in sample_labels])
+        
+        # Record document boundary (start, end) - adjusted for global position
+        document_boundaries.append((current_position, current_position + sample_length))
+        current_position += sample_length
+        
+        if all(label == -100 for label in sample_labels):
+            num_samples_skipped += 1
+            per_dataset_filtered[dataset_source] += 1
+        
+        # Assert that attention mask is all 1s
+        assert all(mask == 1 for mask in sample[ATTENTION_MASK_KEY]), (
+            f"Expected all attention mask values to be 1, but found: {sample[ATTENTION_MASK_KEY]}"
+        )
+    
+    stats = {
+        "per_dataset_counts": per_dataset_counts,
+        "per_dataset_tokens": per_dataset_tokens,
+        "per_dataset_trainable_tokens": per_dataset_trainable_tokens,
+        "per_dataset_filtered": per_dataset_filtered,
+        "num_samples_skipped": num_samples_skipped
+    }
+    
+    return token_ids, labels_mask, document_boundaries, stats
 
 
 @dataclass
@@ -112,6 +176,12 @@ class ConvertSFTDataArguments:
 
     """Only write the tokenizer config to the output directory"""
     tokenizer_config_only: bool = field(default=False)
+    
+    """Number of processes to use for dataset processing. Default is all available CPUs."""
+    num_proc: Optional[int] = field(default=None)
+    
+    """Process dataset in streaming mode to save memory for very large datasets."""
+    streaming_batch_size: Optional[int] = field(default=None)
 
 
 def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
@@ -120,6 +190,16 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         beaker_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
         if os.path.exists(beaker_cache_dir):
             args.dataset_local_cache_dir = beaker_cache_dir
+    
+    # Set default num_proc if not specified
+    if args.num_proc is None:
+        # Use BEAKER_ASSIGNED_CPU_COUNT if available, otherwise use all CPUs
+        args.num_proc = int(float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", multiprocessing.cpu_count())))
+    
+    # Override BEAKER_ASSIGNED_CPU_COUNT to ensure dataset transformation uses our num_proc
+    os.environ["BEAKER_ASSIGNED_CPU_COUNT"] = str(args.num_proc)
+    
+    print(f"Using {args.num_proc} processes for parallel processing")
 
     print("Verify these values match the tokenizer config used in Olmo-core:")
     print(f"Tokenizer vocab_size: {tc.tokenizer.vocab_size}")
@@ -191,59 +271,67 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         train_dataset = train_dataset.select(range(args.num_examples))
 
     print("Collecting tokens from dataset...")
+    
+    # Prepare batches for parallel processing
+    total_samples = len(train_dataset)
+    batch_size = max(100, total_samples // (args.num_proc * 10))  # Aim for at least 10 batches per process
+    batches = []
+    
+    for i in range(0, total_samples, batch_size):
+        batch = []
+        for j in range(i, min(i + batch_size, total_samples)):
+            batch.append(train_dataset[j])
+        batches.append((i, batch))
+    
+    print(f"Processing {total_samples} samples in {len(batches)} batches using {args.num_proc} processes...")
+    
+    # Process batches in parallel
+    with multiprocessing.Pool(processes=args.num_proc) as pool:
+        results = list(tqdm(
+            pool.imap(process_batch, batches),
+            total=len(batches),
+            desc="Processing batches",
+            file=sys.stdout,
+            bar_format="{l_bar}{bar}{r_bar}\n",  # better printing in beaker
+            mininterval=10.0,
+        ))
+    
+    # Combine results from all batches
     token_ids = []
     labels_mask = []
-    sample: Mapping[str, Any]
-    num_samples_skipped = 0
     document_boundaries = []
-    current_position = 0
     
-    # Track per-dataset statistics using dataset_source field
+    # Track per-dataset statistics
     per_dataset_counts = {}
     per_dataset_tokens = {}
     per_dataset_trainable_tokens = {}
     per_dataset_filtered = {}
-
-    for idx, sample in enumerate(tqdm(  # type: ignore
-        train_dataset,
-        desc="Collecting tokens",
-        file=sys.stdout,
-        bar_format="{l_bar}{bar}{r_bar}\n",  # better printing in beaker
-        mininterval=10.0,
-    )):
-        sample_length = len(sample[INPUT_IDS_KEY])
-        sample_tokens = sample[INPUT_IDS_KEY]
-        sample_labels = sample[LABELS_KEY]
-        dataset_source = sample.get(DATASET_SOURCE_KEY, "unknown")
+    num_samples_skipped = 0
+    
+    # Adjust document boundaries to global positions
+    global_position = 0
+    
+    for batch_tokens, batch_labels, batch_boundaries, batch_stats in results:
+        # Extend tokens and labels
+        token_ids.extend(batch_tokens)
+        labels_mask.extend(batch_labels)
         
-        # Initialize counters for new datasets
-        if dataset_source not in per_dataset_counts:
-            per_dataset_counts[dataset_source] = 0
-            per_dataset_tokens[dataset_source] = 0
-            per_dataset_trainable_tokens[dataset_source] = 0
-            per_dataset_filtered[dataset_source] = 0
+        # Adjust and extend document boundaries
+        for start, end in batch_boundaries:
+            document_boundaries.append((global_position + start, global_position + end))
         
-        # Update per-dataset statistics
-        per_dataset_counts[dataset_source] += 1
-        per_dataset_tokens[dataset_source] += sample_length
-        trainable_tokens_in_sample = sum(1 for label in sample_labels if label != -100)
-        per_dataset_trainable_tokens[dataset_source] += trainable_tokens_in_sample
+        # Update global position
+        if batch_boundaries:
+            global_position += batch_boundaries[-1][1]
         
-        token_ids.extend(sample_tokens)
-        labels_mask.extend([1 if label != -100 else 0 for label in sample_labels])
-
-        # Record document boundary (start, end)
-        document_boundaries.append((current_position, current_position + sample_length))
-        current_position += sample_length
-
-        if all(label == -100 for label in sample_labels):
-            num_samples_skipped += 1
-            per_dataset_filtered[dataset_source] += 1
-
-        # Assert that attention mask is all 1s
-        assert all(mask == 1 for mask in sample[ATTENTION_MASK_KEY]), (
-            f"Expected all attention mask values to be 1, but found: {sample[ATTENTION_MASK_KEY]}"
-        )
+        # Merge statistics
+        for dataset_name in batch_stats["per_dataset_counts"]:
+            per_dataset_counts[dataset_name] = per_dataset_counts.get(dataset_name, 0) + batch_stats["per_dataset_counts"][dataset_name]
+            per_dataset_tokens[dataset_name] = per_dataset_tokens.get(dataset_name, 0) + batch_stats["per_dataset_tokens"][dataset_name]
+            per_dataset_trainable_tokens[dataset_name] = per_dataset_trainable_tokens.get(dataset_name, 0) + batch_stats["per_dataset_trainable_tokens"][dataset_name]
+            per_dataset_filtered[dataset_name] = per_dataset_filtered.get(dataset_name, 0) + batch_stats["per_dataset_filtered"][dataset_name]
+        
+        num_samples_skipped += batch_stats["num_samples_skipped"]
 
     # Calculate final statistics
     total_instances = len(train_dataset)
@@ -270,10 +358,22 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         for i in range(0, len(data), chunk_size):
             chunk_data = data[i : i + chunk_size]
             filename = f"{base_filename}_part_{i // chunk_size:04d}.npy"
+            
+            # Create memory-mapped array
             mmap = np.memmap(filename, mode="w+", dtype=dtype, shape=(len(chunk_data),))
-            mmap[:] = chunk_data
+            
+            # Write data in smaller batches to avoid memory spikes
+            write_batch_size = min(10_000_000, len(chunk_data))  # 10M elements at a time
+            for j in range(0, len(chunk_data), write_batch_size):
+                end_idx = min(j + write_batch_size, len(chunk_data))
+                mmap[j:end_idx] = chunk_data[j:end_idx]
+                if j % (write_batch_size * 10) == 0:  # Flush every 10 batches
+                    mmap.flush()
+            
             mmap.flush()
-            chunks.append(mmap)
+            del mmap  # Explicitly close the memory map
+            
+            chunks.append(filename)  # Store filename instead of mmap object
             chunk_boundaries.append((i, i + len(chunk_data)))
             print(f"Written {filename} ({len(chunk_data) * item_size / 1024**3:.2f} GB)")
 
@@ -320,9 +420,21 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     for i, (start, end) in enumerate(token_chunk_boundaries):
         chunk_data = labels_mask[start:end]
         filename = f"{output_dir}/labels_mask_part_{i:04d}.npy"
+        
+        # Create memory-mapped array
         mmap = np.memmap(filename, mode="w+", dtype=np.bool_, shape=(len(chunk_data),))
-        mmap[:] = chunk_data
+        
+        # Write data in smaller batches to avoid memory spikes
+        write_batch_size = min(10_000_000, len(chunk_data))  # 10M elements at a time
+        for j in range(0, len(chunk_data), write_batch_size):
+            end_idx = min(j + write_batch_size, len(chunk_data))
+            mmap[j:end_idx] = chunk_data[j:end_idx]
+            if j % (write_batch_size * 10) == 0:  # Flush every 10 batches
+                mmap.flush()
+        
         mmap.flush()
+        del mmap  # Explicitly close the memory map
+        
         print(f"Written {filename} ({len(chunk_data) * np.dtype(np.bool_).itemsize / 1024**3:.2f} GB)")
 
     print("Data conversion completed successfully!")
