@@ -680,13 +680,13 @@ def main():
 
     
     # Collect repetitive examples for analysis and store their indices in the main dataset
+    repetitive_dataset = dataset_with_flags.filter(lambda x: x.get('has_repetition', False), desc="Collecting repetitive examples")
+    
+    # Get the indices of repetitive examples by finding them in the original dataset
     repetitive_indices = []
-    def collect_indices(example, idx):
+    for i, example in enumerate(dataset_with_flags):
         if example.get('has_repetition', False):
-            repetitive_indices.append(idx)
-            return True
-        return False
-    repetitive_dataset = dataset_with_flags.filter(collect_indices, with_indices=True, desc="Collecting repetitive examples")
+            repetitive_indices.append(i)
     
     print(f"\nFound {len(repetitive_dataset)} examples with repetitive patterns")
     
@@ -760,14 +760,18 @@ def main():
 
     # Add manual_keep column to dataset_with_flags
     def set_manual_keep(example, idx):
-        # If manual filtering was done, set manual_keep for repetitive examples
+        # If manual filtering was done with user input, use manual decisions
         if args.manual_filter and len(manual_keep_map) > 0:
             if example.get('has_repetition', False):
                 return {'manual_keep': manual_keep_map.get(idx, False)}
             else:
                 return {'manual_keep': True}
+        # If manual filtering was skipped or not enabled, remove all repetitive examples
         else:
-            return {'manual_keep': True}
+            if example.get('has_repetition', False):
+                return {'manual_keep': False}
+            else:
+                return {'manual_keep': True}
 
     dataset_with_flags = dataset_with_flags.map(set_manual_keep, with_indices=True, desc="Setting manual_keep column")
 

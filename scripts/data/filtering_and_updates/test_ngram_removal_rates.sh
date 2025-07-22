@@ -135,7 +135,7 @@ for i in "${!TEST_CONFIGS[@]}"; do
     output_file="$OUTPUT_DIR/test_${config}.log"
     
     # Run the filtering script and capture output
-    echo "Running: uv run python $SCRIPT_DIR/filter_ngram_repetitions.py --input-dataset $INPUT_DATASET --column $COLUMN --split $SPLIT --num-proc $NUM_PROC --verbose $FILTER_USER_TURNS $DEBUG --manual-filter"
+    echo "Running: uv run python $SCRIPT_DIR/filter_ngram_repetitions.py --input-dataset $INPUT_DATASET --column $COLUMN --split $SPLIT --num-proc $NUM_PROC --verbose $FILTER_USER_TURNS $DEBUG --manual-filter --push-to-hf"
     
     if uv run python "$SCRIPT_DIR/filter_ngram_repetitions.py" \
         --input-dataset "$INPUT_DATASET" \
@@ -143,6 +143,7 @@ for i in "${!TEST_CONFIGS[@]}"; do
         --split "$SPLIT" \
         --num-proc "$NUM_PROC" \
         --verbose \
+        --push-to-hf \
         $FILTER_USER_TURNS \
         $DEBUG \
         --manual-filter > "$output_file" 2>&1; then
