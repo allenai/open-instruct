@@ -54,7 +54,7 @@ from open_instruct.dataset_transformation import (
     TOKENIZED_SFT_DATASET_KEYS,
     TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE,
     TokenizerConfig,
-    get_cached_dataset_tulu,
+    get_cached_dataset_tulu_with_statistics,
     visualize_token,
 )
 from open_instruct.utils import ArgumentParserPlus, is_beaker_job
@@ -161,7 +161,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         ("sft_tulu_filter_v1", {}),  # remove examples that don't have any labels
     ]
 
-    result = get_cached_dataset_tulu(
+    result = get_cached_dataset_tulu_with_statistics(
         dataset_mixer_list=args.dataset_mixer_list,
         dataset_mixer_list_splits=args.dataset_mixer_list_splits,
         tc=tc,

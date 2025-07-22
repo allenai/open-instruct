@@ -846,7 +846,7 @@ GET_TOKENIZER_FN = {
 
 DEFAULT_SFT_MESSAGES_KEY = "messages"
 GROUND_TRUTHS_KEY = "ground_truth"
-DATASET_SOURCE_KEY = "dataset"
+DATASET_SOURCE_KEY = "dataset_source"  # "dataset" clashes with RLVR stuff.
 
 
 @dataclass
@@ -1628,7 +1628,7 @@ class LocalDatasetTransformationCache:
                 else:
                     # Return empty statistics if not cached
                     return dataset, {"per_dataset_stats": [], "dataset_order": []}
-            return dataset
+            return dataset, None
 
         print(f"Cache not found or invalid, transforming datasets...")
 
@@ -1685,7 +1685,7 @@ class LocalDatasetTransformationCache:
         if dataset_skip_cache:
             if return_statistics:
                 return combined_dataset, all_statistics
-            return combined_dataset
+            return combined_dataset, None
 
         # Save to local cache
         combined_dataset.save_to_disk(cache_path)
@@ -1702,7 +1702,7 @@ class LocalDatasetTransformationCache:
         loaded_dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
         if return_statistics:
             return loaded_dataset, all_statistics
-        return loaded_dataset
+        return loaded_dataset, None
 
 
 def get_cached_dataset(
@@ -1719,10 +1719,10 @@ def get_cached_dataset(
         cache = DatasetTransformationCache(hf_entity=hf_entity)
     return cache.load_or_transform_dataset(
         dcs, tc, dataset_skip_cache=dataset_skip_cache, return_statistics=return_statistics
-    )
+    )[0]
 
 
-def get_cached_dataset_tulu(
+def get_cached_dataset_tulu_with_statistics(
     dataset_mixer_list: List[str],
     dataset_mixer_list_splits: List[str],
     tc: TokenizerConfig,
@@ -1790,6 +1790,35 @@ def get_cached_dataset_tulu(
     return cache.load_or_transform_dataset(
         dcs, tc, dataset_skip_cache=dataset_skip_cache, return_statistics=return_statistics
     )
+
+
+def get_cached_dataset_tulu(
+    dataset_mixer_list: List[str],
+    dataset_mixer_list_splits: List[str],
+    tc: TokenizerConfig,
+    dataset_transform_fn: List[str],
+    transform_fn_args: List[Dict[str, Any]],
+    target_columns: Optional[List[str]] = None,
+    dataset_cache_mode: Literal["hf", "local"] = "local",
+    dataset_config_hash: Optional[str] = None,
+    hf_entity: Optional[str] = None,
+    dataset_local_cache_dir: str = "local_dataset_cache",
+    dataset_skip_cache: bool = False,
+) -> Dataset:
+    return get_cached_dataset_tulu_with_statistics(
+        dataset_mixer_list,
+        dataset_mixer_list_splits,
+        tc,
+        dataset_transform_fn,
+        transform_fn_args,
+        target_columns,
+        dataset_cache_mode,
+        dataset_config_hash,
+        hf_entity,
+        dataset_local_cache_dir,
+        dataset_skip_cache,
+        return_statistics=False,
+    )[0]
 
 
 def test_sft_dpo_same_tokenizer():
