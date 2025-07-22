@@ -563,7 +563,11 @@ class SimpleGenerateCollatorWithGroundTruth:
         # datasets
         datasets = [x[VERIFIER_SOURCE_KEY] for x in batch]
 
-        return {INPUT_IDS_PROMPT_KEY: padded_sequences, GROUND_TRUTHS_KEY: ground_truths, VERIFIER_SOURCE_KEY: datasets}
+        return {
+            INPUT_IDS_PROMPT_KEY: padded_sequences,
+            GROUND_TRUTHS_KEY: ground_truths,
+            VERIFIER_SOURCE_KEY: datasets,
+        }
 
 
 if __name__ == "__main__":
