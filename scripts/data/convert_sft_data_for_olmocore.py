@@ -38,6 +38,7 @@ import gzip
 import json
 import os
 import sys
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -85,6 +86,12 @@ class ConvertSFTDataArguments:
     dataset_transform_fn: list[str] = field(
         default_factory=lambda: ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
     )
+    
+    """Use optimized tokenization for faster processing"""
+    use_optimized_tokenization: bool = field(default=False)
+    
+    """Enable timing information for debugging"""
+    enable_timing: bool = field(default=False)
 
     """The columns to use for the dataset."""
     dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE)
@@ -156,10 +163,16 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         return
 
     # TODO: improve configurability of transform factory
+    tokenize_fn = "sft_tulu_tokenize_and_truncate_v2" if args.use_optimized_tokenization else "sft_tulu_tokenize_and_truncate_v1"
     transform_functions_and_args = [
-        ("sft_tulu_tokenize_and_truncate_v1", {"max_seq_length": args.max_seq_length}),
+        (tokenize_fn, {"max_seq_length": args.max_seq_length}),
         ("sft_tulu_filter_v1", {}),  # remove examples that don't have any labels
     ]
+    
+    if args.enable_timing:
+        print(f"Using tokenization function: {tokenize_fn}")
+        print(f"Number of CPUs available: {os.environ.get('BEAKER_ASSIGNED_CPU_COUNT', 'Not set (using system CPUs)')}")
+        timing_start = time.time()
 
     result = get_cached_dataset_tulu_with_statistics(
         dataset_mixer_list=args.dataset_mixer_list,
@@ -177,6 +190,11 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     
     # Unpack the result
     train_dataset, dataset_statistics = result
+    
+    if args.enable_timing:
+        elapsed = time.time() - timing_start
+        print(f"Dataset loading and tokenization took {elapsed:.2f} seconds")
+        print(f"Processing rate: {len(train_dataset) / elapsed:.2f} examples/second")
 
     train_dataset = train_dataset.shuffle()
 
@@ -191,6 +209,9 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         train_dataset = train_dataset.select(range(args.num_examples))
 
     print("Collecting tokens from dataset...")
+    if args.enable_timing:
+        collection_start = time.time()
+    
     token_ids = []
     labels_mask = []
     sample: Mapping[str, Any]
@@ -249,6 +270,11 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     total_instances = len(train_dataset)
     total_tokens = len(token_ids)
     total_trainable_tokens = sum(labels_mask)
+    
+    if args.enable_timing:
+        collection_elapsed = time.time() - collection_start
+        print(f"Token collection took {collection_elapsed:.2f} seconds")
+        print(f"Collection rate: {total_tokens / collection_elapsed / 1_000_000:.2f} M tokens/second")
     
     print(f"Total sequences: {total_instances}")
     print(f"Total tokens: {total_tokens}")
