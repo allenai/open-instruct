@@ -846,7 +846,7 @@ GET_TOKENIZER_FN = {
 
 DEFAULT_SFT_MESSAGES_KEY = "messages"
 GROUND_TRUTHS_KEY = "ground_truth"
-DATASET_SOURCE_KEY = "dataset_source"  # "dataset" clashes with RLVR stuff.
+VERIFIER_SOURCE_KEY = "dataset"
 
 
 @dataclass
@@ -855,7 +855,7 @@ class TokenizerConfig:
     tokenizer_revision: Optional[str] = None
     trust_remote_code: bool = False
     use_fast: bool = True
-    chat_template_name: str = "olmo"
+    chat_template_name: str = "tulu"
     add_bos: bool = False
     get_tokenizer_fn: str = "get_tokenizer_tulu_v2_2"
 
@@ -897,9 +897,9 @@ class TokenizerConfig:
 INPUT_IDS_KEY = "input_ids"
 ATTENTION_MASK_KEY = "attention_mask"
 LABELS_KEY = "labels"
-DATASET_SOURCE_KEY = "dataset_source"
+DATASET_ORIGIN_KEY = "dataset_source"  # just 'dataset' clashes with RLVR stuff (see VERIFIER_SOURCE_KEY)
 TOKENIZED_SFT_DATASET_KEYS = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY]
-TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY, DATASET_SOURCE_KEY]
+TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY, DATASET_ORIGIN_KEY]
 
 # Preference dataset
 # NOTE (Costa): the `INPUT_IDS_PROMPT_KEY` is just for visualization purposes only
@@ -1244,7 +1244,7 @@ def rlvr_tokenize_v1(
     tokenizer: PreTrainedTokenizer,
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
     ground_truths_key: str = GROUND_TRUTHS_KEY,
-    dataset_source_key: str = DATASET_SOURCE_KEY,
+    verifier_source_key: str = VERIFIER_SOURCE_KEY,
 ):
     if len(row[sft_messages_key]) == 1:
         prompt = row[sft_messages_key]
@@ -1256,7 +1256,7 @@ def rlvr_tokenize_v1(
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
     row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
-    row[DATASET_SOURCE_KEY] = row[dataset_source_key]
+    row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
     return row
 
 
@@ -1265,7 +1265,7 @@ def rlvr_tokenize_v2(
     tokenizer: PreTrainedTokenizer,
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
     ground_truths_key: str = GROUND_TRUTHS_KEY,
-    dataset_source_key: str = DATASET_SOURCE_KEY,
+    verifier_source_key: str = VERIFIER_SOURCE_KEY,
 ):
     if len(row[sft_messages_key]) == 1:
         prompt = row[sft_messages_key]
@@ -1283,14 +1283,14 @@ def rlvr_tokenize_v2(
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
     row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
-    row[DATASET_SOURCE_KEY] = row[dataset_source_key]
+    row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
     # some basic transformations:
     # if ground truths is a string, make it a list
     if isinstance(row[ground_truths_key], str):
         row[ground_truths_key] = [row[ground_truths_key]]
     # if dataset source is a string, make it a list
-    if isinstance(row[dataset_source_key], str):
-        row[dataset_source_key] = [row[dataset_source_key]]
+    if isinstance(row[verifier_source_key], str):
+        row[verifier_source_key] = [row[verifier_source_key]]
     # drop the messages field as it often causes issues.
     row.pop(sft_messages_key)
     return row
@@ -1456,7 +1456,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     # Add dataset source field to track origin after shuffling
     dataset = dataset.map(
-        lambda example: {**example, DATASET_SOURCE_KEY: dc.dataset_name},
+        lambda example: {**example, DATASET_ORIGIN_KEY: dc.dataset_name},
         num_proc=num_proc,
         desc=f"Adding dataset source field for {dc.dataset_name}",
     )
@@ -1469,8 +1469,8 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # perform the transformation
         target_columns = dataset.column_names if dc.target_columns is None else dc.target_columns
         # Always preserve dataset_source if it exists
-        if DATASET_SOURCE_KEY in dataset.column_names and DATASET_SOURCE_KEY not in target_columns:
-            target_columns = target_columns + [DATASET_SOURCE_KEY]
+        if DATASET_ORIGIN_KEY in dataset.column_names and DATASET_ORIGIN_KEY not in target_columns:
+            target_columns = target_columns + [DATASET_ORIGIN_KEY]
 
         if fn_type == "map":
             dataset = dataset.map(
