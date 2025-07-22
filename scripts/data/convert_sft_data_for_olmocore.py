@@ -196,9 +196,6 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         # Use BEAKER_ASSIGNED_CPU_COUNT if available, otherwise use all CPUs
         args.num_proc = int(float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", multiprocessing.cpu_count())))
     
-    # Override BEAKER_ASSIGNED_CPU_COUNT to ensure dataset transformation uses our num_proc
-    os.environ["BEAKER_ASSIGNED_CPU_COUNT"] = str(args.num_proc)
-    
     print(f"Using {args.num_proc} processes for parallel processing")
 
     print("Verify these values match the tokenizer config used in Olmo-core:")
