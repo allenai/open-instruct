@@ -1811,6 +1811,7 @@ def sync_weights_and_prepare_prompts(
             param_prompt_Q,
             eval_prompt_token_ids,
         )
+    return queries_next, ground_truths_next, datasets_next
 
 
 def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
