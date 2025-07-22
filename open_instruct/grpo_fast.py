@@ -264,7 +264,7 @@ class Args:
     mask_truncated_completions: bool = False
     """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
 
-    fill_completions: bool = True
+    fill_completions: bool = False
     """Whether to refill the batchsize with after filtering."""
 
     record_entropy: bool = False
