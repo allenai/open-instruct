@@ -19,6 +19,7 @@ dependencies = [
     "nvitop>=1.4.2",
     "packaging>=24.2",
     "peft>=0.13.2",
+	"tqdm",
     "ray[default]>=2.44.1",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",

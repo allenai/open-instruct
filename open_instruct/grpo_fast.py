@@ -29,7 +29,7 @@
 # limitations under the License.
 # isort: off
 import os
-
+import tqdm
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     import deepspeed
@@ -1129,7 +1129,10 @@ def accumulate_inference_batches(
     all_ground_truths = []
     all_datasets = []
 
-    for _ in range(expected_results):
+    for _ in tqdm.tqdm(range(expected_results),
+                       desc=f"Accumulating results for training step {training_step}",
+                       # Adds a new line after the progress bar so that logs look better.
+                       bar_format="{l_bar}{bar}{r_bar}\n"):
         # Get individual result from queue
         result = inference_results_Q.get()
 
