@@ -401,6 +401,10 @@ class Args:
     code_tool_api_endpoint: Optional[str] = None
 
     def __post_init__(self):
+        if self.num_unique_prompts_rollout * self.num_samples_per_prompt_rollout % args.vllm_num_engines != 0:
+            raise ValueError(
+                "The number of unique prompts times the number of samples per prompt must be divisible by the number of vLLM engines."
+        )
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
@@ -2115,10 +2119,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     reward_fn = make_reward_fn(args)
 
     # Start vLLM engines to process from queues
-    if args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout % args.vllm_num_engines != 0:
-        raise ValueError(
-            "The number of unique prompts times the number of samples per prompt must be divisible by the number of vLLM engines."
-        )
     batch_size_per_engine = (
         args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     ) // args.vllm_num_engines
