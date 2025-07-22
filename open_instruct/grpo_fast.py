@@ -1129,7 +1129,7 @@ def accumulate_inference_batches(
     all_ground_truths = []
     all_datasets = []
 
-    for i in range(expected_results):
+    for _ in range(expected_results):
         # Get individual result from queue
         result = inference_results_Q.get()
 
@@ -1207,7 +1207,7 @@ def data_preparation_thread(
             result, queries, ground_truths, datasets = accumulate_inference_batches(
                 inference_results_Q,
                 pending_queries_map,
-                args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout,
+                args.num_unique_prompts_rollout,
                 training_step,
             )
 
