@@ -41,7 +41,6 @@ try:
 except Exception:
     pass
 # isort: on
-
 import asyncio
 import json
 import logging
