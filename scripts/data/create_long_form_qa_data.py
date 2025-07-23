@@ -7,7 +7,7 @@ no_prompt = True
 if no_prompt:
     prompt = ""
 else:   
-    prompt = " Answer the given question. You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, if you find you lack some knowledge, you can call a search engine by <query> query </query>, and it will return the top searched results between <document> and </document>. You can search as many times as you want. If you find no further external knowledge needed, you can directly provide the answer inside <finish> and </finish>. For example, <finish> xxx </finish>. Question: <question>"
+    prompt = " Answer the given question. You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, if you find you lack some knowledge, you can call a search engine by <search> query </search>, and it will return the top searched results between <document> and </document>. You can search as many times as you want. If you find no further external knowledge needed, you can directly provide the answer inside <finish> and </finish>. For example, <finish> xxx </finish>. Question: <question>"
 
 example_data = [
     {

@@ -27,7 +27,7 @@ def process_vllm_output_for_search(text: str, number_documents_to_search: int = 
     Extracts a query from the given text and returns a snippet wrapped in a tag.
     If no query is found or no snippet is returned, an empty string is returned.
     """
-    query_match = re.search(r"<query>(.*?)</query>", text)
+    query_match = re.search(r"<search>(.*?)</search>", text)
     if not query_match:
         return ""
 
@@ -255,7 +255,7 @@ if __name__ == "__main__":
                 "role": "user",
                 "content": (
                     "How much money, in euros, was the surgeon held responsible for Stella Obasanjo's death ordered to pay her son? "
-                    "Search the web by wrapping a query in query tags like so: <query>{query}</query> "
+                    "Search the web by wrapping a query in query tags like so: <search>{query}</search> "
                     "Then, based on the document, provide the answer, or another query if you need."
                 ),
             }

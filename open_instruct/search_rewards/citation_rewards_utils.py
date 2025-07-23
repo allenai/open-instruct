@@ -569,15 +569,15 @@ if __name__ == "__main__":
 def score_num_in_context_search_turns(context: str, upper_bound: int = 10) -> float:
     """
     Score the number of search turns in the response.
-    This function extracts all strings wrapped within <query> and </query> tags,
+    This function extracts all strings wrapped within <search> and </search> tags,
     then computes the number of valid (non-empty) extracted queries.
     """
     if not context:
         return 0.0, 0
 
-    # Use re.findall to extract all substrings within <query> tags
+    # Use re.findall to extract all substrings within <search> tags
     # The re.DOTALL flag allows '.' to match newline characters, in case a query spans multiple lines.
-    queries = re.findall(r"<query>(.*?)</query>", context, re.DOTALL)
+    queries = re.findall(r"<search>(.*?)</search>", context, re.DOTALL)
 
     # A valid query must not be empty or contain only whitespace.
     num_valid_queries = sum(1 for q in queries if q.strip())

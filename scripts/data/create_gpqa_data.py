@@ -21,9 +21,9 @@ for data in dataset:
                 "content": (
                     "Answer the following multiple choice question. The last line of your response "
                     "should be of the following format: `<answer>LETTER</answer>` where LETTER "
-                    "is one of ABCD. Search the web by wrapping a query in query tags like so: <query></query>\n"
+                    "is one of ABCD. Search the web by wrapping a query in query tags like so: <search></search>\n"
                     "Queries should comprise of a few keywords that are relevant to the question. "
-                    "For example: <query>personalized dialogue generation, personalized language models, personalized dialogue</query>\n"
+                    "For example: <search>personalized dialogue generation, personalized language models, personalized dialogue</search>\n"
                     f"Question {data['Question']}\n"
                     f"Choices: {', '.join(choices)}"
                 )
@@ -54,9 +54,9 @@ for data in dataset:
                 "content": (
                     "Answer the following multiple choice question. The last line of your response "
                     "should be of the following format: `<answer>LETTER</answer>` where LETTER "
-                    "is one of ABCD. Search the web by wrapping a query in query tags like so: <query></query>\n"
+                    "is one of ABCD. Search the web by wrapping a query in query tags like so: <search></search>\n"
                     "Queries should comprise of a few keywords that are relevant to the question. "
-                    "For example: <query>personalized dialogue generation, personalized language models, personalized dialogue</query>\n"
+                    "For example: <search>personalized dialogue generation, personalized language models, personalized dialogue</search>\n"
                     f"Question {data['Question']}\n"
                     f"Choices: {', '.join(choices)}"
                 )

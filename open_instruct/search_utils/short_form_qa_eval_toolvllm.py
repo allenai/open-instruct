@@ -63,8 +63,8 @@ if args.max_eval_samples > -1 and args.max_eval_samples < len(ds):
 prompt_token_ids = [tokenizer.apply_chat_template(data["messages"], add_generation_prompt=True) for data in ds]
 
 tool = SearchTool(
-    start_str="<query>",
-    end_str="</query>",
+    start_str="<search>",
+    end_str="</search>",
     api_endpoint=args.search_api_endpoint,
     number_documents_to_search=args.num_docs,
 )
@@ -149,7 +149,7 @@ f1s_finished = [x["f1"] for x in f1_finished]
 avg_f1_finished = sum(f1s_finished) / len(f1s_finished)
 print(f"Average F1 (finished only): {avg_f1_finished}")
 # 3. How many predictions searched?
-query_regex = r"<query>(.*?)</query>"
+query_regex = r"<search>(.*?)</search>"
 searched = [1 if re.search(query_regex, x) else 0 for x in generations]
 print(f"Sent a query: {sum(searched) / len(searched)}")
 # 3. Of the predictions that searched, what is the f1 score?

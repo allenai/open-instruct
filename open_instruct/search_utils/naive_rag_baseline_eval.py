@@ -24,7 +24,7 @@ ray.init()
 PROMPT = "Answer the given question. You must conduct reasoning "
 "inside <think> and </think> first every time you get new information. "
 "After reasoning, if you find you lack some knowledge, you can call a "
-"search engine by <query> query </query>, and it will return the top "
+"search engine by <search> query </search>, and it will return the top "
 "searched results between <document> and </document>. You can search as "
 "many times as you want. If you find no further external knowledge needed, "
 "you can directly provide the answer inside <finish> and </finish> without "
@@ -81,7 +81,7 @@ for i, prompt in enumerate(prompt_strings):
     snippets = query_results[i]
     query = queries[i]
     # add the query and snippets to the prompt
-    prompt_strings[i] = prompt + f"<query>{query}</query><document>{snippets}</document>"
+    prompt_strings[i] = prompt + f"<search>{query}</search><document>{snippets}</document>"
     # manually force the finish tag to be added.
     if args.add_finish:
         prompt_strings[i] += "<finish>"
@@ -93,7 +93,7 @@ sampling_params = SamplingParams(
     max_tokens=args.model_len,
     include_stop_str_in_output=True,
     n=1,
-    stop=["</query>", "</finish>"],  # needed for search actor (TODO: make this api nicer)
+    stop=["</search>", "</finish>"],  # needed for search actor (TODO: make this api nicer)
 )
 
 result = model.generate(
