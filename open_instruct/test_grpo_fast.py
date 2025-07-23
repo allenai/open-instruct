@@ -421,19 +421,11 @@ class TestGrpoFastVLLM(unittest.TestCase):
             inference_results_Q, pending_queries_map, mock_args, training_step=1
         )
 
-        # Verify results - with the fix, queries/ground_truths/datasets ARE replicated
-        # based on num_samples_per_prompt
-        expected_queries = []
-        expected_ground_truths = []
-        expected_datasets = []
-        for i in range(num_unique_prompts_rollout):
-            expected_queries.extend([f"query_{i}"] * num_samples_per_prompt)
-            expected_ground_truths.extend([f"truth_{i}"] * num_samples_per_prompt)
-            expected_datasets.extend([f"dataset_{i}"] * num_samples_per_prompt)
-
-        self.assertEqual(combined_queries, expected_queries)
-        self.assertEqual(combined_ground_truths, expected_ground_truths)
-        self.assertEqual(combined_datasets, expected_datasets)
+        # Verify results - accumulate_inference_batches should NOT replicate
+        # The replication happens later in data_preparation_thread
+        self.assertEqual(combined_queries, queries_next)
+        self.assertEqual(combined_ground_truths, ground_truths_next)
+        self.assertEqual(combined_datasets, datasets_next)
         self.assertEqual(len(pending_queries_map), 0)
 
         # Verify that we have the correct number of responses (256 = 16 prompts * 16 samples per prompt)
@@ -489,19 +481,284 @@ class TestGrpoFastVLLM(unittest.TestCase):
         )
 
         # Verify results
-        # Each query should be repeated num_samples_per_prompt times
-        expected_queries = []
-        expected_ground_truths = []
-        expected_datasets = []
-        for i in range(num_unique_prompts):
-            expected_queries.extend([f"query_{i}"] * num_samples_per_prompt)
-            expected_ground_truths.extend([f"truth_{i}"] * num_samples_per_prompt)
-            expected_datasets.extend([f"dataset_{i}"] * num_samples_per_prompt)
+        # accumulate_inference_batches should NOT replicate - returns unique entries
+        expected_queries = [f"query_{i}" for i in range(num_unique_prompts)]
+        expected_ground_truths = [f"truth_{i}" for i in range(num_unique_prompts)]
+        expected_datasets = [f"dataset_{i}" for i in range(num_unique_prompts)]
 
         self.assertEqual(combined_queries, expected_queries)
         self.assertEqual(combined_ground_truths, expected_ground_truths)
         self.assertEqual(combined_datasets, expected_datasets)
         self.assertEqual(len(pending_queries_map), 0)  # All entries should be popped
+
+
+class GrpoIntegrationTests(unittest.TestCase):
+    """Integration tests for GRPO with parallel processing."""
+
+    @classmethod
+    def setUpClass(cls):
+        # Initialize Ray
+        if not ray.is_initialized():
+            ray.init(ignore_reinit_error=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        # Shutdown Ray after test
+        if ray.is_initialized():
+            ray.shutdown()
+
+    @ray.remote
+    def mock_vllm_engine(engine_id, prompt_queue, results_queue, num_samples_per_prompt=1):
+        """Mock vLLM engine that processes prompts from queue."""
+        import random
+        import time
+
+        while True:
+            # Get request from queue
+            request = prompt_queue.get()
+            if request is None:  # Stop signal
+                break
+
+            # Simulate processing time
+            time.sleep(random.uniform(0.01, 0.05))
+
+            # Create mock generation result
+            batch_size = len(request.prompts)
+            total_responses = batch_size * num_samples_per_prompt
+
+            # Important: vLLM keeps dataset_index as the original unique indices
+            mock_result = GenerationResult(
+                responses=[[1, 2, 3] for _ in range(total_responses)],
+                finish_reasons=["stop"] * total_responses,
+                masks=[[1, 1, 1] for _ in range(total_responses)],
+                request_info=RequestInfo(
+                    num_calls=[0] * total_responses,
+                    timeouts=[0] * total_responses,
+                    tool_errors=[""] * total_responses,
+                    tool_outputs=[""] * total_responses,
+                    tool_runtimes=[0.0] * total_responses,
+                    tool_calleds=[False] * total_responses,
+                ),
+                dataset_index=request.dataset_index,  # Original indices, not replicated
+            )
+
+            # Push to results queue
+            results_queue.put(mock_result)
+
+    def test_dataset_index_25847_bug(self):
+        """Test to reproduce the specific bug with dataset index 25847."""
+        # This simulates a scenario where we have a large dataset and might get
+        # indices that don't start from 0
+        num_engines = 4
+        num_prompts = 64
+        num_samples_per_prompt = 16
+        start_index = 25800  # Start with a high index like in the error
+
+        # Create test data with high indices
+        queries_next = [f"query_{i}" for i in range(start_index, start_index + num_prompts)]
+        ground_truths_next = [f"truth_{i}" for i in range(start_index, start_index + num_prompts)]
+        datasets_next = [f"dataset_{i}" for i in range(start_index, start_index + num_prompts)]
+        dataset_indices = list(range(start_index, start_index + num_prompts))
+
+        # Create queues
+        param_prompt_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        inference_results_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        pending_queries_map = {}
+
+        # Split and insert batch
+        split_and_insert_batch(
+            queries_next,
+            ground_truths_next,
+            datasets_next,
+            dataset_indices,
+            training_step=1,
+            vllm_num_engines=num_engines,
+            pending_queries_map=pending_queries_map,
+            param_prompt_Q=param_prompt_Q,
+        )
+
+        # Verify the pending queries map contains the right indices
+        self.assertIn(25847, pending_queries_map)
+
+        # Get all requests and create results
+        while not param_prompt_Q.empty():
+            request = param_prompt_Q.get()
+            batch_size = len(request.prompts)
+            total_responses = batch_size * num_samples_per_prompt
+
+            mock_result = GenerationResult(
+                responses=[[1, 2, 3] for _ in range(total_responses)],
+                finish_reasons=["stop"] * total_responses,
+                masks=[[1, 1, 1] for _ in range(total_responses)],
+                request_info=RequestInfo(
+                    num_calls=[0] * total_responses,
+                    timeouts=[0] * total_responses,
+                    tool_errors=[""] * total_responses,
+                    tool_outputs=[""] * total_responses,
+                    tool_runtimes=[0.0] * total_responses,
+                    tool_calleds=[False] * total_responses,
+                ),
+                dataset_index=request.dataset_index,
+            )
+            inference_results_Q.put(mock_result)
+
+        # Create mock args
+        mock_args = Mock()
+        mock_args.vllm_num_engines = num_engines
+        mock_args.num_samples_per_prompt_rollout = num_samples_per_prompt
+
+        # Accumulate results
+        combined_result, combined_queries, combined_ground_truths, combined_datasets = accumulate_inference_batches(
+            inference_results_Q, pending_queries_map, mock_args, training_step=1
+        )
+
+        # Verify results - accumulate_inference_batches returns unique entries
+        self.assertEqual(len(combined_queries), num_prompts)  # Not replicated
+        self.assertEqual(len(combined_result.responses), num_prompts * num_samples_per_prompt)  # Responses are replicated
+        self.assertEqual(len(pending_queries_map), 0)
+
+    def test_out_of_order_processing(self):
+        """Test that dataset indices can be processed out of order."""
+        num_engines = 4
+        num_prompts = 16
+        num_samples_per_prompt = 4
+
+        # Create test data
+        queries_next = [f"query_{i}" for i in range(num_prompts)]
+        ground_truths_next = [f"truth_{i}" for i in range(num_prompts)]
+        datasets_next = [f"dataset_{i}" for i in range(num_prompts)]
+        dataset_indices = list(range(num_prompts))
+
+        # Create queues
+        param_prompt_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        inference_results_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        pending_queries_map = {}
+
+        # Split and insert batch
+        split_and_insert_batch(
+            queries_next,
+            ground_truths_next,
+            datasets_next,
+            dataset_indices,
+            training_step=1,
+            vllm_num_engines=num_engines,
+            pending_queries_map=pending_queries_map,
+            param_prompt_Q=param_prompt_Q,
+        )
+
+        # Get all requests from the queue
+        requests = []
+        while not param_prompt_Q.empty():
+            requests.append(param_prompt_Q.get())
+
+        # Put results back in REVERSE order to simulate out-of-order processing
+        for request in reversed(requests):
+            batch_size = len(request.prompts)
+            total_responses = batch_size * num_samples_per_prompt
+
+            mock_result = GenerationResult(
+                responses=[[1, 2, 3] for _ in range(total_responses)],
+                finish_reasons=["stop"] * total_responses,
+                masks=[[1, 1, 1] for _ in range(total_responses)],
+                request_info=RequestInfo(
+                    num_calls=[0] * total_responses,
+                    timeouts=[0] * total_responses,
+                    tool_errors=[""] * total_responses,
+                    tool_outputs=[""] * total_responses,
+                    tool_runtimes=[0.0] * total_responses,
+                    tool_calleds=[False] * total_responses,
+                ),
+                dataset_index=request.dataset_index,
+            )
+            inference_results_Q.put(mock_result)
+
+        # Create mock args
+        mock_args = Mock()
+        mock_args.vllm_num_engines = num_engines
+        mock_args.num_samples_per_prompt_rollout = num_samples_per_prompt
+
+        # Accumulate results
+        combined_result, combined_queries, combined_ground_truths, combined_datasets = accumulate_inference_batches(
+            inference_results_Q, pending_queries_map, mock_args, training_step=1
+        )
+
+        # Verify results - accumulate_inference_batches returns unique entries
+        self.assertEqual(len(combined_queries), num_prompts)  # Not replicated
+        self.assertEqual(len(combined_result.responses), num_prompts * num_samples_per_prompt)  # Responses are replicated
+        self.assertEqual(len(pending_queries_map), 0)
+
+    @parameterized.expand([
+        (1, 16, 16),   # 1 engine, 16 prompts, 16 samples
+        (2, 32, 16),   # 2 engines, 32 prompts, 16 samples
+        (4, 64, 16),   # 4 engines, 64 prompts, 16 samples
+        (8, 128, 16),  # 8 engines, 128 prompts, 16 samples
+        (4, 100, 16),  # 4 engines, 100 prompts (not evenly divisible), 16 samples
+    ])
+    def test_parallel_processing_with_multiple_engines(self, num_engines, num_prompts, num_samples_per_prompt):
+        """Test parallel processing with multiple engines running concurrently."""
+        import time
+
+        # Create test data
+        queries_next = [f"query_{i}" for i in range(num_prompts)]
+        ground_truths_next = [f"truth_{i}" for i in range(num_prompts)]
+        datasets_next = [f"dataset_{i}" for i in range(num_prompts)]
+        dataset_indices = list(range(num_prompts))
+
+        # Create queues
+        param_prompt_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        inference_results_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        pending_queries_map = {}
+
+        # Split and insert batch
+        split_and_insert_batch(
+            queries_next,
+            ground_truths_next,
+            datasets_next,
+            dataset_indices,
+            training_step=1,
+            vllm_num_engines=num_engines,
+            pending_queries_map=pending_queries_map,
+            param_prompt_Q=param_prompt_Q,
+        )
+
+        # Verify initial state
+        self.assertEqual(len(pending_queries_map), num_prompts)
+        self.assertEqual(param_prompt_Q.qsize(), num_engines)
+
+        # Start mock vLLM engines
+        engines = []
+        for i in range(num_engines):
+            engine = GrpoIntegrationTests.mock_vllm_engine.remote(
+                i, param_prompt_Q, inference_results_Q, num_samples_per_prompt
+            )
+            engines.append(engine)
+
+        # Wait a bit for engines to process
+        time.sleep(0.5)
+
+        # Send stop signals
+        for _ in range(num_engines):
+            param_prompt_Q.put(None)
+
+        # Create mock args
+        mock_args = Mock()
+        mock_args.vllm_num_engines = num_engines
+        mock_args.num_samples_per_prompt_rollout = num_samples_per_prompt
+
+        # Accumulate results
+        combined_result, combined_queries, combined_ground_truths, combined_datasets = accumulate_inference_batches(
+            inference_results_Q, pending_queries_map, mock_args, training_step=1
+        )
+
+        # Verify results - accumulate_inference_batches returns unique entries
+        self.assertEqual(len(combined_queries), num_prompts)
+        self.assertEqual(len(combined_result.responses), num_prompts * num_samples_per_prompt)
+        self.assertEqual(len(combined_ground_truths), num_prompts)
+        self.assertEqual(len(combined_datasets), num_prompts)
+        self.assertEqual(len(pending_queries_map), 0)  # All should be processed
+
+        # Clean up
+        ray.get(engines)
 
 
 if __name__ == "__main__":
