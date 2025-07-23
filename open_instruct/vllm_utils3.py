@@ -207,17 +207,27 @@ class LLMRayActor:
         resume_training_step=1,
     ):
         """Process prompts from the queue and put results in the results queue."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        logger.info(f"[vLLM Engine] Starting process_from_queue, processing steps {resume_training_step} to {num_training_steps}")
         for training_step in range(resume_training_step, num_training_steps + 1):
             # Get prompts from queue
+            logger.info(f"[vLLM Engine] Waiting for prompts for training_step {training_step}")
             request = self.prompt_queue.get()
             if request is None:
+                logger.info("[vLLM Engine] Received None, breaking")
                 break
+            logger.info(f"[vLLM Engine] Got request with {len(request.prompts)} prompts for training_step {request.training_step}")
 
             # Process training prompts
+            logger.info(f"[vLLM Engine] Starting generation for {len(request.prompts)} prompts")
             result = self._generate_batch(
                 request.prompts, sampling_params, request.dataset_index, request.training_step
             )
+            logger.info(f"[vLLM Engine] Completed generation, got {len(result.responses)} responses")
             self.results_queue.put(result)
+            logger.info(f"[vLLM Engine] Put result in queue for training_step {request.training_step}")
 
             # Handle evaluation if needed
             if (
@@ -243,7 +253,12 @@ class LLMRayActor:
         training_step: Optional[int] = None,
     ) -> GenerationResult:
         """Generate responses for a batch of prompts."""
-        outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
+        import logging
+        logger = logging.getLogger(__name__)
+
+        logger.info(f"[vLLM _generate_batch] Generating for {len(prompts)} prompts, training_step={training_step}")
+        outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=True)
+        logger.info("[vLLM _generate_batch] Generation complete")
 
         # Process outputs
         response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
