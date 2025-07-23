@@ -14,7 +14,7 @@ from open_instruct.vllm_utils3 import GenerationResult, PromptRequest, RequestIn
 
 class TestGrpoFastBase(unittest.TestCase):
     """Base class with common test utilities."""
-    
+
     @classmethod
     def setUpClass(cls):
         # Initialize Ray
@@ -26,7 +26,7 @@ class TestGrpoFastBase(unittest.TestCase):
         # Shutdown Ray after test
         if ray.is_initialized():
             ray.shutdown()
-    
+
     def create_test_data(self, num_prompts, prefix="", start_idx=0):
         """Create test data with consistent naming."""
         indices = list(range(start_idx, start_idx + num_prompts))
@@ -34,19 +34,19 @@ class TestGrpoFastBase(unittest.TestCase):
         ground_truths = [f"{prefix}truth_{i}" for i in indices]
         datasets = [f"{prefix}dataset_{i}" for i in indices]
         return queries, ground_truths, datasets, indices
-    
+
     def create_mock_args(self, num_engines=4, num_samples=1):
         """Create mock args object."""
         mock_args = Mock()
         mock_args.vllm_num_engines = num_engines
         mock_args.num_samples_per_prompt_rollout = num_samples
         return mock_args
-    
+
     def create_mock_result(self, dataset_indices, training_step, num_samples_per_prompt=1):
         """Create a mock GenerationResult."""
         batch_size = len(dataset_indices)
         total_responses = batch_size * num_samples_per_prompt
-        
+
         return GenerationResult(
             responses=[[1, 2, 3] for _ in range(total_responses)],
             finish_reasons=["stop"] * total_responses,
@@ -62,24 +62,21 @@ class TestGrpoFastBase(unittest.TestCase):
             dataset_index=dataset_indices,
             training_step=training_step,
         )
-    
-    def setup_and_split_batch(self, queries, ground_truths, datasets, indices, 
-                              num_engines, training_step=1):
+
+    def setup_and_split_batch(self, queries, ground_truths, datasets, indices, num_engines, training_step=1):
         """Setup queues and split batch - common pattern."""
         param_prompt_Q = ray_queue.Queue(maxsize=num_engines * 2)
         inference_results_Q = ray_queue.Queue(maxsize=num_engines * 2)
         pending_queries_map = grpo_fast.PendingQueriesMap()
-        
+
         grpo_fast.split_and_insert_batch(
-            queries, ground_truths, datasets, indices,
-            training_step, num_engines, pending_queries_map, param_prompt_Q
+            queries, ground_truths, datasets, indices, training_step, num_engines, pending_queries_map, param_prompt_Q
         )
-        
+
         return param_prompt_Q, inference_results_Q, pending_queries_map
 
 
 class TestGrpoFastVLLM(TestGrpoFastBase):
-
     def test_vllm_queue_system_single_prompt(self):
         """Test the new queue-based vLLM system with a single prompt 'What is the capital of France?'"""
         # Check if CUDA is available
@@ -159,8 +156,10 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
     def test_batch_splitting_and_engine_configurations(self, vllm_num_engines: int, num_unique_prompts_rollout: int):
         """Test batch splitting and accumulation with various engine configurations."""
         # Create test data
-        queries_next, ground_truths_next, datasets_next, dataset_indices = self.create_test_data(num_unique_prompts_rollout)
-        
+        queries_next, ground_truths_next, datasets_next, dataset_indices = self.create_test_data(
+            num_unique_prompts_rollout
+        )
+
         # Setup and split batch
         param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_split_batch(
             queries_next, ground_truths_next, datasets_next, dataset_indices, vllm_num_engines
@@ -178,7 +177,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
             self.assertIsInstance(request, PromptRequest)
             self.assertEqual(request.training_step, 1)
             self.assertIsInstance(request.dataset_index, list)
-            
+
             mock_result = self.create_mock_result(request.dataset_index, request.training_step)
             inference_results_Q.put(mock_result)
 
@@ -205,15 +204,16 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         # Verify that the inference_results_Q is empty after accumulation
         self.assertEqual(inference_results_Q.qsize(), 0)
 
-
     def test_dataset_index_preservation_through_pipeline(self):
         """Test that dataset indices are correctly preserved through the pipeline."""
         vllm_num_engines = 4
         num_unique_prompts_rollout = 32
 
         # Create test data
-        queries_next, ground_truths_next, datasets_next, dataset_indices = self.create_test_data(num_unique_prompts_rollout)
-        
+        queries_next, ground_truths_next, datasets_next, dataset_indices = self.create_test_data(
+            num_unique_prompts_rollout
+        )
+
         # Setup and split batch
         param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_split_batch(
             queries_next, ground_truths_next, datasets_next, dataset_indices, vllm_num_engines
@@ -239,16 +239,16 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         self.assertEqual(combined_datasets, datasets_next)
         self.assertEqual(len(pending_queries_map), 0)
 
-
-
     @parameterized.expand([(1, 16), (2, 8), (4, 4)])
     def test_multiple_samples_per_prompt(self, vllm_num_engines: int, num_samples_per_prompt: int):
         """Test handling of multiple samples per prompt."""
         num_unique_prompts_rollout = 16
 
         # Create test data
-        queries_next, ground_truths_next, datasets_next, dataset_indices = self.create_test_data(num_unique_prompts_rollout)
-        
+        queries_next, ground_truths_next, datasets_next, dataset_indices = self.create_test_data(
+            num_unique_prompts_rollout
+        )
+
         # Setup and split batch
         param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_split_batch(
             queries_next, ground_truths_next, datasets_next, dataset_indices, vllm_num_engines
@@ -257,9 +257,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         # Simulate vLLM processing with multiple samples
         while not param_prompt_Q.empty():
             request = param_prompt_Q.get()
-            mock_result = self.create_mock_result(
-                request.dataset_index, request.training_step, num_samples_per_prompt
-            )
+            mock_result = self.create_mock_result(request.dataset_index, request.training_step, num_samples_per_prompt)
             inference_results_Q.put(mock_result)
 
         # Accumulate results
@@ -281,7 +279,6 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         self.assertEqual(len(combined_result.responses), expected_responses)
 
 
-
 class GrpoIntegrationTests(TestGrpoFastBase):
     """Integration tests for GRPO with parallel processing."""
 
@@ -289,40 +286,37 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         """Test that different training steps are handled correctly."""
         num_engines = 2
         num_prompts = 16
-        
+
         pending_queries_map = grpo_fast.PendingQueriesMap()
         inference_results_Q = ray_queue.Queue(maxsize=num_engines * 4)
-        
+
         # Create data for two different training steps
         step1_data = self.create_test_data(num_prompts, "step1_", 0)
         step2_data = self.create_test_data(num_prompts, "step2_", 1000)
-        
+
         # Process both steps
-        for step, (queries, ground_truths, datasets, indices) in enumerate(
-            [step1_data, step2_data], 1
-        ):
+        for step, (queries, ground_truths, datasets, indices) in enumerate([step1_data, step2_data], 1):
             param_prompt_Q = ray_queue.Queue(maxsize=num_engines)
-            
+
             grpo_fast.split_and_insert_batch(
-                queries, ground_truths, datasets, indices,
-                step, num_engines, pending_queries_map, param_prompt_Q
+                queries, ground_truths, datasets, indices, step, num_engines, pending_queries_map, param_prompt_Q
             )
-            
+
             # Create results for this step
             while not param_prompt_Q.empty():
                 request = param_prompt_Q.get()
                 mock_result = self.create_mock_result(request.dataset_index, step)
                 inference_results_Q.put(mock_result)
-        
+
         # Process results from both steps
         mock_args = self.create_mock_args(num_engines)
-        
+
         # First accumulation gets step 1 results
         result1, queries1, _, _ = grpo_fast.accumulate_inference_batches(
             inference_results_Q, pending_queries_map, mock_args, training_step=2
         )
         self.assertTrue(all("step1_" in q for q in queries1))
-        
+
         # Second accumulation gets step 2 results
         result2, queries2, _, _ = grpo_fast.accumulate_inference_batches(
             inference_results_Q, pending_queries_map, mock_args, training_step=2
@@ -373,32 +367,30 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         num_prompts = 64
         num_samples_per_prompt = 16
         start_index = 25800
-        
+
         # Create test data with high indices
-        queries, ground_truths, datasets, indices = self.create_test_data(
-            num_prompts, start_idx=start_index
-        )
-        
+        queries, ground_truths, datasets, indices = self.create_test_data(num_prompts, start_idx=start_index)
+
         # Setup and split batch
         param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_split_batch(
             queries, ground_truths, datasets, indices, num_engines
         )
-        
+
         # Verify the specific index from the bug is present
         self.assertIn(25847, pending_queries_map)
-        
+
         # Process all requests
         while not param_prompt_Q.empty():
             request = param_prompt_Q.get()
             mock_result = self.create_mock_result(request.dataset_index, 1, num_samples_per_prompt)
             inference_results_Q.put(mock_result)
-        
+
         # Accumulate results
         mock_args = self.create_mock_args(num_engines, num_samples_per_prompt)
         combined_result, _, _, _ = grpo_fast.accumulate_inference_batches(
             inference_results_Q, pending_queries_map, mock_args, training_step=1
         )
-        
+
         # Verify results
         self.assertEqual(len(combined_result.responses), num_prompts * num_samples_per_prompt)
         self.assertEqual(len(pending_queries_map), 0)
@@ -411,7 +403,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
         # Create test data
         queries, ground_truths, datasets, indices = self.create_test_data(num_prompts)
-        
+
         # Setup and split batch
         param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_split_batch(
             queries, ground_truths, datasets, indices, num_engines
@@ -424,9 +416,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
         # Put results back in REVERSE order to simulate out-of-order processing
         for request in reversed(requests):
-            mock_result = self.create_mock_result(
-                request.dataset_index, request.training_step, num_samples_per_prompt
-            )
+            mock_result = self.create_mock_result(request.dataset_index, request.training_step, num_samples_per_prompt)
             inference_results_Q.put(mock_result)
 
         # Accumulate results
@@ -440,7 +430,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         self.assertEqual(len(combined_result.responses), num_prompts * num_samples_per_prompt)
         self.assertEqual(len(pending_queries_map), 0)
 
-
     def test_no_duplicate_indices_within_training_step(self):
         """Test that dataset indices are unique within a single training step."""
         num_engines = 4
@@ -448,7 +437,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
         # Create test data
         queries, ground_truths, datasets, indices = self.create_test_data(num_prompts)
-        
+
         # Setup and split batch
         param_prompt_Q, _, pending_queries_map = self.setup_and_split_batch(
             queries, ground_truths, datasets, indices, num_engines
@@ -485,10 +474,9 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         # Process step 1
         step1_data = self.create_test_data(num_prompts, "step1_")
         queries1, ground_truths1, datasets1, _ = step1_data
-        
+
         grpo_fast.split_and_insert_batch(
-            queries1, ground_truths1, datasets1, step1_indices,
-            1, num_engines, pending_queries_map, param_prompt_Q
+            queries1, ground_truths1, datasets1, step1_indices, 1, num_engines, pending_queries_map, param_prompt_Q
         )
 
         # Clear queue and process step 2
@@ -497,15 +485,14 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
         step2_data = self.create_test_data(num_prompts, "step2_")
         queries2, ground_truths2, datasets2, _ = step2_data
-        
+
         grpo_fast.split_and_insert_batch(
-            queries2, ground_truths2, datasets2, step2_indices,
-            2, num_engines, pending_queries_map, param_prompt_Q
+            queries2, ground_truths2, datasets2, step2_indices, 2, num_engines, pending_queries_map, param_prompt_Q
         )
 
         # Verify overlapping indices handling
         overlapping_indices = set(step1_indices) & set(step2_indices)
-        
+
         for idx in overlapping_indices:
             query, ground_truth, dataset, count = pending_queries_map[idx]
             self.assertEqual(count, 2)  # Should have count 2
@@ -534,7 +521,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                         i, f"query_{thread_id}_{i}", f"truth_{thread_id}_{i}", f"dataset_{thread_id}_{i}"
                     )
                     time.sleep(0.0001)
-                
+
                 # Remove entries
                 for i in range(start_idx, start_idx + entries_per_thread):
                     if i in pending_queries_map:
@@ -557,28 +544,30 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         self.assertEqual(len(errors), 0, f"Thread safety errors: {errors}")
         self.assertEqual(len(pending_queries_map), 0)
 
-    @parameterized.expand([
-        (17, 4),  # 17 prompts, 4 engines
-        (15, 4),  # 15 prompts, 4 engines
-        (7, 3),   # 7 prompts, 3 engines
-        (100, 7), # 100 prompts, 7 engines
-    ])
+    @parameterized.expand(
+        [
+            (17, 4),  # 17 prompts, 4 engines
+            (15, 4),  # 15 prompts, 4 engines
+            (7, 3),  # 7 prompts, 3 engines
+            (100, 7),  # 100 prompts, 7 engines
+        ]
+    )
     def test_uneven_batch_distribution(self, num_prompts, num_engines):
         """Test batch splitting when prompts don't divide evenly."""
         queries, ground_truths, datasets, indices = self.create_test_data(num_prompts)
-        
+
         param_prompt_Q, _, pending_queries_map = self.setup_and_split_batch(
             queries, ground_truths, datasets, indices, num_engines
         )
-        
+
         # Verify all indices are accounted for
         self.assertEqual(len(pending_queries_map), num_prompts)
-        
+
         total_indices = []
         while not param_prompt_Q.empty():
             request = param_prompt_Q.get()
             total_indices.extend(request.dataset_index)
-        
+
         self.assertEqual(sorted(total_indices), sorted(indices))
 
     def test_accumulate_waits_for_all_engines(self):
@@ -604,6 +593,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
         # Test that accumulate blocks when missing an engine
         import threading
+
         completed = threading.Event()
 
         def run_accumulate():
@@ -621,12 +611,11 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         # Should timeout waiting for 4th engine
         self.assertFalse(completed.wait(timeout=1.0))
         self.assertTrue(thread.is_alive())
-        
+
         # Queue should be empty after consuming 3 results
         self.assertEqual(inference_results_Q.qsize(), 0)
         # Some entries should be removed
         self.assertLess(len(pending_queries_map), num_prompts)
-
 
 
 if __name__ == "__main__":
