@@ -1137,26 +1137,38 @@ def accumulate_inference_batches(
         if dataset_indices is None:
             raise RuntimeError(f"Dataset indices is None for batch {batch_idx}")
 
-        # Assert that the number of responses equals dataset indices * samples per prompt
-        expected_responses = len(dataset_indices) * args.num_samples_per_prompt_rollout
-        assert len(result.responses) == expected_responses, (
-            f"Mismatch: expected {expected_responses} responses "
-            f"({len(dataset_indices)} prompts * {args.num_samples_per_prompt_rollout} samples per prompt) "
-            f"but got {len(result.responses)} responses for batch {batch_idx}"
+        # Assert that the number of responses matches the number of dataset indices
+        # (vLLM generates multiple responses per prompt, but dataset_indices should already reflect that)
+        assert len(result.responses) == len(dataset_indices), (
+            f"Mismatch: number of responses ({len(result.responses)}) "
+            f"doesn't match number of dataset indices ({len(dataset_indices)}) for batch {batch_idx}"
         )
 
         # Get corresponding queries, ground_truths, datasets for each individual prompt
         batch_queries = []
         batch_ground_truths = []
         batch_datasets = []
-        for dataset_idx in dataset_indices:
+
+        # Group indices to handle multiple samples per prompt
+        unique_indices = []
+        index_counts = {}
+        for idx in dataset_indices:
+            if idx not in index_counts:
+                unique_indices.append(idx)
+                index_counts[idx] = 0
+            index_counts[idx] += 1
+
+        # Pop each unique index only once
+        for dataset_idx in unique_indices:
             if dataset_idx not in pending_queries_map:
                 raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
 
             query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
-            batch_queries.append(query)
-            batch_ground_truths.append(ground_truth)
-            batch_datasets.append(dataset)
+            # Replicate based on how many times this index appears
+            count = index_counts[dataset_idx]
+            batch_queries.extend([query] * count)
+            batch_ground_truths.extend([ground_truth] * count)
+            batch_datasets.extend([dataset] * count)
 
         results.append(result)
         all_queries.extend(batch_queries)
