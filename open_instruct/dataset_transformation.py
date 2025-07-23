@@ -665,10 +665,10 @@ DATASET_SOURCE_KEY = "dataset"
 def add_special_chat_tokens(tokenizer, add_special_tokens: List):
     existing_special_tokens = tokenizer.special_tokens_map.get("additional_special_tokens", [])
     new_special_tokens = [t for t in add_special_tokens if t not in existing_special_tokens]
-    if new_special_tokens:  
+    if new_special_tokens:
         all_special_tokens = existing_special_tokens + new_special_tokens
         tokenizer.add_special_tokens({"additional_special_tokens": all_special_tokens})
-            
+
     return tokenizer
 
 @dataclass
@@ -887,9 +887,9 @@ def sft_span_seach_mask_out(
     end_tag: str="<|end_of_text|>",
     ignore_label: int = -100,
 ):
-    """This function encodes a single example into a format that 
-    can be used for sft training (similar to sft_tulu_tokenize_and_truncate_v1). 
-    Instead of performing label masking iteratively, this function performs 
+    """This function encodes a single example into a format that
+    can be used for sft training (similar to sft_tulu_tokenize_and_truncate_v1).
+    Instead of performing label masking iteratively, this function performs
     masking via span search and can handle complex chat templates with thinking."""
 
     # Span label masking strategy
@@ -900,7 +900,7 @@ def sft_span_seach_mask_out(
     # - to avoid this, use tags that are guarded by special tokens
     def masking_strategy_span_search(
         input_ids: torch.tensor,
-        tokenizer, 
+        tokenizer,
     ):
 
         # some prep
@@ -916,7 +916,7 @@ def sft_span_seach_mask_out(
         # - lengths
         num_tokens_asst, num_tokens = _asst_tag.shape[1], labels.shape[1]
         num_tokens_end = _end_tag.shape[1]
-        
+
         if num_tokens >= max(num_tokens_asst, num_tokens_end):
             # - s: start of mask (after last found asst span)
             s = 0
@@ -1541,27 +1541,27 @@ class LocalDatasetTransformationCache:
 
         # Transform each dataset
         transformed_datasets = []
-        total_left_samples = 0
+        remaining_samples = 0
         for i,dc in enumerate(dcs):
             print(f"\n\n**** {i+1}. Processing `{dc.dataset_name}` having {len(dc.dataset):,} samples...")
             start_time = time.time()
             dataset = get_dataset_v1(dc, tc)
-            total_tokens, avg_tokens, std_tokens = count_total_tokens(dataset)
+            if INPUT_IDS_KEY in dataset.features:
+                total_tokens, avg_tokens, std_tokens = count_total_tokens(dataset)
+                print(
+                    f"\n**** Summary for {dc.dataset_name}:\n"
+                    f" - Original samples: {len(dc.dataset):,}\n"
+                    f" - Samples after processing: {len(dataset):,}\n"
+                    f" - Total tokens: {total_tokens:,}\n"
+                    f" - Avg tokens per sample: {avg_tokens:,.1f}\n"
+                    f" - Stddev tokens per sample: {std_tokens:.2f}\n"
+                    f" - Processing time: {duration:.2f} seconds\n"
+                )
             duration = time.time() - start_time
-            print(
-                f"\n**** Summary for {dc.dataset_name}:\n"
-                f" - Original samples: {len(dc.dataset):,}\n"
-                f" - Samples after processing: {len(dataset):,}\n"
-                f" - Total tokens: {total_tokens:,}\n"
-                f" - Avg tokens per sample: {avg_tokens:,.1f}\n"
-                f" - Stddev tokens per sample: {std_tokens:.2f}\n"
-                f" - Processing time: {duration:.2f} seconds\n"
-            )
-            # print(f"\n**** Summary: {dc.dataset_name} has {len(dc.dataset):,} samples and after processing {len(dataset):,} samples left (total tokens: {total_tokens:,} avg_tkn per samples: {avg_tokens:,1} stddev: {std_tokens}). Took {duration:.2f} seconds.")
-            total_left_samples+=len(dataset)
+            remaining_samples+=len(dataset)
             transformed_datasets.append(dataset)
 
-        print(f"\n**** TOTAL NUM.SAMPLES AFTER DATA TRANSFORMATION: {total_left_samples:,} ****\n")
+        print(f"\n**** TOTAL NUM.SAMPLES AFTER DATA TRANSFORMATION: {remaining_samples:,} ****\n")
 
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
@@ -1583,7 +1583,6 @@ def count_total_tokens(dataset):
 
     num_proc = int(float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", multiprocessing.cpu_count())))
     token_counts = dataset.map(get_token_count, num_proc=num_proc)
-    total_tokens = sum(token_counts["num_tokens"])
     token_lengths = torch.tensor(token_counts["num_tokens"], dtype=torch.float)
 
     total_tokens = token_lengths.sum().item()
