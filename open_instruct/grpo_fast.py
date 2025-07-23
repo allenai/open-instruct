@@ -1109,14 +1109,87 @@ class ModelGroup:
             self.models.append(worker_policy)
 
 
+class PendingQueriesMap:
+    """Thread-safe map for tracking pending queries with reference counting."""
+
+    def __init__(self):
+        self._map = {}  # dataset_idx -> (query, ground_truth, dataset, count)
+        self._lock = threading.Lock()
+
+    def __getitem__(self, key):
+        """Get item using dict-like access."""
+        with self._lock:
+            if key not in self._map:
+                raise KeyError(f"Key {key} not found")
+            return self._map[key]
+
+    def __setitem__(self, key, value):
+        """Set item using dict-like access. Value should be (query, ground_truth, dataset)."""
+        with self._lock:
+            if len(value) == 3:
+                # If only 3 elements provided, add count of 1
+                query, ground_truth, dataset = value
+                self._map[key] = (query, ground_truth, dataset, 1)
+            elif len(value) == 4:
+                # Full tuple with count
+                self._map[key] = value
+            else:
+                raise ValueError(
+                    "Value must be a tuple of (query, ground_truth, dataset) or (query, ground_truth, dataset, count)"
+                )
+
+    def __contains__(self, key):
+        """Check if key exists."""
+        with self._lock:
+            return key in self._map
+
+    def __len__(self):
+        """Return the number of items in the map."""
+        with self._lock:
+            return len(self._map)
+
+    def keys(self):
+        """Return a copy of the keys."""
+        with self._lock:
+            return list(self._map.keys())
+
+    def insert(self, dataset_idx, query, ground_truth, dataset):
+        """Insert or increment count for a dataset index."""
+        with self._lock:
+            if dataset_idx in self._map:
+                # Already exists - just increment count
+                existing_query, existing_ground_truth, existing_dataset, count = self._map[dataset_idx]
+                self._map[dataset_idx] = (existing_query, existing_ground_truth, existing_dataset, count + 1)
+            else:
+                # New entry - count starts at 1
+                self._map[dataset_idx] = (query, ground_truth, dataset, 1)
+
+    def pop(self, dataset_idx):
+        """Retrieve data and decrement count. Removes entry when count reaches 0."""
+        with self._lock:
+            if dataset_idx not in self._map:
+                raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
+
+            query, ground_truth, dataset, count = self._map[dataset_idx]
+
+            if count > 1:
+                # More results expected - just decrement
+                self._map[dataset_idx] = (query, ground_truth, dataset, count - 1)
+            else:
+                # Last result - remove entry
+                del self._map[dataset_idx]
+
+            return query, ground_truth, dataset
+
+
 def accumulate_inference_batches(
-    inference_results_Q: ray_queue.Queue, pending_queries_map: dict, args: Args, training_step: int
+    inference_results_Q: ray_queue.Queue, pending_queries_map: PendingQueriesMap, args: Args, training_step: int
 ) -> tuple:
     """Accumulate multiple inference results into a single training batch.
 
     Args:
         inference_results_Q: Queue containing GenerationResult objects
-        pending_queries_map: Map of dataset_index -> (queries, ground_truths, datasets)
+        pending_queries_map: PendingQueriesMap instance for thread-safe query tracking
         args: Arguments containing vllm_num_engines and num_samples_per_prompt_rollout
         training_step: Current training step for error reporting
 
@@ -1133,13 +1206,8 @@ def accumulate_inference_batches(
         # Get result from queue
         result = inference_results_Q.get()
 
-        # Verify this result is for the current training step (if training_step is tracked)
-        if result.training_step is not None and result.training_step != training_step:
-            raise RuntimeError(
-                f"Result training_step ({result.training_step}) doesn't match expected training_step ({training_step}). "
-                f"This indicates a synchronization issue between training steps."
-            )
-
+        # Accept results from any training step as long as we have entries in the map
+        # This prevents synchronization issues when results arrive out of order
         dataset_indices = result.dataset_index
 
         if dataset_indices is None:
@@ -1162,14 +1230,9 @@ def accumulate_inference_batches(
         # When num_samples_per_prompt_rollout > 1, vLLM returns unique dataset indices
         # We should NOT replicate here - the data_preparation_thread will handle replication
         for dataset_idx in dataset_indices:
-            # Use (training_step, dataset_idx) as key to prevent race conditions
-            key = (training_step, dataset_idx)
-            if key not in pending_queries_map:
-                raise RuntimeError(
-                    f"Dataset index {dataset_idx} (training_step={training_step}) not found in pending_queries_map"
-                )
+            # Use thread-safe pop operation
+            query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
 
-            query, ground_truth, dataset = pending_queries_map.pop(key)
             # Don't replicate - just append once per unique index
             batch_queries.append(query)
             batch_ground_truths.append(ground_truth)
@@ -1699,7 +1762,7 @@ def split_and_insert_batch(
     dataset_indices,
     training_step,
     vllm_num_engines,
-    pending_queries_map,
+    pending_queries_map: PendingQueriesMap,
     param_prompt_Q,
     eval_prompt_token_ids=None,
 ):
@@ -1715,11 +1778,9 @@ def split_and_insert_batch(
         batch_datasets = datasets_next[start_idx:end_idx]
         batch_dataset_indices = dataset_indices[start_idx:end_idx]
 
-        # Store individual prompts in the map using (training_step, dataset_idx) as keys
-        # This prevents race conditions when dataset indices are reused across training steps
+        # Store individual prompts in the map using thread-safe insert
         for i, dataset_idx in enumerate(batch_dataset_indices):
-            key = (training_step, dataset_idx)
-            pending_queries_map[key] = (batch_queries[i], batch_ground_truths[i], batch_datasets[i])
+            pending_queries_map.insert(dataset_idx, batch_queries[i], batch_ground_truths[i], batch_datasets[i])
 
         # Use PromptRequest for Ray queue with batch-specific dataset_index list
         param_prompt_Q.put(
@@ -2141,7 +2202,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     # Create additional queues (main queues already created above)
     packed_sequences_Q = Queue(maxsize=args.async_steps)  # Keep this as threading Queue for now
-    pending_queries_map = {}  # Map dataset_index -> (queries, ground_truths, datasets)
+    pending_queries_map = PendingQueriesMap()  # Thread-safe map for tracking pending queries
 
     eval_prompt_token_ids = None
     eval_ground_truths = None
