@@ -401,9 +401,9 @@ class Args:
     code_tool_api_endpoint: Optional[str] = None
 
     def __post_init__(self):
-        if self.num_unique_prompts_rollout * self.num_samples_per_prompt_rollout % self.vllm_num_engines != 0:
+        if self.num_unique_prompts_rollout  % self.vllm_num_engines != 0:
             raise ValueError(
-                "The number of unique prompts times the number of samples per prompt must be divisible by the number of vLLM engines."
+                "The number of unique prompts must be divisible by the number of vLLM engines."
             )
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
@@ -2118,10 +2118,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         eval_dataset_names = eval_dataset[:num_eval_samples][VERIFIER_SOURCE_KEY]
     reward_fn = make_reward_fn(args)
 
-    # Start vLLM engines to process from queues
-    batch_size_per_engine = (
-        args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-    ) // args.vllm_num_engines
+    # Note that each engine will sample this args.num_samples_per_prompt_rollout times.
+    batch_size_per_engine = args.num_unique_prompts_rollout // args.vllm_num_engines
     for engine in vllm_engines:
         engine.process_from_queue.remote(
             generation_config,
