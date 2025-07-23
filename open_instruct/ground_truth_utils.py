@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
 import requests
-from IFEvalG import instructions_registry
 from litellm import acompletion
 
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
@@ -41,6 +40,7 @@ from open_instruct.search_rewards.openscholar_rewards import compute_paper_rewar
 from open_instruct.search_rewards.reasoning_model_rewards import compute_hle_reward
 from open_instruct.search_rewards.rubric_rewards import compute_rubric_reward
 from open_instruct.utils import extract_final_answer
+from open_instruct.IFEvalG import instructions_registry
 
 logger = logging.getLogger(__name__)
 
