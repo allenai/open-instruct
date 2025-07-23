@@ -44,7 +44,6 @@ from functools import partial
 from typing import Callable, List, Literal, Optional, Union
 
 import datasets
-from functools import partial
 import torch
 import torch.utils
 import torch.utils.data
@@ -76,9 +75,6 @@ from open_instruct.dpo_utils import (
     simpo_loss,
     wpo_loss,
 )
-from open_instruct.padding_free_collator import (
-    TensorDataCollatorWithFlatteningDPO
-)
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 from open_instruct.utils import (
@@ -101,13 +97,12 @@ class FlatArguments:
     """
     Full arguments class for all fine-tuning jobs.
     """
+
     # Sometimes users will pass in a `str` repr of a dict in the CLI
     # We need to track what fields those can be. Each time a new arg
     # has a dict type, it must be added to this list.
     # Important: These should be typed with Optional[Union[dict,str,...]]
-    _VALID_DICT_FIELDS = [
-        "additional_model_arguments",
-    ]
+    _VALID_DICT_FIELDS = ["additional_model_arguments"]
 
     # Sometimes users will pass in a `str` repr of a dict in the CLI
     # We need to track what fields those can be. Each time a new arg
@@ -382,7 +377,7 @@ class FlatArguments:
             raise ValueError("Cannot provide two dataset selection mechanisms.")
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
-        
+
         # Parse in args that could be `dict` sent in from the CLI as a string
         for dict_feld in self._VALID_DICT_FIELDS:
             passed_value = getattr(self, dict_feld)

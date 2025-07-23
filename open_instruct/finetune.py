@@ -58,7 +58,6 @@ from open_instruct.dataset_transformation import (
     TOKENIZED_SFT_DATASET_KEYS,
     TokenizerConfig,
     get_cached_dataset_tulu,
-    visualize_token,
     visualize_token_label,
 )
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
@@ -83,13 +82,12 @@ class FlatArguments:
     """
     Full arguments class for all fine-tuning jobs.
     """
+
     # Sometimes users will pass in a `str` repr of a dict in the CLI
     # We need to track what fields those can be. Each time a new arg
     # has a dict type, it must be added to this list.
     # Important: These should be typed with Optional[Union[dict,str,...]]
-    _VALID_DICT_FIELDS = [
-        "additional_model_arguments",
-    ]
+    _VALID_DICT_FIELDS = ["additional_model_arguments"]
 
     # Sometimes users will pass in a `str` repr of a dict in the CLI
     # We need to track what fields those can be. Each time a new arg
@@ -331,20 +329,15 @@ class FlatArguments:
     """the max generation length for evaluation for oe-eval"""
 
     padding_free: bool = field(
-        default=False,
-        metadata={"help": "Whether to use padding-free collation via TensorDataCollatorWithFlattening"},
+        default=False, metadata={"help": "Whether to use padding-free collation via TensorDataCollatorWithFlattening"}
     )
     clean_checkpoints_at_end: bool = field(
-        default=False,
-        metadata={
-            "help": "Whether to clean up all previous checkpoints at the end of the run.",
-        },
+        default=False, metadata={"help": "Whether to clean up all previous checkpoints at the end of the run."}
     )
 
     add_seed_and_date_to_exp_name: bool = True
     additional_model_arguments: Optional[Union[dict, str]] = field(
-        default_factory=dict,
-        metadata={"help": "A dictionary of additional model args used to construct the model."},
+        default_factory=dict, metadata={"help": "A dictionary of additional model args used to construct the model."}
     )
     sync_each_batch: bool = False
     """Optionaly sync grads every batch when using grad accumulation. Can significantly reduce memory costs."""

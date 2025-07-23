@@ -68,10 +68,9 @@ from transformers.utils.hub import _CACHED_NO_EXIST, TRANSFORMERS_CACHE, extract
 from open_instruct.utils import hf_whoami
 import time
 
+
 # MOVE THIS SOMEWHERE
-def load_dataset(
-    *args, **kwargs
-):
+def load_dataset(*args, **kwargs):
     from datasets import load_dataset as lds
     from datasets import DatasetDict
     import pandas as pd
@@ -81,24 +80,25 @@ def load_dataset(
     except:
         # - load_dataset sometimes has strict schema
         # checks and may fail on tools / documents
-        train_files = kwargs['data_files']
+        train_files = kwargs["data_files"]
         if isinstance(train_files, str):
             train_files = [train_files]
 
-        file_type = train_files[0].split('.')[-1]
-        assert file_type in {'json', 'jsonl', 'parquet'}
+        file_type = train_files[0].split(".")[-1]
+        assert file_type in {"json", "jsonl", "parquet"}
 
         dfs = []
         reader = (
-            partial(pd.read_json , lines=True)
-            if file_type in {'json', 'jsonl'}
-            else partial(pd.read_parquet, engine='auto')
+            partial(pd.read_json, lines=True)
+            if file_type in {"json", "jsonl"}
+            else partial(pd.read_parquet, engine="auto")
         )
         for file in train_files:
-            dfs.append(reader(file, orient='records'))
+            dfs.append(reader(file, orient="records"))
 
         raw_datasets = Dataset.from_pandas(pd.concat(dfs))
         return raw_datasets
+
 
 # ----------------------------------------------------------------------------
 # Utilities
@@ -150,10 +150,12 @@ def get_files_hash_if_exists(
 ) -> List[str]:
     return [get_file_hash(model_name_or_path, revision, filename, repo_type) for filename in filenames]
 
+
 def is_file_exts(name: str, exts: List[str]):
     return any(name.endswith(e) for e in exts)
 
-is_jinja_file = partial(is_file_exts, exts=['.jinja', 'jinja2'])
+
+is_jinja_file = partial(is_file_exts, exts=[".jinja", "jinja2"])
 
 # Performance tuning. Some rough numbers:
 APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU = 400
@@ -192,7 +194,9 @@ def visualize_token_role(tokens: list[int], masks: list[int], tokenizer: PreTrai
     console.print(rich_text)
 
 
-def visualize_token_label(tokens: list[int], labels: list[int], tokenizer: PreTrainedTokenizer,ignore_label: int = -100):
+def visualize_token_label(
+    tokens: list[int], labels: list[int], tokenizer: PreTrainedTokenizer, ignore_label: int = -100
+):
     console = Console()
     rich_text = Text()
     # Visualize all tokens decoded back to text (skip color for tokens having ignored labels)
@@ -209,9 +213,7 @@ def visualize_token_label(tokens: list[int], labels: list[int], tokenizer: PreTr
 
     # Visual tokens (decoded back to text) excluding those having ignored labels.
     # They are grount-truth tokens/text to be predicted:
-    decoded_labels = tokenizer.decode(
-        [id for id in labels if id != ignore_label], skip_special_tokens=False
-    )
+    decoded_labels = tokenizer.decode([id for id in labels if id != ignore_label], skip_special_tokens=False)
     console.print(f"\n== Ground-truth decoded text (excluding ignore_label):\n{decoded_labels}")
 
 
@@ -665,11 +667,12 @@ DATASET_SOURCE_KEY = "dataset"
 def add_special_chat_tokens(tokenizer, add_special_tokens: List):
     existing_special_tokens = tokenizer.special_tokens_map.get("additional_special_tokens", [])
     new_special_tokens = [t for t in add_special_tokens if t not in existing_special_tokens]
-    if new_special_tokens:  
+    if new_special_tokens:
         all_special_tokens = existing_special_tokens + new_special_tokens
         tokenizer.add_special_tokens({"additional_special_tokens": all_special_tokens})
-            
+
     return tokenizer
+
 
 @dataclass
 class TokenizerConfig:
@@ -694,8 +697,7 @@ class TokenizerConfig:
 
     # List of special tokens to be added to tokenizer, eg:
     add_special_tokens: Optional[List[str]] = field(
-        default=None,
-        metadata={"help": "List of additional special tokens to add to the tokenizer"},
+        default=None, metadata={"help": "List of additional special tokens to add to the tokenizer"}
     )
 
     @cached_property
@@ -719,6 +721,7 @@ class TokenizerConfig:
             tokenizer = add_special_chat_tokens(tokenizer, self.add_special_tokens)
 
         return tokenizer
+
 
 # TODO: for testing, we should load the tokenizer from the sft / dpo / rl and make sure they are all the same.
 
@@ -882,14 +885,16 @@ def sft_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreTrained
 
 
 def sft_span_seach_mask_out(
-    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int,
-    asst_tag: str="<|start_of_role|>assistant<|end_of_role|>",
-    end_tag: str="<|end_of_text|>",
+    row: Dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    max_seq_length: int,
+    asst_tag: str = "<|start_of_role|>assistant<|end_of_role|>",
+    end_tag: str = "<|end_of_text|>",
     ignore_label: int = -100,
 ):
-    """This function encodes a single example into a format that 
-    can be used for sft training (similar to sft_tulu_tokenize_and_truncate_v1). 
-    Instead of performing label masking iteratively, this function performs 
+    """This function encodes a single example into a format that
+    can be used for sft training (similar to sft_tulu_tokenize_and_truncate_v1).
+    Instead of performing label masking iteratively, this function performs
     masking via span search and can handle complex chat templates with thinking."""
 
     # Span label masking strategy
@@ -898,13 +903,9 @@ def sft_span_seach_mask_out(
     # - if an asst_tage is undetected due to tokenization issues
     #   then a span can be erronously masked
     # - to avoid this, use tags that are guarded by special tokens
-    def masking_strategy_span_search(
-        input_ids: torch.tensor,
-        tokenizer, 
-    ):
-
+    def masking_strategy_span_search(input_ids: torch.tensor, tokenizer):
         # some prep
-        match = lambda x,y: torch.all(x == y)
+        match = lambda x, y: torch.all(x == y)
         _asst_tag = tokenizer.encode(asst_tag)
         _end_tag = tokenizer.encode(end_tag)
         _asst_tag = torch.tensor([_asst_tag])
@@ -916,20 +917,19 @@ def sft_span_seach_mask_out(
         # - lengths
         num_tokens_asst, num_tokens = _asst_tag.shape[1], labels.shape[1]
         num_tokens_end = _end_tag.shape[1]
-        
+
         if num_tokens >= max(num_tokens_asst, num_tokens_end):
             # - s: start of mask (after last found asst span)
             s = 0
-            within_asst_span = False # if pointer is within the asst span
+            within_asst_span = False  # if pointer is within the asst span
             for i in range(num_tokens_asst, num_tokens):
-
-                if match(input_ids[:, i-num_tokens_asst:i], _asst_tag):
-                    labels[:, s:i] = ignore_label # mask everything from s up to start of asst resp
-                    within_asst_span = True # start of asst span
-                elif match(input_ids[:, i-num_tokens_end:i], _end_tag) and within_asst_span:
+                if match(input_ids[:, i - num_tokens_asst : i], _asst_tag):
+                    labels[:, s:i] = ignore_label  # mask everything from s up to start of asst resp
+                    within_asst_span = True  # start of asst span
+                elif match(input_ids[:, i - num_tokens_end : i], _end_tag) and within_asst_span:
                     # - if e is not None means I have just found the asst tag
-                    s = i + 1 # new start should be after the asst resp
-                    within_asst_span = False # moving out of asst span now
+                    s = i + 1  # new start should be after the asst resp
+                    within_asst_span = False  # moving out of asst span now
         else:
             raise ValueError(
                 f"asst_tag has {num_tokens_asst} tokens, and end_tag has {num_tokens_end} "
@@ -963,13 +963,12 @@ def sft_span_seach_mask_out(
     row["was_truncated"] = was_truncated
 
     attention_mask = torch.ones_like(input_ids)
-    labels = masking_strategy_span_search(
-        input_ids, tokenizer,
-    )
+    labels = masking_strategy_span_search(input_ids, tokenizer)
     row[INPUT_IDS_KEY] = input_ids.flatten()
     row[LABELS_KEY] = labels.flatten()
     row[ATTENTION_MASK_KEY] = attention_mask.flatten()
     return row
+
 
 def last_turn_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
@@ -1041,6 +1040,7 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreT
 
 def sft_tulu_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
     return any(x != -100 for x in row[LABELS_KEY])
+
 
 def sft_tulu_filter_truncated_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
     # Filter out rows being truncated to ensure proper conversations.
@@ -1384,14 +1384,14 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     tokenizer = tc.tokenizer
     dataset = dc.dataset
 
-    for i,(fn_name, fn_args) in enumerate(zip(dc.transform_fn, dc.transform_fn_args)):
+    for i, (fn_name, fn_args) in enumerate(zip(dc.transform_fn, dc.transform_fn_args)):
         fn, fn_type = TRANSFORM_FNS[fn_name]
         # always pass in tokenizer and other args if needed
         fn_kwargs = {"tokenizer": tokenizer}
         fn_kwargs.update(fn_args)
 
         # perform the transformation
-        print(f'== Perform transformation {i+1}/{len(dc.transform_fn)} {fn.__name__} with fn_args {fn_args}...')
+        print(f"== Perform transformation {i + 1}/{len(dc.transform_fn)} {fn.__name__} with fn_args {fn_args}...")
         target_columns = dataset.column_names if dc.target_columns is None else dc.target_columns
         if fn_type == "map":
             dataset = dataset.map(
@@ -1399,7 +1399,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
                 fn_kwargs=fn_kwargs,
                 remove_columns=[col for col in dataset.column_names if col not in target_columns],
                 num_proc=get_num_proc(len(dataset), num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
-                load_from_cache_file=False, # force running from scratch (to ensure consistency across multiple datafiles)
+                load_from_cache_file=False,  # force running from scratch (to ensure consistency across multiple datafiles)
             )
         elif fn_type == "filter":
             dataset = dataset.filter(
@@ -1541,27 +1541,27 @@ class LocalDatasetTransformationCache:
 
         # Transform each dataset
         transformed_datasets = []
-        total_left_samples = 0
-        for i,dc in enumerate(dcs):
-            print(f"\n\n**** {i+1}. Processing `{dc.dataset_name}` having {len(dc.dataset):,} samples...")
+        remaining_samples = 0
+        for i, dc in enumerate(dcs):
+            print(f"\n\n**** {i + 1}. Processing `{dc.dataset_name}` having {len(dc.dataset):,} samples...")
             start_time = time.time()
             dataset = get_dataset_v1(dc, tc)
-            total_tokens, avg_tokens, std_tokens = count_total_tokens(dataset)
+            if INPUT_IDS_KEY in dataset.features:
+                total_tokens, avg_tokens, std_tokens = count_total_tokens(dataset)
+                print(
+                    f"\n**** Summary for {dc.dataset_name}:\n"
+                    f" - Original samples: {len(dc.dataset):,}\n"
+                    f" - Samples after processing: {len(dataset):,}\n"
+                    f" - Total tokens: {total_tokens:,}\n"
+                    f" - Avg tokens per sample: {avg_tokens:,.1f}\n"
+                    f" - Stddev tokens per sample: {std_tokens:.2f}\n"
+                    f" - Processing time: {duration:.2f} seconds\n"
+                )
             duration = time.time() - start_time
-            print(
-                f"\n**** Summary for {dc.dataset_name}:\n"
-                f" - Original samples: {len(dc.dataset):,}\n"
-                f" - Samples after processing: {len(dataset):,}\n"
-                f" - Total tokens: {total_tokens:,}\n"
-                f" - Avg tokens per sample: {avg_tokens:,.1f}\n"
-                f" - Stddev tokens per sample: {std_tokens:.2f}\n"
-                f" - Processing time: {duration:.2f} seconds\n"
-            )
-            # print(f"\n**** Summary: {dc.dataset_name} has {len(dc.dataset):,} samples and after processing {len(dataset):,} samples left (total tokens: {total_tokens:,} avg_tkn per samples: {avg_tokens:,1} stddev: {std_tokens}). Took {duration:.2f} seconds.")
-            total_left_samples+=len(dataset)
+            remaining_samples += len(dataset)
             transformed_datasets.append(dataset)
 
-        print(f"\n**** TOTAL NUM.SAMPLES AFTER DATA TRANSFORMATION: {total_left_samples:,} ****\n")
+        print(f"\n**** TOTAL NUM.SAMPLES AFTER DATA TRANSFORMATION: {remaining_samples:,} ****\n")
 
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
@@ -1583,7 +1583,6 @@ def count_total_tokens(dataset):
 
     num_proc = int(float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", multiprocessing.cpu_count())))
     token_counts = dataset.map(get_token_count, num_proc=num_proc)
-    total_tokens = sum(token_counts["num_tokens"])
     token_lengths = torch.tensor(token_counts["num_tokens"], dtype=torch.float)
 
     total_tokens = token_lengths.sum().item()

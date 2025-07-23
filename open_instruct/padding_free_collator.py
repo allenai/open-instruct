@@ -3,7 +3,6 @@ from typing import Dict, List, Union
 
 import torch
 from transformers import DefaultDataCollator
-from typing import Dict, Union, List
 
 
 @dataclass
