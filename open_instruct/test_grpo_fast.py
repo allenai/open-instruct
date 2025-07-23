@@ -760,6 +760,393 @@ class GrpoIntegrationTests(unittest.TestCase):
         # Clean up
         ray.get(engines)
 
+    def test_no_duplicate_indices_within_training_step(self):
+        """Test that dataset indices are unique within a single training step."""
+        num_engines = 4
+        num_prompts = 64
+        
+        # Create test data with sequential indices
+        queries = [f"query_{i}" for i in range(num_prompts)]
+        ground_truths = [f"truth_{i}" for i in range(num_prompts)]
+        datasets = [f"dataset_{i}" for i in range(num_prompts)]
+        dataset_indices = list(range(num_prompts))
+        
+        # Create queues and map
+        param_prompt_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        pending_queries_map = {}
+        
+        # Split and insert batch
+        split_and_insert_batch(
+            queries,
+            ground_truths,
+            datasets,
+            dataset_indices,
+            training_step=1,
+            vllm_num_engines=num_engines,
+            pending_queries_map=pending_queries_map,
+            param_prompt_Q=param_prompt_Q,
+        )
+        
+        # Check for duplicates in pending_queries_map
+        self.assertEqual(len(pending_queries_map), num_prompts, "Some indices were lost or duplicated")
+        self.assertEqual(set(pending_queries_map.keys()), set(dataset_indices), "Indices don't match")
+        
+        # Check each batch has unique indices
+        all_indices_from_batches = []
+        while not param_prompt_Q.empty():
+            request = param_prompt_Q.get()
+            batch_indices = request.dataset_index
+            # Check no duplicates within this batch
+            self.assertEqual(len(batch_indices), len(set(batch_indices)), 
+                           f"Duplicate indices found within batch: {batch_indices}")
+            all_indices_from_batches.extend(batch_indices)
+        
+        # Check total indices match
+        self.assertEqual(sorted(all_indices_from_batches), sorted(dataset_indices))
+
+    def test_dataset_indices_no_overwriting_between_steps(self):
+        """Test that dataset indices from different training steps should NOT overwrite each other."""
+        num_engines = 2
+        num_prompts = 16
+        
+        # Simulate a dataloader that might return overlapping indices
+        step1_indices = list(range(0, num_prompts))  # [0, 1, ..., 15]
+        step2_indices = list(range(10, num_prompts + 10))  # [10, 11, ..., 25] - overlaps with step1
+        
+        pending_queries_map = {}
+        param_prompt_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        
+        # Step 1
+        queries = [f"query_step1_{i}" for i in range(num_prompts)]
+        ground_truths = [f"truth_step1_{i}" for i in range(num_prompts)]
+        datasets = [f"dataset_step1_{i}" for i in range(num_prompts)]
+        
+        split_and_insert_batch(
+            queries, ground_truths, datasets, step1_indices,
+            training_step=1, vllm_num_engines=num_engines,
+            pending_queries_map=pending_queries_map,
+            param_prompt_Q=param_prompt_Q,
+        )
+        
+        step1_map_copy = dict(pending_queries_map)
+        
+        # Step 2 - with overlapping indices
+        queries2 = [f"query_step2_{i}" for i in range(num_prompts)]
+        ground_truths2 = [f"truth_step2_{i}" for i in range(num_prompts)]
+        datasets2 = [f"dataset_step2_{i}" for i in range(num_prompts)]
+        
+        # Clear the queue for step 2
+        while not param_prompt_Q.empty():
+            param_prompt_Q.get()
+            
+        split_and_insert_batch(
+            queries2, ground_truths2, datasets2, step2_indices,
+            training_step=2, vllm_num_engines=num_engines,
+            pending_queries_map=pending_queries_map,
+            param_prompt_Q=param_prompt_Q,
+        )
+        
+        # Check if overlapping indices were overwritten
+        overlapping_indices = set(step1_indices) & set(step2_indices)
+        overwritten_indices = []
+        for idx in overlapping_indices:
+            if idx in step1_map_copy and idx in pending_queries_map:
+                old_value = step1_map_copy[idx]
+                new_value = pending_queries_map[idx]
+                # If they're different, we have overwriting
+                if old_value != new_value:
+                    overwritten_indices.append(idx)
+        
+        # This test should PASS when the bug is fixed
+        # Currently it FAILS because indices ARE being overwritten
+        self.assertEqual(len(overwritten_indices), 0, 
+                        f"Dataset indices {overwritten_indices} were overwritten between training steps! " +
+                        "Different training steps should maintain separate namespaces for indices.")
+
+
+    def test_thread_safety_pending_queries_map(self):
+        """Test concurrent access to pending_queries_map."""
+        import threading
+        import time
+        
+        pending_queries_map = {}
+        errors = []
+        
+        def add_entries(start_idx, count, thread_id):
+            """Add entries to the map."""
+            try:
+                for i in range(start_idx, start_idx + count):
+                    pending_queries_map[i] = (f"query_{thread_id}_{i}", f"truth_{thread_id}_{i}", f"dataset_{thread_id}_{i}")
+                    time.sleep(0.0001)  # Small delay to increase chance of race condition
+            except Exception as e:
+                errors.append(f"Thread {thread_id} add error: {e}")
+        
+        def remove_entries(indices, thread_id):
+            """Remove entries from the map."""
+            try:
+                for idx in indices:
+                    time.sleep(0.0001)  # Small delay
+                    if idx in pending_queries_map:
+                        pending_queries_map.pop(idx)
+                    else:
+                        errors.append(f"Thread {thread_id}: Index {idx} not found for removal")
+            except Exception as e:
+                errors.append(f"Thread {thread_id} remove error: {e}")
+        
+        # Create threads that add entries
+        add_threads = []
+        for i in range(4):
+            t = threading.Thread(target=add_entries, args=(i * 100, 50, i))
+            add_threads.append(t)
+            t.start()
+        
+        # Wait for adds to complete
+        for t in add_threads:
+            t.join()
+            
+        # Now create threads that try to remove entries concurrently
+        remove_threads = []
+        for i in range(4):
+            indices = list(range(i * 100, i * 100 + 50))
+            t = threading.Thread(target=remove_entries, args=(indices, f"remove_{i}"))
+            remove_threads.append(t)
+            t.start()
+            
+        # Wait for removes to complete
+        for t in remove_threads:
+            t.join()
+            
+        # Check for errors
+        self.assertEqual(len(errors), 0, f"Thread safety issues detected: {errors}")
+        
+        # Map should be empty after all removes
+        self.assertEqual(len(pending_queries_map), 0, 
+                        f"Map not empty after removes: {len(pending_queries_map)} items remain")
+
+    def test_batch_size_edge_cases(self):
+        """Test batch splitting when prompts don't divide evenly by engines."""
+        test_cases = [
+            (17, 4),  # 17 prompts, 4 engines -> 4,4,4,5
+            (15, 4),  # 15 prompts, 4 engines -> 3,3,3,6
+            (7, 3),   # 7 prompts, 3 engines -> 2,2,3
+            (100, 7), # 100 prompts, 7 engines
+        ]
+        
+        for num_prompts, num_engines in test_cases:
+            with self.subTest(prompts=num_prompts, engines=num_engines):
+                queries = [f"q_{i}" for i in range(num_prompts)]
+                ground_truths = [f"t_{i}" for i in range(num_prompts)]
+                datasets = [f"d_{i}" for i in range(num_prompts)]
+                dataset_indices = list(range(num_prompts))
+                
+                param_prompt_Q = ray_queue.Queue(maxsize=num_engines * 2)
+                pending_queries_map = {}
+                
+                split_and_insert_batch(
+                    queries, ground_truths, datasets, dataset_indices,
+                    training_step=1, vllm_num_engines=num_engines,
+                    pending_queries_map=pending_queries_map,
+                    param_prompt_Q=param_prompt_Q,
+                )
+                
+                # Verify all indices are in the map
+                self.assertEqual(len(pending_queries_map), num_prompts)
+                
+                # Verify batches
+                batch_sizes = []
+                total_indices = []
+                while not param_prompt_Q.empty():
+                    request = param_prompt_Q.get()
+                    batch_sizes.append(len(request.prompts))
+                    total_indices.extend(request.dataset_index)
+                
+                # All indices should be accounted for
+                self.assertEqual(sorted(total_indices), sorted(dataset_indices))
+                self.assertEqual(sum(batch_sizes), num_prompts)
+                
+                # Verify batch distribution
+                # Expected: all batches equal except last one might have more
+
+    def test_accumulate_waits_for_all_engines(self):
+        """Test that accumulate_inference_batches waits for results from all engines."""
+        num_engines = 4
+        num_prompts = 16
+        
+        # Create results from only 3 engines (missing one)
+        inference_results_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        pending_queries_map = {}
+        
+        # Add entries to pending_queries_map
+        for i in range(num_prompts):
+            pending_queries_map[i] = (f"q_{i}", f"t_{i}", f"d_{i}")
+        
+        # Add results from only 3 engines
+        for engine_id in range(3):  # Missing engine 3
+            start_idx = engine_id * 4
+            end_idx = start_idx + 4
+            mock_result = GenerationResult(
+                responses=[[1, 2, 3] for _ in range(4)],
+                finish_reasons=["stop"] * 4,
+                masks=[[1, 1, 1] for _ in range(4)],
+                request_info=RequestInfo(
+                    num_calls=[0] * 4,
+                    timeouts=[0] * 4,
+                    tool_errors=[""] * 4,
+                    tool_outputs=[""] * 4,
+                    tool_runtimes=[0.0] * 4,
+                    tool_calleds=[False] * 4,
+                ),
+                dataset_index=list(range(start_idx, end_idx)),
+            )
+            inference_results_Q.put(mock_result)
+        
+        mock_args = Mock()
+        mock_args.vllm_num_engines = num_engines
+        mock_args.num_samples_per_prompt_rollout = 1
+        
+        # This should timeout waiting for the 4th engine
+        # We'll verify it doesn't complete within the timeout
+        import threading
+        import time
+        
+        completed = False
+        result = None
+        error = None
+        
+        def run_accumulate():
+            nonlocal completed, result, error
+            try:
+                result = accumulate_inference_batches(
+                    inference_results_Q, pending_queries_map, mock_args, training_step=1
+                )
+                completed = True
+            except Exception as e:
+                error = e
+                completed = True
+        
+        thread = threading.Thread(target=run_accumulate)
+        thread.daemon = True  # Make thread daemon so it doesn't block test suite
+        thread.start()
+        
+        # Wait a short time
+        time.sleep(0.5)
+        
+        # Check that accumulate_inference_batches is still waiting
+        self.assertFalse(completed, 
+                        "accumulate_inference_batches should still be waiting for the missing engine result")
+        
+        # Verify the queue still has 3 items (none were consumed because we're waiting for all 4)
+        self.assertEqual(inference_results_Q.qsize(), 3, 
+                        "Queue should still have 3 results since accumulate is waiting for the 4th")
+
+
+    def test_no_race_condition_with_overlapping_indices(self):
+        """Test that the system should handle overlapping indices without race conditions."""
+        import threading
+        import time
+        
+        num_engines = 4
+        num_prompts = 32
+        
+        # Shared state
+        pending_queries_map = {}
+        param_prompt_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        inference_results_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        errors = []
+        race_condition_detected = False
+        
+        def simulate_training_step(step_num, indices_start):
+            """Simulate one training step."""
+            try:
+                # Create data for this step
+                queries = [f"query_step{step_num}_{i}" for i in range(num_prompts)]
+                ground_truths = [f"truth_step{step_num}_{i}" for i in range(num_prompts)]
+                datasets = [f"dataset_step{step_num}_{i}" for i in range(num_prompts)]
+                # Use overlapping indices to simulate real scenario
+                dataset_indices = list(range(indices_start, indices_start + num_prompts))
+                
+                # Split and insert batch - this modifies pending_queries_map
+                split_and_insert_batch(
+                    queries, ground_truths, datasets, dataset_indices,
+                    training_step=step_num, vllm_num_engines=num_engines,
+                    pending_queries_map=pending_queries_map,
+                    param_prompt_Q=param_prompt_Q,
+                )
+                
+                # Simulate vLLM processing delay
+                time.sleep(0.1)
+                
+                # Create mock results
+                for engine_id in range(num_engines):
+                    if not param_prompt_Q.empty():
+                        request = param_prompt_Q.get()
+                        mock_result = GenerationResult(
+                            responses=[[1, 2, 3] for _ in range(len(request.prompts))],
+                            finish_reasons=["stop"] * len(request.prompts),
+                            masks=[[1, 1, 1] for _ in range(len(request.prompts))],
+                            request_info=RequestInfo(
+                                num_calls=[0] * len(request.prompts),
+                                timeouts=[0] * len(request.prompts),
+                                tool_errors=[""] * len(request.prompts),
+                                tool_outputs=[""] * len(request.prompts),
+                                tool_runtimes=[0.0] * len(request.prompts),
+                                tool_calleds=[False] * len(request.prompts),
+                            ),
+                            dataset_index=request.dataset_index,
+                        )
+                        inference_results_Q.put(mock_result)
+                
+            except Exception as e:
+                errors.append(f"Step {step_num} error: {e}")
+        
+        def simulate_data_prep_thread(step_num):
+            """Simulate data preparation thread processing results."""
+            nonlocal race_condition_detected
+            try:
+                # Add delay to simulate processing time
+                time.sleep(0.2)
+                
+                mock_args = Mock()
+                mock_args.vllm_num_engines = num_engines
+                mock_args.num_samples_per_prompt_rollout = 1
+                
+                # Try to accumulate results
+                result = accumulate_inference_batches(
+                    inference_results_Q, pending_queries_map, mock_args, training_step=step_num
+                )
+                
+            except RuntimeError as e:
+                if "not found in pending_queries_map" in str(e):
+                    race_condition_detected = True
+                    errors.append(f"Race condition detected: {e}")
+                else:
+                    errors.append(f"Step {step_num} accumulate error: {e}")
+            except Exception as e:
+                errors.append(f"Step {step_num} accumulate error: {e}")
+        
+        # Start step 1
+        step1_thread = threading.Thread(target=simulate_training_step, args=(1, 25840))
+        step1_thread.start()
+        
+        # Start data prep for step 1
+        data_prep1 = threading.Thread(target=simulate_data_prep_thread, args=(1,))
+        data_prep1.start()
+        
+        # Before step 1 finishes, start step 2 with overlapping indices
+        time.sleep(0.15)  # Start step 2 while step 1 is still processing
+        step2_thread = threading.Thread(target=simulate_training_step, args=(2, 25847))
+        step2_thread.start()
+        
+        # Wait for all threads
+        step1_thread.join()
+        step2_thread.join()
+        data_prep1.join()
+        
+        # This test should PASS when the bug is fixed
+        # Currently it FAILS because we detect the race condition
+        self.assertFalse(race_condition_detected, 
+                        f"Race condition detected! The system should handle overlapping indices safely. Errors: {errors}")
+
 
 if __name__ == "__main__":
     unittest.main()
