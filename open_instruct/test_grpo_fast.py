@@ -191,5 +191,166 @@ class TestGrpoFastVLLM(unittest.TestCase):
         self.assertEqual(inference_results_Q.qsize(), 0)
 
 
+    def mock_vllm_pipeline(self, prompt_queue, results_queue, num_engines, num_steps=1):
+        """Mock function that simulates vLLM engines pulling from prompt queue and pushing to results queue"""
+        for step in range(num_steps):
+            for engine_id in range(num_engines):
+                # Pull request from prompt queue
+                request = prompt_queue.get()
+                
+                # Create mock generation result preserving dataset_index
+                batch_size = len(request.prompts)
+                mock_result = GenerationResult(
+                    responses=[[1, 2, 3] for _ in range(batch_size)],
+                    finish_reasons=["stop"] * batch_size,
+                    masks=[[1, 1, 1] for _ in range(batch_size)],
+                    request_info=RequestInfo(
+                        num_calls=[0] * batch_size,
+                        timeouts=[0] * batch_size,
+                        tool_errors=[""] * batch_size,
+                        tool_outputs=[""] * batch_size,
+                        tool_runtimes=[0.0] * batch_size,
+                        tool_calleds=[False] * batch_size,
+                    ),
+                    dataset_index=request.dataset_index,  # Preserve the indices
+                )
+                
+                # Push to results queue
+                results_queue.put(mock_result)
+
+    def test_dataset_index_preservation_through_pipeline(self):
+        """Test that dataset indices are correctly preserved through the mock vLLM pipeline"""
+        vllm_num_engines = 4
+        num_unique_prompts_rollout = 32
+        
+        # Mock data
+        queries_next = [f"query_{i}" for i in range(num_unique_prompts_rollout)]
+        ground_truths_next = [f"truth_{i}" for i in range(num_unique_prompts_rollout)]
+        datasets_next = [f"dataset_{i}" for i in range(num_unique_prompts_rollout)]
+        dataset_indices = list(range(num_unique_prompts_rollout))
+        
+        # Create queues and map
+        param_prompt_Q = ray_queue.Queue(maxsize=vllm_num_engines)
+        inference_results_Q = ray_queue.Queue(maxsize=vllm_num_engines)
+        pending_queries_map = {}
+        
+        # Split and insert batch
+        split_and_insert_batch(
+            queries_next,
+            ground_truths_next,
+            datasets_next,
+            dataset_indices,
+            training_step=1,
+            vllm_num_engines=vllm_num_engines,
+            pending_queries_map=pending_queries_map,
+            param_prompt_Q=param_prompt_Q,
+        )
+        
+        # Run mock vLLM pipeline
+        self.mock_vllm_pipeline(param_prompt_Q, inference_results_Q, vllm_num_engines)
+        
+        # Accumulate results
+        combined_result, combined_queries, combined_ground_truths, combined_datasets = accumulate_inference_batches(
+            inference_results_Q, pending_queries_map, vllm_num_engines, training_step=1
+        )
+        
+        # Verify results
+        self.assertEqual(combined_queries, queries_next)
+        self.assertEqual(combined_ground_truths, ground_truths_next)
+        self.assertEqual(combined_datasets, datasets_next)
+        self.assertEqual(len(pending_queries_map), 0)  # Map should be empty after accumulation
+
+    def test_multiple_training_steps(self):
+        """Test that indices don't get mixed up between multiple training steps"""
+        vllm_num_engines = 2
+        num_unique_prompts_rollout = 16
+        num_steps = 3
+        
+        pending_queries_map = {}
+        
+        for step in range(1, num_steps + 1):
+            # Create unique data for each step
+            queries_next = [f"query_step{step}_{i}" for i in range(num_unique_prompts_rollout)]
+            ground_truths_next = [f"truth_step{step}_{i}" for i in range(num_unique_prompts_rollout)]
+            datasets_next = [f"dataset_step{step}_{i}" for i in range(num_unique_prompts_rollout)]
+            # Use different indices for each step to ensure no mixing
+            dataset_indices = list(range((step-1) * num_unique_prompts_rollout, step * num_unique_prompts_rollout))
+            
+            # Create queues
+            param_prompt_Q = ray_queue.Queue(maxsize=vllm_num_engines)
+            inference_results_Q = ray_queue.Queue(maxsize=vllm_num_engines)
+            
+            # Split and insert
+            split_and_insert_batch(
+                queries_next,
+                ground_truths_next,
+                datasets_next,
+                dataset_indices,
+                training_step=step,
+                vllm_num_engines=vllm_num_engines,
+                pending_queries_map=pending_queries_map,
+                param_prompt_Q=param_prompt_Q,
+            )
+            
+            # Run pipeline
+            self.mock_vllm_pipeline(param_prompt_Q, inference_results_Q, vllm_num_engines)
+            
+            # Accumulate
+            combined_result, combined_queries, combined_ground_truths, combined_datasets = accumulate_inference_batches(
+                inference_results_Q, pending_queries_map, vllm_num_engines, training_step=step
+            )
+            
+            # Verify
+            self.assertEqual(combined_queries, queries_next)
+            self.assertEqual(combined_ground_truths, ground_truths_next)
+            self.assertEqual(combined_datasets, datasets_next)
+            self.assertEqual(len(pending_queries_map), 0)  # Map should be empty after each step
+
+    @parameterized.expand([(1,), (2,), (4,), (8,)])
+    def test_various_engine_configurations(self, vllm_num_engines: int):
+        """Test with various numbers of vLLM engines"""
+        num_unique_prompts_rollout = 64  # Use a larger batch to test splitting
+        
+        # Mock data
+        queries_next = [f"query_{i}" for i in range(num_unique_prompts_rollout)]
+        ground_truths_next = [f"truth_{i}" for i in range(num_unique_prompts_rollout)]
+        datasets_next = [f"dataset_{i}" for i in range(num_unique_prompts_rollout)]
+        dataset_indices = list(range(num_unique_prompts_rollout))
+        
+        # Create queues and map
+        param_prompt_Q = ray_queue.Queue(maxsize=vllm_num_engines)
+        inference_results_Q = ray_queue.Queue(maxsize=vllm_num_engines)
+        pending_queries_map = {}
+        
+        # Split and insert
+        split_and_insert_batch(
+            queries_next,
+            ground_truths_next,
+            datasets_next,
+            dataset_indices,
+            training_step=1,
+            vllm_num_engines=vllm_num_engines,
+            pending_queries_map=pending_queries_map,
+            param_prompt_Q=param_prompt_Q,
+        )
+        
+        # Verify correct number of batches created
+        self.assertEqual(param_prompt_Q.qsize(), vllm_num_engines)
+        
+        # Run pipeline
+        self.mock_vllm_pipeline(param_prompt_Q, inference_results_Q, vllm_num_engines)
+        
+        # Accumulate
+        combined_result, combined_queries, combined_ground_truths, combined_datasets = accumulate_inference_batches(
+            inference_results_Q, pending_queries_map, vllm_num_engines, training_step=1
+        )
+        
+        # Verify
+        self.assertEqual(combined_queries, queries_next)
+        self.assertEqual(combined_ground_truths, ground_truths_next)
+        self.assertEqual(combined_datasets, datasets_next)
+        self.assertEqual(len(pending_queries_map), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
