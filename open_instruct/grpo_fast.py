@@ -55,7 +55,7 @@ from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
-from typing import Callable, Dict, Iterator, List, Literal, Optional, Union
+from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -1713,12 +1713,12 @@ def sync_weights_and_prepare_prompts(
     policy_group: ModelGroup,
     pending_queries_map: dict,
     param_prompt_Q: ray_queue.Queue,  # Ray queue
-    queries_next=None,
-    ground_truths_next=None,
-    datasets_next=None,
-    dataset_indices=None,
+    queries_next,
+    ground_truths_next,
+    datasets_next,
+    dataset_indices,
     eval_prompt_token_ids=None,
-):
+) -> tuple[Any, Any, Any, Any]:
     """Sync weights and send the next batch of prompts to vLLM."""
     if training_step != 1:
         dataset_indices = next(iter_dataloader)
@@ -1745,6 +1745,7 @@ def sync_weights_and_prepare_prompts(
             param_prompt_Q,
             eval_prompt_token_ids,
         )
+    return queries_next, ground_truths_next, datasets_next, dataset_indices
 
 
 def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
@@ -1981,7 +1982,10 @@ def make_reward_fn(args: Args) -> Callable:
         infos: List[List[int]],
         queries: Optional[List[str]] = None,
     ) -> List[float]:
-        _, timeouts, tool_errors, tool_outputs, _, tool_calleds = infos
+        timeouts = infos.timeouts
+        tool_errors = infos.tool_errors
+        tool_outputs = infos.tool_outputs
+        tool_calleds = infos.tool_calleds
         good_outputs = [
             len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
             for i in range(len(tool_outputs))
@@ -2169,7 +2173,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     num_total_tokens = 0
     start_time = time.time()
-    dataset_indices = None  # Initialize for training loop
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
             logger.info("-" * 100)
@@ -2177,7 +2180,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
             )  # each sample is an episode
 
-            queries_next, ground_truths_next, datasets_next = sync_weights_and_prepare_prompts(
+            queries_next, ground_truths_next, datasets_next, dataset_indices = sync_weights_and_prepare_prompts(
                 training_step,
                 args,
                 train_dataset,
