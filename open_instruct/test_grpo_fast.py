@@ -209,13 +209,8 @@ class TestGrpoFastVLLM(unittest.TestCase):
                 # Generate num_samples_per_prompt responses for each prompt
                 total_responses = batch_size * num_samples_per_prompt
 
-                # Replicate dataset indices based on num_samples_per_prompt
-                # When num_samples_per_prompt > 1, vLLM repeats the indices
-                replicated_indices = []
-                if request.dataset_index:
-                    for idx in request.dataset_index:
-                        replicated_indices.extend([idx] * num_samples_per_prompt)
-
+                # In real vLLM, dataset_index is NOT replicated when num_samples_per_prompt > 1
+                # It stays as the original list of unique indices
                 mock_result = GenerationResult(
                     responses=[[1, 2, 3] for _ in range(total_responses)],
                     finish_reasons=["stop"] * total_responses,
@@ -228,7 +223,7 @@ class TestGrpoFastVLLM(unittest.TestCase):
                         tool_runtimes=[0.0] * total_responses,
                         tool_calleds=[False] * total_responses,
                     ),
-                    dataset_index=replicated_indices if replicated_indices else request.dataset_index,
+                    dataset_index=request.dataset_index,  # Keep original indices (not replicated)
                 )
 
                 # Push to results queue
@@ -464,25 +459,24 @@ class TestGrpoFastVLLM(unittest.TestCase):
             3: ("query_3", "truth_3", "dataset_3"),
         }
 
-        # Create a mock result with repeated indices (simulating multiple samples per prompt)
-        # [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]
-        repeated_indices = []
-        for i in range(num_unique_prompts):
-            repeated_indices.extend([i] * num_samples_per_prompt)
+        # Create a mock result with dataset indices NOT repeated
+        # vLLM generates multiple responses per prompt but keeps dataset_index as [0, 1, 2, 3]
+        dataset_indices = list(range(num_unique_prompts))
+        total_responses = num_unique_prompts * num_samples_per_prompt
 
         mock_result = GenerationResult(
-            responses=[[1, 2, 3] for _ in range(len(repeated_indices))],
-            finish_reasons=["stop"] * len(repeated_indices),
-            masks=[[1, 1, 1] for _ in range(len(repeated_indices))],
+            responses=[[1, 2, 3] for _ in range(total_responses)],
+            finish_reasons=["stop"] * total_responses,
+            masks=[[1, 1, 1] for _ in range(total_responses)],
             request_info=RequestInfo(
-                num_calls=[0] * len(repeated_indices),
-                timeouts=[0] * len(repeated_indices),
-                tool_errors=[""] * len(repeated_indices),
-                tool_outputs=[""] * len(repeated_indices),
-                tool_runtimes=[0.0] * len(repeated_indices),
-                tool_calleds=[False] * len(repeated_indices),
+                num_calls=[0] * total_responses,
+                timeouts=[0] * total_responses,
+                tool_errors=[""] * total_responses,
+                tool_outputs=[""] * total_responses,
+                tool_runtimes=[0.0] * total_responses,
+                tool_calleds=[False] * total_responses,
             ),
-            dataset_index=repeated_indices,
+            dataset_index=dataset_indices,
         )
 
         # Create queue and add result
