@@ -1,0 +1,11 @@
+N-gram Repetition Filtering Test Results
+Dataset: allenai/persona-precise-if-r1-merged-format-filtered-keyword-filtered-filter-datecutoff
+Date: Mon 21 Jul 2025 03:00:28 PM PDT
+Note: Using sentence-level repetition detection
+=============================================
+
+Configuration   Examples_Removed Removal_Rate%   Output_File    
+------------------------------------------------------------
+default         2               0.00%           test_default.log
+
+Detailed logs are available in the individual test files.

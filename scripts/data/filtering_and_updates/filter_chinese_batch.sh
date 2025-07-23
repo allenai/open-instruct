@@ -68,7 +68,7 @@ for dataset in "${DATASETS[@]}"; do
     # Run the filtering script
     print_status "Running: python scripts/data/filtering_and_updates/filter_chinese.py --input-dataset $dataset --threshold $THRESHOLD"
     
-    if python scripts/data/filtering_and_updates/filter_chinese.py --input-dataset "$dataset" --threshold $THRESHOLD > "$log_file" 2>&1; then
+    if uv run python scripts/data/filtering_and_updates/filter_chinese.py --input-dataset "$dataset" --threshold $THRESHOLD > "$log_file" 2>&1; then
         print_success "Completed processing: $dataset"
         print_status "Log saved to: $log_file"
     else
