@@ -272,13 +272,19 @@ class LLMRayActor:
                 tool_calleds=tool_calleds,
             )
 
+            # For eval prompts, dataset_indices is None as they're not tied to training data
+            if dataset_indices is not None:
+                dataset_index = [dataset_indices[i]]
+            else:
+                dataset_index = None
+            
             results.append(
                 GenerationResult(
                     responses=response_ids,
                     finish_reasons=finish_reasons,
                     masks=masks,
                     request_info=request_info,
-                    dataset_index=[dataset_indices[i]],
+                    dataset_index=dataset_index,
                 )
             )
 
