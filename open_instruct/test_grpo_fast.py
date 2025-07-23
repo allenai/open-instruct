@@ -967,8 +967,8 @@ class GrpoIntegrationTests(unittest.TestCase):
                 # Verify batch distribution
                 # Expected: all batches equal except last one might have more
 
-    def test_accumulate_waits_for_all_engines(self):
-        """Test that accumulate_inference_batches waits for results from all engines."""
+    def test_accumulate_blocks_waiting_for_all_engines(self):
+        """Test that accumulate_inference_batches blocks waiting for results from all engines."""
         num_engines = 4
         num_prompts = 16
         
@@ -1004,40 +1004,42 @@ class GrpoIntegrationTests(unittest.TestCase):
         mock_args.vllm_num_engines = num_engines
         mock_args.num_samples_per_prompt_rollout = 1
         
-        # This should timeout waiting for the 4th engine
-        # We'll verify it doesn't complete within the timeout
+        # This should block waiting for the 4th engine
         import threading
         import time
         
         completed = False
-        result = None
-        error = None
+        timed_out = False
         
         def run_accumulate():
-            nonlocal completed, result, error
+            nonlocal completed
             try:
-                result = accumulate_inference_batches(
+                # This will block on the 4th queue.get() call
+                accumulate_inference_batches(
                     inference_results_Q, pending_queries_map, mock_args, training_step=1
                 )
                 completed = True
-            except Exception as e:
-                error = e
+            except Exception:
                 completed = True
         
         thread = threading.Thread(target=run_accumulate)
         thread.daemon = True  # Make thread daemon so it doesn't block test suite
         thread.start()
         
-        # Wait a short time
-        time.sleep(0.5)
+        # Give it time to process the 3 results and get stuck on the 4th
+        thread.join(timeout=1.0)
         
-        # Check that accumulate_inference_batches is still waiting
-        self.assertFalse(completed, 
-                        "accumulate_inference_batches should still be waiting for the missing engine result")
+        # Check that the thread is still alive (blocked on queue.get())
+        self.assertTrue(thread.is_alive(), 
+                       "accumulate_inference_batches should be blocked waiting for the 4th engine result")
         
-        # Verify the queue still has 3 items (none were consumed because we're waiting for all 4)
-        self.assertEqual(inference_results_Q.qsize(), 3, 
-                        "Queue should still have 3 results since accumulate is waiting for the 4th")
+        # The queue should be empty (3 results consumed, waiting for 4th)
+        self.assertEqual(inference_results_Q.qsize(), 0, 
+                        "Queue should be empty as 3 results were consumed")
+        
+        # Some entries should have been removed from pending_queries_map
+        self.assertLess(len(pending_queries_map), num_prompts,
+                       "Some entries should have been processed and removed from pending_queries_map")
 
 
     def test_no_race_condition_with_overlapping_indices(self):
