@@ -1137,6 +1137,12 @@ def accumulate_inference_batches(
         if dataset_indices is None:
             raise RuntimeError(f"Dataset indices is None for batch {batch_idx}")
 
+        # Assert that the number of dataset indices matches the number of responses
+        assert len(dataset_indices) == len(result.responses), (
+            f"Mismatch between dataset_indices length ({len(dataset_indices)}) "
+            f"and responses length ({len(result.responses)}) for batch {batch_idx}"
+        )
+
         # Get corresponding queries, ground_truths, datasets for each individual prompt
         batch_queries = []
         batch_ground_truths = []
