@@ -1110,14 +1110,14 @@ class ModelGroup:
 
 
 def accumulate_inference_batches(
-    inference_results_Q: ray_queue.Queue, pending_queries_map: dict, vllm_num_engines: int, training_step: int
+    inference_results_Q: ray_queue.Queue, pending_queries_map: dict, args: Args, training_step: int
 ) -> tuple:
     """Accumulate multiple inference results into a single training batch.
 
     Args:
         inference_results_Q: Queue containing GenerationResult objects
         pending_queries_map: Map of dataset_index -> (queries, ground_truths, datasets)
-        vllm_num_engines: Number of vLLM engines (number of batches to accumulate)
+        args: Arguments containing vllm_num_engines and num_samples_per_prompt_rollout
         training_step: Current training step for error reporting
 
     Returns:
@@ -1129,7 +1129,7 @@ def accumulate_inference_batches(
     all_ground_truths = []
     all_datasets = []
 
-    for batch_idx in range(vllm_num_engines):
+    for batch_idx in range(args.vllm_num_engines):
         # Get result from queue
         result = inference_results_Q.get()
         dataset_indices = result.dataset_index
@@ -1137,10 +1137,12 @@ def accumulate_inference_batches(
         if dataset_indices is None:
             raise RuntimeError(f"Dataset indices is None for batch {batch_idx}")
 
-        # Assert that the number of dataset indices matches the number of responses
-        assert len(dataset_indices) == len(result.responses), (
-            f"Mismatch between dataset_indices length ({len(dataset_indices)}) "
-            f"and responses length ({len(result.responses)}) for batch {batch_idx}"
+        # Assert that the number of responses equals dataset indices * samples per prompt
+        expected_responses = len(dataset_indices) * args.num_samples_per_prompt_rollout
+        assert len(result.responses) == expected_responses, (
+            f"Mismatch: expected {expected_responses} responses "
+            f"({len(dataset_indices)} prompts * {args.num_samples_per_prompt_rollout} samples per prompt) "
+            f"but got {len(result.responses)} responses for batch {batch_idx}"
         )
 
         # Get corresponding queries, ground_truths, datasets for each individual prompt
@@ -1219,7 +1221,7 @@ def data_preparation_thread(
         # Accumulate results from multiple vLLM engines into a single training batch
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             result, queries, ground_truths, datasets = accumulate_inference_batches(
-                inference_results_Q, pending_queries_map, args.vllm_num_engines, training_step
+                inference_results_Q, pending_queries_map, args, training_step
             )
 
         # ------------------------------------------------------------------------------------------------
