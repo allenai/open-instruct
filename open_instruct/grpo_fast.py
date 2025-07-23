@@ -1834,15 +1834,10 @@ def sync_weights_and_prepare_prompts(
         ):
             # Add progress bar for weight syncing
             weight_sync_tasks = [m.broadcast_to_vllm.remote() for m in policy_group.models]
-            with tqdm(
-                total=len(weight_sync_tasks),
-                desc="Syncing weights to vLLM engines",
-                bar_format="{l_bar}{bar}{r_bar}\n",
-            ) as pbar:
-                for i, task in enumerate(weight_sync_tasks):
-                    ray.get(task)
-                    pbar.update(1)
-                    pbar.set_postfix_str(f"Synced {i + 1}/{len(weight_sync_tasks)} models")
+            for task in tqdm(
+                weight_sync_tasks, desc="Syncing weights to vLLM engines", bar_format="{l_bar}{bar}{r_bar}\n"
+            ):
+                ray.get(task)
 
     if args.async_mode or training_step != 1:
         split_and_insert_batch(
