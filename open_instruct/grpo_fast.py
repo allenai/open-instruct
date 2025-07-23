@@ -1132,6 +1132,14 @@ def accumulate_inference_batches(
     for batch_idx in range(args.vllm_num_engines):
         # Get result from queue
         result = inference_results_Q.get()
+
+        # Verify this result is for the current training step (if training_step is tracked)
+        if result.training_step is not None and result.training_step != training_step:
+            raise RuntimeError(
+                f"Result training_step ({result.training_step}) doesn't match expected training_step ({training_step}). "
+                f"This indicates a synchronization issue between training steps."
+            )
+
         dataset_indices = result.dataset_index
 
         if dataset_indices is None:
@@ -1154,10 +1162,14 @@ def accumulate_inference_batches(
         # When num_samples_per_prompt_rollout > 1, vLLM returns unique dataset indices
         # We should NOT replicate here - the data_preparation_thread will handle replication
         for dataset_idx in dataset_indices:
-            if dataset_idx not in pending_queries_map:
-                raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
+            # Use (training_step, dataset_idx) as key to prevent race conditions
+            key = (training_step, dataset_idx)
+            if key not in pending_queries_map:
+                raise RuntimeError(
+                    f"Dataset index {dataset_idx} (training_step={training_step}) not found in pending_queries_map"
+                )
 
-            query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
+            query, ground_truth, dataset = pending_queries_map.pop(key)
             # Don't replicate - just append once per unique index
             batch_queries.append(query)
             batch_ground_truths.append(ground_truth)
@@ -1610,7 +1622,7 @@ def create_model_and_optimizer(
 ) -> tuple[ModelGroup, list[LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Ray initialization
-    #ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
+    # ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
 
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -1706,9 +1718,11 @@ def split_and_insert_batch(
         batch_datasets = datasets_next[start_idx:end_idx]
         batch_dataset_indices = dataset_indices[start_idx:end_idx]
 
-        # Store individual prompts in the map using dataset indices as keys
+        # Store individual prompts in the map using (training_step, dataset_idx) as keys
+        # This prevents race conditions when dataset indices are reused across training steps
         for i, dataset_idx in enumerate(batch_dataset_indices):
-            pending_queries_map[dataset_idx] = (batch_queries[i], batch_ground_truths[i], batch_datasets[i])
+            key = (training_step, dataset_idx)
+            pending_queries_map[key] = (batch_queries[i], batch_ground_truths[i], batch_datasets[i])
 
         # Use PromptRequest for Ray queue with batch-specific dataset_index list
         param_prompt_Q.put(

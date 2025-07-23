@@ -161,6 +161,7 @@ class TestGrpoFastVLLM(unittest.TestCase):
                 ),
                 is_eval=False,
                 dataset_index=request.dataset_index,
+                training_step=request.training_step,
             )
             mock_inference_results.append(mock_result)
 
@@ -224,6 +225,7 @@ class TestGrpoFastVLLM(unittest.TestCase):
                         tool_calleds=[False] * total_responses,
                     ),
                     dataset_index=request.dataset_index,  # Keep original indices (not replicated)
+                    training_step=request.training_step,
                 )
 
                 # Push to results queue
@@ -443,12 +445,13 @@ class TestGrpoFastVLLM(unittest.TestCase):
         mock_args.vllm_num_engines = vllm_num_engines
         mock_args.num_samples_per_prompt_rollout = num_samples_per_prompt
 
-        # Create test data
+        # Create test data using (training_step, dataset_idx) as keys
+        training_step = 1
         pending_queries_map = {
-            0: ("query_0", "truth_0", "dataset_0"),
-            1: ("query_1", "truth_1", "dataset_1"),
-            2: ("query_2", "truth_2", "dataset_2"),
-            3: ("query_3", "truth_3", "dataset_3"),
+            (training_step, 0): ("query_0", "truth_0", "dataset_0"),
+            (training_step, 1): ("query_1", "truth_1", "dataset_1"),
+            (training_step, 2): ("query_2", "truth_2", "dataset_2"),
+            (training_step, 3): ("query_3", "truth_3", "dataset_3"),
         }
 
         # Create a mock result with dataset indices NOT repeated
@@ -469,6 +472,7 @@ class TestGrpoFastVLLM(unittest.TestCase):
                 tool_calleds=[False] * total_responses,
             ),
             dataset_index=dataset_indices,
+            training_step=training_step,
         )
 
         # Create queue and add result
@@ -578,7 +582,7 @@ class GrpoIntegrationTests(unittest.TestCase):
         )
 
         # Verify the pending queries map contains the right indices
-        self.assertIn(25847, pending_queries_map)
+        self.assertIn((1, 25847), pending_queries_map)
 
         # Get all requests and create results
         while not param_prompt_Q.empty():
@@ -599,6 +603,7 @@ class GrpoIntegrationTests(unittest.TestCase):
                     tool_calleds=[False] * total_responses,
                 ),
                 dataset_index=request.dataset_index,
+                training_step=request.training_step,
             )
             inference_results_Q.put(mock_result)
 
@@ -669,6 +674,7 @@ class GrpoIntegrationTests(unittest.TestCase):
                     tool_calleds=[False] * total_responses,
                 ),
                 dataset_index=request.dataset_index,
+                training_step=request.training_step,
             )
             inference_results_Q.put(mock_result)
 
@@ -789,7 +795,9 @@ class GrpoIntegrationTests(unittest.TestCase):
         
         # Check for duplicates in pending_queries_map
         self.assertEqual(len(pending_queries_map), num_prompts, "Some indices were lost or duplicated")
-        self.assertEqual(set(pending_queries_map.keys()), set(dataset_indices), "Indices don't match")
+        # Keys are now (training_step, dataset_idx) tuples
+        expected_keys = {(1, idx) for idx in dataset_indices}
+        self.assertEqual(set(pending_queries_map.keys()), expected_keys, "Indices don't match")
         
         # Check each batch has unique indices
         all_indices_from_batches = []
@@ -976,9 +984,10 @@ class GrpoIntegrationTests(unittest.TestCase):
         inference_results_Q = ray_queue.Queue(maxsize=num_engines * 2)
         pending_queries_map = {}
         
-        # Add entries to pending_queries_map
+        # Add entries to pending_queries_map using (training_step, dataset_idx) as keys
+        training_step = 1
         for i in range(num_prompts):
-            pending_queries_map[i] = (f"q_{i}", f"t_{i}", f"d_{i}")
+            pending_queries_map[(training_step, i)] = (f"q_{i}", f"t_{i}", f"d_{i}")
         
         # Add results from only 3 engines
         for engine_id in range(3):  # Missing engine 3
@@ -997,6 +1006,7 @@ class GrpoIntegrationTests(unittest.TestCase):
                     tool_calleds=[False] * 4,
                 ),
                 dataset_index=list(range(start_idx, end_idx)),
+                training_step=training_step,
             )
             inference_results_Q.put(mock_result)
         
@@ -1095,6 +1105,7 @@ class GrpoIntegrationTests(unittest.TestCase):
                                 tool_calleds=[False] * len(request.prompts),
                             ),
                             dataset_index=request.dataset_index,
+                training_step=request.training_step,
                         )
                         inference_results_Q.put(mock_result)
                 
