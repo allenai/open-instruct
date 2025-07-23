@@ -1151,16 +1151,17 @@ def accumulate_inference_batches(
         batch_ground_truths = []
         batch_datasets = []
 
-        # When num_samples_per_prompt_rollout > 1, we need to replicate each entry
+        # When num_samples_per_prompt_rollout > 1, vLLM returns unique dataset indices
+        # We should NOT replicate here - the data_preparation_thread will handle replication
         for dataset_idx in dataset_indices:
             if dataset_idx not in pending_queries_map:
                 raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
 
             query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
-            # Replicate based on num_samples_per_prompt_rollout
-            batch_queries.extend([query] * args.num_samples_per_prompt_rollout)
-            batch_ground_truths.extend([ground_truth] * args.num_samples_per_prompt_rollout)
-            batch_datasets.extend([dataset] * args.num_samples_per_prompt_rollout)
+            # Don't replicate - just append once per unique index
+            batch_queries.append(query)
+            batch_ground_truths.append(ground_truth)
+            batch_datasets.append(dataset)
 
         results.append(result)
         all_queries.extend(batch_queries)
