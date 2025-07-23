@@ -1585,6 +1585,7 @@ class UlyssesSPSplitter:
                 if not torch.is_tensor(batch[k]):
                     continue
                 # at seqlen>10M and 32+ gpus this can take GBs of memory so keep the prefill buffer on cpu
+                print(f"{self.sp_rank} {chunk_len}, chunk_len * self.sp_rank:{chunk_len * self.sp_rank}, chunk_len * (self.sp_rank + 1):{chunk_len * (self.sp_rank + 1)}")
                 batch[k] = batch[k][:, chunk_len * self.sp_rank:chunk_len * (self.sp_rank + 1)].cpu()
 
             batch_shards.append(batch)

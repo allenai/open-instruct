@@ -660,6 +660,7 @@ class PolicyTrainerRayProcess(RayProcess):
             self.sp_group = groups._get_sequence_parallel_group()
             self.sp_world_size = groups._get_sequence_parallel_world_size()
             self.sp_rank = groups._get_sequence_parallel_rank()
+            print(f"SETTING UP: {self.sp_rank=} {self.sp_world_size=}")
             self.splitter = UlyssesSPSplitter(
                 sp_rank=self.sp_rank,
                 sp_group=self.sp_group,
@@ -827,6 +828,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # recalculate the "real" number of mini-batches
         num_mini_batches = len(collated_query_responses) // accumulation_steps
+        original_length = len(collated_query_responses)
 
         if self.splitter is not None:
             sharded_batches = self.splitter.split_batch({
@@ -837,27 +839,47 @@ class PolicyTrainerRayProcess(RayProcess):
                 "tool_masks": collated_tool_masks,
                 "advantages": collated_advantages,
             }, sequence_parallel_size=self.args.sequence_parallel_size, padding_token_id=pad_token_id)
-            # TODO: i actually don't know what sharded_batches looks like yet.
-            sharded_batches = move_to_device(sharded_batches, self.ref_policy.device)
+            
+            # we need to flatten out the sharded batches so its like:
+            # b0 sp0, b0 sp1, ..., b1 sp0, b1 sp1, ..., b2 sp0, b2 sp1, ... etc.
+            # right now, it comes out a list of sp shards, and inside is (bsz, seq_len)
+            collated_query_responses = []
+            collated_attention_masks = []
+            collated_position_ids = []
+            collated_response_masks = []
+            collated_tool_masks = []
+            collated_advantages = []
 
-            # replace non-sharded batches with sharded batches
-            collated_query_responses = [batch["input_ids"].contiguous() for batch in sharded_batches]
-            collated_attention_masks = [batch["attention_mask"].contiguous() for batch in sharded_batches]
-            collated_position_ids = [batch["position_ids"].contiguous() for batch in sharded_batches]
-            collated_response_masks = [batch["response_masks"].contiguous() for batch in sharded_batches]
-            collated_tool_masks = [batch["tool_masks"].contiguous() for batch in sharded_batches]
-            collated_advantages = [batch["advantages"].contiguous() for batch in sharded_batches]
+            for batch_idx in range(original_length):
+                for sp_idx in range(len(sharded_batches)):
+                    # None to re-add in the batch dimension.
+                    collated_query_responses.append(sharded_batches[sp_idx]["input_ids"][batch_idx, None])
+                    collated_attention_masks.append(sharded_batches[sp_idx]["attention_mask"][batch_idx, None])
+                    collated_position_ids.append(sharded_batches[sp_idx]["position_ids"][batch_idx, None])
+                    collated_response_masks.append(sharded_batches[sp_idx]["response_masks"][batch_idx, None])
+                    collated_tool_masks.append(sharded_batches[sp_idx]["tool_masks"][batch_idx, None])
+                    collated_advantages.append(sharded_batches[sp_idx]["advantages"][batch_idx, None])
+
+            collated_query_responses = move_to_device(collated_query_responses, self.ref_policy.device)
+            collated_attention_masks = move_to_device(collated_attention_masks, self.ref_policy.device)
+            collated_position_ids = move_to_device(collated_position_ids, self.ref_policy.device)
+            collated_response_masks = move_to_device(collated_response_masks, self.ref_policy.device)
+            collated_tool_masks = move_to_device(collated_tool_masks, self.ref_policy.device)
+            collated_advantages = move_to_device(collated_advantages, self.ref_policy.device)
+
+            # adjust accumulation steps for sp (do we need to do this?)
+            # accumulation_steps = accumulation_steps * self.sp_world_size
 
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
         with Timer("Inference Calculation", noop=self.rank != 0):
             with torch.no_grad():
                 for i in range(len(collated_query_responses)):
-                    query_response = collated_query_responses[i].squeeze()
-                    tool_mask = collated_tool_masks[i].squeeze()
-                    attention_mask = collated_attention_masks[i].squeeze()
-                    position_id = collated_position_ids[i].squeeze()
-                    response_mask = collated_response_masks[i].squeeze()
+                    query_response = collated_query_responses[i]
+                    tool_mask = collated_tool_masks[i]
+                    attention_mask = collated_attention_masks[i]
+                    position_id = collated_position_ids[i]
+                    response_mask = collated_response_masks[i]
                     ref_logprob, _ = self.forward( self.ref_policy, query_response, attention_mask, position_id, pad_token_id, args.temperature, return_entropy=False)
                     if args.mask_tool_use and args.tool_use:
                         # mask logprobs for tool tokens
@@ -980,7 +1002,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         non_masked_tokens_per_rank = torch.distributed.nn.functional.all_gather(non_masked_tokens, group=self.sp_group)
                         total_loss = sum(losses_per_rank[rank] * non_masked_tokens_per_rank[rank] for rank in range(self.sp_world_size))
                         total_non_masked_tokens = sum(non_masked_tokens_per_rank)
-                        loss = total_loss / total_non_masked_tokens
+                        loss = (total_loss / total_non_masked_tokens).sum()
                     # TODO: do we still need grad acc...? I think so.
                     loss = loss / accumulation_steps
                     self.model.backward(loss)
@@ -1926,9 +1948,34 @@ def maybe_evaluate(
         # timeout 0.01 if this is the last training step or we're not evaluating
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
         timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_freq < 0) else 100
-        eval_result = evaluation_inference_results_Q.get(timeout=timeout)
+        results = []
+        for _ in range(len(eval_prompt_token_ids)):
+            eval_result = evaluation_inference_results_Q.get(timeout=timeout)
+            results.append(eval_result)
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
+        responses, finish_reasons, request_infos = [], [], []
+        for res in results:
+            # res.responses / res.finish_reasons are usually lists, but be defensive
+            responses.extend(res.responses if isinstance(res.responses, (list, tuple)) else [res.responses])
+            finish_reasons.extend(
+                res.finish_reasons if isinstance(res.finish_reasons, (list, tuple)) else [res.finish_reasons]
+            )
+            request_infos.append(res.request_info)
+
+        # create a combined request info
+        combined_request_info = RequestInfo(
+            num_calls=[ri.num_calls for ri in request_infos],
+            timeouts=[ri.timeouts for ri in request_infos],
+            tool_errors=[ri.tool_errors for ri in request_infos],
+            tool_outputs=[ri.tool_outputs for ri in request_infos],
+            tool_runtimes=[ri.tool_runtimes for ri in request_infos],
+            tool_calleds=[ri.tool_calleds for ri in request_infos],
+        )
+
+        seq_lens = np.fromiter((len(r) for r in responses), dtype=int)
+        decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
+        stop_rate = sum(fr == "stop" for fr in finish_reasons) / len(finish_reasons)
 
         eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
         eval_decoded_responses = tokenizer.batch_decode(eval_result.responses, skip_special_tokens=True)
@@ -1937,42 +1984,41 @@ def maybe_evaluate(
         )
 
         # get and log evaluation metrics
-        eval_scores, eval_reward_metrics = asyncio.run(
+        eval_scores, reward_metrics = asyncio.run(
             reward_fn(
-                eval_result.responses,
-                eval_decoded_responses,
+                responses,
+                decoded_responses,
                 eval_ground_truths,
                 eval_dataset_names,
-                eval_result.finish_reasons,
-                eval_result.request_info,
+                finish_reasons,
+                combined_request_info,
             )
         )
-        eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
-        eval_metrics = {
-            "eval/scores": np.array(eval_scores).mean(),
-            "eval/sequence_lengths": eval_sequence_lengths.mean(),
-            "eval/sequence_lengths_min": eval_sequence_lengths.min(),
-            "eval/sequence_lengths_max": eval_sequence_lengths.max(),
-            "eval/stop_rate": eval_stop_rate,
-            **eval_reward_metrics,
+        reward_metrics = {f"eval/{k}": v for k, v in reward_metrics.items()}
+        metrics = {
+            "eval/scores": np.mean(eval_scores),
+            "eval/sequence_lengths": seq_lens.mean(),
+            "eval/sequence_lengths_min": seq_lens.min(),
+            "eval/sequence_lengths_max": seq_lens.max(),
+            "eval/stop_rate": stop_rate,
+            **reward_metrics,
         }
-        print_rich_single_line_metrics(eval_metrics)
-        for key, value in eval_metrics.items():
-            writer.add_scalar(key, value, episode)
-        table = {}
-        table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
-        table["response"] = eval_decoded_responses
-        table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
-        table["scores"] = eval_scores
-        table["ground_truth"] = eval_ground_truths
-        df = pd.DataFrame(table)
+
+        print_rich_single_line_metrics(metrics)
+        for k, v in metrics.items():
+            writer.add_scalar(k, v, episode)
+        df = pd.DataFrame({
+            "prompt":       tokenizer.batch_decode(eval_prompt_token_ids),
+            "response":     [t.replace(tokenizer.pad_token, "") for t in decoded_responses],
+            "scores":       eval_scores,
+            "ground_truth": eval_ground_truths,
+        })
         if args.with_tracking:
             import wandb
 
             wandb.log({"sample_completions": wandb.Table(dataframe=df)})
         else:
             print_rich_table(df.iloc[:1])
-        del table
     except Empty:
         logger.warning("[Main Thread] 🙈 Evaluation responses not received")
 

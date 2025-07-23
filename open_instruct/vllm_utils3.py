@@ -272,13 +272,15 @@ class LLMRayActor:
                 tool_calleds=tool_calleds,
             )
 
+            ds_index = dataset_indices[i] if dataset_indices is not None else None
+
             results.append(
                 GenerationResult(
                     responses=response_ids,
                     finish_reasons=finish_reasons,
                     masks=masks,
                     request_info=request_info,
-                    dataset_index=[dataset_indices[i]],
+                    dataset_index=[ds_index],
                 )
             )
 
