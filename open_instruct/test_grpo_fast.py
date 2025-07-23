@@ -209,6 +209,13 @@ class TestGrpoFastVLLM(unittest.TestCase):
                 # Generate num_samples_per_prompt responses for each prompt
                 total_responses = batch_size * num_samples_per_prompt
 
+                # Replicate dataset indices based on num_samples_per_prompt
+                # When num_samples_per_prompt > 1, vLLM repeats the indices
+                replicated_indices = []
+                if request.dataset_index:
+                    for idx in request.dataset_index:
+                        replicated_indices.extend([idx] * num_samples_per_prompt)
+
                 mock_result = GenerationResult(
                     responses=[[1, 2, 3] for _ in range(total_responses)],
                     finish_reasons=["stop"] * total_responses,
@@ -221,7 +228,7 @@ class TestGrpoFastVLLM(unittest.TestCase):
                         tool_runtimes=[0.0] * total_responses,
                         tool_calleds=[False] * total_responses,
                     ),
-                    dataset_index=request.dataset_index,  # Keep original indices (not replicated)
+                    dataset_index=replicated_indices if replicated_indices else request.dataset_index,
                 )
 
                 # Push to results queue
@@ -419,15 +426,88 @@ class TestGrpoFastVLLM(unittest.TestCase):
             inference_results_Q, pending_queries_map, mock_args, training_step=1
         )
 
-        # Verify results - note that queries/ground_truths/datasets are NOT replicated yet
-        # They get replicated later in data_preparation_thread
-        self.assertEqual(combined_queries, queries_next)
-        self.assertEqual(combined_ground_truths, ground_truths_next)
-        self.assertEqual(combined_datasets, datasets_next)
+        # Verify results - with the fix, queries/ground_truths/datasets ARE replicated
+        # based on num_samples_per_prompt
+        expected_queries = []
+        expected_ground_truths = []
+        expected_datasets = []
+        for i in range(num_unique_prompts_rollout):
+            expected_queries.extend([f"query_{i}"] * num_samples_per_prompt)
+            expected_ground_truths.extend([f"truth_{i}"] * num_samples_per_prompt)
+            expected_datasets.extend([f"dataset_{i}"] * num_samples_per_prompt)
+
+        self.assertEqual(combined_queries, expected_queries)
+        self.assertEqual(combined_ground_truths, expected_ground_truths)
+        self.assertEqual(combined_datasets, expected_datasets)
         self.assertEqual(len(pending_queries_map), 0)
 
         # Verify that we have the correct number of responses (256 = 16 prompts * 16 samples per prompt)
         self.assertEqual(len(combined_result.responses), 256)
+
+
+    def test_multiple_samples_with_repeated_indices(self):
+        """Test that the fix properly handles repeated dataset indices from vLLM"""
+        vllm_num_engines = 1
+        num_unique_prompts = 4
+        num_samples_per_prompt = 4
+
+        # Create mock args
+        mock_args = Mock()
+        mock_args.vllm_num_engines = vllm_num_engines
+        mock_args.num_samples_per_prompt_rollout = num_samples_per_prompt
+
+        # Create test data
+        pending_queries_map = {
+            0: ("query_0", "truth_0", "dataset_0"),
+            1: ("query_1", "truth_1", "dataset_1"),
+            2: ("query_2", "truth_2", "dataset_2"),
+            3: ("query_3", "truth_3", "dataset_3"),
+        }
+
+        # Create a mock result with repeated indices (simulating multiple samples per prompt)
+        # [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]
+        repeated_indices = []
+        for i in range(num_unique_prompts):
+            repeated_indices.extend([i] * num_samples_per_prompt)
+
+        mock_result = GenerationResult(
+            responses=[[1, 2, 3] for _ in range(len(repeated_indices))],
+            finish_reasons=["stop"] * len(repeated_indices),
+            masks=[[1, 1, 1] for _ in range(len(repeated_indices))],
+            request_info=RequestInfo(
+                num_calls=[0] * len(repeated_indices),
+                timeouts=[0] * len(repeated_indices),
+                tool_errors=[""] * len(repeated_indices),
+                tool_outputs=[""] * len(repeated_indices),
+                tool_runtimes=[0.0] * len(repeated_indices),
+                tool_calleds=[False] * len(repeated_indices),
+            ),
+            dataset_index=repeated_indices,
+        )
+
+        # Create queue and add result
+        inference_results_Q = ray_queue.Queue(maxsize=1)
+        inference_results_Q.put(mock_result)
+
+        # Call accumulate_inference_batches
+        combined_result, combined_queries, combined_ground_truths, combined_datasets = accumulate_inference_batches(
+            inference_results_Q, pending_queries_map, mock_args, training_step=1
+        )
+
+        # Verify results
+        # Each query should be repeated num_samples_per_prompt times
+        expected_queries = []
+        expected_ground_truths = []
+        expected_datasets = []
+        for i in range(num_unique_prompts):
+            expected_queries.extend([f"query_{i}"] * num_samples_per_prompt)
+            expected_ground_truths.extend([f"truth_{i}"] * num_samples_per_prompt)
+            expected_datasets.extend([f"dataset_{i}"] * num_samples_per_prompt)
+
+        self.assertEqual(combined_queries, expected_queries)
+        self.assertEqual(combined_ground_truths, expected_ground_truths)
+        self.assertEqual(combined_datasets, expected_datasets)
+        self.assertEqual(len(pending_queries_map), 0)  # All entries should be popped
 
 
 if __name__ == "__main__":
