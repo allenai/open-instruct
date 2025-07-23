@@ -36,6 +36,8 @@ try:
     import deepspeed
     from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF, UlyssesSPDataLoaderAdapter
     from deepspeed.utils import groups
+    from deepspeed.runtime.utils import move_to_device
+
 
     # @vwxyzjn: when importing on CPU-only machines, we get the following error:
     # RuntimeError: 0 active drivers ([]). There should only be one.
@@ -687,7 +689,7 @@ class PolicyTrainerRayProcess(RayProcess):
             input_ids=input_ids[:, :-1],
             # @vwxyzjn: without clamp, we get index out of bounds errors; TODO: investigate
             attention_mask=attention_mask[:, :-1].clamp(0, 1),
-            position_ids=position_ids[:, :-1],
+            # position_ids=position_ids[:, :-1],
             return_dict=True,
         )
         logits = output.logits
@@ -834,36 +836,29 @@ class PolicyTrainerRayProcess(RayProcess):
                 "response_masks": collated_response_masks,
                 "tool_masks": collated_tool_masks,
                 "advantages": collated_advantages,
-            })
+            }, sequence_parallel_size=self.args.sequence_parallel_size, padding_token_id=pad_token_id)
             # TODO: i actually don't know what sharded_batches looks like yet.
+            sharded_batches = move_to_device(sharded_batches, self.ref_policy.device)
 
             # replace non-sharded batches with sharded batches
-            collated_query_responses = [batch["input_ids"] for batch in sharded_batches]
-            collated_attention_masks = [batch["attention_mask"] for batch in sharded_batches]
-            collated_position_ids = [batch["position_ids"] for batch in sharded_batches]
-            collated_response_masks = [batch["response_masks"] for batch in sharded_batches]
-            collated_tool_masks = [batch["tool_masks"] for batch in sharded_batches]
-            collated_advantages = [batch["advantages"] for batch in sharded_batches]
+            collated_query_responses = [batch["input_ids"].contiguous() for batch in sharded_batches]
+            collated_attention_masks = [batch["attention_mask"].contiguous() for batch in sharded_batches]
+            collated_position_ids = [batch["position_ids"].contiguous() for batch in sharded_batches]
+            collated_response_masks = [batch["response_masks"].contiguous() for batch in sharded_batches]
+            collated_tool_masks = [batch["tool_masks"].contiguous() for batch in sharded_batches]
+            collated_advantages = [batch["advantages"].contiguous() for batch in sharded_batches]
 
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
         with Timer("Inference Calculation", noop=self.rank != 0):
             with torch.no_grad():
                 for i in range(len(collated_query_responses)):
-                    query_response = collated_query_responses[i]
-                    tool_mask = collated_tool_masks[i]
-                    attention_mask = collated_attention_masks[i]
-                    position_id = collated_position_ids[i]
-                    response_mask = collated_response_masks[i]
-                    ref_logprob, _ = self.forward(
-                        self.ref_policy,
-                        query_response,
-                        attention_mask,
-                        position_id,
-                        pad_token_id,
-                        args.temperature,
-                        return_entropy=False,
-                    )
+                    query_response = collated_query_responses[i].squeeze()
+                    tool_mask = collated_tool_masks[i].squeeze()
+                    attention_mask = collated_attention_masks[i].squeeze()
+                    position_id = collated_position_ids[i].squeeze()
+                    response_mask = collated_response_masks[i].squeeze()
+                    ref_logprob, _ = self.forward( self.ref_policy, query_response, attention_mask, position_id, pad_token_id, args.temperature, return_entropy=False)
                     if args.mask_tool_use and args.tool_use:
                         # mask logprobs for tool tokens
                         response_mask = response_mask.bool() & tool_mask.bool()

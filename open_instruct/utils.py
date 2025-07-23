@@ -1440,7 +1440,64 @@ def extract_final_answer(prediction: str) -> str:
 
     return prediction
 
+import torch
+import torch.nn.functional as F
+from typing import List, Optional
 
+def pad_and_stack(
+    tensor_list: List[torch.Tensor],
+    *,
+    multiple_of: Optional[int] = None,
+    dim: int = -1,
+    pad_value: float = -100.0
+) -> torch.Tensor:
+    """
+    Collate a list of tensors by right-padding them along `dim` and stacking
+    on a new 0-th batch dimension.
+
+    Parameters
+    ----------
+    tensor_list : list[Tensor]
+        Tensors to collate.  They may differ in size along `dim`, but must
+        match everywhere else.
+    multiple_of : int | None, default None
+        If given (e.g. 8 or 64), the final length along `dim` is **rounded up**
+        so it is a multiple of this value; otherwise we pad only to the max
+        length in the batch.
+    dim : int, default -1
+        Which dimension to pad (negative indices are supported).
+    pad_value : float, default -100.0
+        Fill value for padded elements.
+
+    Returns
+    -------
+    Tensor
+        Shape (batch, *) where the `dim` dimension is the padded one.
+    """
+    # 1. Determine target length.
+    current_max = max(t.shape[dim] for t in tensor_list)
+    if multiple_of and multiple_of > 1:
+        target_len = ((current_max + multiple_of - 1) // multiple_of) * multiple_of
+    else:
+        target_len = current_max
+
+    # 2. Pad each tensor to target_len on the right side of `dim`.
+    padded = []
+    for t in tensor_list:
+        pad_needed = target_len - t.shape[dim]
+        if pad_needed == 0:
+            padded.append(t)
+            continue
+
+        # torch.nn.functional.pad wants pad sizes as
+        # (..., pad_left, pad_right) for the last dim, then second-last, etc.
+        pad_spec = [0] * (2 * t.dim())
+        pad_spec[-(2 * (dim % t.dim()) + 1)] = pad_needed  # right-pad only
+        padded.append(F.pad(t, pad_spec, value=pad_value))
+
+    return torch.stack(padded, dim=0).squeeze().contiguous()
+
+import deepspeed.comm as dist
 class UlyssesSPSplitter:
 
     def __init__(
@@ -1460,11 +1517,27 @@ class UlyssesSPSplitter:
         self.sp_world_size = sp_world_size
         self.device = device
 
-    def split_batch(self, batch):
+    def split_batch(self, batch, sequence_parallel_size=None, padding_token_id=0):
         micro_batches = defaultdict(dict)
 
+        input_ids = pad_and_stack(batch["input_ids"], pad_value=padding_token_id, multiple_of=sequence_parallel_size)
+        attention_mask = pad_and_stack(batch["attention_mask"], pad_value=0, multiple_of=sequence_parallel_size)
+        position_ids = pad_and_stack(batch["position_ids"], pad_value=0, multiple_of=sequence_parallel_size)
+        response_masks = pad_and_stack(batch["response_masks"], pad_value=0, multiple_of=sequence_parallel_size)
+        tool_masks = pad_and_stack(batch["tool_masks"], pad_value=0, multiple_of=sequence_parallel_size)
+        advantages = pad_and_stack(batch["advantages"], pad_value=0, multiple_of=sequence_parallel_size)
+
+        batch = {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "position_ids": position_ids,
+            "response_masks": response_masks,
+            "tool_masks": tool_masks,
+            "advantages": advantages,
+        }
+
         # we have batches of variable seqlen so in order to do all_gather on batches - we need to know the exact length of each tensor on each rank
-        seqlen = torch.tensor(batch["input_ids"].shape[1], dtype=torch.int64, device=self.device)
+        seqlen = torch.tensor(input_ids.shape[1], dtype=torch.int64, device=self.device)
         seqlens = [torch.zeros(1, dtype=torch.int64, device=self.device) for _ in range(self.sp_world_size)]
         dist.all_gather(seqlens, seqlen, group=self.sp_group)
         seqlens = [x[0].item() for x in seqlens]
