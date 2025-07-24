@@ -1195,10 +1195,13 @@ def accumulate_inference_batches(
         # When num_samples_per_prompt_rollout > 1, vLLM generates multiple responses per prompt
         # but dataset_indices only contains the unique indices (not replicated)
         # So we expect: len(responses) == len(dataset_indices) * num_samples_per_prompt_rollout
-        expected_responses = len(dataset_indices)
+        expected_responses = len(dataset_indices) * args.num_samples_per_prompt_rollout
         assert len(result.responses) == expected_responses, (
             f"Mismatch: number of responses ({len(result.responses)}) "
             f"doesn't match expected ({expected_responses}) for batch {batch_idx}"
+            f". {args.num_samples_per_prompt_rollout=}"
+            f", {len(dataset_indices)=}"
+            f", {args.num_unique_prompts_rollout=}"
         )
 
         # Get corresponding queries, ground_truths, datasets for each individual prompt
