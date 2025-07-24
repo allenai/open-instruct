@@ -901,6 +901,18 @@ DATASET_ORIGIN_KEY = "dataset_source"  # just 'dataset' clashes with RLVR stuff 
 TOKENIZED_SFT_DATASET_KEYS = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY]
 TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY, DATASET_ORIGIN_KEY]
 
+
+def _remove_dataset_source_field(dataset: Dataset) -> Dataset:
+    """Remove dataset_source field from dataset if it exists.
+    
+    This should be called after statistics collection but before returning
+    the final dataset to avoid storing unnecessary metadata in cached datasets.
+    """
+    if DATASET_ORIGIN_KEY in dataset.column_names:
+        return dataset.remove_columns([DATASET_ORIGIN_KEY])
+    return dataset
+
+
 # Preference dataset
 # NOTE (Costa): the `INPUT_IDS_PROMPT_KEY` is just for visualization purposes only
 # also we don't really need `CHOSEN_ATTENTION_MASK_KEY` and `REJECTED_ATTENTION_MASK_KEY`
@@ -1787,9 +1799,20 @@ def get_cached_dataset_tulu_with_statistics(
         )
     elif dataset_cache_mode == "hf":
         cache = DatasetTransformationCache(config_hash=dataset_config_hash, hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(
+    
+    result = cache.load_or_transform_dataset(
         dcs, tc, dataset_skip_cache=dataset_skip_cache, return_statistics=return_statistics
     )
+    
+    if return_statistics:
+        dataset, statistics = result
+        # Remove dataset_source field after statistics collection but before return
+        dataset = _remove_dataset_source_field(dataset)
+        return dataset, statistics
+    else:
+        dataset = result
+        # Remove dataset_source field before return
+        return _remove_dataset_source_field(dataset)
 
 
 def get_cached_dataset_tulu(
@@ -1818,7 +1841,7 @@ def get_cached_dataset_tulu(
         dataset_local_cache_dir,
         dataset_skip_cache,
         return_statistics=False,
-    )[0]
+    )
 
 
 def test_sft_dpo_same_tokenizer():
