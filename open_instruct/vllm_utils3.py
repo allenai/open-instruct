@@ -16,10 +16,8 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 import dataclasses
-import logging
 import os
 import queue
-import sys
 from datetime import timedelta
 from typing import Any, List, Optional, Union
 
@@ -37,8 +35,6 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
-
-logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -155,18 +151,6 @@ def init_process_group(
     return pg
 
 
-def _setup_logger(name: str) -> logging.Logger:
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)  # otherwise INFO is filtered
-    handler = logging.StreamHandler(sys.stdout)
-    formatter = logging.Formatter("%(asctime)s (%(process)d) %(levelname)s %(message)s")
-    handler.setFormatter(formatter)
-    logger.handlers.clear()  # workers may be reused; avoid duplicates
-    logger.addHandler(handler)
-    logger.propagate = False  # don't send to root twice
-    return logger
-
-
 @ray.remote
 class LLMRayActor:
     def __init__(
@@ -179,10 +163,6 @@ class LLMRayActor:
         eval_results_queue=None,
         **kwargs,
     ):
-        # We have to call this here as we need to initialize the logger within
-        # ray.
-        self.logger = _setup_logger(name="LLMRayActor")
-        self.logger.info("Starting to initialize LLMRayActor.")
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
@@ -231,34 +211,27 @@ class LLMRayActor:
             try:
                 # Use a short timeout to check for empty queue
                 request = self.prompt_queue.get(timeout=0.1)
-                self.logger.info("[vLLM] Successfully got request from queue")
                 # Unpack request
                 prompts = request.prompts
                 training_step = request.training_step
                 eval_prompts = request.eval_prompts
                 dataset_index = request.dataset_index
-                self.logger.info(f"[vLLM] Processing request for training_step={request.training_step}")
 
                 # Generate responses for training prompts
                 result = self._generate_batch(
                     prompts, sampling_params, dataset_index=dataset_index, training_step=training_step
                 )
-                self.logger.info(f"[vLLM] Generated {len(result.responses)} responses")
 
                 # Put result in queue
                 self.results_queue.put(result)
-                self.logger.info("[vLLM] Successfully put result")
 
                 # Handle eval prompts if needed
                 if eval_prompts and eval_freq and training_step % eval_freq == 0:
-                    self.logger.info(f"[vLLM] Generating eval responses for step {training_step}")
                     eval_result = self._generate_batch(
                         eval_prompts, eval_sampling_params, dataset_index=dataset_index, training_step=training_step
                     )
                     eval_result.is_eval = True
-                    self.logger.info(f"[vLLM] Generated {len(eval_result.responses)} eval responses")
                     self.eval_results_queue.put(eval_result)
-                    self.logger.info("[vLLM] Successfully put eval result to eval queue")
 
             except queue.Empty:
                 break
@@ -271,12 +244,7 @@ class LLMRayActor:
         training_step: Optional[int] = None,
     ) -> GenerationResult:
         """Generate responses for a batch of prompts."""
-        self.logger.info(f"[vLLM] Starting generation for {len(prompts)} prompts")
-        self.logger.info(f"[vLLM] Sampling params n={sampling_params.n}, temperature={sampling_params.temperature}")
         outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
-        self.logger.info(f"[vLLM] Generation complete, got {len(outputs)} outputs")
-        total_responses = sum(len(output.outputs) for output in outputs)
-        self.logger.info(f"[vLLM] Total responses across all prompts: {total_responses}")
 
         # Process outputs
         response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]

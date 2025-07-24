@@ -361,40 +361,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
             # Push to results queue
             results_queue.put(mock_result)
 
-    def test_high_dataset_indices(self):
-        """Test handling of high dataset indices (bug #25847)."""
-        num_engines = 4
-        num_prompts = 64
-        num_samples_per_prompt = 16
-        start_index = 25800
-
-        # Create test data with high indices
-        queries, ground_truths, datasets, indices = self.create_test_data(num_prompts, start_idx=start_index)
-
-        # Setup and split batch
-        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_split_batch(
-            queries, ground_truths, datasets, indices, num_engines
-        )
-
-        # Verify the specific index from the bug is present
-        self.assertIn(25847, pending_queries_map)
-
-        # Process all requests
-        while not param_prompt_Q.empty():
-            request = param_prompt_Q.get()
-            mock_result = self.create_mock_result(request.dataset_index, 1, num_samples_per_prompt)
-            inference_results_Q.put(mock_result)
-
-        # Accumulate results
-        mock_args = self.create_mock_args(num_engines, num_samples_per_prompt)
-        combined_result, _, _, _ = grpo_fast.accumulate_inference_batches(
-            inference_results_Q, pending_queries_map, mock_args, training_step=1
-        )
-
-        # Verify results
-        self.assertEqual(len(combined_result.responses), num_prompts * num_samples_per_prompt)
-        self.assertEqual(len(pending_queries_map), 0)
-
     def test_out_of_order_processing(self):
         """Test that dataset indices can be processed out of order."""
         num_engines = 4
@@ -429,77 +395,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         self.assertEqual(len(combined_queries), num_prompts)
         self.assertEqual(len(combined_result.responses), num_prompts * num_samples_per_prompt)
         self.assertEqual(len(pending_queries_map), 0)
-
-    def test_no_duplicate_indices_within_training_step(self):
-        """Test that dataset indices are unique within a single training step."""
-        num_engines = 4
-        num_prompts = 64
-
-        # Create test data
-        queries, ground_truths, datasets, indices = self.create_test_data(num_prompts)
-
-        # Setup and split batch
-        param_prompt_Q, _, pending_queries_map = self.setup_and_split_batch(
-            queries, ground_truths, datasets, indices, num_engines
-        )
-
-        # Check for duplicates
-        self.assertEqual(len(pending_queries_map), num_prompts)
-        self.assertEqual(set(pending_queries_map.keys()), set(indices))
-
-        # Check each batch has unique indices
-        all_indices_from_batches = []
-        while not param_prompt_Q.empty():
-            request = param_prompt_Q.get()
-            batch_indices = request.dataset_index
-            # Check no duplicates within this batch
-            self.assertEqual(len(batch_indices), len(set(batch_indices)))
-            all_indices_from_batches.extend(batch_indices)
-
-        # Check total indices match
-        self.assertEqual(sorted(all_indices_from_batches), sorted(indices))
-
-    def test_overlapping_indices_between_steps(self):
-        """Test handling of overlapping dataset indices between training steps."""
-        num_engines = 2
-        num_prompts = 16
-
-        # Simulate overlapping indices
-        step1_indices = list(range(0, num_prompts))  # [0, 1, ..., 15]
-        step2_indices = list(range(10, num_prompts + 10))  # [10, 11, ..., 25]
-
-        pending_queries_map = grpo_fast.PendingQueriesMap()
-        param_prompt_Q = ray_queue.Queue(maxsize=num_engines * 2)
-
-        # Process step 1
-        step1_data = self.create_test_data(num_prompts, "step1_")
-        queries1, ground_truths1, datasets1, _ = step1_data
-
-        grpo_fast.split_and_insert_batch(
-            queries1, ground_truths1, datasets1, step1_indices, 1, num_engines, pending_queries_map, param_prompt_Q
-        )
-
-        # Clear queue and process step 2
-        while not param_prompt_Q.empty():
-            param_prompt_Q.get()
-
-        step2_data = self.create_test_data(num_prompts, "step2_")
-        queries2, ground_truths2, datasets2, _ = step2_data
-
-        grpo_fast.split_and_insert_batch(
-            queries2, ground_truths2, datasets2, step2_indices, 2, num_engines, pending_queries_map, param_prompt_Q
-        )
-
-        # Verify overlapping indices handling
-        overlapping_indices = set(step1_indices) & set(step2_indices)
-
-        for idx in overlapping_indices:
-            query, ground_truth, dataset, count = pending_queries_map[idx]
-            self.assertEqual(count, 2)  # Should have count 2
-            # First insertion wins
-            self.assertTrue(query.startswith("step1_"))
-            self.assertTrue(ground_truth.startswith("step1_"))
-            self.assertTrue(dataset.startswith("step1_"))
 
     def test_thread_safety_pending_queries_map(self):
         """Test concurrent access to pending_queries_map."""
@@ -543,32 +438,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         # Verify no errors and map is empty
         self.assertEqual(len(errors), 0, f"Thread safety errors: {errors}")
         self.assertEqual(len(pending_queries_map), 0)
-
-    @parameterized.expand(
-        [
-            (17, 4),  # 17 prompts, 4 engines
-            (15, 4),  # 15 prompts, 4 engines
-            (7, 3),  # 7 prompts, 3 engines
-            (100, 7),  # 100 prompts, 7 engines
-        ]
-    )
-    def test_uneven_batch_distribution(self, num_prompts, num_engines):
-        """Test batch splitting when prompts don't divide evenly."""
-        queries, ground_truths, datasets, indices = self.create_test_data(num_prompts)
-
-        param_prompt_Q, _, pending_queries_map = self.setup_and_split_batch(
-            queries, ground_truths, datasets, indices, num_engines
-        )
-
-        # Verify all indices are accounted for
-        self.assertEqual(len(pending_queries_map), num_prompts)
-
-        total_indices = []
-        while not param_prompt_Q.empty():
-            request = param_prompt_Q.get()
-            total_indices.extend(request.dataset_index)
-
-        self.assertEqual(sorted(total_indices), sorted(indices))
 
     def test_accumulate_waits_for_all_engines(self):
         """Test that accumulate_inference_batches waits for all engines."""

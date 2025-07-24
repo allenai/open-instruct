@@ -1160,9 +1160,6 @@ def accumulate_inference_batches(
     Returns:
         Tuple of (combined_result, combined_queries, combined_ground_truths, combined_datasets)
     """
-    logger.info(f"[ACCUMULATE] Starting accumulate_inference_batches for training_step={training_step}")
-    logger.info(f"  - expecting results from {args.vllm_num_engines} engines")
-    logger.info(f"  - queue size: {inference_results_Q.qsize()}/{inference_results_Q.maxsize}")
 
     # Collect results from all engines
     results = []
@@ -1178,12 +1175,8 @@ def accumulate_inference_batches(
     )
 
     for batch_idx in pbar:
-        logger.info(f"[ACCUMULATE] Waiting for result {batch_idx + 1}/{args.vllm_num_engines}")
         # Get result from queue
         result = inference_results_Q.get()
-        logger.info(
-            f"[ACCUMULATE] Got result {batch_idx + 1}, training_step in result: {result.training_step if hasattr(result, 'training_step') else 'N/A'}"
-        )
 
         # Accept results from any training step as long as we have entries in the map
         # This prevents synchronization issues when results arrive out of order
@@ -1753,11 +1746,6 @@ def split_and_insert_batch(
     eval_prompt_token_ids=None,
 ):
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    logger.info("[SPLIT_BATCH] Starting split_and_insert_batch:")
-    logger.info(f"  - training_step: {training_step}")
-    logger.info(f"  - total queries: {len(queries_next)}")
-    logger.info(f"  - vllm_num_engines: {vllm_num_engines}")
-    logger.info(f"  - queue size before: {param_prompt_Q.qsize()}/{param_prompt_Q.maxsize}")
 
     # Split the batch over the VLLM engines.
     inference_batch_size = len(queries_next) // vllm_num_engines
@@ -1774,15 +1762,6 @@ def split_and_insert_batch(
         for i, dataset_idx in enumerate(batch_dataset_indices):
             pending_queries_map.insert(dataset_idx, batch_queries[i], batch_ground_truths[i], batch_datasets[i])
 
-        logger.info(f"[SPLIT_BATCH] About to put PromptRequest for engine {batch_idx + 1}/{vllm_num_engines}:")
-        logger.info(f"  - training_step: {training_step}")
-        logger.info(f"  - num_prompts: {len(batch_queries)}")
-        logger.info(
-            f"  - dataset_indices: {batch_dataset_indices[:5]}..."
-            if len(batch_dataset_indices) > 5
-            else f"  - dataset_indices: {batch_dataset_indices}"
-        )
-
         # Use PromptRequest for Ray queue with batch-specific dataset_index list
         prompt_request = PromptRequest(
             prompts=batch_queries,
@@ -1790,22 +1769,11 @@ def split_and_insert_batch(
             eval_prompts=eval_prompt_token_ids,
             dataset_index=batch_dataset_indices,
         )
-        logger.info(f"[SPLIT_BATCH] About to put request into queue (id: {id(param_prompt_Q)})")
-        logger.info(
-            f"[SPLIT_BATCH] Request details: training_step={prompt_request.training_step}, num_prompts={len(prompt_request.prompts)}"
-        )
 
         try:
             param_prompt_Q.put(prompt_request)
-            logger.info(f"[SPLIT_BATCH] Successfully put request for engine {batch_idx + 1}")
-            # Verify it was added
-            new_size = param_prompt_Q.qsize()
-            logger.info(f"[SPLIT_BATCH] Queue size after put: {new_size}")
-        except Exception as e:
-            logger.error(f"[SPLIT_BATCH] ERROR putting request into queue: {e}")
+        except Exception:
             raise
-
-    logger.info(f"[SPLIT_BATCH] Finished. Queue size after: {param_prompt_Q.qsize()}/{param_prompt_Q.maxsize}")
 
 
 def sync_weights_and_prepare_prompts(
@@ -1839,7 +1807,6 @@ def sync_weights_and_prepare_prompts(
             ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
         # Now send the actual batch after weight sync
-        logger.info(f"[SYNC_WEIGHTS] Sending batch for training_step={training_step} AFTER weight sync")
         split_and_insert_batch(
             queries_next,
             ground_truths_next,
@@ -2239,11 +2206,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     reward_fn = make_reward_fn(args)
 
     # Verify all vLLM engines are ready
-    logger.info(f"Verifying {len(vllm_engines)} vLLM engines are ready")
     for i, engine in enumerate(vllm_engines):
         ray.get(engine.ready.remote())
-        logger.info(f"vLLM engine {i + 1}/{len(vllm_engines)} is ready")
-    logger.info("======== ✅ All vllm engines verified ready =========")
 
     packing_thread = threading.Thread(
         target=data_preparation_thread,
@@ -2257,14 +2221,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             args.num_training_steps,
         ),
     )
-    logger.info("Starting data preparation thread...")
     packing_thread.start()
-    logger.info("======== ✅ data preparation thread started =========")
 
     # Send initial data to both threads.
-    logger.info("Getting initial dataset indices...")
     dataset_indices = next(iter_dataloader)
-    logger.info(f"Got {len(dataset_indices)} initial dataset indices")
     data_next = train_dataset[dataset_indices]
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
@@ -2286,16 +2246,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     num_total_tokens = 0
     start_time = time.time()
 
-    logger.info("\n[MAIN_LOOP] Starting main training loop")
-    logger.info(f"  - resume_training_step: {resume_training_step}")
-    logger.info(f"  - args.num_training_steps: {args.num_training_steps}")
-    logger.info(f"  - will process steps: {resume_training_step} to {args.num_training_steps}")
-    logger.info(f"  - args.async_mode: {args.async_mode}")
-
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
-            logger.info(f"\n[MAIN_LOOP] Starting training_step={training_step}/{args.num_training_steps}")
-
             episode += (
                 args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
             )  # each sample is an episode
@@ -2317,7 +2269,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             )
 
             # Start vLLM engines to process until queue is empty
-            logger.info(f"[MAIN_LOOP] Starting {len(vllm_engines)} vLLM engines to process queue")
             vllm_refs = []
             for i, engine in enumerate(vllm_engines):
                 ref = engine.process_from_queue.remote(
@@ -2330,10 +2281,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 vllm_refs.append(ref)
 
             # Wait for all engines to complete processing
-            logger.info("[MAIN_LOOP] Waiting for all vLLM engines to finish processing queue")
-            results = ray.get(vllm_refs)
-            for i, result in enumerate(results):
-                logger.info(f"[MAIN_LOOP] vLLM engine {i + 1} completed: {result}")
+            ray.get(vllm_refs)
             collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
                 packed_sequences_Q, num_total_tokens
             )
