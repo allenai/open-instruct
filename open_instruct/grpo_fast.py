@@ -1220,7 +1220,6 @@ def accumulate_inference_batches(
         batch_datasets = []
 
         for dataset_idx in dataset_indices:
-            # Use thread-safe pop operation
             query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
 
             # Don't replicate - just append once per unique index
@@ -1545,9 +1544,6 @@ def data_preparation_thread(
             logger.warning(f"No responses in batch {training_step}.")
 
         # Put the packed sequences and metrics into the output queue
-        logger.info(
-            f"About to add to packed_sequences. Length: {packed_sequences_Q.qsize() / packed_sequences_Q.maxsize}"
-        )
         packed_sequences_Q.put(
             {
                 "packed_sequences": packed_sequences,  # for debugging purposes
@@ -1761,7 +1757,6 @@ def split_and_insert_batch(
     eval_prompt_token_ids=None,
 ):
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-
     # Split the batch over the VLLM engines.
     inference_batch_size = len(queries_next) // vllm_num_engines
     for batch_idx in range(vllm_num_engines):
@@ -1778,18 +1773,13 @@ def split_and_insert_batch(
             pending_queries_map.insert(dataset_idx, batch_queries[i], batch_ground_truths[i], batch_datasets[i])
 
         # Use PromptRequest for Ray queue with batch-specific dataset_index list
-        prompt_request = PromptRequest(
+        param_prompt_Q.put(PromptRequest(
             prompts=batch_queries,
             training_step=training_step,
             eval_prompts=eval_prompt_token_ids,
             dataset_index=batch_dataset_indices,
-        )
-
-        try:
-            param_prompt_Q.put(prompt_request)
-        except Exception:
-            raise
-
+        ))
+        
 
 def sync_weights_and_prepare_prompts(
     training_step: int,
@@ -1812,16 +1802,14 @@ def sync_weights_and_prepare_prompts(
         queries_next = data_next[INPUT_IDS_PROMPT_KEY]
         ground_truths_next = data_next[GROUND_TRUTHS_KEY]
         datasets_next = data_next[VERIFIER_SOURCE_KEY]
-
         with Timer(
             "[Main Thread] 🔄 Loading weights using shared memory"
             if args.async_mode
             else "🔄 Loading weights using shared memory"
         ):
-            # Sync weights using ray.get on all tasks at once (original approach)
             ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
-
-        # Now send the actual batch after weight sync
+            
+    if args.async_mode or training_step != 1:
         split_and_insert_batch(
             queries_next,
             ground_truths_next,
@@ -1835,8 +1823,6 @@ def sync_weights_and_prepare_prompts(
         )
 
         return queries_next, ground_truths_next, datasets_next, dataset_indices
-
-    # For training_step == 1, we don't sync weights and the initial batch was already sent
     return queries_next, ground_truths_next, datasets_next, dataset_indices
 
 
