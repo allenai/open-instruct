@@ -367,13 +367,20 @@ def create_vllm_engines(
             additional_kwargs["tools"] = tools
             additional_kwargs["max_tool_calls"] = max_tool_calls_dict
 
+        # Prepare environment variables for Ray actor
+        env_vars = {"VLLM_ENABLE_V1_MULTIPROCESSING": "0"}
+        
+        # Pass TORCH_CUDA_ARCH_LIST if it's set in the main process
+        if "TORCH_CUDA_ARCH_LIST" in os.environ:
+            env_vars["TORCH_CUDA_ARCH_LIST"] = os.environ["TORCH_CUDA_ARCH_LIST"]
+        
         vllm_engines.append(
             LLMRayActor.options(
                 num_cpus=num_gpus,
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
                 # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
-                runtime_env=ray.runtime_env.RuntimeEnv(env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0"}),
+                runtime_env=ray.runtime_env.RuntimeEnv(env_vars=env_vars),
             ).remote(
                 model=pretrain,
                 revision=revision,

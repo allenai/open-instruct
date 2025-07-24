@@ -1597,7 +1597,7 @@ def create_model_and_optimizer(
 ) -> tuple[ModelGroup, list[LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Ray initialization
-    ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
+    #ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
 
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -2061,6 +2061,9 @@ def cleanup_judge_clients():
 
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_samples: int = 32):
+    # Check if TORCH_CUDA_ARCH_LIST is set in main thread
+    logger.info(f"[Main Thread] TORCH_CUDA_ARCH_LIST = {os.environ.get('TORCH_CUDA_ARCH_LIST', 'NOT SET')}")
+    
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
     beaker_config, writer, wandb_url = setup_experiment_tracking(args, tc, model_config)
