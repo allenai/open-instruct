@@ -1448,10 +1448,11 @@ class DatasetConfig:
             extra_indices = rng.choice(original_size, size=extra_samples, replace=False)
             indices.extend(extra_indices.tolist())
 
-        print(
-            f"Upsampling dataset {self.dataset_name} from {original_size} to {target_size} samples "
-            f"({full_repeats} full repeats + {extra_samples} random samples)"
-        )
+        if target_size > original_size:
+            print(
+                f"Upsampling dataset {self.dataset_name} from {original_size} to {target_size} samples "
+                f"({full_repeats} full repeats + {extra_samples} random samples)"
+            )
 
         return self.dataset.select(indices)
 
@@ -1621,8 +1622,7 @@ class LocalDatasetTransformationCache:
         dcs: List[DatasetConfig],
         tc: TokenizerConfig,
         dataset_skip_cache: bool = False,
-        return_statistics: bool = False,
-    ) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
+    ) -> Tuple[Dataset, Dict[str, Any]]:
         """Load dataset from local cache if it exists, otherwise transform and cache it locally."""
         cache_path = self.get_cache_path()
 
@@ -1695,9 +1695,7 @@ class LocalDatasetTransformationCache:
         all_statistics = {"per_dataset_stats": dataset_statistics, "dataset_order": dataset_order}
 
         if dataset_skip_cache:
-            if return_statistics:
-                return combined_dataset, all_statistics
-            return combined_dataset, None
+            return combined_dataset, all_statistics
 
         # Save to local cache
         combined_dataset.save_to_disk(cache_path)
@@ -1712,9 +1710,7 @@ class LocalDatasetTransformationCache:
         print(f"✅ Found cached dataset at {cache_path}")
 
         loaded_dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
-        if return_statistics:
-            return loaded_dataset, all_statistics
-        return loaded_dataset, None
+        return loaded_dataset, all_statistics
 
 
 def get_cached_dataset(
@@ -1731,7 +1727,7 @@ def get_cached_dataset(
         cache = DatasetTransformationCache(hf_entity=hf_entity)
     return cache.load_or_transform_dataset(
         dcs, tc, dataset_skip_cache=dataset_skip_cache, return_statistics=return_statistics
-    )[0]
+    )
 
 
 def get_cached_dataset_tulu_with_statistics(
@@ -1800,15 +1796,13 @@ def get_cached_dataset_tulu_with_statistics(
     elif dataset_cache_mode == "hf":
         cache = DatasetTransformationCache(config_hash=dataset_config_hash, hf_entity=hf_entity)
 
-    result = cache.load_or_transform_dataset(
+    dataset, statistics = cache.load_or_transform_dataset(
         dcs, tc, dataset_skip_cache=dataset_skip_cache, return_statistics=return_statistics
     )
 
     if return_statistics:
-        dataset, statistics = result
         return _remove_dataset_source_field(dataset), statistics
     else:
-        dataset = result
         return _remove_dataset_source_field(dataset)
 
 
