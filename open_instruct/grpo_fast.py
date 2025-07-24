@@ -1811,7 +1811,6 @@ def sync_weights_and_prepare_prompts(
         ):
             ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
-    if args.async_mode or training_step != 1:
         split_and_insert_batch(
             queries_next,
             ground_truths_next,
@@ -1824,7 +1823,6 @@ def sync_weights_and_prepare_prompts(
             eval_prompt_token_ids,
         )
 
-        return queries_next, ground_truths_next, datasets_next, dataset_indices
     return queries_next, ground_truths_next, datasets_next, dataset_indices
 
 
@@ -2153,7 +2151,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     pprint([args, model_config])
 
     # Initialize Ray before creating Ray objects
-    ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
+    ray.init(dashboard_host="0.0.0.0")
 
     # Create Ray queues
     inference_results_Q = ray_queue.Queue(maxsize=args.async_steps)
