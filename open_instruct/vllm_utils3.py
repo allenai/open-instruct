@@ -18,16 +18,15 @@
 import dataclasses
 import logging
 import os
+import queue
 import sys
 import time
 from datetime import timedelta
-from typing import Any, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import ray
 import torch
 import torch.distributed
-
-logger = logging.getLogger(__name__)
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed.distributed_c10d import (
@@ -39,6 +38,8 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -74,94 +75,6 @@ class PromptRequest:
     training_step: Optional[int] = None
     eval_prompts: Optional[List[List[int]]] = None
     dataset_index: Optional[List[int]] = None
-
-
-@ray.remote
-class WeightUpdater:
-    """Manages weight updates between main thread and vLLM engines."""
-
-    def __init__(self, num_engines: int):
-        self.num_engines = num_engines
-        self.weight_update_available = False
-        self.weight_data_refs = {}  # name -> ray object ref
-        self.update_count = 0
-        self.current_update_id = 0
-        self.logger = logging.getLogger(__name__)
-
-    def signal_weights_available(self, weight_refs: dict):
-        """Called by main thread to signal new weights are available."""
-        self.logger.info(f"[WeightUpdater] Signaling weights available. Num params: {len(weight_refs)}")
-        self.weight_update_available = True
-        self.weight_data_refs = weight_refs
-        self.update_count = 0
-        self.current_update_id += 1
-        return self.current_update_id
-
-    def check_update_available(self):
-        """Called by vLLM actors to check if update needed."""
-        return self.weight_update_available, self.current_update_id
-
-    def get_weight_refs(self):
-        """Called by vLLM actors to get weight data references."""
-        return self.weight_data_refs
-
-    def confirm_update_complete(self, update_id: int):
-        """Called by vLLM actors after updating weights."""
-        if update_id == self.current_update_id:
-            self.update_count += 1
-            self.logger.info(f"[WeightUpdater] Update confirmed: {self.update_count}/{self.num_engines}")
-            if self.update_count >= self.num_engines:
-                self.weight_update_available = False
-                self.logger.info("[WeightUpdater] All engines updated")
-                # Clean up weight refs to free memory
-                self.weight_data_refs.clear()
-        return self.update_count
-
-    def wait_for_all_updates(self, update_id: int, timeout: float = 300):
-        """Called by main thread to wait for all engines to complete update."""
-        from tqdm import tqdm
-
-        start_time = time.time()
-        pbar = tqdm(
-            total=self.num_engines,
-            initial=self.update_count,
-            desc="Waiting for vLLM engines to update weights",
-            bar_format="{l_bar}{bar}{r_bar}\n",
-        )
-
-        last_count = self.update_count
-        while True:
-            current_count = self.update_count
-            if current_count > last_count:
-                pbar.update(current_count - last_count)
-                last_count = current_count
-
-            if current_count >= self.num_engines:
-                pbar.close()
-                self.logger.info(f"[WeightUpdater] All updates complete for update_id={update_id}")
-                return True
-
-            if time.time() - start_time > timeout:
-                pbar.close()
-                self.logger.error(
-                    f"[WeightUpdater] Timeout waiting for updates. Got {self.update_count}/{self.num_engines}"
-                )
-                return False
-
-            time.sleep(0.1)  # Poll every 100ms
-
-    def get_update_status(self):
-        """Get current update status for debugging."""
-        return {
-            "update_available": self.weight_update_available,
-            "current_update_id": self.current_update_id,
-            "update_count": self.update_count,
-            "num_engines": self.num_engines,
-        }
-
-    def ready(self):
-        """Check if the WeightUpdater is ready."""
-        return True
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -251,7 +164,7 @@ def _setup_logger(name: str) -> logging.Logger:
     handler.setFormatter(formatter)
     logger.handlers.clear()  # workers may be reused; avoid duplicates
     logger.addHandler(handler)
-    logger.propagate = False  # don’t send to root twice
+    logger.propagate = False  # don't send to root twice
     return logger
 
 
@@ -262,91 +175,71 @@ class LLMRayActor:
         *args,
         bundle_indices: list = None,
         tool_use: bool = False,
+        num_gpus: float = 0.2,
+        model: str = None,
+        tokenizer: str = None,
+        tools: List[Dict[str, Any]] = None,
         prompt_queue=None,
         results_queue=None,
         eval_results_queue=None,
-        weight_updater=None,
         **kwargs,
     ):
-        # We have to call this here as we need to initialize the logger within
-        # ray.
-        self.logger = _setup_logger(name="LLMRayActor")
-        self.logger.info("Starting to initialize LLMRayActor.")
-        noset_visible_devices = kwargs.pop("noset_visible_devices")
-        if kwargs.get("distributed_executor_backend") == "ray":
-            # a hack to make the script work.
-            # stop ray from manipulating *_VISIBLE_DEVICES
-            # at the top-level when the distributed_executor_backend is ray.
-            os.environ.pop("CUDA_VISIBLE_DEVICES", None)
-            os.environ.pop("ROCR_VISIBLE_DEVICES", None)
-        elif noset_visible_devices:
-            # We need to set CUDA_VISIBLE_DEVICES to the ray assigned GPU
-            # when the distributed_executor_backend is not ray and
-            # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
-
-        num_gpus = kwargs.pop("num_gpus")
         if bundle_indices is not None:
-            os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
-            os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
-            print(f"creating LLM with bundle_indices={bundle_indices}")
-
-        if tool_use:
-            from open_instruct.tool_utils.tool_vllm import ToolUseLLM
-
-            self.llm = ToolUseLLM(*args, **kwargs)
-        else:
-            from vllm import LLM
-
-            self.llm = LLM(*args, **kwargs)
-        self.logger.info("Initialized LLM.")
-
+            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(i) for i in bundle_indices)
+        self.tool_use = tool_use
+        # Store references to the queues
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
-        self.tool_use = tool_use
-        self.weight_updater = weight_updater
-        self.last_update_id = 0
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("[vLLM] LLMRayActor initialized")
+        self.logger.info(f"  - model: {model}")
+        self.logger.info(f"  - tokenizer: {tokenizer}")
+        self.logger.info(f"  - prompt_queue: {prompt_queue} (id: {id(prompt_queue)})")
+        self.logger.info(f"  - results_queue: {results_queue}")
+        self.logger.info(f"  - eval_results_queue: {eval_results_queue}")
 
-        # Fail fast if weight_updater is not provided
-        if self.weight_updater is None:
-            raise ValueError("weight_updater is required for LLMRayActor")
+        # Pass all initialization args to the actual LLM class
+        if tool_use:
+            from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 
-        self.logger.info(f"Queue IDs - prompt_queue: {id(prompt_queue)}, results_queue: {id(results_queue)}")
-        self.logger.info(f"Weight updater: {weight_updater}")
-        self.logger.info("Done initialize LLMRayActor.")
+            self.llm = ToolUseLLM(*args, model=model, tokenizer=tokenizer, tools=tools, **kwargs)
+        else:
+            from vllm import LLM
 
-    def generate(self, *args, **kwargs):
-        return self.llm.generate(*args, **kwargs)
+            self.llm = LLM(*args, model=model, tokenizer=tokenizer, **kwargs)
 
-    def _perform_weight_update(self, update_id: int):
-        """Pull and apply weight updates from the WeightUpdater."""
-        self.logger.info(f"[vLLM] Starting weight update for update_id={update_id}")
+        # Create ProcessGroup if needed
+        self.model_update_group = None
+        self.logger = _setup_logger(__name__)
 
-        try:
-            # Get weight references from WeightUpdater
-            weight_refs = ray.get(self.weight_updater.get_weight_refs.remote())
-            self.logger.info(f"[vLLM] Got {len(weight_refs)} weight references")
+    def init_process_group(
+        self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
+    ):
+        if self.model_update_group is None:
+            timeout = timedelta(seconds=1800)
+            backend = Backend(backend)
+            self.model_update_group = init_process_group(
+                backend=backend,
+                init_method=f"tcp://{master_address}:{master_port}",
+                world_size=world_size,
+                rank=rank_offset,
+                group_name=group_name,
+                timeout=timeout,
+            )
+            self.logger.info(
+                f"init_process_group: world_size={world_size}, rank={rank_offset}, group_name={group_name}"
+            )
 
-            # Apply each weight update
-            for name, weight_ref in weight_refs.items():
-                # Get the weight data from Ray object store
-                weight_data = ray.get(weight_ref)
-                dtype, shape, empty_cache = weight_data["dtype"], weight_data["shape"], weight_data["empty_cache"]
+        return self.model_update_group
 
-                # Apply the update through collective RPC
-                self.llm.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+    def generate(self, sampling_params, prompt_token_ids, use_tqdm=False):
+        return self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompt_token_ids, use_tqdm=use_tqdm)
 
-            # Confirm update complete
-            ray.get(self.weight_updater.confirm_update_complete.remote(update_id))
-            self.last_update_id = update_id
-            self.logger.info(f"[vLLM] Weight update complete for update_id={update_id}")
-
-        except Exception as e:
-            self.logger.error(f"[vLLM] Error during weight update: {e}")
-            import traceback
-
-            self.logger.error(traceback.format_exc())
+    def init_weight_update_group(self, master_address, master_port, rank_offset, world_size, group_name, backend):
+        return self.llm.init_weight_update_group(
+            master_address, master_port, rank_offset, world_size, group_name, backend
+        )
 
     def process_from_queue(
         self,
@@ -394,62 +287,63 @@ class LLMRayActor:
                     "num_training_steps": num_training_steps,
                 }
 
-            # Process requests until we get a None (stop signal)
+            # Process requests until queue is empty
             self.logger.info("[vLLM] Starting to process requests from queue")
+            processed_count = 0
+
             while True:
                 try:
-                    # Use a short timeout to periodically yield control back to Ray
-                    # This allows the actor to process other remote calls like update_weight
-                    request = self.prompt_queue.get(timeout=0.01)  # 10ms timeout for faster response
+                    # Use a short timeout to check for empty queue
+                    request = self.prompt_queue.get(timeout=0.1)
                     self.logger.info("[vLLM] Successfully got request from queue")
-                except Exception:
-                    # Timeout is expected - check for weight updates during this time
-                    # We already verified weight_updater is not None in __init__
-                    update_available, update_id = ray.get(self.weight_updater.check_update_available.remote())
-                    if update_available and update_id > self.last_update_id:
-                        self.logger.info(f"[vLLM] Weight update available: update_id={update_id}")
-                        self._perform_weight_update(update_id)
+                except queue.Empty:
+                    # Check if queue is truly empty
+                    if self.prompt_queue.qsize() == 0:
+                        self.logger.info(f"[vLLM] Queue empty, exiting. Processed {processed_count} requests")
+                        return {"status": "completed", "processed_count": processed_count}
                     continue
 
+                # Check if this is a stop signal
                 if request is None:
-                    self.logger.info("[vLLM] Received None (stop signal), breaking")
-                    break
+                    self.logger.info(
+                        f"[vLLM] Received stop signal (None). Processed {processed_count} requests total."
+                    )
+                    return {"status": "stopped", "processed_count": processed_count}
 
-                self.logger.info("[vLLM] Got request:")
-                self.logger.info(f"  - request.training_step: {request.training_step}")
-                self.logger.info(f"  - num_prompts: {len(request.prompts)}")
-                self.logger.info(
-                    f"  - dataset_indices: {request.dataset_index[:5]}..."
-                    if len(request.dataset_index) > 5
-                    else f"  - dataset_indices: {request.dataset_index}"
-                )
+                # Unpack request
+                prompts = request.prompts
+                training_step = request.training_step
+                eval_prompts = request.eval_prompts
+                dataset_index = request.dataset_index
 
-                # Process training prompts
-                self.logger.info(f"[vLLM] Processing {len(request.prompts)} prompts")
-                result = self._generate_batch(
-                    request.prompts, sampling_params, request.dataset_index, request.training_step
-                )
+                self.logger.info(f"[vLLM] Processing request for training_step={training_step}")
+                self.logger.info(f"  - num_prompts: {len(prompts)}")
+                self.logger.info(f"  - dataset_index: {dataset_index}")
+                if eval_prompts:
+                    self.logger.info(f"  - eval_prompts: {len(eval_prompts)}")
 
-                self.logger.info(f"[vLLM] Putting result in results_queue for training_step={request.training_step}")
+                # Generate responses for training prompts
+                result = self._generate_batch(prompts, sampling_params, dataset_index, training_step)
+                self.logger.info(f"[vLLM] Generated {len(result.responses)} responses")
+
+                # Put result in queue
                 self.results_queue.put(result)
                 self.logger.info("[vLLM] Successfully put result")
+                processed_count += 1
 
-                # Handle evaluation if needed
-                if (
-                    request.eval_prompts is not None
-                    and eval_sampling_params is not None
-                    and (request.training_step - 1) % eval_freq == 0
-                ):
-                    eval_result = self._generate_batch(
-                        request.eval_prompts, eval_sampling_params, request.dataset_index, request.training_step
-                    )
+                # Handle eval prompts if needed
+                if eval_prompts and eval_freq and training_step % eval_freq == 0:
+                    self.logger.info(f"[vLLM] Generating eval responses for step {training_step}")
+                    eval_result = self._generate_batch(eval_prompts, eval_sampling_params)
                     eval_result.is_eval = True
-                    # Put eval results in separate queue if available
-                    if self.eval_results_queue is not None:
+                    eval_result.training_step = training_step
+                    self.logger.info(f"[vLLM] Generated {len(eval_result.responses)} eval responses")
+                    if self.eval_results_queue:
                         self.eval_results_queue.put(eval_result)
                     else:
                         self.results_queue.put(eval_result)
                     self.logger.info("[vLLM] Successfully put eval result")
+
         except Exception as e:
             self.logger.error(f"[vLLM] ERROR in process_from_queue: {e}")
             self.logger.error(f"[vLLM] Exception type: {type(e).__name__}")
@@ -457,7 +351,6 @@ class LLMRayActor:
 
             tb = traceback.format_exc()
             self.logger.error(f"[vLLM] Traceback:\n{tb}")
-
             # Return error information instead of None
             return {"error": str(e), "exception_type": type(e).__name__, "traceback": tb}
 
@@ -512,7 +405,7 @@ class LLMRayActor:
             training_step=training_step,
         )
 
-    def init_process_group(
+    def init_process_group(  # noqa: F811
         self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
     ):
         return self.llm.collective_rpc(
@@ -563,15 +456,10 @@ def create_vllm_engines(
     prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
-) -> tuple[list[LLMRayActor], WeightUpdater]:
+) -> list[LLMRayActor]:
     import vllm
 
     assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
-
-    # Create WeightUpdater for coordinating weight updates
-    weight_updater = WeightUpdater.remote(num_engines)
-    ray.get(weight_updater.ready.remote())  # Ensure it's initialized
-    logger.info(f"Created WeightUpdater for {num_engines} engines")
 
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
@@ -656,7 +544,6 @@ def create_vllm_engines(
                 prompt_queue=prompt_queue,
                 results_queue=results_queue,
                 eval_results_queue=eval_results_queue,
-                weight_updater=weight_updater,
                 **additional_kwargs,
             )
         )
@@ -664,7 +551,7 @@ def create_vllm_engines(
     if vllm_enable_sleep:
         batch_vllm_engine_call(vllm_engines, "sleep", rank_0_only=False)
 
-    return vllm_engines, weight_updater
+    return vllm_engines
 
 
 def batch_vllm_engine_call(engines: List[Any], method_name: str, *args, rank_0_only: bool = True, **kwargs):
@@ -729,3 +616,4 @@ if __name__ == "__main__":
     ray.get(refs)
     output = ray.get(llm.generate.remote("San Franciso is a"))
     print(f"output: {output}")
+
