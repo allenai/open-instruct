@@ -1808,7 +1808,7 @@ def sync_weights_and_prepare_prompts(
             else "🔄 Loading weights using shared memory"
         ):
             ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
-            
+
     if args.async_mode or training_step != 1:
         split_and_insert_batch(
             queries_next,
