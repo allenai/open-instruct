@@ -7,7 +7,7 @@ from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 from vllm import SamplingParams
 
-from open_instruct.grpo_fast import accumulate_inference_batches, split_and_insert_batch
+import open_instruct.grpo_fast as grpo_fast
 from open_instruct.vllm_utils3 import GenerationResult, PromptRequest, RequestInfo, create_vllm_engines
 
 
@@ -118,7 +118,7 @@ class TestGrpoFastVLLM(unittest.TestCase):
         dataset_indices = list(range(num_unique_prompts_rollout))
 
         # Use split_and_insert_batch to split and insert data
-        split_and_insert_batch(
+        grpo_fast.split_and_insert_batch(
             queries_next,
             ground_truths_next,
             datasets_next,
@@ -169,8 +169,10 @@ class TestGrpoFastVLLM(unittest.TestCase):
             inference_results_Q.put(result)
 
         # Use accumulate_inference_batches to combine results
-        combined_result, combined_queries, combined_ground_truths, combined_datasets = accumulate_inference_batches(
-            inference_results_Q, pending_queries_map, vllm_num_engines, training_step
+        combined_result, combined_queries, combined_ground_truths, combined_datasets = (
+            grpo_fast.accumulate_inference_batches(
+                inference_results_Q, pending_queries_map, vllm_num_engines, training_step
+            )
         )
 
         # Verify that the combined results match the original input
