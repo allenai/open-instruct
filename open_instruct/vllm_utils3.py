@@ -257,11 +257,8 @@ class LLMRayActor:
                     )
                     eval_result.is_eval = True
                     self.logger.info(f"[vLLM] Generated {len(eval_result.responses)} eval responses")
-                    if self.eval_results_queue:
-                        self.eval_results_queue.put(eval_result)
-                    else:
-                        self.results_queue.put(eval_result)
-                    self.logger.info("[vLLM] Successfully put eval result")
+                    self.eval_results_queue.put(eval_result)
+                    self.logger.info("[vLLM] Successfully put eval result to eval queue")
 
             except queue.Empty:
                 break
@@ -275,8 +272,11 @@ class LLMRayActor:
     ) -> GenerationResult:
         """Generate responses for a batch of prompts."""
         self.logger.info(f"[vLLM] Starting generation for {len(prompts)} prompts")
+        self.logger.info(f"[vLLM] Sampling params n={sampling_params.n}, temperature={sampling_params.temperature}")
         outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
         self.logger.info(f"[vLLM] Generation complete, got {len(outputs)} outputs")
+        total_responses = sum(len(output.outputs) for output in outputs)
+        self.logger.info(f"[vLLM] Total responses across all prompts: {total_responses}")
 
         # Process outputs
         response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -314,6 +314,7 @@ class LLMRayActor:
             masks=masks,
             request_info=request_info,
             dataset_index=dataset_index,
+            training_step=training_step,
         )
 
     def init_process_group(
