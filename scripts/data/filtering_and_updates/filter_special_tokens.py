@@ -6,13 +6,21 @@ from huggingface_hub import HfApi
 """
 Used for stripping special tokens from text fields in a dataset.
 
-TODO support messages format.
+Supports both text format and messages/conversation format.
 
-Default is for data formatted as:
+For text format:
 Prompt
 <think>reasoning</think><answer>answer</answer>
 
-And adding \n\n between componenets of the text.
+For messages format, converts to:
+User: Question.
+
+Assistant: Answer.
+
+User: Question.
+
+Assistant: Answer.
+...
 
 e.g.
 uv run python scripts/data/filtering_and_updates/filter_special_tokens.py --dataset_name allenai/big-reasoning-traces-reformatted-keyword-filter-datecutoff-chinese-ngram --push_to_hub
@@ -41,6 +49,35 @@ def filter_special_tokens(text):
     
     return filtered_text
 
+def convert_messages_to_text(messages):
+    """Convert messages/conversation format to text format."""
+    if not isinstance(messages, list):
+        return ""
+    
+    text_parts = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+            
+        role = message.get('role', '').lower()
+        content = message.get('content', '')
+        
+        if not content:
+            continue
+            
+        # Filter special tokens from content
+        filtered_content = filter_special_tokens(content)
+        
+        if role in ['user', 'human']:
+            text_parts.append(f"User: {filtered_content}")
+        elif role in ['assistant', 'ai']:
+            text_parts.append(f"Assistant: {filtered_content}")
+        else:
+            # Handle other roles generically
+            text_parts.append(f"{role.capitalize()}: {filtered_content}")
+    
+    return "\n\n".join(text_parts)
+
 def process_dataset_row(row, column_name="text"):
     """Process a single row of the dataset to remove special tokens from specified column."""
     processed_row = row.copy()
@@ -50,16 +87,24 @@ def process_dataset_row(row, column_name="text"):
         if isinstance(value, str):
             processed_row[column_name] = filter_special_tokens(value)
         elif isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
-            # Handle conversation-like structures
-            processed_row[column_name] = []
-            for item in value:
-                processed_item = {}
-                for sub_key, sub_value in item.items():
-                    if isinstance(sub_value, str):
-                        processed_item[sub_key] = filter_special_tokens(sub_value)
-                    else:
-                        processed_item[sub_key] = sub_value
-                processed_row[column_name].append(processed_item)
+            # Handle conversation-like structures (messages/conversation format)
+            if column_name in ['messages', 'conversation']:
+                # Convert to text format and overwrite the text column
+                converted_text = convert_messages_to_text(value)
+                processed_row['text'] = converted_text
+                # Keep the original messages column as well
+                processed_row[column_name] = value
+            else:
+                # Handle other list of dict structures
+                processed_row[column_name] = []
+                for item in value:
+                    processed_item = {}
+                    for sub_key, sub_value in item.items():
+                        if isinstance(sub_value, str):
+                            processed_item[sub_key] = filter_special_tokens(sub_value)
+                        else:
+                            processed_item[sub_key] = sub_value
+                    processed_row[column_name].append(processed_item)
     
     return processed_row
 
@@ -88,6 +133,10 @@ def main():
     if args.column not in dataset.column_names:
         logger.error(f"Column '{args.column}' not found in dataset. Available columns: {dataset.column_names}")
         return
+    
+    # Auto-detect messages/conversation format
+    if args.column in ['messages', 'conversation']:
+        logger.info(f"Detected conversation format in column '{args.column}'. Will convert to text format.")
     
     # Process dataset
     logger.info("Filtering special tokens...")
@@ -123,8 +172,13 @@ def main():
     for i, row in enumerate(filtered_dataset):
         if i >= 3:  # Show first 3 examples
             break
-        if args.column in row:
-            content = str(row[args.column])[:200]
+        
+        # Show the text column if it exists (especially for converted messages)
+        if 'text' in row:
+            content = str(row['text'])[:300]
+            logger.info(f"Row {i+1} - text: {content}...")
+        elif args.column in row:
+            content = str(row[args.column])[:300]
             logger.info(f"Row {i+1} - {args.column}: {content}...")
 
 if __name__ == "__main__":
