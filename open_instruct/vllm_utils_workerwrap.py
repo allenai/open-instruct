@@ -33,15 +33,22 @@ class WorkerWrap:
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
+        import logging
+
         import torch
+
+        logger = logging.getLogger(__name__)
+        logger.info(f"[WorkerWrap] update_weight called for {name}")
 
         assert dtype == self.model_config.dtype, f"mismatch dtype: src {dtype}, dst {self.model_config.dtype}"
         weight = torch.empty(shape, dtype=dtype, device="cuda")
         if self._model_update_with_ray:
             import ray.util.collective as collective
 
+            logger.info(f"[WorkerWrap] Broadcasting weight {name} using Ray collective")
             collective.broadcast(weight, 0, group_name=self._model_update_group)
         else:
+            logger.info(f"[WorkerWrap] Broadcasting weight {name} using torch.distributed")
             torch.distributed.broadcast(weight, 0, group=self._model_update_group)
 
         self.model_runner.model.load_weights(weights=[(name, weight)])

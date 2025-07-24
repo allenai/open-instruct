@@ -669,8 +669,13 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return logprob, entropy
 
-    def setup_model_update_group(self, vllm_engines):
+    def setup_model_update_group(self, vllm_engines, weight_updater=None):
         self.vllm_engines = vllm_engines
+        self.weight_updater = weight_updater
+
+        # Fail fast if weight_updater is not provided
+        if self.weight_updater is None:
+            raise ValueError("weight_updater is required for PolicyTrainerRayProcess")
         if self.rank == 0:
             master_address = ray._private.services.get_node_ip_address()
             with socket.socket() as sock:
@@ -704,6 +709,11 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
+        logger.info("[PolicyTrainer] Starting broadcast_to_vllm")
+        logger.info(f"  - rank: {torch.distributed.get_rank()}")
+        logger.info(f"  - num vllm_engines: {len(self.vllm_engines)}")
+        # We already verified weight_updater is not None in setup_model_update_group
+
         # clear vllm cache if we need to
         cache_reset_refs = []
         if self.args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
@@ -714,40 +724,57 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.cuda.empty_cache()
         model = self.model.module
         count, num_params = 0, len(list(model.named_parameters()))
-        refss = []
+        logger.info(f"[PolicyTrainer] Total parameters to sync: {num_params}")
+
+        # Prepare weight data for Ray object store
+        weight_refs = {}
+
         if self.args.gather_whole_model:
             with deepspeed.zero.GatheredParameters(model.parameters(), enabled=self.args.deepspeed_stage == 3):
-                for name, param in model.named_parameters():
+                for name, param in tqdm(
+                    model.named_parameters(),
+                    total=num_params,
+                    desc="Preparing parameters",
+                    bar_format="{l_bar}{bar}{r_bar}\n",
+                ):
                     count += 1  # empty_cache at last param
-                    # Fire all vllm engines for broadcast
                     if torch.distributed.get_rank() == 0:
                         shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
-                        refs = [
-                            engine.update_weight.remote(
-                                name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
-                            )
-                            for engine in self.vllm_engines
-                        ]
-                        refss.extend(refs)
+                        # Store weight data in Ray object store
+                        weight_data = {"dtype": param.dtype, "shape": shape, "empty_cache": count == num_params}
+                        weight_refs[name] = ray.put(weight_data)
+                    # Broadcast the actual parameter data
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
         else:  # broadcast each parameter independently
-            for name, param in model.named_parameters():
+            logger.info("[PolicyTrainer] Using independent parameter broadcast")
+            for name, param in tqdm(
+                model.named_parameters(),
+                total=num_params,
+                desc="Preparing parameters",
+                bar_format="{l_bar}{bar}{r_bar}\n",
+            ):
                 count += 1
-                if torch.distributed.get_rank() == 0:
-                    shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
-                    refs = [
-                        engine.update_weight.remote(
-                            name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
-                        )
-                        for engine in self.vllm_engines
-                    ]
-                    refss.extend(refs)
                 with deepspeed.zero.GatheredParameters([param], enabled=self.args.deepspeed_stage == 3):
                     if torch.distributed.get_rank() == 0:
+                        shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
+                        # Store weight data in Ray object store
+                        weight_data = {"dtype": param.dtype, "shape": shape, "empty_cache": count == num_params}
+                        weight_refs[name] = ray.put(weight_data)
+                        # Broadcast the actual parameter data
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+
+        # Signal to WeightUpdater that weights are available
         if torch.distributed.get_rank() == 0:
-            ray.get(refss)
+            logger.info("[PolicyTrainer] Signaling weight update to WeightUpdater")
+            update_id = ray.get(self.weight_updater.signal_weights_available.remote(weight_refs))
+            logger.info(f"[PolicyTrainer] Weight update signaled with update_id={update_id}")
+
+            # Wait for all engines to complete the update (with progress bar)
+            success = ray.get(self.weight_updater.wait_for_all_updates.remote(update_id, timeout=300))
+            if not success:
+                logger.error("[PolicyTrainer] Timeout waiting for engines to complete weight update")
+                raise RuntimeError("Weight update timeout")
         if self.args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
             ray.get(cache_reset_refs)
 
@@ -1218,7 +1245,9 @@ def accumulate_inference_batches(
         logger.info(f"[ACCUMULATE] Waiting for result {batch_idx + 1}/{args.vllm_num_engines}")
         # Get result from queue
         result = inference_results_Q.get()
-        logger.info(f"[ACCUMULATE] Got result {batch_idx + 1}, training_step in result: {result.training_step if hasattr(result, 'training_step') else 'N/A'}")
+        logger.info(
+            f"[ACCUMULATE] Got result {batch_idx + 1}, training_step in result: {result.training_step if hasattr(result, 'training_step') else 'N/A'}"
+        )
 
         # Accept results from any training step as long as we have entries in the map
         # This prevents synchronization issues when results arrive out of order
@@ -1569,8 +1598,9 @@ def data_preparation_thread(
             logger.warning(f"No responses in batch {training_step}.")
 
         # Put the packed sequences and metrics into the output queue
-        logger.info("About to add to packed_sequences. Length: "
-                    f"{packed_sequences_Q.qsize()/packed_sequences_Q.maxsize}")
+        logger.info(
+            f"About to add to packed_sequences. Length: {packed_sequences_Q.qsize() / packed_sequences_Q.maxsize}"
+        )
         packed_sequences_Q.put(
             {
                 "packed_sequences": packed_sequences,  # for debugging purposes
@@ -1737,7 +1767,7 @@ def create_model_and_optimizer(
                 raise ValueError(f"Unknown tool: {tool}")
 
     # Create vLLM engines with queues
-    vllm_engines = create_vllm_engines(
+    vllm_engines, weight_updater = create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
         args.vllm_enforce_eager,
@@ -1761,7 +1791,12 @@ def create_model_and_optimizer(
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     logger.info("======== ✅ all models and vLLM engines initialized =========")
 
-    ray.get([m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models])
+    ray.get(
+        [
+            m.setup_model_update_group.remote(vllm_engines=vllm_engines, weight_updater=weight_updater)
+            for m in policy_group.models
+        ]
+    )
     logger.info("======== ✅ model update group setup successfully =========")
 
     if resume_training_step > 1:
@@ -1769,7 +1804,7 @@ def create_model_and_optimizer(
         with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
             ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
-    return policy_group, vllm_engines, tool_objects, resume_training_step, episode
+    return policy_group, vllm_engines, weight_updater, tool_objects, resume_training_step, episode
 
 
 def split_and_insert_batch(
@@ -1784,12 +1819,12 @@ def split_and_insert_batch(
     eval_prompt_token_ids=None,
 ):
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    logger.info(f"[SPLIT_BATCH] Starting split_and_insert_batch:")
+    logger.info("[SPLIT_BATCH] Starting split_and_insert_batch:")
     logger.info(f"  - training_step: {training_step}")
     logger.info(f"  - total queries: {len(queries_next)}")
     logger.info(f"  - vllm_num_engines: {vllm_num_engines}")
     logger.info(f"  - queue size before: {param_prompt_Q.qsize()}/{param_prompt_Q.maxsize}")
-    
+
     # Split the batch over the VLLM engines.
     inference_batch_size = len(queries_next) // vllm_num_engines
     for batch_idx in range(vllm_num_engines):
@@ -1808,19 +1843,34 @@ def split_and_insert_batch(
         logger.info(f"[SPLIT_BATCH] About to put PromptRequest for engine {batch_idx + 1}/{vllm_num_engines}:")
         logger.info(f"  - training_step: {training_step}")
         logger.info(f"  - num_prompts: {len(batch_queries)}")
-        logger.info(f"  - dataset_indices: {batch_dataset_indices[:5]}..." if len(batch_dataset_indices) > 5 else f"  - dataset_indices: {batch_dataset_indices}")
-        
-        # Use PromptRequest for Ray queue with batch-specific dataset_index list
-        param_prompt_Q.put(
-            PromptRequest(
-                prompts=batch_queries,
-                training_step=training_step,
-                eval_prompts=eval_prompt_token_ids,
-                dataset_index=batch_dataset_indices,
-            )
+        logger.info(
+            f"  - dataset_indices: {batch_dataset_indices[:5]}..."
+            if len(batch_dataset_indices) > 5
+            else f"  - dataset_indices: {batch_dataset_indices}"
         )
-        logger.info(f"[SPLIT_BATCH] Successfully put request for engine {batch_idx + 1}")
-    
+
+        # Use PromptRequest for Ray queue with batch-specific dataset_index list
+        prompt_request = PromptRequest(
+            prompts=batch_queries,
+            training_step=training_step,
+            eval_prompts=eval_prompt_token_ids,
+            dataset_index=batch_dataset_indices,
+        )
+        logger.info(f"[SPLIT_BATCH] About to put request into queue (id: {id(param_prompt_Q)})")
+        logger.info(
+            f"[SPLIT_BATCH] Request details: training_step={prompt_request.training_step}, num_prompts={len(prompt_request.prompts)}"
+        )
+
+        try:
+            param_prompt_Q.put(prompt_request)
+            logger.info(f"[SPLIT_BATCH] Successfully put request for engine {batch_idx + 1}")
+            # Verify it was added
+            new_size = param_prompt_Q.qsize()
+            logger.info(f"[SPLIT_BATCH] Queue size after put: {new_size}")
+        except Exception as e:
+            logger.error(f"[SPLIT_BATCH] ERROR putting request into queue: {e}")
+            raise
+
     logger.info(f"[SPLIT_BATCH] Finished. Queue size after: {param_prompt_Q.qsize()}/{param_prompt_Q.maxsize}")
 
 
@@ -1845,24 +1895,17 @@ def sync_weights_and_prepare_prompts(
         queries_next = data_next[INPUT_IDS_PROMPT_KEY]
         ground_truths_next = data_next[GROUND_TRUTHS_KEY]
         datasets_next = data_next[VERIFIER_SOURCE_KEY]
+
         with Timer(
             "[Main Thread] 🔄 Loading weights using shared memory"
             if args.async_mode
             else "🔄 Loading weights using shared memory"
         ):
-            # Add progress bar for weight syncing
-            weight_sync_tasks = [m.broadcast_to_vllm.remote() for m in policy_group.models]
-            for task in tqdm(
-                weight_sync_tasks, desc="Syncing weights to vLLM engines", bar_format="{l_bar}{bar}{r_bar}\n"
-            ):
-                ray.get(task)
+            # Sync weights using ray.get on all tasks at once (original approach)
+            ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
-    # Only send batch if not training_step 1 (initial batch already sent before main loop)
-    if training_step != 1:
-        logger.info(f"[SYNC_WEIGHTS] Calling split_and_insert_batch for training_step={training_step}")
-        logger.info(f"  - args.async_mode: {args.async_mode}")
-        logger.info(f"  - len(queries_next): {len(queries_next)}")
-        logger.info(f"  - args.vllm_num_engines: {args.vllm_num_engines}")
+        # Now send the actual batch after weight sync
+        logger.info(f"[SYNC_WEIGHTS] Sending batch for training_step={training_step} AFTER weight sync")
         split_and_insert_batch(
             queries_next,
             ground_truths_next,
@@ -1874,8 +1917,10 @@ def sync_weights_and_prepare_prompts(
             param_prompt_Q,
             eval_prompt_token_ids,
         )
-    else:
-        logger.info(f"[SYNC_WEIGHTS] NOT calling split_and_insert_batch for training_step={training_step} (initial batch already sent)")
+
+        return queries_next, ground_truths_next, datasets_next, dataset_indices
+
+    # For training_step == 1, we don't sync weights and the initial batch was already sent
     return queries_next, ground_truths_next, datasets_next, dataset_indices
 
 
@@ -2211,16 +2256,33 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     param_prompt_Q = ray_queue.Queue(maxsize=args.async_steps)
     evaluation_inference_results_Q = ray_queue.Queue(maxsize=1)
 
-    policy_group, vllm_engines, tool_objects, resume_training_step, episode = create_model_and_optimizer(
-        args,
-        tc,
-        model_config,
-        beaker_config,
-        wandb_url,
-        tokenizer,
-        inference_results_Q,
-        param_prompt_Q,
-        evaluation_inference_results_Q,
+    # Test Ray queue functionality
+    logger.info("[QUEUE_TEST] Testing Ray queue functionality...")
+    try:
+        test_msg = "test_message"
+        param_prompt_Q.put(test_msg)
+        logger.info(f"[QUEUE_TEST] Put test message, queue size: {param_prompt_Q.qsize()}")
+        retrieved = param_prompt_Q.get(timeout=1)
+        logger.info(f"[QUEUE_TEST] Retrieved: {retrieved}, queue size after: {param_prompt_Q.qsize()}")
+        if retrieved != test_msg:
+            raise RuntimeError(f"Queue test failed: expected {test_msg}, got {retrieved}")
+        logger.info("[QUEUE_TEST] ✅ Ray queue test passed")
+    except Exception as e:
+        logger.error(f"[QUEUE_TEST] ❌ Ray queue test failed: {e}")
+        raise
+
+    policy_group, vllm_engines, weight_updater, tool_objects, resume_training_step, episode = (
+        create_model_and_optimizer(
+            args,
+            tc,
+            model_config,
+            beaker_config,
+            wandb_url,
+            tokenizer,
+            inference_results_Q,
+            param_prompt_Q,
+            evaluation_inference_results_Q,
+        )
     )
 
     # Setup training
@@ -2260,6 +2322,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     logger.info(f"Starting {len(vllm_engines)} vLLM engines to process from queues")
     vllm_refs = []
     for i, engine in enumerate(vllm_engines):
+        # We call the "ready" method to verify that the actor initialized properly.
+        ray.get(engine.ready.remote())
         logger.info(f"Starting vLLM engine {i + 1}/{len(vllm_engines)}")
         ref = engine.process_from_queue.remote(
             generation_config,
@@ -2271,21 +2335,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         vllm_refs.append(ref)
         logger.info(f"vLLM engine {i + 1} started with ref: {ref}")
     logger.info("======== ✅ All vllm engines started processing from queues =========")
-    
-    # Check if any vLLM engine fails early
-    import time
-    time.sleep(2)  # Give engines time to start
-    for i, ref in enumerate(vllm_refs):
-        try:
-            # Check if the task is done (non-blocking)
-            ready, not_ready = ray.wait([ref], timeout=0)
-            if ready:
-                # If it's done already, something went wrong
-                logger.error(f"[ERROR] vLLM engine {i + 1} exited early!")
-                result = ray.get(ref)
-                logger.error(f"Result: {result}")
-        except Exception as e:
-            logger.error(f"[ERROR] vLLM engine {i + 1} failed: {e}")
 
     packing_thread = threading.Thread(
         target=data_preparation_thread,
@@ -2327,17 +2376,26 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     num_total_tokens = 0
     start_time = time.time()
-    
-    logger.info(f"\n[MAIN_LOOP] Starting main training loop")
+
+    logger.info("\n[MAIN_LOOP] Starting main training loop")
     logger.info(f"  - resume_training_step: {resume_training_step}")
     logger.info(f"  - args.num_training_steps: {args.num_training_steps}")
     logger.info(f"  - will process steps: {resume_training_step} to {args.num_training_steps}")
     logger.info(f"  - args.async_mode: {args.async_mode}")
-    
+
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
             logger.info(f"\n[MAIN_LOOP] Starting training_step={training_step}/{args.num_training_steps}")
-            
+
+            # Check vLLM engines are still running
+            for i, ref in enumerate(vllm_refs):
+                ready, _ = ray.wait([ref], timeout=0)
+                if ready:
+                    logger.error(f"[MAIN_LOOP] vLLM engine {i + 1} has exited during training!")
+                    result = ray.get(ref)
+                    logger.error(f"[MAIN_LOOP] Engine result: {result}")
+                    raise RuntimeError(f"vLLM engine {i + 1} exited unexpectedly")
+
             episode += (
                 args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
             )  # each sample is an episode
