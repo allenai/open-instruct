@@ -15,7 +15,9 @@ Script to remove examples containing Chinese characters from our datasets.
 Uses Unicode character ranges for efficient detection without requiring language models.
 
 Run with:
-python scripts/data/filtering_and_updates/filter_chinese.py --input-dataset allenai/tulu-3-sft-mixture
+python scripts/data/filtering_and_updates/filter_chinese.py --input-dataset allenai/tulu-3-sft-mixture --threshold 0.05
+
+Default threshold used is 5%
 """
 
 
@@ -129,7 +131,7 @@ def main():
     parser.add_argument("--filter-user-turns", action="store_true", 
                        help="Also filter based on user messages (default: only filter assistant messages)")
 
-    parser.add_argument("--threshold", type=float, help="Minimum ratio of Chinese characters to trigger filtering (0.0-1.0)")
+    parser.add_argument("--threshold", type=float, default=0.05, help="Minimum ratio of Chinese characters to trigger filtering (0.0-1.0)")
     parser.add_argument("--output-entity", type=str, help="Output entity (org/user) for the filtered dataset. If not provided, uses the same entity as the input dataset.")
     
     args = parser.parse_args()
