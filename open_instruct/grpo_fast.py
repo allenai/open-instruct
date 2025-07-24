@@ -2215,7 +2215,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         n=args.num_samples_per_prompt_rollout,
         stop=stop_strings,
     )
-    logger.info(f"[DEBUG] Created generation_config with n={generation_config.n} (args.num_samples_per_prompt_rollout={args.num_samples_per_prompt_rollout})")
+    logger.info(
+        f"[DEBUG] Created generation_config with n={generation_config.n} (args.num_samples_per_prompt_rollout={args.num_samples_per_prompt_rollout})"
+    )
     eval_generation_config = generation_config.clone()
     eval_generation_config.temperature = 0.0
     eval_generation_config.n = 1
