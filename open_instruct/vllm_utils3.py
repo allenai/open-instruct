@@ -20,9 +20,8 @@ import logging
 import os
 import queue
 import sys
-import time
 from datetime import timedelta
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, List, Optional, Union
 
 import ray
 import torch
@@ -260,9 +259,9 @@ class LLMRayActor:
                     else:
                         self.results_queue.put(eval_result)
                     self.logger.info("[vLLM] Successfully put eval result")
-                
+
             except queue.Empty:
-                break            
+                break
 
     def _generate_batch(
         self,

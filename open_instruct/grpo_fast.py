@@ -2187,7 +2187,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     param_prompt_Q = ray_queue.Queue(maxsize=args.async_steps)
     evaluation_inference_results_Q = ray_queue.Queue(maxsize=1)
 
-
     policy_group, vllm_engines, tool_objects, resume_training_step, episode = create_model_and_optimizer(
         args,
         tc,
