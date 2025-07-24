@@ -910,8 +910,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         # avg_loss in the "mean" case
                         avg_loss_per_pred_tok = sum_loss / pred_tokens_this_log_period
                         total_optim_steps = args.logging_steps * accelerator.num_processes
-                        avg_sum_loss = sum_loss / total_optim_steps
-                        metrics_to_log["train_sum_loss"] = avg_sum_loss
+                        avg_loss = sum_loss / total_optim_steps
+                        metrics_to_log["train_sum_loss"] = avg_loss
                         metrics_to_log["train_loss_per_total_tok"] = avg_loss_per_total_tok
                         metrics_to_log["train_loss_per_pred_tok"] = avg_loss_per_pred_tok
                     if args.verbose:

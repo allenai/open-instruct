@@ -1618,10 +1618,7 @@ class LocalDatasetTransformationCache:
             json.dump(config_dict, f, indent=2)
 
     def load_or_transform_dataset(
-        self,
-        dcs: List[DatasetConfig],
-        tc: TokenizerConfig,
-        dataset_skip_cache: bool = False,
+        self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
     ) -> Tuple[Dataset, Dict[str, Any]]:
         """Load dataset from local cache if it exists, otherwise transform and cache it locally."""
         cache_path = self.get_cache_path()
@@ -1722,9 +1719,7 @@ def get_cached_dataset(
         cache = LocalDatasetTransformationCache(dataset_local_cache_dir=dataset_local_cache_dir)
     else:
         cache = DatasetTransformationCache(hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(
-        dcs, tc, dataset_skip_cache=dataset_skip_cache
-    )
+    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
 
 
 def get_cached_dataset_tulu_with_statistics(
@@ -1793,9 +1788,7 @@ def get_cached_dataset_tulu_with_statistics(
     elif dataset_cache_mode == "hf":
         cache = DatasetTransformationCache(config_hash=dataset_config_hash, hf_entity=hf_entity)
 
-    dataset, statistics = cache.load_or_transform_dataset(
-        dcs, tc, dataset_skip_cache=dataset_skip_cache
-    )
+    dataset, statistics = cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
 
     if return_statistics:
         return _remove_dataset_source_field(dataset), statistics
