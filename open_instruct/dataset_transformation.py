@@ -1726,7 +1726,7 @@ def get_cached_dataset(
     else:
         cache = DatasetTransformationCache(hf_entity=hf_entity)
     return cache.load_or_transform_dataset(
-        dcs, tc, dataset_skip_cache=dataset_skip_cache, return_statistics=return_statistics
+        dcs, tc, dataset_skip_cache=dataset_skip_cache
     )
 
 
@@ -1797,7 +1797,7 @@ def get_cached_dataset_tulu_with_statistics(
         cache = DatasetTransformationCache(config_hash=dataset_config_hash, hf_entity=hf_entity)
 
     dataset, statistics = cache.load_or_transform_dataset(
-        dcs, tc, dataset_skip_cache=dataset_skip_cache, return_statistics=return_statistics
+        dcs, tc, dataset_skip_cache=dataset_skip_cache
     )
 
     if return_statistics:
