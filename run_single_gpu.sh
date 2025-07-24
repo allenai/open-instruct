@@ -11,6 +11,7 @@ uv run python mason.py \
        --num_nodes 1 \
        --max_retries 0 \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+       --env GIT_COMMIT=$(git rev-parse --short HEAD) \
        --budget ai2/oe-adapt \
 	   --no-host-networking \
        --gpus 1 \
