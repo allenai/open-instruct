@@ -15,7 +15,7 @@ Script to remove examples containing Chinese characters from our datasets.
 Uses Unicode character ranges for efficient detection without requiring language models.
 
 Run with:
-python scripts/data/filtering_and_updates/filter_chinese.py --input-dataset allenai/tulu-3-sft-mixture --column messages
+python scripts/data/filtering_and_updates/filter_chinese.py --input-dataset allenai/tulu-3-sft-mixture
 """
 
 

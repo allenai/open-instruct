@@ -87,7 +87,7 @@ def main() -> None:
     args = parser.parse_args()
 
     # Load dataset (Dataset or DatasetDict)
-    ds = load_dataset(args.input_dataset_name, 'DeepSeek')
+    ds = load_dataset(args.input_dataset_name)
 
     # Helper: count rows across splits
     def count_rows(dset):
