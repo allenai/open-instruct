@@ -331,7 +331,7 @@ class FlatArguments:
         metadata={"help": "Whether to use packing/padding-free collation via TensorDataCollatorWithFlattening"},
     )
     verbose: bool = field(
-        default=True, metadata={"help": "Optionally print additional statistics at each reporting period"}
+        default=False, metadata={"help": "Optionally print additional statistics at each reporting period"}
     )
 
     def __post_init__(self):
