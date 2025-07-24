@@ -2284,19 +2284,19 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             )
 
             # Start vLLM engines to process until queue is empty
-            vllm_refs = []
-            for i, engine in enumerate(vllm_engines):
-                ref = engine.process_from_queue.remote(
-                    generation_config,
-                    eval_generation_config,
-                    args.local_eval_freq,
-                    args.num_training_steps,
-                    resume_training_step,
-                )
-                vllm_refs.append(ref)
+            ray.get(
+                [
+                    engine.process_from_queue.remote(
+                        generation_config,
+                        eval_generation_config,
+                        args.local_eval_freq,
+                        args.num_training_steps,
+                        resume_training_step,
+                    )
+                    for engine in vllm_engines
+                ]
+            )
 
-            # Wait for all engines to complete processing
-            ray.get(vllm_refs)
             collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
                 packed_sequences_Q, num_total_tokens
             )
