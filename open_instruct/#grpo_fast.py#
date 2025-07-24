@@ -1197,9 +1197,6 @@ def accumulate_inference_batches(
     Returns:
         Tuple of (combined_result, combined_queries, combined_ground_truths, combined_datasets)
     """
-    logger.info(f"[ACCUMULATE] Starting accumulate_inference_batches for training_step={training_step}")
-    logger.info(f"  - expecting results from {args.vllm_num_engines} engines")
-    logger.info(f"  - queue size: {inference_results_Q.qsize()}/{inference_results_Q.max_size}")
 
     # Collect results from all engines
     results = []
@@ -1215,10 +1212,8 @@ def accumulate_inference_batches(
     )
 
     for batch_idx in pbar:
-        logger.info(f"[ACCUMULATE] Waiting for result {batch_idx + 1}/{args.vllm_num_engines}")
         # Get result from queue
         result = inference_results_Q.get()
-        logger.info(f"[ACCUMULATE] Got result {batch_idx + 1}, training_step in result: {result.training_step if hasattr(result, 'training_step') else 'N/A'}")
 
         # Accept results from any training step as long as we have entries in the map
         # This prevents synchronization issues when results arrive out of order
@@ -1701,6 +1696,9 @@ def create_model_and_optimizer(
     evaluation_inference_results_Q: ray_queue.Queue,
 ) -> tuple[ModelGroup, list[LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
+    # Ray initialization
+    # ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
+
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
@@ -1784,12 +1782,6 @@ def split_and_insert_batch(
     eval_prompt_token_ids=None,
 ):
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    logger.info(f"[SPLIT_BATCH] Starting split_and_insert_batch:")
-    logger.info(f"  - training_step: {training_step}")
-    logger.info(f"  - total queries: {len(queries_next)}")
-    logger.info(f"  - vllm_num_engines: {vllm_num_engines}")
-    logger.info(f"  - queue size before: {param_prompt_Q.qsize()}/{param_prompt_Q.max_size}")
-    
     # Split the batch over the VLLM engines.
     inference_batch_size = len(queries_next) // vllm_num_engines
     for batch_idx in range(vllm_num_engines):
@@ -1805,11 +1797,6 @@ def split_and_insert_batch(
         for i, dataset_idx in enumerate(batch_dataset_indices):
             pending_queries_map.insert(dataset_idx, batch_queries[i], batch_ground_truths[i], batch_datasets[i])
 
-        logger.info(f"[SPLIT_BATCH] About to put PromptRequest for engine {batch_idx + 1}/{vllm_num_engines}:")
-        logger.info(f"  - training_step: {training_step}")
-        logger.info(f"  - num_prompts: {len(batch_queries)}")
-        logger.info(f"  - dataset_indices: {batch_dataset_indices[:5]}..." if len(batch_dataset_indices) > 5 else f"  - dataset_indices: {batch_dataset_indices}")
-        
         # Use PromptRequest for Ray queue with batch-specific dataset_index list
         param_prompt_Q.put(
             PromptRequest(
@@ -1819,9 +1806,6 @@ def split_and_insert_batch(
                 dataset_index=batch_dataset_indices,
             )
         )
-        logger.info(f"[SPLIT_BATCH] Successfully put request for engine {batch_idx + 1}")
-    
-    logger.info(f"[SPLIT_BATCH] Finished. Queue size after: {param_prompt_Q.qsize()}/{param_prompt_Q.max_size}")
 
 
 def sync_weights_and_prepare_prompts(
@@ -1858,10 +1842,6 @@ def sync_weights_and_prepare_prompts(
                 ray.get(task)
 
     if args.async_mode or training_step != 1:
-        logger.info(f"[SYNC_WEIGHTS] Calling split_and_insert_batch for training_step={training_step}")
-        logger.info(f"  - args.async_mode: {args.async_mode}")
-        logger.info(f"  - len(queries_next): {len(queries_next)}")
-        logger.info(f"  - args.vllm_num_engines: {args.vllm_num_engines}")
         split_and_insert_batch(
             queries_next,
             ground_truths_next,
@@ -1873,8 +1853,6 @@ def sync_weights_and_prepare_prompts(
             param_prompt_Q,
             eval_prompt_token_ids,
         )
-    else:
-        logger.info(f"[SYNC_WEIGHTS] NOT calling split_and_insert_batch for training_step={training_step} (async_mode={args.async_mode})")
     return queries_next, ground_truths_next, datasets_next, dataset_indices
 
 
@@ -2202,9 +2180,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     pprint([args, model_config])
 
-    # Initialize Ray before creating Ray objects
-    ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
-
     # Create Ray queues
     inference_results_Q = ray_queue.Queue(maxsize=args.async_steps)
     param_prompt_Q = ray_queue.Queue(maxsize=args.async_steps)
@@ -2309,17 +2284,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     num_total_tokens = 0
     start_time = time.time()
-    
-    logger.info(f"\n[MAIN_LOOP] Starting main training loop")
-    logger.info(f"  - resume_training_step: {resume_training_step}")
-    logger.info(f"  - args.num_training_steps: {args.num_training_steps}")
-    logger.info(f"  - will process steps: {resume_training_step} to {args.num_training_steps}")
-    logger.info(f"  - args.async_mode: {args.async_mode}")
-    
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
-            logger.info(f"\n[MAIN_LOOP] Starting training_step={training_step}/{args.num_training_steps}")
-            
             episode += (
                 args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
             )  # each sample is an episode

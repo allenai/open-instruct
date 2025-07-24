@@ -16,6 +16,7 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 import dataclasses
+import logging
 import os
 from datetime import timedelta
 from typing import Any, List, Optional, Union
@@ -23,6 +24,8 @@ from typing import Any, List, Optional, Union
 import ray
 import torch
 import torch.distributed
+
+logger = logging.getLogger(__name__)
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed.distributed_c10d import (
@@ -207,17 +210,35 @@ class LLMRayActor:
         resume_training_step=1,
     ):
         """Process prompts from the queue and put results in the results queue."""
+        logger.info(f"[vLLM] Starting process_from_queue:")
+        logger.info(f"  - num_training_steps: {num_training_steps}")
+        logger.info(f"  - resume_training_step: {resume_training_step}")
+        logger.info(f"  - will process steps: {resume_training_step} to {num_training_steps}")
+        
         for training_step in range(resume_training_step, num_training_steps + 1):
             # Get prompts from queue
+            logger.info(f"[vLLM] Waiting for request from prompt_queue (expecting step {training_step})")
             request = self.prompt_queue.get()
+            
             if request is None:
+                logger.info(f"[vLLM] Received None (stop signal), breaking")
                 break
+            
+            logger.info(f"[vLLM] Got request:")
+            logger.info(f"  - request.training_step: {request.training_step}")
+            logger.info(f"  - expected training_step: {training_step}")
+            logger.info(f"  - num_prompts: {len(request.prompts)}")
+            logger.info(f"  - dataset_indices: {request.dataset_index[:5]}..." if len(request.dataset_index) > 5 else f"  - dataset_indices: {request.dataset_index}")
 
             # Process training prompts
+            logger.info(f"[vLLM] Processing {len(request.prompts)} prompts")
             result = self._generate_batch(
                 request.prompts, sampling_params, request.dataset_index, request.training_step
             )
+            
+            logger.info(f"[vLLM] Putting result in results_queue for training_step={request.training_step}")
             self.results_queue.put(result)
+            logger.info(f"[vLLM] Successfully put result")
 
             # Handle evaluation if needed
             if (
@@ -243,7 +264,9 @@ class LLMRayActor:
         training_step: Optional[int] = None,
     ) -> GenerationResult:
         """Generate responses for a batch of prompts."""
+        logger.info(f"[vLLM] Starting generation for {len(prompts)} prompts")
         outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
+        logger.info(f"[vLLM] Generation complete, got {len(outputs)} outputs")
 
         # Process outputs
         response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
