@@ -1806,12 +1806,9 @@ def get_cached_dataset_tulu_with_statistics(
     
     if return_statistics:
         dataset, statistics = result
-        # Remove dataset_source field after statistics collection but before return
-        dataset = _remove_dataset_source_field(dataset)
-        return dataset, statistics
+        return _remove_dataset_source_field(dataset), statistics
     else:
         dataset = result
-        # Remove dataset_source field before return
         return _remove_dataset_source_field(dataset)
 
 
