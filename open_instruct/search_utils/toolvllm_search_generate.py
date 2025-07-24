@@ -2,14 +2,16 @@
 Generate from json file.
 Used for astabench
 
+export MCP_TRANSPORT=StreamableHttpTransport
 export S2_API_KEY=xxxx
 python open_instruct/search_utils/toolvllm_search_generate.py \
-    --json_path rubrics_v1.json \
-    --model_path /weka/oe-adapt-default/hamishi/model_checkpoints/nora_rlrag_qwen3-8b-sft-olddata__42__1749019159 \
-    --output_dir asta_sft_no_finetune \
+    --json_path rubrics_v2_recomputed.json \
+    --model_path /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/rl_rag_surveyqa_samples_search_mcp_reward__1__1753332293_checkpoints/step_200 \
+    --output_dir /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/rl_rag_surveyqa_samples_search_mcp_reward__1__1753332293_checkpoints/step_200/test \
     --max_eval_samples 1000 \
     --num_docs 3 \
-    --search_api_endpoint https://api.semanticscholar.org/graph/v1/snippet/search
+    --search_api_endpoint https://api.semanticscholar.org/graph/v1/snippet/search \
+    --use_mcp_tool
 """
 
 import argparse
