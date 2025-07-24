@@ -240,7 +240,7 @@ class LLMRayActor:
                 self.logger.info(f"[vLLM] Processing request for training_step={request.training_step}")
 
                 # Generate responses for training prompts
-                result = self._generate_batch(prompts, sampling_params, dataset_index, training_step)
+                result = self._generate_batch(prompts, sampling_params, dataset_index=dataset_index, training_step=training_step)
                 self.logger.info(f"[vLLM] Generated {len(result.responses)} responses")
 
                 # Put result in queue
@@ -250,9 +250,8 @@ class LLMRayActor:
                 # Handle eval prompts if needed
                 if eval_prompts and eval_freq and training_step % eval_freq == 0:
                     self.logger.info(f"[vLLM] Generating eval responses for step {training_step}")
-                    eval_result = self._generate_batch(eval_prompts, eval_sampling_params)
+                    eval_result = self._generate_batch(eval_prompts, eval_sampling_params, dataset_index=dataset_index, training_step=training_step)
                     eval_result.is_eval = True
-                    eval_result.training_step = training_step
                     self.logger.info(f"[vLLM] Generated {len(eval_result.responses)} eval responses")
                     if self.eval_results_queue:
                         self.eval_results_queue.put(eval_result)
@@ -322,7 +321,6 @@ class LLMRayActor:
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        self.logger.info(f"[vLLM] update_weight called for {name}")
         return self.llm.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
