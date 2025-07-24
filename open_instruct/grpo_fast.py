@@ -1773,13 +1773,15 @@ def split_and_insert_batch(
             pending_queries_map.insert(dataset_idx, batch_queries[i], batch_ground_truths[i], batch_datasets[i])
 
         # Use PromptRequest for Ray queue with batch-specific dataset_index list
-        param_prompt_Q.put(PromptRequest(
-            prompts=batch_queries,
-            training_step=training_step,
-            eval_prompts=eval_prompt_token_ids,
-            dataset_index=batch_dataset_indices,
-        ))
-        
+        param_prompt_Q.put(
+            PromptRequest(
+                prompts=batch_queries,
+                training_step=training_step,
+                eval_prompts=eval_prompt_token_ids,
+                dataset_index=batch_dataset_indices,
+            )
+        )
+
 
 def sync_weights_and_prepare_prompts(
     training_step: int,
