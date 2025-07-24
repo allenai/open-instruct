@@ -1145,6 +1145,26 @@ class PendingQueriesMap:
 
             return query, ground_truth, dataset
 
+    def __len__(self):
+        """Return the number of entries in the map."""
+        with self._lock:
+            return len(self._map)
+
+    def __contains__(self, dataset_idx):
+        """Check if a dataset index is in the map."""
+        with self._lock:
+            return dataset_idx in self._map
+
+    def __getitem__(self, dataset_idx):
+        """Get the value for a dataset index."""
+        with self._lock:
+            return self._map[dataset_idx]
+
+    def keys(self):
+        """Return a view of the keys in the map."""
+        with self._lock:
+            return list(self._map.keys())
+
 
 def accumulate_inference_batches(
     inference_results_Q: ray_queue.Queue, pending_queries_map: PendingQueriesMap, args: Args, training_step: int
@@ -1167,7 +1187,6 @@ def accumulate_inference_batches(
     all_ground_truths = []
     all_datasets = []
 
-    # Add progress bar for engine results
     pbar = tqdm(
         range(args.vllm_num_engines),
         desc=f"Accumulating results from {args.vllm_num_engines} engines",
@@ -1178,8 +1197,6 @@ def accumulate_inference_batches(
         # Get result from queue
         result = inference_results_Q.get()
 
-        # Accept results from any training step as long as we have entries in the map
-        # This prevents synchronization issues when results arrive out of order
         dataset_indices = result.dataset_index
 
         if dataset_indices is None:
@@ -1202,8 +1219,6 @@ def accumulate_inference_batches(
         batch_ground_truths = []
         batch_datasets = []
 
-        # When num_samples_per_prompt_rollout > 1, vLLM returns unique dataset indices
-        # We should NOT replicate here - the data_preparation_thread will handle replication
         for dataset_idx in dataset_indices:
             # Use thread-safe pop operation
             query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
