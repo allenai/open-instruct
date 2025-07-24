@@ -1199,7 +1199,7 @@ def accumulate_inference_batches(
     """
     logger.info(f"[ACCUMULATE] Starting accumulate_inference_batches for training_step={training_step}")
     logger.info(f"  - expecting results from {args.vllm_num_engines} engines")
-    logger.info(f"  - queue size: {inference_results_Q.qsize()}/{inference_results_Q.max_size}")
+    logger.info(f"  - queue size: {inference_results_Q.qsize()}/{inference_results_Q.maxsize}")
 
     # Collect results from all engines
     results = []
@@ -1788,7 +1788,7 @@ def split_and_insert_batch(
     logger.info(f"  - training_step: {training_step}")
     logger.info(f"  - total queries: {len(queries_next)}")
     logger.info(f"  - vllm_num_engines: {vllm_num_engines}")
-    logger.info(f"  - queue size before: {param_prompt_Q.qsize()}/{param_prompt_Q.max_size}")
+    logger.info(f"  - queue size before: {param_prompt_Q.qsize()}/{param_prompt_Q.maxsize}")
     
     # Split the batch over the VLLM engines.
     inference_batch_size = len(queries_next) // vllm_num_engines
@@ -1821,7 +1821,7 @@ def split_and_insert_batch(
         )
         logger.info(f"[SPLIT_BATCH] Successfully put request for engine {batch_idx + 1}")
     
-    logger.info(f"[SPLIT_BATCH] Finished. Queue size after: {param_prompt_Q.qsize()}/{param_prompt_Q.max_size}")
+    logger.info(f"[SPLIT_BATCH] Finished. Queue size after: {param_prompt_Q.qsize()}/{param_prompt_Q.maxsize}")
 
 
 def sync_weights_and_prepare_prompts(
@@ -1857,7 +1857,8 @@ def sync_weights_and_prepare_prompts(
             ):
                 ray.get(task)
 
-    if args.async_mode or training_step != 1:
+    # Only send batch if not training_step 1 (initial batch already sent before main loop)
+    if training_step != 1:
         logger.info(f"[SYNC_WEIGHTS] Calling split_and_insert_batch for training_step={training_step}")
         logger.info(f"  - args.async_mode: {args.async_mode}")
         logger.info(f"  - len(queries_next): {len(queries_next)}")
@@ -1874,7 +1875,7 @@ def sync_weights_and_prepare_prompts(
             eval_prompt_token_ids,
         )
     else:
-        logger.info(f"[SYNC_WEIGHTS] NOT calling split_and_insert_batch for training_step={training_step} (async_mode={args.async_mode})")
+        logger.info(f"[SYNC_WEIGHTS] NOT calling split_and_insert_batch for training_step={training_step} (initial batch already sent)")
     return queries_next, ground_truths_next, datasets_next, dataset_indices
 
 
@@ -2257,17 +2258,34 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     # Start vLLM engines to process from queues
     logger.info(f"Starting {len(vllm_engines)} vLLM engines to process from queues")
+    vllm_refs = []
     for i, engine in enumerate(vllm_engines):
         logger.info(f"Starting vLLM engine {i + 1}/{len(vllm_engines)}")
-        engine.process_from_queue.remote(
+        ref = engine.process_from_queue.remote(
             generation_config,
             eval_generation_config,
             args.local_eval_freq,
             args.num_training_steps,
             resume_training_step,
         )
-        logger.info(f"vLLM engine {i + 1} started")
+        vllm_refs.append(ref)
+        logger.info(f"vLLM engine {i + 1} started with ref: {ref}")
     logger.info("======== ✅ All vllm engines started processing from queues =========")
+    
+    # Check if any vLLM engine fails early
+    import time
+    time.sleep(2)  # Give engines time to start
+    for i, ref in enumerate(vllm_refs):
+        try:
+            # Check if the task is done (non-blocking)
+            ready, not_ready = ray.wait([ref], timeout=0)
+            if ready:
+                # If it's done already, something went wrong
+                logger.error(f"[ERROR] vLLM engine {i + 1} exited early!")
+                result = ray.get(ref)
+                logger.error(f"Result: {result}")
+        except Exception as e:
+            logger.error(f"[ERROR] vLLM engine {i + 1} failed: {e}")
 
     packing_thread = threading.Thread(
         target=data_preparation_thread,

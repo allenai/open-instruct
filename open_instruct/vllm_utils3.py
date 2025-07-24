@@ -210,12 +210,23 @@ class LLMRayActor:
         resume_training_step=1,
     ):
         """Process prompts from the queue and put results in the results queue."""
-        logger.info(f"[vLLM] Starting process_from_queue:")
-        logger.info(f"  - num_training_steps: {num_training_steps}")
-        logger.info(f"  - resume_training_step: {resume_training_step}")
-        logger.info(f"  - will process steps: {resume_training_step} to {num_training_steps}")
-        
-        for training_step in range(resume_training_step, num_training_steps + 1):
+        try:
+            logger.info(f"[vLLM] Starting process_from_queue:")
+            logger.info(f"  - num_training_steps: {num_training_steps}")
+            logger.info(f"  - resume_training_step: {resume_training_step}")
+            logger.info(f"  - will process steps: {resume_training_step} to {num_training_steps}")
+            logger.info(f"  - prompt_queue: {self.prompt_queue}")
+            logger.info(f"  - results_queue: {self.results_queue}")
+            logger.info(f"  - eval_results_queue: {self.eval_results_queue}")
+            
+            if self.prompt_queue is None:
+                logger.error("[vLLM] ERROR: prompt_queue is None!")
+                return
+            if self.results_queue is None:
+                logger.error("[vLLM] ERROR: results_queue is None!")
+                return
+                
+            for training_step in range(resume_training_step, num_training_steps + 1):
             # Get prompts from queue
             logger.info(f"[vLLM] Waiting for request from prompt_queue (expecting step {training_step})")
             request = self.prompt_queue.get()
@@ -255,6 +266,12 @@ class LLMRayActor:
                     self.eval_results_queue.put(eval_result)
                 else:
                     self.results_queue.put(eval_result)
+        except Exception as e:
+            logger.error(f"[vLLM] ERROR in process_from_queue: {e}")
+            logger.error(f"[vLLM] Exception type: {type(e).__name__}")
+            import traceback
+            logger.error(f"[vLLM] Traceback:\n{traceback.format_exc()}")
+            raise
 
     def _generate_batch(
         self,
