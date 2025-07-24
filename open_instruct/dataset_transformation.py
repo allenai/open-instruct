@@ -904,7 +904,7 @@ TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LAB
 
 def _remove_dataset_source_field(dataset: Dataset) -> Dataset:
     """Remove dataset_source field from dataset if it exists.
-    
+
     This should be called after statistics collection but before returning
     the final dataset to avoid storing unnecessary metadata in cached datasets.
     """
@@ -1799,11 +1799,11 @@ def get_cached_dataset_tulu_with_statistics(
         )
     elif dataset_cache_mode == "hf":
         cache = DatasetTransformationCache(config_hash=dataset_config_hash, hf_entity=hf_entity)
-    
+
     result = cache.load_or_transform_dataset(
         dcs, tc, dataset_skip_cache=dataset_skip_cache, return_statistics=return_statistics
     )
-    
+
     if return_statistics:
         dataset, statistics = result
         return _remove_dataset_source_field(dataset), statistics
