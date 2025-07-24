@@ -216,38 +216,9 @@ class LLMRayActor:
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
         self.tool_use = tool_use
-        self.model_update_group = None
 
     def generate(self, *args, **kwargs):
         return self.llm.generate(*args, **kwargs)
-
-    def init_process_group(
-        self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
-    ):
-        if self.model_update_group is None:
-            timeout = timedelta(seconds=1800)
-            backend = Backend(backend)
-            self.model_update_group = init_process_group(
-                backend=backend,
-                init_method=f"tcp://{master_address}:{master_port}",
-                world_size=world_size,
-                rank=rank_offset,
-                group_name=group_name,
-                timeout=timeout,
-            )
-            self.logger.info(
-                f"init_process_group: world_size={world_size}, rank={rank_offset}, group_name={group_name}"
-            )
-
-        return self.model_update_group
-
-    def generate(self, sampling_params, prompt_token_ids, use_tqdm=False):
-        return self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompt_token_ids, use_tqdm=use_tqdm)
-
-    def init_weight_update_group(self, master_address, master_port, rank_offset, world_size, group_name, backend):
-        return self.llm.init_weight_update_group(
-            master_address, master_port, rank_offset, world_size, group_name, backend
-        )
 
     def process_from_queue(
         self,
@@ -257,78 +228,17 @@ class LLMRayActor:
         num_training_steps=None,
         resume_training_step=1,
     ):
-        """Process prompts from the queue and put results in the results queue."""
-        try:
-            self.logger.info("[vLLM] Starting process_from_queue:")
-            self.logger.info(f"  - num_training_steps: {num_training_steps}")
-            self.logger.info(f"  - resume_training_step: {resume_training_step}")
-            self.logger.info(f"  - will process steps: {resume_training_step} to {num_training_steps}")
-            self.logger.info(f"  - prompt_queue: {self.prompt_queue} (id: {id(self.prompt_queue)})")
-            self.logger.info(f"  - results_queue: {self.results_queue}")
-            self.logger.info(f"  - eval_results_queue: {self.eval_results_queue}")
-
-            # Test queue access
+        while True:
             try:
-                queue_size = self.prompt_queue.qsize()
-                self.logger.info(f"[vLLM] Initial prompt_queue size: {queue_size}")
-            except Exception as e:
-                self.logger.error(f"[vLLM] ERROR accessing prompt_queue: {e}")
-                raise
-
-            if self.prompt_queue is None:
-                error_msg = "[vLLM] ERROR: prompt_queue is None!"
-                self.logger.error(error_msg)
-                return {"error": error_msg}
-            if self.results_queue is None:
-                error_msg = "[vLLM] ERROR: results_queue is None!"
-                self.logger.error(error_msg)
-                return {"error": error_msg}
-
-            # Check if we have any steps to process
-            if resume_training_step > num_training_steps:
-                self.logger.info(
-                    f"[vLLM] No steps to process: resume_training_step({resume_training_step}) > num_training_steps({num_training_steps})"
-                )
-                return {
-                    "status": "no_steps_to_process",
-                    "resume_training_step": resume_training_step,
-                    "num_training_steps": num_training_steps,
-                }
-
-            # Process requests until queue is empty
-            self.logger.info("[vLLM] Starting to process requests from queue")
-            processed_count = 0
-
-            while True:
-                try:
-                    # Use a short timeout to check for empty queue
-                    request = self.prompt_queue.get(timeout=0.1)
-                    self.logger.info("[vLLM] Successfully got request from queue")
-                except queue.Empty:
-                    # Check if queue is truly empty
-                    if self.prompt_queue.qsize() == 0:
-                        self.logger.info(f"[vLLM] Queue empty, exiting. Processed {processed_count} requests")
-                        return {"status": "completed", "processed_count": processed_count}
-                    continue
-
-                # Check if this is a stop signal
-                if request is None:
-                    self.logger.info(
-                        f"[vLLM] Received stop signal (None). Processed {processed_count} requests total."
-                    )
-                    return {"status": "stopped", "processed_count": processed_count}
-
+                # Use a short timeout to check for empty queue
+                request = self.prompt_queue.get(timeout=0.1)
+                self.logger.info("[vLLM] Successfully got request from queue")
                 # Unpack request
                 prompts = request.prompts
                 training_step = request.training_step
                 eval_prompts = request.eval_prompts
                 dataset_index = request.dataset_index
-
-                self.logger.info(f"[vLLM] Processing request for training_step={training_step}")
-                self.logger.info(f"  - num_prompts: {len(prompts)}")
-                self.logger.info(f"  - dataset_index: {dataset_index}")
-                if eval_prompts:
-                    self.logger.info(f"  - eval_prompts: {len(eval_prompts)}")
+                self.logger.info(f"[vLLM] Processing request for training_step={request.training_step}")
 
                 # Generate responses for training prompts
                 result = self._generate_batch(prompts, sampling_params, dataset_index, training_step)
@@ -337,7 +247,6 @@ class LLMRayActor:
                 # Put result in queue
                 self.results_queue.put(result)
                 self.logger.info("[vLLM] Successfully put result")
-                processed_count += 1
 
                 # Handle eval prompts if needed
                 if eval_prompts and eval_freq and training_step % eval_freq == 0:
@@ -351,16 +260,9 @@ class LLMRayActor:
                     else:
                         self.results_queue.put(eval_result)
                     self.logger.info("[vLLM] Successfully put eval result")
-
-        except Exception as e:
-            self.logger.error(f"[vLLM] ERROR in process_from_queue: {e}")
-            self.logger.error(f"[vLLM] Exception type: {type(e).__name__}")
-            import traceback
-
-            tb = traceback.format_exc()
-            self.logger.error(f"[vLLM] Traceback:\n{tb}")
-            # Return error information instead of None
-            return {"error": str(e), "exception_type": type(e).__name__, "traceback": tb}
+                
+            except queue.Empty:
+                break            
 
     def _generate_batch(
         self,
@@ -410,10 +312,9 @@ class LLMRayActor:
             masks=masks,
             request_info=request_info,
             dataset_index=dataset_index,
-            training_step=training_step,
         )
 
-    def init_process_group(  # noqa: F811
+    def init_process_group(
         self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
     ):
         return self.llm.collective_rpc(
@@ -439,10 +340,6 @@ class LLMRayActor:
 
     def ready(self):
         return True
-
-    def ping(self):
-        """Simple health check method."""
-        return {"status": "alive", "timestamp": time.time()}
 
 
 def create_vllm_engines(
@@ -513,13 +410,13 @@ def create_vllm_engines(
             tool_use = True
             additional_kwargs["tools"] = tools
             additional_kwargs["max_tool_calls"] = max_tool_calls_dict
-        # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
 
         vllm_engines.append(
             LLMRayActor.options(
                 num_cpus=num_gpus,
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
+                # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
                 runtime_env=ray.runtime_env.RuntimeEnv(env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0"}),
             ).remote(
                 model=pretrain,
@@ -616,4 +513,3 @@ if __name__ == "__main__":
     ray.get(refs)
     output = ray.get(llm.generate.remote("San Franciso is a"))
     print(f"output: {output}")
-
