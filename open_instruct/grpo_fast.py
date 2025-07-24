@@ -2183,9 +2183,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         n=args.num_samples_per_prompt_rollout,
         stop=stop_strings,
     )
-    logger.info(
-        f"[DEBUG] Created generation_config with n={generation_config.n} (args.num_samples_per_prompt_rollout={args.num_samples_per_prompt_rollout})"
-    )
     eval_generation_config = generation_config.clone()
     eval_generation_config.temperature = 0.0
     eval_generation_config.n = 1
@@ -2194,8 +2191,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
 
     # Create additional queues (main queues already created above)
-    packed_sequences_Q = Queue(maxsize=args.async_steps)  # Keep this as threading Queue for now
-    pending_queries_map = PendingQueriesMap()  # Thread-safe map for tracking pending queries
+    packed_sequences_Q = Queue(maxsize=args.async_steps)
+    pending_queries_map = PendingQueriesMap()
 
     eval_prompt_token_ids = None
     eval_ground_truths = None
@@ -2206,10 +2203,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         eval_dataset_names = eval_dataset[:num_eval_samples][VERIFIER_SOURCE_KEY]
     reward_fn = make_reward_fn(args)
 
-    # Verify all vLLM engines are ready
+    # Verify all vLLM engines are ready.
     for i, engine in enumerate(vllm_engines):
         ray.get(engine.ready.remote())
 
+    logger.info("======== ✅ data preparation thread starts =========")
     packing_thread = threading.Thread(
         target=data_preparation_thread,
         args=(
@@ -2246,14 +2244,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     num_total_tokens = 0
     start_time = time.time()
-
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
             episode += (
                 args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
             )  # each sample is an episode
-
-            # Sync weights and insert new prompts into queue
             queries_next, ground_truths_next, datasets_next, dataset_indices = sync_weights_and_prepare_prompts(
                 training_step,
                 args,
