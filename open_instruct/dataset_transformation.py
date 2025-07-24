@@ -1734,7 +1734,6 @@ def get_cached_dataset_tulu_with_statistics(
     hf_entity: Optional[str] = None,
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
-    return_statistics: bool = False,
 ) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
     dcs = []
     if dataset_config_hash is None:
@@ -1790,10 +1789,7 @@ def get_cached_dataset_tulu_with_statistics(
 
     dataset, statistics = cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
 
-    if return_statistics:
-        return _remove_dataset_source_field(dataset), statistics
-    else:
-        return _remove_dataset_source_field(dataset)
+    return _remove_dataset_source_field(dataset), statistics
 
 
 def get_cached_dataset_tulu(
@@ -1822,7 +1818,7 @@ def get_cached_dataset_tulu(
         dataset_local_cache_dir,
         dataset_skip_cache,
         return_statistics=False,
-    )
+    )[0]
 
 
 def test_sft_dpo_same_tokenizer():
