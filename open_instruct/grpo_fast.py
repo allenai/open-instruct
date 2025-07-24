@@ -29,6 +29,7 @@
 # limitations under the License.
 # isort: off
 import os
+import tqdm
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
@@ -400,6 +401,8 @@ class Args:
     code_tool_api_endpoint: Optional[str] = None
 
     def __post_init__(self):
+        if self.num_unique_prompts_rollout % self.vllm_num_engines != 0:
+            raise ValueError("The number of unique prompts must be divisible by the number of vLLM engines.")
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
@@ -1110,50 +1113,47 @@ class ModelGroup:
 
 
 def accumulate_inference_batches(
-    inference_results_Q: ray_queue.Queue, pending_queries_map: dict, vllm_num_engines: int, training_step: int
+    inference_results_Q: ray_queue.Queue, pending_queries_map: dict, expected_results: int, training_step: int
 ) -> tuple:
-    """Accumulate multiple inference results into a single training batch.
+    """Accumulate individual inference results into a single training batch.
 
     Args:
-        inference_results_Q: Queue containing GenerationResult objects
+        inference_results_Q: Queue containing GenerationResult objects (one per prompt)
         pending_queries_map: Map of dataset_index -> (queries, ground_truths, datasets)
-        vllm_num_engines: Number of vLLM engines (number of batches to accumulate)
+        expected_results: Number of individual results to accumulate
         training_step: Current training step for error reporting
 
     Returns:
         Tuple of (combined_result, combined_queries, combined_ground_truths, combined_datasets)
     """
-    # Collect results from all engines
+    # Collect individual results
     results = []
     all_queries = []
     all_ground_truths = []
     all_datasets = []
 
-    for batch_idx in range(vllm_num_engines):
-        # Get result from queue
+    for _ in tqdm.tqdm(
+        range(expected_results),
+        desc=f"Accumulating results for training step {training_step}",
+        # Adds a new line after the progress bar so that logs look better.
+        bar_format="{l_bar}{bar}{r_bar}\n",
+    ):
+        # Get individual result from queue
         result = inference_results_Q.get()
-        dataset_indices = result.dataset_index
 
-        if dataset_indices is None:
-            raise RuntimeError(f"Dataset indices is None for batch {batch_idx}")
+        if result.dataset_index is None or len(result.dataset_index) != 1:
+            raise RuntimeError(f"Expected single dataset index, got {result.dataset_index}")
 
-        # Get corresponding queries, ground_truths, datasets for each individual prompt
-        batch_queries = []
-        batch_ground_truths = []
-        batch_datasets = []
-        for dataset_idx in dataset_indices:
-            if dataset_idx not in pending_queries_map:
-                raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
+        dataset_idx = result.dataset_index[0]
+        if dataset_idx not in pending_queries_map:
+            raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
 
-            query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
-            batch_queries.append(query)
-            batch_ground_truths.append(ground_truth)
-            batch_datasets.append(dataset)
+        query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
 
         results.append(result)
-        all_queries.extend(batch_queries)
-        all_ground_truths.extend(batch_ground_truths)
-        all_datasets.extend(batch_datasets)
+        all_queries.append(query)
+        all_ground_truths.append(ground_truth)
+        all_datasets.append(dataset)
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1213,7 +1213,7 @@ def data_preparation_thread(
         # Accumulate results from multiple vLLM engines into a single training batch
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             result, queries, ground_truths, datasets = accumulate_inference_batches(
-                inference_results_Q, pending_queries_map, args.vllm_num_engines, training_step
+                inference_results_Q, pending_queries_map, args.num_unique_prompts_rollout, training_step
             )
 
         # ------------------------------------------------------------------------------------------------
@@ -1597,7 +1597,9 @@ def create_model_and_optimizer(
 ) -> tuple[ModelGroup, list[LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Ray initialization
-    ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
+    ray.init(
+        dashboard_host="0.0.0.0", ignore_reinit_error=True
+    )  # enable debugging from a different machine (e.g., phobos)
 
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -1681,29 +1683,19 @@ def split_and_insert_batch(
     param_prompt_Q,
     eval_prompt_token_ids=None,
 ):
-    """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    # Split the batch over the VLLM engines.
-    inference_batch_size = len(queries_next) // vllm_num_engines
-    for batch_idx in range(vllm_num_engines):
-        start_idx = batch_idx * inference_batch_size
-        end_idx = start_idx + inference_batch_size if batch_idx < vllm_num_engines - 1 else len(queries_next)
+    """Insert individual prompts into queues and mapping."""
+    # Insert individual prompts into the queue
+    for i, dataset_idx in enumerate(dataset_indices):
+        # Store individual prompt in the map using dataset index as key
+        pending_queries_map[dataset_idx] = (queries_next[i], ground_truths_next[i], datasets_next[i])
 
-        batch_queries = queries_next[start_idx:end_idx]
-        batch_ground_truths = ground_truths_next[start_idx:end_idx]
-        batch_datasets = datasets_next[start_idx:end_idx]
-        batch_dataset_indices = dataset_indices[start_idx:end_idx]
-
-        # Store individual prompts in the map using dataset indices as keys
-        for i, dataset_idx in enumerate(batch_dataset_indices):
-            pending_queries_map[dataset_idx] = (batch_queries[i], batch_ground_truths[i], batch_datasets[i])
-
-        # Use PromptRequest for Ray queue with batch-specific dataset_index list
+        # Create PromptRequest for single prompt
         param_prompt_Q.put(
             PromptRequest(
-                prompts=batch_queries,
+                prompt=queries_next[i],
                 training_step=training_step,
                 eval_prompts=eval_prompt_token_ids,
-                dataset_index=batch_dataset_indices,
+                dataset_index=dataset_idx,
             )
         )
 
@@ -1748,6 +1740,8 @@ def sync_weights_and_prepare_prompts(
             param_prompt_Q,
             eval_prompt_token_ids,
         )
+
+    return queries_next, ground_truths_next, datasets_next, dataset_indices
 
 
 def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
@@ -1984,7 +1978,11 @@ def make_reward_fn(args: Args) -> Callable:
         infos: List[List[int]],
         queries: Optional[List[str]] = None,
     ) -> List[float]:
-        _, timeouts, tool_errors, tool_outputs, _, tool_calleds = infos
+        # infos is a RequestInfo object, not a tuple to unpack
+        timeouts = infos.timeouts
+        tool_errors = infos.tool_errors
+        tool_outputs = infos.tool_outputs
+        tool_calleds = infos.tool_calleds
         good_outputs = [
             len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
             for i in range(len(tool_outputs))
@@ -2071,9 +2069,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     pprint([args, model_config])
 
-    # Create Ray queues
-    inference_results_Q = ray_queue.Queue(maxsize=args.async_steps)
-    param_prompt_Q = ray_queue.Queue(maxsize=args.async_steps)
+    # Create Ray queues - adjust maxsize for individual prompts.
+    total_prompts_per_step = args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+    inference_results_Q = ray_queue.Queue(maxsize=args.async_steps * total_prompts_per_step)
+    param_prompt_Q = ray_queue.Queue(maxsize=args.async_steps * total_prompts_per_step)
     evaluation_inference_results_Q = ray_queue.Queue(maxsize=1)
 
     policy_group, vllm_engines, tool_objects, resume_training_step, episode = create_model_and_optimizer(
@@ -2121,7 +2120,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         eval_dataset_names = eval_dataset[:num_eval_samples][VERIFIER_SOURCE_KEY]
     reward_fn = make_reward_fn(args)
 
-    # Start vLLM engines to process from queues
+    # Note that each engine will sample this args.num_samples_per_prompt_rollout times.
+    batch_size_per_engine = args.num_unique_prompts_rollout // args.vllm_num_engines
     for engine in vllm_engines:
         engine.process_from_queue.remote(
             generation_config,
@@ -2129,6 +2129,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             args.local_eval_freq,
             args.num_training_steps,
             resume_training_step,
+            batch_size_per_engine,
         )
     logger.info("======== ✅ vllm engines started processing from queues =========")
 
@@ -2169,7 +2170,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     num_total_tokens = 0
     start_time = time.time()
-    dataset_indices = None  # Initialize for training loop
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
             logger.info("-" * 100)
@@ -2177,7 +2177,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
             )  # each sample is an episode
 
-            queries_next, ground_truths_next, datasets_next = sync_weights_and_prepare_prompts(
+            queries_next, ground_truths_next, datasets_next, dataset_indices = sync_weights_and_prepare_prompts(
                 training_step,
                 args,
                 train_dataset,
