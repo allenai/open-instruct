@@ -60,7 +60,7 @@ from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
-from typing import Callable, Dict, Iterator, List, Literal, Optional, Union
+from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -76,6 +76,7 @@ from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
@@ -1190,43 +1191,142 @@ class ModelGroup:
             self.models.append(worker_policy)
 
 
+class PendingQueriesMap:
+    """Thread-safe map for tracking pending queries with reference counting."""
+
+    def __init__(self):
+        self._map = {}  # dataset_idx -> (query, ground_truth, dataset, count)
+        self._lock = threading.Lock()
+
+    def __getitem__(self, key):
+        """Get item using dict-like access."""
+        with self._lock:
+            if key not in self._map:
+                raise KeyError(f"Key {key} not found")
+            return self._map[key]
+
+    def __setitem__(self, key, value):
+        """Set item using dict-like access. Value should be (query, ground_truth, dataset)."""
+        with self._lock:
+            if len(value) == 3:
+                # If only 3 elements provided, add count of 1
+                query, ground_truth, dataset = value
+                self._map[key] = (query, ground_truth, dataset, 1)
+            elif len(value) == 4:
+                # Full tuple with count
+                self._map[key] = value
+            else:
+                raise ValueError(
+                    "Value must be a tuple of (query, ground_truth, dataset) or (query, ground_truth, dataset, count)"
+                )
+
+    def __contains__(self, key):
+        """Check if key exists."""
+        with self._lock:
+            return key in self._map
+
+    def __len__(self):
+        """Return the number of items in the map."""
+        with self._lock:
+            return len(self._map)
+
+    def keys(self):
+        """Return a copy of the keys."""
+        with self._lock:
+            return list(self._map.keys())
+
+    def insert(self, dataset_idx, query, ground_truth, dataset):
+        """Insert or increment count for a dataset index."""
+        with self._lock:
+            if dataset_idx in self._map:
+                # Already exists - just increment count
+                existing_query, existing_ground_truth, existing_dataset, count = self._map[dataset_idx]
+                self._map[dataset_idx] = (existing_query, existing_ground_truth, existing_dataset, count + 1)
+            else:
+                # New entry - count starts at 1
+                self._map[dataset_idx] = (query, ground_truth, dataset, 1)
+
+    def pop(self, dataset_idx):
+        """Retrieve data and decrement count. Removes entry when count reaches 0."""
+        with self._lock:
+            if dataset_idx not in self._map:
+                raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
+
+            query, ground_truth, dataset, count = self._map[dataset_idx]
+
+            if count > 1:
+                # More results expected - just decrement
+                self._map[dataset_idx] = (query, ground_truth, dataset, count - 1)
+            else:
+                # Last result - remove entry
+                del self._map[dataset_idx]
+
+            return query, ground_truth, dataset
+
+
 def accumulate_inference_batches(
-    inference_results_Q: ray_queue.Queue, pending_queries_map: dict, expected_results: int, training_step: int
+    inference_results_Q: ray_queue.Queue, pending_queries_map: PendingQueriesMap, args: Args, training_step: int
 ) -> tuple:
     """Accumulate individual inference results into a single training batch.
 
     Args:
-        inference_results_Q: Queue containing GenerationResult objects (one per prompt)
-        pending_queries_map: Map of dataset_index -> (queries, ground_truths, datasets)
-        expected_results: Number of individual results to accumulate
+        inference_results_Q: Queue containing GenerationResult objects
+        pending_queries_map: PendingQueriesMap instance for thread-safe query tracking
+        args: Arguments containing vllm_num_engines and num_samples_per_prompt_rollout
         training_step: Current training step for error reporting
 
     Returns:
         Tuple of (combined_result, combined_queries, combined_ground_truths, combined_datasets)
     """
-    # Collect individual results
+
+    # Collect results from all engines
     results = []
     all_queries = []
     all_ground_truths = []
     all_datasets = []
 
-    for _ in tqdm.tqdm(
-        range(expected_results),
-        desc=f"Accumulating results for training step {training_step}",
-        # Adds a new line after the progress bar so that logs look better.
+    # Add progress bar for engine results
+    pbar = tqdm(
+        range(args.vllm_num_engines),
+        desc=f"Accumulating results from {args.vllm_num_engines} engines",
         bar_format="{l_bar}{bar}{r_bar}\n",
-    ):
-        # Get individual result from queue
+    )
+
+    for batch_idx in pbar:
+        # Get result from queue
         result = inference_results_Q.get()
+
+        # Accept results from any training step as long as we have entries in the map
+        # This prevents synchronization issues when results arrive out of order
+        dataset_indices = result.dataset_index
 
         if result.dataset_index is None or len(result.dataset_index) != 1:
             raise RuntimeError(f"Expected single dataset index, got {result.dataset_index}")
 
-        dataset_idx = result.dataset_index[0]
-        if dataset_idx not in pending_queries_map:
-            raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
+        # When num_samples_per_prompt_rollout > 1, vLLM generates multiple responses per prompt
+        # but dataset_indices only contains the unique indices (not replicated)
+        # So we expect: len(responses) == len(dataset_indices) * num_samples_per_prompt_rollout
+        expected_responses = len(dataset_indices) * args.num_samples_per_prompt_rollout
+        assert len(result.responses) == expected_responses, (
+            f"Mismatch: number of responses ({len(result.responses)}) "
+            f"doesn't match expected ({expected_responses}) for batch {batch_idx}"
+        )
 
-        query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
+        # Get corresponding queries, ground_truths, datasets for each individual prompt
+        batch_queries = []
+        batch_ground_truths = []
+        batch_datasets = []
+
+        # When num_samples_per_prompt_rollout > 1, vLLM returns unique dataset indices
+        # We should NOT replicate here - the data_preparation_thread will handle replication
+        for dataset_idx in dataset_indices:
+            # Use thread-safe pop operation
+            query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
+
+            # Don't replicate - just append once per unique index
+            batch_queries.append(query)
+            batch_ground_truths.append(ground_truth)
+            batch_datasets.append(dataset)
 
         results.append(result)
         all_queries.append(query)
@@ -1275,6 +1375,7 @@ def accumulate_inference_batches(
         dataset_index=None,  # Not meaningful for combined result
     )
 
+    pbar.close()
     return combined_result, all_queries, all_ground_truths, all_datasets
 
 
@@ -1291,7 +1392,7 @@ def data_preparation_thread(
         # Accumulate results from multiple vLLM engines into a single training batch
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             result, queries, ground_truths, datasets = accumulate_inference_batches(
-                inference_results_Q, pending_queries_map, args.num_unique_prompts_rollout, training_step
+                inference_results_Q, pending_queries_map, args, training_step
             )
 
         # ------------------------------------------------------------------------------------------------
@@ -1674,10 +1775,6 @@ def create_model_and_optimizer(
     evaluation_inference_results_Q: ray_queue.Queue,
 ) -> tuple[ModelGroup, list[LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
-    # Ray initialization
-    ray.init(
-        dashboard_host="0.0.0.0", ignore_reinit_error=True
-    )  # enable debugging from a different machine (e.g., phobos)
 
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -1757,7 +1854,7 @@ def split_and_insert_batch(
     dataset_indices,
     training_step,
     vllm_num_engines,
-    pending_queries_map,
+    pending_queries_map: PendingQueriesMap,
     param_prompt_Q,
     eval_prompt_token_ids=None,
 ):
@@ -1767,7 +1864,16 @@ def split_and_insert_batch(
         # Store individual prompt in the map using dataset index as key
         pending_queries_map[dataset_idx] = (queries_next[i], ground_truths_next[i], datasets_next[i])
 
-        # Create PromptRequest for single prompt
+        batch_queries = queries_next[start_idx:end_idx]
+        batch_ground_truths = ground_truths_next[start_idx:end_idx]
+        batch_datasets = datasets_next[start_idx:end_idx]
+        batch_dataset_indices = dataset_indices[start_idx:end_idx]
+
+        # Store individual prompts in the map using thread-safe insert
+        for i, dataset_idx in enumerate(batch_dataset_indices):
+            pending_queries_map.insert(dataset_idx, batch_queries[i], batch_ground_truths[i], batch_datasets[i])
+
+        # Use PromptRequest for Ray queue with batch-specific dataset_index list
         param_prompt_Q.put(
             PromptRequest(
                 prompt=queries_next[i],
@@ -1786,12 +1892,12 @@ def sync_weights_and_prepare_prompts(
     policy_group: ModelGroup,
     pending_queries_map: dict,
     param_prompt_Q: ray_queue.Queue,  # Ray queue
-    queries_next=None,
-    ground_truths_next=None,
-    datasets_next=None,
-    dataset_indices=None,
+    queries_next,
+    ground_truths_next,
+    datasets_next,
+    dataset_indices,
     eval_prompt_token_ids=None,
-):
+) -> tuple[Any, Any, Any, Any]:
     """Sync weights and send the next batch of prompts to vLLM."""
     if training_step != 1:
         dataset_indices = next(iter_dataloader)
@@ -1804,7 +1910,12 @@ def sync_weights_and_prepare_prompts(
             if args.async_mode
             else "🔄 Loading weights using shared memory"
         ):
-            ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
+            # Add progress bar for weight syncing
+            weight_sync_tasks = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+            for task in tqdm(
+                weight_sync_tasks, desc="Syncing weights to vLLM engines", bar_format="{l_bar}{bar}{r_bar}\n"
+            ):
+                ray.get(task)
 
     if args.async_mode or training_step != 1:
         split_and_insert_batch(
@@ -1818,7 +1929,6 @@ def sync_weights_and_prepare_prompts(
             param_prompt_Q,
             eval_prompt_token_ids,
         )
-
     return queries_next, ground_truths_next, datasets_next, dataset_indices
 
 
@@ -2210,7 +2320,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     # Create additional queues (main queues already created above)
     packed_sequences_Q = Queue(maxsize=args.async_steps)  # Keep this as threading Queue for now
-    pending_queries_map = {}  # Map dataset_index -> (queries, ground_truths, datasets)
+    pending_queries_map = PendingQueriesMap()  # Thread-safe map for tracking pending queries
 
     eval_prompt_token_ids = None
     eval_ground_truths = None
@@ -2222,14 +2332,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     reward_fn = make_reward_fn(args)
 
     # Start vLLM engines to process from queues
-    if args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout % args.vllm_num_engines != 0:
-        raise ValueError(
-            "The number of unique prompts times the number of samples per prompt must be divisible by the number of vLLM engines."
-        )
-    batch_size_per_engine = (
-        args.num_unique_prompts_rollout #* args.num_samples_per_prompt_rollout
-    ) // args.vllm_num_engines
-    for engine in vllm_engines:
+    logger.info(f"Starting {len(vllm_engines)} vLLM engines to process from queues")
+    for i, engine in enumerate(vllm_engines):
+        logger.info(f"Starting vLLM engine {i + 1}/{len(vllm_engines)}")
         engine.process_from_queue.remote(
             generation_config,
             eval_generation_config,
@@ -2238,7 +2343,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             resume_training_step,
             batch_size_per_engine,
         )
-    logger.info("======== ✅ vllm engines started processing from queues =========")
+        logger.info(f"vLLM engine {i + 1} started")
+    logger.info("======== ✅ All vllm engines started processing from queues =========")
 
     packing_thread = threading.Thread(
         target=data_preparation_thread,
@@ -2252,11 +2358,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             args.num_training_steps,
         ),
     )
+    logger.info("Starting data preparation thread...")
     packing_thread.start()
-    logger.info("======== ✅ data preparation thread starts =========")
+    logger.info("======== ✅ data preparation thread started =========")
 
     # Send initial data to both threads.
+    logger.info("Getting initial dataset indices...")
     dataset_indices = next(iter_dataloader)
+    logger.info(f"Got {len(dataset_indices)} initial dataset indices")
     data_next = train_dataset[dataset_indices]
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
@@ -2279,7 +2388,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     start_time = time.time()
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
-            logger.info("-" * 100)
             episode += (
                 args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
             )  # each sample is an episode
