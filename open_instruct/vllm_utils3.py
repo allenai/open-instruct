@@ -175,43 +175,51 @@ class LLMRayActor:
         *args,
         bundle_indices: list = None,
         tool_use: bool = False,
-        num_gpus: float = 0.2,
-        model: str = None,
-        tokenizer: str = None,
-        tools: List[Dict[str, Any]] = None,
         prompt_queue=None,
         results_queue=None,
         eval_results_queue=None,
         **kwargs,
     ):
-        if bundle_indices is not None:
-            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(i) for i in bundle_indices)
-        self.tool_use = tool_use
-        # Store references to the queues
-        self.prompt_queue = prompt_queue
-        self.results_queue = results_queue
-        self.eval_results_queue = eval_results_queue
-        self.logger = logging.getLogger(__name__)
-        self.logger.info("[vLLM] LLMRayActor initialized")
-        self.logger.info(f"  - model: {model}")
-        self.logger.info(f"  - tokenizer: {tokenizer}")
-        self.logger.info(f"  - prompt_queue: {prompt_queue} (id: {id(prompt_queue)})")
-        self.logger.info(f"  - results_queue: {results_queue}")
-        self.logger.info(f"  - eval_results_queue: {eval_results_queue}")
+        # We have to call this here as we need to initialize the logger within
+        # ray.
+        self.logger = _setup_logger(name="LLMRayActor")
+        self.logger.info("Starting to initialize LLMRayActor.")
+        noset_visible_devices = kwargs.pop("noset_visible_devices")
+        if kwargs.get("distributed_executor_backend") == "ray":
+            # a hack to make the script work.
+            # stop ray from manipulating *_VISIBLE_DEVICES
+            # at the top-level when the distributed_executor_backend is ray.
+            os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+            os.environ.pop("ROCR_VISIBLE_DEVICES", None)
+        elif noset_visible_devices:
+            # We need to set CUDA_VISIBLE_DEVICES to the ray assigned GPU
+            # when the distributed_executor_backend is not ray and
+            # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
 
-        # Pass all initialization args to the actual LLM class
+        num_gpus = kwargs.pop("num_gpus")
+        if bundle_indices is not None:
+            os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
+            os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
+            print(f"creating LLM with bundle_indices={bundle_indices}")
+
         if tool_use:
             from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 
-            self.llm = ToolUseLLM(*args, model=model, tokenizer=tokenizer, tools=tools, **kwargs)
+            self.llm = ToolUseLLM(*args, **kwargs)
         else:
             from vllm import LLM
 
-            self.llm = LLM(*args, model=model, tokenizer=tokenizer, **kwargs)
+            self.llm = LLM(*args, **kwargs)
 
-        # Create ProcessGroup if needed
+        self.prompt_queue = prompt_queue
+        self.results_queue = results_queue
+        self.eval_results_queue = eval_results_queue
+        self.tool_use = tool_use
         self.model_update_group = None
-        self.logger = _setup_logger(__name__)
+
+    def generate(self, *args, **kwargs):
+        return self.llm.generate(*args, **kwargs)
 
     def init_process_group(
         self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
@@ -506,21 +514,13 @@ def create_vllm_engines(
             additional_kwargs["tools"] = tools
             additional_kwargs["max_tool_calls"] = max_tool_calls_dict
         # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
-        env_vars = {"VLLM_ENABLE_V1_MULTIPROCESSING": "0"}
-
-        # Pass TORCH_CUDA_ARCH_LIST if it's set in the main process
-        if "TORCH_CUDA_ARCH_LIST" in os.environ:
-            env_vars["TORCH_CUDA_ARCH_LIST"] = os.environ["TORCH_CUDA_ARCH_LIST"]
-        else:
-            torch_env_vars = [env_var for env_var in os.environ if env_var.startswith("TORCH_")]
-            print(f"{torch_env_vars=}")
 
         vllm_engines.append(
             LLMRayActor.options(
                 num_cpus=num_gpus,
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
-                runtime_env=ray.runtime_env.RuntimeEnv(env_vars=env_vars),
+                runtime_env=ray.runtime_env.RuntimeEnv(env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0"}),
             ).remote(
                 model=pretrain,
                 revision=revision,

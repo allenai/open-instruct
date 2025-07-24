@@ -1117,43 +1117,6 @@ class PendingQueriesMap:
         self._map = {}  # dataset_idx -> (query, ground_truth, dataset, count)
         self._lock = threading.Lock()
 
-    def __getitem__(self, key):
-        """Get item using dict-like access."""
-        with self._lock:
-            if key not in self._map:
-                raise KeyError(f"Key {key} not found")
-            return self._map[key]
-
-    def __setitem__(self, key, value):
-        """Set item using dict-like access. Value should be (query, ground_truth, dataset)."""
-        with self._lock:
-            if len(value) == 3:
-                # If only 3 elements provided, add count of 1
-                query, ground_truth, dataset = value
-                self._map[key] = (query, ground_truth, dataset, 1)
-            elif len(value) == 4:
-                # Full tuple with count
-                self._map[key] = value
-            else:
-                raise ValueError(
-                    "Value must be a tuple of (query, ground_truth, dataset) or (query, ground_truth, dataset, count)"
-                )
-
-    def __contains__(self, key):
-        """Check if key exists."""
-        with self._lock:
-            return key in self._map
-
-    def __len__(self):
-        """Return the number of items in the map."""
-        with self._lock:
-            return len(self._map)
-
-    def keys(self):
-        """Return a copy of the keys."""
-        with self._lock:
-            return list(self._map.keys())
-
     def insert(self, dataset_idx, query, ground_truth, dataset):
         """Insert or increment count for a dataset index."""
         with self._lock:
@@ -1845,17 +1808,17 @@ def split_and_insert_batch(
 def sync_weights_and_prepare_prompts(
     training_step: int,
     args: Args,
-    train_dataset,
-    iter_dataloader,
+    train_dataset: Any,
+    iter_dataloader: Iterator[List[int]],
     policy_group: ModelGroup,
-    pending_queries_map: dict,
-    param_prompt_Q: ray_queue.Queue,  # Ray queue
-    queries_next,
-    ground_truths_next,
-    datasets_next,
-    dataset_indices,
-    eval_prompt_token_ids=None,
-) -> tuple[Any, Any, Any, Any]:
+    pending_queries_map: PendingQueriesMap,
+    param_prompt_Q: ray_queue.Queue,
+    queries_next: List[List[int]],
+    ground_truths_next: List[List[int]],
+    datasets_next: List[str],
+    dataset_indices: List[int],
+    eval_prompt_token_ids: Optional[List[List[int]]] = None,
+) -> tuple[List[List[int]], List[List[int]], List[str], List[int]]:
     """Sync weights and send the next batch of prompts to vLLM."""
     if training_step != 1:
         dataset_indices = next(iter_dataloader)
@@ -2224,20 +2187,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     param_prompt_Q = ray_queue.Queue(maxsize=args.async_steps)
     evaluation_inference_results_Q = ray_queue.Queue(maxsize=1)
 
-    # Test Ray queue functionality
-    logger.info("[QUEUE_TEST] Testing Ray queue functionality...")
-    try:
-        test_msg = "test_message"
-        param_prompt_Q.put(test_msg)
-        logger.info(f"[QUEUE_TEST] Put test message, queue size: {param_prompt_Q.qsize()}")
-        retrieved = param_prompt_Q.get(timeout=1)
-        logger.info(f"[QUEUE_TEST] Retrieved: {retrieved}, queue size after: {param_prompt_Q.qsize()}")
-        if retrieved != test_msg:
-            raise RuntimeError(f"Queue test failed: expected {test_msg}, got {retrieved}")
-        logger.info("[QUEUE_TEST] ✅ Ray queue test passed")
-    except Exception as e:
-        logger.error(f"[QUEUE_TEST] ❌ Ray queue test failed: {e}")
-        raise
 
     policy_group, vllm_engines, tool_objects, resume_training_step, episode = create_model_and_optimizer(
         args,
