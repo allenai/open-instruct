@@ -1630,17 +1630,15 @@ class LocalDatasetTransformationCache:
         if os.path.exists(cache_path) and not dataset_skip_cache:
             print(f"✅ Found cached dataset at {cache_path}")
             dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
-            if return_statistics:
-                # Load statistics from cache if available
-                stats_path = os.path.join(cache_path, "dataset_statistics.json")
-                if os.path.exists(stats_path):
-                    with open(stats_path, "r") as f:
-                        statistics = json.load(f)
-                    return dataset, statistics
-                else:
-                    # Return empty statistics if not cached
-                    return dataset, {"per_dataset_stats": [], "dataset_order": []}
-            return dataset, None
+            # Load statistics from cache if available
+            stats_path = os.path.join(cache_path, "dataset_statistics.json")
+            if os.path.exists(stats_path):
+                with open(stats_path, "r") as f:
+                    statistics = json.load(f)
+                return dataset, statistics
+            else:
+                # Return empty statistics if not cached
+                return dataset, {"per_dataset_stats": [], "dataset_order": []}
 
         print(f"Cache not found or invalid, transforming datasets...")
 
@@ -1719,7 +1717,6 @@ def get_cached_dataset(
     hf_entity: Optional[str] = None,
     dataset_local_cache_dir: Optional[str] = None,
     dataset_skip_cache: bool = False,
-    return_statistics: bool = False,
 ) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
     if dataset_local_cache_dir is not None:
         cache = LocalDatasetTransformationCache(dataset_local_cache_dir=dataset_local_cache_dir)
