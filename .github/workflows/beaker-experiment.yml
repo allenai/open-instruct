@@ -123,39 +123,71 @@ jobs:
         run: |
           set -euo pipefail
           
-          # Debug: Check if script exists and is executable
-          SCRIPT_PATH="scripts/train/debug/single_gpu_on_beaker.sh"
-          
-          echo "Current directory: $(pwd)"
-          echo "Looking for script at: $SCRIPT_PATH"
-          
-          if [ ! -f "$SCRIPT_PATH" ]; then
-            echo "ERROR: $SCRIPT_PATH not found"
-            echo "Available .sh files:"
-            find . -name "*.sh" -type f | head -20
-            exit 1
-          fi
-          
-          if [ ! -x "$SCRIPT_PATH" ]; then
-            echo "WARNING: $SCRIPT_PATH is not executable"
-            echo "Making it executable..."
-            chmod +x "$SCRIPT_PATH"
-          fi
-          
-          # Debug: Check if uv is available
-          which uv || (echo "ERROR: uv command not found" && exit 1)
-          
           # Set the Docker image in the command
           DOCKER_IMAGE="${{ steps.get-image.outputs.docker_image }}"
           
           echo "Launching experiment with Docker image: ${DOCKER_IMAGE}"
           echo "Git commit: $(git rev-parse --short HEAD)"
           
-          # Launch the experiment and capture output
-          echo "Running: $SCRIPT_PATH '${DOCKER_IMAGE}'"
-          OUTPUT=$("$SCRIPT_PATH" "${DOCKER_IMAGE}" 2>&1) || {
+          # Launch the experiment directly using mason.py
+          echo "Running mason.py with Docker image: ${DOCKER_IMAGE}"
+          
+          OUTPUT=$(uv run python mason.py \
+            --cluster ai2/jupiter-cirrascale-2 \
+            --cluster ai2/augusta-google-1 \
+            --cluster ai2/saturn-cirrascale \
+            --cluster ai2/ceres-cirrascale \
+            --image "${DOCKER_IMAGE}" \
+            --pure_docker_mode \
+            --workspace ai2/tulu-thinker \
+            --priority high \
+            --preemptible \
+            --num_nodes 1 \
+            --max_retries 0 \
+            --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+            --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
+            --env GITHUB_RUN_ID="${GITHUB_RUN_ID}" \
+            --env GITHUB_RUN_URL="${GITHUB_RUN_URL}" \
+            --budget ai2/oe-adapt \
+            --no-host-networking \
+            --gpus 1 \
+            -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+            --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
+            --dataset_mixer_list_splits train \
+            --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
+            --dataset_mixer_eval_list_splits train \
+            --max_token_length 512 \
+            --max_prompt_token_length 512 \
+            --response_length 512 \
+            --pack_length 1024 \
+            --per_device_train_batch_size 1 \
+            --num_unique_prompts_rollout 8 \
+            --num_samples_per_prompt_rollout 4 \
+            --model_name_or_path Qwen/Qwen3-1.7B \
+            --stop_strings "</answer>" \
+            --apply_r1_style_format_reward \
+            --apply_verifiable_reward true \
+            --temperature 0.7 \
+            --ground_truths_key ground_truth \
+            --chat_template_name r1_simple_chat_postpend_think \
+            --learning_rate 3e-7 \
+            --total_episodes 200 \
+            --deepspeed_stage 2 \
+            --num_epochs 1 \
+            --num_learners_per_node 1 \
+            --vllm_tensor_parallel_size 1 \
+            --beta 0.01 \
+            --seed 3 \
+            --num_evals 20 \
+            --vllm_sync_backend gloo \
+            --vllm_gpu_memory_utilization 0.3 \
+            --save_traces \
+            --vllm_enforce_eager \
+            --gradient_checkpointing \
+            --push_to_hub false \
+            --single_gpu_mode 2>&1) || {
             EXIT_CODE=$?
-            echo "ERROR: $SCRIPT_PATH failed with exit code $EXIT_CODE"
+            echo "ERROR: mason.py failed with exit code $EXIT_CODE"
             echo "Full output:"
             echo "$OUTPUT"
             exit $EXIT_CODE
