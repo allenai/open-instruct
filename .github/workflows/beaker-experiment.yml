@@ -77,6 +77,11 @@ jobs:
           token: ${{ secrets.BEAKER_TOKEN }}
           workspace: ai2/tulu-thinker
       
+      - name: Setup SSH for private repository access
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.OPEN_INSTRUCT_DEPLOY_PRIVATE_KEY }}
+      
       - name: Install dependencies
         run: |
           # Install development dependencies needed for mason.py

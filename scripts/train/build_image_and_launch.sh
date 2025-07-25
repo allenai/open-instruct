@@ -4,7 +4,8 @@ set -e
 image_name=open-instruct-dev
 
 # Build and push the Docker image to Beaker
-docker build -f Dockerfile.uv --build-arg UV_CACHE_DIR=$UV_CACHE_DIR -t $image_name .
+# Use --ssh default to forward SSH agent for git clone
+DOCKER_BUILDKIT=1 docker build --ssh default -f Dockerfile.uv --build-arg UV_CACHE_DIR=$UV_CACHE_DIR -t $image_name .
 
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 
