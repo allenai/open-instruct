@@ -91,6 +91,8 @@ dev = [
 
 [tool.pytest.ini_options]
 addopts = "--ignore=oe-eval-internal/"
+testpaths = ["tests", "open_instruct"]
+norecursedirs = ["scripts/data/filtering_and_updates"]
 
 
 [tool.black]
@@ -138,7 +140,3 @@ known-first-party = ["open-instruct"]
 case-sensitive = false
 # Disable split-on-trailing-comma to work with skip-magic-trailing-comma
 split-on-trailing-comma = false
-
-[tool.pytest.ini_options]
-testpaths = ["tests", "open_instruct"]
-norecursedirs = ["scripts/data/filtering_and_updates"]
