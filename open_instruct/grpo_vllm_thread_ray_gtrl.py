@@ -88,9 +88,9 @@ from vllm import SamplingParams
 
 from open_instruct.dataset_processor import SimpleGenerateCollatorWithGroundTruth
 from open_instruct.dataset_transformation import (
-    DATASET_SOURCE_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
+    VERIFIER_SOURCE_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
@@ -102,6 +102,7 @@ from open_instruct.model_utils import (
     disable_dropout_in_model,
     exact_div,
     first_true_indices,
+    get_olmo3_generation_config,
     get_reward,
     log_softmax_and_gather,
     print_rich_single_line_metrics,
@@ -198,12 +199,12 @@ class Args:
     num_training_steps: Optional[int] = None
     """The number of training_steps to train"""
     num_evals: int = 4
-    """The number of evaluations to run throughout training"""
-    eval_freq: Optional[int] = None
-    """The frequency of evaluation steps"""
+    """this sets how many in-loop evals we do during training. in-loop evals reuse the generation/reward verifier setup."""
+    local_eval_freq: Optional[int] = None
+    """this controls the number of in-loop evals, which reuses the generation/reward verifier setup. don't set this directly, but set via num_evals."""
     local_dataloader_batch_size: Optional[int] = None
     """The batch size per GPU for the dataloader"""
-    save_freq: int = -1
+    save_freq: int = 200
     """How many train steps to save the model"""
 
     # online settings
@@ -264,6 +265,8 @@ class Args:
     """whether to add the R1 style format reward"""
     r1_style_format_reward: float = 1.0
     """the reward value for R1 style format reward"""
+    remap_verifier: str = None
+    """Remap verifier like string_f1=general-quality_ref. Currently can only remap once."""
 
     # async setting
     async_mode: bool = True
@@ -348,6 +351,8 @@ class Args:
     """the api url to use for the code verifier"""
     code_max_execution_time: float = 1.0
     """the max execution time to use for the code verifier"""
+    code_pass_rate_reward_threshold: float = 0.0
+    """the pass rate reward threshold for the code verifier. If pass rate is less than this threshold, reward is 0.0, otherwise reward is pass rate"""
 
     def __post_init__(self):
         assert self.number_samples_per_prompt > 0, "Number of samples per prompt must be greater than 0!"
@@ -787,6 +792,7 @@ class PolicyTrainerRayProcess(RayProcess):
         train_dataset: Dataset,
         eval_dataset: Dataset,
         tokenizer: PreTrainedTokenizer,
+        tc: TokenizerConfig,
         vllm_engines: List[ray.actor.ActorHandle],
         metrics_queue: RayQueue,
         data_collator: Callable,
@@ -928,7 +934,7 @@ class PolicyTrainerRayProcess(RayProcess):
             num_training_steps: int,
             sample_evaluation_prompt_token_ids: Optional[List[int]],
             evaluation_Q: Queue,
-            eval_freq: int,
+            local_eval_freq: int,
             resume_training_step: int,
         ):
             def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
@@ -962,7 +968,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 response_ids_Q.put(response_ids)
 
                 # Evaluate the model
-                if sample_evaluation_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
+                if sample_evaluation_prompt_token_ids is not None and (training_step - 1) % local_eval_freq == 0:
                     response_ids = generate_with_engines(
                         sample_evaluation_prompt_token_ids, evaluation_generation_config
                     )
@@ -979,7 +985,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     args.num_training_steps,
                     sample_evaluation_prompt_token_ids,
                     evaluation_Q,
-                    args.eval_freq,
+                    args.local_eval_freq,
                     resume_training_step,
                 ),
             )
@@ -1021,7 +1027,7 @@ class PolicyTrainerRayProcess(RayProcess):
         ].tolist()  # can be simplified since we `remove_padding` later anyway
         queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
         ground_truths_next = data[GROUND_TRUTHS_KEY]
-        datasets_next = data[DATASET_SOURCE_KEY]
+        datasets_next = data[VERIFIER_SOURCE_KEY]
         if self.rank == 0:
             param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
 
@@ -1060,7 +1066,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist()
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
                     ground_truths_next = data[GROUND_TRUTHS_KEY]
-                    datasets_next = data[DATASET_SOURCE_KEY]
+                    datasets_next = data[VERIFIER_SOURCE_KEY]
                     with Timer("🔥🔥🔥 Loading weights using shared memory", noop=self.rank != 0):
                         broadcast_to_vllm()
                 if self.rank == 0:
@@ -1078,7 +1084,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist()
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
                     ground_truths_next = data[GROUND_TRUTHS_KEY]
-                    datasets_next = data[DATASET_SOURCE_KEY]
+                    datasets_next = data[VERIFIER_SOURCE_KEY]
                     with Timer("🔥🔥🔥 Loading weights using shared memory", noop=self.rank != 0):
                         broadcast_to_vllm()
                     if self.rank == 0:
@@ -1374,7 +1380,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 checkpoint_dir = f"{args.output_dir}_checkpoints"
                 step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
                 print(f"Saving model at step {training_step} to {step_dir}")
-                self.save_model(self.model, step_dir)
+                self.save_model(self.model, tc.chat_template_name, tokenizer, step_dir)
                 if args.try_launch_beaker_eval_jobs_on_weka:
                     leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
                     if self.rank == 0 and is_beaker_job():
@@ -1400,7 +1406,7 @@ class PolicyTrainerRayProcess(RayProcess):
                                 print(f"Eval future {eval_futures[0]} is done")
                                 eval_futures.popleft()
         print(f"Saving final model at step {training_step} to {args.output_dir}")
-        self.save_model(self.model, args.output_dir)
+        self.save_model(self.model, tc.chat_template_name, tokenizer, args.output_dir)
         if args.try_launch_beaker_eval_jobs_on_weka:
             leaderboard_name = args.hf_repo_revision
             if self.rank == 0 and is_beaker_job():
@@ -1434,13 +1440,19 @@ class PolicyTrainerRayProcess(RayProcess):
             shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
         print("finished training")
 
-    def save_model(self, model_to_save: PreTrainedModel, output_dir: str) -> None:
+    def save_model(
+        self, model_to_save: PreTrainedModel, chat_template_name: str, tokenizer: PreTrainedTokenizer, output_dir: str
+    ) -> None:
         if self.rank == 0:
             os.makedirs(output_dir, exist_ok=True)
 
         # save model weights for ZeRO2/3
         if hasattr(model_to_save, "module"):
             model_to_save = model_to_save.module
+
+        if "olmo" in chat_template_name:
+            # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
+            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
         # gather parameters
         output_state_dict = {}
@@ -1596,7 +1608,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     args.mini_batch_size = int(args.local_mini_batch_size * args.world_size)
     args.num_mini_batches = exact_div((args.rollout_batch_size * args.number_samples_per_prompt), args.mini_batch_size)
     args.num_training_steps = args.total_episodes // (args.rollout_batch_size * args.number_samples_per_prompt)
-    args.eval_freq = max(1, args.num_training_steps // args.num_evals)
+    if args.local_eval_freq is not None:
+        raise ValueError("local_eval_freq should not be set manually; it will be computed automatically")
+    args.local_eval_freq = max(1, args.num_training_steps // args.num_evals)
     # PPO logic: do checks and set up dataloader batch size
     if args.whiten_rewards:
         assert args.local_mini_batch_size >= 8, (

@@ -55,7 +55,8 @@ explicit = true
 
 # flash-attn related setups
 [project.optional-dependencies]
-compile = ["flash-attn>=2.8.0.post1"]
+compile = ["flash-attn>=2.8.0.post2",
+		   "flashinfer-python>=0.2.7.post1"]
 liger = ["liger-kernel>=0.5.4"]
 code = [
     "fastapi>=0.100.0",
@@ -87,6 +88,10 @@ dev = [
     "ruff>=0.11.13",
 	"parameterized>=0.9.0",
 ]
+
+[tool.pytest.ini_options]
+addopts = "--ignore=oe-eval-internal/"
+
 
 [tool.black]
 line-length = 119

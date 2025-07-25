@@ -988,7 +988,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             accelerator.wait_for_everyone()
 
     if args.output_dir is not None:
-        save_with_accelerate(accelerator, model, tokenizer, args.output_dir, args.use_lora)
+        save_with_accelerate(
+            accelerator, model, tokenizer, args.output_dir, args.use_lora, chat_template_name=tc.chat_template_name
+        )
 
     # remove all checkpoints to save space
     if accelerator.is_local_main_process:

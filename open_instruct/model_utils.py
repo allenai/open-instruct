@@ -261,8 +261,14 @@ async def apply_verifiable_reward(
                 tokenized_prediction=tok_prediction, prediction=prediction, label=gt, query=query
             )
             async_tasks.append(task)
+            # use reward_func.name to get the name of the verifier, rather than ds in case we have done remapping.
             task_metadata.append(
-                {"response_idx": i, "dataset": ds, "reward_weight": reward_func.weight, "reward_mult": reward_mult}
+                {
+                    "response_idx": i,
+                    "dataset": reward_func.name,
+                    "reward_weight": reward_func.weight,
+                    "reward_mult": reward_mult,
+                }
             )
 
     # Execute all tasks in parallel
@@ -397,6 +403,14 @@ def batch_generation(
     return torch.cat(query_responses, 0), torch.cat(logitss, 0)
 
 
+def get_olmo3_generation_config(tokenizer):
+    return transformers.GenerationConfig(
+        temperature=None,
+        top_p=None,
+        eos_token_id=[tokenizer.convert_tokens_to_ids("<|im_end|>"), tokenizer.convert_tokens_to_ids("<|endoftext|>")],
+    )
+
+
 def save_with_accelerate(
     accelerator: Accelerator,
     model: torch.nn.Module,
@@ -404,14 +418,20 @@ def save_with_accelerate(
     output_dir: str,
     use_lora: bool = False,
     model_attribute_to_save: Optional[str] = None,
+    chat_template_name: str = "tulu",
 ) -> None:
     """`model_attribute_to_save` is for used to save PPO's policy instead of the full model"""
     # set the generation config to an empty setting to be safe.
     # we usually do greedy decoding for generation, so this should be okay.
     # otherwise, we get an error thrown at save time.
-    model.generation_config = transformers.GenerationConfig(
-        temperature=None, top_p=None, eos_token_id=tokenizer.eos_token_id, bos_token_id=tokenizer.bos_token_id
-    )
+    if "olmo" in chat_template_name:
+        # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
+        logger.log(f"Detected olmo chat template: {chat_template_name}, updating model generation config.")
+        model.generation_config = get_olmo3_generation_config(tokenizer)
+    else:
+        model.generation_config = transformers.GenerationConfig(
+            temperature=None, top_p=None, eos_token_id=tokenizer.eos_token_id, bos_token_id=tokenizer.bos_token_id
+        )
 
     unwrapped_model: PreTrainedModel = accelerator.unwrap_model(model)
     if model_attribute_to_save is not None:
