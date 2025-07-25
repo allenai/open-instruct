@@ -2382,7 +2382,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 evaluation_inference_results_Q.shutdown()
             except Exception as e:
                 logger.warning(f"Error shutting down Ray queues: {e}")
-            
+
             # Clean up judge clients
             try:
                 cleanup_judge_clients()
