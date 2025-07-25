@@ -161,6 +161,9 @@ class LLMRayActor:
         eval_results_queue=None,
         **kwargs,
     ):
+        # Log TORCH_CUDA_ARCH_LIST status inside Ray actor
+        print(f"[LLMRayActor.__init__] TORCH_CUDA_ARCH_LIST = {os.environ.get('TORCH_CUDA_ARCH_LIST', 'NOT SET')}")
+        
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
@@ -367,13 +370,23 @@ def create_vllm_engines(
             additional_kwargs["tools"] = tools
             additional_kwargs["max_tool_calls"] = max_tool_calls_dict
 
+        # Prepare environment variables for Ray actor
+        env_vars = {"VLLM_ENABLE_V1_MULTIPROCESSING": "0"}
+        
+        # Pass TORCH_CUDA_ARCH_LIST if it's set in the main process
+        if "TORCH_CUDA_ARCH_LIST" in os.environ:
+            env_vars["TORCH_CUDA_ARCH_LIST"] = os.environ["TORCH_CUDA_ARCH_LIST"]
+            print(f"[create_vllm_engines] TORCH_CUDA_ARCH_LIST is set: {os.environ['TORCH_CUDA_ARCH_LIST']}")
+        else:
+            print("[create_vllm_engines] WARNING: TORCH_CUDA_ARCH_LIST is NOT set in main process")
+        
         vllm_engines.append(
             LLMRayActor.options(
                 num_cpus=num_gpus,
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
                 # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
-                runtime_env=ray.runtime_env.RuntimeEnv(env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0"}),
+                runtime_env=ray.runtime_env.RuntimeEnv(env_vars=env_vars),
             ).remote(
                 model=pretrain,
                 revision=revision,
