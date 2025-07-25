@@ -1196,9 +1196,7 @@ def accumulate_inference_batches(
     )
 
     for batch_idx in pbar:
-        # Get result from queue
         result = inference_results_Q.get()
-
         dataset_indices = result.dataset_index
 
         if dataset_indices is None:
@@ -1223,8 +1221,6 @@ def accumulate_inference_batches(
 
         for dataset_idx in dataset_indices:
             query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
-
-            # Don't replicate - just append once per unique index
             batch_queries.append(query)
             batch_ground_truths.append(ground_truth)
             batch_datasets.append(dataset)
@@ -2241,7 +2237,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         eval_dataset_names = eval_dataset[:num_eval_samples][VERIFIER_SOURCE_KEY]
     reward_fn = make_reward_fn(args)
 
-    # Verify all vLLM engines are ready.
+    # Verify none of the engines crashed during initialization.
     for i, engine in enumerate(vllm_engines):
         ray.get(engine.ready.remote())
 
