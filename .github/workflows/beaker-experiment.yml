@@ -69,7 +69,7 @@ jobs:
     needs: check-commits
     if: needs.check-commits.outputs.should_run == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     
     steps:
       - name: Checkout repository
@@ -142,6 +142,7 @@ jobs:
           uv sync --only-group dev
       
       - name: Launch Beaker experiment
+        id: launch
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
           GITHUB_RUN_ID: ${{ github.run_id }}
@@ -153,43 +154,69 @@ jobs:
           echo "Launching experiment with Docker image: ${DOCKER_IMAGE}"
           echo "Git commit: $(git rev-parse --short HEAD)"
           
-          # Launch the experiment using the run_single_gpu.sh script
-          ./run_single_gpu.sh "${DOCKER_IMAGE}"
+          # Launch the experiment and capture output
+          OUTPUT=$(./run_single_gpu.sh "${DOCKER_IMAGE}" 2>&1)
+          echo "$OUTPUT"
+          
+          # Extract experiment ID from output
+          EXPERIMENT_ID=$(echo "$OUTPUT" | grep -oP 'https://beaker.org/ex/\K[a-zA-Z0-9]+' | tail -1)
+          if [ -z "$EXPERIMENT_ID" ]; then
+            echo "Failed to extract experiment ID from output"
+            exit 1
+          fi
+          
+          echo "experiment_id=$EXPERIMENT_ID" >> $GITHUB_OUTPUT
+          echo "Experiment ID: $EXPERIMENT_ID"
+          echo "Experiment URL: https://beaker.org/ex/$EXPERIMENT_ID"
       
-      - name: Capture experiment result
-        id: capture-result
+      - name: Wait for Beaker experiment completion
+        env:
+          BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+        run: |
+          EXPERIMENT_ID="${{ steps.launch.outputs.experiment_id }}"
+          echo "Waiting for experiment $EXPERIMENT_ID to complete..."
+          
+          # Maximum wait time: 20 minutes (1200 seconds)
+          MAX_WAIT_TIME=1200
+          CHECK_INTERVAL=30
+          ELAPSED_TIME=0
+          
+          while [ $ELAPSED_TIME -lt $MAX_WAIT_TIME ]; do
+            # Get experiment status
+            STATUS=$(beaker experiment get $EXPERIMENT_ID --format json | jq -r '.status')
+            
+            echo "Current status: $STATUS (elapsed: ${ELAPSED_TIME}s)"
+            
+            # Check if experiment has completed
+            if [ "$STATUS" = "succeeded" ]; then
+              echo "✅ Experiment completed successfully!"
+              exit 0
+            elif [ "$STATUS" = "failed" ] || [ "$STATUS" = "canceled" ]; then
+              echo "❌ Experiment $STATUS"
+              exit 1
+            fi
+            
+            # Wait before next check
+            sleep $CHECK_INTERVAL
+            ELAPSED_TIME=$((ELAPSED_TIME + CHECK_INTERVAL))
+          done
+          
+          echo "⏱️ Timeout: Experiment did not complete within 20 minutes"
+          exit 1
+      
+      - name: Summary
         if: always()
         run: |
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "✅ Experiment launched successfully!"
-            echo "status_emoji=✅" >> $GITHUB_OUTPUT
-            echo "status_text=Success" >> $GITHUB_OUTPUT
-          else
-            echo "❌ Failed to launch experiment"
-            echo "status_emoji=❌" >> $GITHUB_OUTPUT
-            echo "status_text=Failed" >> $GITHUB_OUTPUT
+          echo "## Beaker Experiment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Trigger:** ${{ steps.get-trigger-info.outputs.trigger_info }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Docker Image:** ${{ steps.get-image.outputs.docker_image }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ steps.launch.outputs.experiment_id }}" ]; then
+            echo "**Beaker Experiment:** [View on Beaker](https://beaker.org/ex/${{ steps.launch.outputs.experiment_id }})" >> $GITHUB_STEP_SUMMARY
           fi
-      
-      - name: Send email notification
-        if: always()
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          secure: true
-          username: ${{ secrets.EMAIL_USERNAME }}
-          password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: ${{ steps.capture-result.outputs.status_emoji }} Beaker Experiment ${{ steps.capture-result.outputs.status_text }} - ${{ steps.get-trigger-info.outputs.trigger_info }}
-          to: finbarrtimbers@gmail.com,hamishi@allenai.org
-          from: GitHub Actions <noreply@github.com>
-          body: |
-            Beaker Experiment Launch ${{ steps.capture-result.outputs.status_text }}
-            
-            Trigger: ${{ steps.get-trigger-info.outputs.trigger_info }}
-            Repository: ${{ github.repository }}
-            Commit: ${{ github.sha }}
-            Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            
-            Docker Image: ${{ steps.get-image.outputs.docker_image }}
-            
-            Status: ${{ steps.capture-result.outputs.status_emoji }} ${{ steps.capture-result.outputs.status_text }}
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ **Status:** Experiment completed successfully!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Status:** Experiment failed or timed out" >> $GITHUB_STEP_SUMMARY
+          fi
