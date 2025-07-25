@@ -2374,6 +2374,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             else:
                 logger.info("======== ✅ generation thread ends =========")
 
+            # Shutdown Ray queues to prevent semaphore leaks
+            logger.info("Shutting down Ray queues...")
+            try:
+                inference_results_Q.shutdown()
+                param_prompt_Q.shutdown()
+                evaluation_inference_results_Q.shutdown()
+            except Exception as e:
+                logger.warning(f"Error shutting down Ray queues: {e}")
+            
             # Clean up judge clients
             try:
                 cleanup_judge_clients()
