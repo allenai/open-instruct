@@ -1,6 +1,4 @@
-import sys
 from copy import deepcopy
-from pathlib import Path
 
 import pytest
 import torch
@@ -12,13 +10,12 @@ from transformers import (
     BambaConfig,
     BambaForCausalLM,
     DataCollatorForSeq2Seq,
+    GraniteMoeHybridConfig,
+    GraniteMoeHybridForCausalLM,
     LlamaConfig,
     LlamaForCausalLM,
 )
 
-# HACK for being able to load the collator without needing to install open-instruct
-open_instruct_dir = Path(__file__).parent.parent.absolute()
-sys.path.append(open_instruct_dir)
 from open_instruct.dataset_processor import CHAT_TEMPLATES
 from open_instruct.dataset_transformation import sft_tulu_tokenize_and_truncate_v1
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
@@ -38,8 +35,12 @@ try:
 except ImportError:
     flash_attn_available = False
 
-MODEL_CLASSES = {"bamba": BambaForCausalLM, "llama": LlamaForCausalLM}
-MODEL_CFGS = {"bamba": BambaConfig, "llama": LlamaConfig}
+MODEL_CLASSES = {
+    "bamba": BambaForCausalLM,
+    "llama": LlamaForCausalLM,
+    "granite_hybrid_no_moe": GraniteMoeHybridForCausalLM,
+}
+MODEL_CFGS = {"bamba": BambaConfig, "llama": LlamaConfig, "granite_hybrid_no_moe": GraniteMoeHybridConfig}
 MODEL_KWARGS = {
     "bamba": dict(
         attention_dropout=0.0,
@@ -57,7 +58,7 @@ MODEL_KWARGS = {
         mamba_n_heads=16,
         max_position_embeddings=512,
         num_attention_heads=4,
-        num_hidden_layers=1,
+        num_hidden_layers=2,
         num_key_value_heads=2,
         pad_token_id=0,
     ),
@@ -69,10 +70,32 @@ MODEL_KWARGS = {
         max_position_embeddings=512,
         mlp_bias=False,
         num_attention_heads=2,
-        num_hidden_layers=1,
+        num_hidden_layers=2,
         num_key_value_heads=2,
     ),
+    "granite_hybrid_no_moe": dict(
+        hidden_act="silu",
+        hidden_size=32,
+        intermediate_size=64,
+        is_training=True,
+        max_position_embeddings=512,
+        mlp_bias=False,
+        num_attention_heads=2,
+        num_hidden_layers=2,
+        num_key_value_heads=2,
+        layer_types=["mamba", "attention"],
+        num_local_experts=0,
+        # No rope
+        rope_scaling=None,
+        mamba_chunk_size=16,
+        mamba_d_conv=4,
+        mamba_d_state=16,
+        mamba_expand=2,
+        mamba_n_groups=1,
+        mamba_n_heads=16,
+    ),
 }
+REQUIRES_MAMBA_AND_CONV = {"granite_hybrid_no_moe", "bamba"}
 
 
 class TestPaddingFree:
@@ -97,11 +120,11 @@ class TestPaddingFree:
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="Padding free tests require CUDA")
     @pytest.mark.skipif(not flash_attn_available, reason="Padding free requires flash_attn")
-    @pytest.mark.parametrize("model_name", ["bamba", "llama"])
+    @pytest.mark.parametrize("model_name", ["granite_hybrid_no_moe", "bamba", "llama"])
     @pytest.mark.parametrize("loss_type", ["mean", "sum"])
     def test_padding_free(self, model_name: str, loss_type: str) -> None:
-        if model_name == "bamba" and not mamba_and_causal_conv_available:
-            pytest.skip("bamba padding-free tests require mamba_ssm and causal_conv1d")
+        if model_name in REQUIRES_MAMBA_AND_CONV and not mamba_and_causal_conv_available:
+            pytest.skip("test requires mamba_ssm and causal_conv1d")
         torch.manual_seed(42)
 
         tokenizer = AutoTokenizer.from_pretrained("ibm-ai-platform/Bamba-9B-v2")
@@ -188,10 +211,5 @@ class TestPaddingFree:
 
         grads = {n: p.grad for n, p in model.named_parameters()}
         pf_grads = {n: p.grad for n, p in pf_model.named_parameters()}
-        non_nan_grads = set()
-        nan_grads = set()
         for k, g in grads.items():
             torch.testing.assert_close(g, pf_grads[k])
-            non_nan_grads.add(k)
-        print(f"{non_nan_grads=}")
-        print(f"{nan_grads=}")
