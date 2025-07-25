@@ -214,7 +214,7 @@ class LLMRayActor:
             result = self._generate_batch(request.prompts, sampling_params, dataset_index=request.dataset_index,
                                           training_step=request.training_step)
             self.results_queue.put(result)
-            if request.eval_prompts and training_step % eval_freq == 0:
+            if request.eval_prompts and request.training_step % eval_freq == 0:
                 eval_result = self._generate_batch(
                     request.eval_prompts, eval_sampling_params)
                 eval_result.is_eval = True
