@@ -2297,7 +2297,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             eval_prompt_token_ids if eval_dataset is not None else None,
         )
     assert param_prompt_Q.size() == args.async_steps, f'{param_prompt_Q.size()=}, {args.async_steps=}'
-    assert len(pending_queries_map) == args.async_steps, f'{pending_queries_map.size()=}, {args.async_steps=}'
+    assert len(pending_queries_map) == args.async_steps, f'{len(pending_queries_map)=}, {args.async_steps=}'
     num_total_tokens = 0
     start_time = time.time()
     try:
