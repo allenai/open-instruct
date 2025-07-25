@@ -2359,7 +2359,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             cleanup_done = True
             # Signal threads to stop
             stop_generate_event.set()
-            
+
             # Clean up threads with timeout
             logger.info("Cleaning up threads...")
             packing_thread.join(timeout=30)
@@ -2367,13 +2367,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 logger.warning("Data preparation thread did not stop cleanly")
             else:
                 logger.info("======== ✅ data preparation thread ends =========")
-            
+
             generation_thread.join(timeout=30)
             if generation_thread.is_alive():
                 logger.warning("Generation thread did not stop cleanly")
             else:
                 logger.info("======== ✅ generation thread ends =========")
-            
+
             # Clean up judge clients
             try:
                 cleanup_judge_clients()
