@@ -90,7 +90,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "--ignore=oe-eval-internal/ -vs --color=yes"
+addopts = "--ignore=oe-eval-internal/"
 
 [tool.black]
 line-length = 119
