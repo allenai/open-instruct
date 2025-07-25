@@ -1,0 +1,165 @@
+name: Beaker Experiment Launch
+
+# Run experiments on Beaker using the latest Docker image
+on:
+  # Run on schedule - every 24 hours at midnight UTC
+  schedule:
+    - cron: '0 0 * * *'
+  
+  # Run when PRs are merged to main
+  push:
+    branches:
+      - main
+    # Only run if the push affects code files (not just docs)
+    paths:
+      - 'open_instruct/**'
+      - 'configs/**'
+      - 'scripts/**'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - '.github/workflows/beaker-experiment.yml'
+  
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      docker_image_override:
+        description: 'Optional: Override the Docker image (leave empty to use latest)'
+        required: false
+        default: ''
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  launch-experiment:
+    name: Launch Beaker Experiment
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Python environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      
+      - name: Setup Beaker
+        uses: allenai/setup-beaker@v2
+        with:
+          token: ${{ secrets.BEAKER_TOKEN }}
+          workspace: ai2/tulu-thinker
+      
+      - name: Get latest Docker image
+        id: get-image
+        run: |
+          # Get the short SHA and run ID for the current commit
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          
+          # If docker_image_override is provided, use it
+          if [ -n "${{ github.event.inputs.docker_image_override }}" ]; then
+            echo "Using override image: ${{ github.event.inputs.docker_image_override }}"
+            echo "docker_image=${{ github.event.inputs.docker_image_override }}" >> $GITHUB_OUTPUT
+          else
+            # Get the most recent successful push-image workflow run for this commit
+            echo "Fetching latest Docker image for commit ${SHORT_SHA}..."
+            
+            # First, try to get the image from the current workflow run if this was triggered by push
+            if [ "${{ github.event_name }}" = "push" ]; then
+              # Wait a bit for the push-image workflow to complete
+              echo "Waiting for push-image workflow to complete..."
+              sleep 60
+            fi
+            
+            # Use the standard naming convention from push-image workflow
+            DOCKER_IMAGE="open_instruct_auto"
+            echo "docker_image=${DOCKER_IMAGE}" >> $GITHUB_OUTPUT
+            echo "Using Docker image: ${DOCKER_IMAGE}"
+          fi
+      
+      - name: Install dependencies
+        run: |
+          # Install Python dependencies needed for mason.py
+          uv pip install --system beaker-py rich
+      
+      - name: Launch Beaker experiment
+        env:
+          BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+        run: |
+          # Set the Docker image in the command
+          DOCKER_IMAGE="${{ steps.get-image.outputs.docker_image }}"
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          
+          echo "Launching experiment with Docker image: ${DOCKER_IMAGE}"
+          echo "Git commit: ${SHORT_SHA}"
+          
+          # Launch the experiment using mason.py
+          uv run python mason.py \
+            --cluster ai2/jupiter-cirrascale-2 \
+            --cluster ai2/augusta-google-1 \
+            --cluster ai2/saturn-cirrascale \
+            --cluster ai2/ceres-cirrascale \
+            --image "${DOCKER_IMAGE}" \
+            --pure_docker_mode \
+            --workspace ai2/tulu-thinker \
+            --priority high \
+            --preemptible \
+            --num_nodes 1 \
+            --max_retries 0 \
+            --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+            --env GIT_COMMIT="${SHORT_SHA}" \
+            --env GITHUB_RUN_ID="${{ github.run_id }}" \
+            --env GITHUB_RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --budget ai2/oe-adapt \
+            --no-host-networking \
+            --gpus 1 \
+            -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+            --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
+            --dataset_mixer_list_splits train \
+            --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
+            --dataset_mixer_eval_list_splits train \
+            --max_token_length 512 \
+            --max_prompt_token_length 512 \
+            --response_length 512 \
+            --pack_length 1024 \
+            --per_device_train_batch_size 1 \
+            --num_unique_prompts_rollout 8 \
+            --num_samples_per_prompt_rollout 4 \
+            --model_name_or_path Qwen/Qwen3-1.7B \
+            --stop_strings "</answer>" \
+            --apply_r1_style_format_reward \
+            --apply_verifiable_reward true \
+            --temperature 0.7 \
+            --ground_truths_key ground_truth \
+            --chat_template_name r1_simple_chat_postpend_think \
+            --learning_rate 3e-7 \
+            --total_episodes 200 \
+            --deepspeed_stage 2 \
+            --num_epochs 1 \
+            --num_learners_per_node 1 \
+            --vllm_tensor_parallel_size 1 \
+            --beta 0.01 \
+            --seed 3 \
+            --num_evals 20 \
+            --vllm_sync_backend gloo \
+            --vllm_gpu_memory_utilization 0.3 \
+            --save_traces \
+            --vllm_enforce_eager \
+            --gradient_checkpointing \
+            --push_to_hub false \
+            --single_gpu_mode
+      
+      - name: Report experiment status
+        if: always()
+        run: |
+          if [ $? -eq 0 ]; then
+            echo "✅ Experiment launched successfully!"
+          else
+            echo "❌ Failed to launch experiment"
+            exit 1
+          fi
