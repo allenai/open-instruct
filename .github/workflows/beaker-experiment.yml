@@ -2,9 +2,10 @@ name: Beaker Experiment Launch
 
 # Run experiments on Beaker using the latest Docker image
 on:
-  # Run on schedule - every 24 hours at midnight UTC
+  # Run on schedule - every 24 hours at midnight PT (Pacific Time)
+  # PT is UTC-8 (PST) or UTC-7 (PDT), so midnight PT is 8am UTC (or 7am during DST)
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 8 * * *'
   
   # Run when PRs are merged to main
   push:
@@ -32,14 +33,67 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-commits:
+    name: Check for Recent Commits
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Check for recent commits
+        id: check
+        run: |
+          # Always run for non-scheduled events
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "Running: triggered by ${{ github.event_name }}"
+          else
+            # For scheduled runs, check if there are commits in last 24 hours
+            COMMITS_24H=$(git log --since="24 hours ago" --oneline)
+            if [ -z "$COMMITS_24H" ]; then
+              echo "No commits in the last 24 hours. Skipping scheduled run."
+              echo "should_run=false" >> $GITHUB_OUTPUT
+            else
+              echo "Found commits in the last 24 hours:"
+              echo "$COMMITS_24H"
+              echo "should_run=true" >> $GITHUB_OUTPUT
+            fi
+          fi
+
   launch-experiment:
     name: Launch Beaker Experiment
+    needs: check-commits
+    if: needs.check-commits.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history to get commit author info
+      
+      - name: Get trigger information
+        id: get-trigger-info
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Get the commit author for push events
+            AUTHOR_NAME=$(git log -1 --pretty=format:'%an')
+            echo "trigger_info=Push by ${AUTHOR_NAME}" >> $GITHUB_OUTPUT
+            echo "notification_type=push" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Get the user who triggered the manual dispatch
+            echo "trigger_info=Manual dispatch by ${{ github.actor }}" >> $GITHUB_OUTPUT
+            echo "notification_type=manual" >> $GITHUB_OUTPUT
+          else
+            # For scheduled runs
+            echo "trigger_info=Scheduled run" >> $GITHUB_OUTPUT
+            echo "notification_type=schedule" >> $GITHUB_OUTPUT
+          fi
       
       - name: Setup Python environment
         uses: actions/setup-python@v5
@@ -154,12 +208,40 @@ jobs:
             --push_to_hub false \
             --single_gpu_mode
       
-      - name: Report experiment status
+      - name: Capture experiment result
+        id: capture-result
         if: always()
         run: |
-          if [ $? -eq 0 ]; then
+          if [ "${{ job.status }}" = "success" ]; then
             echo "✅ Experiment launched successfully!"
+            echo "status_emoji=✅" >> $GITHUB_OUTPUT
+            echo "status_text=Success" >> $GITHUB_OUTPUT
           else
             echo "❌ Failed to launch experiment"
-            exit 1
+            echo "status_emoji=❌" >> $GITHUB_OUTPUT
+            echo "status_text=Failed" >> $GITHUB_OUTPUT
           fi
+      
+      - name: Send email notification
+        if: always()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: ${{ steps.capture-result.outputs.status_emoji }} Beaker Experiment ${{ steps.capture-result.outputs.status_text }} - ${{ steps.get-trigger-info.outputs.trigger_info }}
+          to: finbarrtimbers@gmail.com,hamishi@allenai.org
+          from: GitHub Actions <noreply@github.com>
+          body: |
+            Beaker Experiment Launch ${{ steps.capture-result.outputs.status_text }}
+            
+            Trigger: ${{ steps.get-trigger-info.outputs.trigger_info }}
+            Repository: ${{ github.repository }}
+            Commit: ${{ github.sha }}
+            Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            
+            Docker Image: ${{ steps.get-image.outputs.docker_image }}
+            
+            Status: ${{ steps.capture-result.outputs.status_emoji }} ${{ steps.capture-result.outputs.status_text }}
