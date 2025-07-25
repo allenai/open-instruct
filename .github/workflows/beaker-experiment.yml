@@ -7,21 +7,18 @@ on:
   schedule:
     - cron: '0 8 * * *'
   
-  # Run when PRs are merged to main
   push:
-    branches:
-      - main
-    # Only run if the push affects code files (not just docs)
+    # Run this workflow anytime a push updates one of the files in the image's directory
+    # (other than the README), and anytime there's a new release tag for this image.
     paths:
       - 'open_instruct/**'
-      - 'configs/**'
-      - 'scripts/**'
+      - '!open_instruct/README.md'
       - 'requirements.txt'
       - 'Dockerfile'
-      - '.github/workflows/beaker-experiment.yml'
-  
-  # Allow manual triggering
-  workflow_dispatch:
+      - '.github/workflows/push-image.yml'
+      # Note, add .olmo dockerfile + requirements if adding auto build to those
+    branches: [main]
+  workflow_dispatch:  # This allows us to manually trigger a build through the GitHub UI.
     inputs:
       docker_image_override:
         description: 'Optional: Override the Docker image (leave empty to use latest)'
@@ -33,41 +30,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check-commits:
-    name: Check for Recent Commits
-    runs-on: ubuntu-latest
-    outputs:
-      should_run: ${{ steps.check.outputs.should_run }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
-      - name: Check for recent commits
-        id: check
-        run: |
-          # Always run for non-scheduled events
-          if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "should_run=true" >> $GITHUB_OUTPUT
-            echo "Running: triggered by ${{ github.event_name }}"
-          else
-            # For scheduled runs, check if there are commits in last 24 hours
-            COMMITS_24H=$(git log --since="24 hours ago" --oneline)
-            if [ -z "$COMMITS_24H" ]; then
-              echo "No commits in the last 24 hours. Skipping scheduled run."
-              echo "should_run=false" >> $GITHUB_OUTPUT
-            else
-              echo "Found commits in the last 24 hours:"
-              echo "$COMMITS_24H"
-              echo "should_run=true" >> $GITHUB_OUTPUT
-            fi
-          fi
-
   launch-experiment:
     name: Launch Beaker Experiment
-    needs: check-commits
-    if: needs.check-commits.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     
