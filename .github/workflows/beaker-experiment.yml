@@ -121,6 +121,29 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          set -euo pipefail
+          
+          # Debug: Check if script exists and is executable
+          echo "Current directory: $(pwd)"
+          echo "Directory contents:"
+          ls -la
+          
+          if [ ! -f "run_single_gpu.sh" ]; then
+            echo "ERROR: run_single_gpu.sh not found in current directory"
+            echo "Available .sh files:"
+            find . -name "*.sh" -type f | head -20
+            exit 1
+          fi
+          
+          if [ ! -x "run_single_gpu.sh" ]; then
+            echo "WARNING: run_single_gpu.sh is not executable"
+            echo "Making it executable..."
+            chmod +x run_single_gpu.sh
+          fi
+          
+          # Debug: Check if uv is available
+          which uv || (echo "ERROR: uv command not found" && exit 1)
+          
           # Set the Docker image in the command
           DOCKER_IMAGE="${{ steps.get-image.outputs.docker_image }}"
           
@@ -128,13 +151,22 @@ jobs:
           echo "Git commit: $(git rev-parse --short HEAD)"
           
           # Launch the experiment and capture output
-          OUTPUT=$(./scripts/train/debug/run_single_gpu.sh "${DOCKER_IMAGE}" 2>&1)
+          echo "Running: ./run_single_gpu.sh '${DOCKER_IMAGE}'"
+          OUTPUT=$(./run_single_gpu.sh "${DOCKER_IMAGE}" 2>&1) || {
+            EXIT_CODE=$?
+            echo "ERROR: run_single_gpu.sh failed with exit code $EXIT_CODE"
+            echo "Full output:"
+            echo "$OUTPUT"
+            exit $EXIT_CODE
+          }
           echo "$OUTPUT"
           
           # Extract experiment ID from output
           EXPERIMENT_ID=$(echo "$OUTPUT" | grep -oP 'https://beaker.org/ex/\K[a-zA-Z0-9]+' | tail -1)
           if [ -z "$EXPERIMENT_ID" ]; then
             echo "Failed to extract experiment ID from output"
+            echo "DEBUG: Full output was:"
+            echo "$OUTPUT"
             exit 1
           fi
           
