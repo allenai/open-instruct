@@ -14,9 +14,10 @@ from open_instruct.tool_utils.tool_vllm import Tool, ToolOutput
 
 
 class MCPTool(Tool):
-    def __init__(self, start_str: str, end_str: str):
+    def __init__(self, start_str: str, end_str: str, timeout: int = 60):
         self.start_str = start_str
         self.end_str = end_str
+        self.timeout = timeout  # to avoid hanging forever
 
     def init_mcp_client(self):
         if os.environ.get("MCP_TRANSPORT") == "StreamableHttpTransport":
@@ -24,13 +25,13 @@ class MCPTool(Tool):
             print(
                 f"Using MCP transport: {os.environ.get('MCP_TRANSPORT')}, port: {port}"
             )
-            return Client(f"http://localhost:{port}/mcp")
+            return Client(f"http://localhost:{port}/mcp", timeout=self.timeout)
         elif os.environ.get("MCP_TRANSPORT") == "FastMCPTransport":
             mcp_executable = os.environ.get("MCP_EXECUTABLE")
             print(
                 f"Using MCP transport: {os.environ.get('MCP_TRANSPORT')}, executable: {mcp_executable}"
             )
-            return Client(mcp_executable)
+            return Client(mcp_executable, timeout=self.timeout)
         else:
             raise ValueError(
                 f"Invalid MCP transport: {os.environ.get('MCP_TRANSPORT')}"
