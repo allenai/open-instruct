@@ -26,7 +26,7 @@ on:
       - '!open_instruct/README.md'
       - 'requirements.txt'
       - 'Dockerfile'
-      - '.github/workflows/push-image.yml'
+      - '.github/workflows/beaker-experiment.yml'
   workflow_dispatch:  # This allows us to manually trigger a build through the GitHub UI.
     inputs:
       docker_image_override:
