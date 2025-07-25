@@ -137,4 +137,4 @@ known-first-party = ["open-instruct"]
 # case insensitive to match isort --profile black
 case-sensitive = false
 # Disable split-on-trailing-comma to work with skip-magic-trailing-comma
-split-on-trailing-comma = false
+split-on-trailing-comma = false      
