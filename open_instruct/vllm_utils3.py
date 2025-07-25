@@ -206,35 +206,42 @@ class LLMRayActor:
         eval_freq=None,
         num_training_steps=None,
         resume_training_step=1,
+        timeout=0.1,
     ):
-        while True:
-            try:
-                # Use a short timeout to check for empty queue
-                request = self.prompt_queue.get(timeout=0.1)
-                # Unpack request
-                prompts = request.prompts
-                training_step = request.training_step
-                eval_prompts = request.eval_prompts
-                dataset_index = request.dataset_index
+        """Process a single element from the queue.
+        
+        Returns:
+            bool: True if an element was processed, False if queue was empty
+        """
+        try:
+            # Use a short timeout to check for empty queue
+            request = self.prompt_queue.get(timeout=timeout)
+            # Unpack request
+            prompts = request.prompts
+            training_step = request.training_step
+            eval_prompts = request.eval_prompts
+            dataset_index = request.dataset_index
 
-                # Generate responses for training prompts
-                result = self._generate_batch(
-                    prompts, sampling_params, dataset_index=dataset_index, training_step=training_step
+            # Generate responses for training prompts
+            result = self._generate_batch(
+                prompts, sampling_params, dataset_index=dataset_index, training_step=training_step
+            )
+
+            # Put result in queue
+            self.results_queue.put(result)
+
+            # Handle eval prompts if needed
+            if eval_prompts and eval_freq and training_step % eval_freq == 0:
+                eval_result = self._generate_batch(
+                    eval_prompts, eval_sampling_params, dataset_index=dataset_index, training_step=training_step
                 )
+                eval_result.is_eval = True
+                self.eval_results_queue.put(eval_result)
+            
+            return True
 
-                # Put result in queue
-                self.results_queue.put(result)
-
-                # Handle eval prompts if needed
-                if eval_prompts and eval_freq and training_step % eval_freq == 0:
-                    eval_result = self._generate_batch(
-                        eval_prompts, eval_sampling_params, dataset_index=dataset_index, training_step=training_step
-                    )
-                    eval_result.is_eval = True
-                    self.eval_results_queue.put(eval_result)
-
-            except queue.Empty:
-                break
+        except queue.Empty:
+            return False
 
     def _generate_batch(
         self,

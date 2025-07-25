@@ -231,10 +231,10 @@ class Args:
     The returned output will not contain the stop strings."""
 
     # Algorithm
-    async_mode: bool = True
+    async_mode: Optional[bool] = None
     """Whether to run the generation in async mode which learns from the second latest policy like Cleanba (https://arxiv.org/abs/2310.00036)"""
     async_steps: int = 1
-    """Number of steps ahead to generate responses. Only used when async_mode is True."""
+    """Number of steps ahead to generate responses. Set to 0 to make the code synchronous."""
     num_epochs: int = 1
     """the number of epochs to train"""
     num_mini_batches: int = 1
@@ -401,6 +401,8 @@ class Args:
     code_tool_api_endpoint: Optional[str] = None
 
     def __post_init__(self):
+        if not self.async_mode is None:
+            logger.fatal("Async mode argument is deprecated. To use async mode, set `async_steps=N>0` in the args.")
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
@@ -1791,37 +1793,32 @@ def sync_weights_and_prepare_prompts(
     policy_group: ModelGroup,
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q: ray_queue.Queue,
-    queries_next: List[List[int]],
-    ground_truths_next: List[List[int]],
-    datasets_next: List[str],
-    dataset_indices: List[int],
     eval_prompt_token_ids: Optional[List[List[int]]] = None,
 ) -> tuple[List[List[int]], List[List[int]], List[str], List[int]]:
     """Sync weights and send the next batch of prompts to vLLM."""
-    if training_step != 1:
-        dataset_indices = next(iter_dataloader)
-        data_next = train_dataset[dataset_indices]
-        queries_next = data_next[INPUT_IDS_PROMPT_KEY]
-        ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-        datasets_next = data_next[VERIFIER_SOURCE_KEY]
-        with Timer(
+    dataset_indices = next(iter_dataloader)
+    data_next = train_dataset[dataset_indices]
+    queries_next = data_next[INPUT_IDS_PROMPT_KEY]
+    ground_truths_next = data_next[GROUND_TRUTHS_KEY]
+    datasets_next = data_next[VERIFIER_SOURCE_KEY]
+    with Timer(
             "[Main Thread] 🔄 Loading weights using shared memory"
-            if args.async_mode
+            if args.async_steps > 0
             else "🔄 Loading weights using shared memory"
-        ):
-            ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
-
-        split_and_insert_batch(
-            queries_next,
-            ground_truths_next,
-            datasets_next,
-            dataset_indices,
-            training_step,
-            args.vllm_num_engines,
-            pending_queries_map,
-            param_prompt_Q,
-            eval_prompt_token_ids,
-        )
+    ):
+        ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
+        
+    split_and_insert_batch(
+        queries_next,
+        ground_truths_next,
+        datasets_next,
+        dataset_indices,
+        training_step,
+        args.vllm_num_engines,
+        pending_queries_map,
+        param_prompt_Q,
+        eval_prompt_token_ids,
+    )
 
     return queries_next, ground_truths_next, datasets_next, dataset_indices
 
@@ -1838,6 +1835,47 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
             logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
             return None, data_thread_metrics, num_total_tokens
         return collated_data, data_thread_metrics, num_total_tokens
+
+
+def generate_thread(
+    vllm_engines,
+    generation_config,
+    eval_generation_config,
+    local_eval_freq,
+    num_training_steps,
+    resume_training_step,
+    stop_event,
+):
+    """Thread function that repeatedly calls process_from_queue on vllm engines."""
+    logger.info("[Generate Thread] 🚀 Starting generation thread")
+    
+    while not stop_event.is_set():
+        # Track if any engine processed a request
+        any_processed = False
+        
+        for engine in vllm_engines:
+            try:
+                # Call process_from_queue with a short timeout
+                processed = ray.get(
+                    engine.process_from_queue.remote(
+                        generation_config,
+                        eval_generation_config,
+                        local_eval_freq,
+                        num_training_steps,
+                        resume_training_step,
+                        timeout=0.1,
+                    )
+                )
+                if processed:
+                    any_processed = True
+            except Exception as e:
+                logger.error(f"[Generate Thread] Error processing from queue: {e}")
+        
+        # If no engine processed anything, sleep briefly to avoid busy waiting
+        if not any_processed:
+            time.sleep(0.01)
+    
+    logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
 def one_training_step(
@@ -2153,9 +2191,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     # Initialize Ray before creating Ray objects
     ray.init(dashboard_host="0.0.0.0")
 
-    # Create Ray queues
-    inference_results_Q = ray_queue.Queue(maxsize=args.async_steps)
-    param_prompt_Q = ray_queue.Queue(maxsize=args.async_steps)
+    # Create Ray queues.
+    inference_results_Q = ray_queue.Queue(maxsize=args.async_steps + 1)
+    param_prompt_Q = ray_queue.Queue(maxsize=args.async_steps + 1)
     evaluation_inference_results_Q = ray_queue.Queue(maxsize=1)
 
     policy_group, vllm_engines, tool_objects, resume_training_step, episode = create_model_and_optimizer(
@@ -2221,34 +2259,50 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         ),
     )
     packing_thread.start()
-
-    # Send initial data to both threads.
-    dataset_indices = next(iter_dataloader)
-    data_next = train_dataset[dataset_indices]
-    queries_next = data_next[INPUT_IDS_PROMPT_KEY]
-    ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-    datasets_next = data_next[VERIFIER_SOURCE_KEY]
-
-    # Split the initial batch using the split_and_insert_batch function
-    split_and_insert_batch(
-        queries_next,
-        ground_truths_next,
-        datasets_next,
-        dataset_indices,
-        1,  # training_step
-        args.vllm_num_engines,
-        pending_queries_map,
-        param_prompt_Q,
-        eval_prompt_token_ids if eval_dataset is not None else None,
+    
+    # Create and start the generate thread
+    stop_generate_event = threading.Event()
+    generation_thread = threading.Thread(
+        target=generate_thread,
+        args=(
+            vllm_engines,
+            generation_config,
+            eval_generation_config,
+            args.local_eval_freq,
+            args.num_training_steps,
+            resume_training_step,
+            stop_generate_event,
+        ),
     )
-
+    generation_thread.start()
+    logger.info("======== ✅ generation thread starts =========")
+    
+    # Send initial data to ensure we have a N-step offset. This is what
+    # the async_steps arg does.
+    for _ in range(args.async_steps):
+        dataset_indices = next(iter_dataloader)
+        data_next = train_dataset[dataset_indices]
+        queries_next = data_next[INPUT_IDS_PROMPT_KEY]
+        ground_truths_next = data_next[GROUND_TRUTHS_KEY]
+        datasets_next = data_next[VERIFIER_SOURCE_KEY]
+        split_and_insert_batch(
+            queries_next,
+            ground_truths_next,
+            datasets_next,
+            dataset_indices,
+            1,  # training_step
+            args.vllm_num_engines,
+            pending_queries_map,
+            param_prompt_Q,
+            eval_prompt_token_ids if eval_dataset is not None else None,
+        )
+    assert param_prompt_Q.size() == args.async_steps, f'{param_prompt_Q.size()=}, {args.async_steps=}'
+    assert len(pending_queries_map) == args.async_steps, f'{pending_queries_map.size()=}, {args.async_steps=}'
     num_total_tokens = 0
     start_time = time.time()
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
-            episode += (
-                args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-            )  # each sample is an episode
+            episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
             queries_next, ground_truths_next, datasets_next, dataset_indices = sync_weights_and_prepare_prompts(
                 training_step,
                 args,
@@ -2257,28 +2311,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 policy_group,
                 pending_queries_map,
                 param_prompt_Q,
-                queries_next,
-                ground_truths_next,
-                datasets_next,
-                dataset_indices,
                 eval_prompt_token_ids,
             )
 
-            # Start vLLM engines to process until queue is empty
-            vllm_refs = []
-            for engine in vllm_engines:
-                ref = engine.process_from_queue.remote(
-                    generation_config,
-                    eval_generation_config,
-                    args.local_eval_freq,
-                    args.num_training_steps,
-                    resume_training_step,
-                )
-                vllm_refs.append(ref)
-
-            # Wait for all engines to complete processing
-            ray.get(vllm_refs)
-
+            # The generate_thread is now handling vLLM processing asynchronously
+            
             collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
                 packed_sequences_Q, num_total_tokens
             )
@@ -2319,12 +2356,18 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     except Exception as e:
         logger.error(f"Training error occurred: {str(e)}\n{traceback.format_exc()}")
+        stop_generate_event.set()
         cleanup_judge_clients()
         os._exit(1)
 
     # Clean up threads
     packing_thread.join()
     logger.info("======== ✅ data preparation thread ends =========")
+    
+    # Stop and wait for generation thread
+    stop_generate_event.set()
+    generation_thread.join()
+    logger.info("======== ✅ generation thread ends =========")
 
     cleanup_judge_clients()
 
