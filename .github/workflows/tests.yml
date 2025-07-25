@@ -24,4 +24,4 @@ jobs:
       - name: Set up Python
         run: uv python install
       - name: Run unit tests
-        run: uv run pytest --color=yes --verbose --capture=no
+        run: uv run pytest
