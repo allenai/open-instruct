@@ -161,6 +161,9 @@ class LLMRayActor:
         eval_results_queue=None,
         **kwargs,
     ):
+        # Log TORCH_CUDA_ARCH_LIST status inside Ray actor
+        print(f"[LLMRayActor.__init__] TORCH_CUDA_ARCH_LIST = {os.environ.get('TORCH_CUDA_ARCH_LIST', 'NOT SET')}")
+        
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
@@ -373,6 +376,9 @@ def create_vllm_engines(
         # Pass TORCH_CUDA_ARCH_LIST if it's set in the main process
         if "TORCH_CUDA_ARCH_LIST" in os.environ:
             env_vars["TORCH_CUDA_ARCH_LIST"] = os.environ["TORCH_CUDA_ARCH_LIST"]
+            print(f"[create_vllm_engines] TORCH_CUDA_ARCH_LIST is set: {os.environ['TORCH_CUDA_ARCH_LIST']}")
+        else:
+            print("[create_vllm_engines] WARNING: TORCH_CUDA_ARCH_LIST is NOT set in main process")
         
         vllm_engines.append(
             LLMRayActor.options(
