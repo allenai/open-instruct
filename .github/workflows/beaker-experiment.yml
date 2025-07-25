@@ -28,11 +28,6 @@ on:
       - 'Dockerfile'
       - '.github/workflows/beaker-experiment.yml'
   workflow_dispatch:  # This allows us to manually trigger a build through the GitHub UI.
-    inputs:
-      docker_image_override:
-        description: 'Optional: Override the Docker image (leave empty to use latest)'
-        required: false
-        default: ''
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -82,39 +77,12 @@ jobs:
           token: ${{ secrets.BEAKER_TOKEN }}
           workspace: ai2/tulu-thinker
       
-      - name: Get latest Docker image
-        id: get-image
-        run: |
-          # Get the short SHA and run ID for the current commit
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          
-          # If docker_image_override is provided, use it
-          if [ -n "${{ github.event.inputs.docker_image_override }}" ]; then
-            echo "Using override image: ${{ github.event.inputs.docker_image_override }}"
-            echo "docker_image=${{ github.event.inputs.docker_image_override }}" >> $GITHUB_OUTPUT
-          else
-            # Get the most recent successful push-image workflow run for this commit
-            echo "Fetching latest Docker image for commit ${SHORT_SHA}..."
-            
-            # First, try to get the image from the current workflow run if this was triggered by push
-            if [ "${{ github.event_name }}" = "push" ]; then
-              # Wait a bit for the push-image workflow to complete
-              echo "Waiting for push-image workflow to complete..."
-              sleep 60
-            fi
-            
-            # Use the standard naming convention from push-image workflow
-            DOCKER_IMAGE="open_instruct_auto"
-            echo "docker_image=${DOCKER_IMAGE}" >> $GITHUB_OUTPUT
-            echo "Using Docker image: ${DOCKER_IMAGE}"
-          fi
-      
       - name: Install dependencies
         run: |
           # Install development dependencies needed for mason.py
           uv sync --only-group dev
       
-      - name: Launch Beaker experiment
+      - name: Build image and launch experiment
         id: launch
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
@@ -123,31 +91,17 @@ jobs:
         run: |
           set -euo pipefail
           
-          # Set the script path
-          SCRIPT_PATH="scripts/train/debug/single_gpu_on_beaker.sh"
+          # Make scripts executable
+          chmod +x scripts/train/build_image_and_launch.sh
+          chmod +x scripts/train/debug/single_gpu_on_beaker.sh
           
-          # Check if script exists and is executable
-          if [ ! -f "$SCRIPT_PATH" ]; then
-            echo "ERROR: $SCRIPT_PATH not found"
-            exit 1
-          fi
-          
-          if [ ! -x "$SCRIPT_PATH" ]; then
-            echo "Making $SCRIPT_PATH executable..."
-            chmod +x "$SCRIPT_PATH"
-          fi
-          
-          # Set the Docker image in the command
-          DOCKER_IMAGE="${{ steps.get-image.outputs.docker_image }}"
-          
-          echo "Launching experiment with Docker image: ${DOCKER_IMAGE}"
+          echo "Building Docker image and launching experiment..."
           echo "Git commit: $(git rev-parse --short HEAD)"
           
-          # Launch the experiment and capture output
-          echo "Running: $SCRIPT_PATH '${DOCKER_IMAGE}'"
-          OUTPUT=$("$SCRIPT_PATH" "${DOCKER_IMAGE}" 2>&1) || {
+          # Build image and launch experiment
+          OUTPUT=$(./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh 2>&1) || {
             EXIT_CODE=$?
-            echo "ERROR: $SCRIPT_PATH failed with exit code $EXIT_CODE"
+            echo "ERROR: build_image_and_launch.sh failed with exit code $EXIT_CODE"
             echo "Full output:"
             echo "$OUTPUT"
             exit $EXIT_CODE
@@ -208,7 +162,7 @@ jobs:
           echo "## Beaker Experiment Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Trigger:** ${{ steps.get-trigger-info.outputs.trigger_info }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Docker Image:** ${{ steps.get-image.outputs.docker_image }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Docker Image:** Built locally by build_image_and_launch.sh" >> $GITHUB_STEP_SUMMARY
           if [ -n "${{ steps.launch.outputs.experiment_id }}" ]; then
             echo "**Beaker Experiment:** [View on Beaker](https://beaker.org/ex/${{ steps.launch.outputs.experiment_id }})" >> $GITHUB_STEP_SUMMARY
           fi

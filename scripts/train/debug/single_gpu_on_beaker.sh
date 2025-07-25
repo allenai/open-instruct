@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Set default image
-BEAKER_IMAGE=${1:-finbarrt/open-instruct-dev}
+# Get the Beaker username to construct the image name
+BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+BEAKER_IMAGE="${BEAKER_USER}/open-instruct-dev"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
