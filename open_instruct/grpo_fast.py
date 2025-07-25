@@ -401,8 +401,10 @@ class Args:
     code_tool_api_endpoint: Optional[str] = None
 
     def __post_init__(self):
-        if not self.async_mode is None:
-            raise ValueError("Async mode argument is deprecated. To use async mode, set `async_steps=N>0` in the args.")
+        if self.async_mode is not None:
+            raise ValueError(
+                "Async mode argument is deprecated. To use async mode, set `async_steps=N>0` in the args."
+            )
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
@@ -1798,12 +1800,12 @@ def sync_weights_and_prepare_prompts(
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
     datasets_next = data_next[VERIFIER_SOURCE_KEY]
     with Timer(
-            "[Main Thread] 🔄 Loading weights using shared memory"
-            if args.async_steps > 0
-            else "🔄 Loading weights using shared memory"
+        "[Main Thread] 🔄 Loading weights using shared memory"
+        if args.async_steps > 0
+        else "🔄 Loading weights using shared memory"
     ):
         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
-        
+
     split_and_insert_batch(
         queries_next,
         ground_truths_next,
@@ -1844,11 +1846,11 @@ def generate_thread(
 ):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
-    
+
     while not stop_event.is_set():
         # Track if any engine processed a request
         any_processed = False
-        
+
         for engine in vllm_engines:
             try:
                 # Call process_from_queue with a short timeout
@@ -1866,11 +1868,11 @@ def generate_thread(
                     any_processed = True
             except Exception as e:
                 logger.error(f"[Generate Thread] Error processing from queue: {e}")
-        
+
         # If no engine processed anything, sleep briefly to avoid busy waiting
         if not any_processed:
             time.sleep(0.01)
-    
+
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
@@ -2255,7 +2257,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         ),
     )
     packing_thread.start()
-    
+
     # Create and start the generate thread
     stop_generate_event = threading.Event()
     generation_thread = threading.Thread(
@@ -2272,7 +2274,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     )
     generation_thread.start()
     logger.info("======== ✅ generation thread starts =========")
-    
+
     # Send initial data to ensure we have a N-step offset. This is what
     # the async_steps arg does.
     for _ in range(args.async_steps):
@@ -2309,7 +2311,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             )
 
             # The generate_thread is now handling vLLM processing asynchronously
-            
+
             collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
                 packed_sequences_Q, num_total_tokens
             )
@@ -2357,7 +2359,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     # Clean up threads
     packing_thread.join()
     logger.info("======== ✅ data preparation thread ends =========")
-    
+
     # Stop and wait for generation thread
     stop_generate_event.set()
     generation_thread.join()

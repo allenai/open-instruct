@@ -489,41 +489,42 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
 class TestGenerateThread(TestGrpoFastBase):
     """Test the generate_thread functionality."""
-    
+
     def test_generate_thread_processes_single_elements(self):
         """Test that generate_thread processes elements one at a time from the queue."""
         import threading
         import time
         from unittest.mock import MagicMock
-        
+
         # Create mock vLLM engines
         num_engines = 2
         mock_engines = []
-        
+
         for i in range(num_engines):
             mock_engine = MagicMock()
             # Create a counter for this engine
-            call_counter = {'count': 0}
-            
+            call_counter = {"count": 0}
+
             # Create a mock that tracks calls and returns appropriate values
             def create_mock_remote(counter):
                 def mock_remote(*args, **kwargs):
                     # Return True for first 3 calls, then False
-                    result = counter['count'] < 3
-                    counter['count'] += 1
+                    result = counter["count"] < 3
+                    counter["count"] += 1
                     return MagicMock(return_value=result)
+
                 return MagicMock(side_effect=mock_remote)
-            
+
             mock_engine.process_from_queue.remote = create_mock_remote(call_counter)
             mock_engines.append(mock_engine)
-        
+
         # Mock ray.get to return the actual value
         original_ray_get = ray.get
-        ray.get = lambda x: x.return_value if hasattr(x, 'return_value') else x
-        
+        ray.get = lambda x: x.return_value if hasattr(x, "return_value") else x
+
         # Create stop event
         stop_event = threading.Event()
-        
+
         # Create and start generate_thread
         thread = threading.Thread(
             target=grpo_fast.generate_thread,
@@ -531,58 +532,58 @@ class TestGenerateThread(TestGrpoFastBase):
                 mock_engines,
                 MagicMock(),  # generation_config
                 MagicMock(),  # eval_generation_config
-                10,           # local_eval_freq
-                100,          # num_training_steps
-                1,            # resume_training_step
+                10,  # local_eval_freq
+                100,  # num_training_steps
+                1,  # resume_training_step
                 stop_event,
             ),
-            daemon=True
+            daemon=True,
         )
         thread.start()
-        
+
         # Let it run briefly
         time.sleep(0.5)
-        
+
         # Stop the thread
         stop_event.set()
         thread.join(timeout=2.0)
-        
+
         # Restore ray.get
         ray.get = original_ray_get
-        
+
         # Verify that process_from_queue was called on each engine
         for engine in mock_engines:
             self.assertTrue(engine.process_from_queue.remote.called)
             # Should have been called multiple times (at least 3 times)
             self.assertGreaterEqual(engine.process_from_queue.remote.call_count, 3)
-            
+
             # Verify timeout parameter was passed
             call_args = engine.process_from_queue.remote.call_args_list[0]
-            self.assertEqual(call_args[1]['timeout'], 0.1)
-    
+            self.assertEqual(call_args[1]["timeout"], 0.1)
+
     def test_generate_thread_handles_exceptions(self):
         """Test that generate_thread handles exceptions gracefully."""
         import threading
         import time
         from unittest.mock import MagicMock
-        
+
         # Create mock vLLM engine that raises exception
         mock_engine = MagicMock()
         mock_remote = MagicMock()
         mock_engine.process_from_queue = mock_remote
-        
+
         def mock_process_from_queue(*args, **kwargs):
             raise RuntimeError("Test exception")
-        
+
         mock_remote.remote = mock_process_from_queue
-        
+
         # Mock ray.get to raise the exception
         original_ray_get = ray.get
         ray.get = lambda x: mock_process_from_queue()
-        
+
         # Create stop event
         stop_event = threading.Event()
-        
+
         # Create and start generate_thread
         thread = threading.Thread(
             target=grpo_fast.generate_thread,
@@ -590,25 +591,25 @@ class TestGenerateThread(TestGrpoFastBase):
                 [mock_engine],
                 MagicMock(),  # generation_config
                 MagicMock(),  # eval_generation_config
-                10,           # local_eval_freq
-                100,          # num_training_steps
-                1,            # resume_training_step
+                10,  # local_eval_freq
+                100,  # num_training_steps
+                1,  # resume_training_step
                 stop_event,
             ),
-            daemon=True
+            daemon=True,
         )
         thread.start()
-        
+
         # Let it run briefly
         time.sleep(0.2)
-        
+
         # Stop the thread
         stop_event.set()
         thread.join(timeout=2.0)
-        
+
         # Restore ray.get
         ray.get = original_ray_get
-        
+
         # Thread should have handled exceptions and stopped gracefully
         self.assertFalse(thread.is_alive())
 
