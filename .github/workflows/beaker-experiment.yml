@@ -128,7 +128,7 @@ jobs:
           echo "Git commit: $(git rev-parse --short HEAD)"
           
           # Launch the experiment and capture output
-          OUTPUT=$(./run_single_gpu.sh "${DOCKER_IMAGE}" 2>&1)
+          OUTPUT=$(./scripts/train/debug/run_single_gpu.sh "${DOCKER_IMAGE}" 2>&1)
           echo "$OUTPUT"
           
           # Extract experiment ID from output
