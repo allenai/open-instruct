@@ -86,7 +86,10 @@ jobs:
         run: |
           # Install development dependencies needed for mason.py
           uv sync --only-group dev
-      
+		  
+      - name: Delete huge unnecessary tools folder
+        run: rm -rf /opt/hostedtoolcache /usr/share/dotnet "$AGENT_TOOLSDIRECTORY" /usr/local/lib/android/sdk/ndk
+		
       - name: Build image and launch experiment
         id: launch
         env:
