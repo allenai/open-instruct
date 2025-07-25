@@ -126,8 +126,18 @@ FILTER_EXAMPLE_PER_SECOND_PER_CPU = 1130
 
 
 def get_num_proc(dataset_len: int, num_available_cpus: int, example_per_second_per_cpu) -> int:
+    # Check for memory constraints
+    max_cpus_for_memory = num_available_cpus
+    if "MAX_PARALLEL_WORKERS" in os.environ or True:
+        max_cpus_for_memory = int(16)
+        print(f"Limiting parallel workers to {max_cpus_for_memory} due to MAX_PARALLEL_WORKERS")
+    
+    # If BEAKER_ASSIGNED_CPU_COUNT is set, use all available CPUs (up to memory limit)
+    if "BEAKER_ASSIGNED_CPU_COUNT" in os.environ:
+        return min(num_available_cpus, max_cpus_for_memory)
+    # Otherwise, use the original scaling logic
     num_required_cpus = max(1, dataset_len // example_per_second_per_cpu)
-    return min(num_required_cpus, num_available_cpus)
+    return min(num_required_cpus, num_available_cpus, max_cpus_for_memory)
 
 
 COLORS = ["on red", "on green", "on blue", "on yellow", "on magenta"]
@@ -1119,6 +1129,90 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreT
     return row
 
 
+def sft_tulu_tokenize_and_truncate_v2(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
+    """Optimized version that reduces redundant tokenization calls."""
+    messages = row["messages"]
+    if len(messages) == 0:
+        raise ValueError("messages field is empty.")
+    
+    # Tokenize full conversation once
+    input_ids = tokenizer.apply_chat_template(
+        conversation=messages,
+        tokenize=True,
+        return_tensors="pt",
+        padding=False,
+        truncation=True,
+        max_length=max_seq_length,
+        add_generation_prompt=False,
+    )
+    labels = input_ids.clone()
+    
+    # Cache tokenized prefixes to avoid redundant calls
+    prefix_lengths = {}
+    
+    # Process each message
+    for message_idx, message in enumerate(messages):
+        if message["role"] != "assistant":
+            # Calculate start index
+            if message_idx == 0:
+                message_start_idx = 0
+            else:
+                # Use cached length if available
+                key = message_idx - 1
+                if key not in prefix_lengths:
+                    prefix_lengths[key] = tokenizer.apply_chat_template(
+                        conversation=messages[:message_idx],
+                        tokenize=True,
+                        return_tensors="pt",
+                        padding=False,
+                        truncation=True,
+                        max_length=max_seq_length,
+                        add_generation_prompt=False,
+                    ).shape[1]
+                message_start_idx = prefix_lengths[key]
+            
+            # Calculate end index
+            if message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant":
+                # Need generation prompt
+                key = (message_idx, True)
+                if key not in prefix_lengths:
+                    prefix_lengths[key] = tokenizer.apply_chat_template(
+                        conversation=messages[: message_idx + 1],
+                        tokenize=True,
+                        return_tensors="pt",
+                        padding=False,
+                        truncation=True,
+                        max_length=max_seq_length,
+                        add_generation_prompt=True,
+                    ).shape[1]
+                message_end_idx = prefix_lengths[key]
+            else:
+                # No generation prompt
+                key = (message_idx, False)
+                if key not in prefix_lengths:
+                    prefix_lengths[key] = tokenizer.apply_chat_template(
+                        conversation=messages[: message_idx + 1],
+                        tokenize=True,
+                        return_tensors="pt",
+                        padding=False,
+                        truncation=True,
+                        max_length=max_seq_length,
+                        add_generation_prompt=False,
+                    ).shape[1]
+                message_end_idx = prefix_lengths[key]
+            
+            # Mask non-assistant parts
+            labels[:, message_start_idx:message_end_idx] = -100
+            if max_seq_length and message_end_idx >= max_seq_length:
+                break
+    
+    attention_mask = torch.ones_like(input_ids)
+    row[INPUT_IDS_KEY] = input_ids.flatten()
+    row[LABELS_KEY] = labels.flatten()
+    row[ATTENTION_MASK_KEY] = attention_mask.flatten()
+    return row
+
+
 def sft_tulu_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
     return any(x != -100 for x in row[LABELS_KEY])
 
@@ -1320,6 +1414,7 @@ TRANSFORM_FNS = {
     "sft_tokenize_mask_out_prompt_v1": (sft_tokenize_mask_out_prompt_v1, "map"),
     "sft_filter_v1": (sft_filter_v1, "filter"),
     "sft_tulu_tokenize_and_truncate_v1": (sft_tulu_tokenize_and_truncate_v1, "map"),
+    "sft_tulu_tokenize_and_truncate_v2": (sft_tulu_tokenize_and_truncate_v2, "map"),
     "sft_tulu_filter_v1": (sft_tulu_filter_v1, "filter"),
     "preference_tokenize_v1": (preference_tokenize_v1, "map"),
     "preference_filter_v1": (preference_filter_v1, "filter"),
@@ -1448,8 +1543,12 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     assert len(dc.transform_fn) == len(dc.transform_fn_args), (
         f"transform_fn and transform_fn_args must have the same length: {dc.transform_fn=} != {dc.transform_fn_args=}"
     )
-    # beaker specific logic; we may get assigned 15.5 CPU, so we convert it to float then int
-    num_proc = int(float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", multiprocessing.cpu_count())))
+
+    if "BEAKER_ASSIGNED_CPU_COUNT" in os.environ:
+            # beaker specific logic; we may get assigned 15.5 CPU, so we convert it to float then int
+        num_proc = int(float(os.environ["BEAKER_ASSIGNED_CPU_COUNT"]))
+    else:
+        num_proc = 1
 
     tokenizer = tc.tokenizer
     dataset = dc.dataset
