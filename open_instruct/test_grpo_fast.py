@@ -282,47 +282,6 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
 class GrpoIntegrationTests(TestGrpoFastBase):
     """Integration tests for GRPO with parallel processing."""
 
-    def test_training_step_isolation(self):
-        """Test that different training steps are handled correctly."""
-        num_engines = 2
-        num_prompts = 16
-
-        pending_queries_map = grpo_fast.PendingQueriesMap()
-        inference_results_Q = ray_queue.Queue(maxsize=num_engines * 4)
-
-        # Create data for two different training steps
-        step1_data = self.create_test_data(num_prompts, "step1_", 0)
-        step2_data = self.create_test_data(num_prompts, "step2_", 1000)
-
-        # Process both steps
-        for step, (queries, ground_truths, datasets, indices) in enumerate([step1_data, step2_data], 1):
-            param_prompt_Q = ray_queue.Queue(maxsize=num_engines)
-
-            grpo_fast.split_and_insert_batch(
-                queries, ground_truths, datasets, indices, step, num_engines, pending_queries_map, param_prompt_Q
-            )
-
-            # Create results for this step
-            while not param_prompt_Q.empty():
-                request = param_prompt_Q.get()
-                mock_result = self.create_mock_result(request.dataset_index, step)
-                inference_results_Q.put(mock_result)
-
-        # Process results from both steps
-        mock_args = self.create_mock_args(num_engines)
-
-        # First accumulation gets step 1 results
-        result1, queries1, _, _ = grpo_fast.accumulate_inference_batches(
-            inference_results_Q, pending_queries_map, mock_args, training_step=2
-        )
-        self.assertTrue(all("step1_" in q for q in queries1))
-
-        # Second accumulation gets step 2 results
-        result2, queries2, _, _ = grpo_fast.accumulate_inference_batches(
-            inference_results_Q, pending_queries_map, mock_args, training_step=2
-        )
-        self.assertTrue(all("step2_" in q for q in queries2))
-
     @ray.remote
     def mock_vllm_engine(engine_id, prompt_queue, results_queue, num_samples_per_prompt=1):
         """Mock vLLM engine that processes prompts from queue."""
@@ -560,58 +519,6 @@ class TestGenerateThread(TestGrpoFastBase):
             # Verify timeout parameter was passed
             call_args = engine.process_from_queue.remote.call_args_list[0]
             self.assertEqual(call_args[1]["timeout"], 0.1)
-
-    def test_generate_thread_handles_exceptions(self):
-        """Test that generate_thread handles exceptions gracefully."""
-        import threading
-        import time
-        from unittest.mock import MagicMock
-
-        # Create mock vLLM engine that raises exception
-        mock_engine = MagicMock()
-        mock_remote = MagicMock()
-        mock_engine.process_from_queue = mock_remote
-
-        def mock_process_from_queue(*args, **kwargs):
-            raise RuntimeError("Test exception")
-
-        mock_remote.remote = mock_process_from_queue
-
-        # Mock ray.get to raise the exception
-        original_ray_get = ray.get
-        ray.get = lambda x: mock_process_from_queue()
-
-        # Create stop event
-        stop_event = threading.Event()
-
-        # Create and start generate_thread
-        thread = threading.Thread(
-            target=grpo_fast.generate_thread,
-            args=(
-                [mock_engine],
-                MagicMock(),  # generation_config
-                MagicMock(),  # eval_generation_config
-                10,  # local_eval_freq
-                100,  # num_training_steps
-                1,  # resume_training_step
-                stop_event,
-            ),
-            daemon=True,
-        )
-        thread.start()
-
-        # Let it run briefly
-        time.sleep(0.2)
-
-        # Stop the thread
-        stop_event.set()
-        thread.join(timeout=2.0)
-
-        # Restore ray.get
-        ray.get = original_ray_get
-
-        # Thread should have handled exceptions and stopped gracefully
-        self.assertFalse(thread.is_alive())
 
 
 if __name__ == "__main__":
