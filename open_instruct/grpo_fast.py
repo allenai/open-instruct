@@ -2296,6 +2296,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         )
     num_total_tokens = 0
     start_time = time.time()
+    cleanup_done = False
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
             episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
@@ -2352,20 +2353,32 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     except Exception as e:
         logger.error(f"Training error occurred: {str(e)}\n{traceback.format_exc()}")
-        stop_generate_event.set()
-        cleanup_judge_clients()
-        os._exit(1)
-
-    # Clean up threads
-    packing_thread.join()
-    logger.info("======== ✅ data preparation thread ends =========")
-
-    # Stop and wait for generation thread
-    stop_generate_event.set()
-    generation_thread.join()
-    logger.info("======== ✅ generation thread ends =========")
-
-    cleanup_judge_clients()
+        raise
+    finally:
+        if not cleanup_done:
+            cleanup_done = True
+            # Signal threads to stop
+            stop_generate_event.set()
+            
+            # Clean up threads with timeout
+            logger.info("Cleaning up threads...")
+            packing_thread.join(timeout=30)
+            if packing_thread.is_alive():
+                logger.warning("Data preparation thread did not stop cleanly")
+            else:
+                logger.info("======== ✅ data preparation thread ends =========")
+            
+            generation_thread.join(timeout=30)
+            if generation_thread.is_alive():
+                logger.warning("Generation thread did not stop cleanly")
+            else:
+                logger.info("======== ✅ generation thread ends =========")
+            
+            # Clean up judge clients
+            try:
+                cleanup_judge_clients()
+            except Exception as e:
+                logger.error(f"Error during judge cleanup: {e}")
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
     # make a copy of the model to `/output` in the end.
