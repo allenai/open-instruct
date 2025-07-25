@@ -161,7 +161,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         ("sft_tulu_filter_v1", {}),  # remove examples that don't have any labels
     ]
 
-    result = get_cached_dataset_tulu_with_statistics(
+    train_dataset, dataset_statistics = get_cached_dataset_tulu_with_statistics(
         dataset_mixer_list=args.dataset_mixer_list,
         dataset_mixer_list_splits=args.dataset_mixer_list_splits,
         tc=tc,
@@ -172,11 +172,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         dataset_config_hash=args.dataset_config_hash,
         dataset_local_cache_dir=args.dataset_local_cache_dir,
         dataset_skip_cache=args.dataset_skip_cache,
-        return_statistics=True,
     )
-    
-    # Unpack the result
-    train_dataset, dataset_statistics = result
 
     train_dataset = train_dataset.shuffle()
 
