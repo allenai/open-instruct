@@ -90,6 +90,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+minversion = "6.0"
 
 [tool.black]
 line-length = 119
