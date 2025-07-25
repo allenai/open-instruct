@@ -1598,9 +1598,6 @@ def create_model_and_optimizer(
     evaluation_inference_results_Q: ray_queue.Queue,
 ) -> tuple[ModelGroup, list[LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
-    # Ray initialization
-    ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
-
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
@@ -2072,6 +2069,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         return
 
     pprint([args, model_config])
+
+    # Initialize Ray before creating Ray objects
+    ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
 
     # Create Ray queues
     inference_results_Q = ray_queue.Queue(maxsize=args.async_steps)

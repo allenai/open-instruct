@@ -81,7 +81,7 @@ def main() -> None:
         help="Which filter function to apply (default: think)."
     )
     parser.add_argument(
-        "--output_format", choices=["answer", "no_answer"], default="no_answer",
+        "--output_format", choices=["answer", "keep", "no_answer"], default="no_answer",
         help="Whether to include <answer></answer> tags in the final model response (default: no_answer)."
     )
     args = parser.parse_args()
@@ -102,6 +102,8 @@ def main() -> None:
     kept_ds = ds.filter(filter_fn)
     if args.output_format == "answer":
         kept_ds = kept_ds.map(add_answer)
+    elif args.output_format == "keep":
+        pass
     else:
         kept_ds = kept_ds.map(remove_answer)
 
