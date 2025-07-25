@@ -41,6 +41,7 @@ $(echo -e "$upstream_entries")
 
 server {
     listen $NGINX_PORT;
+    client_max_body_size 0;
     location / {
         proxy_pass http://api_servers;
         proxy_set_header Host \$host;

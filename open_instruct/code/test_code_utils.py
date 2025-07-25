@@ -18,7 +18,7 @@ class GetSuccessfulTestsFastTests(unittest.TestCase):
         """Bad + good + timeout tests: expect [F, T, F, T, T, F, T]."""
         tests = [FAILING_TEST, PASSING_TEST, FAILING_TEST, PASSING_TEST, PASSING_TEST, TIMEOUT_TEST, PASSING_TEST]
         expected = [0, 1, 0, 1, 1, 0, 1]
-        result = code_utils.get_successful_tests_fast(program=SIMPLE_PROGRAM, tests=tests)
+        result, _ = code_utils.get_successful_tests_fast(program=SIMPLE_PROGRAM, tests=tests)
         self.assertEqual(result, expected)
 
     def test_all_fail_or_timeout(self):
@@ -26,7 +26,7 @@ class GetSuccessfulTestsFastTests(unittest.TestCase):
         tests = [FAILING_TEST, FAILING_TEST, TIMEOUT_TEST, TIMEOUT_TEST, TIMEOUT_TEST, TIMEOUT_TEST]
         expected = [0] * len(tests)
 
-        result = code_utils.get_successful_tests_fast(program=SIMPLE_PROGRAM, tests=tests)
+        result, _ = code_utils.get_successful_tests_fast(program=SIMPLE_PROGRAM, tests=tests)
         self.assertEqual(result, expected)
 
     def test_tiger_lab_acecode_sample(self):
@@ -36,12 +36,12 @@ class GetSuccessfulTestsFastTests(unittest.TestCase):
         # Choose the same sample index used in the original snippet.
         i = 1
         program = ds[i]["inferences"][-1]["completion"]
-        tests = ds[i]["test_cases"]
+        tests = code_utils.decode_tests(ds[i]["test_cases"])
 
         # The dataset also stores a pass-rate; we can use it to sanity-check.
         expected_passes = int(len(tests) * ds[i]["inferences"][-1]["pass_rate"])
 
-        result = code_utils.get_successful_tests_fast(program=program, tests=tests)
+        result, _ = code_utils.get_successful_tests_fast(program=program, tests=tests)
         self.assertEqual(sum(result), expected_passes)
 
     def test_add_function_example(self):
@@ -54,7 +54,7 @@ class GetSuccessfulTestsFastTests(unittest.TestCase):
         ]
         expected = [1, 1, 0]
 
-        result = code_utils.get_successful_tests_fast(program=program, tests=tests)
+        result, _ = code_utils.get_successful_tests_fast(program=program, tests=tests)
         self.assertEqual(result, expected)
 
 
@@ -72,7 +72,7 @@ try:
 except:
     socket_created = False
 """
-        result = code_utils.get_successful_tests_fast(
+        result, _ = code_utils.get_successful_tests_fast(
             program=program, tests=["assert socket_created == True"], max_execution_time=0.5
         )
         self.assertEqual(result, [1])
@@ -85,7 +85,9 @@ except:
     )
     def test_dangerous_imports_with_networking(self, name, program):
         """Test that certain networking-related imports are blocked."""
-        result = code_utils.get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
+        result, _ = code_utils.get_successful_tests_fast(
+            program=program, tests=["assert True"], max_execution_time=0.5
+        )
         self.assertEqual(result, [0])
 
 
@@ -126,7 +128,7 @@ except:
     )
     def test_file_operations_sandboxed(self, name, program, tests, expected):
         """Test that file operations are properly sandboxed."""
-        result = code_utils.get_successful_tests_fast(program=program, tests=tests, max_execution_time=0.5)
+        result, _ = code_utils.get_successful_tests_fast(program=program, tests=tests, max_execution_time=0.5)
         self.assertEqual(result, [expected])
 
     @parameterized.parameterized.expand(
@@ -158,7 +160,7 @@ except:
     def test_file_deletion_blocked(self, name, program):
         """Test that file deletion operations are blocked."""
         # These will be blocked by should_execute due to "import os"
-        result = code_utils.get_successful_tests_fast(
+        result, _ = code_utils.get_successful_tests_fast(
             program=program, tests=["assert remove_worked == False"], max_execution_time=0.5
         )
         # Programs with "import os" are blocked entirely
@@ -178,7 +180,7 @@ try:
 except:
     popen_worked = False
 """
-        result = code_utils.get_successful_tests_fast(
+        result, _ = code_utils.get_successful_tests_fast(
             program=program, tests=["assert popen_worked == False"], max_execution_time=0.5
         )
         self.assertEqual(result, [1])
@@ -190,7 +192,9 @@ except:
 import os
 exit_code = os.system('echo hello')
 """
-        result = code_utils.get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
+        result, _ = code_utils.get_successful_tests_fast(
+            program=program, tests=["assert True"], max_execution_time=0.5
+        )
         self.assertEqual(result, [0])
 
     def test_os_operations_without_import(self):
@@ -204,7 +208,7 @@ try:
 except:
     result = False
 """
-        result = code_utils.get_successful_tests_fast(
+        result, _ = code_utils.get_successful_tests_fast(
             program=program, tests=["assert result == True"], max_execution_time=0.5
         )
         # This will be blocked due to "import os"
@@ -225,7 +229,7 @@ try:
 except RecursionError:
     recursion_failed = True
 """
-        result = code_utils.get_successful_tests_fast(
+        result, _ = code_utils.get_successful_tests_fast(
             program=program, tests=["assert recursion_failed == True"], max_execution_time=0.5
         )
         self.assertEqual(result, [1])
@@ -238,7 +242,7 @@ result = 0
 for i in range(10**10):
     result += i
 """
-        result = code_utils.get_successful_tests_fast(
+        result, _ = code_utils.get_successful_tests_fast(
             program=program,
             tests=["assert result > 0"],
             max_execution_time=0.1,  # Very short timeout
@@ -254,7 +258,7 @@ try:
 except:
     is_enabled = None
 """
-        result = code_utils.get_successful_tests_fast(
+        result, _ = code_utils.get_successful_tests_fast(
             program=program, tests=["assert is_enabled == False"], max_execution_time=0.5
         )
         self.assertEqual(result, [1])
@@ -276,7 +280,9 @@ class ReliabilityGuardModuleImportTests(unittest.TestCase):
     def test_dangerous_imports_blocked(self, name, program):
         """Test that imports of dangerous modules fail."""
         # These are checked by should_execute function
-        result = code_utils.get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
+        result, _ = code_utils.get_successful_tests_fast(
+            program=program, tests=["assert True"], max_execution_time=0.5
+        )
         self.assertEqual(result, [0])
 
     @parameterized.parameterized.expand(
@@ -288,7 +294,7 @@ class ReliabilityGuardModuleImportTests(unittest.TestCase):
     )
     def test_safe_imports_allowed(self, name, program, test):
         """Test that safe imports are allowed."""
-        result = code_utils.get_successful_tests_fast(program=program, tests=[test], max_execution_time=0.5)
+        result, _ = code_utils.get_successful_tests_fast(program=program, tests=[test], max_execution_time=0.5)
         self.assertEqual(result, [1])
 
 
@@ -302,7 +308,7 @@ class ReliabilityGuardEdgeCaseTests(unittest.TestCase):
 exit_disabled = exit is None
 quit_disabled = quit is None
 """
-        result = code_utils.get_successful_tests_fast(
+        result, _ = code_utils.get_successful_tests_fast(
             program=program,
             tests=["assert exit_disabled == True", "assert quit_disabled == True"],
             max_execution_time=0.5,
@@ -323,7 +329,7 @@ try:
 except:
     sandboxed = False
 """
-        result = code_utils.get_successful_tests_fast(
+        result, _ = code_utils.get_successful_tests_fast(
             program=program, tests=["assert sandboxed == True"], max_execution_time=0.5
         )
         self.assertEqual(result, [1])
@@ -335,7 +341,9 @@ except:
 import shutil
 shutil.rmtree('/tmp/test')
 """
-        result = code_utils.get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
+        result, _ = code_utils.get_successful_tests_fast(
+            program=program, tests=["assert True"], max_execution_time=0.5
+        )
         self.assertEqual(result, [0])
 
 
