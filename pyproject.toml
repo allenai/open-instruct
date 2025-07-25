@@ -27,7 +27,10 @@ dependencies = [
     "vllm==0.9.1",    
     "wandb==0.18.1",
     "langdetect==1.0.9",
-    "immutabledict==1.2.0"
+    "immutabledict==1.2.0",
+    "flash-attn>=2.8.0.post2; platform_system == 'Linux'",
+    "flashinfer-python>=0.2.7.post1; platform_system == 'Linux'",
+    "liger-kernel>=0.5.4; platform_system == 'Linux'"
 ]
 
 [build-system]
