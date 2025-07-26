@@ -26,6 +26,18 @@ class TestGrpoFastBase(unittest.TestCase):
         # Shutdown Ray after test
         if ray.is_initialized():
             ray.shutdown()
+    
+    def setUp(self):
+        """Check for leaks before each test."""
+        leak_report = grpo_fast.check_runtime_leaks()
+        if not leak_report.is_clean:
+            self.fail(f"Leaks detected before test {self._testMethodName}:\n{leak_report.pretty()}")
+    
+    def tearDown(self):
+        """Check for leaks after each test."""
+        leak_report = grpo_fast.check_runtime_leaks()
+        if not leak_report.is_clean:
+            self.fail(f"Leaks detected after test {self._testMethodName}:\n{leak_report.pretty()}")
 
     def create_test_data(self, num_prompts, prefix="", start_idx=0):
         """Create test data with consistent naming."""
