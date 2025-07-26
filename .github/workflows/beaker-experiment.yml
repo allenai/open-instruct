@@ -45,6 +45,13 @@ jobs:
         with:
           fetch-depth: 0  # Need full history to get commit author info
       
+      - name: Checkout oe-eval-internal
+        uses: actions/checkout@v4
+        with:
+          repository: allenai/oe-eval-internal
+          path: './oe-eval-internal'
+          ssh-key: ${{ secrets.OPEN_INSTRUCT_DEPLOY_PRIVATE_KEY }}
+      
       - name: Get trigger information
         id: get-trigger-info
         run: |

@@ -11,8 +11,8 @@ RUN echo "UV_CACHE_DIR: ${UV_CACHE_DIR}"
 # setup files
 WORKDIR /stage/
 
-# Install nginx, git, and create conf.d directory
-RUN apt-get update --no-install-recommends && apt-get install -y nginx git && mkdir -p /etc/nginx/conf.d && rm -rf /var/lib/apt/lists/*
+# Install nginx and create conf.d directory
+RUN apt-get update --no-install-recommends && apt-get install -y nginx && mkdir -p /etc/nginx/conf.d && rm -rf /var/lib/apt/lists/*
 
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
@@ -43,9 +43,8 @@ COPY scripts scripts
 COPY mason.py mason.py
 COPY .git/ ./.git/
 
-# Clone oe-eval-internal repository (shallow clone to save memory)
-# This requires SSH agent forwarding during build (docker build --ssh default)
-RUN --mount=type=ssh git clone --depth 1 git@github.com:allenai/oe-eval-internal.git
+# Copy oe-eval-internal repository (already cloned in the workflow)
+COPY oe-eval-internal oe-eval-internal
 
 # Set up the environment
 ENV PATH=/stage/.venv/bin:$PATH
