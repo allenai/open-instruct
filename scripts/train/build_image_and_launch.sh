@@ -4,12 +4,11 @@ set -e
 image_name=open-instruct-dev
 
 # Build and push the Docker image to Beaker
-# Use --ssh default to forward SSH agent for git clone
 echo "Building Docker image $image_name..."
+
+# Use the regular Dockerfile which copies oe-eval-internal instead of cloning
 DOCKER_BUILDKIT=1 docker build \
-    --ssh default \
-    -f Dockerfile.uv \
-    --build-arg UV_CACHE_DIR=$UV_CACHE_DIR \
+    -f Dockerfile \
     --build-arg BUILDKIT_INLINE_CACHE=1 \
     -t $image_name \
     .
