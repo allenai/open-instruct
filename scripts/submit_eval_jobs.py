@@ -108,6 +108,7 @@ parser.add_argument("--upload_to_hf", type=str, default=None, help="If given, up
 parser.add_argument("--hf_upload_experiments", type=str, nargs="*", default=None, help="Upload given experiment to the Hugging Face model hub.")
 parser.add_argument("--run_oe_eval_experiments", action="store_true", help="Run the OE eval tool and experiments too.")
 parser.add_argument("--run_safety_evaluations", action="store_true", help="Run the OE safety evaluations too.")
+parser.add_argument("--run_safety_evaluations_reasoning", action="store_true", help="Run the OE safety evaluations on a reasoning model too.")
 parser.add_argument("--skip_oi_evals", action="store_true", help="Don't run open instruct evals.")
 parser.add_argument("--oe_eval_max_length", type=int, default=4096, help="Max length for OE eval.")
 parser.add_argument("--oe_eval_task_suite", type=str, default="NEXT_MODEL_DEV", help="Task suite for OE eval: NEXT_MODEL_DEV, NEXT_MODEL_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN (default: NEXT_MODEL_DEV)")
@@ -668,69 +669,120 @@ if args.run_oe_eval_experiments:
     print(f"Running OE eval with command: {oe_eval_cmd}")
     subprocess.Popen(oe_eval_cmd, shell=True)
 
-# create an experiment that runs the safety eval tasks
 if args.run_safety_evaluations:
-    # just take the original spec we had, modify it for safety eval.
-    experiment_name = f"oi_safety_{model_name}"
-    experiment_name = experiment_name.replace('β', '').replace(r"{", "").replace(r"}", "") # hack: remove characters beaker doesn't like
-    d["description"] = experiment_name
-    # specific image for safety eval
-    d["tasks"][0]["image"]["beaker"] = "hamishivi/open-safety"
-    if args.use_alternate_safety_image:
-        d["tasks"][0]["image"]["beaker"] = args.use_alternate_safety_image
-    d["tasks"] = [d["tasks"][0]]
-    task_spec = d["tasks"][0]
-    task_spec["name"] = experiment_name
-    task_spec["arguments"][0] = '''
-VLLM_WORKER_MULTIPROC_METHOD=spawn PYTHONPATH=. python evaluation/run_all_generation_benchmarks.py \
-    --model_name_or_path /model \
-    --model_input_template_path_or_name hf \
-    --report_output_path /output/metrics.json \
-    --save_individual_results_path /output/all.json \
-'''
-    # some copied logic
-    if model_info[0].startswith("hf-"):  # if it's a huggingface model, load it from the model hub and delete mount `/model`
-        task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", f"--model_name_or_path {model_info[1]} --hf_revision {args.hf_revision}")]
-        task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", f"--tokenizer_name_or_path {model_info[1]}")]
-        del task_spec['datasets'][1]
-    elif model_info[1].startswith("/"):  # if it's a local model, load it from the local directory and delete mount `/model`
-        assert weka_available, "NFS / Weka is required for path-based models."  # to be safe.
-        task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
-        task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", "--tokenizer_name_or_path "+model_info[1])]
-        del task_spec['datasets'][1]
-    else:  # if it's a beaker model, mount the beaker dataset to `/model`
-        task_spec['datasets'][1]['source']['beaker'] = model_info[1]
-
-    task_spec = adjust_gpus(
-        task_spec=task_spec,
-        experiment_group="safety_eval",
-        model_name=model_info[0],
-        gpu_multiplier=args.gpu_multiplier,
-    )
-
-    # add gpu information.
-    # we just assume you want to use all the gpus for one task at a time
-    if "70B" in model_info[0]:
-        task_spec['resources']['gpuCount'] = 8
-    num_gpus = task_spec['resources']['gpuCount']
-    task_spec["arguments"][0]+= f" --min_gpus_per_task {num_gpus}"
-
+    # if so, run safety-fork through oe-eval. We assume oe-eval is cloned in the top-level repo directory.
+    oe_safety_cmd = f"scripts/eval/oe-eval.sh --model-name {model_name}"
     if args.upload_to_hf:
-        hf_dataset = args.upload_to_hf
-        # to match the way oe-eval script works.
-        # if we prepended hf- to the model name, remove it.
-        # if model_name.startswith("hf-"):
-        #     model_name = model_name[3:]
-        # Above is no longer the case, oe-eval includes hf- again
-        task_spec['arguments'] = [task_spec['arguments'][0] + f" --upload_to_hf {hf_dataset} --hf_upload_name results/{model_name}"]
+        oe_safety_cmd += f" --upload_to_hf {args.upload_to_hf}"
+    ## model location munging: if beaker, use beaker://. If hf, just name
+    if model_info[0].startswith("hf-"):
+        oe_safety_cmd += f" --model-location {model_info[1]}"
+    elif model_info[1].startswith("/"):
+        oe_safety_cmd += f" --model-location {model_info[1]}"
+    elif model_info[1].startswith("gs://"):
+        oe_safety_cmd += f" --model-location {model_info[1]}"
+    else:
+        oe_safety_cmd += f" --model-location beaker://{model_info[1]}"
+    if args.hf_revision:
+        oe_safety_cmd += f" --revision {args.hf_revision}"
+    if args.evaluate_on_weka:
+        oe_safety_cmd += " --evaluate_on_weka"
+    oe_safety_cmd += f" --tasks safety_eval"
+    if args.run_id:
+        oe_safety_cmd += f" --run-id {args.run_id}"
+    if args.step:
+        oe_safety_cmd += f" --step {args.step}"
+    # add string with number of gpus
+    num_gpus = task_spec['resources']['gpuCount']
+    # if num_gpus > 1, double it again for oe-eval configs
+    # open_instruct GPT adjustment wasn't quite enough
+    # adjusted here so the GPU configs in open-instruct eval are not impacted by the change
+    # tested reasonably extensively with 70B
+    if num_gpus > 1:
+        num_gpus *= 2
+    oe_safety_cmd += f" --num_gpus {num_gpus}"
+    if args.oe_eval_max_length:
+        oe_safety_cmd += f" --max-length {args.oe_eval_max_length}"
 
-    d["tasks"] = [task_spec]
-    if not os.path.exists("configs/beaker_configs/auto_created"):
-        os.makedirs("configs/beaker_configs/auto_created")
-    fn = "configs/beaker_configs/auto_created/{}.yaml".format(experiment_name)
-    os.makedirs(os.path.dirname(fn), exist_ok=True)
-    with open(fn, "w") as file:
-        yaml.dump(d, file, default_flow_style=True)
+    # add priority
+    oe_safety_cmd += f" --priority {args.priority}"
 
-    cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
-    subprocess.Popen(cmd, shell=True)
+    # Add stop sequences if provided
+    if args.oe_eval_stop_sequences:
+        oe_safety_cmd += f" --stop-sequences '{args.oe_eval_stop_sequences}'"
+
+    # Add process output if provided
+    if args.process_output:
+        oe_safety_cmd += f" --process-output {args.process_output}"
+
+    # Add beaker image from existing argument
+    if args.beaker_image:
+        oe_safety_cmd += f" --beaker-image {args.beaker_image}"
+
+    # Add cluster parameter - use the existing cluster argument
+    # Join the list with commas since oe-eval.sh expects a comma-separated string
+    if args.cluster and len(args.cluster) > 0:
+        cluster_str = ",".join(args.cluster)
+        oe_safety_cmd += f" --cluster '{cluster_str}'"
+
+    print(f"Running OE safety eval with command: {oe_safety_cmd}")
+    subprocess.Popen(oe_safety_cmd, shell=True)
+
+if args.run_safety_evaluations_reasoning:
+    # if so, run safety-fork on resoning tasks through oe-eval. We assume oe-eval is cloned in the top-level repo directory.
+    oe_safety_reasoning_cmd = f"scripts/eval/oe-eval.sh --model-name {model_name}"
+    if args.upload_to_hf:
+        oe_safety_reasoning_cmd += f" --upload_to_hf {args.upload_to_hf}"
+    ## model location munging: if beaker, use beaker://. If hf, just name
+    if model_info[0].startswith("hf-"):
+        oe_safety_reasoning_cmd += f" --model-location {model_info[1]}"
+    elif model_info[1].startswith("/"):
+        oe_safety_reasoning_cmd += f" --model-location {model_info[1]}"
+    elif model_info[1].startswith("gs://"):
+        oe_safety_reasoning_cmd += f" --model-location {model_info[1]}"
+    else:
+        oe_safety_reasoning_cmd += f" --model-location beaker://{model_info[1]}"
+    if args.hf_revision:
+        oe_safety_reasoning_cmd += f" --revision {args.hf_revision}"
+    if args.evaluate_on_weka:
+        oe_safety_reasoning_cmd += " --evaluate_on_weka"
+    oe_safety_reasoning_cmd += f" --tasks safety_eval_reasoning"
+    if args.run_id:
+        oe_safety_reasoning_cmd += f" --run-id {args.run_id}"
+    if args.step:
+        oe_safety_reasoning_cmd += f" --step {args.step}"
+    # add string with number of gpus
+    num_gpus = task_spec['resources']['gpuCount']
+    # if num_gpus > 1, double it again for oe-eval configs
+    # open_instruct GPT adjustment wasn't quite enough
+    # adjusted here so the GPU configs in open-instruct eval are not impacted by the change
+    # tested reasonably extensively with 70B
+    if num_gpus > 1:
+        num_gpus *= 2
+    oe_safety_reasoning_cmd += f" --num_gpus {num_gpus}"
+    if args.oe_eval_max_length:
+        oe_safety_reasoning_cmd += f" --max-length {args.oe_eval_max_length}"
+
+    # add priority
+    oe_safety_reasoning_cmd += f" --priority {args.priority}"
+
+    # Add stop sequences if provided
+    if args.oe_eval_stop_sequences:
+        oe_safety_reasoning_cmd += f" --stop-sequences '{args.oe_eval_stop_sequences}'"
+
+    # Add process output if provided
+    if args.process_output:
+        oe_safety_reasoning_cmd += f" --process-output {args.process_output}"
+
+    # Add beaker image from existing argument
+    if args.beaker_image:
+        oe_safety_reasoning_cmd += f" --beaker-image {args.beaker_image}"
+
+    # Add cluster parameter - use the existing cluster argument
+    # Join the list with commas since oe-eval.sh expects a comma-separated string
+    if args.cluster and len(args.cluster) > 0:
+        cluster_str = ",".join(args.cluster)
+        oe_safety_reasoning_cmd += f" --cluster '{cluster_str}'"
+
+    print(f"Running OE safety eval with command: {oe_safety_reasoning_cmd}")
+    subprocess.Popen(oe_safety_reasoning_cmd, shell=True)
