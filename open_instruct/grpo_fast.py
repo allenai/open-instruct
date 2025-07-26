@@ -45,6 +45,7 @@ import asyncio
 import json
 import logging
 import math
+import multiprocessing as mp
 import os
 import shutil
 import socket
@@ -54,8 +55,9 @@ import traceback
 from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
+from multiprocessing import resource_tracker as _rt
 from queue import Empty, Queue
-from typing import Callable, Dict, Iterator, List, Literal, Optional, Union
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Literal, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -71,6 +73,7 @@ from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
@@ -140,6 +143,134 @@ logger = logging.getLogger(__name__)
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
+
+
+# ---- Runtime leak detection -----------------------------------------------------------------
+
+DEFAULT_THREAD_ALLOWLIST = {
+    "MainThread",
+    "pytest-watcher",  # pytest
+    "pydevd.",  # debugger
+    "IPythonHistorySavingThread",
+    "raylet_client",  # ray internal when still up during test body
+}
+
+DEFAULT_THREAD_ALLOW_PREFIXES = {
+    "ThreadPoolExecutor-",  # executors create transient threads; adjust if you join them
+    "ray-",  # ray internal threads
+    "grpc-default-executor",  # grpc internal
+}
+
+
+@dataclass
+class LeakReport:
+    bad_threads: List[threading.Thread] = field(default_factory=list)
+    bad_processes: List[mp.Process] = field(default_factory=list)
+    ray_actors: list = field(default_factory=list)
+    ray_tasks: list = field(default_factory=list)
+    ray_workers: list = field(default_factory=list)
+    leaked_semaphores: List[str] = field(default_factory=list)
+    leaked_shm: List[str] = field(default_factory=list)
+
+    @property
+    def is_clean(self) -> bool:
+        return not (
+            self.bad_threads
+            or self.bad_processes
+            or self.ray_actors
+            or self.ray_tasks
+            or self.ray_workers
+            or self.leaked_semaphores
+            or self.leaked_shm
+        )
+
+    def pretty(self) -> str:
+        lines = []
+        if self.bad_threads:
+            lines.append("Leaked threads:")
+            for t in self.bad_threads:
+                target = getattr(t, "_target", None)
+                tgt_name = getattr(target, "__name__", repr(target)) if target else "?"
+                lines.append(f"  - {t.name} (alive={t.is_alive()}, daemon={t.daemon}, target={tgt_name})")
+        if self.bad_processes:
+            lines.append("Leaked multiprocessing children:")
+            for p in self.bad_processes:
+                lines.append(f"  - PID {p.pid} alive={p.is_alive()} name={p.name}")
+        if self.ray_actors:
+            lines.append("Live Ray actors:")
+            for a in self.ray_actors:
+                lines.append(f"  - {a.get('class_name')} id={a.get('actor_id')}")
+        if self.ray_tasks:
+            lines.append("Live Ray tasks:")
+            for t in self.ray_tasks:
+                lines.append(f"  - {t.get('name')} id={t.get('task_id')}")
+        if self.ray_workers:
+            lines.append("Live Ray workers:")
+            for w in self.ray_workers:
+                lines.append(f"  - pid={w.get('pid')} id={w.get('worker_id')}")
+        if self.leaked_semaphores:
+            lines.append("Leaked POSIX semaphores (multiprocessing):")
+            for name in self.leaked_semaphores:
+                lines.append(f"  - {name}")
+        if self.leaked_shm:
+            lines.append("Leaked shared_memory blocks:")
+            for name in self.leaked_shm:
+                lines.append(f"  - {name}")
+        return "\n".join(lines) if lines else "No leaks detected."
+
+
+def check_runtime_leaks(
+    thread_allowlist: Iterable[str] = DEFAULT_THREAD_ALLOWLIST,
+    thread_allow_prefixes: Iterable[str] = DEFAULT_THREAD_ALLOW_PREFIXES,
+    include_daemon_threads: bool = False,
+) -> LeakReport:
+    """
+    Inspect runtime state for leftovers.
+
+    Returns a LeakReport; call .is_clean or .pretty().
+    """
+    report = LeakReport()
+
+    # Threads
+    for t in threading.enumerate():
+        if t.name in thread_allowlist or any(t.name.startswith(p) for p in thread_allow_prefixes):
+            continue
+        if not include_daemon_threads and t.daemon:
+            continue
+        if t is threading.main_thread():
+            continue
+        # ignore ones already finished
+        if not t.is_alive():
+            continue
+        report.bad_threads.append(t)
+
+    # Multiprocessing children
+    for child in mp.active_children():
+        if child.is_alive():
+            report.bad_processes.append(child)
+
+    # Ray state (only if ray is present & initialized)
+    try:
+        import ray
+        from ray.util import state as ray_state
+
+        if ray_state is not None and ray is not None and ray.is_initialized():
+            report.ray_actors = ray_state.list_actors(filters=[("state", "=", "ALIVE")])
+            report.ray_tasks = ray_state.list_tasks(filters=[("state", "=", "RUNNING")])
+            report.ray_workers = ray_state.list_workers(filters=[("is_alive", "=", True)])
+    except Exception:
+        pass
+
+    # Multiprocessing resource_tracker cache (private API, so guard carefully)
+    if _rt is not None and hasattr(_rt, "_resource_tracker"):
+        cache = getattr(_rt._resource_tracker, "_cache", {})
+        for name, (count, rtype) in cache.items():
+            if count > 0 and rtype == "semaphore":
+                report.leaked_semaphores.append(name)
+            if count > 0 and rtype == "shared_memory":
+                report.leaked_shm.append(name)
+
+    return report
 
 
 @dataclass
@@ -230,10 +361,10 @@ class Args:
     The returned output will not contain the stop strings."""
 
     # Algorithm
-    async_mode: bool = True
+    async_mode: Optional[bool] = None
     """Whether to run the generation in async mode which learns from the second latest policy like Cleanba (https://arxiv.org/abs/2310.00036)"""
     async_steps: int = 1
-    """Number of steps ahead to generate responses. Only used when async_mode is True."""
+    """Number of steps ahead to generate responses. Set to 0 to make the code synchronous."""
     num_epochs: int = 1
     """the number of epochs to train"""
     num_mini_batches: int = 1
@@ -400,6 +531,10 @@ class Args:
     code_tool_api_endpoint: Optional[str] = None
 
     def __post_init__(self):
+        if self.async_mode is not None:
+            raise ValueError(
+                "Async mode argument is deprecated. To use async mode, set `async_steps=N>0` in the args."
+            )
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
@@ -1109,42 +1244,114 @@ class ModelGroup:
             self.models.append(worker_policy)
 
 
+class PendingQueriesMap:
+    """Thread-safe map for tracking pending queries with reference counting."""
+
+    def __init__(self):
+        self._map = {}  # dataset_idx -> (query, ground_truth, dataset, count)
+        self._lock = threading.Lock()
+
+    def insert(self, dataset_idx, query, ground_truth, dataset):
+        """Insert or increment count for a dataset index."""
+        with self._lock:
+            if dataset_idx in self._map:
+                # Already exists - just increment count
+                existing_query, existing_ground_truth, existing_dataset, count = self._map[dataset_idx]
+                self._map[dataset_idx] = (existing_query, existing_ground_truth, existing_dataset, count + 1)
+            else:
+                # New entry - count starts at 1
+                self._map[dataset_idx] = (query, ground_truth, dataset, 1)
+
+    def pop(self, dataset_idx):
+        """Retrieve data and decrement count. Removes entry when count reaches 0."""
+        with self._lock:
+            if dataset_idx not in self._map:
+                raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
+
+            query, ground_truth, dataset, count = self._map[dataset_idx]
+
+            if count > 1:
+                # More results expected - just decrement
+                self._map[dataset_idx] = (query, ground_truth, dataset, count - 1)
+            else:
+                # Last result - remove entry
+                del self._map[dataset_idx]
+
+            return query, ground_truth, dataset
+
+    def __len__(self):
+        """Return the number of entries in the map."""
+        with self._lock:
+            return len(self._map)
+
+    def __contains__(self, dataset_idx):
+        """Check if a dataset index is in the map."""
+        with self._lock:
+            return dataset_idx in self._map
+
+    def __getitem__(self, dataset_idx):
+        """Get the value for a dataset index."""
+        with self._lock:
+            return self._map[dataset_idx]
+
+    def keys(self):
+        """Return a view of the keys in the map."""
+        with self._lock:
+            return list(self._map.keys())
+
+
 def accumulate_inference_batches(
-    inference_results_Q: ray_queue.Queue, pending_queries_map: dict, vllm_num_engines: int, training_step: int
+    inference_results_Q: ray_queue.Queue, pending_queries_map: PendingQueriesMap, args: Args, training_step: int
 ) -> tuple:
     """Accumulate multiple inference results into a single training batch.
 
     Args:
         inference_results_Q: Queue containing GenerationResult objects
-        pending_queries_map: Map of dataset_index -> (queries, ground_truths, datasets)
-        vllm_num_engines: Number of vLLM engines (number of batches to accumulate)
+        pending_queries_map: PendingQueriesMap instance for thread-safe query tracking
+        args: Arguments containing vllm_num_engines and num_samples_per_prompt_rollout
         training_step: Current training step for error reporting
 
     Returns:
         Tuple of (combined_result, combined_queries, combined_ground_truths, combined_datasets)
     """
+
     # Collect results from all engines
     results = []
     all_queries = []
     all_ground_truths = []
     all_datasets = []
 
-    for batch_idx in range(vllm_num_engines):
-        # Get result from queue
+    pbar = tqdm(
+        range(args.vllm_num_engines),
+        desc=f"Accumulating results from {args.vllm_num_engines} engines",
+        bar_format="{l_bar}{bar}{r_bar}\n",
+    )
+
+    for batch_idx in pbar:
         result = inference_results_Q.get()
         dataset_indices = result.dataset_index
 
         if dataset_indices is None:
             raise RuntimeError(f"Dataset indices is None for batch {batch_idx}")
 
+        # When num_samples_per_prompt_rollout > 1, vLLM generates multiple responses per prompt
+        # but dataset_indices only contains the unique indices (not replicated)
+        # So we expect: len(responses) == len(dataset_indices) * num_samples_per_prompt_rollout
+        expected_responses = len(dataset_indices) * args.num_samples_per_prompt_rollout
+        assert len(result.responses) == expected_responses, (
+            f"Mismatch: number of responses ({len(result.responses)}) "
+            f"doesn't match expected ({expected_responses}) for batch {batch_idx}"
+            f". {args.num_samples_per_prompt_rollout=}"
+            f", {len(dataset_indices)=}"
+            f", {args.num_unique_prompts_rollout=}"
+        )
+
         # Get corresponding queries, ground_truths, datasets for each individual prompt
         batch_queries = []
         batch_ground_truths = []
         batch_datasets = []
-        for dataset_idx in dataset_indices:
-            if dataset_idx not in pending_queries_map:
-                raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
 
+        for dataset_idx in dataset_indices:
             query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
             batch_queries.append(query)
             batch_ground_truths.append(ground_truth)
@@ -1197,6 +1404,7 @@ def accumulate_inference_batches(
         dataset_index=None,  # Not meaningful for combined result
     )
 
+    pbar.close()
     return combined_result, all_queries, all_ground_truths, all_datasets
 
 
@@ -1213,7 +1421,7 @@ def data_preparation_thread(
         # Accumulate results from multiple vLLM engines into a single training batch
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             result, queries, ground_truths, datasets = accumulate_inference_batches(
-                inference_results_Q, pending_queries_map, args.vllm_num_engines, training_step
+                inference_results_Q, pending_queries_map, args, training_step
             )
 
         # ------------------------------------------------------------------------------------------------
@@ -1674,7 +1882,7 @@ def split_and_insert_batch(
     dataset_indices,
     training_step,
     vllm_num_engines,
-    pending_queries_map,
+    pending_queries_map: PendingQueriesMap,
     param_prompt_Q,
     eval_prompt_token_ids=None,
 ):
@@ -1690,9 +1898,9 @@ def split_and_insert_batch(
         batch_datasets = datasets_next[start_idx:end_idx]
         batch_dataset_indices = dataset_indices[start_idx:end_idx]
 
-        # Store individual prompts in the map using dataset indices as keys
+        # Store individual prompts in the map using thread-safe insert
         for i, dataset_idx in enumerate(batch_dataset_indices):
-            pending_queries_map[dataset_idx] = (batch_queries[i], batch_ground_truths[i], batch_datasets[i])
+            pending_queries_map.insert(dataset_idx, batch_queries[i], batch_ground_truths[i], batch_datasets[i])
 
         # Use PromptRequest for Ray queue with batch-specific dataset_index list
         param_prompt_Q.put(
@@ -1708,43 +1916,39 @@ def split_and_insert_batch(
 def sync_weights_and_prepare_prompts(
     training_step: int,
     args: Args,
-    train_dataset,
-    iter_dataloader,
+    train_dataset: Any,
+    iter_dataloader: Iterator[List[int]],
     policy_group: ModelGroup,
-    pending_queries_map: dict,
-    param_prompt_Q: ray_queue.Queue,  # Ray queue
-    queries_next=None,
-    ground_truths_next=None,
-    datasets_next=None,
-    dataset_indices=None,
-    eval_prompt_token_ids=None,
-):
+    pending_queries_map: PendingQueriesMap,
+    param_prompt_Q: ray_queue.Queue,
+    eval_prompt_token_ids: Optional[List[List[int]]] = None,
+) -> tuple[List[List[int]], List[List[int]], List[str], List[int]]:
     """Sync weights and send the next batch of prompts to vLLM."""
-    if training_step != 1:
-        dataset_indices = next(iter_dataloader)
-        data_next = train_dataset[dataset_indices]
-        queries_next = data_next[INPUT_IDS_PROMPT_KEY]
-        ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-        datasets_next = data_next[VERIFIER_SOURCE_KEY]
-        with Timer(
-            "[Main Thread] 🔄 Loading weights using shared memory"
-            if args.async_mode
-            else "🔄 Loading weights using shared memory"
-        ):
-            ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
+    dataset_indices = next(iter_dataloader)
+    data_next = train_dataset[dataset_indices]
+    queries_next = data_next[INPUT_IDS_PROMPT_KEY]
+    ground_truths_next = data_next[GROUND_TRUTHS_KEY]
+    datasets_next = data_next[VERIFIER_SOURCE_KEY]
+    with Timer(
+        "[Main Thread] 🔄 Loading weights using shared memory"
+        if args.async_steps > 0
+        else "🔄 Loading weights using shared memory"
+    ):
+        ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
-    if args.async_mode or training_step != 1:
-        split_and_insert_batch(
-            queries_next,
-            ground_truths_next,
-            datasets_next,
-            dataset_indices,
-            training_step,
-            args.vllm_num_engines,
-            pending_queries_map,
-            param_prompt_Q,
-            eval_prompt_token_ids,
-        )
+    split_and_insert_batch(
+        queries_next,
+        ground_truths_next,
+        datasets_next,
+        dataset_indices,
+        training_step,
+        args.vllm_num_engines,
+        pending_queries_map,
+        param_prompt_Q,
+        eval_prompt_token_ids,
+    )
+
+    return queries_next, ground_truths_next, datasets_next, dataset_indices
 
 
 def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
@@ -1759,6 +1963,47 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
             logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
             return None, data_thread_metrics, num_total_tokens
         return collated_data, data_thread_metrics, num_total_tokens
+
+
+def generate_thread(
+    vllm_engines,
+    generation_config,
+    eval_generation_config,
+    local_eval_freq,
+    num_training_steps,
+    resume_training_step,
+    stop_event,
+):
+    """Thread function that repeatedly calls process_from_queue on vllm engines."""
+    logger.info("[Generate Thread] 🚀 Starting generation thread")
+
+    while not stop_event.is_set():
+        # Track if any engine processed a request
+        any_processed = False
+
+        for engine in vllm_engines:
+            try:
+                # Call process_from_queue with a short timeout
+                processed = ray.get(
+                    engine.process_from_queue.remote(
+                        generation_config,
+                        eval_generation_config,
+                        local_eval_freq,
+                        num_training_steps,
+                        resume_training_step,
+                        timeout=0.1,
+                    )
+                )
+                if processed:
+                    any_processed = True
+            except Exception as e:
+                logger.error(f"[Generate Thread] Error processing from queue: {e}")
+
+        # If no engine processed anything, sleep briefly to avoid busy waiting
+        if not any_processed:
+            time.sleep(0.01)
+
+    logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
 def one_training_step(
@@ -1981,7 +2226,10 @@ def make_reward_fn(args: Args) -> Callable:
         infos: List[List[int]],
         queries: Optional[List[str]] = None,
     ) -> List[float]:
-        _, timeouts, tool_errors, tool_outputs, _, tool_calleds = infos
+        timeouts = infos.timeouts
+        tool_errors = infos.tool_errors
+        tool_outputs = infos.tool_outputs
+        tool_calleds = infos.tool_calleds
         good_outputs = [
             len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
             for i in range(len(tool_outputs))
@@ -2069,11 +2317,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     pprint([args, model_config])
 
     # Initialize Ray before creating Ray objects
-    ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
+    ray.init(dashboard_host="0.0.0.0")
 
-    # Create Ray queues
-    inference_results_Q = ray_queue.Queue(maxsize=args.async_steps)
-    param_prompt_Q = ray_queue.Queue(maxsize=args.async_steps)
+    # Create Ray queues.
+    inference_results_Q = ray_queue.Queue(maxsize=args.async_steps + 1)
+    param_prompt_Q = ray_queue.Queue(maxsize=args.async_steps + 1)
     evaluation_inference_results_Q = ray_queue.Queue(maxsize=1)
 
     policy_group, vllm_engines, tool_objects, resume_training_step, episode = create_model_and_optimizer(
@@ -2109,8 +2357,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
 
     # Create additional queues (main queues already created above)
-    packed_sequences_Q = Queue(maxsize=args.async_steps)  # Keep this as threading Queue for now
-    pending_queries_map = {}  # Map dataset_index -> (queries, ground_truths, datasets)
+    packed_sequences_Q = Queue(maxsize=args.async_steps)
+    pending_queries_map = PendingQueriesMap()
 
     eval_prompt_token_ids = None
     eval_ground_truths = None
@@ -2121,17 +2369,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         eval_dataset_names = eval_dataset[:num_eval_samples][VERIFIER_SOURCE_KEY]
     reward_fn = make_reward_fn(args)
 
-    # Start vLLM engines to process from queues
-    for engine in vllm_engines:
-        engine.process_from_queue.remote(
-            generation_config,
-            eval_generation_config,
-            args.local_eval_freq,
-            args.num_training_steps,
-            resume_training_step,
-        )
-    logger.info("======== ✅ vllm engines started processing from queues =========")
+    # Verify none of the engines crashed during initialization.
+    for i, engine in enumerate(vllm_engines):
+        ray.get(engine.ready.remote())
 
+    logger.info("======== ✅ data preparation thread starts =========")
     packing_thread = threading.Thread(
         target=data_preparation_thread,
         args=(
@@ -2145,39 +2387,50 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         ),
     )
     packing_thread.start()
-    logger.info("======== ✅ data preparation thread starts =========")
 
-    # Send initial data to both threads.
-    dataset_indices = next(iter_dataloader)
-    data_next = train_dataset[dataset_indices]
-    queries_next = data_next[INPUT_IDS_PROMPT_KEY]
-    ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-    datasets_next = data_next[VERIFIER_SOURCE_KEY]
-
-    # Split the initial batch using the split_and_insert_batch function
-    split_and_insert_batch(
-        queries_next,
-        ground_truths_next,
-        datasets_next,
-        dataset_indices,
-        1,  # training_step
-        args.vllm_num_engines,
-        pending_queries_map,
-        param_prompt_Q,
-        eval_prompt_token_ids if eval_dataset is not None else None,
+    # Create and start the generate thread
+    stop_generate_event = threading.Event()
+    generation_thread = threading.Thread(
+        target=generate_thread,
+        args=(
+            vllm_engines,
+            generation_config,
+            eval_generation_config,
+            args.local_eval_freq,
+            args.num_training_steps,
+            resume_training_step,
+            stop_generate_event,
+        ),
     )
+    generation_thread.start()
+    logger.info("======== ✅ generation thread starts =========")
 
+    # Send initial data to ensure we have a N-step offset. This is what
+    # the async_steps arg does.
+    for _ in range(args.async_steps):
+        dataset_indices = next(iter_dataloader)
+        data_next = train_dataset[dataset_indices]
+        queries_next = data_next[INPUT_IDS_PROMPT_KEY]
+        ground_truths_next = data_next[GROUND_TRUTHS_KEY]
+        datasets_next = data_next[VERIFIER_SOURCE_KEY]
+        split_and_insert_batch(
+            queries_next,
+            ground_truths_next,
+            datasets_next,
+            dataset_indices,
+            1,  # training_step
+            args.vllm_num_engines,
+            pending_queries_map,
+            param_prompt_Q,
+            eval_prompt_token_ids if eval_dataset is not None else None,
+        )
     num_total_tokens = 0
     start_time = time.time()
-    dataset_indices = None  # Initialize for training loop
+    cleanup_done = False
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
-            logger.info("-" * 100)
-            episode += (
-                args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-            )  # each sample is an episode
-
-            queries_next, ground_truths_next, datasets_next = sync_weights_and_prepare_prompts(
+            episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+            queries_next, ground_truths_next, datasets_next, dataset_indices = sync_weights_and_prepare_prompts(
                 training_step,
                 args,
                 train_dataset,
@@ -2185,12 +2438,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 policy_group,
                 pending_queries_map,
                 param_prompt_Q,
-                queries_next,
-                ground_truths_next,
-                datasets_next,
-                dataset_indices,
                 eval_prompt_token_ids,
             )
+
+            # The generate_thread is now handling vLLM processing asynchronously
+
             collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
                 packed_sequences_Q, num_total_tokens
             )
@@ -2231,14 +2483,41 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     except Exception as e:
         logger.error(f"Training error occurred: {str(e)}\n{traceback.format_exc()}")
-        cleanup_judge_clients()
-        os._exit(1)
+        raise
+    finally:
+        if not cleanup_done:
+            cleanup_done = True
+            # Signal threads to stop
+            stop_generate_event.set()
 
-    # Clean up threads
-    packing_thread.join()
-    logger.info("======== ✅ data preparation thread ends =========")
+            # Clean up threads with timeout
+            logger.info("Cleaning up threads...")
+            packing_thread.join(timeout=30)
+            if packing_thread.is_alive():
+                logger.warning("Data preparation thread did not stop cleanly")
+            else:
+                logger.info("======== ✅ data preparation thread ends =========")
 
-    cleanup_judge_clients()
+            generation_thread.join(timeout=30)
+            if generation_thread.is_alive():
+                logger.warning("Generation thread did not stop cleanly")
+            else:
+                logger.info("======== ✅ generation thread ends =========")
+
+            # Shutdown Ray queues to prevent semaphore leaks
+            logger.info("Shutting down Ray queues...")
+            try:
+                inference_results_Q.shutdown()
+                param_prompt_Q.shutdown()
+                evaluation_inference_results_Q.shutdown()
+            except Exception as e:
+                logger.warning(f"Error shutting down Ray queues: {e}")
+
+            # Clean up judge clients
+            try:
+                cleanup_judge_clients()
+            except Exception as e:
+                logger.error(f"Error during judge cleanup: {e}")
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
     # make a copy of the model to `/output` in the end.
@@ -2256,6 +2535,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     if args.push_to_hub:
         logger.info("Pushing model to hub")
         push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+
+    # Check for runtime leaks before exiting
+    logger.info("Checking for runtime leaks...")
+    leak_report = check_runtime_leaks()
+    if not leak_report.is_clean:
+        logger.warning("Runtime leaks detected:\n" + leak_report.pretty())
+    else:
+        logger.info("No runtime leaks detected.")
 
 
 if __name__ == "__main__":
