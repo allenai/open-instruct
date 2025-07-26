@@ -40,19 +40,10 @@ jobs:
     timeout-minutes: 35
     
     steps:
-      - name: Setup SSH for private repository access
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.OPEN_INSTRUCT_DEPLOY_PRIVATE_KEY }}
-      
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Need full history to get commit author info
-      
-      - name: Checkout oe-eval-internal
-        run: |
-          git clone git@github.com:allenai/oe-eval-internal.git ./oe-eval-internal
       
       - name: Get trigger information
         id: get-trigger-info
@@ -85,6 +76,11 @@ jobs:
         with:
           token: ${{ secrets.BEAKER_TOKEN }}
           workspace: ai2/tulu-thinker
+      
+      - name: Setup SSH for private repository access
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.OPEN_INSTRUCT_DEPLOY_PRIVATE_KEY }}
       
       - name: Install dependencies
         run: |
