@@ -1,4 +1,7 @@
+import gc
+import os
 import unittest
+from multiprocessing import resource_tracker
 from unittest.mock import Mock
 
 import ray
@@ -15,8 +18,47 @@ from open_instruct.vllm_utils3 import GenerationResult, PromptRequest, RequestIn
 class TestGrpoFastBase(unittest.TestCase):
     """Base class with common test utilities."""
 
+    def _get_resource_tracker_state(self):
+        """Get current resource tracker state for debugging."""
+        tracked_resources = {}
+        try:
+            # Try to access resource tracker directly
+            from multiprocessing.resource_tracker import _resource_tracker
+            if hasattr(_resource_tracker, '_cache'):
+                for name, rtype in list(_resource_tracker._cache.items()):
+                    if rtype not in tracked_resources:
+                        tracked_resources[rtype] = []
+                    tracked_resources[rtype].append(name)
+        except Exception:
+            # Alternative approach: check via resource_tracker module
+            try:
+                import multiprocessing.resource_tracker as rt
+                if hasattr(rt, 'getfd'):
+                    # This is a hack to get the cache info
+                    import ctypes
+                    import sys
+                    # Try to find the cache in the module
+                    for attr_name in dir(rt):
+                        attr = getattr(rt, attr_name)
+                        if isinstance(attr, dict) and any('semaphore' in str(v) for v in attr.values()):
+                            for k, v in attr.items():
+                                if v not in tracked_resources:
+                                    tracked_resources[v] = []
+                                tracked_resources[v].append(k)
+            except Exception:
+                pass
+        return tracked_resources
+
     def setUp(self):
         """Initialize Ray and check for pre-existing leaks."""
+        # Save original environment variable value
+        self._original_nccl_cumem = os.environ.get("NCCL_CUMEM_ENABLE")
+        
+        # Record initial resource tracker state
+        self._initial_resources = self._get_resource_tracker_state()
+        
+        # Track Ray queues for cleanup
+        self._ray_queues = []
 
         # Check for leaks after Ray init
         leak_report = grpo_fast.check_runtime_leaks()
@@ -38,11 +80,37 @@ class TestGrpoFastBase(unittest.TestCase):
         # Initialize Ray for this test
         ray.init(include_dashboard=False)
 
+    def _cleanup_ray_queues(self):
+        """Clean up all Ray queues created during the test."""
+        for queue in self._ray_queues:
+            try:
+                queue.shutdown()
+            except Exception as e:
+                print(f"Warning: Failed to shutdown Ray queue: {e}")
+        self._ray_queues.clear()
+
     def tearDown(self):
         """Check for leaks and shutdown Ray."""
+        # Clean up Ray queues BEFORE shutting down Ray
+        self._cleanup_ray_queues()
+        
         # Shutdown Ray
         if ray.is_initialized():
             ray.shutdown()
+
+        # Force garbage collection to clean up any lingering objects
+        gc.collect()
+
+        # Get final resource tracker state
+        final_resources = self._get_resource_tracker_state()
+        
+        # Check for new resources that weren't there initially
+        new_resources = {}
+        for rtype, names in final_resources.items():
+            initial_names = set(self._initial_resources.get(rtype, []))
+            new_names = [n for n in names if n not in initial_names]
+            if new_names:
+                new_resources[rtype] = new_names
 
         # Check for leaks before shutdown
         leak_report = grpo_fast.check_runtime_leaks()
@@ -59,6 +127,23 @@ class TestGrpoFastBase(unittest.TestCase):
 
         if not leak_report.is_clean:
             self.fail(f"Leaks detected after test {self._testMethodName}:\n{leak_report.pretty()}")
+
+        # Check for semaphore leaks
+        if new_resources:
+            # Report all new resources, especially semaphores
+            leak_msg = f"Resource leaks detected after test {self._testMethodName}:\n"
+            for rtype, names in new_resources.items():
+                leak_msg += f"  {rtype}: {names}\n"
+            
+            # Fail if there are semaphore leaks
+            if 'semaphore' in new_resources:
+                self.fail(leak_msg)
+
+        # Restore original environment variable value
+        if self._original_nccl_cumem is None:
+            os.environ.pop("NCCL_CUMEM_ENABLE", None)
+        else:
+            os.environ["NCCL_CUMEM_ENABLE"] = self._original_nccl_cumem
 
     def create_test_data(self, num_prompts, prefix="", start_idx=0):
         """Create test data with consistent naming."""
@@ -101,6 +186,9 @@ class TestGrpoFastBase(unittest.TestCase):
         param_prompt_Q = ray_queue.Queue(maxsize=num_engines * 2)
         inference_results_Q = ray_queue.Queue(maxsize=num_engines * 2)
         pending_queries_map = grpo_fast.PendingQueriesMap()
+        
+        # Track queues for cleanup
+        self._ray_queues.extend([param_prompt_Q, inference_results_Q])
 
         grpo_fast.split_and_insert_batch(
             queries, ground_truths, datasets, indices, training_step, num_engines, pending_queries_map, param_prompt_Q
@@ -127,6 +215,9 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         # Create Ray queues
         param_prompt_Q = ray_queue.Queue(maxsize=1)
         inference_results_Q = ray_queue.Queue(maxsize=1)
+        
+        # Track queues for cleanup
+        self._ray_queues.extend([param_prompt_Q, inference_results_Q])
 
         # Create vLLM engines with queues
         vllm_engines = create_vllm_engines(
@@ -438,6 +529,10 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
         # Setup with results from only 3 engines
         inference_results_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        
+        # Track queue for cleanup
+        self._ray_queues.append(inference_results_Q)
+        
         pending_queries_map = grpo_fast.PendingQueriesMap()
 
         # Add entries to map
