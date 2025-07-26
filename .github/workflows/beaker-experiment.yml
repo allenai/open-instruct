@@ -40,6 +40,11 @@ jobs:
     timeout-minutes: 35
     
     steps:
+      - name: Setup SSH for private repository access
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.OPEN_INSTRUCT_DEPLOY_PRIVATE_KEY }}
+      
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -50,7 +55,6 @@ jobs:
         with:
           repository: allenai/oe-eval-internal
           path: './oe-eval-internal'
-          ssh-key: ${{ secrets.OPEN_INSTRUCT_DEPLOY_PRIVATE_KEY }}
       
       - name: Get trigger information
         id: get-trigger-info
