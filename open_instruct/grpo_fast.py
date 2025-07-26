@@ -45,6 +45,7 @@ import asyncio
 import json
 import logging
 import math
+import multiprocessing as mp
 import os
 import shutil
 import socket
@@ -58,7 +59,6 @@ from multiprocessing import resource_tracker as _rt
 from queue import Empty, Queue
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Literal, Optional, Union
 
-import multiprocessing as mp
 import numpy as np
 import pandas as pd
 import ray
@@ -149,16 +149,16 @@ INVALID_LOGPROB = 1.0
 
 DEFAULT_THREAD_ALLOWLIST = {
     "MainThread",
-    "pytest-watcher",        # pytest
-    "pydevd.",               # debugger
+    "pytest-watcher",  # pytest
+    "pydevd.",  # debugger
     "IPythonHistorySavingThread",
-    "raylet_client",         # ray internal when still up during test body
+    "raylet_client",  # ray internal when still up during test body
 }
 
 DEFAULT_THREAD_ALLOW_PREFIXES = {
-    "ThreadPoolExecutor-",   # executors create transient threads; adjust if you join them
-    "ray-",                  # ray internal threads
-    "grpc-default-executor", # grpc internal
+    "ThreadPoolExecutor-",  # executors create transient threads; adjust if you join them
+    "ray-",  # ray internal threads
+    "grpc-default-executor",  # grpc internal
 }
 
 
@@ -174,9 +174,15 @@ class LeakReport:
 
     @property
     def is_clean(self) -> bool:
-        return not (self.bad_threads or self.bad_processes or
-                    self.ray_actors or self.ray_tasks or self.ray_workers or
-                    self.leaked_semaphores or self.leaked_shm)
+        return not (
+            self.bad_threads
+            or self.bad_processes
+            or self.ray_actors
+            or self.ray_tasks
+            or self.ray_workers
+            or self.leaked_semaphores
+            or self.leaked_shm
+        )
 
     def pretty(self) -> str:
         lines = []
@@ -245,11 +251,12 @@ def check_runtime_leaks(
 
     # Ray state (only if ray is present & initialized)
     try:
-        from ray.util import state as ray_state
         import ray
+        from ray.util import state as ray_state
+
         if ray_state is not None and ray is not None and ray.is_initialized():
-            report.ray_actors  = ray_state.list_actors(filters=[("state", "=", "ALIVE")])
-            report.ray_tasks   = ray_state.list_tasks(filters=[("state", "=", "RUNNING")])
+            report.ray_actors = ray_state.list_actors(filters=[("state", "=", "ALIVE")])
+            report.ray_tasks = ray_state.list_tasks(filters=[("state", "=", "RUNNING")])
             report.ray_workers = ray_state.list_workers(filters=[("is_alive", "=", True)])
     except Exception:
         pass
@@ -2528,7 +2535,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     if args.push_to_hub:
         logger.info("Pushing model to hub")
         push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
-    
+
     # Check for runtime leaks before exiting
     logger.info("Checking for runtime leaks...")
     leak_report = check_runtime_leaks()
