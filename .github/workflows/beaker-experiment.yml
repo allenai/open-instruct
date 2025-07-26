@@ -1,0 +1,228 @@
+name: Beaker Experiment Launch
+
+# Run experiments on Beaker using the latest Docker image
+on:
+  # Run on schedule - every 24 hours at midnight PT (Pacific Time)
+  # PT is UTC-8 (PST) or UTC-7 (PDT), so midnight PT is 8am UTC (or 7am during DST)
+  schedule:
+    - cron: '0 8 * * *'
+  
+  push:
+    # Run this workflow anytime a push updates one of the files in the image's directory
+    # (other than the README), and anytime there's a new release tag for this image.
+    paths:
+      - 'open_instruct/**'
+      - '!open_instruct/README.md'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - '.github/workflows/push-image.yml'
+      # Note, add .olmo dockerfile + requirements if adding auto build to those
+    branches: [main]
+  pull_request: # note, comment this out for running on every push
+    # Also run on PRs that update the files in the image's directory (other than README).
+    branches: [main]
+    paths:
+      - 'open_instruct/**'
+      - '!open_instruct/README.md'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - '.github/workflows/beaker-experiment.yml'
+  workflow_dispatch:  # This allows us to manually trigger a build through the GitHub UI.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  launch-experiment:
+    name: Launch Beaker Experiment
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history to get commit author info
+      
+      - name: Get trigger information
+        id: get-trigger-info
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Get the commit author for push events
+            AUTHOR_NAME=$(git log -1 --pretty=format:'%an')
+            echo "trigger_info=Push by ${AUTHOR_NAME}" >> $GITHUB_OUTPUT
+            echo "notification_type=push" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Get the user who triggered the manual dispatch
+            echo "trigger_info=Manual dispatch by ${{ github.actor }}" >> $GITHUB_OUTPUT
+            echo "notification_type=manual" >> $GITHUB_OUTPUT
+          else
+            # For scheduled runs
+            echo "trigger_info=Scheduled run" >> $GITHUB_OUTPUT
+            echo "notification_type=schedule" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Setup Python environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      
+      - name: Setup Beaker
+        uses: allenai/setup-beaker@v2
+        with:
+          token: ${{ secrets.BEAKER_TOKEN }}
+          workspace: ai2/tulu-thinker
+      
+      - name: Setup SSH for private repository access
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.OPEN_INSTRUCT_DEPLOY_PRIVATE_KEY }}
+      
+      - name: Install dependencies
+        run: |
+          # Install development dependencies needed for mason.py
+          uv sync --only-group dev
+
+      - name: Delete huge unnecessary tools folder
+        run: |
+          echo "Disk space before cleanup:"
+          df -h
+          
+          # Remove unnecessary tools
+          sudo rm -rf /opt/hostedtoolcache
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          
+          # Clean up apt cache
+          sudo apt-get clean
+          sudo apt-get autoremove -y
+          
+          # Remove some large packages we don't need
+          sudo apt-get remove -y '^aspnetcore-.*' || true
+          sudo apt-get remove -y '^dotnet-.*' || true
+          sudo apt-get remove -y '^llvm-.*' || true
+          sudo apt-get remove -y 'php.*' || true
+          sudo apt-get remove -y '^mongodb-.*' || true
+          sudo apt-get remove -y '^mysql-.*' || true
+          sudo apt-get remove -y azure-cli google-chrome-stable firefox powershell mono-devel || true
+          sudo apt-get autoremove -y
+          
+          # Clean up Docker
+          docker system prune -af --volumes || true
+          
+          echo "Disk space after cleanup:"
+          df -h
+
+      - name: Build image and launch experiment
+        id: launch
+        env:
+          BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          
+          # Make scripts executable
+          chmod +x scripts/train/build_image_and_launch.sh
+          chmod +x scripts/train/debug/single_gpu_on_beaker.sh
+          
+          echo "Building Docker image and launching experiment..."
+          echo "Git commit: $(git rev-parse --short HEAD)"
+          
+          # Monitor disk space during build
+          echo "Disk space before build:"
+          df -h /
+          
+          # Build image and launch experiment
+          # Use tee to both stream output and capture it for parsing
+          ./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh 2>&1 | tee /tmp/beaker_output.log || {
+            EXIT_CODE=$?
+            echo "ERROR: build_image_and_launch.sh failed with exit code $EXIT_CODE"
+            exit $EXIT_CODE
+          }
+          
+          # Extract experiment ID from the saved output
+          EXPERIMENT_ID=$(grep -oP 'https://beaker.org/ex/\K[a-zA-Z0-9]+' /tmp/beaker_output.log | tail -1)
+          if [ -z "$EXPERIMENT_ID" ]; then
+            echo "Failed to extract experiment ID from output"
+            echo "DEBUG: Output tail:"
+            tail -n 50 /tmp/beaker_output.log
+            exit 1
+          fi
+          
+          echo "experiment_id=$EXPERIMENT_ID" >> $GITHUB_OUTPUT
+          echo "Experiment ID: $EXPERIMENT_ID"
+          echo "Experiment URL: https://beaker.org/ex/$EXPERIMENT_ID"
+      
+      - name: Wait for Beaker experiment completion
+        env:
+          BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+        run: |
+          EXPERIMENT_ID="${{ steps.launch.outputs.experiment_id }}"
+          echo "Waiting for experiment $EXPERIMENT_ID to complete..."
+          
+          # Maximum wait time: 20 minutes (1200 seconds)
+          MAX_WAIT_TIME=1200
+          CHECK_INTERVAL=30
+          ELAPSED_TIME=0
+          
+          # Track the last log line we've seen
+          LAST_LOG_LINE=0
+          
+          while [ $ELAPSED_TIME -lt $MAX_WAIT_TIME ]; do
+            # Get experiment status
+            STATUS=$(beaker experiment get $EXPERIMENT_ID --format json | jq -r '.status')
+            
+            echo "=== Status: $STATUS (elapsed: ${ELAPSED_TIME}s) ==="
+            
+            # Stream new logs since last check
+            echo "--- Recent logs ---"
+            beaker experiment logs $EXPERIMENT_ID --tail 50 || echo "No logs available yet"
+            echo "--- End of logs ---"
+            
+            # Check if experiment has completed
+            if [ "$STATUS" = "succeeded" ]; then
+              echo "✅ Experiment completed successfully!"
+              # Show final logs
+              echo "=== Final logs ==="
+              beaker experiment logs $EXPERIMENT_ID --tail 100
+              exit 0
+            elif [ "$STATUS" = "failed" ] || [ "$STATUS" = "canceled" ]; then
+              echo "❌ Experiment $STATUS"
+              # Show error logs
+              echo "=== Error logs ==="
+              beaker experiment logs $EXPERIMENT_ID --tail 200
+              exit 1
+            fi
+            
+            # Wait before next check
+            sleep $CHECK_INTERVAL
+            ELAPSED_TIME=$((ELAPSED_TIME + CHECK_INTERVAL))
+          done
+          
+          echo "⏱️ Timeout: Experiment did not complete within 20 minutes"
+          exit 1
+      
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Beaker Experiment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Trigger:** ${{ steps.get-trigger-info.outputs.trigger_info }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Docker Image:** Built locally by build_image_and_launch.sh" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ steps.launch.outputs.experiment_id }}" ]; then
+            echo "**Beaker Experiment:** [View on Beaker](https://beaker.org/ex/${{ steps.launch.outputs.experiment_id }})" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ **Status:** Experiment completed successfully!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Status:** Experiment failed or timed out" >> $GITHUB_STEP_SUMMARY
+          fi
