@@ -43,9 +43,9 @@ COPY scripts scripts
 COPY mason.py mason.py
 COPY .git/ ./.git/
 
-# Clone oe-eval-internal repository
+# Clone oe-eval-internal repository (shallow clone to save memory)
 # This requires SSH agent forwarding during build (docker build --ssh default)
-RUN --mount=type=ssh git clone git@github.com:allenai/oe-eval-internal.git
+RUN --mount=type=ssh git clone --depth 1 git@github.com:allenai/oe-eval-internal.git
 
 # Set up the environment
 ENV PATH=/stage/.venv/bin:$PATH
