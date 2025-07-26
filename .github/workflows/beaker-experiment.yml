@@ -88,7 +88,37 @@ jobs:
           uv sync --only-group dev
 
       - name: Delete huge unnecessary tools folder
-        run: rm -rf /opt/hostedtoolcache /usr/share/dotnet "$AGENT_TOOLSDIRECTORY" /usr/local/lib/android/sdk/ndk
+        run: |
+          echo "Disk space before cleanup:"
+          df -h
+          
+          # Remove unnecessary tools
+          sudo rm -rf /opt/hostedtoolcache
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          
+          # Clean up apt cache
+          sudo apt-get clean
+          sudo apt-get autoremove -y
+          
+          # Remove some large packages we don't need
+          sudo apt-get remove -y '^aspnetcore-.*' || true
+          sudo apt-get remove -y '^dotnet-.*' || true
+          sudo apt-get remove -y '^llvm-.*' || true
+          sudo apt-get remove -y 'php.*' || true
+          sudo apt-get remove -y '^mongodb-.*' || true
+          sudo apt-get remove -y '^mysql-.*' || true
+          sudo apt-get remove -y azure-cli google-chrome-stable firefox powershell mono-devel || true
+          sudo apt-get autoremove -y
+          
+          # Clean up Docker
+          docker system prune -af --volumes || true
+          
+          echo "Disk space after cleanup:"
+          df -h
 
       - name: Build image and launch experiment
         id: launch
@@ -106,22 +136,24 @@ jobs:
           echo "Building Docker image and launching experiment..."
           echo "Git commit: $(git rev-parse --short HEAD)"
           
+          # Monitor disk space during build
+          echo "Disk space before build:"
+          df -h /
+          
           # Build image and launch experiment
-          OUTPUT=$(./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh 2>&1) || {
+          # Use tee to both stream output and capture it for parsing
+          ./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh 2>&1 | tee /tmp/beaker_output.log || {
             EXIT_CODE=$?
             echo "ERROR: build_image_and_launch.sh failed with exit code $EXIT_CODE"
-            echo "Full output:"
-            echo "$OUTPUT"
             exit $EXIT_CODE
           }
-          echo "$OUTPUT"
           
-          # Extract experiment ID from output
-          EXPERIMENT_ID=$(echo "$OUTPUT" | grep -oP 'https://beaker.org/ex/\K[a-zA-Z0-9]+' | tail -1)
+          # Extract experiment ID from the saved output
+          EXPERIMENT_ID=$(grep -oP 'https://beaker.org/ex/\K[a-zA-Z0-9]+' /tmp/beaker_output.log | tail -1)
           if [ -z "$EXPERIMENT_ID" ]; then
             echo "Failed to extract experiment ID from output"
-            echo "DEBUG: Full output was:"
-            echo "$OUTPUT"
+            echo "DEBUG: Output tail:"
+            tail -n 50 /tmp/beaker_output.log
             exit 1
           fi
           
@@ -141,18 +173,32 @@ jobs:
           CHECK_INTERVAL=30
           ELAPSED_TIME=0
           
+          # Track the last log line we've seen
+          LAST_LOG_LINE=0
+          
           while [ $ELAPSED_TIME -lt $MAX_WAIT_TIME ]; do
             # Get experiment status
             STATUS=$(beaker experiment get $EXPERIMENT_ID --format json | jq -r '.status')
             
-            echo "Current status: $STATUS (elapsed: ${ELAPSED_TIME}s)"
+            echo "=== Status: $STATUS (elapsed: ${ELAPSED_TIME}s) ==="
+            
+            # Stream new logs since last check
+            echo "--- Recent logs ---"
+            beaker experiment logs $EXPERIMENT_ID --tail 50 || echo "No logs available yet"
+            echo "--- End of logs ---"
             
             # Check if experiment has completed
             if [ "$STATUS" = "succeeded" ]; then
               echo "✅ Experiment completed successfully!"
+              # Show final logs
+              echo "=== Final logs ==="
+              beaker experiment logs $EXPERIMENT_ID --tail 100
               exit 0
             elif [ "$STATUS" = "failed" ] || [ "$STATUS" = "canceled" ]; then
               echo "❌ Experiment $STATUS"
+              # Show error logs
+              echo "=== Error logs ==="
+              beaker experiment logs $EXPERIMENT_ID --tail 200
               exit 1
             fi
             
