@@ -50,7 +50,7 @@ jobs:
         with:
           repository: allenai/oe-eval-internal
           path: './oe-eval-internal'
-          ssh-key: ${{ secrets.OPEN_INSTRUCT_DEPLOY_PRIVATE_KEY }}
+          ssh-key: ${{ secrets.OE_EVAL_GIT_CLONE_ACCESS_PRIVATE_SSH_DEPLOY_KEY }}
       
       - name: Get trigger information
         id: get-trigger-info
@@ -87,7 +87,7 @@ jobs:
       - name: Setup SSH for private repository access
         uses: webfactory/ssh-agent@v0.9.0
         with:
-          ssh-private-key: ${{ secrets.OPEN_INSTRUCT_DEPLOY_PRIVATE_KEY }}
+          ssh-private-key: ${{ secrets.OE_EVAL_GIT_CLONE_ACCESS_PRIVATE_SSH_DEPLOY_KEY }}
       
       - name: Install dependencies
         run: |
