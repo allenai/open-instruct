@@ -6,7 +6,7 @@ BEAKER_IMAGE="${BEAKER_USER}/open-instruct-dev"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
-uv run python mason.py \
+python mason.py \
        --cluster ai2/jupiter-cirrascale-2 \
        --cluster ai2/augusta-google-1 \
        --cluster ai2/saturn-cirrascale \
