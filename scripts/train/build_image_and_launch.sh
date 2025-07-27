@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-image_name=open-instruct-dev
+image_name=open-instruct-integration-test
 
 # Build the Docker image exactly like push-image.yml does
 docker build \
@@ -19,6 +19,6 @@ beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 beaker image rename $beaker_user/$image_name "" || true
 
 # Create the image in the same workspace used for jobs
-beaker image create $image_name -n $beaker_user/$image_name -w ai2/$beaker_user
+beaker image create $image_name -n $image_name -w ai2/$beaker_user
 
 bash $1
