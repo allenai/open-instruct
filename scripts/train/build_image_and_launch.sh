@@ -3,8 +3,15 @@ set -e
 
 image_name=open-instruct-dev
 
-# Build and push the Docker image to Beaker
-DOCKER_BUILDKIT=1 docker build -f Dockerfile.uv --build-arg UV_CACHE_DIR=$UV_CACHE_DIR -t $image_name .
+# Build the Docker image exactly like push-image.yml does
+docker build \
+    --build-arg BUILDKIT_INLINE_CACHE=1 \
+    --build-arg CUDA=12.1.0 \
+    --build-arg TARGET=cudnn8-devel \
+    --build-arg DIST=ubuntu20.04 \
+    --build-arg REQUIRE=requirements.txt \
+    . \
+    -t $image_name
 
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 

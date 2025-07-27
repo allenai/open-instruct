@@ -33,6 +33,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  DOCKER_BUILDKIT: "1"
+
 jobs:
   launch-experiment:
     name: Launch Beaker Experiment
@@ -83,11 +86,6 @@ jobs:
         with:
           token: ${{ secrets.BEAKER_TOKEN }}
           workspace: ai2/tulu-thinker
-      
-      - name: Setup SSH for private repository access
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.OE_EVAL_GIT_CLONE_ACCESS_PRIVATE_SSH_DEPLOY_KEY }}
       
       - name: Install dependencies
         run: |
