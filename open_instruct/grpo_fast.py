@@ -1907,7 +1907,7 @@ def split_and_insert_batch(
             PromptRequest(
                 prompts=batch_queries,
                 training_step=training_step,
-                eval_prompts=eval_prompt_token_ids,
+                eval_prompts=eval_prompt_token_ids if batch_idx == 0 else None,
                 dataset_index=batch_dataset_indices,
             )
         )
@@ -2320,8 +2320,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     ray.init(dashboard_host="0.0.0.0")
 
     # Create Ray queues.
-    inference_results_Q = ray_queue.Queue(maxsize=args.async_steps + 1)
-    param_prompt_Q = ray_queue.Queue(maxsize=args.async_steps + 1)
+    queue_size = (args.async_steps + 1) * args.vllm_num_engines
+    inference_results_Q = ray_queue.Queue(maxsize=queue_size)
+    param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
     evaluation_inference_results_Q = ray_queue.Queue(maxsize=1)
 
     policy_group, vllm_engines, tool_objects, resume_training_step, episode = create_model_and_optimizer(
