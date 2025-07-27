@@ -182,10 +182,17 @@ jobs:
           LAST_LOG_LINE=0
           
           while [ $ELAPSED_TIME -lt $MAX_WAIT_TIME ]; do
-            # Get experiment status
-            STATUS=$(beaker experiment get $EXPERIMENT_ID --format json | jq -r '.status')
+            # Get job status directly
+            JOB_STATUS=$(beaker experiment get $EXPERIMENT_ID --format json | jq -r '.[0].jobs[0].status' 2>/dev/null || echo "{}")
             
-            echo "=== Status: $STATUS (elapsed: ${ELAPSED_TIME}s) ==="
+            # Check if exitCode exists (experiment is done)
+            EXIT_CODE=$(echo "$JOB_STATUS" | jq -r '.exitCode // "pending"')
+            
+            if [ "$EXIT_CODE" = "pending" ]; then
+              echo "=== Experiment still running (elapsed: ${ELAPSED_TIME}s) ==="
+            else
+              echo "=== Experiment finished with exit code: $EXIT_CODE (elapsed: ${ELAPSED_TIME}s) ==="
+            fi
             
             # Stream new logs since last check
             echo "--- Recent logs ---"
@@ -193,18 +200,20 @@ jobs:
             echo "--- End of logs ---"
             
             # Check if experiment has completed
-            if [ "$STATUS" = "succeeded" ]; then
-              echo "✅ Experiment completed successfully!"
-              # Show final logs
-              echo "=== Final logs ==="
-              beaker experiment logs $EXPERIMENT_ID --tail 100
-              exit 0
-            elif [ "$STATUS" = "failed" ] || [ "$STATUS" = "canceled" ]; then
-              echo "❌ Experiment $STATUS"
-              # Show error logs
-              echo "=== Error logs ==="
-              beaker experiment logs $EXPERIMENT_ID --tail 200
-              exit 1
+            if [ "$EXIT_CODE" != "pending" ]; then
+              if [ "$EXIT_CODE" = "0" ]; then
+                echo "✅ Experiment completed successfully!"
+                # Show final logs
+                echo "=== Final logs ==="
+                beaker experiment logs $EXPERIMENT_ID --tail 100
+                exit 0
+              else
+                echo "❌ Experiment failed with exit code $EXIT_CODE"
+                # Show error logs
+                echo "=== Error logs ==="
+                beaker experiment logs $EXPERIMENT_ID --tail 200
+                exit 1
+              fi
             fi
             
             # Wait before next check
