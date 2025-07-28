@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 image_name=open-instruct-integration-test
 
@@ -15,8 +15,7 @@ docker build \
 
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 
-# Use '|| true' to prevent script from exiting if image doesn't exist to delete
-beaker image rename $beaker_user/$image_name "" || true
+beaker image rename $beaker_user/$image_name ""
 
 # Create the image in the same workspace used for jobs
 beaker image create $image_name -n $image_name -w ai2/$beaker_user
@@ -33,4 +32,4 @@ echo "Installing dependencies with uv..."
 uv sync --only-group dev
 
 # Run the provided script
-bash $1
+bash $1 "$beaker_user/$image_name"
