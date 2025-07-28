@@ -1332,13 +1332,12 @@ def accumulate_inference_batches(
     all_ground_truths = []
     all_datasets = []
 
-    pbar = tqdm(
-        total=args.vllm_num_engines,
-        desc=f"Accumulating results from {args.vllm_num_engines} engines",
-        bar_format="{l_bar}{bar}{r_bar}\n",
-    )
-
-    for i in range(args.vllm_num_engines):
+    for _ in tqdm(
+            range(args.vllm_num_engines),
+            total=args.vllm_num_engines,
+            desc=f"Accumulating results from {args.vllm_num_engines} engines",
+            bar_format="{l_bar}{bar}{r_bar}\n",
+    ):
         result = inference_results_Q.get()
         dataset_indices = result.dataset_index
 
@@ -1372,12 +1371,6 @@ def accumulate_inference_batches(
         all_queries.extend(batch_queries)
         all_ground_truths.extend(batch_ground_truths)
         all_datasets.extend(batch_datasets)
-
-        # Update progress bar
-        pbar.update(1)
-        logger.info(f"[Data Prep] Received batch {i + 1}/{args.vllm_num_engines} for step {training_step}")
-
-    pbar.close()
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -2004,11 +1997,15 @@ def generate_thread(
                 resume_training_step,
                 timeout=0.1,
             )
-            for engine in vllm_engines
+            for engine in tqdm.tqdm(vllm_engines, desc="[Generate Thread] Launching vLLM engines",
+                                    bar_format="{l_bar}{bar}{r_bar}\n")
         ]
-
-        # Get results from all futures
-        processed_results = ray.get(futures)
+        processed_results = []
+        with tqdm.tqdm(total=len(vllm_engines), desc="[Generate Thread] Waiting for vLLM engines to process",
+                       bar_format="{l_bar}{bar}{r_bar}\n") as pbar:
+            for future in futures.as_completed(futures):
+                processed_results.append(future.result())
+                pbar.update(1)
         num_processed = sum(int(result) for result in processed_results)
         logger.info(
             f"[Generate Thread] 🚀 Processed results from all vLLM engines ({num_processed}/{len(processed_results)} processed batches)"
