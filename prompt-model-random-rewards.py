@@ -7,8 +7,8 @@ model_name = "Qwen/Qwen2.5-7B"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(model_name)
 
-prompt = "Can You Imagine 3 Fictional Cities That Are Based On Berlin During 1991?"
-# prompt = "Who is Natasha Jaques?"
+# prompt = "Can You Imagine 3 Fictional Cities That Are Based On Berlin During 1991?"
+prompt = "Who is Natasha Jaques?"
 inputs = tokenizer(prompt, return_tensors="pt")
 
 responses = []
