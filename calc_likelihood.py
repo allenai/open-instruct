@@ -76,9 +76,13 @@ for ckpt_path in tqdm(steps, desc="checkpoints"):
         avg_logp = avg_logp_per_token(
             model, tokenizer, row["prompt"], row["completion"]
         )
+        if ckpt_path == "Qwen/Qwen2.5-7B":
+            step = 0
+        else:
+            step = ckpt_path.name
         results.append(
             {
-                "step": ckpt_path.name,
+                "step": step,
                 "ex_id": row["ex_id"],
                 "c_id": row["c_id"],
                 "avg_logp_per_tok": avg_logp,
