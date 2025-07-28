@@ -1870,9 +1870,9 @@ def generate_thread(
             engine_futures = [ref.future() for ref in engine_refs]
             processed_results = []
             with tqdm(
-                    total=len(vllm_engines),
-                    desc="[Generate Thread] Waiting for vLLM engines to process",
-                    bar_format="{l_bar}{bar}{r_bar}\n",
+                total=len(vllm_engines),
+                desc="[Generate Thread] Waiting for vLLM engines to process",
+                bar_format="{l_bar}{bar}{r_bar}\n",
             ) as pbar:
                 for future in futures.as_completed(engine_futures):
                     processed_results.append(future.result())
