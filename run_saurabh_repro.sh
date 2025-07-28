@@ -5,7 +5,7 @@ exp_name=rlvr_ace_fn_and_og_ocr_stdio_from_base_with_perf_penalty
     python mason.py \
         --cluster ai2/jupiter-cirrascale-2 \
         --cluster ai2/augusta-google-1 \
-        --image finbarrt/code_perf_penalty \
+        --image $1 \
 		--pure_docker_mode \
         --workspace ai2/oe-adapt-code \
         --priority high \
