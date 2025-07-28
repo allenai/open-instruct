@@ -196,7 +196,7 @@ jobs:
             
             # Stream new logs since last check
             echo "--- Recent logs ---"
-            beaker experiment logs $EXPERIMENT_ID --tail 50 || echo "No logs available yet"
+            beaker experiment logs $EXPERIMENT_ID 2>/dev/null | tail -n 50 || echo "No logs available yet"
             echo "--- End of logs ---"
             
             # Check if experiment has completed
@@ -205,13 +205,13 @@ jobs:
                 echo "✅ Experiment completed successfully!"
                 # Show final logs
                 echo "=== Final logs ==="
-                beaker experiment logs $EXPERIMENT_ID --tail 100
+                beaker experiment logs $EXPERIMENT_ID | tail -n 100
                 exit 0
               else
                 echo "❌ Experiment failed with exit code $EXIT_CODE"
                 # Show error logs
                 echo "=== Error logs ==="
-                beaker experiment logs $EXPERIMENT_ID --tail 200
+                beaker experiment logs $EXPERIMENT_ID | tail -n 200
                 exit 1
               fi
             fi
