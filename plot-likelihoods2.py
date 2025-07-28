@@ -102,9 +102,9 @@
 import re, pandas as pd, numpy as np, matplotlib.pyplot as plt
 
 # ---- 1. load the saved pivot table -----------------------------------------
-pivot = pd.read_csv("likelihoods_per_token.csv", index_col=[0, 1])
+pivot = pd.read_csv("likelihoods_per_token_qwen2p5_responses.csv", index_col=[0, 1])
 pivot.index.set_names(["ex_id", "c_id"], inplace=True)
-pivot = pivot.loc[pivot.index.get_level_values("c_id").isin([0, 1, 2, 3])]
+pivot = pivot.loc[pivot.index.get_level_values("c_id").isin([0, 1, 2, 3, 4, 5, 6])]
 
 # ---- 2. choose which prompt to inspect -------------------------------------
 PROMPT_ID = 1       # <- set to 1 for prompt 1
@@ -116,6 +116,8 @@ pivot_prompt = pivot.loc[mask]
 
 # ---- 3. sort the step columns numerically ----------------------------------
 def step_num(col):                    # "step_1350" → 1350
+    if "step_" not in col:
+        return int(col)
     return int(re.search(r"step_(\d+)$", col).group(1))
 
 col_order = sorted(pivot_prompt.columns, key=step_num)
