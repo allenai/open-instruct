@@ -231,10 +231,8 @@ class Args:
     The returned output will not contain the stop strings."""
 
     # Algorithm
-    async_mode: Optional[bool] = None
-    """Whether to run the generation in async mode which learns from the second latest policy like Cleanba (https://arxiv.org/abs/2310.00036)"""
     async_steps: int = 1
-    """Number of steps ahead to generate responses. Set to 0 to make the code synchronous."""
+    """Number of steps ahead to generate responses. Set to 0 to make the code synchronous. Values greater than 0 learn from a policy up to async_steps old like Cleanba (https://arxiv.org/abs/2310.00036)"""
     num_epochs: int = 1
     """the number of epochs to train"""
     num_mini_batches: int = 1
@@ -1857,32 +1855,32 @@ def generate_thread(
     logger.info("[Generate Thread] 🚀 Starting generation thread")
 
     while not stop_event.is_set():
-        # Create futures for all engines in parallel
-        engine_refs = [
-            engine.process_from_queue.remote(
-                generation_config,
-                eval_generation_config,
-                local_eval_freq,
-                num_training_steps,
-                resume_training_step,
-                timeout=0.1,
+        with Timer("🔥 Generation time"):
+            engine_refs = [
+                engine.process_from_queue.remote(
+                    generation_config,
+                    eval_generation_config,
+                    local_eval_freq,
+                    num_training_steps,
+                    resume_training_step,
+                    timeout=0.1,
+                )
+                for engine in vllm_engines
+            ]
+            engine_futures = [ref.future() for ref in engine_refs]
+            processed_results = []
+            with tqdm(
+                    total=len(vllm_engines),
+                    desc="[Generate Thread] Waiting for vLLM engines to process",
+                    bar_format="{l_bar}{bar}{r_bar}\n",
+            ) as pbar:
+                for future in futures.as_completed(engine_futures):
+                    processed_results.append(future.result())
+                    pbar.update(1)
+            num_processed = sum(int(result) for result in processed_results)
+            logger.info(
+                f"[Generate Thread] 🚀 Processed results from all vLLM engines ({num_processed}/{len(processed_results)} processed batches)"
             )
-            for engine in vllm_engines
-        ]
-        engine_futures = [ref.future() for ref in engine_refs]
-        processed_results = []
-        with tqdm(
-            total=len(vllm_engines),
-            desc="[Generate Thread] Waiting for vLLM engines to process",
-            bar_format="{l_bar}{bar}{r_bar}\n",
-        ) as pbar:
-            for future in futures.as_completed(engine_futures):
-                processed_results.append(future.result())
-                pbar.update(1)
-        num_processed = sum(int(result) for result in processed_results)
-        logger.info(
-            f"[Generate Thread] 🚀 Processed results from all vLLM engines ({num_processed}/{len(processed_results)} processed batches)"
-        )
         if num_processed == 0:
             # If no batches were processed, sleep for a short time to avoid busy waiting
             time.sleep(1)
