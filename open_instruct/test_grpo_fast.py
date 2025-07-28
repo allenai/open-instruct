@@ -11,6 +11,7 @@ from transformers import AutoTokenizer
 from vllm import SamplingParams
 
 from open_instruct import grpo_fast
+from open_instruct import utils
 from open_instruct.vllm_utils3 import GenerationResult, PromptRequest, RequestInfo, create_vllm_engines
 
 
@@ -61,7 +62,7 @@ class TestGrpoFastBase(unittest.TestCase):
         self._ray_queues = []
 
         # Check for leaks after Ray init
-        leak_report = grpo_fast.check_runtime_leaks()
+        leak_report = utils.check_runtime_leaks()
         # After Ray init, we expect exactly one Ray head worker
         if len(leak_report.ray_workers) == 1:
             # Check if it's the head worker (worker ID all zeros or all f's)
@@ -113,7 +114,7 @@ class TestGrpoFastBase(unittest.TestCase):
                 new_resources[rtype] = new_names
 
         # Check for leaks before shutdown
-        leak_report = grpo_fast.check_runtime_leaks()
+        leak_report = utils.check_runtime_leaks()
         # We still expect the Ray head worker
         if len(leak_report.ray_workers) == 1:
             worker = leak_report.ray_workers[0]
