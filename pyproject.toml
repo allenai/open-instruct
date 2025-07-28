@@ -89,6 +89,10 @@ dev = [
 	"parameterized>=0.9.0",
 ]
 
+[tool.pytest.ini_options]
+addopts = "--ignore=oe-eval-internal/"
+
+
 [tool.black]
 line-length = 119
 target-version = ['py310']
