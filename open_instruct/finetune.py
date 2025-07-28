@@ -331,7 +331,7 @@ class FlatArguments:
         metadata={"help": "Whether to use packing/padding-free collation via TensorDataCollatorWithFlattening"},
     )
     verbose: bool = field(
-        default=True, metadata={"help": "Optionally print additional statistics at each reporting period"}
+        default=False, metadata={"help": "Optionally print additional statistics at each reporting period"}
     )
 
     def __post_init__(self):
@@ -455,6 +455,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             },
         )
         wandb_tracker = accelerator.get_tracker("wandb")
+    else:
+        wandb_tracker = None  # for later eval launching
 
     if accelerator.is_main_process:
         pprint([args, tc])
@@ -996,7 +998,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             path=args.output_dir,
             leaderboard_name=args.hf_repo_revision,
             oe_eval_max_length=args.oe_eval_max_length,
-            wandb_url=wandb_tracker.run.get_url(),
+            wandb_url=wandb_tracker.run.get_url() if wandb_tracker is not None else None,
             oe_eval_tasks=args.oe_eval_tasks,
             gs_bucket_path=args.gs_bucket_path,
         )
