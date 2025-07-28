@@ -1998,9 +1998,7 @@ def generate_thread(
                 resume_training_step,
                 timeout=0.1,
             )
-            for engine in tqdm(
-                vllm_engines, desc="[Generate Thread] Launching vLLM engines", bar_format="{l_bar}{bar}{r_bar}\n"
-            )
+            for engine in vllm_engines
         ]
         engine_futures = [ref.future() for ref in engine_refs]
         processed_results = []
