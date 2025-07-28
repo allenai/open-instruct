@@ -8,25 +8,8 @@ on:
     - cron: '0 8 * * *'
   
   push:
-    # Run this workflow anytime a push updates one of the files in the image's directory
-    # (other than the README), and anytime there's a new release tag for this image.
-    paths:
-      - 'open_instruct/**'
-      - '!open_instruct/README.md'
-      - 'requirements.txt'
-      - 'Dockerfile'
-      - '.github/workflows/push-image.yml'
-      # Note, add .olmo dockerfile + requirements if adding auto build to those
+    # Run this workflow on every push to main branch
     branches: [main]
-  pull_request: # note, comment this out for running on every push
-    # Also run on PRs that update the files in the image's directory (other than README).
-    branches: [main]
-    paths:
-      - 'open_instruct/**'
-      - '!open_instruct/README.md'
-      - 'requirements.txt'
-      - 'Dockerfile'
-      - '.github/workflows/beaker-experiment.yml'
   workflow_dispatch:  # This allows us to manually trigger a build through the GitHub UI.
 
 concurrency:
