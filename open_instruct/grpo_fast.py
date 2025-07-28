@@ -51,7 +51,6 @@ import shutil
 import socket
 import threading
 import time
-import traceback
 from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
@@ -2190,6 +2189,34 @@ def cleanup_judge_clients():
     ray.shutdown()
 
 
+def cleanup_training_resources(
+    stop_generate_event: threading.Event, threads: list[threading.Thread], queues: list[ray_queue.Queue]
+) -> None:
+    """Clean up all training resources including threads and Ray queues."""
+    # Signal threads to stop
+    stop_generate_event.set()
+
+    # Clean up threads with timeout
+    logger.info("Cleaning up threads...")
+    for thread in threads:
+        thread.join(timeout=30)
+        if thread.is_alive():
+            logger.warning(f"Thread {thread.name} did not stop cleanly")
+        else:
+            logger.info(f"======== ✅ Thread {thread.name} ends =========")
+
+    # Shutdown Ray queues to prevent semaphore leaks
+    logger.info("Shutting down Ray queues...")
+    for queue in queues:
+        try:
+            queue.shutdown()
+        except Exception as e:
+            logger.warning(f"Error shutting down Ray queue: {e}")
+
+    # Clean up judge clients
+    cleanup_judge_clients()
+
+
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_samples: int = 32):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
@@ -2312,98 +2339,65 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         )
     num_total_tokens = 0
     start_time = time.time()
-    cleanup_done = False
-    try:
-        for training_step in range(resume_training_step, args.num_training_steps + 1):
-            episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-            queries_next, ground_truths_next, datasets_next, dataset_indices = sync_weights_and_prepare_prompts(
-                training_step,
-                args,
-                train_dataset,
-                iter_dataloader,
-                policy_group,
-                pending_queries_map,
-                param_prompt_Q,
-                eval_prompt_token_ids,
-            )
+    for training_step in range(resume_training_step, args.num_training_steps + 1):
+        episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+        queries_next, ground_truths_next, datasets_next, dataset_indices = sync_weights_and_prepare_prompts(
+            training_step,
+            args,
+            train_dataset,
+            iter_dataloader,
+            policy_group,
+            pending_queries_map,
+            param_prompt_Q,
+            eval_prompt_token_ids,
+        )
 
-            # The generate_thread is now handling vLLM processing asynchronously
+        # The generate_thread is now handling vLLM processing asynchronously
 
-            collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
-                packed_sequences_Q, num_total_tokens
-            )
-            if collated_data is None:
-                continue
+        collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
+            packed_sequences_Q, num_total_tokens
+        )
+        if collated_data is None:
+            continue
 
-            one_training_step(
-                args,
-                policy_group,
-                collated_data,
-                tokenizer,
-                data_thread_metrics,
-                {},
-                episode,
-                training_step,
-                num_total_tokens,
-                start_time,
-                train_dataset,
-                writer,
-                wandb_url,
-                tc.chat_template_name,
-            )
+        one_training_step(
+            args,
+            policy_group,
+            collated_data,
+            tokenizer,
+            data_thread_metrics,
+            {},
+            episode,
+            training_step,
+            num_total_tokens,
+            start_time,
+            train_dataset,
+            writer,
+            wandb_url,
+            tc.chat_template_name,
+        )
 
-            maybe_evaluate(
-                args,
-                training_step,
-                evaluation_inference_results_Q,
-                tokenizer,
-                eval_prompt_token_ids,
-                eval_ground_truths,
-                eval_dataset_names,
-                reward_fn,
-                episode,
-                writer,
-            )
+        maybe_evaluate(
+            args,
+            training_step,
+            evaluation_inference_results_Q,
+            tokenizer,
+            eval_prompt_token_ids,
+            eval_ground_truths,
+            eval_dataset_names,
+            reward_fn,
+            episode,
+            writer,
+        )
 
-        save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
+    save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
-    except Exception as e:
-        logger.error(f"Training error occurred: {str(e)}\n{traceback.format_exc()}")
-        raise
-    finally:
-        if not cleanup_done:
-            cleanup_done = True
-            # Signal threads to stop
-            stop_generate_event.set()
-
-            # Clean up threads with timeout
-            logger.info("Cleaning up threads...")
-            packing_thread.join(timeout=30)
-            if packing_thread.is_alive():
-                logger.warning("Data preparation thread did not stop cleanly")
-            else:
-                logger.info("======== ✅ data preparation thread ends =========")
-
-            generation_thread.join(timeout=30)
-            if generation_thread.is_alive():
-                logger.warning("Generation thread did not stop cleanly")
-            else:
-                logger.info("======== ✅ generation thread ends =========")
-
-            # Shutdown Ray queues to prevent semaphore leaks
-            logger.info("Shutting down Ray queues...")
-            try:
-                inference_results_Q.shutdown()
-                param_prompt_Q.shutdown()
-                evaluation_inference_results_Q.shutdown()
-            except Exception as e:
-                logger.warning(f"Error shutting down Ray queues: {e}")
-
-            # Clean up judge clients
-            try:
-                cleanup_judge_clients()
-            except Exception as e:
-                logger.error(f"Error during judge cleanup: {e}")
+    # Clean up resources
+    cleanup_training_resources(
+        stop_generate_event,
+        [packing_thread, generation_thread],
+        [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
+    )
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
     # make a copy of the model to `/output` in the end.
