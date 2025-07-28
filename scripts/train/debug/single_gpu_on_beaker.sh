@@ -1,8 +1,10 @@
-uv run python mason.py \
+#!/bin/bash
+beaker_image="${1:-finbarrt/open-instruct-dev}"
+python mason.py \
        --cluster ai2/jupiter-cirrascale-2 \
        --cluster ai2/augusta-google-1 \
        --cluster ai2/saturn-cirrascale \
-	   --image finbarrt/open-instruct-dev \
+	   --image "$beaker_image" \
        --pure_docker_mode \
        --workspace ai2/tulu-thinker \
        --priority high \
@@ -10,7 +12,7 @@ uv run python mason.py \
        --num_nodes 1 \
        --max_retries 0 \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-       --env GIT_COMMIT=$(git rev-parse --short HEAD) \
+       --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --budget ai2/oe-adapt \
 	   --no-host-networking \
        --gpus 1 \
