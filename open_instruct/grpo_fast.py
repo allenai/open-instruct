@@ -1313,10 +1313,7 @@ class PendingQueriesMap:
 
 
 def accumulate_inference_batches(
-    inference_results_Q: ray_queue.Queue, 
-    pending_queries_map: PendingQueriesMap,
-    args: Args, 
-    training_step: int
+    inference_results_Q: ray_queue.Queue, pending_queries_map: PendingQueriesMap, args: Args, training_step: int
 ) -> tuple[GenerationResult, list, list, list]:
     """Accumulate multiple inference results into a single training batch.
 
@@ -1375,10 +1372,10 @@ def accumulate_inference_batches(
         all_queries.extend(batch_queries)
         all_ground_truths.extend(batch_ground_truths)
         all_datasets.extend(batch_datasets)
-        
+
         # Update progress bar
         pbar.update(1)
-        logger.info(f"[Data Prep] Received batch {i+1}/{args.vllm_num_engines} for step {training_step}")
+        logger.info(f"[Data Prep] Received batch {i + 1}/{args.vllm_num_engines} for step {training_step}")
 
     pbar.close()
 
