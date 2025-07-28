@@ -29,6 +29,7 @@
 # limitations under the License.
 # isort: off
 import os
+from concurrent import futures
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
@@ -1988,7 +1989,7 @@ def generate_thread(
 
     while not stop_event.is_set():
         # Create futures for all engines in parallel
-        futures = [
+        engine_futures = [
             engine.process_from_queue.remote(
                 generation_config,
                 eval_generation_config,
@@ -2007,7 +2008,7 @@ def generate_thread(
             desc="[Generate Thread] Waiting for vLLM engines to process",
             bar_format="{l_bar}{bar}{r_bar}\n",
         ) as pbar:
-            for future in futures.as_completed(futures):
+            for future in futures.as_completed(engine_futures):
                 processed_results.append(future.result())
                 pbar.update(1)
         num_processed = sum(int(result) for result in processed_results)
