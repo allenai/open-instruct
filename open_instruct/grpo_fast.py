@@ -1826,9 +1826,25 @@ def sync_weights_and_prepare_prompts(
     return queries_next, ground_truths_next, datasets_next, dataset_indices
 
 
-def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
+def load_data_from_packing_thread(
+    packed_sequences_Q: Queue, num_total_tokens: int, stop_generate_event: threading.Event
+):
     """Get the packed sequences with advantages from the packing thread."""
     with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
+        while not stop_generate_event.is_set():
+            try:
+                packed_data = packed_sequences_Q.get(timeout=2.0)
+                if packed_data is not None:
+                    # got data continue
+                    break
+            except Empty:
+                # keep polling for data
+                continue
+
+        if stop_generate_event.is_set():
+            logger.error("[Main Thread] generate thread has died, cancelling")
+            raise Exception("Generate thread died")
+
         packed_data = packed_sequences_Q.get()
         data_thread_metrics = packed_data["metrics"]
         B = packed_data["B"]
@@ -1854,31 +1870,36 @@ def generate_thread(
 
     while not stop_event.is_set():
         with Timer("🔥 Generation time"):
-            engine_refs = [
-                engine.process_from_queue.remote(
-                    generation_config,
-                    eval_generation_config,
-                    local_eval_freq,
-                    num_training_steps,
-                    resume_training_step,
-                    timeout=0.1,
+            try:
+                engine_refs = [
+                    engine.process_from_queue.remote(
+                        generation_config,
+                        eval_generation_config,
+                        local_eval_freq,
+                        num_training_steps,
+                        resume_training_step,
+                        timeout=0.1,
+                    )
+                    for engine in vllm_engines
+                ]
+                engine_futures = [ref.future() for ref in engine_refs]
+                processed_results = []
+                with tqdm(
+                    total=len(vllm_engines),
+                    desc="[Generate Thread] Waiting for vLLM engines to process",
+                    bar_format="{l_bar}{bar}{r_bar}\n",
+                ) as pbar:
+                    for future in futures.as_completed(engine_futures):
+                        processed_results.append(future.result())
+                        pbar.update(1)
+                num_processed = sum(int(result) for result in processed_results)
+                logger.info(
+                    f"[Generate Thread] 🚀 Processed results from all vLLM engines ({num_processed}/{len(processed_results)} processed batches)"
                 )
-                for engine in vllm_engines
-            ]
-            engine_futures = [ref.future() for ref in engine_refs]
-            processed_results = []
-            with tqdm(
-                total=len(vllm_engines),
-                desc="[Generate Thread] Waiting for vLLM engines to process",
-                bar_format="{l_bar}{bar}{r_bar}\n",
-            ) as pbar:
-                for future in futures.as_completed(engine_futures):
-                    processed_results.append(future.result())
-                    pbar.update(1)
-            num_processed = sum(int(result) for result in processed_results)
-            logger.info(
-                f"[Generate Thread] 🚀 Processed results from all vLLM engines ({num_processed}/{len(processed_results)} processed batches)"
-            )
+            except Exception as e:
+                logger.error(f"[Generate Thread] Error processing from queue: {e}")
+                stop_event.set()
+
         if num_processed == 0:
             # If no batches were processed, sleep for a short time to avoid busy waiting
             time.sleep(1)
@@ -2351,7 +2372,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         # The generate_thread is now handling vLLM processing asynchronously
 
         collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
-            packed_sequences_Q, num_total_tokens
+            packed_sequences_Q, num_total_tokens, stop_generate_event
         )
         if collated_data is None:
             continue
