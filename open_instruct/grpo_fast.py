@@ -73,6 +73,7 @@ from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
@@ -1311,6 +1312,122 @@ class PendingQueriesMap:
             return list(self._map.keys())
 
 
+def accumulate_inference_batches(
+    inference_results_Q: ray_queue.Queue, 
+    pending_queries_map: PendingQueriesMap,
+    args: Args, 
+    training_step: int
+) -> tuple[GenerationResult, list, list, list]:
+    """Accumulate multiple inference results into a single training batch.
+
+    Args:
+        inference_results_Q: Queue containing GenerationResult objects
+        pending_queries_map: PendingQueriesMap instance for thread-safe query tracking
+        args: Arguments containing vllm_num_engines and num_samples_per_prompt_rollout
+        training_step: Current training step for error reporting
+
+    Returns:
+        Tuple of (combined_result, queries, ground_truths, datasets)
+    """
+    # Collect results from all engines with non-blocking progress bar
+    results = []
+    all_queries = []
+    all_ground_truths = []
+    all_datasets = []
+
+    pbar = tqdm(
+        total=args.vllm_num_engines,
+        desc=f"Accumulating results from {args.vllm_num_engines} engines",
+        bar_format="{l_bar}{bar}{r_bar}\n",
+    )
+
+    for i in range(args.vllm_num_engines):
+        result = inference_results_Q.get()
+        dataset_indices = result.dataset_index
+
+        if dataset_indices is None:
+            raise RuntimeError(f"Dataset indices is None for result {i}")
+
+        # When num_samples_per_prompt_rollout > 1, vLLM generates multiple responses per prompt
+        # but dataset_indices only contains the unique indices (not replicated)
+        # So we expect: len(responses) == len(dataset_indices) * num_samples_per_prompt_rollout
+        expected_responses = len(dataset_indices) * args.num_samples_per_prompt_rollout
+        assert len(result.responses) == expected_responses, (
+            f"Mismatch: number of responses ({len(result.responses)}) "
+            f"doesn't match expected ({expected_responses}) for result {i}"
+            f". {args.num_samples_per_prompt_rollout=}"
+            f", {len(dataset_indices)=}"
+            f", {args.num_unique_prompts_rollout=}"
+        )
+
+        # Get corresponding queries, ground_truths, datasets for each individual prompt
+        batch_queries = []
+        batch_ground_truths = []
+        batch_datasets = []
+
+        for dataset_idx in dataset_indices:
+            query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
+            batch_queries.append(query)
+            batch_ground_truths.append(ground_truth)
+            batch_datasets.append(dataset)
+
+        results.append(result)
+        all_queries.extend(batch_queries)
+        all_ground_truths.extend(batch_ground_truths)
+        all_datasets.extend(batch_datasets)
+        
+        # Update progress bar
+        pbar.update(1)
+        logger.info(f"[Data Prep] Received batch {i+1}/{args.vllm_num_engines} for step {training_step}")
+
+    pbar.close()
+
+    # Combine all results into a single GenerationResult
+    combined_responses = []
+    combined_finish_reasons = []
+    combined_masks = []
+    combined_num_calls = []
+    combined_timeouts = []
+    combined_tool_errors = []
+    combined_tool_outputs = []
+    combined_tool_runtimes = []
+    combined_tool_calleds = []
+
+    for result in results:
+        combined_responses.extend(result.responses)
+        combined_finish_reasons.extend(result.finish_reasons)
+        combined_masks.extend(result.masks)
+        combined_num_calls.extend(result.request_info.num_calls)
+        combined_timeouts.extend(result.request_info.timeouts)
+        combined_tool_errors.extend(result.request_info.tool_errors)
+        combined_tool_outputs.extend(result.request_info.tool_outputs)
+        combined_tool_runtimes.extend(result.request_info.tool_runtimes)
+        combined_tool_calleds.extend(result.request_info.tool_calleds)
+
+    # Create combined RequestInfo
+    combined_request_info = RequestInfo(
+        num_calls=combined_num_calls,
+        timeouts=combined_timeouts,
+        tool_errors=combined_tool_errors,
+        tool_outputs=combined_tool_outputs,
+        tool_runtimes=combined_tool_runtimes,
+        tool_calleds=combined_tool_calleds,
+    )
+
+    # Create combined GenerationResult
+    combined_result = GenerationResult(
+        responses=combined_responses,
+        finish_reasons=combined_finish_reasons,
+        masks=combined_masks,
+        request_info=combined_request_info,
+        is_eval=False,
+        dataset_index=None,  # Not meaningful for combined result
+        training_step=training_step,
+    )
+
+    return combined_result, all_queries, all_ground_truths, all_datasets
+
+
 def data_preparation_thread(
     reward_fn: Callable,
     inference_results_Q: ray_queue.Queue,  # Ray queue
@@ -1323,107 +1440,9 @@ def data_preparation_thread(
     for training_step in range(1, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            # Initialize dictionaries to store results by batch index
-            results_dict = {}  # batch_idx -> GenerationResult
-            queries_dict = {}  # batch_idx -> (queries, ground_truths, datasets)
-            expected_batches = set(range(args.vllm_num_engines))
-
-            # Process results as they arrive (streaming)
-            while expected_batches:
-                result = inference_results_Q.get()
-                batch_idx = result.batch_index
-
-                if batch_idx is None:
-                    raise RuntimeError(f"Batch index is None for result at training step {training_step}")
-
-                # Store the result
-                results_dict[batch_idx] = result
-
-                # Get corresponding queries from pending_queries_map
-                dataset_indices = result.dataset_index
-                if dataset_indices is None:
-                    raise RuntimeError(f"Dataset indices is None for batch {batch_idx}")
-
-                # Verify expected number of responses
-                expected_responses = len(dataset_indices) * args.num_samples_per_prompt_rollout
-                assert len(result.responses) == expected_responses, (
-                    f"Mismatch: number of responses ({len(result.responses)}) "
-                    f"doesn't match expected ({expected_responses}) for batch {batch_idx}"
-                )
-
-                # Get queries, ground_truths, datasets for this batch
-                batch_queries = []
-                batch_ground_truths = []
-                batch_datasets = []
-
-                for dataset_idx in dataset_indices:
-                    query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
-                    batch_queries.append(query)
-                    batch_ground_truths.append(ground_truth)
-                    batch_datasets.append(dataset)
-
-                queries_dict[batch_idx] = (batch_queries, batch_ground_truths, batch_datasets)
-                expected_batches.remove(batch_idx)
-
-                # Log progress
-                logger.info(f"[Data Prep] Received batch {batch_idx}/{args.vllm_num_engines} for step {training_step}")
-
-            # Now combine all results in order
-            combined_responses = []
-            combined_finish_reasons = []
-            combined_masks = []
-            combined_num_calls = []
-            combined_timeouts = []
-            combined_tool_errors = []
-            combined_tool_outputs = []
-            combined_tool_runtimes = []
-            combined_tool_calleds = []
-
-            all_queries = []
-            all_ground_truths = []
-            all_datasets = []
-
-            # Process in order by batch_idx
-            for batch_idx in range(args.vllm_num_engines):
-                result = results_dict[batch_idx]
-                batch_queries, batch_ground_truths, batch_datasets = queries_dict[batch_idx]
-
-                # Add to combined lists
-                combined_responses.extend(result.responses)
-                combined_finish_reasons.extend(result.finish_reasons)
-                combined_masks.extend(result.masks)
-                combined_num_calls.extend(result.request_info.num_calls)
-                combined_timeouts.extend(result.request_info.timeouts)
-                combined_tool_errors.extend(result.request_info.tool_errors)
-                combined_tool_outputs.extend(result.request_info.tool_outputs)
-                combined_tool_runtimes.extend(result.request_info.tool_runtimes)
-                combined_tool_calleds.extend(result.request_info.tool_calleds)
-
-                all_queries.extend(batch_queries)
-                all_ground_truths.extend(batch_ground_truths)
-                all_datasets.extend(batch_datasets)
-
-            # Create combined result
-            result = GenerationResult(
-                responses=combined_responses,
-                finish_reasons=combined_finish_reasons,
-                masks=combined_masks,
-                request_info=RequestInfo(
-                    num_calls=combined_num_calls,
-                    timeouts=combined_timeouts,
-                    tool_errors=combined_tool_errors,
-                    tool_outputs=combined_tool_outputs,
-                    tool_runtimes=combined_tool_runtimes,
-                    tool_calleds=combined_tool_calleds,
-                ),
-                is_eval=False,
-                dataset_index=None,
-                training_step=training_step,
+            result, queries, ground_truths, datasets = accumulate_inference_batches(
+                inference_results_Q, pending_queries_map, args, training_step
             )
-
-            queries = all_queries
-            ground_truths = all_ground_truths
-            datasets = all_datasets
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -1909,7 +1928,6 @@ def split_and_insert_batch(
                 training_step=training_step,
                 eval_prompts=eval_prompt_token_ids if batch_idx == 0 else None,
                 dataset_index=batch_dataset_indices,
-                batch_index=batch_idx,
             )
         )
 

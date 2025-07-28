@@ -60,7 +60,6 @@ class GenerationResult:
     is_eval: bool = False
     dataset_index: Optional[List[int]] = None
     training_step: Optional[int] = None
-    batch_index: Optional[int] = None
 
 
 @dataclasses.dataclass
@@ -71,7 +70,6 @@ class PromptRequest:
     training_step: Optional[int] = None
     eval_prompts: Optional[List[List[int]]] = None
     dataset_index: Optional[List[int]] = None
-    batch_index: Optional[int] = None
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -218,15 +216,15 @@ class LLMRayActor:
                 sampling_params,
                 dataset_index=request.dataset_index,
                 training_step=request.training_step,
-                batch_index=request.batch_index,
             )
             self.results_queue.put(result)
             if request.eval_prompts and request.training_step % eval_freq == 0:
                 eval_result = self._generate_batch(request.eval_prompts, eval_sampling_params)
                 eval_result.is_eval = True
                 self.eval_results_queue.put(eval_result)
+            return 1  # Successfully processed a request
         except queue.Empty:
-            pass
+            return 0  # No request to process
 
     def _generate_batch(
         self,
@@ -234,7 +232,6 @@ class LLMRayActor:
         sampling_params,
         dataset_index: Optional[List[int]] = None,
         training_step: Optional[int] = None,
-        batch_index: Optional[int] = None,
     ) -> GenerationResult:
         """Generate responses for a batch of prompts."""
         outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
@@ -276,7 +273,6 @@ class LLMRayActor:
             request_info=request_info,
             dataset_index=dataset_index,
             training_step=training_step,
-            batch_index=batch_index,
         )
 
     def init_process_group(
