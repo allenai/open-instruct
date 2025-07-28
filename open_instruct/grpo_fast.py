@@ -1941,10 +1941,26 @@ def sync_weights_and_prepare_prompts(
     return queries_next, ground_truths_next, datasets_next, dataset_indices
 
 
-def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
+def load_data_from_packing_thread(
+    packed_sequences_Q: Queue, num_total_tokens: int, stop_generate_event: threading.Event
+):
     """Get the packed sequences with advantages from the packing thread."""
     with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
-        packed_data = packed_sequences_Q.get()
+        while not stop_generate_event.is_set():
+            try:
+                packed_data = packed_sequences_Q.get(timeout=2.0)
+                if packed_data is not None:
+                    # got data continue
+                    break
+
+            except Empty:
+                # keep polling for data
+                continue
+
+        if stop_generate_event.is_set():
+            logger.error("[Main Thread] generate thread has died, cancelling")
+            raise Exception("Generate thread died")
+
         data_thread_metrics = packed_data["metrics"]
         B = packed_data["B"]
         collated_data = packed_data["collated_data"]
@@ -1988,6 +2004,8 @@ def generate_thread(
                     any_processed = True
             except Exception as e:
                 logger.error(f"[Generate Thread] Error processing from queue: {e}")
+                stop_event.set()
+                break
 
         # If no engine processed anything, sleep briefly to avoid busy waiting
         if not any_processed:
@@ -2435,7 +2453,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             # The generate_thread is now handling vLLM processing asynchronously
 
             collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
-                packed_sequences_Q, num_total_tokens
+                packed_sequences_Q, num_total_tokens, stop_generate_event
             )
             if collated_data is None:
                 continue
