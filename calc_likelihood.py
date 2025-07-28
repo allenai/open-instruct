@@ -61,6 +61,7 @@ ckpt_root = Path(
     "/weka/oe-adapt-default/jacobm/random-rewards/checkpoints/qwen2p5_7b_random_reward/olmo-32b-pref-mix/qwen2p5_7b_random_rewards__1__1751699850_checkpoints"
 )
 steps = sorted((p for p in ckpt_root.glob("step_*") if p.is_dir()), key=lambda p: int(p.name.split("_")[-1]))
+steps = ["Qwen/Qwen2.5-7B"] + steps
 
 results = []
 for ckpt_path in tqdm(steps, desc="checkpoints"):

@@ -2,11 +2,13 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 
 # Load model and tokenizer
-model_name = "/weka/oe-adapt-default/jacobm/random-rewards/checkpoints/qwen2p5_7b_random_reward/olmo-32b-pref-mix/qwen2p5_7b_random_rewards__1__1751699850_checkpoints/step_1950"
+# model_name = "/weka/oe-adapt-default/jacobm/random-rewards/checkpoints/qwen2p5_7b_random_reward/olmo-32b-pref-mix/qwen2p5_7b_random_rewards__1__1751699850_checkpoints/step_1950"
+model_name = "Qwen/Qwen2.5-7B"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(model_name)
 
-prompt = "Who is Natasha Jaques?"
+prompt = "Can You Imagine 3 Fictional Cities That Are Based On Berlin During 1991?"
+# prompt = "Who is Natasha Jaques?"
 inputs = tokenizer(prompt, return_tensors="pt")
 
 responses = []

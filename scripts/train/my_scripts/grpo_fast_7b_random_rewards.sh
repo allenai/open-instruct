@@ -1,5 +1,5 @@
 python mason.py \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/olmo-instruct \
     --priority high \
     --image jacobm/open-instruct-random-rewards --pure_docker_mode \
@@ -12,12 +12,12 @@ python mason.py \
     --beta 0.01 \
     --num_unique_prompts_rollout 64 \
     --num_samples_per_prompt_rollout 16 \
-    --try_launch_beaker_eval_jobs_on_weka \
+    --try_launch_beaker_eval_jobs_on_weka False \
     --kl_estimator kl3 \
     --learning_rate 5e-7 \
-    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list jacobmorrison/olmo-2-0325-32b-preference-mix-messages 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list jacobmorrison/olmo-2-0325-32b-preference-mix-messages 16 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
@@ -43,9 +43,10 @@ python mason.py \
     --lr_scheduler_type constant \
     --apply_verifiable_reward false \
     --seed 1 \
-    --num_evals 1000 \
+    --num_evals 100 \
+    --eval_freq 1000 \
     --save_freq 50 \
     --gradient_checkpointing \
     --gather_whole_model False \
-    --with_tracking
-    --output_dir /weka/oe-adapt-default/jacobm/random-rewards/checkpoints/qwen2p5_7b_random_rewards \
+    --output_dir /weka/oe-adapt-default/jacobm/random-rewards/checkpoints/qwen2p5_7b_random_reward/olmo-32b-pref-mix/ \
+    --with_tracking 
