@@ -2002,7 +2002,7 @@ def generate_thread(
                 vllm_engines, desc="[Generate Thread] Launching vLLM engines", bar_format="{l_bar}{bar}{r_bar}\n"
             )
         ]
-        engine_futures = [ref.future() for ref in refs]
+        engine_futures = [ref.future() for ref in engine_refs]
         processed_results = []
         with tqdm(
             total=len(vllm_engines),

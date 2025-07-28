@@ -775,6 +775,5 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         self.assertEqual(len(pending_queries_map), 0)
 
 
-
 if __name__ == "__main__":
     unittest.main()
