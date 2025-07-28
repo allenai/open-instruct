@@ -401,10 +401,6 @@ class Args:
     code_tool_api_endpoint: Optional[str] = None
 
     def __post_init__(self):
-        if self.async_mode is not None:
-            raise ValueError(
-                "Async mode argument is deprecated. To use async mode, set `async_steps=N>0` in the args."
-            )
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
