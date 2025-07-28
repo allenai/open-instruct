@@ -1332,11 +1332,11 @@ def accumulate_inference_batches(
     all_ground_truths = []
     all_datasets = []
 
-    for _ in tqdm(
-            range(args.vllm_num_engines),
-            total=args.vllm_num_engines,
-            desc=f"Accumulating results from {args.vllm_num_engines} engines",
-            bar_format="{l_bar}{bar}{r_bar}\n",
+    for i in tqdm(
+        range(args.vllm_num_engines),
+        total=args.vllm_num_engines,
+        desc=f"Accumulating results from {args.vllm_num_engines} engines",
+        bar_format="{l_bar}{bar}{r_bar}\n",
     ):
         result = inference_results_Q.get()
         dataset_indices = result.dataset_index
@@ -1997,12 +1997,16 @@ def generate_thread(
                 resume_training_step,
                 timeout=0.1,
             )
-            for engine in tqdm.tqdm(vllm_engines, desc="[Generate Thread] Launching vLLM engines",
-                                    bar_format="{l_bar}{bar}{r_bar}\n")
+            for engine in tqdm(
+                vllm_engines, desc="[Generate Thread] Launching vLLM engines", bar_format="{l_bar}{bar}{r_bar}\n"
+            )
         ]
         processed_results = []
-        with tqdm.tqdm(total=len(vllm_engines), desc="[Generate Thread] Waiting for vLLM engines to process",
-                       bar_format="{l_bar}{bar}{r_bar}\n") as pbar:
+        with tqdm(
+            total=len(vllm_engines),
+            desc="[Generate Thread] Waiting for vLLM engines to process",
+            bar_format="{l_bar}{bar}{r_bar}\n",
+        ) as pbar:
             for future in futures.as_completed(futures):
                 processed_results.append(future.result())
                 pbar.update(1)
