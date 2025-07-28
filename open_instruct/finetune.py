@@ -59,6 +59,7 @@ from open_instruct.dataset_transformation import (
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token_label,
+    remove_non_tensor_columns
 )
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
@@ -637,6 +638,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         collate_fn = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding="longest")
 
     accelerator.print("Creating dataloader")
+    # The collators expect to act on tensor data, so remove any non-tensor entries now. The
+    # non-tensor entries are assumed to be non-crucial metadata like `DATASET_ORIGIN_KEY`
+    train_dataset = remove_non_tensor_columns(train_dataset)
     train_dataloader = DataLoader(
         train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
     )

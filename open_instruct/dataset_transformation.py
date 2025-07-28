@@ -44,6 +44,7 @@ import copy
 import hashlib
 import json
 import multiprocessing
+import warnings
 import os
 from dataclasses import asdict, dataclass, field
 from functools import cached_property, partial
@@ -2010,6 +2011,13 @@ def get_cached_dataset_tulu(
         dataset_skip_cache,
         return_statistics=False,
     )[0]
+
+
+def remove_non_tensor_columns(dataset: Dataset) -> Dataset:
+    example = dataset[0]
+    cols_to_remove = [k for k, v in example.items() if not torch.is_tensor(v)]
+    warnings.warn(f"Removing non-tensor dataset colums {cols_to_remove}", stacklevel=1)
+    return dataset.remove_columns(cols_to_remove)
 
 
 def test_sft_dpo_same_tokenizer():
