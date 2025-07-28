@@ -2,7 +2,6 @@ uv run python mason.py \
        --cluster ai2/jupiter-cirrascale-2 \
        --cluster ai2/augusta-google-1 \
        --cluster ai2/saturn-cirrascale \
-       --cluster ai2/ceres-cirrascale \
 	   --image finbarrt/open-instruct-dev \
        --pure_docker_mode \
        --workspace ai2/tulu-thinker \
