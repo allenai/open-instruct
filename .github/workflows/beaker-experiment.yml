@@ -2,9 +2,27 @@ name: Beaker Experiment Launch
 
 on:
   push:
-    # Run this workflow on every push to main branch
+	# Run this workflow anytime a push updates one of the files in the image's directory
+    # (other than the README), and anytime there's a new release tag for this image.
+    paths:
+      - 'open_instruct/**'
+      - '!open_instruct/README.md'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - '.github/workflows/push-image.yml'
+      # Note, add .olmo dockerfile + requirements if adding auto build to those.
+
+    # But only on pushes to main.
     branches: [main]
   workflow_dispatch:  # This allows us to manually trigger a build through the GitHub UI.
+  pull_request:
+    branches: [main]
+	paths:
+      - 'open_instruct/**'
+      - '!open_instruct/README.md'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - '.github/workflows/beaker-experiment.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
