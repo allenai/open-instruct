@@ -1261,6 +1261,18 @@ class PendingQueriesMap:
                 # New entry - count starts at 1
                 self._map[dataset_idx] = (query, ground_truth, dataset, 1)
 
+    def insert_many(self, dataset_indices, queries, ground_truths, datasets):
+        """Insert or increment count for multiple dataset indices at once."""
+        with self._lock:
+            for i, dataset_idx in enumerate(dataset_indices):
+                if dataset_idx in self._map:
+                    # Already exists - just increment count
+                    existing_query, existing_ground_truth, existing_dataset, count = self._map[dataset_idx]
+                    self._map[dataset_idx] = (existing_query, existing_ground_truth, existing_dataset, count + 1)
+                else:
+                    # New entry - count starts at 1
+                    self._map[dataset_idx] = (queries[i], ground_truths[i], datasets[i], 1)
+
     def pop(self, dataset_idx):
         """Retrieve data and decrement count. Removes entry when count reaches 0."""
         with self._lock:
@@ -1887,9 +1899,8 @@ def split_and_insert_batch(
         batch_datasets = datasets_next[start_idx:end_idx]
         batch_dataset_indices = dataset_indices[start_idx:end_idx]
 
-        # Store individual prompts in the map using thread-safe insert
-        for i, dataset_idx in enumerate(batch_dataset_indices):
-            pending_queries_map.insert(dataset_idx, batch_queries[i], batch_ground_truths[i], batch_datasets[i])
+        # Store prompts in the map using thread-safe insert_many
+        pending_queries_map.insert_many(batch_dataset_indices, batch_queries, batch_ground_truths, batch_datasets)
 
         # Use PromptRequest for Ray queue with batch-specific dataset_index list
         param_prompt_Q.put(
@@ -1968,31 +1979,27 @@ def generate_thread(
     logger.info("[Generate Thread] 🚀 Starting generation thread")
 
     while not stop_event.is_set():
-        # Track if any engine processed a request
-        any_processed = False
-
-        for engine in vllm_engines:
-            try:
-                # Call process_from_queue with a short timeout
-                processed = ray.get(
-                    engine.process_from_queue.remote(
-                        generation_config,
-                        eval_generation_config,
-                        local_eval_freq,
-                        num_training_steps,
-                        resume_training_step,
-                        timeout=0.1,
-                    )
-                )
-                if processed:
-                    any_processed = True
-            except Exception as e:
-                logger.error(f"[Generate Thread] Error processing from queue: {e}")
-
-        # If no engine processed anything, sleep briefly to avoid busy waiting
-        if not any_processed:
-            time.sleep(0.01)
-
+        # Create futures for all engines in parallel
+        futures = [
+            engine.process_from_queue.remote(
+                generation_config,
+                eval_generation_config,
+                local_eval_freq,
+                num_training_steps,
+                resume_training_step,
+                timeout=0.1,
+            )
+            for engine in vllm_engines
+        ]
+        
+        # Get results from all futures
+        processed_results = ray.get(futures)
+        num_processed = sum(int(result) for result in processed_results)
+        logger.info(f"[Generate Thread] 🚀 Processed results from all vLLM engines ({num_processed}/{len(processed_results)} processed batches)")
+        if num_processed == 0:
+            # If no batches were processed, sleep for a short time to avoid busy waiting
+            time.sleep(1)
+        
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
