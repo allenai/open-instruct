@@ -40,11 +40,9 @@ COPY open_instruct open_instruct
 COPY eval eval
 COPY configs configs
 COPY scripts scripts
+COPY oe-eval-internal oe-eval-internal
 COPY mason.py mason.py
 COPY .git/ ./.git/
-
-# Copy oe-eval-internal repository (already cloned in the workflow)
-COPY oe-eval-internal oe-eval-internal
 
 # Set up the environment
 ENV PATH=/stage/.venv/bin:$PATH
