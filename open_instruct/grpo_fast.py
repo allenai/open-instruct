@@ -1991,15 +1991,17 @@ def generate_thread(
             )
             for engine in vllm_engines
         ]
-        
+
         # Get results from all futures
         processed_results = ray.get(futures)
         num_processed = sum(int(result) for result in processed_results)
-        logger.info(f"[Generate Thread] 🚀 Processed results from all vLLM engines ({num_processed}/{len(processed_results)} processed batches)")
+        logger.info(
+            f"[Generate Thread] 🚀 Processed results from all vLLM engines ({num_processed}/{len(processed_results)} processed batches)"
+        )
         if num_processed == 0:
             # If no batches were processed, sleep for a short time to avoid busy waiting
             time.sleep(1)
-        
+
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
