@@ -692,17 +692,25 @@ if args.run_safety_evaluations:
         oe_safety_cmd += f" --run-id {args.run_id}"
     if args.step:
         oe_safety_cmd += f" --step {args.step}"
-    # add string with number of gpus
-    num_gpus = task_spec['resources']['gpuCount']
-    # if num_gpus > 1, double it again for oe-eval configs
-    # open_instruct GPT adjustment wasn't quite enough
-    # adjusted here so the GPU configs in open-instruct eval are not impacted by the change
-    # tested reasonably extensively with 70B
-    if num_gpus > 1:
-        num_gpus *= 2
+
+    # pull num gpu logic from old safety eval code
+    task_spec = adjust_gpus(
+        task_spec=task_spec,
+        experiment_group="safety_eval",
+        model_name=model_info[0],
+        gpu_multiplier=args.gpu_multiplier,
+    )
+    # add gpu information.
+    # we just assume you want to use all the gpus for one task at a time
+    if "70B" in model_info[0]:
+        task_spec['resources']['gpuCount'] = 8
+    num_gpus = task_spec['resources']['gpuCount'] 
+
     oe_safety_cmd += f" --num_gpus {num_gpus}"
-    if args.oe_eval_max_length:
-        oe_safety_cmd += f" --max-length {args.oe_eval_max_length}"
+    
+    # controlled by config file
+    # if args.oe_eval_max_length:
+    #     oe_safety_cmd += f" --max-length {args.oe_eval_max_length}"
 
     # add priority
     oe_safety_cmd += f" --priority {args.priority}"
@@ -751,17 +759,24 @@ if args.run_safety_evaluations_reasoning:
         oe_safety_reasoning_cmd += f" --run-id {args.run_id}"
     if args.step:
         oe_safety_reasoning_cmd += f" --step {args.step}"
-    # add string with number of gpus
-    num_gpus = task_spec['resources']['gpuCount']
-    # if num_gpus > 1, double it again for oe-eval configs
-    # open_instruct GPT adjustment wasn't quite enough
-    # adjusted here so the GPU configs in open-instruct eval are not impacted by the change
-    # tested reasonably extensively with 70B
-    if num_gpus > 1:
-        num_gpus *= 2
-    oe_safety_reasoning_cmd += f" --num_gpus {num_gpus}"
-    if args.oe_eval_max_length:
-        oe_safety_reasoning_cmd += f" --max-length {args.oe_eval_max_length}"
+     
+     # pull num gpu logic from old safety eval code
+    task_spec = adjust_gpus(
+        task_spec=task_spec,
+        experiment_group="safety_eval",
+        model_name=model_info[0],
+        gpu_multiplier=args.gpu_multiplier,
+    )
+    # add gpu information.
+    # we just assume you want to use all the gpus for one task at a time
+    if "70B" in model_info[0]:
+        task_spec['resources']['gpuCount'] = 8
+    num_gpus = task_spec['resources']['gpuCount'] 
+
+    oe_safety_cmd += f" --num_gpus {num_gpus}"
+    # controlled by config file
+    # if args.oe_eval_max_length:
+    #     oe_safety_reasoning_cmd += f" --max-length {args.oe_eval_max_length}"
 
     # add priority
     oe_safety_reasoning_cmd += f" --priority {args.priority}"
