@@ -1989,7 +1989,7 @@ def generate_thread(
 
     while not stop_event.is_set():
         # Create futures for all engines in parallel
-        engine_futures = [
+        engine_refs = [
             engine.process_from_queue.remote(
                 generation_config,
                 eval_generation_config,
@@ -2002,6 +2002,7 @@ def generate_thread(
                 vllm_engines, desc="[Generate Thread] Launching vLLM engines", bar_format="{l_bar}{bar}{r_bar}\n"
             )
         ]
+        engine_futures = [ref.future() for ref in refs]
         processed_results = []
         with tqdm(
             total=len(vllm_engines),
