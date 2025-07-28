@@ -1,12 +1,6 @@
 name: Beaker Experiment Launch
 
-# Run experiments on Beaker using the latest Docker image
 on:
-  # Run on schedule - every 24 hours at midnight PT (Pacific Time)
-  # PT is UTC-8 (PST) or UTC-7 (PDT), so midnight PT is 8am UTC (or 7am during DST)
-  schedule:
-    - cron: '0 8 * * *'
-  
   push:
     # Run this workflow on every push to main branch
     branches: [main]
