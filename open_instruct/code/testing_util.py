@@ -230,11 +230,11 @@ def grade_stdio(code: str, all_inputs: list, all_outputs: list, timeout: int):
     code = make_function(code)
     compiled_sol = compile_code(code, timeout)
     if compiled_sol is None:
-        return ([-1] * len(all_outputs), {"error_code": -1, "error_message": "Compilation Error or Timeout"})
+        return ([-1] * len(all_outputs), [-1.0] * len(all_outputs))
 
     method = get_function(compiled_sol, "wrapped_function")
     if method is None:
-        return ([-1] * len(all_outputs), {"error_code": -1, "error_message": "Method not found"})
+        return ([-1] * len(all_outputs), [-1.0] * len(all_outputs))
 
     all_results = []
     all_runtimes = []
@@ -267,7 +267,7 @@ def grade_stdio(code: str, all_inputs: list, all_outputs: list, timeout: int):
             else:
                 all_results.append(-4)
                 if not first_failure_info:
-                    first_failure_info = {"error_code": -4, "error_message": "Runtime Error"}
+                    first_failure_info = {"error_code": -4, "error_message": f"Runtime Error: {e}"}
                 continue
         finally:
             signal.alarm(0)
@@ -318,6 +318,7 @@ def grade_stdio(code: str, all_inputs: list, all_outputs: list, timeout: int):
         all_results.append(True)
 
     if first_failure_info:
-        return all_results, first_failure_info
+        print(f"first_failure_info: {first_failure_info}")
+        return all_results, all_runtimes
 
     return all_results, all_runtimes

@@ -206,7 +206,7 @@ def run_tests_stdio_helper(program: str, tests: List[Any], max_execution_time: f
         results, runtimes = grade_stdio(program, all_inputs, all_outputs, timeout)
 
         if results is not None:
-            processed_results = [1 if r is True else int(r) for r in results]
+            processed_results = [1 if r is True else 0 for r in results]
             for i, res in enumerate(processed_results):
                 if i < len(stdio_test_results):
                     stdio_test_results[i] = res
@@ -218,7 +218,9 @@ def run_tests_stdio_helper(program: str, tests: List[Any], max_execution_time: f
         partial_undo_reliability_guard()
 
 
-def get_successful_tests_stdio(program: str, tests: List[Any], max_execution_time: float = 1.0) -> List[int]:
+def get_successful_tests_stdio(
+    program: str, tests: List[Any], max_execution_time: float = 1.0
+) -> Tuple[List[int], List[float]]:
     """Same as above but for stdio format.
     Parameter:
         program: a string representation of the python program you want to run
@@ -226,14 +228,15 @@ def get_successful_tests_stdio(program: str, tests: List[Any], max_execution_tim
         max_execution_time: the number of second each individual test can run before
             it is considered failed and terminated
     Return:
-        a list of 0/1 indicating passed or not
+        a tuple of (results, runtimes). results is a list of 0/1 indicating
+        passed or not, runtimes is a list of execution times for each test.
     """
     test_ct = len(tests)
     if test_ct == 0:
-        return []
+        return [], []
     if not should_execute(program=program, tests=tests):
         logger.info("Not executing program %s", program)
-        return [0] * len(tests)
+        return [0] * len(tests), [-1.0] * len(tests)
 
     for i in range(test_ct):
         stdio_test_results[i] = 0  # Initialize results to 0 (failure)
@@ -249,9 +252,7 @@ def get_successful_tests_stdio(program: str, tests: List[Any], max_execution_tim
     if p.is_alive():
         p.kill()
 
-    return [1 if stdio_test_results[i] == 1 else 0 for i in range(test_ct)], [
-        stdio_runtimes[i] for i in range(test_ct)
-    ]
+    return [stdio_test_results[i] for i in range(test_ct)], [stdio_runtimes[i] for i in range(test_ct)]
 
 
 # -------------------------------------------------------------
