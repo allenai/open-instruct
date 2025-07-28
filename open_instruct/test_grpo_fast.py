@@ -10,8 +10,7 @@ from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 from vllm import SamplingParams
 
-from open_instruct import grpo_fast
-from open_instruct import utils
+from open_instruct import grpo_fast, utils
 from open_instruct.vllm_utils3 import GenerationResult, PromptRequest, RequestInfo, create_vllm_engines
 
 

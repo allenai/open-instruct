@@ -47,7 +47,6 @@ from typing import Any, Iterable, List, NewType, Optional, Tuple, Union
 
 import numpy as np
 import ray
-from ray.util import state as ray_state
 import requests
 import torch
 from accelerate.logging import get_logger
@@ -55,6 +54,7 @@ from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
 from huggingface_hub import HfApi
+from ray.util import state as ray_state
 from rich.pretty import pprint
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 

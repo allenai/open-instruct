@@ -46,7 +46,6 @@ import asyncio
 import json
 import logging
 import math
-import multiprocessing as mp
 import os
 import shutil
 import socket
@@ -57,7 +56,7 @@ from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Literal, Optional, Union
+from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -143,8 +142,6 @@ logger = logging.getLogger(__name__)
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
-
-
 
 
 @dataclass
@@ -2428,6 +2425,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     # Check for runtime leaks before exiting
     logger.info("Checking for runtime leaks...")
     from open_instruct import utils
+
     leak_report = utils.check_runtime_leaks()
     if not leak_report.is_clean:
         logger.warning("Runtime leaks detected:\n" + leak_report.pretty())
