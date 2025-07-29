@@ -1201,7 +1201,11 @@ class PendingQueriesMap:
 
 
 def accumulate_inference_batches(
-    inference_results_Q: ray_queue.Queue, pending_queries_map: PendingQueriesMap, args: Args, training_step: int
+    inference_results_Q: ray_queue.Queue,
+    pending_queries_map: PendingQueriesMap,
+    args: Args,
+    training_step: int,
+    timeout: Optional[float] = None,
 ) -> tuple[GenerationResult, Batch]:
     """Accumulate multiple inference results into a single training batch.
 
@@ -1210,6 +1214,7 @@ def accumulate_inference_batches(
         pending_queries_map: PendingQueriesMap instance for thread-safe query tracking
         args: Arguments containing vllm_num_engines and num_samples_per_prompt_rollout
         training_step: Current training step for error reporting
+        timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
 
     Returns:
         Tuple of (combined_result, Batch with queries, ground_truths, datasets)
@@ -1226,7 +1231,7 @@ def accumulate_inference_batches(
         desc=f"Accumulating results from {args.vllm_num_engines} engines",
         bar_format="{l_bar}{bar}{r_bar}\n",
     ):
-        result = inference_results_Q.get()
+        result = inference_results_Q.get(timeout=timeout)
         dataset_indices = result.dataset_index
 
         if dataset_indices is None:
@@ -2004,13 +2009,18 @@ def maybe_evaluate(
     reward_fn,
     episode,
     writer,
+    eval_pending_queries_map: PendingQueriesMap,
 ):
     """Optionally evaluate the model."""
     try:
         # timeout 0.01 if this is the last training step or we're not evaluating
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
         timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_freq < 0) else 100
-        eval_result = evaluation_inference_results_Q.get(timeout=timeout)
+
+        # Accumulate evaluation results from all vLLM engines
+        eval_result, _ = accumulate_inference_batches(
+            evaluation_inference_results_Q, eval_pending_queries_map, args, training_step, timeout=timeout
+        )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
 
@@ -2280,6 +2290,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     # Create additional queues (main queues already created above)
     packed_sequences_Q = Queue(maxsize=args.async_steps)
     pending_queries_map = PendingQueriesMap()
+    eval_pending_queries_map = PendingQueriesMap()
 
     if eval_dataset is None:
         eval_batch = None
@@ -2344,7 +2355,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         )
         if training_step % args.local_eval_freq == 0 and eval_batch is not None:
             split_and_insert_batch(
-                eval_batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, is_eval=True
+                eval_batch,
+                training_step,
+                args.vllm_num_engines,
+                eval_pending_queries_map,
+                param_prompt_Q,
+                is_eval=True,
             )
 
         # The generate_thread is now handling vLLM processing asynchronously
@@ -2372,7 +2388,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         )
 
         maybe_evaluate(
-            args, training_step, evaluation_inference_results_Q, tokenizer, eval_batch, reward_fn, episode, writer
+            args,
+            training_step,
+            evaluation_inference_results_Q,
+            tokenizer,
+            eval_batch,
+            reward_fn,
+            episode,
+            writer,
+            eval_pending_queries_map,
         )
 
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)

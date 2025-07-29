@@ -190,15 +190,8 @@ class TestGrpoFastBase(unittest.TestCase):
         # Track queues for cleanup
         self._ray_queues.extend([param_prompt_Q, inference_results_Q])
 
-        batch = grpo_fast.Batch(
-            queries=queries,
-            ground_truths=ground_truths,
-            datasets=datasets,
-            indices=indices
-        )
-        grpo_fast.split_and_insert_batch(
-            batch, training_step, num_engines, pending_queries_map, param_prompt_Q
-        )
+        batch = grpo_fast.Batch(queries=queries, ground_truths=ground_truths, datasets=datasets, indices=indices)
+        grpo_fast.split_and_insert_batch(batch, training_step, num_engines, pending_queries_map, param_prompt_Q)
 
         return param_prompt_Q, inference_results_Q, pending_queries_map
 
