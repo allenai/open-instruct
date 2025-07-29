@@ -27,6 +27,7 @@ jobs:
         run: uv sync --only-group dev
       - name: Code quality
         run: |
+          source .venv/bin/activate
           ruff format --check --diff open_instruct
           ruff check --exit-non-zero-on-fix open_instruct
         
