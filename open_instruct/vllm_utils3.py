@@ -204,9 +204,11 @@ class LLMRayActor:
         """Process a single element from the queue."""
         try:
             request = self.prompt_queue.get(timeout=timeout)
+            # Use eval_sampling_params for eval requests, otherwise use sampling_params
+            params_to_use = eval_sampling_params if request.is_eval and eval_sampling_params else sampling_params
             result = self._generate_batch(
                 request.prompts,
-                sampling_params,
+                params_to_use,
                 dataset_index=request.dataset_index,
                 training_step=request.training_step,
             )
