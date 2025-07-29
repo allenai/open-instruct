@@ -21,7 +21,22 @@ import asyncio
 import aiohttp
 import time
 from tqdm.asyncio import tqdm_asyncio
+import logging
 
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("verification.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+CONCURRENCY_LIMIT = 256
+SOURCE_DATASET = "saurabh5/correct-python-sft-187k-x16-thoughts"
+DESTINATION_DATASET = "saurabh5/correct-python-sft-187k-x16-thoughts-filtered"
 
 def load_dataset_with_retries(dataset_name, split="train", max_retries=5, initial_backoff=2):
     """Loads a dataset from Hugging Face with retries and exponential backoff."""
@@ -32,7 +47,7 @@ def load_dataset_with_retries(dataset_name, split="train", max_retries=5, initia
             return load_dataset(dataset_name, split=split)
         except Exception as e:
             if "429" in str(e):
-                print(f"Rate limit exceeded for {dataset_name}. Retrying in {backoff} seconds...")
+                logger.warning(f"Rate limit exceeded for {dataset_name}. Retrying in {backoff} seconds...")
                 time.sleep(backoff)
                 retries += 1
                 backoff *= 2  # Exponentially increase the wait time
@@ -93,14 +108,11 @@ async def verify_and_process_row(session, row, id_to_row, base_url, dataset_to_u
                 else:
                     return "failed", None
         except Exception as e:
-            print(f"Request failed for question_id {id}: {e}")
+            logger.error(f"Request failed for question_id {id}: {e}")
             return "failed", None
 
 
 async def main():
-    SOURCE_DATASET = "saurabh5/correct-python-sft-187k-x16-thoughts"
-    DESTINATION_DATASET = "saurabh5/correct-python-sft-187k-x16-thoughts-filtered"
-
     dataset_to_url = {
         "saurabh5/open-code-reasoning-rlvr-stdio": "/test_program_stdio",
         "saurabh5/rlvr_acecoder_filtered": "/test_program",
@@ -115,11 +127,10 @@ async def main():
             id_to_row[get_id(row)] = row
         
     base_url = os.getenv("CODE_API_URL")
-    print(f"Using code API URL: {base_url}")
+    logger.info(f"Using code API URL: {base_url}")
 
     source_ds = load_dataset_with_retries(SOURCE_DATASET)
     
-    CONCURRENCY_LIMIT = 256
     semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
     async with aiohttp.ClientSession() as session:
@@ -141,9 +152,9 @@ async def main():
         elif status == "failed":
             failed_rows += 1
     
-    print(f"Skipped {skipped_rows} rows")
-    print(f"Failed {failed_rows} rows")
-    print(f"Passed {len(filtered_rows)} rows, uploading to {DESTINATION_DATASET}")
+    logger.info(f"Skipped {skipped_rows} rows")
+    logger.info(f"Failed {failed_rows} rows")
+    logger.info(f"Passed {len(filtered_rows)} rows, uploading to {DESTINATION_DATASET}")
 
     filtered_ds = Dataset.from_list(filtered_rows)
     filtered_ds.push_to_hub(DESTINATION_DATASET)
