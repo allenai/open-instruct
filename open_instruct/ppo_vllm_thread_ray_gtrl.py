@@ -360,6 +360,8 @@ class Args:
     """the max execution time to use for the code verifier"""
     code_pass_rate_reward_threshold: float = 0.0
     """the pass rate reward threshold for the code verifier. If pass rate is less than this threshold, reward is 0.0, otherwise reward is pass rate"""
+    code_apply_perf_penalty: bool = False
+    """whether to apply a performance penalty to the code verifier"""
 
 
 def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
