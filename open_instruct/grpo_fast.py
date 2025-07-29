@@ -2021,8 +2021,7 @@ def maybe_evaluate(
             reward_fn(
                 eval_result.responses,
                 eval_decoded_responses,
-                eval_batch.ground_truths if eval_batch else [],
-                eval_batch.datasets if eval_batch else [],
+                eval_batch if eval_batch else Batch(queries=[], ground_truths=[], datasets=[], indices=None),
                 eval_result.finish_reasons,
                 eval_result.request_info,
             )
