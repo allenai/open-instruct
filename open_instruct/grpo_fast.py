@@ -1799,8 +1799,7 @@ def split_and_insert_batch(
         batch_dataset_indices = batch.indices[start_idx:end_idx]
 
         # Store prompts in the map using thread-safe insert_many
-        if not is_eval:
-            pending_queries_map.insert_many(batch_dataset_indices, batch_queries, batch_ground_truths, batch_datasets)
+        pending_queries_map.insert_many(batch_dataset_indices, batch_queries, batch_ground_truths, batch_datasets)
 
         # Use PromptRequest for Ray queue with batch-specific dataset_index list
         param_prompt_Q.put(
