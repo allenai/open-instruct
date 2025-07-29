@@ -148,7 +148,7 @@ def main():
         ds = Dataset.from_list(ds)
 
         if args.max_eval_samples > -1 and args.max_eval_samples < len(ds):
-            ds = ds.shuffle(42).select(range(args.offset, args.offset + args.max_eval_samples))
+            ds = ds.select(range(args.offset, args.offset + args.max_eval_samples))
 
         prompt_token_ids = [tokenizer.apply_chat_template(data["messages"], add_generation_prompt=True) for data in ds]
 
