@@ -1331,7 +1331,7 @@ def data_preparation_thread(
             # Create a simple config object with n for accumulate_inference_batches
             class SimpleConfig:
                 n = args.num_samples_per_prompt_rollout
-            
+
             result, batch = accumulate_inference_batches(
                 inference_results_Q, pending_queries_map, args, training_step, SimpleConfig()
             )
@@ -2015,7 +2015,12 @@ def maybe_evaluate(
 
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch = accumulate_inference_batches(
-            evaluation_inference_results_Q, eval_pending_queries_map, args, training_step, eval_generation_config, timeout=timeout
+            evaluation_inference_results_Q,
+            eval_pending_queries_map,
+            args,
+            training_step,
+            eval_generation_config,
+            timeout=timeout,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
