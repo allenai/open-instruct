@@ -1,10 +1,16 @@
 #!/bin/bash
-beaker_image="${1:-finbarrt/open-instruct-dev}"
+
+# Get the Beaker username to construct the image name
+BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-dev}"
+
+echo "Using Beaker image: $BEAKER_IMAGE"
+
 uv run python mason.py \
        --cluster ai2/jupiter-cirrascale-2 \
        --cluster ai2/augusta-google-1 \
        --cluster ai2/saturn-cirrascale \
-	   --image "$beaker_image" \
+       --image "$BEAKER_IMAGE" \
        --pure_docker_mode \
        --workspace ai2/tulu-thinker \
        --priority high \
@@ -14,7 +20,7 @@ uv run python mason.py \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --budget ai2/oe-adapt \
-	   --no-host-networking \
+       --no-host-networking \
        --gpus 1 \
 	   -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
@@ -49,5 +55,5 @@ uv run python mason.py \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
-	--push_to_hub false \
+    --push_to_hub false \
     --single_gpu_mode
