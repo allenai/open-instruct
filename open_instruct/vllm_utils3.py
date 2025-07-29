@@ -57,7 +57,6 @@ class GenerationResult:
     finish_reasons: List[str]
     masks: List[List[int]]
     request_info: RequestInfo
-    is_eval: bool = False
     dataset_index: Optional[List[int]] = None
     training_step: Optional[int] = None
 
@@ -68,8 +67,8 @@ class PromptRequest:
 
     prompts: List[List[int]]
     training_step: Optional[int] = None
-    eval_prompts: Optional[List[List[int]]] = None
     dataset_index: Optional[List[int]] = None
+    is_eval: bool = False
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -200,13 +199,7 @@ class LLMRayActor:
         return self.llm.generate(*args, **kwargs)
 
     def process_from_queue(
-        self,
-        sampling_params,
-        eval_sampling_params=None,
-        eval_freq=None,
-        num_training_steps=None,
-        resume_training_step=1,
-        timeout=0.1,
+        self, sampling_params, eval_sampling_params=None, num_training_steps=None, resume_training_step=1, timeout=0.1
     ):
         """Process a single element from the queue."""
         try:
@@ -217,11 +210,10 @@ class LLMRayActor:
                 dataset_index=request.dataset_index,
                 training_step=request.training_step,
             )
-            self.results_queue.put(result)
-            if request.eval_prompts and request.training_step % eval_freq == 0:
-                eval_result = self._generate_batch(request.eval_prompts, eval_sampling_params)
-                eval_result.is_eval = True
-                self.eval_results_queue.put(eval_result)
+            if request.is_eval:
+                self.eval_results_queue.put(result)
+            else:
+                self.results_queue.put(result)
             return 1  # Successfully processed a request
         except queue.Empty:
             return 0  # No request to process

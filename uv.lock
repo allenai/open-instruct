@@ -2396,6 +2396,7 @@ dev = [
     { name = "mkdocs-material" },
     { name = "parameterized" },
     { name = "pytest" },
+    { name = "rich" },
     { name = "ruff" },
 ]
 
@@ -2447,6 +2448,7 @@ dev = [
     { name = "mkdocs-material", specifier = ">=9.6.8" },
     { name = "parameterized", specifier = ">=0.9.0" },
     { name = "pytest", specifier = ">=8.3.4" },
+    { name = "rich", specifier = ">=13.7.0" },
     { name = "ruff", specifier = ">=0.11.13" },
 ]
 

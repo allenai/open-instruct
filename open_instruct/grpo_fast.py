@@ -1276,7 +1276,6 @@ def accumulate_inference_batches(
         finish_reasons=combined_finish_reasons,
         masks=combined_masks,
         request_info=combined_request_info,
-        is_eval=False,
         dataset_index=None,  # Not meaningful for combined result
         training_step=training_step,
     )
@@ -1758,10 +1757,10 @@ def split_and_insert_batch(
     dataset_indices,
     training_step,
     vllm_num_engines,
-    pending_queries_map: PendingQueriesMap,
+    pending_queries_map: Optional[PendingQueriesMap],
     param_prompt_Q,
-    eval_prompt_token_ids=None,
-):
+    is_eval: bool = False,
+) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
     # Split the batch over the VLLM engines.
     inference_batch_size = len(queries_next) // vllm_num_engines
@@ -1775,15 +1774,16 @@ def split_and_insert_batch(
         batch_dataset_indices = dataset_indices[start_idx:end_idx]
 
         # Store prompts in the map using thread-safe insert_many
-        pending_queries_map.insert_many(batch_dataset_indices, batch_queries, batch_ground_truths, batch_datasets)
+        if not is_eval:
+            pending_queries_map.insert_many(batch_dataset_indices, batch_queries, batch_ground_truths, batch_datasets)
 
         # Use PromptRequest for Ray queue with batch-specific dataset_index list
         param_prompt_Q.put(
             PromptRequest(
                 prompts=batch_queries,
                 training_step=training_step,
-                eval_prompts=eval_prompt_token_ids if batch_idx == 0 else None,
                 dataset_index=batch_dataset_indices,
+                is_eval=is_eval,
             )
         )
 
@@ -1796,7 +1796,6 @@ def sync_weights_and_prepare_prompts(
     policy_group: ModelGroup,
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q: ray_queue.Queue,
-    eval_prompt_token_ids: Optional[List[List[int]]] = None,
 ) -> tuple[List[List[int]], List[List[int]], List[str], List[int]]:
     """Sync weights and send the next batch of prompts to vLLM."""
     dataset_indices = next(iter_dataloader)
@@ -1820,7 +1819,6 @@ def sync_weights_and_prepare_prompts(
         args.vllm_num_engines,
         pending_queries_map,
         param_prompt_Q,
-        eval_prompt_token_ids,
     )
 
     return queries_next, ground_truths_next, datasets_next, dataset_indices
@@ -1986,9 +1984,9 @@ def maybe_evaluate(
     training_step: int,
     evaluation_inference_results_Q: ray_queue.Queue,  # Ray queue
     tokenizer,
-    eval_prompt_token_ids,
+    eval_queries,
     eval_ground_truths,
-    eval_dataset_names,
+    eval_datasets,
     reward_fn,
     episode,
     writer,
@@ -2014,7 +2012,7 @@ def maybe_evaluate(
                 eval_result.responses,
                 eval_decoded_responses,
                 eval_ground_truths,
-                eval_dataset_names,
+                eval_datasets,
                 eval_result.finish_reasons,
                 eval_result.request_info,
             )
@@ -2032,7 +2030,7 @@ def maybe_evaluate(
         for key, value in eval_metrics.items():
             writer.add_scalar(key, value, episode)
         table = {}
-        table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
+        table["prompt"] = tokenizer.batch_decode(eval_queries)
         table["response"] = eval_decoded_responses
         table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
         table["scores"] = eval_scores
@@ -2269,18 +2267,20 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     packed_sequences_Q = Queue(maxsize=args.async_steps)
     pending_queries_map = PendingQueriesMap()
 
-    eval_prompt_token_ids = None
-    eval_ground_truths = None
-    eval_dataset_names = None
-    if eval_dataset is not None:
-        eval_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
+    if eval_dataset is None:
+        eval_dataset_indices = None
+        eval_queries = None
+        eval_ground_truths = None
+        eval_datasets = None
+    else:
+        eval_dataset_indices = list(range(num_eval_samples))
+        eval_queries = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
         eval_ground_truths = eval_dataset[:num_eval_samples][GROUND_TRUTHS_KEY]
-        eval_dataset_names = eval_dataset[:num_eval_samples][VERIFIER_SOURCE_KEY]
+        eval_datasets = eval_dataset[:num_eval_samples][VERIFIER_SOURCE_KEY]
     reward_fn = make_reward_fn(args)
 
     # Verify none of the engines crashed during initialization.
-    for i, engine in enumerate(vllm_engines):
-        ray.get(engine.ready.remote())
+    ray.get([engine.ready.remote() for engine in vllm_engines])
 
     logger.info("======== ✅ data preparation thread starts =========")
     packing_thread = threading.Thread(
@@ -2331,25 +2331,27 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             args.vllm_num_engines,
             pending_queries_map,
             param_prompt_Q,
-            eval_prompt_token_ids if eval_dataset is not None else None,
         )
     num_total_tokens = 0
     start_time = time.time()
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         queries_next, ground_truths_next, datasets_next, dataset_indices = sync_weights_and_prepare_prompts(
-            training_step,
-            args,
-            train_dataset,
-            iter_dataloader,
-            policy_group,
-            pending_queries_map,
-            param_prompt_Q,
-            eval_prompt_token_ids,
+            training_step, args, train_dataset, iter_dataloader, policy_group, pending_queries_map, param_prompt_Q
         )
+        if training_step % args.local_eval_freq == 0:
+            split_and_insert_batch(
+                eval_queries,
+                eval_ground_truths,
+                eval_datasets,
+                eval_dataset_indices,
+                training_step,
+                args.vllm_num_engines,
+                pending_queries_map,
+                param_prompt_Q,
+            )
 
         # The generate_thread is now handling vLLM processing asynchronously
-
         collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
             packed_sequences_Q, num_total_tokens
         )
@@ -2378,9 +2380,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             training_step,
             evaluation_inference_results_Q,
             tokenizer,
-            eval_prompt_token_ids,
+            eval_queries,
             eval_ground_truths,
-            eval_dataset_names,
+            eval_datasets,
             reward_fn,
             episode,
             writer,
