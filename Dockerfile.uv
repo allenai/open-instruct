@@ -11,6 +11,9 @@ RUN echo "UV_CACHE_DIR: ${UV_CACHE_DIR}"
 # setup files
 WORKDIR /stage/
 
+# Install nginx and create conf.d directory
+RUN apt-get update --no-install-recommends && apt-get install -y nginx && mkdir -p /etc/nginx/conf.d && rm -rf /var/lib/apt/lists/*
+
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
 
@@ -29,6 +32,10 @@ RUN VLLM_USE_PRECOMPILED=1 uv pip install -e vllm_olmo3
 
 # Install liger, flash-attn, code, and don't remove vllm
 RUN uv sync --extra compile --extra liger --extra vllm --extra code
+
+# punkt / punkt_tab
+RUN uv run -m nltk.downloader punkt
+RUN uv run -m nltk.downloader punkt_tab
 
 WORKDIR /stage/
 

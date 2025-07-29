@@ -86,9 +86,9 @@ from vllm import SamplingParams
 
 from open_instruct.dataset_processor import SimpleGenerateCollatorWithGroundTruth
 from open_instruct.dataset_transformation import (
-    DATASET_SOURCE_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
+    VERIFIER_SOURCE_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
@@ -100,6 +100,7 @@ from open_instruct.model_utils import (
     disable_dropout_in_model,
     exact_div,
     first_true_indices,
+    get_olmo3_generation_config,
     get_reward,
     log_softmax_and_gather,
     print_rich_single_line_metrics,
@@ -357,6 +358,10 @@ class Args:
     """the api url to use for the code verifier"""
     code_max_execution_time: float = 1.0
     """the max execution time to use for the code verifier"""
+    code_pass_rate_reward_threshold: float = 0.0
+    """the pass rate reward threshold for the code verifier. If pass rate is less than this threshold, reward is 0.0, otherwise reward is pass rate"""
+    code_apply_perf_penalty: bool = False
+    """whether to apply a performance penalty to the code verifier"""
 
 
 def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
@@ -1061,7 +1066,7 @@ class PolicyTrainerRayProcess(RayProcess):
         ].tolist()  # can be simplified since we `remove_padding` later anyway
         queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
         ground_truths_next = data[GROUND_TRUTHS_KEY]
-        datasets_next = data[DATASET_SOURCE_KEY]
+        datasets_next = data[VERIFIER_SOURCE_KEY]
         if self.rank == 0:
             param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
 
@@ -1100,7 +1105,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist()
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
                     ground_truths_next = data[GROUND_TRUTHS_KEY]
-                    datasets_next = data[DATASET_SOURCE_KEY]
+                    datasets_next = data[VERIFIER_SOURCE_KEY]
                     with Timer("🔥🔥🔥 Loading weights using shared memory", noop=self.rank != 0):
                         broadcast_to_vllm()
                 if self.rank == 0:
@@ -1118,7 +1123,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist()
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
                     ground_truths_next = data[GROUND_TRUTHS_KEY]
-                    datasets_next = data[DATASET_SOURCE_KEY]
+                    datasets_next = data[VERIFIER_SOURCE_KEY]
                     with Timer("🔥🔥🔥 Loading weights using shared memory", noop=self.rank != 0):
                         broadcast_to_vllm()
                     if self.rank == 0:
@@ -1511,13 +1516,19 @@ class PolicyTrainerRayProcess(RayProcess):
             shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
         print("finished training")
 
-    def save_model(self, model_to_save: PreTrainedModel, output_dir: str) -> None:
+    def save_model(
+        self, model_to_save: PreTrainedModel, chat_template_name: str, tokenizer: PreTrainedTokenizer, output_dir: str
+    ) -> None:
         if self.rank == 0:
             os.makedirs(output_dir, exist_ok=True)
 
         # save model weights for ZeRO2/3
         if hasattr(model_to_save, "module"):
             model_to_save = model_to_save.module
+
+        if "olmo" in chat_template_name:
+            # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
+            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
         # gather parameters
         output_state_dict = {}
