@@ -190,11 +190,11 @@ class LLMRayActor:
             from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 
             self.llm = ToolUseLLM(*args, **kwargs)
-            self.engine = self.llm.llm_engine
+            self.llm_engine = self.llm.llm_engine
         else:
             # Create EngineArgs and initialize LLMEngine
             engine_args = vllm.EngineArgs(*args, **kwargs)
-            self.engine = vllm.LLMEngine.from_engine_args(engine_args)
+            self.llm_engine = vllm.LLMEngine.from_engine_args(engine_args)
             self.llm = None  # Set llm to None when using engine directly
 
         self.prompt_queue = prompt_queue
@@ -207,26 +207,25 @@ class LLMRayActor:
         """Generate using manual event loop with LLMEngine."""
         if self.tool_use:
             # For tool use, still use the original LLM interface
-            return self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompt_token_ids, *args, **kwargs)
-        
-        
+            return self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompt_token_ids,
+                                     *args, **kwargs)
+                
         # Add all requests to the engine
         request_outputs = []
         for i, prompt in enumerate(prompt_token_ids):
-            request_id = str(i)
             # Convert token IDs to TokensPrompt format that LLMEngine expects
             tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
-            self.engine.add_request(request_id, tokens_prompt, sampling_params)
+            self.llm_engine.add_request(str(i), tokens_prompt, sampling_params)
         
         # Run the engine event loop until all requests are finished
         while True:
-            step_outputs = self.engine.step()
+            step_outputs = self.llm_engine.step()
             for output in step_outputs:
                 if output.finished:
                     request_outputs.append(output)
             
             # Check if all requests are finished
-            if not self.engine.has_unfinished_requests():
+            if not self.llm_engine.has_unfinished_requests():
                 break
         
         # Sort outputs by request_id to maintain order
@@ -308,56 +307,25 @@ class LLMRayActor:
     def init_process_group(
         self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
     ):
-        if self.tool_use:
-            return self.llm.collective_rpc(
-                "init_process_group",
-                args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
-            )
-        else:
-            # For LLMEngine, we need to access the model executor's collective_rpc method
-            return self.engine.model_executor.collective_rpc(
-                "init_process_group",
-                args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
-            )
+        return self.llm_engine.collective_rpc(
+            "init_process_group",
+            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
+        )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        if self.tool_use:
-            return self.llm.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
-        else:
-            return self.engine.model_executor.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        if self.tool_use:
-            return self.llm.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
-        else:
-            return self.engine.model_executor.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
+        return self.llm_engine.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
 
     def reset_prefix_cache(self):
-        if self.tool_use and self.llm:
-            self.llm.llm_engine.reset_prefix_cache()
-        else:
-            # Use our engine directly
-            if hasattr(self.engine, 'reset_prefix_cache'):
-                self.engine.reset_prefix_cache()
-            elif hasattr(self.engine, 'cache_config') and hasattr(self.engine.cache_config, 'reset'):
-                # Alternative approach if direct method doesn't exist
-                self.engine.cache_config.reset()
+        self.llm_engine.reset_prefix_cache()
 
     def sleep(self, level=1):
-        if self.tool_use and self.llm:
-            self.llm.sleep(level=level)
-        else:
-            # For LLMEngine, we might need to implement a custom sleep mechanism
-            # This depends on vllm version and implementation details
-            pass
+        self.llm_engine.sleep(level=level)
 
-    def wake_up(self):
-        if self.tool_use and self.llm:
-            self.llm.wake_up()
-        else:
-            # For LLMEngine, we might need to implement a custom wake mechanism
-            # This depends on vllm version and implementation details
-            pass
+    def wake_up(self, tags: Optional[list[str]] = None):
+        self.llm_engine.wake_up(tags)
 
     def ready(self):
         return True
