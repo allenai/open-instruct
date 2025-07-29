@@ -57,6 +57,7 @@ from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Union
 
+import datasets
 import numpy as np
 import pandas as pd
 import ray
@@ -429,6 +430,27 @@ class Args:
                 if tool not in ["search", "code"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
+
+
+@dataclass
+class Batch:
+    """Container for batch data including queries, ground truths, and datasets."""
+
+    queries: List[List[int]]
+    ground_truths: List[List[int]]
+    datasets: List[str]
+    indices: Optional[List[int]]
+
+
+def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
+    """Extract next batch of data based on indices."""
+    data_next = dataset[dataset_indices]
+    return Batch(
+        queries=data_next[INPUT_IDS_PROMPT_KEY],
+        ground_truths=data_next[GROUND_TRUTHS_KEY],
+        datasets=data_next[VERIFIER_SOURCE_KEY],
+        indices=dataset_indices,
+    )
 
 
 def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
@@ -1180,7 +1202,7 @@ class PendingQueriesMap:
 
 def accumulate_inference_batches(
     inference_results_Q: ray_queue.Queue, pending_queries_map: PendingQueriesMap, args: Args, training_step: int
-) -> tuple[GenerationResult, list, list, list]:
+) -> tuple[GenerationResult, Batch]:
     """Accumulate multiple inference results into a single training batch.
 
     Args:
@@ -1190,7 +1212,7 @@ def accumulate_inference_batches(
         training_step: Current training step for error reporting
 
     Returns:
-        Tuple of (combined_result, queries, ground_truths, datasets)
+        Tuple of (combined_result, Batch with queries, ground_truths, datasets)
     """
     # Collect results from all engines with non-blocking progress bar
     results = []
@@ -1280,7 +1302,14 @@ def accumulate_inference_batches(
         training_step=training_step,
     )
 
-    return combined_result, all_queries, all_ground_truths, all_datasets
+    # Note: We don't have dataset_indices here, but they're not needed for the returned batch
+    batch = Batch(
+        queries=all_queries,
+        ground_truths=all_ground_truths,
+        datasets=all_datasets,
+        indices=None,  # Not meaningful for combined results
+    )
+    return combined_result, batch
 
 
 def data_preparation_thread(
@@ -1295,16 +1324,18 @@ def data_preparation_thread(
     for training_step in range(1, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            result, queries, ground_truths, datasets = accumulate_inference_batches(
-                inference_results_Q, pending_queries_map, args, training_step
-            )
+            result, batch = accumulate_inference_batches(inference_results_Q, pending_queries_map, args, training_step)
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
         if args.num_samples_per_prompt_rollout > 1:
-            queries = [item for item in queries for _ in range(args.num_samples_per_prompt_rollout)]
-            ground_truths = [item for item in ground_truths for _ in range(args.num_samples_per_prompt_rollout)]
-            datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
+            queries = [item for item in batch.queries for _ in range(args.num_samples_per_prompt_rollout)]
+            ground_truths = [item for item in batch.ground_truths for _ in range(args.num_samples_per_prompt_rollout)]
+            datasets = [item for item in batch.datasets for _ in range(args.num_samples_per_prompt_rollout)]
+        else:
+            queries = batch.queries
+            ground_truths = batch.ground_truths
+            datasets = batch.datasets
             good_outputs = [
                 len(result.request_info.tool_outputs[i]) > 0
                 and result.request_info.tool_calleds[i]
@@ -1751,10 +1782,7 @@ def create_model_and_optimizer(
 
 
 def split_and_insert_batch(
-    queries_next,
-    ground_truths_next,
-    datasets_next,
-    dataset_indices,
+    batch: Batch,
     training_step,
     vllm_num_engines,
     pending_queries_map: Optional[PendingQueriesMap],
@@ -1763,15 +1791,15 @@ def split_and_insert_batch(
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
     # Split the batch over the VLLM engines.
-    inference_batch_size = len(queries_next) // vllm_num_engines
+    inference_batch_size = len(batch.queries) // vllm_num_engines
     for batch_idx in range(vllm_num_engines):
         start_idx = batch_idx * inference_batch_size
-        end_idx = start_idx + inference_batch_size if batch_idx < vllm_num_engines - 1 else len(queries_next)
+        end_idx = start_idx + inference_batch_size if batch_idx < vllm_num_engines - 1 else len(batch.queries)
 
-        batch_queries = queries_next[start_idx:end_idx]
-        batch_ground_truths = ground_truths_next[start_idx:end_idx]
-        batch_datasets = datasets_next[start_idx:end_idx]
-        batch_dataset_indices = dataset_indices[start_idx:end_idx]
+        batch_queries = batch.queries[start_idx:end_idx]
+        batch_ground_truths = batch.ground_truths[start_idx:end_idx]
+        batch_datasets = batch.datasets[start_idx:end_idx]
+        batch_dataset_indices = batch.indices[start_idx:end_idx]
 
         # Store prompts in the map using thread-safe insert_many
         if not is_eval:
@@ -1796,13 +1824,10 @@ def sync_weights_and_prepare_prompts(
     policy_group: ModelGroup,
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q: ray_queue.Queue,
-) -> tuple[List[List[int]], List[List[int]], List[str], List[int]]:
+) -> Batch:
     """Sync weights and send the next batch of prompts to vLLM."""
     dataset_indices = next(iter_dataloader)
-    data_next = train_dataset[dataset_indices]
-    queries_next = data_next[INPUT_IDS_PROMPT_KEY]
-    ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-    datasets_next = data_next[VERIFIER_SOURCE_KEY]
+    batch = next_batch(dataset_indices, train_dataset)
     with Timer(
         "[Main Thread] 🔄 Loading weights using shared memory"
         if args.async_steps > 0
@@ -1810,18 +1835,9 @@ def sync_weights_and_prepare_prompts(
     ):
         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
-    split_and_insert_batch(
-        queries_next,
-        ground_truths_next,
-        datasets_next,
-        dataset_indices,
-        training_step,
-        args.vllm_num_engines,
-        pending_queries_map,
-        param_prompt_Q,
-    )
+    split_and_insert_batch(batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q)
 
-    return queries_next, ground_truths_next, datasets_next, dataset_indices
+    return batch
 
 
 def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
@@ -1984,9 +2000,7 @@ def maybe_evaluate(
     training_step: int,
     evaluation_inference_results_Q: ray_queue.Queue,  # Ray queue
     tokenizer,
-    eval_queries,
-    eval_ground_truths,
-    eval_datasets,
+    eval_batch: Optional[Batch],
     reward_fn,
     episode,
     writer,
@@ -2011,8 +2025,8 @@ def maybe_evaluate(
             reward_fn(
                 eval_result.responses,
                 eval_decoded_responses,
-                eval_ground_truths,
-                eval_datasets,
+                eval_batch.ground_truths if eval_batch else [],
+                eval_batch.datasets if eval_batch else [],
                 eval_result.finish_reasons,
                 eval_result.request_info,
             )
@@ -2030,11 +2044,11 @@ def maybe_evaluate(
         for key, value in eval_metrics.items():
             writer.add_scalar(key, value, episode)
         table = {}
-        table["prompt"] = tokenizer.batch_decode(eval_queries)
+        table["prompt"] = tokenizer.batch_decode(eval_batch.queries if eval_batch else [])
         table["response"] = eval_decoded_responses
         table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
         table["scores"] = eval_scores
-        table["ground_truth"] = eval_ground_truths
+        table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
         df = pd.DataFrame(table)
         if args.with_tracking:
             import wandb
@@ -2268,15 +2282,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     pending_queries_map = PendingQueriesMap()
 
     if eval_dataset is None:
-        eval_dataset_indices = None
-        eval_queries = None
-        eval_ground_truths = None
-        eval_datasets = None
+        eval_batch = None
     else:
         eval_dataset_indices = list(range(num_eval_samples))
-        eval_queries = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
-        eval_ground_truths = eval_dataset[:num_eval_samples][GROUND_TRUTHS_KEY]
-        eval_datasets = eval_dataset[:num_eval_samples][VERIFIER_SOURCE_KEY]
+        eval_batch = next_batch(eval_dataset_indices, eval_dataset)
     reward_fn = make_reward_fn(args)
 
     # Verify none of the engines crashed during initialization.
@@ -2318,15 +2327,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     # the async_steps arg does.
     for _ in range(args.async_steps):
         dataset_indices = next(iter_dataloader)
-        data_next = train_dataset[dataset_indices]
-        queries_next = data_next[INPUT_IDS_PROMPT_KEY]
-        ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-        datasets_next = data_next[VERIFIER_SOURCE_KEY]
+        batch = next_batch(dataset_indices, train_dataset)
         split_and_insert_batch(
-            queries_next,
-            ground_truths_next,
-            datasets_next,
-            dataset_indices,
+            batch,
             1,  # training_step
             args.vllm_num_engines,
             pending_queries_map,
@@ -2336,19 +2339,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     start_time = time.time()
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-        queries_next, ground_truths_next, datasets_next, dataset_indices = sync_weights_and_prepare_prompts(
+        batch = sync_weights_and_prepare_prompts(
             training_step, args, train_dataset, iter_dataloader, policy_group, pending_queries_map, param_prompt_Q
         )
-        if training_step % args.local_eval_freq == 0:
+        if training_step % args.local_eval_freq == 0 and eval_batch is not None:
             split_and_insert_batch(
-                eval_queries,
-                eval_ground_truths,
-                eval_datasets,
-                eval_dataset_indices,
-                training_step,
-                args.vllm_num_engines,
-                pending_queries_map,
-                param_prompt_Q,
+                eval_batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, is_eval=True
             )
 
         # The generate_thread is now handling vLLM processing asynchronously
@@ -2376,16 +2372,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         )
 
         maybe_evaluate(
-            args,
-            training_step,
-            evaluation_inference_results_Q,
-            tokenizer,
-            eval_queries,
-            eval_ground_truths,
-            eval_datasets,
-            reward_fn,
-            episode,
-            writer,
+            args, training_step, evaluation_inference_results_Q, tokenizer, eval_batch, reward_fn, episode, writer
         )
 
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)

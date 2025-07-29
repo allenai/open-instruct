@@ -190,8 +190,14 @@ class TestGrpoFastBase(unittest.TestCase):
         # Track queues for cleanup
         self._ray_queues.extend([param_prompt_Q, inference_results_Q])
 
+        batch = grpo_fast.Batch(
+            queries=queries,
+            ground_truths=ground_truths,
+            datasets=datasets,
+            indices=indices
+        )
         grpo_fast.split_and_insert_batch(
-            queries, ground_truths, datasets, indices, training_step, num_engines, pending_queries_map, param_prompt_Q
+            batch, training_step, num_engines, pending_queries_map, param_prompt_Q
         )
 
         return param_prompt_Q, inference_results_Q, pending_queries_map
@@ -550,12 +556,12 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
         # Accumulate results
         mock_args = self.create_mock_args(num_engines, num_samples_per_prompt)
-        combined_result, combined_queries, _, _ = grpo_fast.accumulate_inference_batches(
+        combined_result, batch = grpo_fast.accumulate_inference_batches(
             inference_results_Q, pending_queries_map, mock_args, training_step=1
         )
 
         # Verify results work correctly even with out-of-order processing
-        self.assertEqual(len(combined_queries), num_prompts)
+        self.assertEqual(len(batch.queries), num_prompts)
         self.assertEqual(len(combined_result.responses), num_prompts * num_samples_per_prompt)
         self.assertEqual(len(pending_queries_map), 0)
 
