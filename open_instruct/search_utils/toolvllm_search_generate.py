@@ -5,9 +5,9 @@ Used for astabench
 export MCP_TRANSPORT=StreamableHttpTransport
 export S2_API_KEY=xxxx
 python open_instruct/search_utils/toolvllm_search_generate.py \
-    --json_path rubrics_v2_recomputed.json \
-    --model_path /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/rl_rag_surveyqa_samples_search_mcp_reward__1__1753332293_checkpoints/step_200 \
-    --output_dir /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/rl_rag_surveyqa_samples_search_mcp_reward__1__1753332293_checkpoints/step_200/test \
+    --json_path surveyqa_test.json \
+    --model_path /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/rl_rag_surveyqa_search_mcp_reward__1__1753233122_checkpoints_step_1000 \
+    --output_dir /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/rl_rag_surveyqa_search_mcp_reward__1__1753233122_checkpoints_step_1000/surveyqa_test \
     --max_eval_samples 1000 \
     --num_docs 3 \
     --search_api_endpoint https://api.semanticscholar.org/graph/v1/snippet/search \
@@ -118,6 +118,7 @@ def main():
         parser.add_argument("--model_len", type=int, default=8192, help="Max model length.")
         parser.add_argument("--output_dir", type=str, default="tmp", help="Output directory.")
         parser.add_argument("--max_eval_samples", type=int, default=2000, help="Max eval samples.")
+        parser.add_argument("--offset", type=int, default=0, help="Offset for the eval samples.")
         parser.add_argument("--num_docs", type=int, default=3, help="Number of documents to retrieve.")
         parser.add_argument("--search_api_endpoint", type=str, default="http://localhost:8000", help="Search API endpoint.")
         parser.add_argument("--use_mcp_tool", action="store_true", help="Use the MCP search tool.")
@@ -147,7 +148,7 @@ def main():
         ds = Dataset.from_list(ds)
 
         if args.max_eval_samples > -1 and args.max_eval_samples < len(ds):
-            ds = ds.shuffle(42).select(range(args.max_eval_samples))
+            ds = ds.shuffle(42).select(range(args.offset, args.offset + args.max_eval_samples))
 
         prompt_token_ids = [tokenizer.apply_chat_template(data["messages"], add_generation_prompt=True) for data in ds]
 
@@ -200,7 +201,7 @@ def main():
         # save predictions with sample data.
         os.makedirs(args.output_dir, exist_ok=True)
         with open(f"{args.output_dir}/predictions.jsonl", "w") as f:
-            for sample, prediction, generation in zip(dataset, predictions, generations):
+            for sample, prediction, generation in zip(ds, predictions, generations):
                 f.write(json.dumps({**sample, "answer": prediction, "generation": generation}) + "\n")
 
         if args.use_astabench_format:
