@@ -306,12 +306,12 @@ def get_cuda_arch_list() -> str:
     """Get CUDA compute capabilities and format them for TORCH_CUDA_ARCH_LIST."""
     if not torch.cuda.is_available():
         return ""
-    
+
     cuda_capabilities = []
     for i in range(torch.cuda.device_count()):
         major, minor = torch.cuda.get_device_capability(i)
         cuda_capabilities.append(f"{major}.{minor}")
-    
+
     # Remove duplicates and sort
     cuda_capabilities = sorted(set(cuda_capabilities))
     cuda_arch_list = ";".join(cuda_capabilities)
@@ -394,10 +394,9 @@ def create_vllm_engines(
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
                 # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
-                runtime_env=ray.runtime_env.RuntimeEnv(env_vars={
-                    "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
-                    "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
-                }),
+                runtime_env=ray.runtime_env.RuntimeEnv(
+                    env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
+                ),
             ).remote(
                 model=pretrain,
                 revision=revision,
