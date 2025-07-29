@@ -59,16 +59,16 @@ This command generates samples into `asta_env_<model_name>/predictions.jsonl`.
 Alternatively, `asta_env_<model_name>/astabench_formatted_predictions.json` will have custom asta-bench formatted answers if you set `--use_astabench_format` (and the old predictions file will still exist).
 To then run asta-bench eval over it, we run:
 
+INSPECT_EVAL_LOG_FILE_PATTERN=${model_name} uv run --extra sqa inspect eval astabench/evals/sqa/task.py@sqa --display plain -T simplified_eval=true -T assess_jointly=true --max-samples 12 --max-connections 16 --solver astabench/solvers/sqa/debug/cached_solver.py@cache_solver -S path="{formatted_answer_file_path}" -T sentence_wise_cit_eval=false -T all_at_once=true -T split='test' -T scorer_model="google/gemini-2.5-flash"
+
 ```bash
-split=test  # set to dev for v1 and test for 
 path_to_predictions=asta_env_<model_name>/predictions.jsonl
-eval astabench/evals/sqa/task.py@sqa --solver astabench/solvers/sqa/general_memorized/memorized_solver.py@formatted_solver --model openai/o4-mini -T scorer_model=google/gemini-2.5-pro-preview-03-25 -T split=${split} -S require_snippets=false -S sys_name_or_path=${path_to_predictions} --retry-on-error=10 --log-shared
+inspect eval astabench/evals/sqa/task.py@sqa --solver astabench/solvers/sqa/general_memorized/memorized_solver.py@formatted_solver --display plain -T simplified_eval=true -T assess_jointly=true --max-samples 12 --max-connections 16 -S sys_name_or_path=${path_to_predictions} -T sentence_wise_cit_eval=false -T all_at_once=true -T split='test' -T scorer_model="google/gemini-2.5-flash"
 ```
 
 If you want to use the astabench formatted samples (and so not rely on astabench extracting citations on its own), you can run:
 
 ```bash
-split=test  # set to dev for v1 and test for 
 path_to_predictions=asta_env_<model_name>/astabench_formatted_predictions.json
-eval astabench/evals/sqa/task.py@sqa --solver astabench/solvers/sqa/debug/cached_solver.py@cache_solver --model openai/o4-mini -T scorer_model=google/gemini-2.5-pro-preview-03-25 -T split=${split} -S require_snippets=false -S sys_name_or_path=${path_to_predictions} --retry-on-error=10 --log-shared
+inspect eval astabench/evals/sqa/task.py@sqa --solver astabench/solvers/sqa/debug/cached_solver.py@cache_solver --display plain -T simplified_eval=true -T assess_jointly=true --max-samples 12 --max-connections 16 -S sys_name_or_path=${path_to_predictions} -T sentence_wise_cit_eval=false -T all_at_once=true -T split='test' -T scorer_model="google/gemini-2.5-flash"
 ```
