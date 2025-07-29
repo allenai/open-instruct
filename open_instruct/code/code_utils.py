@@ -80,7 +80,7 @@ def decode_tests(tests: Any) -> list:
                 decompressed_chunks.append(decompressor.flush())
 
                 decompressed_data = b"".join(decompressed_chunks)
-                return json.loads(pickle.loads(decompressed_data))
+                return pickle.loads(decompressed_data)
             except Exception:
                 # Log the problematic data before returning an empty list
                 logger.error(f"Failed to decode test data: {tests}")
