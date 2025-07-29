@@ -1867,12 +1867,7 @@ def generate_thread(
         with Timer("🔥 Generation time"):
             engine_refs = [
                 engine.process_from_queue.remote(
-                    generation_config,
-                    eval_generation_config,
-                    local_eval_freq,
-                    num_training_steps,
-                    resume_training_step,
-                    timeout=0.1,
+                    generation_config, eval_generation_config, num_training_steps, resume_training_step, timeout=0.1
                 )
                 for engine in vllm_engines
             ]
