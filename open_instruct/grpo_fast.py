@@ -1203,6 +1203,7 @@ def accumulate_inference_batches(
     pending_queries_map: PendingQueriesMap,
     args: Args,
     training_step: int,
+    generation_config,
     timeout: Optional[float] = None,
 ) -> tuple[GenerationResult, Batch]:
     """Accumulate multiple inference results into a single training batch.
@@ -1210,8 +1211,9 @@ def accumulate_inference_batches(
     Args:
         inference_results_Q: Queue containing GenerationResult objects
         pending_queries_map: PendingQueriesMap instance for thread-safe query tracking
-        args: Arguments containing vllm_num_engines and num_samples_per_prompt_rollout
+        args: Arguments containing vllm_num_engines
         training_step: Current training step for error reporting
+        generation_config: Generation config containing n (number of samples per prompt)
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
 
     Returns:
@@ -1235,16 +1237,15 @@ def accumulate_inference_batches(
         if dataset_indices is None:
             raise RuntimeError(f"Dataset indices is None for result {i}")
 
-        # When num_samples_per_prompt_rollout > 1, vLLM generates multiple responses per prompt
+        # When generation_config.n > 1, vLLM generates multiple responses per prompt
         # but dataset_indices only contains the unique indices (not replicated)
-        # So we expect: len(responses) == len(dataset_indices) * num_samples_per_prompt_rollout
-        expected_responses = len(dataset_indices) * args.num_samples_per_prompt_rollout
+        # So we expect: len(responses) == len(dataset_indices) * generation_config.n
+        expected_responses = len(dataset_indices) * generation_config.n
         assert len(result.responses) == expected_responses, (
             f"Mismatch: number of responses ({len(result.responses)}) "
             f"doesn't match expected ({expected_responses}) for result {i}"
-            f". {args.num_samples_per_prompt_rollout=}"
+            f". {generation_config.n=}"
             f", {len(dataset_indices)=}"
-            f", {args.num_unique_prompts_rollout=}"
         )
 
         # Get corresponding queries, ground_truths, datasets for each individual prompt
@@ -1327,7 +1328,13 @@ def data_preparation_thread(
     for training_step in range(1, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            result, batch = accumulate_inference_batches(inference_results_Q, pending_queries_map, args, training_step)
+            # Create a simple config object with n for accumulate_inference_batches
+            class SimpleConfig:
+                n = args.num_samples_per_prompt_rollout
+            
+            result, batch = accumulate_inference_batches(
+                inference_results_Q, pending_queries_map, args, training_step, SimpleConfig()
+            )
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -1998,6 +2005,7 @@ def maybe_evaluate(
     episode,
     writer,
     eval_pending_queries_map: PendingQueriesMap,
+    eval_generation_config,
 ):
     """Optionally evaluate the model."""
     try:
@@ -2006,8 +2014,8 @@ def maybe_evaluate(
         timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_freq < 0) else 100
 
         # Accumulate evaluation results from all vLLM engines
-        eval_result, _ = accumulate_inference_batches(
-            evaluation_inference_results_Q, eval_pending_queries_map, args, training_step, timeout=timeout
+        eval_result, eval_batch = accumulate_inference_batches(
+            evaluation_inference_results_Q, eval_pending_queries_map, args, training_step, eval_generation_config, timeout=timeout
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -2382,6 +2390,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             episode,
             writer,
             eval_pending_queries_map,
+            eval_generation_config,
         )
 
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
