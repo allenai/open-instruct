@@ -37,10 +37,7 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
-from vllm import SamplingParams
-from vllm.engine.arg_utils import EngineArgs
-from vllm.engine.llm_engine import LLMEngine
-from vllm.inputs import TokensPrompt
+import vllm
 
 
 @dataclasses.dataclass
@@ -196,8 +193,9 @@ class LLMRayActor:
             self.engine = self.llm.llm_engine
         else:
             # Create EngineArgs and initialize LLMEngine
-            engine_args = EngineArgs(*args, **kwargs)
-            self.engine = LLMEngine.from_engine_args(engine_args)
+            engine_args = vllm.engine.arg_utils.EngineArgs(*args, **kwargs)
+            self.engine = vllm.engine.llm_engine.LLMEngine.from_engine_args(engine_args)
+            self.llm = None  # Set llm to None when using engine directly
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
@@ -227,9 +225,9 @@ class LLMRayActor:
                     request_id = str(request_id_counter)
                     request_id_counter += 1
                     # Convert token IDs to TokensPrompt format that LLMEngine expects
-                    tokens_prompt = TokensPrompt(prompt_token_ids=prompt)
+                    tokens_prompt = vllm.inputs.TokensPrompt(prompt_token_ids=prompt)
                     # Create a new sampling params with n=1 for each individual request
-                    single_sample_params = SamplingParams(**{k: v for k, v in sampling_params.__dict__.items() if k != 'n'})
+                    single_sample_params = vllm.SamplingParams(**{k: v for k, v in sampling_params.__dict__.items() if k != 'n'})
                     single_sample_params.n = 1
                     self.engine.add_request(request_id, tokens_prompt, single_sample_params)
         else:
@@ -237,7 +235,7 @@ class LLMRayActor:
             for i, prompt in enumerate(prompt_token_ids):
                 request_id = str(i)
                 # Convert token IDs to TokensPrompt format that LLMEngine expects
-                tokens_prompt = TokensPrompt(prompt_token_ids=prompt)
+                tokens_prompt = vllm.inputs.TokensPrompt(prompt_token_ids=prompt)
                 self.engine.add_request(request_id, tokens_prompt, sampling_params)
         
         # Run the engine event loop until all requests are finished
@@ -378,7 +376,7 @@ class LLMRayActor:
             return self.engine.model_executor.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
 
     def reset_prefix_cache(self):
-        if self.tool_use:
+        if self.tool_use and self.llm:
             self.llm.llm_engine.reset_prefix_cache()
         else:
             # Use our engine directly
@@ -389,7 +387,7 @@ class LLMRayActor:
                 self.engine.cache_config.reset()
 
     def sleep(self, level=1):
-        if self.tool_use:
+        if self.tool_use and self.llm:
             self.llm.sleep(level=level)
         else:
             # For LLMEngine, we might need to implement a custom sleep mechanism
@@ -397,7 +395,7 @@ class LLMRayActor:
             pass
 
     def wake_up(self):
-        if self.tool_use:
+        if self.tool_use and self.llm:
             self.llm.wake_up()
         else:
             # For LLMEngine, we might need to implement a custom wake mechanism
