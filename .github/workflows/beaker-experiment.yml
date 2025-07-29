@@ -17,14 +17,14 @@ on:
 
   # Adding a comment to trigger a run.
   workflow_dispatch:  # This allows us to manually trigger a build through the GitHub UI.
-  pull_request:
-    branches: [main]
-    paths:
-      - 'open_instruct/**'
-      - '!open_instruct/README.md'
-      - 'requirements.txt'
-      - 'Dockerfile'
-      - '.github/workflows/beaker-experiment.yml'
+  # pull_request:
+  #   branches: [main]
+  #   paths:
+  #     - 'open_instruct/**'
+  #     - '!open_instruct/README.md'
+  #     - 'requirements.txt'
+  #     - 'Dockerfile'
+  #     - '.github/workflows/beaker-experiment.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
