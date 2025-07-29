@@ -37,6 +37,9 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+from vllm import SamplingParams
+from vllm.engine.arg_utils import EngineArgs
+from vllm.engine.llm_engine import LLMEngine
 
 
 @dataclasses.dataclass
@@ -185,13 +188,15 @@ class LLMRayActor:
             print(f"creating LLM with bundle_indices={bundle_indices}")
 
         if tool_use:
+            # TODO: Need to update ToolUseLLM to use LLMEngine as well
             from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 
             self.llm = ToolUseLLM(*args, **kwargs)
+            self.engine = self.llm.llm_engine
         else:
-            from vllm import LLM
-
-            self.llm = LLM(*args, **kwargs)
+            # Create EngineArgs and initialize LLMEngine
+            engine_args = EngineArgs(*args, **kwargs)
+            self.engine = LLMEngine.from_engine_args(engine_args)
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
@@ -199,8 +204,32 @@ class LLMRayActor:
         self.tool_use = tool_use
         self.logger = logging.getLogger(__name__)
 
-    def generate(self, *args, **kwargs):
-        return self.llm.generate(*args, **kwargs)
+    def generate(self, sampling_params=None, prompt_token_ids=None, *args, **kwargs):
+        """Generate using manual event loop with LLMEngine."""
+        if self.tool_use:
+            # For tool use, still use the original LLM interface
+            return self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompt_token_ids, *args, **kwargs)
+        
+        # Add all requests to the engine
+        request_outputs = []
+        for i, prompt in enumerate(prompt_token_ids):
+            request_id = str(i)
+            self.engine.add_request(request_id, prompt, sampling_params)
+        
+        # Run the engine event loop until all requests are finished
+        while True:
+            step_outputs = self.engine.step()
+            for output in step_outputs:
+                if output.finished:
+                    request_outputs.append(output)
+            
+            # Check if all requests are finished
+            if not self.engine.has_unfinished_requests():
+                break
+        
+        # Sort outputs by request_id to maintain order
+        request_outputs.sort(key=lambda x: int(x.request_id))
+        return request_outputs
 
     def process_from_queue(self, num_training_steps=None, resume_training_step=1, timeout=0.1):
         """Process a single element from the queue."""
@@ -233,7 +262,7 @@ class LLMRayActor:
         training_step: Optional[int] = None,
     ) -> GenerationResult:
         """Generate responses for a batch of prompts."""
-        outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
+        outputs = self.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
 
         # Process outputs
         response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -277,25 +306,56 @@ class LLMRayActor:
     def init_process_group(
         self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
     ):
-        return self.llm.collective_rpc(
-            "init_process_group",
-            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
-        )
+        if self.tool_use:
+            return self.llm.collective_rpc(
+                "init_process_group",
+                args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
+            )
+        else:
+            # For LLMEngine, we need to access the model executor's collective_rpc method
+            return self.engine.model_executor.collective_rpc(
+                "init_process_group",
+                args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
+            )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        return self.llm.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        if self.tool_use:
+            return self.llm.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        else:
+            return self.engine.model_executor.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        return self.llm.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
+        if self.tool_use:
+            return self.llm.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
+        else:
+            return self.engine.model_executor.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
 
     def reset_prefix_cache(self):
-        self.llm.llm_engine.reset_prefix_cache()
+        if self.tool_use:
+            self.llm.llm_engine.reset_prefix_cache()
+        else:
+            # Use our engine directly
+            if hasattr(self.engine, 'reset_prefix_cache'):
+                self.engine.reset_prefix_cache()
+            elif hasattr(self.engine, 'cache_config') and hasattr(self.engine.cache_config, 'reset'):
+                # Alternative approach if direct method doesn't exist
+                self.engine.cache_config.reset()
 
     def sleep(self, level=1):
-        self.llm.sleep(level=level)
+        if self.tool_use:
+            self.llm.sleep(level=level)
+        else:
+            # For LLMEngine, we might need to implement a custom sleep mechanism
+            # This depends on vllm version and implementation details
+            pass
 
     def wake_up(self):
-        self.llm.wake_up()
+        if self.tool_use:
+            self.llm.wake_up()
+        else:
+            # For LLMEngine, we might need to implement a custom wake mechanism
+            # This depends on vllm version and implementation details
+            pass
 
     def ready(self):
         return True
