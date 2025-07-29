@@ -14,6 +14,8 @@
 # isort: off
 import os
 
+# We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
+# https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
@@ -30,6 +32,7 @@ import dataclasses
 import functools
 import json
 import logging
+import multiprocessing as mp
 import os
 import random
 import re
@@ -37,10 +40,12 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
-from dataclasses import dataclass
-from typing import Any, List, NewType, Optional, Tuple, Union
+from dataclasses import dataclass, field
+from multiprocessing import resource_tracker as _rt
+from typing import Any, Iterable, List, NewType, Optional, Tuple, Union
 
 import numpy as np
 import ray
@@ -51,6 +56,7 @@ from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
 from huggingface_hub import HfApi
+from ray.util import state as ray_state
 from rich.pretty import pprint
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
@@ -1432,3 +1438,125 @@ def extract_final_answer(prediction: str) -> str:
         return cleaned.strip()
 
     return prediction
+
+
+# ---- Runtime leak detection -----------------------------------------------------------------
+
+DEFAULT_THREAD_ALLOWLIST = {
+    "MainThread",
+    "pytest-watcher",  # pytest
+    "pydevd.",  # debugger
+    "IPythonHistorySavingThread",
+    "raylet_client",  # ray internal when still up during test body
+}
+
+DEFAULT_THREAD_ALLOW_PREFIXES = {
+    "ThreadPoolExecutor-",  # executors create transient threads; adjust if you join them
+    "ray-",  # ray internal threads
+    "grpc-default-executor",  # grpc internal
+}
+
+
+@dataclass
+class LeakReport:
+    bad_threads: List[threading.Thread] = field(default_factory=list)
+    bad_processes: List[mp.Process] = field(default_factory=list)
+    ray_actors: list = field(default_factory=list)
+    ray_tasks: list = field(default_factory=list)
+    ray_workers: list = field(default_factory=list)
+    leaked_semaphores: List[str] = field(default_factory=list)
+    leaked_shm: List[str] = field(default_factory=list)
+
+    @property
+    def is_clean(self) -> bool:
+        return not (
+            self.bad_threads
+            or self.bad_processes
+            or self.ray_actors
+            or self.ray_tasks
+            or self.ray_workers
+            or self.leaked_semaphores
+            or self.leaked_shm
+        )
+
+    def pretty(self) -> str:
+        lines = []
+        if self.bad_threads:
+            lines.append("Leaked threads:")
+            for t in self.bad_threads:
+                target = getattr(t, "_target", None)
+                tgt_name = getattr(target, "__name__", repr(target)) if target else "?"
+                lines.append(f"  - {t.name} (alive={t.is_alive()}, daemon={t.daemon}, target={tgt_name})")
+        if self.bad_processes:
+            lines.append("Leaked multiprocessing children:")
+            for p in self.bad_processes:
+                lines.append(f"  - PID {p.pid} alive={p.is_alive()} name={p.name}")
+        if self.ray_actors:
+            lines.append("Live Ray actors:")
+            for a in self.ray_actors:
+                lines.append(f"  - {a.get('class_name')} id={a.get('actor_id')}")
+        if self.ray_tasks:
+            lines.append("Live Ray tasks:")
+            for t in self.ray_tasks:
+                lines.append(f"  - {t.get('name')} id={t.get('task_id')}")
+        if self.ray_workers:
+            lines.append("Live Ray workers:")
+            for w in self.ray_workers:
+                lines.append(f"  - pid={w.get('pid')} id={w.get('worker_id')}")
+        if self.leaked_semaphores:
+            lines.append("Leaked POSIX semaphores (multiprocessing):")
+            for name in self.leaked_semaphores:
+                lines.append(f"  - {name}")
+        if self.leaked_shm:
+            lines.append("Leaked shared_memory blocks:")
+            for name in self.leaked_shm:
+                lines.append(f"  - {name}")
+        return "\n".join(lines) if lines else "No leaks detected."
+
+
+def check_runtime_leaks(
+    thread_allowlist: Iterable[str] = DEFAULT_THREAD_ALLOWLIST,
+    thread_allow_prefixes: Iterable[str] = DEFAULT_THREAD_ALLOW_PREFIXES,
+    include_daemon_threads: bool = False,
+) -> LeakReport:
+    """
+    Inspect runtime state for leftovers.
+
+    Returns a LeakReport; call .is_clean or .pretty().
+    """
+    report = LeakReport()
+
+    # Threads
+    for t in threading.enumerate():
+        if t.name in thread_allowlist or any(t.name.startswith(p) for p in thread_allow_prefixes):
+            continue
+        if not include_daemon_threads and t.daemon:
+            continue
+        if t is threading.main_thread():
+            continue
+        # ignore ones already finished
+        if not t.is_alive():
+            continue
+        report.bad_threads.append(t)
+
+    # Multiprocessing children
+    for child in mp.active_children():
+        if child.is_alive():
+            report.bad_processes.append(child)
+
+    # Ray state (only if ray is present & initialized)
+    if ray_state is not None and ray is not None and ray.is_initialized():
+        report.ray_actors = ray_state.list_actors(filters=[("state", "=", "ALIVE")])
+        report.ray_tasks = ray_state.list_tasks(filters=[("state", "=", "RUNNING")])
+        report.ray_workers = ray_state.list_workers(filters=[("is_alive", "=", True)])
+
+    # Multiprocessing resource_tracker cache (private API, so guard carefully)
+    if _rt is not None and hasattr(_rt, "_resource_tracker"):
+        cache = getattr(_rt._resource_tracker, "_cache", {})
+        for name, (count, rtype) in cache.items():
+            if count > 0 and rtype == "semaphore":
+                report.leaked_semaphores.append(name)
+            if count > 0 and rtype == "shared_memory":
+                report.leaked_shm.append(name)
+
+    return report

@@ -16,6 +16,8 @@
 # isort: off
 import os
 
+# We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
+# https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     import deepspeed
@@ -331,7 +333,7 @@ class FlatArguments:
         metadata={"help": "Whether to use packing/padding-free collation via TensorDataCollatorWithFlattening"},
     )
     verbose: bool = field(
-        default=True, metadata={"help": "Optionally print additional statistics at each reporting period"}
+        default=False, metadata={"help": "Optionally print additional statistics at each reporting period"}
     )
 
     def __post_init__(self):
@@ -455,6 +457,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             },
         )
         wandb_tracker = accelerator.get_tracker("wandb")
+    else:
+        wandb_tracker = None  # for later eval launching
 
     if accelerator.is_main_process:
         pprint([args, tc])
@@ -905,14 +909,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         avg_loss = sum_loss / total_fwd_passes
                         metrics_to_log["train_loss"] = avg_loss
                     else:
-                        avg_loss_per_total_tok = sum_loss / total_tokens_this_log_period
+                        avg_loss = sum_loss / total_tokens_this_log_period
                         # The loss per pred tok is the closest analogue to what we report as the
                         # avg_loss in the "mean" case
                         avg_loss_per_pred_tok = sum_loss / pred_tokens_this_log_period
                         total_optim_steps = args.logging_steps * accelerator.num_processes
                         avg_sum_loss = sum_loss / total_optim_steps
                         metrics_to_log["train_sum_loss"] = avg_sum_loss
-                        metrics_to_log["train_loss_per_total_tok"] = avg_loss_per_total_tok
+                        metrics_to_log["train_loss_per_total_tok"] = avg_loss
                         metrics_to_log["train_loss_per_pred_tok"] = avg_loss_per_pred_tok
                     if args.verbose:
                         sec_per_step = (time.time() - start_time) / (completed_steps - resume_step)
@@ -974,7 +978,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             accelerator.wait_for_everyone()
 
     if args.output_dir is not None:
-        save_with_accelerate(accelerator, model, tokenizer, args.output_dir, args.use_lora, tc.chat_template_name)
+        save_with_accelerate(
+            accelerator, model, tokenizer, args.output_dir, args.use_lora, chat_template_name=tc.chat_template_name
+        )
 
     # remove all checkpoints to save space
     if args.clean_checkpoints_at_end and accelerator.is_local_main_process:
@@ -994,7 +1000,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             path=args.output_dir,
             leaderboard_name=args.hf_repo_revision,
             oe_eval_max_length=args.oe_eval_max_length,
-            wandb_url=wandb_tracker.run.get_url(),
+            wandb_url=wandb_tracker.run.get_url() if wandb_tracker is not None else None,
             oe_eval_tasks=args.oe_eval_tasks,
             gs_bucket_path=args.gs_bucket_path,
         )
