@@ -19,7 +19,7 @@ dependencies = [
     "nvitop>=1.4.2",
     "packaging>=24.2",
     "peft>=0.13.2",
-    "ray[default]>=2.44.1",
+    "ray[default]==2.46.0",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch==2.7.0",
@@ -138,6 +138,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["open-instruct"]
+known-third-party = ["wandb"]
 # case insensitive to match isort --profile black
 case-sensitive = false
 # Disable split-on-trailing-comma to work with skip-magic-trailing-comma
