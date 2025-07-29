@@ -193,8 +193,8 @@ class LLMRayActor:
             self.engine = self.llm.llm_engine
         else:
             # Create EngineArgs and initialize LLMEngine
-            engine_args = vllm.engine.arg_utils.EngineArgs(*args, **kwargs)
-            self.engine = vllm.engine.llm_engine.LLMEngine.from_engine_args(engine_args)
+            engine_args = vllm.EngineArgs(*args, **kwargs)
+            self.engine = vllm.LLMEngine.from_engine_args(engine_args)
             self.llm = None  # Set llm to None when using engine directly
 
         self.prompt_queue = prompt_queue
@@ -212,31 +212,11 @@ class LLMRayActor:
         
         # Add all requests to the engine
         request_outputs = []
-        
-        # Check if we need to handle multiple samples per prompt
-        n_samples = getattr(sampling_params, 'n', 1) if sampling_params else 1
-        
-        if n_samples > 1:
-            # For multiple samples, we need to submit the same prompt multiple times
-            # with different request IDs
-            request_id_counter = 0
-            for i, prompt in enumerate(prompt_token_ids):
-                for j in range(n_samples):
-                    request_id = str(request_id_counter)
-                    request_id_counter += 1
-                    # Convert token IDs to TokensPrompt format that LLMEngine expects
-                    tokens_prompt = vllm.inputs.TokensPrompt(prompt_token_ids=prompt)
-                    # Create a new sampling params with n=1 for each individual request
-                    single_sample_params = vllm.SamplingParams(**{k: v for k, v in sampling_params.__dict__.items() if k != 'n'})
-                    single_sample_params.n = 1
-                    self.engine.add_request(request_id, tokens_prompt, single_sample_params)
-        else:
-            # For single sample, use the original logic
-            for i, prompt in enumerate(prompt_token_ids):
-                request_id = str(i)
-                # Convert token IDs to TokensPrompt format that LLMEngine expects
-                tokens_prompt = vllm.inputs.TokensPrompt(prompt_token_ids=prompt)
-                self.engine.add_request(request_id, tokens_prompt, sampling_params)
+        for i, prompt in enumerate(prompt_token_ids):
+            request_id = str(i)
+            # Convert token IDs to TokensPrompt format that LLMEngine expects
+            tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
+            self.engine.add_request(request_id, tokens_prompt, sampling_params)
         
         # Run the engine event loop until all requests are finished
         while True:
@@ -251,29 +231,6 @@ class LLMRayActor:
         
         # Sort outputs by request_id to maintain order
         request_outputs.sort(key=lambda x: int(x.request_id))
-        
-        
-        # If we expanded requests for multiple samples, we need to reorganize the outputs
-        if n_samples > 1:
-            # Group outputs back by original prompt index
-            reorganized_outputs = []
-            for i in range(len(prompt_token_ids)):
-                # Create a combined output that contains all samples for this prompt
-                combined_outputs = []
-                for j in range(n_samples):
-                    idx = i * n_samples + j
-                    if idx < len(request_outputs):
-                        # Each request_output should have 1 completion output
-                        combined_outputs.extend(request_outputs[idx].outputs)
-                
-                # Create a new RequestOutput-like object with all the samples
-                # We'll use the first request's metadata as the base
-                base_output = request_outputs[i * n_samples]
-                base_output.outputs = combined_outputs
-                reorganized_outputs.append(base_output)
-            
-            return reorganized_outputs
-        
         return request_outputs
 
     def process_from_queue(self, num_training_steps=None, resume_training_step=1, timeout=0.1):
