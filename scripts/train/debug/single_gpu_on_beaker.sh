@@ -1,6 +1,6 @@
 #!/bin/bash
 beaker_image="${1:-finbarrt/open-instruct-dev}"
-python mason.py \
+uv run python mason.py \
        --cluster ai2/jupiter-cirrascale-2 \
        --cluster ai2/augusta-google-1 \
        --cluster ai2/saturn-cirrascale \
