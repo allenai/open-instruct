@@ -55,7 +55,7 @@ from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
-from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Union
+from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
 
 import datasets
 import numpy as np
@@ -91,6 +91,7 @@ from open_instruct.ground_truth_utils import (
     soft_format_reward_func,
 )
 from open_instruct.model_utils import (
+    Batch,
     ModelConfig,
     apply_verifiable_reward,
     disable_dropout_in_model,
@@ -432,14 +433,9 @@ class Args:
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
 
 
-@dataclass
-class Batch:
-    """Container for batch data including queries, ground truths, and datasets."""
-
-    queries: List[List[int]]
-    ground_truths: List[List[int]]
-    datasets: List[str]
-    indices: Optional[List[int]]
+def flatten(nested_list: List[List[Any]]) -> List[Any]:
+    """Flatten a list of lists into a single list."""
+    return [item for sublist in nested_list for item in sublist]
 
 
 def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
@@ -1334,13 +1330,14 @@ def data_preparation_thread(
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
         if args.num_samples_per_prompt_rollout > 1:
-            queries = [item for item in batch.queries for _ in range(args.num_samples_per_prompt_rollout)]
-            ground_truths = [item for item in batch.ground_truths for _ in range(args.num_samples_per_prompt_rollout)]
-            datasets = [item for item in batch.datasets for _ in range(args.num_samples_per_prompt_rollout)]
-        else:
-            queries = batch.queries
-            ground_truths = batch.ground_truths
-            datasets = batch.datasets
+            batch = Batch(
+                queries=flatten([[item] * args.num_samples_per_prompt_rollout for item in batch.queries]),
+                ground_truths=flatten([[item] * args.num_samples_per_prompt_rollout for item in batch.ground_truths]),
+                datasets=flatten([[item] * args.num_samples_per_prompt_rollout for item in batch.datasets]),
+                indices=flatten([[item] * args.num_samples_per_prompt_rollout for item in batch.indices])
+                if batch.indices
+                else None,
+            )
             good_outputs = [
                 len(result.request_info.tool_outputs[i]) > 0
                 and result.request_info.tool_calleds[i]
@@ -1360,7 +1357,7 @@ def data_preparation_thread(
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
-            decoded_queries = tokenizer.batch_decode(queries, skip_special_tokens=True)
+            decoded_queries = tokenizer.batch_decode(batch.queries, skip_special_tokens=True)
             decoded_queries = [extract_user_query(query) for query in decoded_queries]
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
                 result.finish_reasons
@@ -1371,8 +1368,7 @@ def data_preparation_thread(
                 reward_fn(
                     result.responses,
                     decoded_responses,
-                    ground_truths,
-                    datasets,
+                    batch,
                     result.finish_reasons,
                     result.request_info,
                     decoded_queries,
@@ -1409,9 +1405,7 @@ def data_preparation_thread(
             scores = scores[non_zero_gradient_index]
             responses = [result.responses[i] for i in non_zero_gradient_index]
             masks = [result.masks[i] for i in non_zero_gradient_index]
-            queries = [queries[i] for i in non_zero_gradient_index]
-            ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
-            datasets = [datasets[i] for i in non_zero_gradient_index]
+            batch = batch.slice(non_zero_gradient_index.tolist())
             finish_reasons = [result.finish_reasons[i] for i in non_zero_gradient_index]
             if args.mask_truncated_completions:
                 stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
@@ -1419,14 +1413,12 @@ def data_preparation_thread(
                 advantages = advantages[stop_idxes]
                 responses = [responses[i] for i in stop_idxes]
                 masks = [masks[i] for i in stop_idxes]
-                queries = [queries[i] for i in stop_idxes]
-                ground_truths = [ground_truths[i] for i in stop_idxes]
-                datasets = [datasets[i] for i in stop_idxes]
+                batch = batch.slice(stop_idxes.tolist())
                 finish_reasons = [finish_reasons[i] for i in stop_idxes]
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
-                queries=queries,
+                queries=batch.queries,
                 responses=responses,
                 masks=masks,
                 pack_length=args.pack_length,
@@ -1570,9 +1562,9 @@ def data_preparation_thread(
                 "scores": scores.tolist(),
                 "finish_reasons": finish_reasons,
                 "responses": responses,
-                "queries": queries,
-                "ground_truths": ground_truths,
-                "datasets": datasets,
+                "queries": batch.queries,
+                "ground_truths": batch.ground_truths,
+                "datasets": batch.datasets,
                 "training_step": training_step,
                 **reward_metrics,
             }
@@ -2122,8 +2114,7 @@ def make_reward_fn(args: Args) -> Callable:
     async def reward_fn(
         responses: List[torch.Tensor],
         decoded_responses: List[str],
-        ground_truths: List[Union[str, List[str]]],
-        datasets: List[str],
+        batch: Batch,
         finish_reasons: List[str],
         infos: List[List[int]],
         queries: Optional[List[str]] = None,
@@ -2154,8 +2145,7 @@ def make_reward_fn(args: Args) -> Callable:
                     reward_fn_mapping,
                     responses,
                     decoded_responses,
-                    ground_truths,
-                    datasets,
+                    batch,
                     reward_mult=args.verification_reward,
                     queries=queries,
                 )

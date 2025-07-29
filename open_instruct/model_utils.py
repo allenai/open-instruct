@@ -48,6 +48,25 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class Batch:
+    """Container for batch data including queries, ground truths, and datasets."""
+
+    queries: List[List[int]]
+    ground_truths: List[List[int]]
+    datasets: List[str]
+    indices: Optional[List[int]]
+
+    def slice(self, indices: List[int]) -> "Batch":
+        """Return a new Batch with elements at the specified indices."""
+        return Batch(
+            queries=[self.queries[i] for i in indices],
+            ground_truths=[self.ground_truths[i] for i in indices],
+            datasets=[self.datasets[i] for i in indices],
+            indices=[self.indices[i] for i in indices] if self.indices else None,
+        )
+
+
+@dataclass
 class ModelConfig:
     model_name_or_path: Optional[str] = None
     """The model checkpoint for weights initialization."""
@@ -221,8 +240,7 @@ async def apply_verifiable_reward(
     reward_fn_mapping: Dict[str, VerifierFunction],
     responses: List[torch.Tensor],
     decoded_responses: List[str],
-    ground_truths: List[str],
-    datasets: List[Union[str, List[str]]],
+    batch: Batch,
     reward_mult: int = 10,
     queries: Optional[List[str]] = None,
 ):
@@ -234,7 +252,7 @@ async def apply_verifiable_reward(
     task_metadata = []
 
     for i, (tok_prediction, prediction, ground_truth, dataset, query) in enumerate(
-        zip(responses, decoded_responses, ground_truths, datasets, queries)
+        zip(responses, decoded_responses, batch.ground_truths, batch.datasets, queries)
     ):
         # allow multiple ground truths and datasets for a single response
 
