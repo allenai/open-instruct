@@ -133,7 +133,17 @@ def main():
         # load the json data
         with open(args.json_path, "r") as f:
             dataset = json.load(f)
-        ds = [{"messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": data["question"]}]} for data in dataset]
+        
+        # surveyqa has "query", asta-bench has "question" -- check
+        if "query" in dataset[0]:
+            question_key = "query"
+        elif "question" in dataset[0]:
+            question_key = "question"
+        else:
+            raise ValueError(f"Question key not found in dataset: {dataset[0]}")
+
+
+        ds = [{"messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": data[question_key]}]} for data in dataset]
         ds = Dataset.from_list(ds)
 
         if args.max_eval_samples > -1 and args.max_eval_samples < len(ds):
