@@ -10,7 +10,7 @@ from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 from vllm import SamplingParams
 
-from open_instruct import grpo_fast, utils
+from open_instruct import grpo_fast, model_utils, utils
 from open_instruct.vllm_utils3 import GenerationResult, PromptRequest, RequestInfo, create_vllm_engines
 
 
@@ -190,7 +190,7 @@ class TestGrpoFastBase(unittest.TestCase):
         # Track queues for cleanup
         self._ray_queues.extend([param_prompt_Q, inference_results_Q])
 
-        batch = grpo_fast.Batch(queries=queries, ground_truths=ground_truths, datasets=datasets, indices=indices)
+        batch = model_utils.Batch(queries=queries, ground_truths=ground_truths, datasets=datasets, indices=indices)
         grpo_fast.split_and_insert_batch(batch, training_step, num_engines, pending_queries_map, param_prompt_Q)
 
         return param_prompt_Q, inference_results_Q, pending_queries_map
@@ -549,8 +549,16 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
         # Accumulate results
         mock_args = self.create_mock_args(num_engines, num_samples_per_prompt)
+        # Create a mock generation config with n
+        mock_generation_config = Mock()
+        mock_generation_config.n = num_samples_per_prompt
+
         combined_result, batch = grpo_fast.accumulate_inference_batches(
-            inference_results_Q, pending_queries_map, mock_args, training_step=1
+            inference_results_Q,
+            pending_queries_map,
+            mock_args,
+            training_step=1,
+            generation_config=mock_generation_config,
         )
 
         # Verify results work correctly even with out-of-order processing
@@ -633,8 +641,16 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
         def run_accumulate():
             try:
+                # Create a mock generation config with n=1 (default)
+                mock_generation_config = Mock()
+                mock_generation_config.n = 1
+
                 grpo_fast.accumulate_inference_batches(
-                    inference_results_Q, pending_queries_map, mock_args, training_step=1
+                    inference_results_Q,
+                    pending_queries_map,
+                    mock_args,
+                    training_step=1,
+                    generation_config=mock_generation_config,
                 )
                 completed.set()
             except Exception:
