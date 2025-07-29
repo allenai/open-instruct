@@ -203,68 +203,98 @@ class LLMRayActor:
         self.tool_use = tool_use
         self.logger = logging.getLogger(__name__)
 
-    def generate(self, sampling_params=None, prompt_token_ids=None, *args, **kwargs):
-        """Generate using manual event loop with LLMEngine."""
-        if self.tool_use:
-            # For tool use, still use the original LLM interface
-            return self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompt_token_ids,
-                                     *args, **kwargs)
-                
-        # Add all requests to the engine
-        request_outputs = []
-        for i, prompt in enumerate(prompt_token_ids):
-            # Convert token IDs to TokensPrompt format that LLMEngine expects
-            tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
-            self.llm_engine.add_request(str(i), tokens_prompt, sampling_params)
-        
-        # Run the engine event loop until all requests are finished
-        while True:
-            step_outputs = self.llm_engine.step()
-            for output in step_outputs:
-                if output.finished:
-                    request_outputs.append(output)
-            
-            # Check if all requests are finished
-            if not self.llm_engine.has_unfinished_requests():
-                break
-        
-        # Sort outputs by request_id to maintain order
-        request_outputs.sort(key=lambda x: int(x.request_id))
-        return request_outputs
-
-    def process_from_queue(self, num_training_steps=None, resume_training_step=1, timeout=0.1):
-        """Process a single element from the queue."""
-        try:
-            request = self.prompt_queue.get(timeout=timeout)
-            # Use generation_config from the request
-            result = self._generate_batch(
-                request.prompts,
-                request.generation_config,
-                dataset_index=request.dataset_index,
-                training_step=request.training_step,
-            )
-            if request.is_eval:
-                self.eval_results_queue.put(result, timeout=1)
-            else:
-                self.results_queue.put(result, timeout=1)
-            return 1  # Successfully processed a request
-        except queue.Empty:
-            self.logger.warning("[LLMRayActor] No request in the queue to process. Returning from process_from_queue.")
-            return 0  # No request to process
-        except queue.Full:
-            self.logger.warning(f"[LLMRayActor] Results queue is full. Skipping insert. {request.is_eval=}.")
-            return 0
-
-    def _generate_batch(
+    def _tool_generation_loop(
         self,
-        prompts: List[List[int]],
+        timeout: float = 60.0,
+    ):
+        while True:
+            try:
+                request = self.prompt_queue.get(timeout=timeout)
+                outputs = self.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
+                result = self._process_outputs(outputs, dataset_index=dataset_index, training_step=training_step)
+                if request.is_eval:
+                    self.eval_results_queue.put(result)
+                else:
+                    self.results_queue.put(result)
+            except queue.Empty:
+                pass
+            except queue.Full:
+                self.logger.warning("Results queue is full, discarding result.")
+            if self.weight_update_available():
+                break
+
+    def _run_generation_loop(
+        self,
+        timeout: float = 60.0,
+    ):
+        """Run generation loop using LLMEngine directly."""
+        while True:
+            # Check for weight updates first
+            if self.weight_update_available():
+                break
+                
+            # Try to get request from queue
+            try:
+                request = self.prompt_queue.get(timeout=timeout)
+            except queue.Empty:
+                self.logger.warning("[LLMRayActor] No request in the queue to process. Continuing.")
+                continue
+                
+            # Process the request
+            prompts = request.prompts
+            
+            # Add all regular requests to the engine
+            for i, prompt in enumerate(prompts):
+                request_id = f"batch_{request.training_step}_{i}"
+                tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
+                self.llm_engine.add_request(request_id, tokens_prompt, request.generation_config)
+            
+            # Run the engine event loop until all requests are finished
+            outputs = []
+            while self.llm_engine.has_unfinished_requests():
+                step_outputs = self.llm_engine.step()
+                for output in step_outputs:
+                    if output.finished:
+                        outputs.append(output)                
+            
+            # Sort and process regular outputs
+            outputs.sort(key=lambda x: int(x.request_id.split('_')[-1]))
+            result = self._process_outputs(
+                outputs, 
+                dataset_index=request.dataset_index, 
+                training_step=request.training_step
+            )
+            try:
+                if request.is_eval:
+                    self.eval_results_queue.put(result, timeout=10)
+                else:
+                    self.results_queue.put(result, timeout=10)
+            except queue.Full:
+                self.logger.warning("Results queue is full, discarding result.")
+            
+    def process_from_queue(
+        self,
         sampling_params,
+        eval_sampling_params=None,
+        eval_freq=None,
+        num_training_steps=None,
+        resume_training_step=1,
+        timeout=0.1,
+    ):
+        """Process a single element from the queue."""
+        if self.tool_use:
+            self.run_tool_generation_loop(sampling_params, eval_sampling_params, eval_freq, timeout):
+        else:
+            self._run_generation_loop(sampling_params, eval_sampling_params, eval_freq, timeout):
+>>>>>>> ca31dd02 (Now, we use a generation loop.)
+
+    def _process_outputs(
+        self,
+        outputs: List[Any],  # List of vllm.RequestOutput objects
         dataset_index: Optional[List[int]] = None,
         training_step: Optional[int] = None,
     ) -> GenerationResult:
-        """Generate responses for a batch of prompts."""
-        outputs = self.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
-
+        """Process vLLM RequestOutputs into GenerationResult format."""
         # Process outputs
         response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
         finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
