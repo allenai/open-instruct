@@ -2285,7 +2285,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     if eval_dataset is None:
         eval_batch = None
     else:
-        eval_dataset_indices = list(range(num_eval_samples))
+        eval_dataset_indices = list(range(min(num_eval_samples, len(eval_dataset))))
         eval_batch = next_batch(eval_dataset_indices, eval_dataset)
     reward_fn = make_reward_fn(args)
 
