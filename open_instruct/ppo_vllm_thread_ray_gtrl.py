@@ -30,6 +30,8 @@
 # isort: off
 import os
 
+# We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
+# https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     import deepspeed
