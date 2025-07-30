@@ -37,7 +37,6 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
-import vllm
 
 
 @dataclasses.dataclass
@@ -61,7 +60,6 @@ class GenerationResult:
     masks: List[List[int]]
     request_info: RequestInfo
     dataset_index: Optional[List[int]] = None
-    training_step: Optional[int] = None
 
 
 @dataclasses.dataclass
@@ -155,6 +153,32 @@ def init_process_group(
 
 
 @ray.remote
+class ActorManager:
+    """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
+
+    def __init__(self, eval_freq: int):
+        self._should_update_weights = False
+        self._current_training_step = 0
+        self._eval_freq = eval_freq
+
+    def set_training_step(self, training_step: int):
+        """Set the current training step."""
+        self._current_training_step = training_step
+
+    def should_evaluate(self) -> bool:
+        """Check if evaluation should be performed."""
+        return self._current_training_step % self._eval_freq == 0
+
+    def set_should_update_weights(self, should_update: bool):
+        """Set whether weights should be updated."""
+        self._should_update_weights = should_update
+
+    def should_update_weights(self) -> bool:
+        """Check if weights should be updated."""
+        return self._should_update_weights
+
+
+@ray.remote
 class LLMRayActor:
     def __init__(
         self,
@@ -164,6 +188,7 @@ class LLMRayActor:
         prompt_queue=None,
         results_queue=None,
         eval_results_queue=None,
+        actor_manager=None,
         **kwargs,
     ):
         noset_visible_devices = kwargs.pop("noset_visible_devices")
@@ -202,6 +227,7 @@ class LLMRayActor:
         self.eval_results_queue = eval_results_queue
         self.tool_use = tool_use
         self.logger = logging.getLogger(__name__)
+        self.actor_manager = actor_manager
 
     def _tool_generation_loop(
         self,
@@ -232,23 +258,31 @@ class LLMRayActor:
             # Check for weight updates first
             if self.weight_update_available():
                 break
-                
+
             # Try to get request from queue
             try:
                 request = self.prompt_queue.get(timeout=timeout)
             except queue.Empty:
                 self.logger.warning("[LLMRayActor] No request in the queue to process. Continuing.")
                 continue
-                
+
             # Process the request
             prompts = request.prompts
-            
+
             # Add all regular requests to the engine
             for i, prompt in enumerate(prompts):
                 request_id = f"batch_{request.training_step}_{i}"
                 tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
                 self.llm_engine.add_request(request_id, tokens_prompt, request.generation_config)
-            
+
+            # Add eval requests if needed
+            has_eval = request.eval_prompts and request.training_step % eval_freq == 0
+            if has_eval:
+                for i, prompt in enumerate(request.eval_prompts):
+                    request_id = f"eval_{request.training_step}_{i}"
+                    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
+                    self.llm_engine.add_request(request_id, tokens_prompt, eval_sampling_params)
+
             # Run the engine event loop until all requests are finished
             outputs = []
             while self.llm_engine.has_unfinished_requests():
@@ -274,25 +308,18 @@ class LLMRayActor:
             
     def process_from_queue(
         self,
-        sampling_params,
-        eval_sampling_params=None,
-        eval_freq=None,
-        num_training_steps=None,
-        resume_training_step=1,
         timeout=0.1,
     ):
         """Process a single element from the queue."""
         if self.tool_use:
-            self.run_tool_generation_loop(sampling_params, eval_sampling_params, eval_freq, timeout):
+            self.run_tool_generation_loop(timeout)
         else:
-            self._run_generation_loop(sampling_params, eval_sampling_params, eval_freq, timeout):
->>>>>>> ca31dd02 (Now, we use a generation loop.)
+            self._run_generation_loop(timeout):
 
     def _process_outputs(
         self,
         outputs: List[Any],  # List of vllm.RequestOutput objects
         dataset_index: Optional[List[int]] = None,
-        training_step: Optional[int] = None,
     ) -> GenerationResult:
         """Process vLLM RequestOutputs into GenerationResult format."""
         # Process outputs
@@ -331,7 +358,6 @@ class LLMRayActor:
             masks=masks,
             request_info=request_info,
             dataset_index=dataset_index,
-            training_step=training_step,
         )
 
     def init_process_group(
@@ -346,7 +372,9 @@ class LLMRayActor:
         return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        return self.llm_engine.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
+        return self.llm_engine.collective_rpc(
+            "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
+        )
 
     def reset_prefix_cache(self):
         self.llm_engine.reset_prefix_cache()

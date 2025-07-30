@@ -1309,7 +1309,6 @@ def accumulate_inference_batches(
         masks=combined_masks,
         request_info=combined_request_info,
         dataset_index=None,  # Not meaningful for combined result
-        training_step=training_step,
     )
 
     # Note: We don't have dataset_indices here, but they're not needed for the returned batch
