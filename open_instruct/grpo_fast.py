@@ -1866,7 +1866,24 @@ def sync_weights_and_prepare_prompts(
         if args.async_steps > 0
         else "🔄 Loading weights using shared memory"
     ):
-        ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
+        ray_refs = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+        ray_futures = [ref.future() for ref in ray_refs]
+        pbar = tqdm(
+            total=len(ray_futures),
+            desc=f"[Main Thread] Broadcasting weights to vLLM engines at training step {training_step}",
+            bar_format="{l_bar}{bar}{r_bar}\n",
+        )
+        try:
+            while not all(future.done() for future in ray_futures):
+                try:
+                    for future in futures.as_completed(ray_futures, timeout=10):
+                        pbar.update(1)
+                except TimeoutError:
+                    logger.warning(
+                        f"[Main Thread] Timeout while waiting for weight broadcast at training step {training_step}"
+                    )
+        finally:
+            pbar.close()
 
     split_and_insert_batch(
         batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]
