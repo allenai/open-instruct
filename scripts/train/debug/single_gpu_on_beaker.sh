@@ -2,7 +2,7 @@
 
 # Get the Beaker username to construct the image name
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="$1"
+BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
