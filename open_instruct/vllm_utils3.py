@@ -156,18 +156,8 @@ def init_process_group(
 class ActorManager:
     """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
 
-    def __init__(self, eval_freq: int):
+    def __init__(self):
         self._should_update_weights = False
-        self._current_training_step = 0
-        self._eval_freq = eval_freq
-
-    def set_training_step(self, training_step: int):
-        """Set the current training step."""
-        self._current_training_step = training_step
-
-    def should_evaluate(self) -> bool:
-        """Check if evaluation should be performed."""
-        return self._current_training_step % self._eval_freq == 0
 
     def set_should_update_weights(self, should_update: bool):
         """Set whether weights should be updated."""
@@ -234,6 +224,9 @@ class LLMRayActor:
         timeout: float = 60.0,
     ):
         while True:
+            if self.actor_manager.should_update_weights():
+                self.logger.info("[LLMRayActor] Actor manager signaled to update weights. Exiting generation loop.")
+                return
             try:
                 request = self.prompt_queue.get(timeout=timeout)
                 outputs = self.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
@@ -246,8 +239,6 @@ class LLMRayActor:
                 pass
             except queue.Full:
                 self.logger.warning("Results queue is full, discarding result.")
-            if self.weight_update_available():
-                break
 
     def _run_generation_loop(
         self,
@@ -255,11 +246,9 @@ class LLMRayActor:
     ):
         """Run generation loop using LLMEngine directly."""
         while True:
-            # Check for weight updates first
-            if self.weight_update_available():
-                break
-
-            # Try to get request from queue
+            if self.actor_manager.should_update_weights():
+                self.logger.info("[LLMRayActor] Actor manager signaled to update weights. Exiting generation loop.")
+                return
             try:
                 request = self.prompt_queue.get(timeout=timeout)
             except queue.Empty:
