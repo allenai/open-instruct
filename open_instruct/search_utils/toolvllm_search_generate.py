@@ -6,9 +6,10 @@ export MCP_TRANSPORT=StreamableHttpTransport
 export S2_API_KEY=xxxx
 python open_instruct/search_utils/toolvllm_search_generate.py \
     --json_path surveyqa_test.json \
-    --model_path /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/rl_rag_surveyqa_search_mcp_reward__1__1753233122_checkpoints_step_1000 \
-    --output_dir /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/rl_rag_surveyqa_search_mcp_reward__1__1753233122_checkpoints_step_1000/surveyqa_test \
+    --model_path /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/rl_rag_surveyqa_samples_search_mcp_reward_longer__1__1753400976_checkpoints/step_100 \
+    --output_dir /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/rl_rag_surveyqa_samples_search_mcp_reward_longer__1__1753400976_checkpoints/step_100/surveyqa_test_offset_3000 \
     --max_eval_samples 1000 \
+    --offset 3000 \
     --num_docs 3 \
     --search_api_endpoint https://api.semanticscholar.org/graph/v1/snippet/search \
     --use_mcp_tool
@@ -148,7 +149,7 @@ def main():
         ds = Dataset.from_list(ds)
 
         if args.max_eval_samples > -1 and args.max_eval_samples < len(ds):
-            ds = ds.select(range(args.offset, args.offset + args.max_eval_samples))
+            ds = ds.select(range(args.offset, max(args.offset + args.max_eval_samples, len(ds))))
 
         prompt_token_ids = [tokenizer.apply_chat_template(data["messages"], add_generation_prompt=True) for data in ds]
 
