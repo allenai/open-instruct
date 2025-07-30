@@ -1,7 +1,8 @@
 exp_name="grpo_orz_olmo3_fullmix"
+EXP_NAME=${EXP_NAME:-${exp_name}}
 
 # full integration mix
-dataset_mix="saurabh5/rlvr_acecoder 56878 hamishivi/rlvr_orz_math_57k_collected 56878 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2 56878 allenai/IF_multi_constraints_upto5 56878"
+dataset_mix="saurabh5/rlvr_acecoder_filtered 63033 hamishivi/rlvr_orz_math_57k_collected 56878 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2 56878 allenai/IF_multi_constraints_upto5 56878"
 # math only mix
 # dataset_mix="hamishivi/rlvr_orz_math_57k_collected 56878"
 
@@ -20,31 +21,39 @@ evals="minerva_math::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,a
 # micro anneals
 # model_name_or_path="/weka/oe-adapt-default/allennlp/deletable_checkpoint/michaeln/olmo3_microanneal-finemath-643cecc4_step4769-hf"
 # model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round1-100B-olmo3_7b_with-reasoning-anneal-12T-3d39e871/step47684-hf"
-# model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/kylel/baseline-olmo2_7b-928646-anneal-100B-dolma2-round1-alldressed-17b22b3a/step47684-hf"
+
+model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/kylel/baseline-olmo2_7b-928646-anneal-100B-dolma2-round1-alldressed-17b22b3a/step47684-hf"
+gs_model_name="olmo3-midtraining-round1"
+
 # model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round2-100B-olmo3_7b_with-reasoning-anneal-12T-53f443c7/step47684-hf"
-model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round3-webround2-100B-olmo3_7b_with-reasoning-anneal-12T-302b1ae8/step47684-hf"
-gs_model_name="olmo3-midtraining-round3"
+# model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round3-webround2-100B-olmo3_7b_with-reasoning-anneal-12T-302b1ae8/step47684-hf"
+# gs_model_name="olmo3-midtraining-round3"
+
 # cluster
 cluster=ai2/augusta-google-1
 # cluster=ai2/jupiter-cirrascale-2
 
+NUM_GPUS=${NUM_GPUS:-8}
+
 python mason.py \
-    --task_name ${exp_name} \
+    --task_name ${EXP_NAME} \
     --cluster ${cluster} \
     --workspace ai2/tulu-thinker \
     --priority high \
     --pure_docker_mode \
     --image michaeln/open_instruct_dev_uv_olmo3 \
     --preemptible \
-    --num_nodes 1 \
+    --num_nodes 2 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+    --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gs_model_name $gs_model_name \
+    --gpus ${NUM_GPUS} \
     --budget ai2/oe-adapt \
-    --gpus 8 -- \
+    -- \
 source configs/beaker_configs/ray_node_setup.sh \&\& \
 source configs/beaker_configs/code_api_setup.sh \&\& \
 python open_instruct/grpo_fast.py \
-    --exp_name ${exp_name} \
+    --exp_name ${EXP_NAME} \
     --beta 0.0 \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 64 \
@@ -66,15 +75,16 @@ python open_instruct/grpo_fast.py \
     --stop_strings "</answer>" \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 256000 \
+    --total_episodes 512000 \
     --deepspeed_stage 2 \
-    --num_learners_per_node 4 \
-    --vllm_num_engines 4 \
+    --num_learners_per_node 8 \
+    --vllm_num_engines 8 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
     --num_evals 5 \
     --save_freq 100 \
+    --checkpoint_state_freq 50 \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \
@@ -83,4 +93,4 @@ python open_instruct/grpo_fast.py \
     --oe_eval_max_length 8192 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --oe_eval_tasks ${evals} \
-    --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo3_auto
+    --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo3_auto $@
