@@ -1411,7 +1411,7 @@ def data_preparation_thread(
             scores = scores[non_zero_gradient_index]
             responses = [result.responses[i] for i in non_zero_gradient_index]
             masks = [result.masks[i] for i in non_zero_gradient_index]
-            batch = batch.slice(non_zero_gradient_index.tolist())
+            batch = batch[non_zero_gradient_index.tolist()]
             finish_reasons = [result.finish_reasons[i] for i in non_zero_gradient_index]
             if args.mask_truncated_completions:
                 stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
@@ -1419,7 +1419,7 @@ def data_preparation_thread(
                 advantages = advantages[stop_idxes]
                 responses = [responses[i] for i in stop_idxes]
                 masks = [masks[i] for i in stop_idxes]
-                batch = batch.slice(stop_idxes.tolist())
+                batch = batch[stop_idxes.tolist()]
                 finish_reasons = [finish_reasons[i] for i in stop_idxes]
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
@@ -1568,10 +1568,8 @@ def data_preparation_thread(
                 "scores": scores.tolist(),
                 "finish_reasons": finish_reasons,
                 "responses": responses,
-                "queries": batch.queries,
-                "ground_truths": batch.ground_truths,
-                "datasets": batch.datasets,
                 "training_step": training_step,
+                **asdict(batch),  # Unpack all batch fields
                 **reward_metrics,
             }
             os.makedirs(args.output_dir, exist_ok=True)
@@ -1784,12 +1782,33 @@ def create_model_and_optimizer(
     return policy_group, vllm_engines, tool_objects, resume_training_step, episode
 
 
+def create_generation_configs(args: Args, tool_objects: dict):
+    """Create generation configs for training and evaluation."""
+    stop_strings = [] if args.stop_strings is None else args.stop_strings
+    if args.tool_use:
+        stop_strings += list(tool_objects.keys())
+    generation_config = SamplingParams(
+        temperature=args.temperature,
+        top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
+        max_tokens=args.response_length,
+        include_stop_str_in_output=True,
+        skip_special_tokens=False,
+        n=args.num_samples_per_prompt_rollout,
+        stop=stop_strings,
+    )
+    eval_generation_config = generation_config.clone()
+    eval_generation_config.temperature = 0.0
+    eval_generation_config.n = 1
+    return generation_config, eval_generation_config
+
+
 def split_and_insert_batch(
     batch: Batch,
     training_step,
     vllm_num_engines,
-    pending_queries_map: Optional[PendingQueriesMap],
+    pending_queries_map: PendingQueriesMap,
     param_prompt_Q,
+    generation_config,
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
@@ -1799,21 +1818,19 @@ def split_and_insert_batch(
         start_idx = batch_idx * inference_batch_size
         end_idx = start_idx + inference_batch_size if batch_idx < vllm_num_engines - 1 else len(batch.queries)
 
-        batch_queries = batch.queries[start_idx:end_idx]
-        batch_ground_truths = batch.ground_truths[start_idx:end_idx]
-        batch_datasets = batch.datasets[start_idx:end_idx]
-        batch_dataset_indices = batch.indices[start_idx:end_idx]
+        sub_batch = batch[start_idx:end_idx]
 
         # Store prompts in the map using thread-safe insert_many
-        pending_queries_map.insert_many(batch_dataset_indices, batch_queries, batch_ground_truths, batch_datasets)
+        pending_queries_map.insert_many(sub_batch.indices, sub_batch.queries, sub_batch.ground_truths, sub_batch.datasets)
 
         # Use PromptRequest for Ray queue with batch-specific dataset_index list
         param_prompt_Q.put(
             PromptRequest(
-                prompts=batch_queries,
+                prompts=sub_batch.queries,
                 training_step=training_step,
-                dataset_index=batch_dataset_indices,
+                dataset_index=sub_batch.indices,
                 is_eval=is_eval,
+                generation_config=generation_config,
             )
         )
 
@@ -1826,6 +1843,7 @@ def sync_weights_and_prepare_prompts(
     policy_group: ModelGroup,
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q: ray_queue.Queue,
+    tool_objects: dict,
 ) -> Batch:
     """Sync weights and send the next batch of prompts to vLLM."""
     dataset_indices = next(iter_dataloader)
@@ -1837,7 +1855,8 @@ def sync_weights_and_prepare_prompts(
     ):
         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
-    split_and_insert_batch(batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q)
+    generation_config, _ = create_generation_configs(args, tool_objects)
+    split_and_insert_batch(batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_config)
 
     return batch
 
@@ -1858,8 +1877,6 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
 
 def generate_thread(
     vllm_engines,
-    generation_config,
-    eval_generation_config,
     local_eval_freq,
     num_training_steps,
     resume_training_step,
@@ -1872,7 +1889,7 @@ def generate_thread(
         with Timer("🔥 Generation time"):
             engine_refs = [
                 engine.process_from_queue.remote(
-                    generation_config, eval_generation_config, num_training_steps, resume_training_step, timeout=0.1
+                    num_training_steps, resume_training_step, timeout=0.1
                 )
                 for engine in vllm_engines
             ]
@@ -2263,21 +2280,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     )
 
     # Setup training
-    stop_strings = [] if args.stop_strings is None else args.stop_strings
-    if args.tool_use:
-        stop_strings += list(tool_objects.keys())
-    generation_config = SamplingParams(
-        temperature=args.temperature,
-        top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
-        max_tokens=args.response_length,
-        include_stop_str_in_output=True,
-        skip_special_tokens=False,
-        n=args.num_samples_per_prompt_rollout,
-        stop=stop_strings,
-    )
-    eval_generation_config = generation_config.clone()
-    eval_generation_config.temperature = 0.0
-    eval_generation_config.n = 1
+    generation_config, eval_generation_config = create_generation_configs(args, tool_objects)
 
     train_dataset_idxs = np.arange(len(train_dataset))
     iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
@@ -2319,8 +2322,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         target=generate_thread,
         args=(
             vllm_engines,
-            generation_config,
-            eval_generation_config,
             args.local_eval_freq,
             args.num_training_steps,
             resume_training_step,
@@ -2335,27 +2336,31 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     for _ in range(args.async_steps):
         dataset_indices = next(iter_dataloader)
         batch = next_batch(dataset_indices, train_dataset)
+        gen_config, _ = create_generation_configs(args, tool_objects)
         split_and_insert_batch(
             batch,
             1,  # training_step
             args.vllm_num_engines,
             pending_queries_map,
             param_prompt_Q,
+            gen_config,
         )
     num_total_tokens = 0
     start_time = time.time()
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         batch = sync_weights_and_prepare_prompts(
-            training_step, args, train_dataset, iter_dataloader, policy_group, pending_queries_map, param_prompt_Q
+            training_step, args, train_dataset, iter_dataloader, policy_group, pending_queries_map, param_prompt_Q, tool_objects
         )
         if training_step % args.local_eval_freq == 0 and eval_batch is not None:
+            _, eval_gen_config = create_generation_configs(args, tool_objects)
             split_and_insert_batch(
                 eval_batch,
                 training_step,
                 args.vllm_num_engines,
                 eval_pending_queries_map,
                 param_prompt_Q,
+                eval_gen_config,
                 is_eval=True,
             )
 

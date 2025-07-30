@@ -56,14 +56,32 @@ class Batch:
     datasets: List[str]
     indices: Optional[List[int]]
 
-    def slice(self, indices: List[int]) -> "Batch":
-        """Return a new Batch with elements at the specified indices."""
-        return Batch(
-            queries=[self.queries[i] for i in indices],
-            ground_truths=[self.ground_truths[i] for i in indices],
-            datasets=[self.datasets[i] for i in indices],
-            indices=[self.indices[i] for i in indices] if self.indices else None,
-        )
+    def __getitem__(self, key: Union[slice, int, List[int]]) -> "Batch":
+        """Enable indexing and slicing: batch[5], batch[start:end], or batch[[1,3,5]]."""
+        if isinstance(key, slice):
+            # Handle slice object: batch[start:end]
+            return Batch(
+                queries=self.queries[key],
+                ground_truths=self.ground_truths[key],
+                datasets=self.datasets[key],
+                indices=self.indices[key] if self.indices else None,
+            )
+        elif isinstance(key, int):
+            # Handle single index: batch[5]
+            return Batch(
+                queries=[self.queries[key]],
+                ground_truths=[self.ground_truths[key]],
+                datasets=[self.datasets[key]],
+                indices=[self.indices[key]] if self.indices else None,
+            )
+        else:
+            # Handle list of indices: batch[[1,3,5]]
+            return Batch(
+                queries=[self.queries[i] for i in key],
+                ground_truths=[self.ground_truths[i] for i in key],
+                datasets=[self.datasets[i] for i in key],
+                indices=[self.indices[i] for i in key] if self.indices else None,
+            )
 
 
 @dataclass

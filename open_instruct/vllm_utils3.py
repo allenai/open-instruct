@@ -24,6 +24,7 @@ from typing import Any, List, Optional, Union
 import ray
 import torch
 import torch.distributed
+import vllm
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed.distributed_c10d import (
@@ -69,6 +70,7 @@ class PromptRequest:
     training_step: Optional[int] = None
     dataset_index: Optional[List[int]] = None
     is_eval: bool = False
+    generation_config: vllm.SamplingParams
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -199,16 +201,15 @@ class LLMRayActor:
         return self.llm.generate(*args, **kwargs)
 
     def process_from_queue(
-        self, sampling_params, eval_sampling_params=None, num_training_steps=None, resume_training_step=1, timeout=0.1
+        self, num_training_steps=None, resume_training_step=1, timeout=0.1
     ):
         """Process a single element from the queue."""
         try:
             request = self.prompt_queue.get(timeout=timeout)
-            # Use eval_sampling_params for eval requests, otherwise use sampling_params
-            params_to_use = eval_sampling_params if request.is_eval and eval_sampling_params else sampling_params
+            # Use generation_config from the request
             result = self._generate_batch(
                 request.prompts,
-                params_to_use,
+                request.generation_config,
                 dataset_index=request.dataset_index,
                 training_step=request.training_step,
             )
