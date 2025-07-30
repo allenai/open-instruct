@@ -168,33 +168,33 @@ TULU_3_UNSEEN=(
 # New default task suites
 NEXT_MODEL_DEV=(
     # Knowledge
-    "mmlu:cot::hamish_zs_reasoning"
+    "mmlu:cot::olmo3:thinker"           # OLD: "mmlu:cot::hamish_zs_reasoning"
     "popqa::hamish_zs_reasoning"
     # "simpleqa::tulu-thinker"
-    
+
     # Reasoning
-    "bbh:cot::hamish_zs_reasoning"
-    "gpqa:0shot_cot::hamish_zs_reasoning"
+    "bbh:cot::olmo3:thinker"            # OLD: "bbh:cot::hamish_zs_reasoning"
+    "gpqa:0shot_cot::olmo3:thinker"     # OLD: "gpqa:0shot_cot::hamish_zs_reasoning"
     "zebralogic::hamish_zs_reasoning"
-    "agi_eval_english:0shot_cot::hamish_zs_reasoning"
-    
+    "agi_eval:0shot_cot::olmo3:thinker" # OLD: "agi_eval_english:0shot_cot::hamish_zs_reasoning"
+
     # Math
     # [faster] minerva_math_500::hamish_zs_reasoning
     "minerva_math::hamish_zs_reasoning"
     "gsm8k::zs_cot_latex"
     "omega:0-shot-chat"
-    "aime::hamish_zs_reasoning"
-    # [maybe unseen] aime::hamish_zs_reasoning_2025
+    "aime:zs_cot_r1::pass_at_32_2024_temp1"
+    "aime:zs_cot_r1::pass_at_32_2025_temp1"  # OLD: "aime::hamish_zs_reasoning"
     
     # Coding
-    "codex_humanevalplus:0-shot-chat::tulu-thinker"
-    "mbppplus:0-shot-chat::tulu-thinker"
-    "livecodebench_codegeneration::tulu-thinker"
-    # [TODO not merged] codeeditorbench
+    "codex_humanevalplus::olmo3:thinker"            # OLD: "codex_humanevalplus:0-shot-chat::tulu-thinker"
+    "mbppplus::olmo3:thinker"                       # OLD: "mbppplus:0-shot-chat::tulu-thinker"
+    "livecodebench_codegeneration::olmo3:thinker"   # OLD: "livecodebench_codegeneration::tulu-thinker"
+    # [TODO not merged] codeeditorbench - requires separate server
     # [TODO, maybe] cruxeval
     
     # Chat / IF / Vibes
-    # "alpaca_eval_v3::hamish_zs_reasoning"
+    "alpaca_eval_v3::hamish_zs_reasoning"
     "ifeval::hamish_zs_reasoning"
     # [expensive, multi-turn all versions] multiturn_alpacaeval::tulu
     # [expensive, typos vibes] styled_evals::tulu
@@ -268,7 +268,7 @@ for TASK in "${TASKS[@]}"; do
     if [ "$EVALUATE_ON_WEKA" == "true" ]; then
         python oe-eval-internal/oe_eval/launch.py \
             --model "$MODEL_NAME" \
-            --beaker-workspace "ai2/tulu-3-results" \
+            --beaker-workspace "ai2/olmo-instruct" \
             --beaker-budget ai2/oe-adapt \
             --task "$TASK" \
             $MODEL_TYPE \

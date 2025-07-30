@@ -14,7 +14,7 @@ import yaml
 def adjust_batch_size(task_spec, model_name, batch_size_reduction):
     "Adjust batch size using heuristics that are good for A100-size GPUs."
     reduce_by_2 = ["13B"]
-    reduce_by_4 = ["30B", "34B", "40B", "65B", "70B", "70b", "72B", "72b"]
+    reduce_by_4 = ["30B", "34B", "40B", "65B", "70B", "70b", "72B", "72b", "32B"]
     # If not given, choose a value based on the model name.
     if batch_size_reduction is None:
         if any([pattern in model_name for pattern in reduce_by_2]):
@@ -35,7 +35,7 @@ def adjust_batch_size(task_spec, model_name, batch_size_reduction):
 
 def adjust_gpus(task_spec, experiment_group, model_name, gpu_multiplier):
     "Adjust GPU count using heuristics that are good for A100-size GPUs."
-    medium = ["30B", "34B"]
+    medium = ["30B", "34B", "32B"]
     large = ["40B", "65B", "70B", "70b", "72B", "72b"]
     # If not given, choose a value based on model name.
     if gpu_multiplier is None:
