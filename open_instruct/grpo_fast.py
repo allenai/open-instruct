@@ -1340,8 +1340,7 @@ def data_preparation_thread(
                 break  # Success, exit retry loop
             except Empty:
                 logger.warning(
-                    f"[Data Preparation Thread] Timeout waiting for inference results "
-                    f"at training step {training_step}"
+                    f"[Data Preparation Thread] Timeout waiting for inference results at training step {training_step}"
                 )
 
         # ------------------------------------------------------------------------------------------------
@@ -2352,7 +2351,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         batch = sync_weights_and_prepare_prompts(
-            training_step, args, train_dataset, iter_dataloader, policy_group, pending_queries_map, param_prompt_Q, generation_configs
+            training_step,
+            args,
+            train_dataset,
+            iter_dataloader,
+            policy_group,
+            pending_queries_map,
+            param_prompt_Q,
+            generation_configs,
         )
         if training_step % args.local_eval_freq == 0 and eval_batch is not None:
             split_and_insert_batch(
