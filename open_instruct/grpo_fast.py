@@ -1255,7 +1255,7 @@ def accumulate_inference_batches(
     for i in tqdm(
         range(args.vllm_num_engines),
         total=args.vllm_num_engines,
-        desc=f"Accumulating results from {args.vllm_num_engines} engines",
+        desc=f"Accumulating results from {args.vllm_num_engines} engines ({timeout=})",
         bar_format="{l_bar}{bar}{r_bar}\n",
     ):
         result = inference_results_Q.get(timeout=timeout)
@@ -1355,17 +1355,10 @@ def data_preparation_thread(
 ):
     for training_step in range(1, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
-        while True:
-            try:
-                with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-                    result, batch = accumulate_inference_batches(
-                        inference_results_Q, pending_queries_map, args, training_step, generation_config, timeout=20.0
-                    )
-                break  # Success, exit retry loop
-            except Empty:
-                logger.warning(
-                    f"[Data Preparation Thread] Timeout waiting for inference results at training step {training_step}"
-                )
+        with Timer("🚀 [Data Preparation Thread] Getting response ids"):
+            result, batch = accumulate_inference_batches(
+                inference_results_Q, pending_queries_map, args, training_step, generation_config
+            )
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -1953,9 +1946,6 @@ def generate_thread(vllm_engines, local_eval_freq, num_training_steps, resume_tr
                     processed_results.append(future.result())
                     pbar.update(1)
             num_processed = sum(int(result) for result in processed_results)
-            logger.info(
-                f"[Generate Thread] 🚀 Processed results from all vLLM engines ({num_processed}/{len(processed_results)} processed batches)"
-            )
         if num_processed == 0:
             # If no batches were processed, sleep for a short time to avoid busy waiting
             time.sleep(1)
