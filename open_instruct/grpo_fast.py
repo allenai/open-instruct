@@ -49,6 +49,7 @@ import json
 import logging
 import math
 import os
+import queue
 import shutil
 import socket
 import threading
@@ -1850,12 +1851,14 @@ def generate_thread(
     num_training_steps,
     resume_training_step,
     stop_event,
+    generate_metrics_Q,
 ):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
 
     while not stop_event.is_set():
-        with Timer("🔥 Generation time"):
+        timer = Timer("🔥 Generation time")
+        with timer:
             engine_refs = [
                 engine.process_from_queue.remote(
                     generation_config,
@@ -1884,6 +1887,8 @@ def generate_thread(
         if num_processed == 0:
             # If no batches were processed, sleep for a short time to avoid busy waiting
             time.sleep(1)
+        else:
+            generate_metrics_Q.put({"generation_time": timer.duration})
 
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
@@ -2300,6 +2305,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     packing_thread.start()
 
     # Create and start the generate thread
+    generate_metrics_Q = Queue(maxsize=args.async_steps)
     stop_generate_event = threading.Event()
     generation_thread = threading.Thread(
         target=generate_thread,
@@ -2311,6 +2317,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             args.num_training_steps,
             resume_training_step,
             stop_generate_event,
+            generate_metrics_Q,
         ),
     )
     generation_thread.start()
@@ -2357,6 +2364,17 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         )
         if collated_data is None:
             continue
+
+        try:
+            generate_metrics = generate_metrics_Q.get_nowait()
+        except queue.Empty:
+            logging.info("[Main Thread] didn't get generation metrics")
+
+        import pdb
+
+        pdb.set_trace()
+
+        data_thread_metrics = {**data_thread_metrics, **generate_metrics}
 
         one_training_step(
             args,
