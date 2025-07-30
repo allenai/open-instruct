@@ -67,7 +67,7 @@ class PromptRequest:
     """Container for prompt requests to vLLM."""
 
     prompts: List[List[int]]
-    generation_config: vllm.SamplingParams
+    sampling_params: vllm.SamplingParams
     training_step: Optional[int] = None
     dataset_index: Optional[List[int]] = None
     is_eval: bool = False
@@ -219,18 +219,19 @@ class LLMRayActor:
         self.logger = logging.getLogger(__name__)
         self.actor_manager = actor_manager
 
-    def _tool_generation_loop(
-        self,
-        timeout: float = 60.0,
-    ):
+    def _tool_generation_loop(self, timeout: float = 60.0):
         while True:
             if self.actor_manager.should_update_weights():
                 self.logger.info("[LLMRayActor] Actor manager signaled to update weights. Exiting generation loop.")
                 return
             try:
                 request = self.prompt_queue.get(timeout=timeout)
-                outputs = self.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
-                result = self._process_outputs(outputs, dataset_index=dataset_index, training_step=training_step)
+                outputs = self.generate(
+                    sampling_params=request.sampling_params, prompt_token_ids=request.prompts, use_tqdm=False
+                )
+                result = self._process_outputs(
+                    outputs, dataset_index=request.dataset_index, training_step=request.training_step
+                )
                 if request.is_eval:
                     self.eval_results_queue.put(result)
                 else:
@@ -240,10 +241,7 @@ class LLMRayActor:
             except queue.Full:
                 self.logger.warning("Results queue is full, discarding result.")
 
-    def _run_generation_loop(
-        self,
-        timeout: float = 60.0,
-    ):
+    def _run_generation_loop(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly."""
         while True:
             if self.actor_manager.should_update_weights():
@@ -262,15 +260,7 @@ class LLMRayActor:
             for i, prompt in enumerate(prompts):
                 request_id = f"batch_{request.training_step}_{i}"
                 tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
-                self.llm_engine.add_request(request_id, tokens_prompt, request.generation_config)
-
-            # Add eval requests if needed
-            has_eval = request.eval_prompts and request.training_step % eval_freq == 0
-            if has_eval:
-                for i, prompt in enumerate(request.eval_prompts):
-                    request_id = f"eval_{request.training_step}_{i}"
-                    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
-                    self.llm_engine.add_request(request_id, tokens_prompt, eval_sampling_params)
+                self.llm_engine.add_request(request_id, tokens_prompt, request.sampling_params)
 
             # Run the engine event loop until all requests are finished
             outputs = []
@@ -278,14 +268,12 @@ class LLMRayActor:
                 step_outputs = self.llm_engine.step()
                 for output in step_outputs:
                     if output.finished:
-                        outputs.append(output)                
-            
+                        outputs.append(output)
+
             # Sort and process regular outputs
-            outputs.sort(key=lambda x: int(x.request_id.split('_')[-1]))
+            outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
             result = self._process_outputs(
-                outputs, 
-                dataset_index=request.dataset_index, 
-                training_step=request.training_step
+                outputs, dataset_index=request.dataset_index, training_step=request.training_step
             )
             try:
                 if request.is_eval:
@@ -294,16 +282,13 @@ class LLMRayActor:
                     self.results_queue.put(result, timeout=10)
             except queue.Full:
                 self.logger.warning("Results queue is full, discarding result.")
-            
-    def process_from_queue(
-        self,
-        timeout=0.1,
-    ):
+
+    def process_from_queue(self, timeout=0.1):
         """Process a single element from the queue."""
         if self.tool_use:
             self.run_tool_generation_loop(timeout)
         else:
-            self._run_generation_loop(timeout):
+            self._run_generation_loop(timeout)
 
     def _process_outputs(
         self,
