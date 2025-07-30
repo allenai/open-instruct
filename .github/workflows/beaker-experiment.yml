@@ -15,6 +15,8 @@ on:
     # But only on pushes to main.
     branches: [main]
 
+  merge_group:
+
   # Adding a comment to trigger a run.
   workflow_dispatch:  # This allows us to manually trigger a build through the GitHub UI.
   # pull_request:
