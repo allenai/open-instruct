@@ -200,9 +200,7 @@ class LLMRayActor:
     def generate(self, *args, **kwargs):
         return self.llm.generate(*args, **kwargs)
 
-    def process_from_queue(
-        self, num_training_steps=None, resume_training_step=1, timeout=0.1
-    ):
+    def process_from_queue(self, num_training_steps=None, resume_training_step=1, timeout=0.1):
         """Process a single element from the queue."""
         try:
             request = self.prompt_queue.get(timeout=timeout)

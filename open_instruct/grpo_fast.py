@@ -1821,7 +1821,9 @@ def split_and_insert_batch(
         sub_batch = batch[start_idx:end_idx]
 
         # Store prompts in the map using thread-safe insert_many
-        pending_queries_map.insert_many(sub_batch.indices, sub_batch.queries, sub_batch.ground_truths, sub_batch.datasets)
+        pending_queries_map.insert_many(
+            sub_batch.indices, sub_batch.queries, sub_batch.ground_truths, sub_batch.datasets
+        )
 
         # Use PromptRequest for Ray queue with batch-specific dataset_index list
         param_prompt_Q.put(
@@ -1856,7 +1858,9 @@ def sync_weights_and_prepare_prompts(
         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
     generation_config, _ = create_generation_configs(args, tool_objects)
-    split_and_insert_batch(batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_config)
+    split_and_insert_batch(
+        batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_config
+    )
 
     return batch
 
@@ -1875,22 +1879,14 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
         return collated_data, data_thread_metrics, num_total_tokens
 
 
-def generate_thread(
-    vllm_engines,
-    local_eval_freq,
-    num_training_steps,
-    resume_training_step,
-    stop_event,
-):
+def generate_thread(vllm_engines, local_eval_freq, num_training_steps, resume_training_step, stop_event):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
 
     while not stop_event.is_set():
         with Timer("🔥 Generation time"):
             engine_refs = [
-                engine.process_from_queue.remote(
-                    num_training_steps, resume_training_step, timeout=0.1
-                )
+                engine.process_from_queue.remote(num_training_steps, resume_training_step, timeout=0.1)
                 for engine in vllm_engines
             ]
             engine_futures = [ref.future() for ref in engine_refs]
@@ -2320,13 +2316,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     stop_generate_event = threading.Event()
     generation_thread = threading.Thread(
         target=generate_thread,
-        args=(
-            vllm_engines,
-            args.local_eval_freq,
-            args.num_training_steps,
-            resume_training_step,
-            stop_generate_event,
-        ),
+        args=(vllm_engines, args.local_eval_freq, args.num_training_steps, resume_training_step, stop_generate_event),
     )
     generation_thread.start()
     logger.info("======== ✅ generation thread starts =========")
@@ -2350,7 +2340,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         batch = sync_weights_and_prepare_prompts(
-            training_step, args, train_dataset, iter_dataloader, policy_group, pending_queries_map, param_prompt_Q, tool_objects
+            training_step,
+            args,
+            train_dataset,
+            iter_dataloader,
+            policy_group,
+            pending_queries_map,
+            param_prompt_Q,
+            tool_objects,
         )
         if training_step % args.local_eval_freq == 0 and eval_batch is not None:
             _, eval_gen_config = create_generation_configs(args, tool_objects)
