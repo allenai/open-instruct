@@ -214,22 +214,17 @@ class LLMRayActor:
                 dataset_index=request.dataset_index,
                 training_step=request.training_step,
             )
-            while True:
-                try:
-                    if request.is_eval:
-                        self.eval_results_queue.put(result, timeout=1)
-                    else:
-                        self.results_queue.put(result, timeout=1)
-                    break  # Successfully put result, exit the retry loop
-                except queue.Full:
-                    self.logger.warning(
-                        f"[LLMRayActor] Results queue is full. Retrying to put results after 1 seconds. {request.is_eval=}."
-                    )
-                    time.sleep(1)
+            if request.is_eval:
+                self.eval_results_queue.put(result, timeout=1)
+            else:
+                self.results_queue.put(result, timeout=1)
             return 1  # Successfully processed a request
         except queue.Empty:
             self.logger.warning("[LLMRayActor] No request in the queue to process. Returning from process_from_queue.")
             return 0  # No request to process
+        except queue.Full:
+            self.logger.warning(f"[LLMRayActor] Results queue is full. Skipping insert. {request.is_eval=}.")
+            return 0
 
     def _generate_batch(
         self,
