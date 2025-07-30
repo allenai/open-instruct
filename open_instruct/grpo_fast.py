@@ -1335,7 +1335,7 @@ def data_preparation_thread(
             try:
                 with Timer("🚀 [Data Preparation Thread] Getting response ids"):
                     result, batch = accumulate_inference_batches(
-                        inference_results_Q, pending_queries_map, args, training_step, generation_config, timeout=10.0
+                        inference_results_Q, pending_queries_map, args, training_step, generation_config, timeout=20.0
                     )
                 break  # Success, exit retry loop
             except Empty:
@@ -1868,22 +1868,13 @@ def sync_weights_and_prepare_prompts(
     ):
         ray_refs = [m.broadcast_to_vllm.remote() for m in policy_group.models]
         ray_futures = [ref.future() for ref in ray_refs]
-        pbar = tqdm(
+        for future in tqdm(
+            futures.as_completed(ray_futures),
             total=len(ray_futures),
             desc=f"[Main Thread] Broadcasting weights to vLLM engines at training step {training_step}",
             bar_format="{l_bar}{bar}{r_bar}\n",
-        )
-        try:
-            while not all(future.done() for future in ray_futures):
-                try:
-                    for future in futures.as_completed(ray_futures, timeout=10):
-                        pbar.update(1)
-                except TimeoutError:
-                    logger.warning(
-                        f"[Main Thread] Timeout while waiting for weight broadcast at training step {training_step}"
-                    )
-        finally:
-            pbar.close()
+        ):
+            pass
 
     split_and_insert_batch(
         batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]
@@ -2288,7 +2279,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     queue_size = (args.async_steps + 1) * args.vllm_num_engines
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
-    evaluation_inference_results_Q = ray_queue.Queue(maxsize=1)
+    evaluation_inference_results_Q = ray_queue.Queue(maxsize=args.vllm_num_engines)
 
     policy_group, vllm_engines, tool_objects, resume_training_step, episode = create_model_and_optimizer(
         args,
