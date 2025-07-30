@@ -1324,16 +1324,13 @@ def data_preparation_thread(
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
+    generation_config,
 ):
     for training_step in range(1, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            # Create a simple config object with n for accumulate_inference_batches
-            class SimpleConfig:
-                n = args.num_samples_per_prompt_rollout
-
             result, batch = accumulate_inference_batches(
-                inference_results_Q, pending_queries_map, args, training_step, SimpleConfig()
+                inference_results_Q, pending_queries_map, args, training_step, generation_config
             )
 
         # ------------------------------------------------------------------------------------------------
@@ -2311,6 +2308,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             args,
             tokenizer,
             args.num_training_steps,
+            generation_config,
         ),
     )
     packing_thread.start()
