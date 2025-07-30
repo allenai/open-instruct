@@ -1331,10 +1331,18 @@ def data_preparation_thread(
 ):
     for training_step in range(1, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
-        with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            result, batch = accumulate_inference_batches(
-                inference_results_Q, pending_queries_map, args, training_step, generation_config
-            )
+        while True:
+            try:
+                with Timer("🚀 [Data Preparation Thread] Getting response ids"):
+                    result, batch = accumulate_inference_batches(
+                        inference_results_Q, pending_queries_map, args, training_step, generation_config, timeout=10.0
+                    )
+                break  # Success, exit retry loop
+            except Empty:
+                logger.warning(
+                    f"[Data Preparation Thread] Timeout waiting for inference results "
+                    f"at training step {training_step}"
+                )
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -1849,6 +1857,7 @@ def sync_weights_and_prepare_prompts(
     policy_group: ModelGroup,
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q: ray_queue.Queue,
+    generation_configs: Dict[str, SamplingParams],
 ) -> Batch:
     """Sync weights and send the next batch of prompts to vLLM."""
     dataset_indices = next(iter_dataloader)
@@ -1860,7 +1869,6 @@ def sync_weights_and_prepare_prompts(
     ):
         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
-    generation_configs = create_generation_configs(args)
     split_and_insert_batch(
         batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]
     )
@@ -2331,31 +2339,29 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     for _ in range(args.async_steps):
         dataset_indices = next(iter_dataloader)
         batch = next_batch(dataset_indices, train_dataset)
-        gen_configs = create_generation_configs(args)
         split_and_insert_batch(
             batch,
             1,  # training_step
             args.vllm_num_engines,
             pending_queries_map,
             param_prompt_Q,
-            gen_configs["train"],
+            generation_configs["train"],
         )
     num_total_tokens = 0
     start_time = time.time()
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         batch = sync_weights_and_prepare_prompts(
-            training_step, args, train_dataset, iter_dataloader, policy_group, pending_queries_map, param_prompt_Q
+            training_step, args, train_dataset, iter_dataloader, policy_group, pending_queries_map, param_prompt_Q, generation_configs
         )
         if training_step % args.local_eval_freq == 0 and eval_batch is not None:
-            gen_configs = create_generation_configs(args)
             split_and_insert_batch(
                 eval_batch,
                 training_step,
                 args.vllm_num_engines,
                 eval_pending_queries_map,
                 param_prompt_Q,
-                gen_configs["eval"],
+                generation_configs["eval"],
                 is_eval=True,
             )
 
