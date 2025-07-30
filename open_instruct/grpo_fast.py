@@ -124,6 +124,7 @@ from open_instruct.utils import (
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
+    ray_get_with_progress,
     sync_gs_bucket,
 )
 from open_instruct.vllm_utils3 import (
@@ -145,28 +146,6 @@ logger = logging.getLogger(__name__)
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
-
-
-def ray_get_with_progress(ray_refs: List[ray.ObjectRef], desc: str = "Processing") -> List[Any]:
-    """Execute ray.get() with a progress bar using futures.
-
-    Args:
-        ray_refs: List of ray object references
-        desc: Description for the progress bar
-
-    Returns:
-        List of results in the same order as ray_refs
-    """
-    ray_futures = [ref.future() for ref in ray_refs]
-    results = [None] * len(ray_refs)
-
-    for future in tqdm(
-        futures.as_completed(ray_futures), total=len(ray_futures), desc=desc, bar_format="{l_bar}{bar}{r_bar}\n"
-    ):
-        idx = ray_futures.index(future)
-        results[idx] = future.result()
-
-    return results
 
 
 @dataclass
@@ -1890,14 +1869,9 @@ def sync_weights_and_prepare_prompts(
         else "🔄 Loading weights using shared memory"
     ):
         ray_refs = [m.broadcast_to_vllm.remote() for m in policy_group.models]
-        ray_futures = [ref.future() for ref in ray_refs]
-        for future in tqdm(
-            futures.as_completed(ray_futures),
-            total=len(ray_futures),
-            desc=f"[Main Thread] Broadcasting weights to vLLM engines at training step {training_step}",
-            bar_format="{l_bar}{bar}{r_bar}\n",
-        ):
-            pass
+        ray_get_with_progress(
+            ray_refs, desc=f"[Main Thread] Broadcasting weights to vLLM engines at training step {training_step}"
+        )
 
     split_and_insert_batch(
         batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]
@@ -2324,8 +2298,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     # Setup training
     generation_configs = create_generation_configs(args)
-    generation_config = generation_configs["train"]
-    eval_generation_config = generation_configs["eval"]
 
     train_dataset_idxs = np.arange(len(train_dataset))
     iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
@@ -2356,7 +2328,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             args,
             tokenizer,
             args.num_training_steps,
-            generation_config,
+            generation_configs["train"],
         ),
     )
     packing_thread.start()
@@ -2442,7 +2414,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             episode,
             writer,
             eval_pending_queries_map,
-            eval_generation_config,
+            generation_configs["eval"],
         )
 
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
