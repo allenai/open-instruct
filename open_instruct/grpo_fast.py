@@ -147,6 +147,28 @@ api = HfApi()
 INVALID_LOGPROB = 1.0
 
 
+def ray_get_with_progress(ray_refs: List[ray.ObjectRef], desc: str = "Processing") -> List[Any]:
+    """Execute ray.get() with a progress bar using futures.
+
+    Args:
+        ray_refs: List of ray object references
+        desc: Description for the progress bar
+
+    Returns:
+        List of results in the same order as ray_refs
+    """
+    ray_futures = [ref.future() for ref in ray_refs]
+    results = [None] * len(ray_refs)
+
+    for future in tqdm(
+        futures.as_completed(ray_futures), total=len(ray_futures), desc=desc, bar_format="{l_bar}{bar}{r_bar}\n"
+    ):
+        idx = ray_futures.index(future)
+        results[idx] = future.result()
+
+    return results
+
+
 @dataclass
 class Args:
     # Dataset
@@ -723,7 +745,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 rank=0,
                 group_name="openrlhf",
             )
-            ray.get(refs)
+            ray_get_with_progress(refs, desc="Initializing process group")
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
@@ -770,9 +792,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
         if torch.distributed.get_rank() == 0:
-            ray.get(refss)
+            ray_get_with_progress(refss, desc="Broadcasting weights to vLLM")
         if self.args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
-            ray.get(cache_reset_refs)
+            ray_get_with_progress(cache_reset_refs, desc="Resetting vLLM prefix cache")
 
     def update_ref_policy(self):
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
@@ -1102,7 +1124,9 @@ class ModelGroup:
         ).remote(world_size, 0, 0, None, None)
 
         self.models.append(master_policy)
-        master_addr, master_port = ray.get(master_policy.get_master_addr_port.remote())
+        master_addr, master_port = ray_get_with_progress(
+            [master_policy.get_master_addr_port.remote()], desc="Getting master address"
+        )[0]
 
         def get_bundle_index(rank, num_gpus_per_node):
             """given a rank and a list of num_gpus_per_node, return the index of the bundle that the rank belongs to"""
@@ -1724,7 +1748,7 @@ def create_model_and_optimizer(
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
-    ray.get(pg.ready())
+    ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
     inits = []
     policy_group = ModelGroup(pg, PolicyTrainerRayProcess, args.num_learners_per_node, args.single_gpu_mode)
     wandb_url = wandb.run.get_url() if args.with_tracking else None
@@ -1781,17 +1805,23 @@ def create_model_and_optimizer(
         eval_results_queue=evaluation_inference_results_Q,
     )
 
-    resume_training_step = ray.get(inits)[0] + 1
+    resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     logger.info("======== ✅ all models and vLLM engines initialized =========")
 
-    ray.get([m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models])
+    ray_get_with_progress(
+        [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
+        desc="Setting up model update group",
+    )
     logger.info("======== ✅ model update group setup successfully =========")
 
     if resume_training_step > 1:
         logger.info(f"Resuming training from step {resume_training_step}... Broadcasting weights to vLLM engines.")
         with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
-            ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
+            ray_get_with_progress(
+                [m.broadcast_to_vllm.remote() for m in policy_group.models],
+                desc="Broadcasting weights to vLLM engines",
+            )
 
     return policy_group, vllm_engines, tool_objects, resume_training_step, episode
 
@@ -1886,7 +1916,12 @@ def sync_weights_and_prepare_prompts(
 def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
     """Get the packed sequences with advantages from the packing thread."""
     with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
-        packed_data = packed_sequences_Q.get()
+        while True:
+            try:
+                packed_data = packed_sequences_Q.get(timeout=30.0)
+                break
+            except Empty:
+                logger.warning("[Main Thread] Timeout waiting for packed sequences. Retrying...")
         data_thread_metrics = packed_data["metrics"]
         B = packed_data["B"]
         collated_data = packed_data["collated_data"]
@@ -1947,13 +1982,14 @@ def one_training_step(
     """Train the model for one step."""
     update_ref_policy_future = []
     with Timer("[Main Thread] 🗡️ Training"):
-        metrics_list: List[dict[str, float]] = ray.get(
+        metrics_list: List[dict[str, float]] = ray_get_with_progress(
             [
                 policy_group.models[i].train.remote(
                     **collated_data[i], pad_token_id=tokenizer.pad_token_id, num_mini_batches=args.num_mini_batches
                 )
                 for i in range(args.world_size)
-            ]
+            ],
+            desc=f"Running training step {training_step}",
         )
         if (
             args.ref_policy_update_freq is not None
@@ -1989,11 +2025,12 @@ def one_training_step(
                 checkpoint_dir = f"{args.output_dir}_checkpoints"
                 step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
                 logger.info(f"Saving model at step {training_step} to {step_dir}")
-                ray.get(
+                ray_get_with_progress(
                     [
                         policy_group.models[i].save_model.remote(step_dir, chat_template_name, tokenizer)
                         for i in range(args.world_size)
-                    ]
+                    ],
+                    desc=f"Saving model at step {training_step}",
                 )
                 if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                     leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
@@ -2008,17 +2045,18 @@ def one_training_step(
         ):
             with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
                 client_state = {"training_step": training_step}
-                ray.get(
+                ray_get_with_progress(
                     [
                         policy_group.models[i].save_checkpoint_state.remote(args.checkpoint_state_dir, client_state)
                         for i in range(args.world_size)
-                    ]
+                    ],
+                    desc=f"Saving checkpoint state at step {training_step}",
                 )
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
     if len(update_ref_policy_future) > 0:
         with Timer("[Main Thread] 🔃 Updating reference policy"):
-            ray.get(update_ref_policy_future)
+            ray_get_with_progress(update_ref_policy_future, desc="Updating reference policy")
 
     return average_metrics
 
@@ -2110,11 +2148,12 @@ def save_final_model(
     """Save the final model and launch evaluation jobs if configured."""
     logger.info(f"Saving final model at step {training_step} to {args.output_dir}")
     with Timer("[Main Thread] 🗡️ Saving model"):
-        ray.get(
+        ray_get_with_progress(
             [
                 policy_group.models[i].save_model.remote(args.output_dir, chat_template_name, tokenizer)
                 for i in range(args.world_size)
-            ]
+            ],
+            desc="Saving final model",
         )
         if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
             leaderboard_name = args.hf_repo_revision
@@ -2314,7 +2353,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     reward_fn = make_reward_fn(args)
 
     # Verify none of the engines crashed during initialization.
-    ray.get([engine.ready.remote() for engine in vllm_engines])
+    ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], desc="Verifying vLLM engines are ready")
 
     logger.info("======== ✅ data preparation thread starts =========")
     packing_thread = threading.Thread(
