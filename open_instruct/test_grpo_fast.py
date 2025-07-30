@@ -191,7 +191,16 @@ class TestGrpoFastBase(unittest.TestCase):
         self._ray_queues.extend([param_prompt_Q, inference_results_Q])
 
         batch = model_utils.Batch(queries=queries, ground_truths=ground_truths, datasets=datasets, indices=indices)
-        grpo_fast.split_and_insert_batch(batch, training_step, num_engines, pending_queries_map, param_prompt_Q)
+
+        # Create a mock generation_config for testing
+        from unittest.mock import MagicMock
+
+        mock_generation_config = MagicMock()
+        mock_generation_config.n = 4
+
+        grpo_fast.split_and_insert_batch(
+            batch, training_step, num_engines, pending_queries_map, param_prompt_Q, mock_generation_config
+        )
 
         return param_prompt_Q, inference_results_Q, pending_queries_map
 

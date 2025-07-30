@@ -411,6 +411,9 @@ class Args:
         assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
             "At least one reward must be applied!"
         )
+        # Initialize stop_strings if None
+        if self.stop_strings is None:
+            self.stop_strings = []
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
@@ -1738,11 +1741,15 @@ def create_model_and_optimizer(
                     number_documents_to_search=args.number_documents_to_search,
                 )
                 tool_objects[tool.end_str] = tool
+                # Add tool end string to stop_strings
+                args.stop_strings.append(tool.end_str)
             elif tool.lower() == "code":
                 from open_instruct.tool_utils.tool_vllm import PythonCodeTool
 
                 tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
                 tool_objects[tool.end_str] = tool
+                # Add tool end string to stop_strings
+                args.stop_strings.append(tool.end_str)
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 
@@ -1782,11 +1789,8 @@ def create_model_and_optimizer(
     return policy_group, vllm_engines, tool_objects, resume_training_step, episode
 
 
-def create_generation_configs(args: Args, tool_objects: dict):
+def create_generation_configs(args: Args):
     """Create generation configs for training and evaluation."""
-    stop_strings = [] if args.stop_strings is None else args.stop_strings
-    if args.tool_use:
-        stop_strings += list(tool_objects.keys())
     generation_config = SamplingParams(
         temperature=args.temperature,
         top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
@@ -1794,12 +1798,12 @@ def create_generation_configs(args: Args, tool_objects: dict):
         include_stop_str_in_output=True,
         skip_special_tokens=False,
         n=args.num_samples_per_prompt_rollout,
-        stop=stop_strings,
+        stop=args.stop_strings,
     )
     eval_generation_config = generation_config.clone()
     eval_generation_config.temperature = 0.0
     eval_generation_config.n = 1
-    return generation_config, eval_generation_config
+    return {"train": generation_config, "eval": eval_generation_config}
 
 
 def split_and_insert_batch(
@@ -1829,10 +1833,10 @@ def split_and_insert_batch(
         param_prompt_Q.put(
             PromptRequest(
                 prompts=sub_batch.queries,
+                generation_config=generation_config,
                 training_step=training_step,
                 dataset_index=sub_batch.indices,
                 is_eval=is_eval,
-                generation_config=generation_config,
             )
         )
 
@@ -1845,7 +1849,6 @@ def sync_weights_and_prepare_prompts(
     policy_group: ModelGroup,
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q: ray_queue.Queue,
-    tool_objects: dict,
 ) -> Batch:
     """Sync weights and send the next batch of prompts to vLLM."""
     dataset_indices = next(iter_dataloader)
@@ -1857,9 +1860,9 @@ def sync_weights_and_prepare_prompts(
     ):
         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
-    generation_config, _ = create_generation_configs(args, tool_objects)
+    generation_configs = create_generation_configs(args)
     split_and_insert_batch(
-        batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_config
+        batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]
     )
 
     return batch
@@ -2276,7 +2279,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     )
 
     # Setup training
-    generation_config, eval_generation_config = create_generation_configs(args, tool_objects)
+    generation_configs = create_generation_configs(args)
+    generation_config = generation_configs["train"]
+    eval_generation_config = generation_configs["eval"]
 
     train_dataset_idxs = np.arange(len(train_dataset))
     iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
@@ -2326,38 +2331,31 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     for _ in range(args.async_steps):
         dataset_indices = next(iter_dataloader)
         batch = next_batch(dataset_indices, train_dataset)
-        gen_config, _ = create_generation_configs(args, tool_objects)
+        gen_configs = create_generation_configs(args)
         split_and_insert_batch(
             batch,
             1,  # training_step
             args.vllm_num_engines,
             pending_queries_map,
             param_prompt_Q,
-            gen_config,
+            gen_configs["train"],
         )
     num_total_tokens = 0
     start_time = time.time()
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         batch = sync_weights_and_prepare_prompts(
-            training_step,
-            args,
-            train_dataset,
-            iter_dataloader,
-            policy_group,
-            pending_queries_map,
-            param_prompt_Q,
-            tool_objects,
+            training_step, args, train_dataset, iter_dataloader, policy_group, pending_queries_map, param_prompt_Q
         )
         if training_step % args.local_eval_freq == 0 and eval_batch is not None:
-            _, eval_gen_config = create_generation_configs(args, tool_objects)
+            gen_configs = create_generation_configs(args)
             split_and_insert_batch(
                 eval_batch,
                 training_step,
                 args.vllm_num_engines,
                 eval_pending_queries_map,
                 param_prompt_Q,
-                eval_gen_config,
+                gen_configs["eval"],
                 is_eval=True,
             )
 

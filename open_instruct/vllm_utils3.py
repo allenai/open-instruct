@@ -67,10 +67,10 @@ class PromptRequest:
     """Container for prompt requests to vLLM."""
 
     prompts: List[List[int]]
+    generation_config: vllm.SamplingParams
     training_step: Optional[int] = None
     dataset_index: Optional[List[int]] = None
     is_eval: bool = False
-    generation_config: vllm.SamplingParams
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
