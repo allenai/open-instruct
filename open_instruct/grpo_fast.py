@@ -1843,7 +1843,7 @@ def load_data_from_packing_thread(
 
         if stop_generate_event.is_set():
             logger.error("[Main Thread] generate thread has died, cancelling")
-            raise Exception("Generate thread died")
+            raise Exception("Generate thread has an exception and died, see error above")
 
         packed_data = packed_sequences_Q.get()
         data_thread_metrics = packed_data["metrics"]
@@ -1870,39 +1870,43 @@ def generate_thread(
 
     while not stop_event.is_set():
         with Timer("🔥 Generation time"):
-            try:
-                engine_refs = [
-                    engine.process_from_queue.remote(
-                        generation_config,
-                        eval_generation_config,
-                        local_eval_freq,
-                        num_training_steps,
-                        resume_training_step,
-                        timeout=0.1,
-                    )
-                    for engine in vllm_engines
-                ]
-                engine_futures = [ref.future() for ref in engine_refs]
-                processed_results = []
-                with tqdm(
-                    total=len(vllm_engines),
-                    desc="[Generate Thread] Waiting for vLLM engines to process",
-                    bar_format="{l_bar}{bar}{r_bar}\n",
-                ) as pbar:
-                    for future in futures.as_completed(engine_futures):
-                        processed_results.append(future.result())
-                        pbar.update(1)
-                num_processed = sum(int(result) for result in processed_results)
-                logger.info(
-                    f"[Generate Thread] 🚀 Processed results from all vLLM engines ({num_processed}/{len(processed_results)} processed batches)"
+            engine_refs = [
+                engine.process_from_queue.remote(
+                    generation_config,
+                    eval_generation_config,
+                    local_eval_freq,
+                    num_training_steps,
+                    resume_training_step,
+                    timeout=0.1,
                 )
-            except Exception as e:
-                logger.error(f"[Generate Thread] Error processing from queue: {e}")
-                stop_event.set()
+                for engine in vllm_engines
+            ]
+            engine_futures = [ref.future() for ref in engine_refs]
+            processed_results = []
+            with tqdm(
+                total=len(vllm_engines),
+                desc="[Generate Thread] Waiting for vLLM engines to process",
+                bar_format="{l_bar}{bar}{r_bar}\n",
+            ) as pbar:
+                for future in futures.as_completed(engine_futures):
+                    try:
+                        if future.exception() is not None:
+                            raise future.exception()
+                        processed_results.append(future.result())
+                    except Exception as e:
+                        logger.error(f"[Generate Thread] Error processing from queue: {e}")
+                        stop_event.set()
+                        break
+                    finally:
+                        pbar.update(1)
+            num_processed = sum(int(result) for result in processed_results)
+            logger.info(
+                f"[Generate Thread] 🚀 Processed results from all vLLM engines ({num_processed}/{len(processed_results)} processed batches)"
+            )
 
-        if num_processed == 0:
-            # If no batches were processed, sleep for a short time to avoid busy waiting
-            time.sleep(1)
+    if num_processed == 0:
+        # If no batches were processed, sleep for a short time to avoid busy waiting
+        time.sleep(1)
 
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
@@ -2371,9 +2375,19 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
         # The generate_thread is now handling vLLM processing asynchronously
 
-        collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
-            packed_sequences_Q, num_total_tokens, stop_generate_event
-        )
+        try:
+            collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
+                packed_sequences_Q, num_total_tokens, stop_generate_event
+            )
+        except Exception as e:
+            cleanup_training_resources(
+                stop_generate_event,
+                [packing_thread, generation_thread],
+                [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
+            )
+            raise Exception(e)
+
+        # Ai2 logic: we use /output to store the artifacts of the job, so we
         if collated_data is None:
             continue
 
