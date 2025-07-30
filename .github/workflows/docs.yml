@@ -5,6 +5,7 @@ on:
       - master 
       - main
       - benchmark
+  merge_group:
 permissions:
   contents: write
 jobs:
