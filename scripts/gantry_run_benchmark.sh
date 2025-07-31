@@ -12,7 +12,7 @@ if [[ "$1" =~ ^[0-9]+$ ]]; then
   response_length="$1"
   shift
 fi
-
+num_prompts=13686
 gantry run \
        --name open_instruct-benchmark_generators \
        --workspace ai2/oe-eval \
