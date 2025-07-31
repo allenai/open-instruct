@@ -250,9 +250,7 @@ class LLMRayActor:
                 outputs = self.generate(
                     sampling_params=request.sampling_params, prompt_token_ids=request.prompts, use_tqdm=False
                 )
-                result = self._process_outputs(
-                    outputs, dataset_index=request.dataset_index
-                )
+                result = self._process_outputs(outputs, dataset_index=request.dataset_index)
                 if request.is_eval:
                     self.eval_results_queue.put(result)
                 else:
@@ -293,9 +291,7 @@ class LLMRayActor:
 
             # Sort and process regular outputs
             outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
-            result = self._process_outputs(
-                outputs, dataset_index=request.dataset_index
-            )
+            result = self._process_outputs(outputs, dataset_index=request.dataset_index)
             try:
                 if request.is_eval:
                     self.eval_results_queue.put(result, timeout=10)
