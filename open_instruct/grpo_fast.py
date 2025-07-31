@@ -1335,7 +1335,9 @@ def create_thread_error_wrapper(
                 return func(*args, **kwargs)
             except Exception as e:
                 logger.error(f"🚨 Fatal error in {func.__name__}: {e}", exc_info=True)
-                cleanup_training_resources(stop_event, threads, queues, actor_manager)
+                # Signal main thread to stop instead of calling cleanup directly
+                stop_event.set()
+                logger.info(f"[{func.__name__}] Set stop event due to error")
 
         return wrapper
 
@@ -2252,7 +2254,10 @@ def cleanup_judge_clients():
         logger.info("✅ LLM judge clients cleaned up")
     except Exception as cleanup_error:
         logger.warning(f"Error during LLM judge cleanup: {cleanup_error}")
+
+    logger.info("Shutting down Ray...")
     ray.shutdown()
+    logger.info("✅ Ray shut down")
 
 
 def cleanup_training_resources(
@@ -2273,6 +2278,11 @@ def cleanup_training_resources(
             logger.warning(f"Thread {thread.name} did not stop cleanly")
         else:
             logger.info(f"======== ✅ Thread {thread.name} ends =========")
+
+    # Signal all actors to stop
+    logger.info("Signaling all actors to stop...")
+    ray.get(actor_manager.set_should_stop.remote(True))
+    logger.info("✅ Signaled all actors to stop")
 
     # Shutdown Ray queues to prevent semaphore leaks
     logger.info("Shutting down Ray queues...")
@@ -2391,6 +2401,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     num_total_tokens = 0
     start_time = time.time()
     for training_step in range(resume_training_step, args.num_training_steps + 1):
+        if stop_generate_event.is_set():
+            logger.warning("⚠️ Stop event detected, breaking out of training loop")
+            break
+
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         batch = sync_weights_and_prepare_prompts(
             training_step,
