@@ -30,25 +30,25 @@ pip install -r requirements.txt
 pip install -e .
 python -m nltk.downloader punkt' \
        -- python -m open_instruct.benchmark_generators \
-    --model_name_or_path "hamishivi/qwen2_5_openthoughts2" \
-    --tokenizer_name_or_path "hamishivi/qwen2_5_openthoughts2" \
-    --dataset_mixer_list "hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2" "1.0" \
-    --dataset_mixer_list_splits "train" \
+       --model_name_or_path "Qwen/Qwen2.5-7B" \
+       --dataset_mixer_list "saurabh5/rlvr_acecoder_filtered ${num_prompts} saurabh5/synthetic2-rlvr-code-compressed ${num_prompts}" \
+       --dataset_mixer_list_splits "train" \
+       --dataset_mixer_eval_list "saurabh5/rlvr_acecoder_filtered 8 saurabh5/synthetic2-rlvr-code-compressed 8" \
     --max_token_length 10240 \
     --max_prompt_token_length 2048 \
     --temperature 1.0 \
     --response_length "$response_length" \
-    --vllm_top_p 0.9 \
-    --num_unique_prompts_rollout 32 \
-    --num_samples_per_prompt_rollout 16 \
+    --stop_strings "</answer>" \
+    --non_stop_penalty False \
+    --temperature 1.0 \
+    --num_unique_prompts_rollout 16 \
+    --num_samples_per_prompt_rollout 256 \
     --vllm_num_engines 1 \
+    --vllm_enable_prefix_caching \
     --vllm_tensor_parallel_size 1 \
     --vllm_gpu_memory_utilization 0.9 \
-    --pack_length 40000 \
+    --pack_length 70000 \
     --chat_template_name "tulu_thinker" \
     --trust_remote_code \
     --seed 42 \
-    --dataset_local_cache_dir "benchmark_cache" \
-    --dataset_cache_mode "local" \
-    --dataset_transform_fn "rlvr_tokenize_v1" "rlvr_filter_v1" \
-    "$@"
+    --dataset_skip_cache True
