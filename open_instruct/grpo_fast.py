@@ -128,6 +128,7 @@ from open_instruct.utils import (
     sync_gs_bucket,
 )
 from open_instruct.vllm_utils3 import (
+    ActorManager,
     GenerationResult,
     LLMRayActor,
     PromptRequest,
@@ -1755,6 +1756,9 @@ def create_model_and_optimizer(
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 
+    # Create ActorManager to coordinate weight updates
+    actor_manager = ActorManager.remote()
+
     # Create vLLM engines with queues
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
@@ -1774,6 +1778,7 @@ def create_model_and_optimizer(
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
+        actor_manager=actor_manager,
     )
 
     resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
@@ -1794,7 +1799,7 @@ def create_model_and_optimizer(
                 desc="Broadcasting weights to vLLM engines",
             )
 
-    return policy_group, vllm_engines, tool_objects, resume_training_step, episode
+    return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager
 
 
 def create_generation_configs(args: Args):
@@ -1858,19 +1863,19 @@ def sync_weights_and_prepare_prompts(
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q: ray_queue.Queue,
     generation_configs: Dict[str, SamplingParams],
+    actor_manager: ActorManager,
 ) -> Batch:
     """Sync weights and send the next batch of prompts to vLLM."""
     dataset_indices = next(iter_dataloader)
     batch = next_batch(dataset_indices, train_dataset)
+
     with Timer(
         "[Main Thread] 🔄 Loading weights using shared memory"
         if args.async_steps > 0
         else "🔄 Loading weights using shared memory"
     ):
-        ray_refs = [m.broadcast_to_vllm.remote() for m in policy_group.models]
-        ray_get_with_progress(
-            ray_refs, desc=f"[Main Thread] Broadcasting weights to vLLM engines at training step {training_step}"
-        )
+        # Use ActorManager to coordinate weight sync
+        ray.get(actor_manager.sync_weights.remote(policy_group.models, training_step))
 
     split_and_insert_batch(
         batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]
@@ -1904,10 +1909,7 @@ def generate_thread(vllm_engines, local_eval_freq, num_training_steps, resume_tr
 
     while not stop_event.is_set():
         with Timer("🔥 Generation time"):
-            engine_refs = [
-                engine.process_from_queue.remote(timeout=0.1)
-                for engine in vllm_engines
-            ]
+            engine_refs = [engine.process_from_queue.remote(timeout=0.1) for engine in vllm_engines]
             engine_futures = [ref.future() for ref in engine_refs]
             processed_results = []
             with tqdm(
@@ -2283,16 +2285,18 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
     evaluation_inference_results_Q = ray_queue.Queue(maxsize=args.vllm_num_engines)
 
-    policy_group, vllm_engines, tool_objects, resume_training_step, episode = create_model_and_optimizer(
-        args,
-        tc,
-        model_config,
-        beaker_config,
-        wandb_url,
-        tokenizer,
-        inference_results_Q,
-        param_prompt_Q,
-        evaluation_inference_results_Q,
+    policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
+        create_model_and_optimizer(
+            args,
+            tc,
+            model_config,
+            beaker_config,
+            wandb_url,
+            tokenizer,
+            inference_results_Q,
+            param_prompt_Q,
+            evaluation_inference_results_Q,
+        )
     )
 
     # Setup training
@@ -2367,6 +2371,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             pending_queries_map,
             param_prompt_Q,
             generation_configs,
+            actor_manager,
         )
         if training_step % args.local_eval_freq == 0 and eval_batch is not None:
             split_and_insert_batch(

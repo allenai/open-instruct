@@ -38,6 +38,8 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
+from open_instruct import utils
+
 
 @dataclasses.dataclass
 class RequestInfo:
@@ -166,6 +168,25 @@ class ActorManager:
     def should_update_weights(self) -> bool:
         """Check if weights should be updated."""
         return self._should_update_weights
+
+    def sync_weights(self, policy_models: List[Any], training_step: int) -> None:
+        """Synchronize weights by coordinating the update process.
+
+        Args:
+            policy_models: List of policy model objects with broadcast_to_vllm method
+            training_step: Current training step for logging
+        """
+        # Signal actors to stop processing new batches
+        self._should_update_weights = True
+
+        # Broadcast weights from policy models to vLLM engines
+        ray_refs = [m.broadcast_to_vllm.remote() for m in policy_models]
+        utils.ray_get_with_progress(
+            ray_refs, desc=f"[Main Thread] Broadcasting weights to vLLM engines at training step {training_step}"
+        )
+
+        # Signal actors that weight update is complete
+        self._should_update_weights = False
 
 
 @ray.remote
@@ -399,6 +420,7 @@ def create_vllm_engines(
     prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
+    actor_manager=None,
 ) -> list[LLMRayActor]:
     import vllm
 
@@ -481,6 +503,7 @@ def create_vllm_engines(
                 prompt_queue=prompt_queue,
                 results_queue=results_queue,
                 eval_results_queue=eval_results_queue,
+                actor_manager=actor_manager,
                 **additional_kwargs,
             )
         )
