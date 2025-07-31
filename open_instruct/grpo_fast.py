@@ -1905,7 +1905,7 @@ def generate_thread(vllm_engines, local_eval_freq, num_training_steps, resume_tr
     while not stop_event.is_set():
         with Timer("🔥 Generation time"):
             engine_refs = [
-                engine.process_from_queue.remote(num_training_steps, resume_training_step, timeout=0.1)
+                engine.process_from_queue.remote(timeout=0.1)
                 for engine in vllm_engines
             ]
             engine_futures = [ref.future() for ref in engine_refs]
