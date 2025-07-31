@@ -159,15 +159,15 @@ class ActorManager:
     """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
 
     def __init__(self):
-        self._should_update_weights = False
+        self._should_stop = False
 
-    def set_should_update_weights(self, should_update: bool):
-        """Set whether weights should be updated."""
-        self._should_update_weights = should_update
+    def set_should_stop(self, should_stop: bool):
+        """Set whether actors should stop processing."""
+        self._should_stop = should_stop
 
-    def should_update_weights(self) -> bool:
-        """Check if weights should be updated."""
-        return self._should_update_weights
+    def should_stop(self) -> bool:
+        """Check if actors should stop processing."""
+        return self._should_stop
 
     def sync_weights(self, policy_models: List[Any], training_step: int) -> None:
         """Synchronize weights by coordinating the update process.
@@ -177,7 +177,7 @@ class ActorManager:
             training_step: Current training step for logging
         """
         # Signal actors to stop processing new batches
-        self._should_update_weights = True
+        self._should_stop = True
 
         # Broadcast weights from policy models to vLLM engines
         ray_refs = [m.broadcast_to_vllm.remote() for m in policy_models]
@@ -186,7 +186,7 @@ class ActorManager:
         )
 
         # Signal actors that weight update is complete
-        self._should_update_weights = False
+        self._should_stop = False
 
 
 @ray.remote
@@ -242,12 +242,12 @@ class LLMRayActor:
 
     def _tool_generation_loop(self, timeout: float = 60.0):
         while True:
-            if ray.get(self.actor_manager.should_update_weights.remote()):
-                self.logger.info("[LLMRayActor] Actor manager signaled to update weights. Exiting generation loop.")
+            if ray.get(self.actor_manager.should_stop.remote()):
+                self.logger.info("[LLMRayActor] Actor manager signaled to stop. Exiting generation loop.")
                 return
             try:
                 request = self.prompt_queue.get(timeout=timeout)
-                outputs = self.generate(
+                outputs = self.llm.generate(
                     sampling_params=request.sampling_params, prompt_token_ids=request.prompts, use_tqdm=False
                 )
                 result = self._process_outputs(outputs, dataset_index=request.dataset_index)
@@ -263,8 +263,8 @@ class LLMRayActor:
     def _run_generation_loop(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly."""
         while True:
-            if ray.get(self.actor_manager.should_update_weights.remote()):
-                self.logger.info("[LLMRayActor] Actor manager signaled to update weights. Exiting generation loop.")
+            if ray.get(self.actor_manager.should_stop.remote()):
+                self.logger.info("[LLMRayActor] Actor manager signaled to stop. Exiting generation loop.")
                 return
             try:
                 request = self.prompt_queue.get(timeout=timeout)
@@ -274,6 +274,13 @@ class LLMRayActor:
 
             # Process the request
             prompts = request.prompts
+
+            # Debug logging
+            n_samples = request.sampling_params.n if request.sampling_params else 1
+            print(
+                f"[LLMRayActor] Processing batch: {len(prompts)} prompts, "
+                f"n={n_samples}, expecting {len(prompts) * n_samples} total outputs"
+            )
 
             # Add all regular requests to the engine
             for i, prompt in enumerate(prompts):
@@ -291,6 +298,14 @@ class LLMRayActor:
 
             # Sort and process regular outputs
             outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
+
+            # Debug logging
+            total_responses = sum(len(output.outputs) for output in outputs)
+            self.logger.info(
+                f"[LLMRayActor] Collected {len(outputs)} RequestOutputs with "
+                f"{total_responses} total responses (expected {len(prompts) * n_samples})"
+            )
+
             result = self._process_outputs(outputs, dataset_index=request.dataset_index)
             try:
                 if request.is_eval:
@@ -313,6 +328,15 @@ class LLMRayActor:
         dataset_index: Optional[List[int]] = None,
     ) -> GenerationResult:
         """Process vLLM RequestOutputs into GenerationResult format."""
+        # Debug logging
+        self.logger.info(
+            f"[_process_outputs] Processing {len(outputs)} RequestOutputs, dataset_indices={dataset_index}"
+        )
+        for i, output in enumerate(outputs):
+            self.logger.info(
+                f"[_process_outputs] Output {i}: request_id={output.request_id}, num_completions={len(output.outputs)}"
+            )
+
         # Process outputs
         response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
         finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
@@ -343,13 +367,21 @@ class LLMRayActor:
             tool_calleds=tool_calleds,
         )
 
-        return GenerationResult(
+        result = GenerationResult(
             responses=response_ids,
             finish_reasons=finish_reasons,
             masks=masks,
             request_info=request_info,
             dataset_index=dataset_index,
         )
+
+        # Debug logging
+        self.logger.info(
+            f"[_process_outputs] Returning GenerationResult with {len(result.responses)} responses "
+            f"for {len(dataset_index) if dataset_index else 0} dataset indices"
+        )
+
+        return result
 
     def init_process_group(
         self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False

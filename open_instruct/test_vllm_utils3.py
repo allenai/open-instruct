@@ -47,7 +47,7 @@ class TestActorManager(unittest.TestCase):
         policy_models = [mock_model1, mock_model2]
 
         # Verify initial state
-        self.assertFalse(ray.get(actor_manager.should_update_weights.remote()))
+        self.assertFalse(ray.get(actor_manager.should_stop.remote()))
 
         # Call sync_weights and wait for completion
         ray.get(actor_manager.sync_weights.remote(policy_models, training_step=100))
@@ -57,22 +57,22 @@ class TestActorManager(unittest.TestCase):
         self.assertTrue(ray.get(mock_model2.was_broadcast_called.remote()))
 
         # Verify flag is reset after sync
-        self.assertFalse(ray.get(actor_manager.should_update_weights.remote()))
+        self.assertFalse(ray.get(actor_manager.should_stop.remote()))
 
-    def test_set_should_update_weights(self):
-        """Test the basic set_should_update_weights functionality."""
+    def test_set_should_stop(self):
+        """Test the basic set_should_stop functionality."""
         actor_manager = ActorManager.remote()
 
         # Initially should be False
-        self.assertFalse(ray.get(actor_manager.should_update_weights.remote()))
+        self.assertFalse(ray.get(actor_manager.should_stop.remote()))
 
         # Set to True
-        ray.get(actor_manager.set_should_update_weights.remote(True))
-        self.assertTrue(ray.get(actor_manager.should_update_weights.remote()))
+        ray.get(actor_manager.set_should_stop.remote(True))
+        self.assertTrue(ray.get(actor_manager.should_stop.remote()))
 
         # Set back to False
-        ray.get(actor_manager.set_should_update_weights.remote(False))
-        self.assertFalse(ray.get(actor_manager.should_update_weights.remote()))
+        ray.get(actor_manager.set_should_stop.remote(False))
+        self.assertFalse(ray.get(actor_manager.should_stop.remote()))
 
 
 if __name__ == "__main__":

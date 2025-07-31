@@ -1322,6 +1322,27 @@ def accumulate_inference_batches(
     return combined_result, batch
 
 
+def create_thread_error_wrapper(
+    stop_event: threading.Event,
+    threads: list[threading.Thread],
+    queues: list[ray_queue.Queue],
+    actor_manager: ActorManager,
+):
+    """Create a wrapper that handles thread errors and triggers cleanup."""
+
+    def wrap_thread_func(func):
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                logger.error(f"🚨 Fatal error in {func.__name__}: {e}", exc_info=True)
+                cleanup_training_resources(stop_event, threads, queues, actor_manager)
+
+        return wrapper
+
+    return wrap_thread_func
+
+
 def data_preparation_thread(
     reward_fn: Callable,
     inference_results_Q: ray_queue.Queue,  # Ray queue
@@ -2238,9 +2259,16 @@ def cleanup_judge_clients():
 
 
 def cleanup_training_resources(
-    stop_generate_event: threading.Event, threads: list[threading.Thread], queues: list[ray_queue.Queue]
+    stop_generate_event: threading.Event,
+    threads: list[threading.Thread],
+    queues: list[ray_queue.Queue],
+    actor_manager: ActorManager,
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
+    # Signal all actors to stop
+    ray.get(actor_manager.set_should_stop.remote(True))
+    logger.info("Signaled all actors to stop")
+
     # Signal threads to stop
     stop_generate_event.set()
 
@@ -2320,9 +2348,20 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     # Verify none of the engines crashed during initialization.
     ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], desc="Verifying vLLM engines are ready")
 
+    # Create and start the generate thread
+    stop_generate_event = threading.Event()
+
+    # Create error wrapper for threads
+    thread_wrapper = create_thread_error_wrapper(
+        stop_generate_event,
+        [],  # Will be populated with actual threads
+        [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
+        actor_manager,
+    )
+
     logger.info("======== ✅ data preparation thread starts =========")
     packing_thread = threading.Thread(
-        target=data_preparation_thread,
+        target=thread_wrapper(data_preparation_thread),
         args=(
             reward_fn,
             inference_results_Q,
@@ -2336,10 +2375,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     )
     packing_thread.start()
 
-    # Create and start the generate thread
-    stop_generate_event = threading.Event()
     generation_thread = threading.Thread(
-        target=generate_thread,
+        target=thread_wrapper(generate_thread),
         args=(vllm_engines, args.local_eval_freq, args.num_training_steps, resume_training_step, stop_generate_event),
     )
     generation_thread.start()
@@ -2428,6 +2465,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         stop_generate_event,
         [packing_thread, generation_thread],
         [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
+        actor_manager,
     )
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
