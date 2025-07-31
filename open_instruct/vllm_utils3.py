@@ -289,6 +289,13 @@ class LLMRayActor:
                 f"{total_responses} total responses (expected {len(prompts) * n_samples})"
             )
 
+            # Additional debug info
+            for i, output in enumerate(outputs):
+                self.logger.info(
+                    f"[LLMRayActor] RequestOutput {i} (request_id={output.request_id}): "
+                    f"has {len(output.outputs)} completions"
+                )
+
             result = self._process_outputs(outputs, dataset_index=request.dataset_index)
             try:
                 if request.is_eval:

@@ -1917,10 +1917,13 @@ def sync_weights_and_prepare_prompts(
     return batch
 
 
-def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
+def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event):
     """Get the packed sequences with advantages from the packing thread."""
     with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
         while True:
+            if stop_event.is_set():
+                logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
+                return None, {}, num_total_tokens
             try:
                 packed_data = packed_sequences_Q.get(timeout=30.0)
                 break
@@ -2261,14 +2264,14 @@ def cleanup_judge_clients():
 
 
 def cleanup_training_resources(
-    stop_generate_event: threading.Event,
+    stop_event: threading.Event,
     threads: list[threading.Thread],
     queues: list[ray_queue.Queue],
     actor_manager: ActorManager,
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
     # Signal threads to stop
-    stop_generate_event.set()
+    stop_event.set()
 
     # Clean up threads with timeout
     logger.info("Cleaning up threads...")
@@ -2352,11 +2355,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], desc="Verifying vLLM engines are ready")
 
     # Create and start the generate thread
-    stop_generate_event = threading.Event()
+    stop_event = threading.Event()
 
     # Create error wrapper for threads
     thread_wrapper = create_thread_error_wrapper(
-        stop_generate_event,
+        stop_event,
         [],  # Will be populated with actual threads
         [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
         actor_manager,
@@ -2380,7 +2383,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     generation_thread = threading.Thread(
         target=thread_wrapper(generate_thread),
-        args=(vllm_engines, args.local_eval_freq, args.num_training_steps, resume_training_step, stop_generate_event),
+        args=(vllm_engines, args.local_eval_freq, args.num_training_steps, resume_training_step, stop_event),
     )
     generation_thread.start()
     logger.info("======== ✅ generation thread starts =========")
@@ -2401,7 +2404,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     num_total_tokens = 0
     start_time = time.time()
     for training_step in range(resume_training_step, args.num_training_steps + 1):
-        if stop_generate_event.is_set():
+        if stop_event.is_set():
             logger.warning("⚠️ Stop event detected, breaking out of training loop")
             break
 
@@ -2430,7 +2433,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
         # The generate_thread is now handling vLLM processing asynchronously
         collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
-            packed_sequences_Q, num_total_tokens
+            packed_sequences_Q, num_total_tokens, stop_event
         )
         if collated_data is None:
             continue
@@ -2469,7 +2472,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     # Clean up resources
     cleanup_training_resources(
-        stop_generate_event,
+        stop_event,
         [packing_thread, generation_thread],
         [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
         actor_manager,
