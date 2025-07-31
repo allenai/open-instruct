@@ -242,7 +242,7 @@ class LLMRayActor:
 
     def _tool_generation_loop(self, timeout: float = 60.0):
         while True:
-            if self.actor_manager.should_update_weights():
+            if ray.get(self.actor_manager.should_update_weights.remote()):
                 self.logger.info("[LLMRayActor] Actor manager signaled to update weights. Exiting generation loop.")
                 return
             try:
@@ -251,7 +251,7 @@ class LLMRayActor:
                     sampling_params=request.sampling_params, prompt_token_ids=request.prompts, use_tqdm=False
                 )
                 result = self._process_outputs(
-                    outputs, dataset_index=request.dataset_index, training_step=request.training_step
+                    outputs, dataset_index=request.dataset_index
                 )
                 if request.is_eval:
                     self.eval_results_queue.put(result)
@@ -265,7 +265,7 @@ class LLMRayActor:
     def _run_generation_loop(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly."""
         while True:
-            if self.actor_manager.should_update_weights():
+            if ray.get(self.actor_manager.should_update_weights.remote()):
                 self.logger.info("[LLMRayActor] Actor manager signaled to update weights. Exiting generation loop.")
                 return
             try:
@@ -294,7 +294,7 @@ class LLMRayActor:
             # Sort and process regular outputs
             outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
             result = self._process_outputs(
-                outputs, dataset_index=request.dataset_index, training_step=request.training_step
+                outputs, dataset_index=request.dataset_index
             )
             try:
                 if request.is_eval:
