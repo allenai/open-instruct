@@ -724,7 +724,9 @@ if args.run_safety_evaluations:
         oe_safety_cmd += f" --process-output {args.process_output}"
 
     # Add beaker image from existing argument
-    if args.beaker_image:
+    if args.use_alternate_safety_image:
+        oe_safety_cmd += f" --beaker-image {args.use_alternate_safety_image}"
+    elif args.beaker_image:
         oe_safety_cmd += f" --beaker-image {args.beaker_image}"
 
     # Add cluster parameter - use the existing cluster argument
@@ -790,6 +792,8 @@ if args.run_safety_evaluations_reasoning:
         oe_safety_reasoning_cmd += f" --process-output {args.process_output}"
 
     # Add beaker image from existing argument
+    if args.use_alternate_safety_image:
+        oe_safety_cmd += f" --beaker-image {args.use_alternate_safety_image}"
     if args.beaker_image:
         oe_safety_reasoning_cmd += f" --beaker-image {args.beaker_image}"
 
