@@ -1895,8 +1895,19 @@ def sync_weights_and_prepare_prompts(
         if args.async_steps > 0
         else "🔄 Loading weights using shared memory"
     ):
-        # Use ActorManager to coordinate weight sync
-        ray.get(actor_manager.sync_weights.remote(policy_group.models, training_step))
+        # Signal actors to stop for weight sync
+        ray.get(actor_manager.set_should_stop.remote(True))
+        logger.info(f"[Main Thread] Set should_stop to True for weight sync at step {training_step}")
+
+        # Sync weights to vLLM
+        ray_get_with_progress(
+            [m.broadcast_to_vllm.remote() for m in policy_group.models],
+            desc=f"🔄 Broadcasting weights to vLLM at step {training_step}",
+        )
+
+        # Signal actors to resume
+        ray.get(actor_manager.set_should_stop.remote(False))
+        logger.info(f"[Main Thread] Set should_stop to False after weight sync at step {training_step}")
 
     split_and_insert_batch(
         batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]

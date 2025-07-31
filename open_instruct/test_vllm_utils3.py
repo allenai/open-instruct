@@ -1,4 +1,4 @@
-"""Simple test for ActorManager sync_weights functionality."""
+"""Simple test for ActorManager functionality."""
 
 import time
 import unittest
@@ -9,7 +9,7 @@ from open_instruct.vllm_utils3 import ActorManager
 
 
 class TestActorManager(unittest.TestCase):
-    """Test ActorManager sync_weights functionality."""
+    """Test ActorManager functionality."""
 
     def setUp(self):
         """Set up test fixtures."""
@@ -21,42 +21,24 @@ class TestActorManager(unittest.TestCase):
         if ray.is_initialized():
             ray.shutdown()
 
-    def test_actor_manager_sync_weights(self):
-        """Test that ActorManager.sync_weights calls broadcast and manages flags correctly."""
+    def test_actor_manager_weight_sync_coordination(self):
+        """Test that ActorManager can coordinate weight sync via should_stop flag."""
         # Create actor manager
         actor_manager = ActorManager.remote()
-
-        # Create mock policy models as Ray actors
-        @ray.remote
-        class MockModel:
-            def __init__(self):
-                self.broadcast_called = False
-
-            def broadcast_to_vllm(self):
-                self.broadcast_called = True
-
-                time.sleep(0.1)  # Simulate some work
-                return "broadcast_done"
-
-            def was_broadcast_called(self):
-                return self.broadcast_called
-
-        mock_model1 = MockModel.remote()
-        mock_model2 = MockModel.remote()
-
-        policy_models = [mock_model1, mock_model2]
 
         # Verify initial state
         self.assertFalse(ray.get(actor_manager.should_stop.remote()))
 
-        # Call sync_weights and wait for completion
-        ray.get(actor_manager.sync_weights.remote(policy_models, training_step=100))
+        # Test the coordination pattern used in sync_weights_and_prepare_prompts
+        # Set should_stop to True (simulating weight sync start)
+        ray.get(actor_manager.set_should_stop.remote(True))
+        self.assertTrue(ray.get(actor_manager.should_stop.remote()))
 
-        # Verify broadcast was called on both models
-        self.assertTrue(ray.get(mock_model1.was_broadcast_called.remote()))
-        self.assertTrue(ray.get(mock_model2.was_broadcast_called.remote()))
+        # Simulate weight sync happening
+        time.sleep(0.1)
 
-        # Verify flag is reset after sync
+        # Set should_stop back to False (simulating weight sync complete)
+        ray.get(actor_manager.set_should_stop.remote(False))
         self.assertFalse(ray.get(actor_manager.should_stop.remote()))
 
     def test_set_should_stop(self):

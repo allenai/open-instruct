@@ -38,8 +38,6 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
-from open_instruct import utils
-
 
 @dataclasses.dataclass
 class RequestInfo:
@@ -169,25 +167,6 @@ class ActorManager:
         """Check if actors should stop processing."""
         return self._should_stop
 
-    def sync_weights(self, policy_models: List[Any], training_step: int) -> None:
-        """Synchronize weights by coordinating the update process.
-
-        Args:
-            policy_models: List of policy model objects with broadcast_to_vllm method
-            training_step: Current training step for logging
-        """
-        # Signal actors to stop processing new batches
-        self._should_stop = True
-
-        # Broadcast weights from policy models to vLLM engines
-        ray_refs = [m.broadcast_to_vllm.remote() for m in policy_models]
-        utils.ray_get_with_progress(
-            ray_refs, desc=f"[Main Thread] Broadcasting weights to vLLM engines at training step {training_step}"
-        )
-
-        # Signal actors that weight update is complete
-        self._should_stop = False
-
 
 @ray.remote
 class LLMRayActor:
@@ -288,7 +267,7 @@ class LLMRayActor:
                 tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
                 # Ensure sampling params are passed correctly
                 sampling_params = request.sampling_params
-                if sampling_params and hasattr(sampling_params, 'n'):
+                if sampling_params and hasattr(sampling_params, "n"):
                     print(f"[DEBUG] Adding request {request_id} with n={sampling_params.n}")
                 self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
 
