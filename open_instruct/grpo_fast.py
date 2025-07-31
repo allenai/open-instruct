@@ -29,7 +29,6 @@
 # limitations under the License.
 # isort: off
 import os
-from concurrent import futures
 
 # We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
 # https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
@@ -1942,20 +1941,7 @@ def generate_thread(vllm_engines, local_eval_freq, num_training_steps, resume_tr
     while not stop_event.is_set():
         with Timer("🔥 Generation time"):
             engine_refs = [engine.process_from_queue.remote(timeout=0.1) for engine in vllm_engines]
-            engine_futures = [ref.future() for ref in engine_refs]
-            processed_results = []
-            with tqdm(
-                total=len(vllm_engines),
-                desc="[Generate Thread] Waiting for vLLM engines to process",
-                bar_format="{l_bar}{bar}{r_bar}\n",
-            ) as pbar:
-                for future in futures.as_completed(engine_futures):
-                    processed_results.append(future.result())
-                    pbar.update(1)
-            num_processed = sum(int(result) for result in processed_results)
-        if num_processed == 0:
-            # If no batches were processed, sleep for a short time to avoid busy waiting
-            time.sleep(1)
+            ray_get_with_progress(engine_refs, desc="[Generate Thread] Waiting for vLLM engines to process")
 
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
