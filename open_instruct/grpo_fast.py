@@ -2265,10 +2265,6 @@ def cleanup_training_resources(
     actor_manager: ActorManager,
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
-    # Signal all actors to stop
-    ray.get(actor_manager.set_should_stop.remote(True))
-    logger.info("Signaled all actors to stop")
-
     # Signal threads to stop
     stop_generate_event.set()
 
@@ -2289,7 +2285,7 @@ def cleanup_training_resources(
         except Exception as e:
             logger.warning(f"Error shutting down Ray queue: {e}")
 
-    # Clean up judge clients
+    # Clean up judge clients, which also shuts down Ray.
     cleanup_judge_clients()
 
 

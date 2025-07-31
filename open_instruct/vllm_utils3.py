@@ -286,7 +286,11 @@ class LLMRayActor:
             for i, prompt in enumerate(prompts):
                 request_id = f"batch_{request.training_step}_{i}"
                 tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
-                self.llm_engine.add_request(request_id, tokens_prompt, request.sampling_params)
+                # Ensure sampling params are passed correctly
+                sampling_params = request.sampling_params
+                if sampling_params and hasattr(sampling_params, 'n'):
+                    print(f"[DEBUG] Adding request {request_id} with n={sampling_params.n}")
+                self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
 
             # Run the engine event loop until all requests are finished
             outputs = []
