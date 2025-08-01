@@ -232,8 +232,8 @@ def main():
 
     eval_sets = [
         # (dataset, subset, split, fields, limit)
-        # Olmo 3 New Dev Evals
-        ("livecodebench/code_generation_lite", None, "test", ["question_content"], None),  # v3 is dev, v6 is test, load full for full decontam
+          # Olmo 3 New Dev Evals
+        ("livecodebench/code_generation_lite", None, "test", ["question_content"], None),  # v3 is dev, v6 is test, load full for full decontam. Needs trust_remote_code=True
         ("allenai/aime-2021-2025", None, "train", ["problem"], None),
         ("allenai/ZebraLogicBench-private", "grid_mode", "test", ["puzzle"], None),
         # TODO: Omega
@@ -293,6 +293,8 @@ def main():
         for dataset, subset, split, fields, limit in eval_sets:
             print(f"Querying {index_name} for {dataset}.")
             try:
+                if 'livecodebench' in dataset:
+                    query_dataset = list(load_dataset(dataset, subset, split=split, trust_remote_code=True))[:limit]
                 query_dataset = list(load_dataset(dataset, subset, split=split))[:limit]
             except ValueError:
                 query_dataset = []
