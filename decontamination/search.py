@@ -232,7 +232,13 @@ def main():
 
     eval_sets = [
         # (dataset, subset, split, fields, limit)
-        # Dev evals
+          # Olmo 3 New Dev Evals
+        ("allenai/aime-2021-2025", None, "train", ["problem"], None),
+        ("allenai/ZebraLogicBench-private", "grid_mode", "test", ["puzzle"], None),
+        # TODO: Omega
+        ("allenai/multilingual_mbpp", None, "test", ["text"], None),
+        ("livecodebench/code_generation_lite", None, "test", ["question_content"], None),  # v3 is dev, v6 is test, load full for full decontam. Needs trust_remote_code=True
+        # Tulu 3 Dev evals
         ("cais/mmlu", "all", "test", ["question"], None),
         ("openai/openai_humaneval", None, "test", ["prompt"], None),
         ("openai/gsm8k", "main", "test", ["question"], None),
@@ -254,6 +260,7 @@ def main():
         ("lighteval/agi_eval_en", None, "train", ["passage", "question"], None),
         ("bigcode/bigcodebench", None, "v0.1.2", ["instruct_prompt"], None),
         ("deepmind/math_dataset", None, "test", ["question"], 50),
+        ("allenai/IFBench_test"), None, "test", ["prompt"], None),
     ] if args.dataset is None else [
         (args.dataset, args.subset, args.split, args.field, args.limit)
     ]
@@ -286,6 +293,8 @@ def main():
         for dataset, subset, split, fields, limit in eval_sets:
             print(f"Querying {index_name} for {dataset}.")
             try:
+                if 'livecodebench' in dataset:
+                    query_dataset = list(load_dataset(dataset, subset, split=split, trust_remote_code=True))[:limit]
                 query_dataset = list(load_dataset(dataset, subset, split=split))[:limit]
             except ValueError:
                 query_dataset = []
