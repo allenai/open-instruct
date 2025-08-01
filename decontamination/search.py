@@ -260,7 +260,7 @@ def main():
         ("lighteval/agi_eval_en", None, "train", ["passage", "question"], None),
         ("bigcode/bigcodebench", None, "v0.1.2", ["instruct_prompt"], None),
         ("deepmind/math_dataset", None, "test", ["question"], 50),
-        ("allenai/IFBench_test"), None, "test", ["prompt"], None),
+        ("allenai/IFBench_test", None, "test", ["prompt"], None),
     ] if args.dataset is None else [
         (args.dataset, args.subset, args.split, args.field, args.limit)
     ]
