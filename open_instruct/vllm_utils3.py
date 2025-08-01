@@ -179,6 +179,7 @@ class LLMRayActor:
         results_queue=None,
         eval_results_queue=None,
         actor_manager=None,
+        inference_batch_size: int = 1,
         **kwargs,
     ):
         noset_visible_devices = kwargs.pop("noset_visible_devices")
@@ -218,6 +219,8 @@ class LLMRayActor:
         self.tool_use = tool_use
         self.logger = logging.getLogger(__name__)
         self.actor_manager = actor_manager
+        self.inference_batch_size = inference_batch_size
+        self.update_weights_inflight = kwargs.pop("update_weights_inflight", False)
 
     def _tool_generation_loop(self, timeout: float = 60.0):
         while True:
@@ -242,34 +245,81 @@ class LLMRayActor:
     def _run_generation_loop(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly."""
         while True:
-            if ray.get(self.actor_manager.should_stop.remote()):
-                self.logger.info("[LLMRayActor] Actor manager signaled to stop. Exiting generation loop.")
+            should_stop = ray.get(self.actor_manager.should_stop.remote())
+
+            # If update_weights_inflight is True, exit immediately when stop is signaled
+            if should_stop and self.update_weights_inflight:
+                self.logger.info(
+                    "[LLMRayActor] Actor manager signaled to stop (update_weights_inflight=True). Exiting immediately."
+                )
                 return
+
+            # If update_weights_inflight is False and should_stop, finish current requests first
+            if should_stop and not self.update_weights_inflight and not self.llm_engine.has_unfinished_requests():
+                self.logger.info("[LLMRayActor] Actor manager signaled to stop and no unfinished requests. Exiting.")
+                return
+
+            # Don't accept new requests if we should stop (but might still be processing existing ones)
+            if should_stop and not self.update_weights_inflight:
+                # Just process existing requests without accepting new ones
+                if self.llm_engine.has_unfinished_requests():
+                    step_outputs = self.llm_engine.step()
+                    continue
+                else:
+                    return
+
+            # Normal operation - collect requests
+            requests = []
             try:
-                request = self.prompt_queue.get(timeout=timeout)
+                # Get first request (wait with timeout)
+                first_request = self.prompt_queue.get(timeout=timeout)
+                requests.append(first_request)
+
+                # Try to get more requests without waiting
+                for _ in range(self.inference_batch_size - 1):
+                    try:
+                        request = self.prompt_queue.get(timeout=0.001)  # Very short timeout
+                        requests.append(request)
+                    except queue.Empty:
+                        break
             except queue.Empty:
                 self.logger.warning("[LLMRayActor] No request in the queue to process. Continuing.")
                 continue
 
-            # Process the request
-            prompts = request.prompts
+            # Batch all prompts together
+            all_prompts = []
+            all_dataset_indices = []
+            request_mapping = []  # Track which prompts belong to which request
+
+            for req_idx, request in enumerate(requests):
+                for prompt in request.prompts:
+                    all_prompts.append(prompt)
+                    all_dataset_indices.extend(request.dataset_index if request.dataset_index else [])
+                    request_mapping.append((req_idx, request))
 
             # Debug logging
-            n_samples = request.sampling_params.n if request.sampling_params else 1
+            n_samples = requests[0].sampling_params.n if requests[0].sampling_params else 1
             print(
-                f"[LLMRayActor] Processing batch: {len(prompts)} prompts, "
-                f"n={n_samples}, expecting {len(prompts) * n_samples} total outputs"
+                f"[LLMRayActor] Processing batch: {len(all_prompts)} prompts from {len(requests)} requests, "
+                f"n={n_samples}, expecting {len(all_prompts) * n_samples} total outputs"
             )
 
             # Add requests to the engine
-            for i, prompt in enumerate(prompts):
-                request_id = f"batch_{request.training_step}_{i}"
+            for i, prompt in enumerate(all_prompts):
+                request_id = f"batch_{requests[0].training_step}_{i}"
                 tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
-                self.llm_engine.add_request(request_id, tokens_prompt, request.sampling_params)
+                self.llm_engine.add_request(request_id, tokens_prompt, requests[0].sampling_params)
 
             # Run the engine event loop until all requests are finished
             outputs = []
             while self.llm_engine.has_unfinished_requests():
+                # Check if we should stop immediately during processing
+                if self.update_weights_inflight and ray.get(self.actor_manager.should_stop.remote()):
+                    self.logger.info(
+                        "[LLMRayActor] Stopping immediately during request processing (update_weights_inflight=True)"
+                    )
+                    return
+
                 step_outputs = self.llm_engine.step()
                 for output in step_outputs:
                     if output.finished:
@@ -283,24 +333,26 @@ class LLMRayActor:
             total_responses = sum(len(output.outputs) for output in outputs)
             self.logger.info(
                 f"[LLMRayActor] Collected {len(outputs)} RequestOutputs with "
-                f"{total_responses} total responses (expected {len(prompts) * n_samples})"
+                f"{total_responses} total responses (expected {len(all_prompts) * n_samples})"
             )
 
-            # Additional debug info
-            for i, output in enumerate(outputs):
-                self.logger.info(
-                    f"[LLMRayActor] RequestOutput {i} (request_id={output.request_id}): "
-                    f"has {len(output.outputs)} completions"
-                )
+            # Process outputs and send results back for each original request
+            prompt_idx = 0
+            for request in requests:
+                # Extract outputs for this request
+                num_prompts_in_request = len(request.prompts)
+                request_outputs = outputs[prompt_idx : prompt_idx + num_prompts_in_request]
+                prompt_idx += num_prompts_in_request
 
-            result = self._process_outputs(outputs, dataset_index=request.dataset_index)
-            try:
-                if request.is_eval:
-                    self.eval_results_queue.put(result, timeout=10)
-                else:
-                    self.results_queue.put(result, timeout=10)
-            except queue.Full:
-                self.logger.warning("Results queue is full, discarding result.")
+                # Process and send result
+                result = self._process_outputs(request_outputs, dataset_index=request.dataset_index)
+                try:
+                    if request.is_eval:
+                        self.eval_results_queue.put(result, timeout=10)
+                    else:
+                        self.results_queue.put(result, timeout=10)
+                except queue.Full:
+                    self.logger.warning("Results queue is full, discarding result.")
 
     def process_from_queue(self, timeout=0.1):
         """Process a single element from the queue."""
@@ -436,6 +488,8 @@ def create_vllm_engines(
     results_queue=None,
     eval_results_queue=None,
     actor_manager=None,
+    inference_batch_size: int = None,
+    update_weights_inflight: bool = False,
 ) -> list[LLMRayActor]:
     import vllm
 
@@ -519,6 +573,8 @@ def create_vllm_engines(
                 results_queue=results_queue,
                 eval_results_queue=eval_results_queue,
                 actor_manager=actor_manager,
+                inference_batch_size=inference_batch_size,
+                update_weights_inflight=update_weights_inflight,
                 **additional_kwargs,
             )
         )
