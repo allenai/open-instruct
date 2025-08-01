@@ -261,27 +261,11 @@ class LLMRayActor:
                 f"n={n_samples}, expecting {len(prompts) * n_samples} total outputs"
             )
 
-            # WORKAROUND for vLLM V1 bug: LLMEngine ignores n > 1 in SamplingParams
-            # Instead of submitting 1 request with n=4, we submit 4 requests with n=1
-            # Bug: vLLM V1 LLMEngine ignores n > 1, always generating only 1 completion per prompt.
-            # This differs from V0 LLM API which correctly handles n > 1.
-            # TODO: Remove this workaround when vLLM V1 properly supports n > 1
-            
+            # Add requests to the engine
             for i, prompt in enumerate(prompts):
-                sampling_params = request.sampling_params
-                assert sampling_params is not None, "sampling_params should never be None"
-                
-                num_completions = sampling_params.n
-                
-                # Create a modified sampling params with n=1
-                modified_params = sampling_params.clone()
-                modified_params.n = 1
-                
-                # Submit n separate requests
-                for j in range(num_completions):
-                    request_id = f"batch_{request.training_step}_{i}_{j}"
-                    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
-                    self.llm_engine.add_request(request_id, tokens_prompt, modified_params)
+                request_id = f"batch_{request.training_step}_{i}"
+                tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
+                self.llm_engine.add_request(request_id, tokens_prompt, request.sampling_params)
 
             # Run the engine event loop until all requests are finished
             outputs = []
@@ -291,9 +275,9 @@ class LLMRayActor:
                     if output.finished:
                         outputs.append(output)
 
-            # Sort outputs by prompt index (i) and completion index (j)
-            # Request IDs are now in format: batch_{step}_{i}_{j}
-            outputs.sort(key=lambda x: (int(x.request_id.split("_")[-2]), int(x.request_id.split("_")[-1])))
+            # Sort outputs by prompt index (i)
+            # Request IDs are now in format: batch_{step}_{i}
+            outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
 
             # Debug logging
             total_responses = sum(len(output.outputs) for output in outputs)
