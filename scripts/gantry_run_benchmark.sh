@@ -31,7 +31,7 @@ pip install -e .
 python -m nltk.downloader punkt' \
        -- python -m open_instruct.benchmark_generators \
        --model_name_or_path "Qwen/Qwen2.5-7B" \
-       --dataset_mixer_list "saurabh5/rlvr_acecoder_filtered ${num_prompts} saurabh5/synthetic2-rlvr-code-compressed ${num_prompts}" \
+       --dataset_mixer_list saurabh5/rlvr_acecoder_filtered ${num_prompts} saurabh5/synthetic2-rlvr-code-compressed ${num_prompts} \
        --dataset_mixer_list_splits "train" \
        --dataset_mixer_eval_list "saurabh5/rlvr_acecoder_filtered 8 saurabh5/synthetic2-rlvr-code-compressed 8" \
     --max_token_length 10240 \
