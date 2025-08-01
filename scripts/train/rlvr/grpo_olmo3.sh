@@ -43,7 +43,7 @@ python mason.py \
     --pure_docker_mode \
     --image michaeln/open_instruct_dev_uv_olmo3 \
     --preemptible \
-    --num_nodes 2 \
+    --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gs_model_name $gs_model_name \
@@ -75,10 +75,10 @@ python open_instruct/grpo_fast.py \
     --stop_strings "</answer>" \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 512000 \
+    --total_episodes 256000 \
     --deepspeed_stage 2 \
-    --num_learners_per_node 8 \
-    --vllm_num_engines 8 \
+    --num_learners_per_node 4 \
+    --vllm_num_engines 4 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
