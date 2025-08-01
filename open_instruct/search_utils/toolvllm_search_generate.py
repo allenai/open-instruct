@@ -141,11 +141,19 @@ def main():
             question_key = "query"
         elif "question" in dataset[0]:
             question_key = "question"
+        elif "prompt" in dataset[0]:
+            question_key = "prompt"
         else:
             raise ValueError(f"Question key not found in dataset: {dataset[0]}")
 
 
-        ds = [{"messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": data[question_key]}]} for data in dataset]
+        if question_key == "prompt":
+            # we have a list of messages instead of just the single string.
+            new_data = []
+            for data in dataset:
+                new_data.append({"messages": [{"role": "system", "content": SYSTEM_PROMPT}] + data["prompt"]})
+        else:
+            ds = [{"messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": data[question_key]}]} for data in dataset]
         ds = Dataset.from_list(ds)
 
         if args.max_eval_samples > -1 and args.max_eval_samples < len(ds):
