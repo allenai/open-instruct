@@ -1247,6 +1247,15 @@ def accumulate_inference_batches(
         # but dataset_indices only contains the unique indices (not replicated)
         # So we expect: len(responses) == len(dataset_indices) * generation_config.n
         expected_responses = len(dataset_indices) * generation_config.n
+        if len(result.responses) != expected_responses:
+            # Print detailed debugging info before asserting
+            logger.error(f"Response count mismatch for result {i}:")
+            logger.error(f"  Expected: {expected_responses} (dataset_indices={len(dataset_indices)} * n={generation_config.n})")
+            logger.error(f"  Actual: {len(result.responses)}")
+            logger.error(f"  Dataset indices: {dataset_indices}")
+            logger.error(f"  Response lengths: {[len(r) for r in result.responses[:5]]}...")  # First 5
+            logger.error(f"  Finish reasons: {result.finish_reasons[:5]}...")  # First 5
+
         assert len(result.responses) == expected_responses, (
             f"Mismatch: number of responses ({len(result.responses)}) "
             f"doesn't match expected ({expected_responses}) for result {i}"
@@ -2403,9 +2412,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         )
     num_total_tokens = 0
     start_time = time.time()
+    error_occurred = False
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         if stop_event.is_set():
             logger.warning("⚠️ Stop event detected, breaking out of training loop")
+            error_occurred = True
             break
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
@@ -2504,6 +2515,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         logger.warning("Runtime leaks detected:\n" + leak_report.pretty())
     else:
         logger.info("No runtime leaks detected.")
+
+    # Raise error if one occurred during training
+    if error_occurred:
+        raise RuntimeError("Training stopped due to error in worker thread")
 
 
 if __name__ == "__main__":
