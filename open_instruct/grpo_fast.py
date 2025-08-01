@@ -1250,7 +1250,9 @@ def accumulate_inference_batches(
         if len(result.responses) != expected_responses:
             # Print detailed debugging info before asserting
             logger.error(f"Response count mismatch for result {i}:")
-            logger.error(f"  Expected: {expected_responses} (dataset_indices={len(dataset_indices)} * n={generation_config.n})")
+            logger.error(
+                f"  Expected: {expected_responses} (dataset_indices={len(dataset_indices)} * n={generation_config.n})"
+            )
             logger.error(f"  Actual: {len(result.responses)}")
             logger.error(f"  Dataset indices: {dataset_indices}")
             logger.error(f"  Response lengths: {[len(r) for r in result.responses[:5]]}...")  # First 5
@@ -1898,7 +1900,7 @@ def sync_weights_and_prepare_prompts(
     policy_group: ModelGroup,
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q: ray_queue.Queue,
-    generation_configs: Dict[str, SamplingParams],
+    generation_configs: Dict[str, vllm.SamplingParams],
     actor_manager: ActorManager,
 ) -> Batch:
     """Sync weights and send the next batch of prompts to vLLM."""
@@ -1959,7 +1961,7 @@ def generate_thread(vllm_engines, local_eval_freq, num_training_steps, resume_tr
 
     while not stop_event.is_set():
         with Timer("🔥 Generation time"):
-            engine_refs = [engine.process_from_queue.remote(timeout=0.1) for engine in vllm_engines]
+            engine_refs = [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines]
             ray_get_with_progress(engine_refs, desc="[Generate Thread] Waiting for vLLM engines to process")
 
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
