@@ -60,7 +60,6 @@ class GenerationResult:
     masks: List[List[int]]
     request_info: RequestInfo
     dataset_index: Optional[List[int]] = None
-    training_step: Optional[int] = None
 
 
 @dataclasses.dataclass
@@ -68,7 +67,7 @@ class PromptRequest:
     """Container for prompt requests to vLLM."""
 
     prompts: List[List[int]]
-    generation_config: vllm.SamplingParams
+    sampling_params: vllm.SamplingParams
     training_step: Optional[int] = None
     dataset_index: Optional[List[int]] = None
     is_eval: bool = False
@@ -154,6 +153,22 @@ def init_process_group(
 
 
 @ray.remote
+class ActorManager:
+    """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
+
+    def __init__(self):
+        self._should_stop = False
+
+    def set_should_stop(self, should_stop: bool):
+        """Set whether actors should stop processing."""
+        self._should_stop = should_stop
+
+    def should_stop(self) -> bool:
+        """Check if actors should stop processing."""
+        return self._should_stop
+
+
+@ray.remote
 class LLMRayActor:
     def __init__(
         self,
@@ -163,6 +178,7 @@ class LLMRayActor:
         prompt_queue=None,
         results_queue=None,
         eval_results_queue=None,
+        actor_manager=None,
         **kwargs,
     ):
         noset_visible_devices = kwargs.pop("noset_visible_devices")
@@ -185,55 +201,128 @@ class LLMRayActor:
             print(f"creating LLM with bundle_indices={bundle_indices}")
 
         if tool_use:
+            # TODO: Need to update ToolUseLLM to use LLMEngine as well
             from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 
             self.llm = ToolUseLLM(*args, **kwargs)
+            self.llm_engine = self.llm.llm_engine
         else:
-            from vllm import LLM
-
-            self.llm = LLM(*args, **kwargs)
+            # Create EngineArgs and initialize LLMEngine
+            engine_args = vllm.EngineArgs(*args, **kwargs)
+            self.llm_engine = vllm.LLMEngine.from_engine_args(engine_args)
+            self.llm = None  # Set llm to None when using engine directly
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
         self.tool_use = tool_use
         self.logger = logging.getLogger(__name__)
+        self.actor_manager = actor_manager
 
-    def generate(self, *args, **kwargs):
-        return self.llm.generate(*args, **kwargs)
+    def _tool_generation_loop(self, timeout: float = 60.0):
+        while True:
+            if ray.get(self.actor_manager.should_stop.remote()):
+                self.logger.info("[LLMRayActor] Actor manager signaled to stop. Exiting generation loop.")
+                return
+            try:
+                request = self.prompt_queue.get(timeout=timeout)
+                outputs = self.llm.generate(
+                    sampling_params=request.sampling_params, prompt_token_ids=request.prompts, use_tqdm=False
+                )
+                result = self._process_outputs(outputs, dataset_index=request.dataset_index)
+                if request.is_eval:
+                    self.eval_results_queue.put(result)
+                else:
+                    self.results_queue.put(result)
+            except queue.Empty:
+                pass
+            except queue.Full:
+                self.logger.warning("Results queue is full, discarding result.")
 
-    def process_from_queue(self, num_training_steps=None, resume_training_step=1, timeout=0.1):
-        """Process a single element from the queue."""
-        try:
-            request = self.prompt_queue.get(timeout=timeout)
-            # Use generation_config from the request
-            result = self._generate_batch(
-                request.prompts,
-                request.generation_config,
-                dataset_index=request.dataset_index,
-                training_step=request.training_step,
+    def _run_generation_loop(self, timeout: float = 60.0):
+        """Run generation loop using LLMEngine directly."""
+        while True:
+            if ray.get(self.actor_manager.should_stop.remote()):
+                self.logger.info("[LLMRayActor] Actor manager signaled to stop. Exiting generation loop.")
+                return
+            try:
+                request = self.prompt_queue.get(timeout=timeout)
+            except queue.Empty:
+                self.logger.warning("[LLMRayActor] No request in the queue to process. Continuing.")
+                continue
+
+            # Process the request
+            prompts = request.prompts
+
+            # Debug logging
+            n_samples = request.sampling_params.n if request.sampling_params else 1
+            print(
+                f"[LLMRayActor] Processing batch: {len(prompts)} prompts, "
+                f"n={n_samples}, expecting {len(prompts) * n_samples} total outputs"
             )
-            if request.is_eval:
-                self.eval_results_queue.put(result, timeout=1)
-            else:
-                self.results_queue.put(result, timeout=1)
-            return 1  # Successfully processed a request
-        except queue.Empty:
-            self.logger.warning("[LLMRayActor] No request in the queue to process. Returning from process_from_queue.")
-            return 0  # No request to process
-        except queue.Full:
-            self.logger.warning(f"[LLMRayActor] Results queue is full. Skipping insert. {request.is_eval=}.")
-            return 0
 
-    def _generate_batch(
+            # Add requests to the engine
+            for i, prompt in enumerate(prompts):
+                request_id = f"batch_{request.training_step}_{i}"
+                tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
+                self.llm_engine.add_request(request_id, tokens_prompt, request.sampling_params)
+
+            # Run the engine event loop until all requests are finished
+            outputs = []
+            while self.llm_engine.has_unfinished_requests():
+                step_outputs = self.llm_engine.step()
+                for output in step_outputs:
+                    if output.finished:
+                        outputs.append(output)
+
+            # Sort outputs by prompt index (i)
+            # Request IDs are now in format: batch_{step}_{i}
+            outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
+
+            # Debug logging
+            total_responses = sum(len(output.outputs) for output in outputs)
+            self.logger.info(
+                f"[LLMRayActor] Collected {len(outputs)} RequestOutputs with "
+                f"{total_responses} total responses (expected {len(prompts) * n_samples})"
+            )
+
+            # Additional debug info
+            for i, output in enumerate(outputs):
+                self.logger.info(
+                    f"[LLMRayActor] RequestOutput {i} (request_id={output.request_id}): "
+                    f"has {len(output.outputs)} completions"
+                )
+
+            result = self._process_outputs(outputs, dataset_index=request.dataset_index)
+            try:
+                if request.is_eval:
+                    self.eval_results_queue.put(result, timeout=10)
+                else:
+                    self.results_queue.put(result, timeout=10)
+            except queue.Full:
+                self.logger.warning("Results queue is full, discarding result.")
+
+    def process_from_queue(self, timeout=0.1):
+        """Process a single element from the queue."""
+        if self.tool_use:
+            self.run_tool_generation_loop(timeout)
+        else:
+            self._run_generation_loop(timeout)
+
+    def _process_outputs(
         self,
-        prompts: List[List[int]],
-        sampling_params,
+        outputs: List[Any],  # List of vllm.RequestOutput objects
         dataset_index: Optional[List[int]] = None,
-        training_step: Optional[int] = None,
     ) -> GenerationResult:
-        """Generate responses for a batch of prompts."""
-        outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
+        """Process vLLM RequestOutputs into GenerationResult format."""
+        # Debug logging
+        self.logger.info(
+            f"[_process_outputs] Processing {len(outputs)} RequestOutputs, dataset_indices={dataset_index}"
+        )
+        for i, output in enumerate(outputs):
+            self.logger.info(
+                f"[_process_outputs] Output {i}: request_id={output.request_id}, num_completions={len(output.outputs)}"
+            )
 
         # Process outputs
         response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -265,37 +354,46 @@ class LLMRayActor:
             tool_calleds=tool_calleds,
         )
 
-        return GenerationResult(
+        result = GenerationResult(
             responses=response_ids,
             finish_reasons=finish_reasons,
             masks=masks,
             request_info=request_info,
             dataset_index=dataset_index,
-            training_step=training_step,
         )
+
+        # Debug logging
+        self.logger.info(
+            f"[_process_outputs] Returning GenerationResult with {len(result.responses)} responses "
+            f"for {len(dataset_index) if dataset_index else 0} dataset indices"
+        )
+
+        return result
 
     def init_process_group(
         self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
     ):
-        return self.llm.collective_rpc(
+        return self.llm_engine.collective_rpc(
             "init_process_group",
             args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        return self.llm.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        return self.llm.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
+        return self.llm_engine.collective_rpc(
+            "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
+        )
 
     def reset_prefix_cache(self):
-        self.llm.llm_engine.reset_prefix_cache()
+        self.llm_engine.reset_prefix_cache()
 
     def sleep(self, level=1):
-        self.llm.sleep(level=level)
+        self.llm_engine.sleep(level=level)
 
-    def wake_up(self):
-        self.llm.wake_up()
+    def wake_up(self, tags: Optional[list[str]] = None):
+        self.llm_engine.wake_up(tags)
 
     def ready(self):
         return True
@@ -337,6 +435,7 @@ def create_vllm_engines(
     prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
+    actor_manager=None,
 ) -> list[LLMRayActor]:
     import vllm
 
@@ -419,6 +518,7 @@ def create_vllm_engines(
                 prompt_queue=prompt_queue,
                 results_queue=results_queue,
                 eval_results_queue=eval_results_queue,
+                actor_manager=actor_manager,
                 **additional_kwargs,
             )
         )
