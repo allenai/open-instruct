@@ -207,7 +207,7 @@ class Args:
     # Batch sizes
     per_device_train_batch_size: int = 1
     """The forward batch size per device (local_micro_batch_size)"""
-    inference_batch_size: int = 1
+    inference_batch_size: Optional[int] = None
     """The batch size for LLMRayActor to pull from the queue for inference"""
     total_episodes: int = 100000
     """The total number of episodes in the dataset"""
@@ -441,6 +441,11 @@ class Args:
                 if tool not in ["search", "code"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
+        
+        # Set default inference_batch_size if not provided
+        if self.inference_batch_size is None:
+            self.inference_batch_size = self.num_unique_prompts_rollout // self.vllm_num_engines
+            logger.info(f"Setting inference_batch_size to {self.inference_batch_size} (num_unique_prompts_rollout={self.num_unique_prompts_rollout} // vllm_num_engines={self.vllm_num_engines})")
 
 
 def flatten(nested_list: List[List[Any]]) -> List[Any]:
