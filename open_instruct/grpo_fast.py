@@ -1832,26 +1832,19 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
         while not stop_event.is_set():
             try:
                 packed_data = packed_sequences_Q.get(timeout=2.0)
-                if packed_data is not None:
-                    # got data continue
-                    break
             except Empty:
                 # keep polling for data
                 continue
 
-        if stop_event.is_set():
-            logger.error("[Main Thread] generate thread has died, cancelling")
-            raise Exception("Generate thread has an exception and died, see error above")
-
-        packed_data = packed_sequences_Q.get()
-        data_thread_metrics = packed_data["metrics"]
-        B = packed_data["B"]
-        collated_data = packed_data["collated_data"]
-        num_total_tokens += packed_data["num_new_tokens"]
-        if B == 0:
-            logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-            return None, data_thread_metrics, num_total_tokens
-        return collated_data, data_thread_metrics, num_total_tokens
+            packed_data = packed_sequences_Q.get()
+            data_thread_metrics = packed_data["metrics"]
+            B = packed_data["B"]
+            collated_data = packed_data["collated_data"]
+            num_total_tokens += packed_data["num_new_tokens"]
+            if B == 0:
+                logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
+                return None, data_thread_metrics, num_total_tokens
+            return collated_data, data_thread_metrics, num_total_tokens
 
 
 def generate_thread(
