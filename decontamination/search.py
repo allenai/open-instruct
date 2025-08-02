@@ -209,54 +209,64 @@ def vector_match(es, index_name, query_dataset, fields, model, tokenizer, max_ba
     max_train_match_scores = {_id: max(scores) for _id, scores in all_train_id_scores.items()}
     return match_scores, output_data, max_train_match_scores
 
-def load_cached_results(path, index_type, match_threshold=None):
+from collections import defaultdict
+import json
+
+def load_cached_results(path, index_type,
+                        match_threshold=None, is_exact=False):
     """
-    Recompute mean score and contaminated IDs from a cached *.jsonl* file.
-    Works for exact-match, n-gram, and vector runs.
+    Re-compute mean-match-score and the correct contaminated-ID set
+    from a cached *.jsonl* file.
     """
-    match_scores = []
-    contaminated_ids = set()
+    match_scores            = []
+    contaminated_ids        = set()
+    # for n-gram / vector we must keep the *best* score per training doc
+    max_score_per_train_doc = defaultdict(float)
 
     with open(path) as f:
         for line in f:
             d = json.loads(line)
 
-            # -------- score ----------
-            if "num_hits" in d:                      # exact match
+            # -------- 1️⃣  per-query score (for the mean) ----------
+            if "num_hits" in d:                           # exact-match
                 score_raw = 1 if d["num_hits"] > 0 else 0
-
-            elif "score" in d:                       # n-gram branch
+            elif "score" in d:                            # n-gram
                 score_raw = d["score"]
-
-            else:                                    # vector branch
-                # **take top-1 Elastic score, same as original code**
+            else:                                         # vector
                 score_raw = d["results"][0]["score"]
 
-            # apply threshold exactly like the live pipeline
-            if match_threshold is None:
-                score = score_raw
-            else:
-                score = 1 if score_raw > match_threshold else 0
+            match_scores.append(
+                score_raw if match_threshold is None
+                else 1 if score_raw > match_threshold else 0
+            )
 
-            match_scores.append(score)
+            # -------- 2️⃣  collect training-doc scores ----------
+            if "train_docs" in d:                         # exact-match
+                for td in d["train_docs"]:
+                    contaminated_ids.add(td["original_id"])  # ← always
 
-            # -------- ids -------------
-            if "train_docs" in d:                    # exact match
-                src_ids = [td["original_id"] for td in d["train_docs"]]
+            elif "matches" in d:                          # n-gram
+                for m in d["matches"]:
+                    _id, s = m["source"]["original_id"], m["score"]
+                    max_score_per_train_doc[_id] = max(
+                        max_score_per_train_doc[_id], s)
 
-            elif "matches" in d:                     # n-gram
-                src_ids = [m["source"]["original_id"] for m in d["matches"]]
+            else:                                         # vector
+                for r in d["results"]:
+                    _id, s = r["original_id"], r["score"]
+                    max_score_per_train_doc[_id] = max(
+                        max_score_per_train_doc[_id], s)
 
-            else:                                    # vector
-                src_ids = [r["original_id"] for r in d["results"]
-                           if (match_threshold is None or
-                               score_raw > match_threshold)]  # **same rule**
-
-            contaminated_ids.update(src_ids)
+    # -------- 3️⃣  finalise contaminated IDs for n-gram / vector ----
+    if match_threshold is not None:
+        contaminated_ids.update(
+            _id for _id, s in max_score_per_train_doc.items()
+            if s > match_threshold
+        )
+    # else: leave the set unchanged (exact-match already handled it)
 
     mean = sum(match_scores) / len(match_scores) if match_scores else 0.0
     return mean, contaminated_ids
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -344,7 +354,10 @@ def main():
             output_filename = os.path.join(args.output_dir, f"{index_name}_{dataset.split('/')[-1]}.jsonl")
             if os.path.exists(output_filename):
                 print(f"[cache] {output_filename} exists – reusing.")
-                mean, cached_ids = load_cached_results(output_filename, args.index_type, args.match_threshold)
+                mean, cached_ids = load_cached_results(
+                    output_filename,
+                    args.index_type,
+                    match_threshold=args.match_threshold)
                 mean_match_scores[dataset] = mean          # <-- still recorded
                 contaminated_ids.update(cached_ids)        # <-- still counted
                 print(f"\tNumber of matching train instances: {len(cached_ids)}")
