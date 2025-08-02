@@ -902,7 +902,7 @@ TOKENIZED_SFT_DATASET_KEYS = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY]
 TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY, DATASET_ORIGIN_KEY]
 
 
-def _remove_dataset_source_field(dataset: Dataset) -> Dataset:
+def remove_dataset_source_field(dataset: Dataset) -> Dataset:
     """Remove dataset_source field from dataset if it exists.
 
     This should be called after statistics collection but before returning
@@ -1734,6 +1734,7 @@ def get_cached_dataset_tulu_with_statistics(
     hf_entity: Optional[str] = None,
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
+    drop_dataset_source: bool = True,
 ) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
     dcs = []
     if dataset_config_hash is None:
@@ -1789,7 +1790,10 @@ def get_cached_dataset_tulu_with_statistics(
 
     dataset, statistics = cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
 
-    return _remove_dataset_source_field(dataset), statistics
+    if drop_dataset_source:
+        dataset = remove_dataset_source_field(dataset)
+
+    return dataset, statistics
 
 
 def get_cached_dataset_tulu(

@@ -190,6 +190,12 @@ def get_args():
         action="store_true",
         help="If set, don't use host networking in experiment. Note this will make multi-node jobs error.",
     )
+    parser.add_argument(
+        "--timeout",
+        type=str,
+        help="Timeout for the Beaker task (e.g., '2h', '30m', '1d'). If not specified, no timeout is set.",
+        default=None,
+    )
     # Split up the mason args from the Python args.
     mason_args, command_args = parser.parse_known_args()
     commands = parse_commands(command_args)
@@ -838,6 +844,9 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         spec.host_networking = False
     else:
         spec.host_networking = True
+    
+    if args.timeout is not None:
+        spec.timeout = args.timeout
 
     return spec
 
