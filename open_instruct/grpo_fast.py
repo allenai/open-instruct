@@ -1848,6 +1848,9 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
                 return None, data_thread_metrics, num_total_tokens
             return collated_data, data_thread_metrics, num_total_tokens
 
+    # end thread
+    return None, None, None
+
 
 def generate_thread(
     vllm_engines,
@@ -1897,9 +1900,10 @@ def generate_thread(
                 f"[Generate Thread] 🚀 Processed results from all vLLM engines ({num_processed}/{len(processed_results)} processed batches)"
             )
 
-    if num_processed == 0:
-        # If no batches were processed, sleep for a short time to avoid busy waiting
-        time.sleep(1)
+            if num_processed == 0:
+                # If no batches were processed, sleep for a short time to avoid busy waiting
+                time.sleep(1)
+                continue
 
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
@@ -2378,6 +2382,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 [packing_thread, generation_thread],
                 [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
             )
+            raise RuntimeError("A thread has died")
 
         # Ai2 logic: we use /output to store the artifacts of the job, so we
         if collated_data is None:
