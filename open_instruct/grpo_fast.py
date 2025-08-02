@@ -1828,18 +1828,28 @@ def sync_weights_and_prepare_prompts(
     return queries_next, ground_truths_next, datasets_next, dataset_indices
 
 
-def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
+def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event):
     """Get the packed sequences with advantages from the packing thread."""
     with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
-        packed_data = packed_sequences_Q.get()
-        data_thread_metrics = packed_data["metrics"]
-        B = packed_data["B"]
-        collated_data = packed_data["collated_data"]
-        num_total_tokens += packed_data["num_new_tokens"]
-        if B == 0:
-            logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-            return None, data_thread_metrics, num_total_tokens
-        return collated_data, data_thread_metrics, num_total_tokens
+        while not stop_event.is_set():
+            try:
+                packed_data = packed_sequences_Q.get(timeout=2.0)
+            except Empty:
+                # keep polling for data
+                continue
+
+            packed_data = packed_sequences_Q.get()
+            data_thread_metrics = packed_data["metrics"]
+            B = packed_data["B"]
+            collated_data = packed_data["collated_data"]
+            num_total_tokens += packed_data["num_new_tokens"]
+            if B == 0:
+                logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
+                return None, data_thread_metrics, num_total_tokens
+            return collated_data, data_thread_metrics, num_total_tokens
+
+    # end thread
+    return None, None, None
 
 
 def generate_thread(
@@ -1875,15 +1885,25 @@ def generate_thread(
                 bar_format="{l_bar}{bar}{r_bar}\n",
             ) as pbar:
                 for future in futures.as_completed(engine_futures):
-                    processed_results.append(future.result())
-                    pbar.update(1)
+                    try:
+                        # if future.exception() is not None:
+                        #     raise future.exception()
+                        processed_results.append(future.result())
+                        pbar.update(1)
+                    except Exception as e:
+                        logger.error("[Generate Thread] Error processing from queue")
+                        stop_event.set()
+                        raise e
+
             num_processed = sum(int(result) for result in processed_results)
             logger.info(
                 f"[Generate Thread] 🚀 Processed results from all vLLM engines ({num_processed}/{len(processed_results)} processed batches)"
             )
-        if num_processed == 0:
-            # If no batches were processed, sleep for a short time to avoid busy waiting
-            time.sleep(1)
+
+            if num_processed == 0:
+                # If no batches were processed, sleep for a short time to avoid busy waiting
+                time.sleep(1)
+                continue
 
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
@@ -2188,11 +2208,11 @@ def cleanup_judge_clients():
 
 
 def cleanup_training_resources(
-    stop_generate_event: threading.Event, threads: list[threading.Thread], queues: list[ray_queue.Queue]
+    stop_event: threading.Event, threads: list[threading.Thread], queues: list[ray_queue.Queue]
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
     # Signal threads to stop
-    stop_generate_event.set()
+    stop_event.set()
 
     # Clean up threads with timeout
     logger.info("Cleaning up threads...")
@@ -2300,7 +2320,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     packing_thread.start()
 
     # Create and start the generate thread
-    stop_generate_event = threading.Event()
+    stop_event = threading.Event()
     generation_thread = threading.Thread(
         target=generate_thread,
         args=(
@@ -2310,7 +2330,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             args.local_eval_freq,
             args.num_training_steps,
             resume_training_step,
-            stop_generate_event,
+            stop_event,
         ),
     )
     generation_thread.start()
@@ -2353,8 +2373,18 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         # The generate_thread is now handling vLLM processing asynchronously
 
         collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
-            packed_sequences_Q, num_total_tokens
+            packed_sequences_Q, num_total_tokens, stop_event
         )
+
+        if stop_event.is_set():
+            cleanup_training_resources(
+                stop_event,
+                [packing_thread, generation_thread],
+                [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
+            )
+            raise RuntimeError("A thread has died")
+
+        # Ai2 logic: we use /output to store the artifacts of the job, so we
         if collated_data is None:
             continue
 
@@ -2392,7 +2422,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     # Clean up resources
     cleanup_training_resources(
-        stop_generate_event,
+        stop_event,
         [packing_thread, generation_thread],
         [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
     )
