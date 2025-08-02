@@ -330,6 +330,8 @@ def main():
                 mean, cached_ids = load_cached_results(output_filename, args.index_type)
                 mean_match_scores[dataset] = mean          # <-- still recorded
                 contaminated_ids.update(cached_ids)        # <-- still counted
+                print(f"\tNumber of matching train instances: {len(contaminated_ids)}")
+                print(f"\tMean match score: {mean}")
                 continue
             try:
                 if 'livecodebench' in dataset:
