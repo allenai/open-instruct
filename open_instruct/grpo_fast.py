@@ -1886,8 +1886,6 @@ def generate_thread(
             ) as pbar:
                 for future in futures.as_completed(engine_futures):
                     try:
-                        # if future.exception() is not None:
-                        #     raise future.exception()
                         processed_results.append(future.result())
                         pbar.update(1)
                     except Exception as e:
@@ -1903,7 +1901,6 @@ def generate_thread(
             if num_processed == 0:
                 # If no batches were processed, sleep for a short time to avoid busy waiting
                 time.sleep(1)
-                continue
 
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
