@@ -293,6 +293,10 @@ def main():
         contaminated_ids = set()
         for dataset, subset, split, fields, limit in eval_sets:
             print(f"Querying {index_name} for {dataset}.")
+            output_filename = os.path.join(args.output_dir, f"{index_name}_{dataset.split('/')[-1]}.jsonl")
+            if os.path.exists(output_filename):
+                print(f"Output file {output_filename} already exists. Skipping.")
+                continue
             try:
                 if 'livecodebench' in dataset:
                     query_dataset = list(load_dataset(dataset, subset, split=split, trust_remote_code=True))[:limit]
@@ -328,7 +332,7 @@ def main():
             print(f"\tNumber of matching train instances: {len(contaminated_ids)}")
             print(f"\tMean match score: {mean_match_score}")
             mean_match_scores[dataset] = mean_match_score
-            output_filename = os.path.join(args.output_dir, f"{index_name}_{dataset.split('/')[-1]}.jsonl")
+            
             with open(output_filename, "w") as outfile:
                 for datum in output_data:
                     print(json.dumps(datum), file=outfile)
