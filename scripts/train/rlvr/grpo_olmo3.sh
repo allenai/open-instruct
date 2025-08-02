@@ -20,12 +20,15 @@ evals="minerva_math::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,a
 # model_name_or_path="/weka/oe-adapt-default/michaeln/olmo3/anneal-round1-100B-olmo3_7b_with-reasoning-anneal-9d6f76b0_step47684"
 # micro anneals
 # model_name_or_path="/weka/oe-adapt-default/allennlp/deletable_checkpoint/michaeln/olmo3_microanneal-finemath-643cecc4_step4769-hf"
-# model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round1-100B-olmo3_7b_with-reasoning-anneal-12T-3d39e871/step47684-hf"
 
-model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/kylel/baseline-olmo2_7b-928646-anneal-100B-dolma2-round1-alldressed-17b22b3a/step47684-hf"
+# model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/kylel/baseline-olmo2_7b-928646-anneal-100B-dolma2-round1-alldressed-17b22b3a/step47684-hf"
+# gs_model_name="olmo2-alldressed-midtraingin"
+
+model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round1-100B-olmo3_7b_with-reasoning-anneal-12T-3d39e871/step47684-hf"
 gs_model_name="olmo3-midtraining-round1"
 
 # model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round2-100B-olmo3_7b_with-reasoning-anneal-12T-53f443c7/step47684-hf"
+#
 # model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round3-webround2-100B-olmo3_7b_with-reasoning-anneal-12T-302b1ae8/step47684-hf"
 # gs_model_name="olmo3-midtraining-round3"
 
