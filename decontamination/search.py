@@ -209,11 +209,7 @@ def vector_match(es, index_name, query_dataset, fields, model, tokenizer, max_ba
     max_train_match_scores = {_id: max(scores) for _id, scores in all_train_id_scores.items()}
     return match_scores, output_data, max_train_match_scores
 
-def load_cached_results(path, index_type):
-    """
-    Re-compute the per-query scores and contaminated ids from a *.jsonl* file that
-    was written in a previous run.
-    """
+def load_cached_results(path, index_type, match_threshold=None):
     match_scores = []
     contaminated_ids = set()
 
@@ -221,22 +217,29 @@ def load_cached_results(path, index_type):
         for line in f:
             d = json.loads(line)
 
-            # ----  score  ----
-            if index_type == "text" and "score" not in d:           # exact-match
-                match_scores.append(1 if d["num_hits"] > 0 else 0)
-            else:                                                   # n-gram / vector
-                match_scores.append(d["score"])
+            # ---------- score ----------
+            if "num_hits" in d:                     # exact-match branch
+                score = 1 if d["num_hits"] > 0 else 0
+            else:                                   # n-gram / vector
+                score = d["score"]
+                if match_threshold is not None:
+                    score = 1 if score > match_threshold else 0
+            match_scores.append(score)
 
-            # ----  contaminated ids  ----
-            if "train_docs" in d:                                   # exact match
-                contaminated_ids.update(td["original_id"]
-                                          for td in d["train_docs"])
-            elif "matches" in d:                                    # n-gram
-                contaminated_ids.update(m["source"]["original_id"]
-                                          for m in d["matches"])
-            elif "results" in d:                                    # vector
-                contaminated_ids.update(r["original_id"]
-                                          for r in d["results"])
+            # ---------- ids -------------
+            if "train_docs" in d:                   # exact-match
+                src_ids = [td["original_id"] for td in d["train_docs"]]
+            elif "matches" in d:                    # n-gram
+                src_ids = [m["source"]["original_id"] for m in d["matches"]]
+            else:                                   # vector
+                src_ids = [r["original_id"] for r in d["results"]]
+
+            # only keep IDs that also pass the threshold
+            if match_threshold is None:
+                contaminated_ids.update(src_ids)
+            else:
+                if score == 1:
+                    contaminated_ids.update(src_ids)
 
     mean = sum(match_scores) / len(match_scores) if match_scores else 0.0
     return mean, contaminated_ids
@@ -327,10 +330,10 @@ def main():
             output_filename = os.path.join(args.output_dir, f"{index_name}_{dataset.split('/')[-1]}.jsonl")
             if os.path.exists(output_filename):
                 print(f"[cache] {output_filename} exists – reusing.")
-                mean, cached_ids = load_cached_results(output_filename, args.index_type)
+                mean, cached_ids = load_cached_results(output_filename, args.index_type, args.match_threshold)
                 mean_match_scores[dataset] = mean          # <-- still recorded
                 contaminated_ids.update(cached_ids)        # <-- still counted
-                print(f"\tNumber of matching train instances: {len(contaminated_ids)}")
+                print(f"\tNumber of matching train instances: {len(cached_ids)}")
                 print(f"\tMean match score: {mean}")
                 continue
             try:
