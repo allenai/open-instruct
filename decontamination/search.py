@@ -209,6 +209,37 @@ def vector_match(es, index_name, query_dataset, fields, model, tokenizer, max_ba
     max_train_match_scores = {_id: max(scores) for _id, scores in all_train_id_scores.items()}
     return match_scores, output_data, max_train_match_scores
 
+def load_cached_results(path, index_type):
+    """
+    Re-compute the per-query scores and contaminated ids from a *.jsonl* file that
+    was written in a previous run.
+    """
+    match_scores = []
+    contaminated_ids = set()
+
+    with open(path) as f:
+        for line in f:
+            d = json.loads(line)
+
+            # ----  score  ----
+            if index_type == "text" and "score" not in d:           # exact-match
+                match_scores.append(1 if d["num_hits"] > 0 else 0)
+            else:                                                   # n-gram / vector
+                match_scores.append(d["score"])
+
+            # ----  contaminated ids  ----
+            if "train_docs" in d:                                   # exact match
+                contaminated_ids.update(td["original_id"]
+                                          for td in d["train_docs"])
+            elif "matches" in d:                                    # n-gram
+                contaminated_ids.update(m["source"]["original_id"]
+                                          for m in d["matches"])
+            elif "results" in d:                                    # vector
+                contaminated_ids.update(r["original_id"]
+                                          for r in d["results"])
+
+    mean = sum(match_scores) / len(match_scores) if match_scores else 0.0
+    return mean, contaminated_ids
 
 def main():
     parser = argparse.ArgumentParser()
@@ -295,7 +326,10 @@ def main():
             print(f"Querying {index_name} for {dataset}.")
             output_filename = os.path.join(args.output_dir, f"{index_name}_{dataset.split('/')[-1]}.jsonl")
             if os.path.exists(output_filename):
-                print(f"Output file {output_filename} already exists. Skipping.")
+                print(f"[cache] {output_filename} exists – reusing.")
+                mean, cached_ids = load_cached_results(output_filename, args.index_type)
+                mean_match_scores[dataset] = mean          # <-- still recorded
+                contaminated_ids.update(cached_ids)        # <-- still counted
                 continue
             try:
                 if 'livecodebench' in dataset:
