@@ -210,6 +210,10 @@ def vector_match(es, index_name, query_dataset, fields, model, tokenizer, max_ba
     return match_scores, output_data, max_train_match_scores
 
 def load_cached_results(path, index_type, match_threshold=None):
+    """
+    Recompute mean score and contaminated IDs from a cached *.jsonl* file.
+    Works for exact-match, n-gram, and vector runs.
+    """
     match_scores = []
     contaminated_ids = set()
 
@@ -217,32 +221,42 @@ def load_cached_results(path, index_type, match_threshold=None):
         for line in f:
             d = json.loads(line)
 
-            # ---------- score ----------
-            if "num_hits" in d:                     # exact-match branch
-                score = 1 if d["num_hits"] > 0 else 0
-            else:                                   # n-gram / vector
-                score = d["score"]
-                if match_threshold is not None:
-                    score = 1 if score > match_threshold else 0
+            # -------- score ----------
+            if "num_hits" in d:                      # exact match
+                score_raw = 1 if d["num_hits"] > 0 else 0
+
+            elif "score" in d:                       # n-gram branch
+                score_raw = d["score"]
+
+            else:                                    # vector branch
+                # **take top-1 Elastic score, same as original code**
+                score_raw = d["results"][0]["score"]
+
+            # apply threshold exactly like the live pipeline
+            if match_threshold is None:
+                score = score_raw
+            else:
+                score = 1 if score_raw > match_threshold else 0
+
             match_scores.append(score)
 
-            # ---------- ids -------------
-            if "train_docs" in d:                   # exact-match
+            # -------- ids -------------
+            if "train_docs" in d:                    # exact match
                 src_ids = [td["original_id"] for td in d["train_docs"]]
-            elif "matches" in d:                    # n-gram
-                src_ids = [m["source"]["original_id"] for m in d["matches"]]
-            else:                                   # vector
-                src_ids = [r["original_id"] for r in d["results"]]
 
-            # only keep IDs that also pass the threshold
-            if match_threshold is None:
-                contaminated_ids.update(src_ids)
-            else:
-                if score == 1:
-                    contaminated_ids.update(src_ids)
+            elif "matches" in d:                     # n-gram
+                src_ids = [m["source"]["original_id"] for m in d["matches"]]
+
+            else:                                    # vector
+                src_ids = [r["original_id"] for r in d["results"]
+                           if (match_threshold is None or
+                               score_raw > match_threshold)]  # **same rule**
+
+            contaminated_ids.update(src_ids)
 
     mean = sum(match_scores) / len(match_scores) if match_scores else 0.0
     return mean, contaminated_ids
+
 
 def main():
     parser = argparse.ArgumentParser()
