@@ -1826,12 +1826,10 @@ def sync_weights_and_prepare_prompts(
     return queries_next, ground_truths_next, datasets_next, dataset_indices
 
 
-def load_data_from_packing_thread(
-    packed_sequences_Q: Queue, num_total_tokens: int, stop_generate_event: threading.Event
-):
+def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event):
     """Get the packed sequences with advantages from the packing thread."""
     with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
-        while not stop_generate_event.is_set():
+        while not stop_event.is_set():
             try:
                 packed_data = packed_sequences_Q.get(timeout=2.0)
                 if packed_data is not None:
@@ -1841,7 +1839,7 @@ def load_data_from_packing_thread(
                 # keep polling for data
                 continue
 
-        if stop_generate_event.is_set():
+        if stop_event.is_set():
             logger.error("[Main Thread] generate thread has died, cancelling")
             raise Exception("Generate thread has an exception and died, see error above")
 
@@ -2211,11 +2209,11 @@ def cleanup_judge_clients():
 
 
 def cleanup_training_resources(
-    stop_generate_event: threading.Event, threads: list[threading.Thread], queues: list[ray_queue.Queue]
+    stop_event: threading.Event, threads: list[threading.Thread], queues: list[ray_queue.Queue]
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
     # Signal threads to stop
-    stop_generate_event.set()
+    stop_event.set()
 
     # Clean up threads with timeout
     logger.info("Cleaning up threads...")
@@ -2323,7 +2321,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     packing_thread.start()
 
     # Create and start the generate thread
-    stop_generate_event = threading.Event()
+    stop_event = threading.Event()
     generation_thread = threading.Thread(
         target=generate_thread,
         args=(
@@ -2333,7 +2331,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             args.local_eval_freq,
             args.num_training_steps,
             resume_training_step,
-            stop_generate_event,
+            stop_event,
         ),
     )
     generation_thread.start()
@@ -2377,11 +2375,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
         try:
             collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
-                packed_sequences_Q, num_total_tokens, stop_generate_event
+                packed_sequences_Q, num_total_tokens, stop_event
             )
         except Exception as e:
             cleanup_training_resources(
-                stop_generate_event,
+                stop_event,
                 [packing_thread, generation_thread],
                 [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
             )
@@ -2425,7 +2423,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     # Clean up resources
     cleanup_training_resources(
-        stop_generate_event,
+        stop_event,
         [packing_thread, generation_thread],
         [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
     )
