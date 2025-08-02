@@ -1881,15 +1881,15 @@ def generate_thread(
             ) as pbar:
                 for future in futures.as_completed(engine_futures):
                     try:
-                        if future.exception() is not None:
-                            raise future.exception()
+                        # if future.exception() is not None:
+                        #     raise future.exception()
                         processed_results.append(future.result())
-                    except Exception as e:
-                        logger.error(f"[Generate Thread] Error processing from queue: {e}")
-                        stop_event.set()
-                        break
-                    finally:
                         pbar.update(1)
+                    except Exception as e:
+                        logger.error("[Generate Thread] Error processing from queue")
+                        stop_event.set()
+                        raise e
+
             num_processed = sum(int(result) for result in processed_results)
             logger.info(
                 f"[Generate Thread] 🚀 Processed results from all vLLM engines ({num_processed}/{len(processed_results)} processed batches)"
@@ -2366,17 +2366,16 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
         # The generate_thread is now handling vLLM processing asynchronously
 
-        try:
-            collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
-                packed_sequences_Q, num_total_tokens, stop_event
-            )
-        except Exception as e:
+        collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
+            packed_sequences_Q, num_total_tokens, stop_event
+        )
+
+        if stop_event.is_set():
             cleanup_training_resources(
                 stop_event,
                 [packing_thread, generation_thread],
                 [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
             )
-            raise Exception(e)
 
         # Ai2 logic: we use /output to store the artifacts of the job, so we
         if collated_data is None:
