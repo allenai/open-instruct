@@ -204,7 +204,8 @@ model_name = model_info[0] + f"_{model_info[2]}" if model_info[2] is not None el
 eval_task_specs = []
 
 for experiment_group in experiment_groups:
-    print(f"Submitting {experiment_group} for model: {model_info[0]}")
+    if not args.skip_oi_evals:
+        print(f"Submitting {experiment_group} for model: {model_info[0]}")
     task_spec = copy.deepcopy(d1["tasks"][0])
 
     name = f"open_instruct_eval_{experiment_group}_{model_name}_{today}"
@@ -562,7 +563,8 @@ for experiment_group in experiment_groups:
 
     if any([x in model_info[0] for x in ["opt", "pythia", "falcon", "olmoe"]]):
         if "--use_vllm" in task_spec['arguments'][0]:
-            print(f"Removing --use_vllm for {model_info[0]}")
+            if not args.skip_oi_evals:
+                print(f"Removing --use_vllm for {model_info[0]}")
             task_spec['arguments'] = [task_spec['arguments'][0].replace("--use_vllm", "")]
 
     # Add additional stop sequences if needed.
@@ -577,7 +579,8 @@ for experiment_group in experiment_groups:
             # by default, we dont upload oi-evals, only safety and oe-evals.
             args.hf_upload_experiments = []
         if experiment_group not in args.hf_upload_experiments:
-            print(f"Skipping HF upload for {experiment_group}")
+            if not args.skip_oi_evals: 
+                print(f"Skipping HF upload for {experiment_group}")
         else:
             hf_dataset = args.upload_to_hf
             # to match the way oe-eval script works.

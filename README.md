@@ -53,7 +53,7 @@ pip install --upgrade pip "setuptools<70.0.0" wheel
 # TODO, unpin setuptools when this issue in flash attention is resolved
 pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
 pip install packaging
-pip install flash-attn==2.7.2.post1 --no-build-isolation
+pip install flash-attn==2.7.2.post2 flashinfer-python>=0.2.7.post1 --no-build-isolation
 pip install -r requirements.txt
 pip install -e .
 python -m nltk.downloader punkt
@@ -62,15 +62,21 @@ python -m nltk.downloader punkt
 * **Local installation with uv (preview)**: We are experimenting with using [uv](https://docs.astral.sh/uv/). You can install via
 ```bash
 uv sync
-uv sync --extra compile --extra liger # to install flash attention and liger-kernel
+uv sync --extra compile --extra liger # to install flash attention, flash infer, and liger-kernel
 ```
 
 
 * **Docker installation**: You can also use the Dockerfile to build a Docker image. You can build the image with the following command:
 
 ```bash
+# If you are internal at Ai2, defaults are set to use an internal base image.
 docker build . -t open_instruct_dev
-# if you are interally at AI2, you can create an image like this:
+
+# if you are external to Ai2, please build the base image first and then build the open_instruct_dev image.
+docker build -f Dockerfile.base --build-arg CUDA="12.8.0" --build-arg VARIANT=devel --build-arg DIST=ubuntu22.04 --build-arg TORCH_VER="2.7.0" --build-arg BEAKER_VERSION=v1.5.208 --build-arg VULKAN_SDK_VERSION="1.3.275" --target default-cuda -t open_instruct_dev:latest .
+docker build . -t open_instruct_dev --build-arg BASE_IMAGE=open_instruct_dev:latest
+
+# if you are interally at AI2, you can create a beaker image like this:
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 beaker image delete $beaker_user/open_instruct_dev 
 beaker image create open_instruct_dev -n open_instruct_dev -w ai2/$beaker_user
@@ -79,12 +85,13 @@ beaker image create open_instruct_dev -n open_instruct_dev -w ai2/$beaker_user
 Optionally you can build the base image with the following command:
 
 ```bash
-docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 -f  Dockerfile.base . -t cuda-no-conda:12.1-cudnn8-dev-ubuntu20.04
+docker build -f Dockerfile.base --build-arg CUDA="12.8.0" --build-arg VARIANT=devel --build-arg DIST=ubuntu22.04 --build-arg TORCH_VER="2.7.0" --build-arg BEAKER_VERSION=v1.5.208 --build-arg VULKAN_SDK_VERSION="1.3.275" --target default-cuda -t open_instruct_dev:latest .
 ```
 
 * **Docker with uv**: You can also use the Dockerfile to build a Docker image with uv. You can build the image with the following command:
 
 ```bash
+# similar to above, you need to provide the base image if you are external to Ai2.
 docker build -f Dockerfile.uv --build-arg UV_CACHE_DIR=$UV_CACHE_DIR -t open_instruct_dev_uv .
 # if you are interally at AI2, you can create an image like this:
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
