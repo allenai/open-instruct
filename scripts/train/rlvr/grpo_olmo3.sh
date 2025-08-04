@@ -24,13 +24,19 @@ evals="minerva_math::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,a
 # model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/kylel/baseline-olmo2_7b-928646-anneal-100B-dolma2-round1-alldressed-17b22b3a/step47684-hf"
 # gs_model_name="olmo2-alldressed-midtraingin"
 
-model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round1-100B-olmo3_7b_with-reasoning-anneal-12T-3d39e871/step47684-hf"
-gs_model_name="olmo3-midtraining-round1"
+# model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round1-100B-olmo3_7b_with-reasoning-anneal-12T-3d39e871/step47684-hf"
+# gs_model_name="olmo3-midtraining-round1"
 
 # model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round2-100B-olmo3_7b_with-reasoning-anneal-12T-53f443c7/step47684-hf"
 #
 # model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round3-webround2-100B-olmo3_7b_with-reasoning-anneal-12T-302b1ae8/step47684-hf"
 # gs_model_name="olmo3-midtraining-round3"
+
+# model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/ianm/decon-anneal-round3-webround2-100B-olmo3_7b_with-reasoning-anneal-12T-fc803782/step47684-hf"
+# gs_model_name="olmo3-midtraining-round3-decon"
+
+model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round4-100B-olmo3_7b-anneal-decon-12T-081e9449/step47684-hf"
+gs_model_name="olmo3-midtraining-round4"
 
 # cluster
 cluster=ai2/augusta-google-1
@@ -46,7 +52,7 @@ python mason.py \
     --pure_docker_mode \
     --image michaeln/open_instruct_dev_uv_olmo3 \
     --preemptible \
-    --num_nodes 1 \
+    --num_nodes 2 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gs_model_name $gs_model_name \
@@ -80,8 +86,8 @@ python open_instruct/grpo_fast.py \
     --temperature 1.0 \
     --total_episodes 256000 \
     --deepspeed_stage 2 \
-    --num_learners_per_node 4 \
-    --vllm_num_engines 4 \
+    --num_learners_per_node 8 \
+    --vllm_num_engines 8 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
