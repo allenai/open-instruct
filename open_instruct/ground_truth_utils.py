@@ -19,7 +19,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
-import aiohttp
+import requests
 from litellm import acompletion
 
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
