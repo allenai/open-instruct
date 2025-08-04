@@ -319,7 +319,7 @@ def main():
         ("lighteval/agi_eval_en", None, "train", ["passage", "question"], None),
         ("bigcode/bigcodebench", None, "v0.1.2", ["instruct_prompt"], None),
         ("deepmind/math_dataset", None, "test", ["question"], 50),
-        ("allenai/IFBench_test", None, "test", ["prompt"], None),
+        ("allenai/IFBench_test", None, "train", ["prompt"], None),
     ] if args.dataset is None else [
         (args.dataset, args.subset, args.split, args.field, args.limit)
     ]
@@ -364,7 +364,7 @@ def main():
                 print(f"\tMean match score: {mean}")
                 continue
             try:
-                if 'livecodebench' in dataset:
+                if 'deepmind' in dataset or 'livecodebench' in dataset or 'alpaca' in dataset or 'agi' in dataset:
                     query_dataset = list(load_dataset(dataset, subset, split=split, trust_remote_code=True))[:limit]
                 query_dataset = list(load_dataset(dataset, subset, split=split))[:limit]
             except ValueError:
