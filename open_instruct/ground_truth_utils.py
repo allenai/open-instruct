@@ -19,7 +19,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
-import requests
+import aiohttp
 from litellm import acompletion
 
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
@@ -805,15 +805,16 @@ class CodeVerifier(VerifierFunction):
         }
 
         try:
-            # Make the request in a thread pool to keep it async
-            def make_request():
-                response = requests.post(
+            # Use 10x the execution timeout with reasonable min/max bounds
+            http_timeout = max(30, min(300, self.verifier_config.code_max_execution_time * 10))
+            timeout = aiohttp.ClientTimeout(total=http_timeout)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
                     self.verifier_config.code_api_url, json=payload, headers={"Content-Type": "application/json"}
-                )
-                response.raise_for_status()
-                return response.json()
+                ) as response:
+                    response.raise_for_status()
+                    result = await response.json()
 
-            result = await asyncio.to_thread(make_request)
             passes = result["results"]
             pass_rate = sum(passes) / len(passes) if passes else 0.0
             score = 0.0 if pass_rate < self.pass_rate_reward_threshold else pass_rate
