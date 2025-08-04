@@ -761,6 +761,9 @@ class CodeVerifier(VerifierFunction):
     The label should be a list of test cases or a JSON string representation of a list.
     The API URL should be provided during initialization.
     """
+    
+    # Class-level session cache to reuse connections
+    _session_cache = weakref.WeakKeyDictionary()
 
     def __init__(self, verifier_config: CodeVerifierConfig) -> None:
         super().__init__("code", verifier_config=verifier_config, weight=1.0)
@@ -778,6 +781,27 @@ class CodeVerifier(VerifierFunction):
 
         # Return the last match, stripped of whitespace
         return matches[-1].strip()
+
+    # Create a session pool for better performance
+    _session_pool = None
+    
+    @classmethod
+    def _get_session(cls):
+        if cls._session_pool is None:
+            cls._session_pool = requests.Session()
+            # Configure connection pooling
+            adapter = requests.adapters.HTTPAdapter(
+                pool_connections=100,
+                pool_maxsize=100,
+                max_retries=requests.adapters.Retry(
+                    total=3,
+                    backoff_factor=0.3,
+                    status_forcelist=[500, 502, 503, 504]
+                )
+            )
+            cls._session_pool.mount('http://', adapter)
+            cls._session_pool.mount('https://', adapter)
+        return cls._session_pool
 
     async def async_call(
         self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
@@ -805,16 +829,25 @@ class CodeVerifier(VerifierFunction):
         }
 
         try:
-            # Use 10x the execution timeout with reasonable min/max bounds
+            # Use connection pooling session
+            session = self._get_session()
+            
+            # Calculate timeout
             http_timeout = max(30, min(300, self.verifier_config.code_max_execution_time * 10))
-            timeout = aiohttp.ClientTimeout(total=http_timeout)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    self.verifier_config.code_api_url, json=payload, headers={"Content-Type": "application/json"}
-                ) as response:
-                    response.raise_for_status()
-                    result = await response.json()
-
+            
+            # Make request in thread pool to keep it async
+            def make_request():
+                response = session.post(
+                    self.verifier_config.code_api_url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=http_timeout
+                )
+                response.raise_for_status()
+                return response.json()
+            
+            result = await asyncio.to_thread(make_request)
+            
             passes = result["results"]
             pass_rate = sum(passes) / len(passes) if passes else 0.0
             score = 0.0 if pass_rate < self.pass_rate_reward_threshold else pass_rate
