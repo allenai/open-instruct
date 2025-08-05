@@ -206,7 +206,7 @@ class CodeViewTool(Tool):
                 # Call the API endpoint
                 timeout_seconds = 60
                 response = requests.post(
-                    f"{self.api_endpoint}/view_file",
+                    self.api_endpoint,
                     json={"repo_name": repo_name, "path": path, "view_range": view_range},
                     timeout=timeout_seconds,
                 )
