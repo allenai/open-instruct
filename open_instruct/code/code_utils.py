@@ -9,6 +9,7 @@ import shutil
 import sys
 import time
 import zlib
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .testing_util import grade_stdio
@@ -32,7 +33,8 @@ tmp_unlink = os.unlink
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
+REPO_DIR = os.path.join(os.path.dirname(__file__), "repos")
+os.makedirs(REPO_DIR, exist_ok=True)
 # -------------------------------------------------------------
 # The slow but  accurate version
 # -------------------------------------------------------------
@@ -391,3 +393,56 @@ def reliability_guard(maximum_memory_bytes: Optional[int] = None):
     sys.modules["resource"] = None
     sys.modules["psutil"] = None
     sys.modules["tkinter"] = None
+
+
+def clone_repo(repo, config):
+    """
+    Clones repository and returns the path to the repository.
+    """
+    assert repo["image_name"] != "", f"{repo['name']} needs a docker image specified"
+    # Clone the repo
+    repo_name = repo["name"]
+    repo_last_name = repo_name.split("/")[-1]
+    repo_git_folder = f"{REPO_DIR}/{repo_last_name}/.git"
+    url = f"https://{config['call_paths']['default']['repo_domain']}/{repo_name}.git"
+    cmd = f"cd {REPO_DIR}; git clone {url}"
+    p = os.path.split(Path(repo_git_folder))[0]  # Get path to repo
+    if not os.path.exists(p):
+        os.system(cmd)
+
+    # Switch to right commit or save the current commit
+    os.chdir(f"{p}")
+    base_commit = repo["base_commit"]
+    os.system(f"git checkout {base_commit}")
+    print(f"\tSet cwd to {p} and checked out {base_commit}...")
+    os.chdir(config["home_dir"])
+    return p
+
+
+def view_file(repo_path: str, file_path: str, view_range: Optional[List[int]] = None):
+    """
+    View a file and return the content.
+
+    Args:
+        repo_path: The absolute path to the repository
+        file_path: The relative path to the file within the repository
+        view_range: Optional [start_line, end_line] to view specific lines (1-indexed)
+
+    Returns:
+        The content of the file (or specified lines)
+    """
+    full_path = os.path.join(repo_path, file_path)
+
+    if not os.path.exists(full_path):
+        raise FileNotFoundError(f"File not found: {full_path}")
+
+    with open(full_path, "r") as f:
+        if view_range and len(view_range) == 2:
+            lines = f.readlines()
+            start_line = max(1, view_range[0]) - 1  # Convert to 0-indexed
+            end_line = min(len(lines), view_range[1])
+            content = "".join(lines[start_line:end_line])
+        else:
+            content = f.read()
+
+    return content

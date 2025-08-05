@@ -3,6 +3,7 @@ python open_instruct/tool_utils/tool_vllm.py
 """
 
 import copy
+import json
 import re
 import time
 import traceback
@@ -128,6 +129,126 @@ class PythonCodeTool(Tool):
         # Return all captured outputs as a single string
         return ToolOutput(
             output="\n".join(all_outputs), called=True, error=error, timeout=timeout, runtime=time.time() - start_time
+        )
+
+
+class CodeViewTool(Tool):
+    def __init__(self, api_endpoint: str, repo_name: str = None, *args, **kwargs):
+        self.api_endpoint = api_endpoint
+        self.repo_name = repo_name
+        super().__init__(*args, **kwargs)
+
+    def __call__(self, prompt: str) -> ToolOutput:
+        """
+        Use the code view tool to view files of a repo.
+        The prompt will contain tool calls with file paths to view.
+
+        Expected formats:
+        <tool_call>
+        {"name": "str_replace_editor", "arguments": {"command": "view", "path": "/testbed/starlette/config.py", "view_range": [121, 138], "repo_name": "encode/starlette"}}
+        </tool_call>
+
+        or
+
+        <tool_call>
+        {"name": "str_replace_editor", "arguments": {"command": "view", "path": "/testbed/starlette/config.py", "repo_name": "encode/starlette"}}
+        </tool_call>
+
+        The repo_name should be provided in the tool call. If not provided, will fallback to "testbed".
+        """
+
+        # Find tool calls in the prompt
+        tool_call_pattern = r"<tool_call>\s*(.*?)\s*</tool_call>"
+        tool_calls = re.findall(tool_call_pattern, prompt, re.DOTALL)
+
+        if not tool_calls:
+            return ToolOutput(output="", called=False, error="", timeout=False, runtime=0)
+
+        all_outputs = []
+        error = ""
+        start_time = time.time()
+        timeout = False
+
+        for tool_call_str in tool_calls:
+            try:
+                # Parse the JSON tool call
+                tool_call = json.loads(tool_call_str)
+
+                # Check if this is a view command
+                if tool_call.get("arguments", {}).get("command") != "view":
+                    continue
+
+                # Extract the path and view_range
+                path = tool_call["arguments"].get("path", "")
+                view_range = tool_call["arguments"].get("view_range", None)
+
+                # Remove /testbed/ prefix if present
+                if path.startswith("/testbed/"):
+                    path = path[9:]  # Remove "/testbed/" prefix
+                elif path.startswith("testbed/"):
+                    path = path[8:]  # Remove "testbed/" prefix
+
+                # Extract repo_name from the tool call arguments
+                repo_name = tool_call.get("arguments", {}).get("repo_name")
+
+                # Fallback to instance variable if not in tool call
+                if not repo_name:
+                    repo_name = self.repo_name
+
+                # For instances from sample data, extract repo name from extra_fields if available
+                if not repo_name and "extra_fields" in tool_call.get("arguments", {}):
+                    repo_name = tool_call["arguments"]["extra_fields"].get("repo_name")
+
+                if not repo_name:
+                    # Try to infer from the prompt or use a default
+                    repo_name = "testbed"
+
+                # Call the API endpoint
+                timeout_seconds = 60
+                response = requests.post(
+                    f"{self.api_endpoint}/view_file",
+                    json={"repo_name": repo_name, "path": path, "view_range": view_range},
+                    timeout=timeout_seconds,
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    content = result.get("content", "")
+
+                    # Format the output similar to how a file viewer would show it
+                    if view_range:
+                        output = f"Lines {view_range[0]}-{view_range[1]} of {path}:\n{content}"
+                    else:
+                        output = f"Content of {path}:\n{content}"
+
+                    all_outputs.append(output)
+                else:
+                    error_msg = f"API error (status {response.status_code}): {response.text}"
+                    all_outputs.append(error_msg)
+                    error = error_msg
+
+            except requests.Timeout:
+                all_outputs.append("Timeout viewing file")
+                timeout = True
+                break
+            except json.JSONDecodeError as e:
+                error_msg = f"Invalid JSON in tool call: {e}"
+                all_outputs.append(error_msg)
+                error = error_msg
+            except Exception as e:
+                error_msg = f"Error processing tool call: {str(e)}"
+                all_outputs.append(error_msg)
+                error = error_msg
+
+        runtime = time.time() - start_time
+        called = len(tool_calls) > 0
+
+        return ToolOutput(
+            output="\n\n".join(all_outputs) if all_outputs else "",
+            called=called,
+            error=error,
+            timeout=timeout,
+            runtime=runtime,
         )
 
 

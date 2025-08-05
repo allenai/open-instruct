@@ -385,8 +385,8 @@ class Args:
 
     # Tool settings
     tools: Optional[List[str]] = None
-    """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
-    max_tool_calls: List[int] = field(default_factory=lambda: [5])
+    """If set, use the tool mapped to the string. Currently supports `search`, `code`, and `code_view`"""
+    max_tool_calls: List[int] = field(default_factory=lambda: [32])
     """Maximum number of tool calls allowed. If a list is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
     mask_tool_use: bool = True
     """Whether to mask the tool output. By default on."""
@@ -401,6 +401,10 @@ class Args:
 
     # code-tool specific settings
     code_tool_api_endpoint: Optional[str] = None
+
+    # code-view-tool specific settings
+    code_view_api_endpoint: Optional[str] = None
+    """The API endpoint for the code view tool (defaults to code_tool_api_endpoint if not set)."""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
@@ -1713,6 +1717,23 @@ def create_model_and_optimizer(
                 from open_instruct.tool_utils.tool_vllm import PythonCodeTool
 
                 tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
+                tool_objects[tool.end_str] = tool
+            elif tool.lower() == "code_view":
+                from open_instruct.tool_utils.tool_vllm import CodeViewTool
+
+                # Use code_view_api_endpoint if set, otherwise fall back to code_tool_api_endpoint
+                api_endpoint = args.code_view_api_endpoint or args.code_tool_api_endpoint
+                if not api_endpoint:
+                    raise ValueError(
+                        "code_view tool requires either --code-view-api-endpoint or --code-tool-api-endpoint to be set"
+                    )
+
+                tool = CodeViewTool(
+                    start_str="<tool_call>",
+                    end_str="</tool_call>",
+                    api_endpoint=api_endpoint,
+                    repo_name=None,  # Repo name will be provided in the tool call by the model
+                )
                 tool_objects[tool.end_str] = tool
             else:
                 raise ValueError(f"Unknown tool: {tool}")
