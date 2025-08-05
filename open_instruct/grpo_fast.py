@@ -1722,10 +1722,10 @@ def create_model_and_optimizer(
                 from open_instruct.tool_utils.tool_vllm import CodeViewTool
 
                 # Use code_view_api_endpoint if set, otherwise fall back to code_tool_api_endpoint
-                api_endpoint = args.code_view_api_endpoint or args.code_tool_api_endpoint
+                api_endpoint = args.code_view_api_endpoint
                 if not api_endpoint:
                     raise ValueError(
-                        "code_view tool requires either --code-view-api-endpoint or --code-tool-api-endpoint to be set"
+                        "code_view tool requires --code_view_api_endpoint to be set"
                     )
 
                 tool = CodeViewTool(

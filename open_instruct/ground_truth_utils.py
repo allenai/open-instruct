@@ -888,7 +888,7 @@ class CodeSearchVerifier(VerifierFunction):
         tool_calls = self.parse_tool_calls(prediction)
         score = 0.0
         for tool_call in tool_calls:
-            # check that the file is the correct file
+            # check if any of the tools calls identify the correct file and span the buggy lines
             if tool_call["arguments"]["file"] == bug_fn_file and tool_call["arguments"]["line_start"] <= bug_fn_line_start and tool_call["arguments"]["line_end"] >= bug_fn_line_end:
                 score = 1.0
         return VerificationResult(score=score)
