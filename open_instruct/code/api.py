@@ -120,7 +120,7 @@ async def view_file_endpoint(request: ViewFileRequest):
         repo_path = clone_repo(repo_info, config)
 
         # View the file
-        file_content = view_file(repo_path, request.path, request.view_range)
+        file_content = "OBSERVATION:\n" + view_file(repo_path, request.path, request.view_range) + "\n"
 
         return {"content": file_content, "repo_path": repo_path}
     except HTTPException:

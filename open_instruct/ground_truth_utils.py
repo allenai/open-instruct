@@ -889,7 +889,12 @@ class CodeSearchVerifier(VerifierFunction):
         score = 0.0
         for tool_call in tool_calls:
             # check if any of the tools calls identify the correct file and span the buggy lines
-            if tool_call["arguments"]["file"] == bug_fn_file and tool_call["arguments"]["line_start"] <= bug_fn_line_start and tool_call["arguments"]["line_end"] >= bug_fn_line_end:
+            if "view_range" not in tool_call["arguments"]:
+                continue
+            tool_file = tool_call["arguments"]["path"]
+            tool_line_start = tool_call["arguments"]["view_range"][0]
+            tool_line_end = tool_call["arguments"]["view_range"][1]
+            if (tool_file.endswith(bug_fn_file) or bug_fn_file.endswith(tool_file)) and tool_line_start <= bug_fn_line_start and tool_line_end >= bug_fn_line_end:
                 score = 1.0
         return VerificationResult(score=score)
         
