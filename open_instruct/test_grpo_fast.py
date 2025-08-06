@@ -251,11 +251,10 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
                 999,  # eval_freq (avoid evaluation)
                 1,  # num_training_steps
                 1,  # resume_training_step
-                1,  # batch_size
             )
 
         # Put the test prompt in the queue using PromptRequest
-        request = PromptRequest(prompt=prompt_token_ids, dataset_index=0)
+        request = PromptRequest(prompts=[prompt_token_ids], dataset_index=0)
         param_prompt_Q.put(request)
 
         # Get the result
@@ -293,7 +292,8 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         # Verify that we have individual prompts in the map (not batches)
         self.assertEqual(len(pending_queries_map), num_unique_prompts_rollout)
 
-        self.assertEqual(param_prompt_Q.qsize(), num_unique_prompts_rollout)
+        # Verify that we have the expected number of items in the queue
+        self.assertEqual(param_prompt_Q.qsize(), vllm_num_engines)
 
         # Simulate vLLM processing
         batch_idx = 0
@@ -359,7 +359,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         self.assertEqual(len(combined_result.finish_reasons), len(queries_next))
         self.assertEqual(len(combined_result.masks), len(queries_next))
 
-        # Verify that the test_pending_queries_map is empty after accumulation
+        # Verify that the pending_queries_map is empty after accumulation
         self.assertEqual(len(pending_queries_map), 0)
 
         # Verify that the inference_results_Q is empty after accumulation

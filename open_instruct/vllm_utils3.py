@@ -24,7 +24,6 @@ from typing import Any, List, Optional, Union
 import ray
 import torch
 import torch.distributed
-import vllm
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed.distributed_c10d import (
@@ -65,9 +64,9 @@ class GenerationResult:
 
 @dataclasses.dataclass
 class PromptRequest:
-    """Container for a single prompt request to vLLM."""
+    """Container for prompt requests to vLLM."""
 
-    prompt: List[int]  # Single prompt
+    prompts: List[List[int]]
     training_step: Optional[int] = None
     eval_prompts: Optional[List[List[int]]] = None
     dataset_index: Optional[List[int]] = None
@@ -237,37 +236,35 @@ class LLMRayActor:
         """Generate responses for a batch of prompts."""
         outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
 
-        # Process outputs and create individual GenerationResult objects
-        results = []
-        for i, output in enumerate(outputs):
-            response_ids = [list(out.token_ids) for out in output.outputs]
-            finish_reasons = [out.finish_reason for out in output.outputs]
+        # Process outputs
+        response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
+        finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
 
-            if self.tool_use:
-                masks = [out.mask for out in output.outputs]
-                num_calls = [out.num_calls for out in output.outputs]
-                timeouts = [out.timeout for out in output.outputs]
-                tool_errors = [out.tool_error for out in output.outputs]
-                tool_outputs = [out.tool_output for out in output.outputs]
-                tool_runtimes = [out.tool_runtime for out in output.outputs]
-                tool_calleds = [out.tool_called for out in output.outputs]
-            else:
-                masks = [[1] * len(resp) for resp in response_ids]
-                num_calls = [0] * len(response_ids)
-                timeouts = [0] * len(response_ids)
-                tool_errors = [""] * len(response_ids)
-                tool_outputs = [""] * len(response_ids)
-                tool_runtimes = [0] * len(response_ids)
-                tool_calleds = [False] * len(response_ids)
+        if self.tool_use:
+            masks = [out.mask for output in outputs for out in output.outputs]
+            num_calls = [out.num_calls for output in outputs for out in output.outputs]
+            timeouts = [out.timeout for output in outputs for out in output.outputs]
+            tool_errors = [out.tool_error for output in outputs for out in output.outputs]
+            tool_outputs = [out.tool_output for output in outputs for out in output.outputs]
+            tool_runtimes = [out.tool_runtime for output in outputs for out in output.outputs]
+            tool_calleds = [out.tool_called for output in outputs for out in output.outputs]
+        else:
+            masks = [[1] * len(resp) for resp in response_ids]
+            num_calls = [0] * len(response_ids)
+            timeouts = [0] * len(response_ids)
+            tool_errors = [""] * len(response_ids)
+            tool_outputs = [""] * len(response_ids)
+            tool_runtimes = [0] * len(response_ids)
+            tool_calleds = [False] * len(response_ids)
 
-            request_info = RequestInfo(
-                num_calls=num_calls,
-                timeouts=timeouts,
-                tool_errors=tool_errors,
-                tool_outputs=tool_outputs,
-                tool_runtimes=tool_runtimes,
-                tool_calleds=tool_calleds,
-            )
+        request_info = RequestInfo(
+            num_calls=num_calls,
+            timeouts=timeouts,
+            tool_errors=tool_errors,
+            tool_outputs=tool_outputs,
+            tool_runtimes=tool_runtimes,
+            tool_calleds=tool_calleds,
+        )
 
         return GenerationResult(
             responses=response_ids,

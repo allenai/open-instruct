@@ -295,9 +295,8 @@ def setup_vllm_engines(
     pg = ray.util.placement_group(bundles, strategy="PACK")
     ray.get(pg.ready())
 
-    # Adjust queue sizes for individual prompts
-    param_prompt_Q = ray_queue.Queue(maxsize=100)
-    inference_results_Q = ray_queue.Queue(maxsize=100)
+    param_prompt_Q = ray_queue.Queue(maxsize=10)
+    inference_results_Q = ray_queue.Queue(maxsize=10)
 
     vllm_engines = vllm_utils3.create_vllm_engines(
         num_engines=args.vllm_num_engines,
@@ -335,41 +334,6 @@ def get_batch_data(
     return prompts
 
 
-def run_generation_batch(
-    inference_results_Q: ray_queue.Queue, param_prompt_Q: ray_queue.Queue, prompts: list[list[int]], batch_idx: int
-) -> dict[str, Any]:
-    """Run generation for a batch of prompts and measure performance."""
-
-    start_time = time.time()
-
-    # Insert individual prompts
-    for i, prompt in enumerate(prompts):
-        dataset_idx = batch_idx * len(prompts) + i
-        param_prompt_Q.put(vllm_utils3.PromptRequest(prompt=prompt, dataset_index=dataset_idx))
-
-    # Collect individual results
-    all_responses = []
-    all_finish_reasons = []
-    for _ in range(len(prompts)):
-        result = inference_results_Q.get()
-        all_responses.extend(result.responses)
-        all_finish_reasons.extend(result.finish_reasons)
-
-    generation_time = time.time() - start_time
-
-    new_tokens = sum(len(response) for response in all_responses)
-    tokens_per_second = new_tokens / generation_time
-    return {
-        "tokens_per_second": tokens_per_second,
-        "generation_time": generation_time,
-        "num_new_tokens": new_tokens,
-        # dict mapping string reasons to counts.
-        "finish_reasons": collections.Counter(all_finish_reasons),
-        "response_lengths": [len(response) for response in all_responses],
-        "prompt_lengths": [len(prompt) for prompt in prompts],  # Original unique prompts
-    }
-
-
 def run_benchmark(
     dataset: datasets.Dataset,
     vllm_engines: list[ray.actor.ActorHandle],
@@ -402,7 +366,6 @@ def run_benchmark(
             num_batches + 1,  # eval_freq (avoid evaluation)
             num_batches,  # num_training_steps
             1,  # resume_training_step
-            args.num_unique_prompts_rollout // args.vllm_num_engines,  # batch_size
         )
 
     # Wait for engines to be ready
@@ -420,47 +383,37 @@ def run_benchmark(
     ]
     submission_start_time = time.time()
     for batch_idx in range(num_batches):
-        # Insert individual prompts for this batch
-        for i, prompt in enumerate(all_prompts[batch_idx]):
-            dataset_idx = batch_idx * args.num_unique_prompts_rollout + i
-            param_prompt_Q.put(vllm_utils3.PromptRequest(prompt=prompt, dataset_index=dataset_idx))
+        param_prompt_Q.put(vllm_utils3.PromptRequest(prompts=all_prompts[batch_idx], dataset_index=batch_idx))
     submission_time = time.time() - submission_start_time
     logger.info(f"All batches submitted in {submission_time:.2f}s")
 
     # Receive results and measure time for each batch
     last_completion_time = submission_start_time
     for batch_idx in range(num_batches):
-        # Collect individual results for this batch
-        batch_responses = []
-        batch_finish_reasons = []
-        for _ in range(args.num_unique_prompts_rollout):
-            result = inference_results_Q.get()
-            batch_responses.extend(result.responses)
-            batch_finish_reasons.extend(result.finish_reasons)
-
+        result = inference_results_Q.get()
         completion_time = time.time()
         batch_generation_time = completion_time - last_completion_time
         last_completion_time = completion_time
 
-        # Process batch results
-        new_tokens = sum(len(response) for response in batch_responses)
+        # Process result
+        new_tokens = sum(len(response) for response in result.responses)
         tokens_per_second = new_tokens / batch_generation_time
 
         result_dict = {
             "tokens_per_second": tokens_per_second,
             "generation_time": batch_generation_time,
             "num_new_tokens": new_tokens,
-            "finish_reasons": collections.Counter(batch_finish_reasons),
-            "response_lengths": [len(response) for response in batch_responses],
-            "batch_idx": batch_idx,
+            "finish_reasons": collections.Counter(result.finish_reasons),
+            "response_lengths": [len(response) for response in result.responses],
+            "batch_idx": result.dataset_index,
         }
         result_dict["mfu"] = 100 * result_dict["tokens_per_second"] * flops_per_token / device_flops
 
         # We incrementally save completion lengths so even if the job dies, we still have data.
-        save_completion_lengths([result_dict], timestamp, batch_idx)
+        save_completion_lengths([result_dict], timestamp, result.dataset_index)
         results.append(result_dict)
         logger.info(
-            f"Batch {batch_idx + 1}: "
+            f"Batch {result.dataset_index + 1}: "
             f"{result_dict['tokens_per_second']:.2f} new tokens/sec, "
             f"MFU: {result_dict['mfu']:.2f}%, "
             f"generation time: {batch_generation_time:.2f}s"

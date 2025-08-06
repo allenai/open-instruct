@@ -1200,74 +1200,6 @@ class PendingQueriesMap:
         self._map = {}  # dataset_idx -> (query, ground_truth, dataset, count)
         self._lock = threading.Lock()
 
-    def insert(self, dataset_idx, query, ground_truth, dataset):
-        """Insert or increment count for a dataset index."""
-        with self._lock:
-            if dataset_idx in self._map:
-                # Already exists - just increment count
-                existing_query, existing_ground_truth, existing_dataset, count = self._map[dataset_idx]
-                self._map[dataset_idx] = (existing_query, existing_ground_truth, existing_dataset, count + 1)
-            else:
-                # New entry - count starts at 1
-                self._map[dataset_idx] = (query, ground_truth, dataset, 1)
-
-    def insert_many(self, dataset_indices, queries, ground_truths, datasets):
-        """Insert or increment count for multiple dataset indices at once."""
-        with self._lock:
-            for i, dataset_idx in enumerate(dataset_indices):
-                if dataset_idx in self._map:
-                    # Already exists - just increment count
-                    existing_query, existing_ground_truth, existing_dataset, count = self._map[dataset_idx]
-                    self._map[dataset_idx] = (existing_query, existing_ground_truth, existing_dataset, count + 1)
-                else:
-                    # New entry - count starts at 1
-                    self._map[dataset_idx] = (queries[i], ground_truths[i], datasets[i], 1)
-
-    def pop(self, dataset_idx):
-        """Retrieve data and decrement count. Removes entry when count reaches 0."""
-        with self._lock:
-            if dataset_idx not in self._map:
-                raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
-
-            query, ground_truth, dataset, count = self._map[dataset_idx]
-
-            if count > 1:
-                # More results expected - just decrement
-                self._map[dataset_idx] = (query, ground_truth, dataset, count - 1)
-            else:
-                # Last result - remove entry
-                del self._map[dataset_idx]
-
-            return query, ground_truth, dataset
-
-    def __len__(self):
-        """Return the number of entries in the map."""
-        with self._lock:
-            return len(self._map)
-
-    def __contains__(self, dataset_idx):
-        """Check if a dataset index is in the map."""
-        with self._lock:
-            return dataset_idx in self._map
-
-    def __getitem__(self, dataset_idx):
-        """Get the value for a dataset index."""
-        with self._lock:
-            return self._map[dataset_idx]
-
-    def keys(self):
-        """Return a view of the keys in the map."""
-        with self._lock:
-            return list(self._map.keys())
-
-
-class PendingQueriesMap:
-    """Thread-safe map for tracking pending queries with reference counting."""
-
-    def __init__(self):
-        self._map = {}  # dataset_idx -> (query, ground_truth, dataset, count)
-        self._lock = threading.Lock()
-
     def __getitem__(self, key):
         """Get item using dict-like access."""
         with self._lock:
@@ -1362,8 +1294,6 @@ def accumulate_inference_batches(
     ):
         result = inference_results_Q.get()
 
-        # Accept results from any training step as long as we have entries in the map
-        # This prevents synchronization issues when results arrive out of order
         dataset_indices = result.dataset_index
 
         if dataset_indices is None:
@@ -1388,16 +1318,14 @@ def accumulate_inference_batches(
 
         for dataset_idx in dataset_indices:
             query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
-
-            # Don't replicate - just append once per unique index
             batch_queries.append(query)
             batch_ground_truths.append(ground_truth)
             batch_datasets.append(dataset)
 
         results.append(result)
-        all_queries.append(query)
-        all_ground_truths.append(ground_truth)
-        all_datasets.append(dataset)
+        all_queries.extend(batch_queries)
+        all_ground_truths.extend(batch_ground_truths)
+        all_datasets.extend(batch_datasets)
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1442,7 +1370,6 @@ def accumulate_inference_batches(
         training_step=training_step,
     )
 
-    pbar.close()
     return combined_result, all_queries, all_ground_truths, all_datasets
 
 
@@ -1924,11 +1851,12 @@ def split_and_insert_batch(
     param_prompt_Q,
     eval_prompt_token_ids=None,
 ):
-    """Insert individual prompts into queues and mapping."""
-    # Insert individual prompts into the queue
-    for i, dataset_idx in enumerate(dataset_indices):
-        # Store individual prompt in the map using dataset index as key
-        pending_queries_map[dataset_idx] = (queries_next[i], ground_truths_next[i], datasets_next[i])
+    """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
+    # Split the batch over the VLLM engines.
+    inference_batch_size = len(queries_next) // vllm_num_engines
+    for batch_idx in range(vllm_num_engines):
+        start_idx = batch_idx * inference_batch_size
+        end_idx = start_idx + inference_batch_size if batch_idx < vllm_num_engines - 1 else len(queries_next)
 
         batch_queries = queries_next[start_idx:end_idx]
         batch_ground_truths = ground_truths_next[start_idx:end_idx]
@@ -1941,7 +1869,7 @@ def split_and_insert_batch(
         # Use PromptRequest for Ray queue with batch-specific dataset_index list
         param_prompt_Q.put(
             PromptRequest(
-                prompt=queries_next[i],
+                prompts=batch_queries,
                 training_step=training_step,
                 eval_prompts=eval_prompt_token_ids if batch_idx == 0 else None,
                 dataset_index=batch_dataset_indices,
@@ -2159,34 +2087,9 @@ def maybe_evaluate(
         # timeout 0.01 if this is the last training step or we're not evaluating
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
         timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_freq < 0) else 100
-        results = []
-        for _ in range(len(eval_prompt_token_ids)):
-            eval_result = evaluation_inference_results_Q.get(timeout=timeout)
-            results.append(eval_result)
+        eval_result = evaluation_inference_results_Q.get(timeout=timeout)
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
-        responses, finish_reasons, request_infos = [], [], []
-        for res in results:
-            # res.responses / res.finish_reasons are usually lists, but be defensive
-            responses.extend(res.responses if isinstance(res.responses, (list, tuple)) else [res.responses])
-            finish_reasons.extend(
-                res.finish_reasons if isinstance(res.finish_reasons, (list, tuple)) else [res.finish_reasons]
-            )
-            request_infos.append(res.request_info)
-
-        # create a combined request info
-        combined_request_info = RequestInfo(
-            num_calls=[ri.num_calls for ri in request_infos],
-            timeouts=[ri.timeouts for ri in request_infos],
-            tool_errors=[ri.tool_errors for ri in request_infos],
-            tool_outputs=[ri.tool_outputs for ri in request_infos],
-            tool_runtimes=[ri.tool_runtimes for ri in request_infos],
-            tool_calleds=[ri.tool_calleds for ri in request_infos],
-        )
-
-        seq_lens = np.fromiter((len(r) for r in responses), dtype=int)
-        decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
-        stop_rate = sum(fr == "stop" for fr in finish_reasons) / len(finish_reasons)
 
         eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
         eval_decoded_responses = tokenizer.batch_decode(eval_result.responses, skip_special_tokens=True)
@@ -2195,41 +2098,42 @@ def maybe_evaluate(
         )
 
         # get and log evaluation metrics
-        eval_scores, reward_metrics = asyncio.run(
+        eval_scores, eval_reward_metrics = asyncio.run(
             reward_fn(
-                responses,
-                decoded_responses,
+                eval_result.responses,
+                eval_decoded_responses,
                 eval_ground_truths,
                 eval_dataset_names,
-                finish_reasons,
-                combined_request_info,
+                eval_result.finish_reasons,
+                eval_result.request_info,
             )
         )
-        reward_metrics = {f"eval/{k}": v for k, v in reward_metrics.items()}
-        metrics = {
-            "eval/scores": np.mean(eval_scores),
-            "eval/sequence_lengths": seq_lens.mean(),
-            "eval/sequence_lengths_min": seq_lens.min(),
-            "eval/sequence_lengths_max": seq_lens.max(),
-            "eval/stop_rate": stop_rate,
-            **reward_metrics,
+        eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
+        eval_metrics = {
+            "eval/scores": np.array(eval_scores).mean(),
+            "eval/sequence_lengths": eval_sequence_lengths.mean(),
+            "eval/sequence_lengths_min": eval_sequence_lengths.min(),
+            "eval/sequence_lengths_max": eval_sequence_lengths.max(),
+            "eval/stop_rate": eval_stop_rate,
+            **eval_reward_metrics,
         }
-
-        print_rich_single_line_metrics(metrics)
-        for k, v in metrics.items():
-            writer.add_scalar(k, v, episode)
-        df = pd.DataFrame({
-            "prompt":       tokenizer.batch_decode(eval_prompt_token_ids),
-            "response":     [t.replace(tokenizer.pad_token, "") for t in decoded_responses],
-            "scores":       eval_scores,
-            "ground_truth": eval_ground_truths,
-        })
+        print_rich_single_line_metrics(eval_metrics)
+        for key, value in eval_metrics.items():
+            writer.add_scalar(key, value, episode)
+        table = {}
+        table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
+        table["response"] = eval_decoded_responses
+        table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
+        table["scores"] = eval_scores
+        table["ground_truth"] = eval_ground_truths
+        df = pd.DataFrame(table)
         if args.with_tracking:
             import wandb
 
             wandb.log({"sample_completions": wandb.Table(dataframe=df)})
         else:
             print_rich_table(df.iloc[:1])
+        del table
     except Empty:
         logger.warning("[Main Thread] 🙈 Evaluation responses not received")
 
