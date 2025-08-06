@@ -215,13 +215,8 @@ class CodeViewTool(Tool):
                     result = response.json()
                     content = result.get("content", "")
 
-                    # Format the output similar to how a file viewer would show it
-                    if view_range:
-                        output = f"Lines {view_range[0]}-{view_range[1]} of {path}:\n{content}"
-                    else:
-                        output = f"Content of {path}:\n{content}"
-
-                    all_outputs.append(output)
+                    # Return the exact format from the API (matches str_replace_editor)
+                    all_outputs.append(content)
                 else:
                     error_msg = f"API error (status {response.status_code}): {response.text}"
                     all_outputs.append(error_msg)

@@ -1724,9 +1724,7 @@ def create_model_and_optimizer(
                 # Use code_view_api_endpoint if set, otherwise fall back to code_tool_api_endpoint
                 api_endpoint = args.code_view_api_endpoint
                 if not api_endpoint:
-                    raise ValueError(
-                        "code_view tool requires --code_view_api_endpoint to be set"
-                    )
+                    raise ValueError("code_view tool requires --code_view_api_endpoint to be set")
 
                 tool = CodeViewTool(
                     start_str="<tool_call>",

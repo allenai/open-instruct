@@ -859,6 +859,7 @@ class CodeVerifier(VerifierFunction):
         """
         return CodeVerifierConfig
 
+
 class CodeSearchVerifier(VerifierFunction):
     """
     Simple verifier checks in the model makes a call to the CodeSearchTool in tool_utils.tool_vllm.py
@@ -867,7 +868,7 @@ class CodeSearchVerifier(VerifierFunction):
 
     def __init__(self, verifier_config: VerifierConfig) -> None:
         super().__init__("code_search", verifier_config=verifier_config, weight=1.0)
-    
+
     def parse_tool_calls(self, prediction: str) -> List[Dict[str, Any]]:
         """
         Parse the tool calls from the prediction.
@@ -875,7 +876,7 @@ class CodeSearchVerifier(VerifierFunction):
         tool_call_pattern = r"<tool_call>\s*(.*?)\s*</tool_call>"
         tool_calls = re.findall(tool_call_pattern, prediction, re.DOTALL)
         return [json.loads(tool_call) for tool_call in tool_calls]
-    
+
     async def async_call(
         self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
     ) -> VerificationResult:
@@ -894,10 +895,31 @@ class CodeSearchVerifier(VerifierFunction):
             tool_file = tool_call["arguments"]["path"]
             tool_line_start = tool_call["arguments"]["view_range"][0]
             tool_line_end = tool_call["arguments"]["view_range"][1]
-            if (tool_file.endswith(bug_fn_file) or bug_fn_file.endswith(tool_file)) and tool_line_start <= bug_fn_line_start and tool_line_end >= bug_fn_line_end:
+            if (
+                (tool_file.endswith(bug_fn_file) or bug_fn_file.endswith(tool_file))
+                and tool_line_start <= bug_fn_line_start
+                and tool_line_end >= bug_fn_line_end
+            ):
                 score = 1.0
         return VerificationResult(score=score)
-        
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
+    ) -> VerificationResult:
+        """
+        Synchronously verify code search operations.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                raise RuntimeError(
+                    "Cannot call synchronous __call__ method from within an async context. Use async_call instead."
+                )
+            else:
+                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+        except RuntimeError:
+            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+
 
 def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     """
@@ -953,7 +975,6 @@ async def cleanup_all_llm_judge_clients():
     Cleanup function to properly close all LLM judge clients before shutdown.
     """
     await LMJudgeVerifier.cleanup_all_clients()
-
 
 
 class CodeSearchVerifierOld(VerifierFunction):

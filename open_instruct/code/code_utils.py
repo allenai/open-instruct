@@ -421,7 +421,7 @@ def clone_repo(repo, config):
 
 def view_file(repo_path: str, file_path: str, view_range: Optional[List[int]] = None):
     """
-    View a file and return the content.
+    View a file and return the content formatted like cat -n.
 
     Args:
         repo_path: The absolute path to the repository
@@ -429,20 +429,64 @@ def view_file(repo_path: str, file_path: str, view_range: Optional[List[int]] = 
         view_range: Optional [start_line, end_line] to view specific lines (1-indexed)
 
     Returns:
-        The content of the file (or specified lines)
+        The content of the file formatted with line numbers
     """
+    MAX_RESPONSE_LEN = 16000
+    TRUNCATED_MESSAGE = "<response clipped><NOTE>To save on context only part of this file has been shown to you. You should retry this tool after you have searched inside the file with `grep -n` in order to find the line numbers of what you are looking for.</NOTE>"
+
     full_path = os.path.join(repo_path, file_path)
 
     if not os.path.exists(full_path):
         raise FileNotFoundError(f"File not found: {full_path}")
 
-    with open(full_path, "r") as f:
-        if view_range and len(view_range) == 2:
-            lines = f.readlines()
-            start_line = max(1, view_range[0]) - 1  # Convert to 0-indexed
-            end_line = min(len(lines), view_range[1])
-            content = "".join(lines[start_line:end_line])
-        else:
-            content = f.read()
+    with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+        file_content = f.read()
 
-    return content
+    file_lines = file_content.split("\n")
+    n_lines_file = len(file_lines)
+
+    if view_range and len(view_range) == 2:
+        init_line = view_range[0]
+        final_line = view_range[1]
+
+        # Validate view_range
+        if init_line < 1 or init_line > n_lines_file:
+            return f"Invalid `view_range`: {view_range}. Its first element `{init_line}` should be within the range of lines of the file: {[1, n_lines_file]}"
+
+        if final_line > n_lines_file:
+            return f"Invalid `view_range`: {view_range}. Its second element `{final_line}` should be smaller than the number of lines in the file: `{n_lines_file}`"
+
+        if final_line != -1 and final_line < init_line:
+            return f"Invalid `view_range`: {view_range}. Its second element `{final_line}` should be larger or equal than its first `{init_line}`"
+
+        if final_line == -1:
+            final_line = n_lines_file
+
+        # Get the specified lines
+        file_content = "\n".join(file_lines[init_line - 1 : final_line])
+    else:
+        # Check if file is too large and we should show abbreviated version
+        if len(file_content) > MAX_RESPONSE_LEN:
+            # Show truncated message at the beginning
+            truncated_note = "<NOTE>This file is too large to display entirely. Showing abbreviated version. Please use `view_file` with the `view_range` parameter to show selected lines next.</NOTE>\n"
+            # Truncate the content
+            file_content = file_content[:MAX_RESPONSE_LEN] + TRUNCATED_MESSAGE
+            # Format with line numbers
+            file_content = file_content.expandtabs()
+            numbered_lines = []
+            for i, line in enumerate(file_content.split("\n"), 1):
+                numbered_lines.append(f"{i:6}\t{line}")
+            return (
+                f"Here's the result of running `cat -n` on {file_path}:\n{truncated_note}"
+                + "\n".join(numbered_lines)
+                + "\n"
+            )
+        init_line = 1
+
+    # Format the content with line numbers (like cat -n)
+    file_content = file_content.expandtabs()
+    numbered_lines = []
+    for i, line in enumerate(file_content.split("\n")):
+        numbered_lines.append(f"{i + init_line:6}\t{line}")
+
+    return f"Here's the result of running `cat -n` on {file_path}:\n" + "\n".join(numbered_lines) + "\n"
