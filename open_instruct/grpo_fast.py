@@ -46,12 +46,6 @@ except Exception:
 
 # Sequence Parallelism imports
 try:
-    from ring_attention_pytorch import RingAttention
-    RING_ATTENTION_AVAILABLE = True
-except ImportError:
-    RING_ATTENTION_AVAILABLE = False
-
-try:
     from deepspeed.sequence.layer import DistributedAttention
     ULYSSES_AVAILABLE = True
 except ImportError:
@@ -351,16 +345,10 @@ class Args:
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
     
     # Sequence Parallelism
-    sequence_parallel_type: Literal["none", "ring_attention", "ulysses"] = "none"
+    sequence_parallel_type: Literal["none", "ulysses"] = "none"
     """Type of sequence parallelism to use for long context training"""
     sequence_parallel_size: int = 1
-    """Number of devices to use for sequence parallelism"""
-    ring_attention_block_size: int = 1024
-    """Block size for ring attention computation"""
-    ulysses_sp_degree: int = 1
-    """Degree of sequence parallelism for Ulysses (should divide total sequence length)"""
-    enable_sequence_parallel: bool = False
-    """Whether to enable sequence parallelism for long context training"""
+    """Number of devices to use for sequence parallelism (should divide total sequence length)"""
 
     # Experiment tracking
     with_tracking: bool = False
@@ -584,13 +572,13 @@ class PolicyTrainerRayProcess(RayProcess):
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2" if not args.enable_sequence_parallel else None,
+            attn_implementation="flash_attention_2",
             use_cache=False,
         )
         disable_dropout_in_model(self.policy)
         
         # Apply sequence parallelism modifications before gradient checkpointing
-        if args.enable_sequence_parallel:
+        if args.sequence_parallel_type != "none":
             logger.info(f"Applying {args.sequence_parallel_type} sequence parallelism to policy model...")
             self.policy = modify_model_for_sequence_parallel(self.policy, args, self.sp_group)
         
@@ -663,13 +651,13 @@ class PolicyTrainerRayProcess(RayProcess):
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2" if not args.enable_sequence_parallel else None,
+            attn_implementation="flash_attention_2",
             use_cache=False,
         )
         disable_dropout_in_model(self.ref_policy)
         
         # Apply sequence parallelism modifications to reference policy
-        if args.enable_sequence_parallel:
+        if args.sequence_parallel_type != "none":
             logger.info(f"Applying {args.sequence_parallel_type} sequence parallelism to reference policy model...")
             self.ref_policy = modify_model_for_sequence_parallel(self.ref_policy, args, self.sp_group)
         
@@ -1611,17 +1599,10 @@ def setup_runtime_variables(args: Args) -> Args:
     args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
     
     # Validate sequence parallelism settings
-    if args.enable_sequence_parallel:
-        if args.sequence_parallel_type == "none":
-            raise ValueError("sequence_parallel_type must be set when enable_sequence_parallel=True")
+    if args.sequence_parallel_type != "none":
         if args.sequence_parallel_size <= 1:
             raise ValueError("sequence_parallel_size must be > 1 when sequence parallelism is enabled")
-        if args.sequence_parallel_type == "ulysses" and args.ulysses_sp_degree <= 1:
-            args.ulysses_sp_degree = args.sequence_parallel_size  # Set default
         logger.info(f"Sequence parallelism enabled: {args.sequence_parallel_type} with size {args.sequence_parallel_size}")
-    else:
-        if args.sequence_parallel_type != "none":
-            logger.warning("sequence_parallel_type is set but enable_sequence_parallel=False, ignoring")
     if is_beaker_job():
         args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
     args.world_size = sum(args.num_learners_per_node)
@@ -2232,14 +2213,12 @@ def make_reward_fn(args: Args) -> Callable:
 
 def setup_sequence_parallel_groups(args: Args):
     """Setup communication groups for sequence parallelism."""
-    if not args.enable_sequence_parallel or args.sequence_parallel_type == "none":
+    if args.sequence_parallel_type == "none":
         return None
     
     if args.sequence_parallel_type == "ulysses" and not ULYSSES_AVAILABLE:
         raise ImportError("DeepSpeed Ulysses not available. Install DeepSpeed with sequence parallelism support.")
     
-    if args.sequence_parallel_type == "ring_attention" and not RING_ATTENTION_AVAILABLE:
-        raise ImportError("Ring Attention not available. Install ring-attention-pytorch: pip install ring-attention-pytorch")
     
     world_size = torch.distributed.get_world_size()
     rank = torch.distributed.get_rank()
@@ -2269,34 +2248,10 @@ def setup_sequence_parallel_groups(args: Args):
 
 def modify_model_for_sequence_parallel(model: torch.nn.Module, args: Args, sp_group):
     """Modify model layers to support sequence parallelism."""
-    if not args.enable_sequence_parallel or args.sequence_parallel_type == "none":
+    if args.sequence_parallel_type == "none":
         return model
     
-    if args.sequence_parallel_type == "ring_attention":
-        # Replace attention layers with RingAttention
-        def replace_attn_with_ring(module, name=""):
-            for child_name, child in module.named_children():
-                full_name = f"{name}.{child_name}" if name else child_name
-                
-                if hasattr(child, 'self_attn') and hasattr(child.self_attn, 'num_heads'):
-                    # Replace the attention module
-                    ring_attn = RingAttention(
-                        dim=child.self_attn.hidden_size,
-                        heads=child.self_attn.num_heads,
-                        dim_head=child.self_attn.hidden_size // child.self_attn.num_heads,
-                        ring_seq_size=args.sequence_parallel_size,
-                        max_lookback_seq_len=args.ring_attention_block_size,
-                        auto_check_redist=True,
-                        ring_reduce_col=True  # Enable column-wise ring reduce
-                    )
-                    setattr(child, 'self_attn', ring_attn)
-                    logger.info(f"Replaced attention in {full_name} with RingAttention")
-                else:
-                    replace_attn_with_ring(child, full_name)
-        
-        replace_attn_with_ring(model)
-    
-    elif args.sequence_parallel_type == "ulysses":
+    if args.sequence_parallel_type == "ulysses":
         # Replace attention layers with DeepSpeed DistributedAttention
         def replace_attn_with_ulysses(module, name=""):
             for child_name, child in module.named_children():
