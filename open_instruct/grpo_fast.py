@@ -122,6 +122,7 @@ from open_instruct.utils import (
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
+    ray_get_with_progress,
     sync_gs_bucket,
 )
 from open_instruct.vllm_utils3 import (
@@ -2291,10 +2292,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         eval_dataset_names = eval_dataset[:num_eval_samples][VERIFIER_SOURCE_KEY]
     reward_fn = make_reward_fn(args)
 
-    # Verify none of the engines crashed during initialization.
-    for i, engine in enumerate(vllm_engines):
-        ray.get(engine.ready.remote())
+    ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work.")
 
+    stop_event = threading.Event()
     executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="grpo")
     logger.info("======== ✅ data preparation thread starts =========")
     packing_future = executor.submit(
