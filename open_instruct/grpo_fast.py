@@ -703,7 +703,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 rank=0,
                 group_name="openrlhf",
             )
-            ray.get(refs)
+            ray_get_with_progress(refs, "Initializing vLLM process groups", timeout=60)
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
@@ -2309,7 +2309,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         eval_dataset_names = eval_dataset[:num_eval_samples][VERIFIER_SOURCE_KEY]
     reward_fn = make_reward_fn(args)
 
-    ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work.")
+    try:
+        ray_get_with_progress(
+            [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
+        )
+    except TimeoutError as e:
+        logger.error(f"vLLM engines failed to initialize within timeout: {e}")
+        # Clean up using existing cleanup function
+        cleanup_judge_clients()  # This calls ray.shutdown()
+        raise RuntimeError("vLLM engine initialization timed out")
 
     stop_event = threading.Event()
     executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="grpo")
