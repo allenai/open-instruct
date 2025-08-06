@@ -27,7 +27,8 @@ dependencies = [
     "vllm==0.9.1",    
     "wandb==0.18.1",
     "langdetect==1.0.9",
-    "immutabledict==1.2.0"
+    "immutabledict==1.2.0",
+    "pytest-xdist==3.8.0",
 ]
 
 [build-system]
@@ -55,7 +56,8 @@ explicit = true
 
 # flash-attn related setups
 [project.optional-dependencies]
-compile = ["flash-attn>=2.8.0.post1"]
+compile = ["flash-attn>=2.8.0.post2",
+		   "flashinfer-python>=0.2.7.post1"]
 liger = ["liger-kernel>=0.5.4"]
 code = [
     "fastapi>=0.100.0",
@@ -85,8 +87,13 @@ dev = [
     "markdown-include>=0.8.1",
     "pytest>=8.3.4",
     "ruff>=0.11.13",
-	"parameterized>=0.9.0",
+    "parameterized>=0.9.0",
+    "rich>=13.7.0",
 ]
+
+[tool.pytest.ini_options]
+addopts = "--ignore=oe-eval-internal/"
+
 
 [tool.black]
 line-length = 119
