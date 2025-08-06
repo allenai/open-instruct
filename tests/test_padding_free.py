@@ -17,8 +17,19 @@ from transformers import (
 )
 
 from open_instruct.dataset_processor import CHAT_TEMPLATES
-from open_instruct.dataset_transformation import sft_tulu_tokenize_and_truncate_v1
-from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
+from open_instruct.dataset_transformation import (
+    sft_tulu_tokenize_and_truncate_v1, 
+    preference_tulu_tokenize_and_truncate_v1_2,
+)
+from open_instruct.padding_free_collator import (
+    TensorDataCollatorWithFlattening,
+    TensorDataCollatorWithFlatteningDPO
+)
+from open_instruct.dpo_utils import (
+    DataCollatorForSeq2SeqDPO,
+    concatenated_forward
+)
+
 
 try:
     import mamba_ssm  # noqa
@@ -102,8 +113,11 @@ class TestPaddingFree:
     seqlen = 128
     batch_size = 2
     dtype = torch.bfloat16
+    model = None
 
     def get_fa2_model_and_cfg(self, model_name: str, vocab_size: int) -> nn.Module:
+        if self.model is not None:
+            return self.model, self.model.config
         model_cls = MODEL_CLASSES[model_name]
         model_cfg = MODEL_CFGS[model_name]
         model_kwargs = MODEL_KWARGS[model_name]
@@ -116,6 +130,7 @@ class TestPaddingFree:
             }
         )
         model = model_cls(cfg).to("cuda", dtype=self.dtype)
+        self.model = model
         return model, cfg
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="Padding free tests require CUDA")
@@ -135,8 +150,6 @@ class TestPaddingFree:
         model, cfg = self.get_fa2_model_and_cfg(model_name, vocab_size)
         model.initialize_weights()
         pf_model = deepcopy(model)
-
-        inputs = torch.randint(cfg.vocab_size, size=(self.batch_size, self.seqlen), device="cpu")
 
         data = {
             0: {
@@ -213,3 +226,71 @@ class TestPaddingFree:
         pf_grads = {n: p.grad for n, p in pf_model.named_parameters()}
         for k, g in grads.items():
             torch.testing.assert_close(g, pf_grads[k])
+            non_nan_grads.add(k)
+        print(f"{non_nan_grads=}")
+        print(f"{nan_grads=}")
+
+    
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="Padding free tests require CUDA")
+    @pytest.mark.skipif(not flash_attn_available, reason="Padding free requires flash_attn")
+    @pytest.mark.parametrize("model_name", ["bamba", "llama"])
+    def test_padding_free_dpo(self, model_name: str) -> None:
+        if model_name == "bamba" and not mamba_and_causal_conv_available:
+            pytest.skip("bamba padding-free tests require mamba_ssm and causal_conv1d")
+        torch.manual_seed(42)
+
+        tokenizer = AutoTokenizer.from_pretrained("ibm-ai-platform/Bamba-9B-v2")
+        tokenizer.add_special_tokens({"pad_token": "<pad>"})
+        tokenizer.chat_template = CHAT_TEMPLATES["tulu"]
+        vocab_size = len(tokenizer)
+
+        model, cfg = self.get_fa2_model_and_cfg(model_name, vocab_size)
+        model.initialize_weights()
+        pf_model = deepcopy(model)
+
+        data = {
+            0: {
+                "chosen": [
+                    {"role": "user", "content": "Why did the chicken cross the road?"},
+                    {"role": "assistant", "content": "To get to the other side"},
+                ],
+                "rejected": [
+                    {"role": "user", "content": "Why did the chicken cross the road?"},
+                    {"role": "assistant", "content": "To make friends with a cow. Trying to make a long response to simulate hallucination."},
+                ],
+            },
+            1: {
+                "chosen": [
+                    {"role": "user", "content": "What is one plus two?"},
+                    {"role": "assistant", "content": "The answer is 3"},
+                ],
+                "rejected": [
+                    {"role": "user", "content": "What is one plus two?"},
+                    {"role": "assistant", "content": "I am a beginner in math. I have not yet learnt addition. The answer is 12"},
+                ]
+            },
+        }
+
+        tok_data = {k: preference_tulu_tokenize_and_truncate_v1_2(v, tokenizer, max_seq_length=2**30) for k, v in data.items()}
+
+        collate_fn = DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=model, padding="longest")
+        dataloader = DataLoader(tok_data, shuffle=False, collate_fn=collate_fn, batch_size=self.batch_size)
+
+        pf_collate_fn = TensorDataCollatorWithFlatteningDPO()
+        pf_dataloader = DataLoader(tok_data, shuffle=False, collate_fn=pf_collate_fn, batch_size=self.batch_size)
+
+        batch = next(iter(dataloader))
+        pf_batch = next(iter(pf_dataloader))
+        for b in (batch, pf_batch):
+            for k in b:
+                if torch.is_tensor(b[k]):
+                    b[k] = b[k].cuda()
+
+        assert batch["chosen_input_ids"].shape[0] == 2
+        assert pf_batch["chosen_input_ids"].shape[0] == 1
+        chosen_logps, rejected_logps, _ = concatenated_forward(model, batch, average_log_prob=False)
+        pf_chosen_logos, pf_rejected_logps, _ = concatenated_forward(pf_model, pf_batch, average_log_prob=False, packing=True)
+
+        torch.testing.assert_close(chosen_logps, pf_chosen_logos, atol=1e-3, rtol=1e-3)
+        torch.testing.assert_close(rejected_logps, pf_rejected_logps, atol=1e-3, rtol=1e-3)
+

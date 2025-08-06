@@ -4,6 +4,8 @@ from typing import Dict, List, Union
 import torch
 from transformers import DefaultDataCollator
 
+from open_instruct.model_utils import log_softmax_and_gather
+
 
 @dataclass
 class TensorDataCollatorWithFlattening(DefaultDataCollator):
@@ -129,7 +131,8 @@ def concatenated_inputs(
 
     if "seq_idx" in chosen_features:
         ret[f"{tag}seq_idx"] = torch.cat(
-            [chosen_features["seq_idx"], rejected_features["seq_idx"] + chosen_features["seq_idx"][0, -1]], dim=-1
+            [chosen_features["seq_idx"], rejected_features["seq_idx"] + len(chosen_features["cu_seq_lens_k"]) - 1],
+            dim=-1,
         )
 
     return ret, len(chosen_features["cu_seq_lens_k"]) - 1
@@ -156,7 +159,7 @@ def get_batch_logps(
     cu_seq_lens[0] = 0
 
     splits = cu_seq_lens.diff().tolist()
-    per_token_logps = torch.gather(logits.log_softmax(-1), dim=2, index=labels.unsqueeze(2)).squeeze(2)
+    per_token_logps = log_softmax_and_gather(logits, labels)
 
     return torch.concat(
         [
