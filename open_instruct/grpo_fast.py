@@ -2296,10 +2296,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         ray.get(engine.ready.remote())
 
     executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="grpo")
-    stop_event = threading.Event()
-
-    logger.info("======== ✅ Starting worker threads =========")
-
     logger.info("======== ✅ data preparation thread starts =========")
     packing_future = executor.submit(
         data_preparation_thread,
@@ -2325,10 +2321,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         stop_event,
     )
 
-    thread_futures = [packing_future, generation_future]
-
-    # Send initial data to ensure we have a N-step offset. This is what
-    # the async_steps arg does.
+    # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps):
         dataset_indices = next(iter_dataloader)
         data_next = train_dataset[dataset_indices]
@@ -2349,7 +2342,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     num_total_tokens = 0
     start_time = time.time()
     for training_step in range(resume_training_step, args.num_training_steps + 1):
-        check_threads_healthy(thread_futures, stop_event, executor)
+        check_threads_healthy([packing_future, generation_future], stop_event, executor)
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         queries_next, ground_truths_next, datasets_next, dataset_indices = sync_weights_and_prepare_prompts(
