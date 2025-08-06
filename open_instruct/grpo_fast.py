@@ -29,7 +29,7 @@
 # limitations under the License.
 # isort: off
 import os
-from concurrent import futures
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
 # https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
@@ -1294,8 +1294,13 @@ def data_preparation_thread(
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
+    stop_event: threading.Event,  # Add stop_event parameter
 ):
     for training_step in range(1, num_training_steps + 1):
+        # Check if we should exit
+        if stop_event.is_set():
+            logger.info("[Data Preparation Thread] Shutting down")
+            return
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             result, queries, ground_truths, datasets = accumulate_inference_batches(
@@ -1874,7 +1879,7 @@ def generate_thread(
                 desc="[Generate Thread] Waiting for vLLM engines to process",
                 bar_format="{l_bar}{bar}{r_bar}\n",
             ) as pbar:
-                for future in futures.as_completed(engine_futures):
+                for future in as_completed(engine_futures):
                     processed_results.append(future.result())
                     pbar.update(1)
             num_processed = sum(int(result) for result in processed_results)
@@ -2187,23 +2192,29 @@ def cleanup_judge_clients():
     ray.shutdown()
 
 
+def check_threads_healthy(futures: list, stop_event: threading.Event) -> None:
+    """Check if any threads have failed and raise their exception if so."""
+    for future in futures:
+        if future.done():
+            exc = future.exception()
+            if exc:
+                logger.error(f"Thread {future} failed with exception: {exc}")
+                stop_event.set()  # Signal other threads to stop
+                raise RuntimeError(f"Thread failed: {exc}") from exc
+
+
 def cleanup_training_resources(
-    stop_generate_event: threading.Event, threads: list[threading.Thread], queues: list[ray_queue.Queue]
+    stop_event: threading.Event, executor: ThreadPoolExecutor, queues: list[ray_queue.Queue]
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
     # Signal threads to stop
-    stop_generate_event.set()
+    stop_event.set()
 
-    # Clean up threads with timeout
-    logger.info("Cleaning up threads...")
-    for thread in threads:
-        thread.join(timeout=30)
-        if thread.is_alive():
-            logger.warning(f"Thread {thread.name} did not stop cleanly")
-        else:
-            logger.info(f"======== ✅ Thread {thread.name} ends =========")
+    # Shutdown executor - this waits for all threads to complete
+    logger.info("Shutting down thread pool executor...")
+    executor.shutdown(wait=True, timeout=30)
 
-    # Shutdown Ray queues to prevent semaphore leaks
+    # Shutdown Ray queues
     logger.info("Shutting down Ray queues...")
     for queue in queues:
         try:
@@ -2284,37 +2295,39 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     for i, engine in enumerate(vllm_engines):
         ray.get(engine.ready.remote())
 
-    logger.info("======== ✅ data preparation thread starts =========")
-    packing_thread = threading.Thread(
-        target=data_preparation_thread,
-        args=(
-            reward_fn,
-            inference_results_Q,
-            packed_sequences_Q,
-            pending_queries_map,
-            args,
-            tokenizer,
-            args.num_training_steps,
-        ),
-    )
-    packing_thread.start()
+    # Create thread pool executor
+    executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="grpo")
 
-    # Create and start the generate thread
-    stop_generate_event = threading.Event()
-    generation_thread = threading.Thread(
-        target=generate_thread,
-        args=(
-            vllm_engines,
-            generation_config,
-            eval_generation_config,
-            args.local_eval_freq,
-            args.num_training_steps,
-            resume_training_step,
-            stop_generate_event,
-        ),
+    # Create stop event for thread coordination
+    stop_event = threading.Event()
+
+    logger.info("======== ✅ Starting worker threads =========")
+
+    # Submit threads to executor
+    packing_future = executor.submit(
+        data_preparation_thread,
+        reward_fn,
+        inference_results_Q,
+        packed_sequences_Q,
+        pending_queries_map,
+        args,
+        tokenizer,
+        args.num_training_steps,
+        stop_event,
     )
-    generation_thread.start()
-    logger.info("======== ✅ generation thread starts =========")
+
+    generation_future = executor.submit(
+        generate_thread,
+        vllm_engines,
+        generation_config,
+        eval_generation_config,
+        args.local_eval_freq,
+        args.num_training_steps,
+        resume_training_step,
+        stop_event,
+    )
+
+    thread_futures = [packing_future, generation_future]
 
     # Send initial data to ensure we have a N-step offset. This is what
     # the async_steps arg does.
@@ -2338,6 +2351,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     num_total_tokens = 0
     start_time = time.time()
     for training_step in range(resume_training_step, args.num_training_steps + 1):
+        # Check thread health at the start of each step
+        check_threads_healthy(thread_futures, stop_event)
+
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         queries_next, ground_truths_next, datasets_next, dataset_indices = sync_weights_and_prepare_prompts(
             training_step,
@@ -2392,9 +2408,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     # Clean up resources
     cleanup_training_resources(
-        stop_generate_event,
-        [packing_thread, generation_thread],
-        [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
+        stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q]
     )
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
