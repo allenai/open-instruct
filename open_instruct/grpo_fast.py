@@ -1200,43 +1200,6 @@ class PendingQueriesMap:
         self._map = {}  # dataset_idx -> (query, ground_truth, dataset, count)
         self._lock = threading.Lock()
 
-    def __getitem__(self, key):
-        """Get item using dict-like access."""
-        with self._lock:
-            if key not in self._map:
-                raise KeyError(f"Key {key} not found")
-            return self._map[key]
-
-    def __setitem__(self, key, value):
-        """Set item using dict-like access. Value should be (query, ground_truth, dataset)."""
-        with self._lock:
-            if len(value) == 3:
-                # If only 3 elements provided, add count of 1
-                query, ground_truth, dataset = value
-                self._map[key] = (query, ground_truth, dataset, 1)
-            elif len(value) == 4:
-                # Full tuple with count
-                self._map[key] = value
-            else:
-                raise ValueError(
-                    "Value must be a tuple of (query, ground_truth, dataset) or (query, ground_truth, dataset, count)"
-                )
-
-    def __contains__(self, key):
-        """Check if key exists."""
-        with self._lock:
-            return key in self._map
-
-    def __len__(self):
-        """Return the number of items in the map."""
-        with self._lock:
-            return len(self._map)
-
-    def keys(self):
-        """Return a copy of the keys."""
-        with self._lock:
-            return list(self._map.keys())
-
     def insert(self, dataset_idx, query, ground_truth, dataset):
         """Insert or increment count for a dataset index."""
         with self._lock:
@@ -1247,6 +1210,18 @@ class PendingQueriesMap:
             else:
                 # New entry - count starts at 1
                 self._map[dataset_idx] = (query, ground_truth, dataset, 1)
+
+    def insert_many(self, dataset_indices, queries, ground_truths, datasets):
+        """Insert or increment count for multiple dataset indices at once."""
+        with self._lock:
+            for i, dataset_idx in enumerate(dataset_indices):
+                if dataset_idx in self._map:
+                    # Already exists - just increment count
+                    existing_query, existing_ground_truth, existing_dataset, count = self._map[dataset_idx]
+                    self._map[dataset_idx] = (existing_query, existing_ground_truth, existing_dataset, count + 1)
+                else:
+                    # New entry - count starts at 1
+                    self._map[dataset_idx] = (queries[i], ground_truths[i], datasets[i], 1)
 
     def pop(self, dataset_idx):
         """Retrieve data and decrement count. Removes entry when count reaches 0."""
@@ -1264,6 +1239,26 @@ class PendingQueriesMap:
                 del self._map[dataset_idx]
 
             return query, ground_truth, dataset
+
+    def __len__(self):
+        """Return the number of entries in the map."""
+        with self._lock:
+            return len(self._map)
+
+    def __contains__(self, dataset_idx):
+        """Check if a dataset index is in the map."""
+        with self._lock:
+            return dataset_idx in self._map
+
+    def __getitem__(self, dataset_idx):
+        """Get the value for a dataset index."""
+        with self._lock:
+            return self._map[dataset_idx]
+
+    def keys(self):
+        """Return a view of the keys in the map."""
+        with self._lock:
+            return list(self._map.keys())
 
 
 def accumulate_inference_batches(
