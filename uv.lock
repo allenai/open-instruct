@@ -944,7 +944,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/32/5c/c7610beeb2fc0e70d
 
 [[package]]
 name = "flashinfer-python"
-version = "0.2.7"
+version = "0.2.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cuda-python" },
@@ -957,7 +957,7 @@ dependencies = [
     { name = "torch", version = "2.7.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.7.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform != 'darwin'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f9/a0/5e700751f2393a504bc5eb2879e77d783a5b70778a254289711323126abc/flashinfer_python-0.2.7.tar.gz", hash = "sha256:1359554083fafac13908a76e314a0729e578d42de567a61ebb1670d723cf8b9e", size = 3199463 }
+sdist = { url = "https://files.pythonhosted.org/packages/72/0e/827624993516e80f62ba88dd368ad5e180c41324f063c00d27fa638a430e/flashinfer_python-0.2.8.tar.gz", hash = "sha256:f662861323d0db0ff10fd90653a00b4a700eb8b478e87411ff55444ab34d2d3f", size = 3425936 }
 
 [[package]]
 name = "fonttools"
@@ -2420,7 +2420,7 @@ requires-dist = [
     { name = "deepspeed", specifier = "==0.15.4" },
     { name = "fastapi", marker = "extra == 'code'", specifier = ">=0.100.0" },
     { name = "flash-attn", marker = "extra == 'compile'", specifier = ">=2.8.0.post2" },
-    { name = "flashinfer-python", marker = "extra == 'compile'", specifier = "==0.2.7" },
+    { name = "flashinfer-python", marker = "extra == 'compile'", specifier = "==0.2.8" },
     { name = "hf-transfer", specifier = ">=0.1.8" },
     { name = "immutabledict", specifier = "==1.2.0" },
     { name = "langdetect", specifier = "==1.0.9" },

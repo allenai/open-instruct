@@ -56,7 +56,7 @@ fastrlock==0.8.3 ; sys_platform != 'darwin'
 filelock==3.18.0
 flake8==7.2.0
 flash-attn==2.8.0.post2
-flashinfer-python==0.2.7
+flashinfer-python==0.2.8
 fonttools==4.58.1
 frozenlist==1.6.2
 fsspec==2025.3.0
