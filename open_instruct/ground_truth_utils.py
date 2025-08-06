@@ -16,7 +16,7 @@ import weakref
 from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Tuple
 
 import requests
 from litellm import acompletion
@@ -39,6 +39,7 @@ from open_instruct.math_utils import (
 from open_instruct.search_rewards.openscholar_rewards import compute_paper_reward
 from open_instruct.search_rewards.reasoning_model_rewards import compute_hle_reward
 from open_instruct.search_rewards.rubric_rewards import compute_rubric_reward
+from open_instruct.search_rewards.finegrained_rewards import compute_finegrained_reward
 from open_instruct.utils import extract_final_answer
 from open_instruct.IFEvalG import instructions_registry
 
@@ -91,6 +92,70 @@ class VerificationResult:
     cost: float = 0.0
     log_values: Optional[Dict[str, float]] = None
     reasoning: Optional[str] = None
+
+
+@dataclass
+class FinegrainedRewardOutput:
+    """
+    Simple output class for finegrained rewards from reward functions.
+    
+    This replaces the tuple format used in finegrained GRPO, providing a cleaner
+    interface for reward functions that return multiple rewards per response.
+    
+    The reward_fn wrapper will call your finegrained reward function and return
+    the unpacked format expected by fgrpo_fast.py.
+    
+    Attributes:
+        finegrained_scores: List of (score, effective_span, reward_group_id, response_idx) tuples
+        log_values: Optional dictionary of metrics for logging (matches VerificationResult)
+        cost: Cost of computing the rewards (matches VerificationResult)
+        reasoning: Optional reasoning text (matches VerificationResult)
+    """
+    finegrained_scores: List[Tuple[float, Tuple[int, int], int, int]]  # (score, (start_char, end_char), group_id, response_idx)
+    log_values: Optional[Dict[str, float]] = None
+    cost: float = 0.0
+    reasoning: Optional[str] = None
+    
+    def __post_init__(self):
+        """Basic validation of the finegrained scores."""
+        for i, item in enumerate(self.finegrained_scores):
+            if not isinstance(item, tuple) or len(item) != 4:
+                raise ValueError(f"finegrained_scores[{i}] must be a 4-tuple (score, effective_span, reward_group_id, response_idx)")
+            
+            score, effective_span, reward_group_id, response_idx = item
+            
+            if not isinstance(effective_span, tuple) or len(effective_span) != 2:
+                raise ValueError(f"effective_span in finegrained_scores[{i}] must be a 2-tuple (start_char, end_char)")
+            
+            start_char, end_char = effective_span
+            if start_char < 0 or end_char < start_char:
+                raise ValueError(f"Invalid effective_span {effective_span} in finegrained_scores[{i}]")
+            
+            if reward_group_id < 0 or response_idx < 0:
+                raise ValueError(f"reward_group_id and response_idx must be >= 0 in finegrained_scores[{i}]")
+    
+    def unpack_for_fgrpo(self) -> Tuple[List[Tuple[float, Tuple[int, int], int, int]], Dict[str, float]]:
+        """
+        Unpack for the format expected by fgrpo_fast.py.
+        
+        Returns:
+            Tuple of (finegrained_scores, log_values) as expected by line 1175 in fgrpo_fast.py
+        """
+        return self.finegrained_scores, self.log_values or {}
+    
+    def get_scores_for_response(self, response_idx: int) -> List[Tuple[float, Tuple[int, int], int, int]]:
+        """Get all scores for a specific response."""
+        return [score for score in self.finegrained_scores if score[3] == response_idx]
+    
+    def get_scores_for_group(self, reward_group_id: int) -> List[Tuple[float, Tuple[int, int], int, int]]:
+        """Get all scores for a specific reward group."""
+        return [score for score in self.finegrained_scores if score[2] == reward_group_id]
+    
+    def __len__(self) -> int:
+        return len(self.finegrained_scores)
+    
+    def __iter__(self):
+        return iter(self.finegrained_scores)
 
 
 class VerifierFunction(ABC):
@@ -869,6 +934,23 @@ class RLRAGLongFormReasoningJudgeVerifier(VerifierFunction):
         score = result["reward"]
         return VerificationResult(score=score, log_values=result["log_values"])
 
+
+class RLRAGLongFormFinegrainedVerifier(VerifierFunction):
+    """
+    Verifier that computes the RL-RAG (long form) score between the prediction and the label.
+    """
+
+    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+        super().__init__("rl_rag_longform_finegrained", verifier_config=verifier_config, weight=1.0)
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> FinegrainedRewardOutput:
+        result = compute_finegrained_reward(prediction, label, query)
+        return FinegrainedRewardOutput(
+            finegrained_scores=result["finegrained_scores"],
+            log_values=result["log_values"],
+        )
 
 def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     """

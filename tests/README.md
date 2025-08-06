@@ -26,6 +26,10 @@ conda activate open-instruct
 - `test_optimized_mapping.py`: Benchmark of different optimization strategies for character-to-token mapping
 - `test_final_optimized_mapping.py`: Performance comparison showing the optimization benefits in production
 - `test_llama_tokenizer_optimization.py`: Tests offset mapping support across different tokenizers (GPT-2, Llama, RoBERTa)
+- `test_finegrained_reward_classes.py`: Tests for the FinegrainedRewardOutput class used in finegrained GRPO reward functions
+- `test_dummy_finegrained_rewards.py`: Tests for the dummy finegrained reward function that splits responses into first/second half
+- `test_rlrag_finegrained_verifier.py`: Tests for the RLRAGLongFormFinegrainedVerifier integration with the dummy reward function
+- `test_fgrpo_distributed_with_verifier.py`: Comprehensive distributed test of finegrained GRPO with RLRAGLongFormFinegrainedVerifier, including gradient computation, collation, and metrics aggregation
 
 ### Running Individual Tests
 
