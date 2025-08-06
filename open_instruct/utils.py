@@ -70,12 +70,13 @@ logger = get_logger(__name__)
 DataClassType = NewType("DataClassType", Any)
 
 
-def ray_get_with_progress(ray_refs: List[ray.ObjectRef], desc: str = "Processing") -> List[Any]:
+def ray_get_with_progress(ray_refs: List[ray.ObjectRef], desc: str = "Processing", enable: bool = True) -> List[Any]:
     """Execute ray.get() with a progress bar using futures.
 
     Args:
         ray_refs: List of ray object references
         desc: Description for the progress bar
+        enable: Whether to show the progress bar (default: True)
 
     Returns:
         List of results in the same order as ray_refs
@@ -83,9 +84,11 @@ def ray_get_with_progress(ray_refs: List[ray.ObjectRef], desc: str = "Processing
     ray_futures = [ref.future() for ref in ray_refs]
     results = [None] * len(ray_refs)
 
-    for future in tqdm(
-        futures.as_completed(ray_futures), total=len(ray_futures), desc=desc, bar_format="{l_bar}{bar}{r_bar}\n"
-    ):
+    futures_iter = futures.as_completed(ray_futures)
+    if enable:
+        futures_iter = tqdm(futures_iter, total=len(ray_futures), desc=desc, bar_format="{l_bar}{bar}{r_bar}\n")
+
+    for future in futures_iter:
         idx = ray_futures.index(future)
         results[idx] = future.result()
 

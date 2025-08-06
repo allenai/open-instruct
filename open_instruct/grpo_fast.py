@@ -341,6 +341,8 @@ class Args:
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
 
     # Experiment tracking
+    verbose: bool = False
+    """If toggled, debug output will be shown"""
     with_tracking: bool = False
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
@@ -442,6 +444,11 @@ class Args:
 def flatten(nested_list: List[List[Any]]) -> List[Any]:
     """Flatten a list of lists into a single list."""
     return [item for sublist in nested_list for item in sublist]
+
+
+def repeat_each(seq, k):
+    """Repeat each element in a sequence k times."""
+    return [item for item in seq for _ in range(k)]
 
 
 def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
@@ -771,9 +778,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
         if torch.distributed.get_rank() == 0:
-            ray_get_with_progress(refss, desc="Broadcasting weights to vLLM")
+            ray_get_with_progress(refss, desc="Broadcasting weights to vLLM", enable=self.args.verbose)
         if self.args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
-            ray_get_with_progress(cache_reset_refs, desc="Resetting vLLM prefix cache")
+            ray_get_with_progress(cache_reset_refs, desc="Resetting vLLM prefix cache", enable=self.args.verbose)
 
     def update_ref_policy(self):
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
@@ -1343,12 +1350,10 @@ def data_preparation_thread(
         # Pack sequences
         if args.num_samples_per_prompt_rollout > 1:
             batch = Batch(
-                queries=flatten([[item] * args.num_samples_per_prompt_rollout for item in batch.queries]),
-                ground_truths=flatten([[item] * args.num_samples_per_prompt_rollout for item in batch.ground_truths]),
-                datasets=flatten([[item] * args.num_samples_per_prompt_rollout for item in batch.datasets]),
-                indices=flatten([[item] * args.num_samples_per_prompt_rollout for item in batch.indices])
-                if batch.indices
-                else None,
+                queries=repeat_each(batch.queries, args.num_samples_per_prompt_rollout),
+                ground_truths=repeat_each(batch.ground_truths, args.num_samples_per_prompt_rollout),
+                datasets=repeat_each(batch.datasets, args.num_samples_per_prompt_rollout),
+                indices=repeat_each(batch.indices, args.num_samples_per_prompt_rollout) if batch.indices else None,
             )
             good_outputs = [
                 len(result.request_info.tool_outputs[i]) > 0
@@ -1793,6 +1798,7 @@ def create_model_and_optimizer(
             ray_get_with_progress(
                 [m.broadcast_to_vllm.remote() for m in policy_group.models],
                 desc="Broadcasting weights to vLLM engines",
+                enable=args.verbose,
             )
 
     return policy_group, vllm_engines, tool_objects, resume_training_step, episode
@@ -1870,7 +1876,9 @@ def sync_weights_and_prepare_prompts(
     ):
         ray_refs = [m.broadcast_to_vllm.remote() for m in policy_group.models]
         ray_get_with_progress(
-            ray_refs, desc=f"[Main Thread] Broadcasting weights to vLLM engines at training step {training_step}"
+            ray_refs,
+            desc=f"[Main Thread] Broadcasting weights to vLLM engines at training step {training_step}",
+            enable=args.verbose,
         )
 
     split_and_insert_batch(
@@ -1913,7 +1921,7 @@ def generate_thread(vllm_engines, local_eval_freq, num_training_steps, resume_tr
             processed_results = []
             with tqdm(
                 total=len(vllm_engines),
-                desc="[Generate Thread] Waiting for vLLM engines to process",
+                desc="[Generate Thread] Waiting for vLLM engines to return",
                 bar_format="{l_bar}{bar}{r_bar}\n",
             ) as pbar:
                 for future in futures.as_completed(engine_futures):
