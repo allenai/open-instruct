@@ -845,7 +845,6 @@ class CodeVerifier(VerifierFunction):
                 return response.json()
 
             result = await asyncio.to_thread(make_request)
-
             passes = result["results"]
             pass_rate = sum(passes) / len(passes) if passes else 0.0
             score = 0.0 if pass_rate < self.pass_rate_reward_threshold else pass_rate
