@@ -29,7 +29,7 @@
 # limitations under the License.
 # isort: off
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent import futures
 
 # We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
 # https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
@@ -1294,10 +1294,9 @@ def data_preparation_thread(
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
-    stop_event: threading.Event,  # Add stop_event parameter
+    stop_event: threading.Event,
 ):
     for training_step in range(1, num_training_steps + 1):
-        # Check if we should exit
         if stop_event.is_set():
             logger.info("[Data Preparation Thread] Shutting down")
             return
@@ -1879,7 +1878,7 @@ def generate_thread(
                 desc="[Generate Thread] Waiting for vLLM engines to process",
                 bar_format="{l_bar}{bar}{r_bar}\n",
             ) as pbar:
-                for future in as_completed(engine_futures):
+                for future in futures.as_completed(engine_futures):
                     processed_results.append(future.result())
                     pbar.update(1)
             num_processed = sum(int(result) for result in processed_results)
@@ -2204,17 +2203,15 @@ def check_threads_healthy(futures: list, stop_event: threading.Event) -> None:
 
 
 def cleanup_training_resources(
-    stop_event: threading.Event, executor: ThreadPoolExecutor, queues: list[ray_queue.Queue]
+    stop_event: threading.Event, executor: futures.ThreadPoolExecutor, queues: list[ray_queue.Queue]
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
     # Signal threads to stop
     stop_event.set()
 
-    # Shutdown executor - this waits for all threads to complete
     logger.info("Shutting down thread pool executor...")
-    executor.shutdown(wait=True, timeout=30)
+    executor.shutdown(wait=True)
 
-    # Shutdown Ray queues
     logger.info("Shutting down Ray queues...")
     for queue in queues:
         try:
@@ -2295,15 +2292,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     for i, engine in enumerate(vllm_engines):
         ray.get(engine.ready.remote())
 
-    # Create thread pool executor
-    executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="grpo")
-
-    # Create stop event for thread coordination
+    executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="grpo")
     stop_event = threading.Event()
 
     logger.info("======== ✅ Starting worker threads =========")
-
-    # Submit threads to executor
     packing_future = executor.submit(
         data_preparation_thread,
         reward_fn,
@@ -2351,7 +2343,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     num_total_tokens = 0
     start_time = time.time()
     for training_step in range(resume_training_step, args.num_training_steps + 1):
-        # Check thread health at the start of each step
         check_threads_healthy(thread_futures, stop_event)
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
