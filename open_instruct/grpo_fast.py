@@ -2194,12 +2194,10 @@ def cleanup_judge_clients():
 def check_threads_healthy(futures: list, stop_event: threading.Event) -> None:
     """Check if any threads have failed and raise their exception if so."""
     for future in futures:
-        if future.done():
-            exc = future.exception()
-            if exc:
-                logger.error(f"Thread {future} failed with exception: {exc}")
-                stop_event.set()  # Signal other threads to stop
-                raise RuntimeError(f"Thread failed: {exc}") from exc
+        if not future.done():
+            continue
+        # This will raise any exception that occurred in the thread
+        future.result()
 
 
 def cleanup_training_resources(
