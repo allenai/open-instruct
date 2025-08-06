@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - main
+  merge_group:
 
 jobs:
 
@@ -24,6 +25,10 @@ jobs:
       - name: Set up Python
         run: uv python install 3.10
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --only-group dev
       - name: Code quality
-        run: make style-check && make quality-check
+        run: |
+          source .venv/bin/activate
+          ruff format --check --diff open_instruct
+          ruff check --exit-non-zero-on-fix open_instruct
+        
