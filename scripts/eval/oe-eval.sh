@@ -168,15 +168,15 @@ TULU_3_UNSEEN=(
 # New default task suites
 NEXT_MODEL_DEV=(
     # Knowledge
-    "mmlu:cot::olmo3:thinker"           # OLD: "mmlu:cot::hamish_zs_reasoning"
+    "mmlu:cot::hamish_zs_reasoning"
     "popqa::hamish_zs_reasoning"
     "simpleqa::tulu-thinker"
 
     # Reasoning
-    "bbh:cot::olmo3:thinker"            # OLD: "bbh:cot::hamish_zs_reasoning"
-    "gpqa:0shot_cot::olmo3:thinker"     # OLD: "gpqa:0shot_cot::hamish_zs_reasoning"
+    "bbh:cot::hamish_zs_reasoning"
+    "gpqa:0shot_cot::hamish_zs_reasoning"
     "zebralogic::hamish_zs_reasoning"
-    "agi_eval:0shot_cot::olmo3:thinker" # OLD: "agi_eval_english:0shot_cot::hamish_zs_reasoning"
+    "agi_eval_english:0shot_cot::hamish_zs_reasoning"
 
     # Math
     # [faster] minerva_math_500::hamish_zs_reasoning
@@ -187,9 +187,9 @@ NEXT_MODEL_DEV=(
     "aime:zs_cot_r1::pass_at_32_2025_temp1"  # OLD: "aime::hamish_zs_reasoning"
     
     # Coding
-    "codex_humanevalplus::olmo3:thinker"            # OLD: "codex_humanevalplus:0-shot-chat::tulu-thinker"
-    "mbppplus::olmo3:thinker"                       # OLD: "mbppplus:0-shot-chat::tulu-thinker"
-    "livecodebench_codegeneration::olmo3:thinker"   # OLD: "livecodebench_codegeneration::tulu-thinker"
+    "codex_humanevalplus:0-shot-chat::tulu-thinker"
+    "mbppplus:0-shot-chat::tulu-thinker"
+    "livecodebench_codegeneration::tulu-thinker"
     # [TODO not merged] codeeditorbench - requires separate server
     # [TODO, maybe] cruxeval
     
