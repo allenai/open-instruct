@@ -201,6 +201,9 @@ class LLMRayActor:
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             print(f"creating LLM with bundle_indices={bundle_indices}")
 
+        # Pop update_weights_inflight before passing kwargs to vLLM
+        self.update_weights_inflight = kwargs.pop("update_weights_inflight", False)
+
         if tool_use:
             # TODO: Need to update ToolUseLLM to use LLMEngine as well
             from open_instruct.tool_utils.tool_vllm import ToolUseLLM
@@ -220,7 +223,6 @@ class LLMRayActor:
         self.logger = logging.getLogger(__name__)
         self.actor_manager = actor_manager
         self.inference_batch_size = inference_batch_size
-        self.update_weights_inflight = kwargs.pop("update_weights_inflight", False)
 
     def _tool_generation_loop(self, timeout: float = 60.0):
         while True:

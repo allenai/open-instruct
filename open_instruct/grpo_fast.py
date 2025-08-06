@@ -207,8 +207,6 @@ class Args:
     # Batch sizes
     per_device_train_batch_size: int = 1
     """The forward batch size per device (local_micro_batch_size)"""
-    inference_batch_size: Optional[int] = None
-    """The batch size for LLMRayActor to pull from the queue for inference"""
     total_episodes: int = 100000
     """The total number of episodes in the dataset"""
     world_size: Optional[int] = None
@@ -240,8 +238,6 @@ class Args:
     # Algorithm
     async_steps: int = 1
     """Number of steps ahead to generate responses. Set to 0 to make the code synchronous. Values greater than 0 learn from a policy up to async_steps old like Cleanba (https://arxiv.org/abs/2310.00036)"""
-    update_weights_inflight: bool = False
-    """Whether to pause generation immediately when weight update flag is set, or wait for batches to finish"""
     num_epochs: int = 1
     """the number of epochs to train"""
     num_mini_batches: int = 1
@@ -441,13 +437,6 @@ class Args:
                 if tool not in ["search", "code"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
-
-        # Set default inference_batch_size if not provided
-        if self.inference_batch_size is None:
-            self.inference_batch_size = self.num_unique_prompts_rollout // self.vllm_num_engines
-            logger.info(
-                f"Setting inference_batch_size to {self.inference_batch_size} (num_unique_prompts_rollout={self.num_unique_prompts_rollout} // vllm_num_engines={self.vllm_num_engines})"
-            )
 
 
 def flatten(nested_list: List[List[Any]]) -> List[Any]:
@@ -1823,8 +1812,6 @@ def create_model_and_optimizer(
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
-        inference_batch_size=args.inference_batch_size,
-        update_weights_inflight=args.update_weights_inflight,
     )
 
     resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
@@ -1879,18 +1866,27 @@ def split_and_insert_batch(
     generation_config,
     is_eval: bool = False,
 ) -> None:
-    """Insert individual prompts into queues and mapping."""
-    # Store all prompts in the map
-    pending_queries_map.insert_many(batch.indices, batch.queries, batch.ground_truths, batch.datasets)
+    """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
+    # Split the batch over the VLLM engines.
+    inference_batch_size = len(batch.queries) // vllm_num_engines
+    for batch_idx in range(vllm_num_engines):
+        start_idx = batch_idx * inference_batch_size
+        end_idx = start_idx + inference_batch_size if batch_idx < vllm_num_engines - 1 else len(batch.queries)
 
-    # Put individual prompts into the queue
-    for idx, query in enumerate(batch.queries):
+        sub_batch = batch[start_idx:end_idx]
+
+        # Store prompts in the map using thread-safe insert_many
+        pending_queries_map.insert_many(
+            sub_batch.indices, sub_batch.queries, sub_batch.ground_truths, sub_batch.datasets
+        )
+
+        # Use PromptRequest for Ray queue with batch-specific dataset_index list
         param_prompt_Q.put(
             PromptRequest(
-                prompts=[query],
+                prompts=sub_batch.queries,
                 sampling_params=generation_config,
                 training_step=training_step,
-                dataset_index=[batch.indices[idx]],
+                dataset_index=sub_batch.indices,
                 is_eval=is_eval,
             )
         )
