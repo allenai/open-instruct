@@ -170,7 +170,7 @@ NEXT_MODEL_DEV=(
     # Knowledge
     "mmlu:cot::hamish_zs_reasoning"
     "popqa::hamish_zs_reasoning"
-    # "simpleqa::tulu-thinker"
+    "simpleqa::tulu-thinker"
     
     # Reasoning
     "bbh:cot::hamish_zs_reasoning"
@@ -183,7 +183,8 @@ NEXT_MODEL_DEV=(
     "minerva_math::hamish_zs_reasoning"
     "gsm8k::zs_cot_latex"
     "omega:0-shot-chat"
-    "aime::hamish_zs_reasoning"
+    "aime:zs_cot_r1::pass_at_32_2024_temp1"
+    "aime:zs_cot_r1::pass_at_32_2025_temp1"   # OLD: "aime::hamish_zs_reasoning"
     # [maybe unseen] aime::hamish_zs_reasoning_2025
     
     # Coding
@@ -194,7 +195,7 @@ NEXT_MODEL_DEV=(
     # [TODO, maybe] cruxeval
     
     # Chat / IF / Vibes
-    # "alpaca_eval_v3::hamish_zs_reasoning"
+    "alpaca_eval_v3::hamish_zs_reasoning"
     "ifeval::hamish_zs_reasoning"
     # [expensive, multi-turn all versions] multiturn_alpacaeval::tulu
     # [expensive, typos vibes] styled_evals::tulu
