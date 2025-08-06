@@ -169,20 +169,20 @@ TULU_3_UNSEEN=(
 NEXT_MODEL_DEV=(
     # Knowledge
     "mmlu:cot::olmo3:thinker"           # OLD: "mmlu:cot::hamish_zs_reasoning"
-    #"popqa::hamish_zs_reasoning"
-    # "simpleqa::tulu-thinker"
+    "popqa::hamish_zs_reasoning"
+    "simpleqa::tulu-thinker"
 
     # Reasoning
     "bbh:cot::olmo3:thinker"            # OLD: "bbh:cot::hamish_zs_reasoning"
     "gpqa:0shot_cot::olmo3:thinker"     # OLD: "gpqa:0shot_cot::hamish_zs_reasoning"
-    #"zebralogic::hamish_zs_reasoning"
+    "zebralogic::hamish_zs_reasoning"
     "agi_eval:0shot_cot::olmo3:thinker" # OLD: "agi_eval_english:0shot_cot::hamish_zs_reasoning"
 
     # Math
     # [faster] minerva_math_500::hamish_zs_reasoning
-    #"minerva_math::hamish_zs_reasoning"
-    #"gsm8k::zs_cot_latex"
-    #"omega:0-shot-chat"
+    "minerva_math::hamish_zs_reasoning"
+    "gsm8k::zs_cot_latex"
+    "omega:0-shot-chat"
     "aime:zs_cot_r1::pass_at_32_2024_temp1"
     "aime:zs_cot_r1::pass_at_32_2025_temp1"  # OLD: "aime::hamish_zs_reasoning"
     
@@ -194,13 +194,16 @@ NEXT_MODEL_DEV=(
     # [TODO, maybe] cruxeval
     
     # Chat / IF / Vibes
-    #"alpaca_eval_v3::hamish_zs_reasoning"
-    #"ifeval::hamish_zs_reasoning"
+    "alpaca_eval_v3::hamish_zs_reasoning"
+    "ifeval::hamish_zs_reasoning"
     # [expensive, multi-turn all versions] multiturn_alpacaeval::tulu
     # [expensive, typos vibes] styled_evals::tulu
     # [optional, typos compare] styled_math500::tulu
     # [optional, typos compare] styled_popqa::tulu
     # [optional, typos compare] styled_truthfulqa::tulu
+
+    # Tool Use
+    "bfcl_all::std" # This requires special logic on model_args and metadata, handled below
 )
 
 NEXT_MODEL_UNSEEN=(
@@ -265,38 +268,48 @@ for TASK in "${TASKS[@]}"; do
         MODEL_TYPE="--model-type vllm"
         GPU_COUNT="$NUM_GPUS"
     fi
-    # Handle special case for bfcl_all::std task
+
+    # Handle special case for bfcl_all::std task - requires additional metadata
     if [[ "$TASK" == "bfcl_all::std" ]]; then
-        # Check if MODEL_LOCATION is a local model (starts with beaker:// or /weka/)
-        if [[ "$MODEL_LOCATION" == beaker://* || "$MODEL_LOCATION" == /weka/* ]]; then
+        # Update MODEL_ARGS
+        # Check if MODEL_LOCATION is a local model (starts with beaker:// or /weka/ or gs://)
+            if [[ "$MODEL_LOCATION" == beaker://* ]] || [[ "$MODEL_LOCATION" == /weka/* ]] || [[ "$MODEL_LOCATION" == gs://* ]]; then
             # Local model: keep model_path as MODEL_LOCATION, add metadata with allenai/general-tool-use-dev
             MODEL_ARGS="${MODEL_ARGS%?}, \"metadata\": {\"extra_eval_config\": {\"model_name\": \"allenai/general-tool-use-dev\"}}}"
         else
-            # HF model: check if it's a non-AI2 model
-            MODEL_NAME=$MODEL_LOCATION
-            if [[ " ${NON_AI2_MODELS[*]} " =~ " ${MODEL_LOCATION} " ]]; then
-                # Non-AI2 model: remove model_path, no metadata needed
+            # HF model: check if it's supported
+            if [[ " ${SUPPORTED_MODELS[*]} " =~ " ${MODEL_LOCATION} " ]]; then
+                # Supported HF model: remove model_path, no metadata needed
                 BASE_ARGS="{\"max_length\": ${MAX_LENGTH}, \"trust_remote_code\": \"true\""
                 if [[ -n "$PROCESS_OUTPUT" ]]; then
                     BASE_ARGS+=", \"process_output\": \"${PROCESS_OUTPUT}\""
                 fi
                 BASE_ARGS+="}"
                 MODEL_ARGS="$BASE_ARGS"
+
+                # remove hf- from model name
+                MODEL_NAME="${MODEL_NAME#hf-}"
             else
-                # AI2 model: remove model_path, add metadata with allenai/general-tool-use-dev
-                BASE_ARGS="{\"max_length\": ${MAX_LENGTH}, \"trust_remote_code\": \"true\""
-                if [[ -n "$PROCESS_OUTPUT" ]]; then
-                    BASE_ARGS+=", \"process_output\": \"${PROCESS_OUTPUT}\""
-                fi
-                BASE_ARGS+=", \"metadata\": {\"extra_eval_config\": {\"model_name\": \"allenai/general-tool-use-dev\"}}}"
-                MODEL_ARGS="$BASE_ARGS"
+                # Unsupported HF model: skip this task
+                echo "Warning: Model '${MODEL_LOCATION}' is not supported for bfcl_all::std task. Skipping..."
+                continue
             fi
         fi
+        # Update env length variable in gantry-args, needed for bfcl
+        MAX_TOKENS_ARG=", \"env#111\": \"MAX_TOKENS=${MAX_LENGTH}\""
     else
-        MODEL_ARGS="$MODEL_ARGS"
+        # For other tasks, use the original MODEL_ARGS without metadata, and no gantry-arg for length
+        MAX_TOKENS_ARG=""
     fi
 
     # NOTE: For gantry args here and below, random numbers like #42 are added to the env variables because they need to be unique names. The numbers are ignored.
+    # Build gantry args
+    if [ "$EVALUATE_ON_WEKA" == "true" ]; then
+        GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"weka\": \"oe-adapt-default:/weka/oe-adapt-default\", \"env#132\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#42\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\"${MAX_TOKENS_ARG}}"
+    else
+        GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env-secret#43\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"${MAX_TOKENS_ARG}}"
+    fi
+
     if [ "$EVALUATE_ON_WEKA" == "true" ]; then
         python oe-eval-internal/oe_eval/launch.py \
             --model "$MODEL_NAME" \
@@ -309,7 +322,7 @@ for TASK in "${TASKS[@]}"; do
             --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
-            --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1", "env-secret#42": "AZURE_EVAL_API_KEY=azure_eval_api_key", "env-secret#2":"HF_TOKEN=HF_TOKEN", "env#111": "MAX_TOKENS=4096"}' \
+            --gantry-args "$GANTRY_ARGS" \
             ${REVISION_ARG} \
             --cluster "$CLUSTER" \
             --beaker-retries 2 \
@@ -329,7 +342,7 @@ for TASK in "${TASKS[@]}"; do
         --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
         ${HF_UPLOAD_ARG} \
         --gpus "$GPU_COUNT" \
-        --gantry-args "{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env-secret#43\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"}" \
+        --gantry-args "$GANTRY_ARGS" \
         ${REVISION_ARG} \
         --cluster ai2/augusta-google-1 \
         --beaker-retries 2 \
