@@ -247,7 +247,7 @@ class Args:
     """
     ref_policy_update_freq: Optional[int] = None
     """How many training steps to take before updating the reference policy."""
-    advantage_normalization_type: Literal["standard", "centered"] = "standard"
+    advantage_normalization_type: Literal["standard", "centered", "finegrained"] = "standard"
     """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
     divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
@@ -817,7 +817,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     mb_ref_logprob = collated_ref_logprobs[i]
                     mb_query_responses = collated_query_responses[i]
                     mb_tool_mask = collated_tool_masks[i]
-                    mb_advantages = collated_advantages[i]
+                    # todo: make sure the advantages return these stats
+                    mb_advantages_list, mb_advantages_mask_list = collated_advantages[i]
                     mb_response_masks = collated_response_masks[i]
                     mb_response_masks_bool = mb_response_masks[:, 1:].bool()
                     # if masking snippets, do it here.
@@ -833,42 +834,45 @@ class PolicyTrainerRayProcess(RayProcess):
                         pad_token_id,
                         args.temperature,
                     )
-                    mb_new_logprobs = torch.masked_fill(mb_new_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
+                    # todo: obtain the logprobs for different finegrained segments
+                    mb_new_logprobs_list = [torch.masked_fill(mb_new_logprobs, ~mb_advantages_mask_list[j], INVALID_LOGPROB) for j in range(len(mb_advantages_list))]
 
                     # Cache the old logprobs
                     with torch.no_grad():
                         if epoch_idx == 0:
-                            old_logprobs[i] = mb_new_logprobs
-                        mb_old_logprobs = old_logprobs[i].detach()
+                            old_logprobs[i] = mb_new_logprobs_list
+                        mb_old_logprobs_list = [old_logprobs[i][j].detach() for j in range(len(mb_advantages_list))]
 
                     # Calculate the policy's loss
-                    logprobs_diff = mb_new_logprobs - mb_old_logprobs
-                    ratio = torch.exp(logprobs_diff)
-                    pg_losses = -mb_advantages[:, 1:] * ratio
-                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(
-                        ratio, 1.0 - args.clip_lower, 1.0 + args.clip_higher
-                    )
-                    pg_loss_max = torch.max(pg_losses, pg_losses2)
+                    logprobs_diff_list = [mb_new_logprobs_list[j] - mb_old_logprobs_list[j] for j in range(len(mb_advantages_list))]
+                    ratio_list = [torch.exp(logprobs_diff_list[j]) for j in range(len(mb_advantages_list))]
+                    
+                    pg_losses_list = [-mb_advantages_list[j][:, 1:] * ratio_list[j] for j in range(len(mb_advantages_list))]
+                    pg_losses2_list = [-mb_advantages_list[j][:, 1:] * torch.clamp(
+                        ratio_list[j], 1.0 - args.clip_lower, 1.0 + args.clip_higher
+                    ) for j in range(len(mb_advantages_list))]
+                    pg_loss_max_list = [torch.max(pg_losses_list[j], pg_losses2_list[j]) for j in range(len(mb_advantages_list))]
 
                     # Here we recalculate kl: we want the KL loss to backpropagate through the model
                     # We also clamp the KL loss to avoid numerical instability
                     # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
-                    ref_logprobs_diff = (mb_new_logprobs - mb_ref_logprob).clamp(-40.0, 40.0)
-                    kl1 = ref_logprobs_diff
-                    kl2 = (ref_logprobs_diff) ** 2 / 2
-                    kl3 = torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff  # this is more numerically stable
-                    kl4 = ratio * ref_logprobs_diff
+                    ref_logprobs_diff_list = [(mb_new_logprobs_list[j] - mb_ref_logprob).clamp(-40.0, 40.0) for j in range(len(mb_advantages_list))]
+                    kl1_list = [ref_logprobs_diff_list[j] for j in range(len(mb_advantages_list))]
+                    kl2_list = [(ref_logprobs_diff_list[j]) ** 2 / 2 for j in range(len(mb_advantages_list))]
+                    kl3_list = [torch.expm1(-ref_logprobs_diff_list[j]) + ref_logprobs_diff_list[j] for j in range(len(mb_advantages_list))] # this is more numerically stable
+                    kl4_list = [ratio_list[j] * ref_logprobs_diff_list[j] for j in range(len(mb_advantages_list))]
                     if args.kl_estimator == "kl1":
-                        kl = kl1
+                        kl_list = kl1_list
                     elif args.kl_estimator == "kl2":
-                        kl = kl2
+                        kl_list = kl2_list
                     elif args.kl_estimator == "kl3":
-                        kl = kl3
+                        kl_list = kl3_list
                     elif args.kl_estimator == "kl4":
-                        kl = kl4
+                        kl_list = kl4_list
 
                     # grpo change: directly subtract KL in loss (add)
-                    loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
+                    loss_list = [masked_mean(pg_loss_max_list[j] + (args.beta * kl_list[j]), mb_response_masks_bool, args.masked_mean_axis) for j in range(len(mb_advantages_list))]
+                    loss = torch.mean(torch.stack(loss_list))
                     loss = loss / accumulation_steps
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
@@ -876,24 +880,16 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_step += 1
                     with torch.no_grad():
                         # NOTE: in packed implementation, kl calculation are averages over response tokens
-                        kl1_stats[i] = masked_mean(kl1, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, args.masked_mean_axis).float()
-                        if args.kl_estimator == "kl1":
-                            kl_loss_stats[i] = kl1_stats[i] * args.beta
-                        elif args.kl_estimator == "kl2":
-                            kl_loss_stats[i] = kl2_stats[i] * args.beta
-                        elif args.kl_estimator == "kl3":
-                            kl_loss_stats[i] = kl3_stats[i] * args.beta
-                        elif args.kl_estimator == "kl4":
-                            kl_loss_stats[i] = kl4_stats[i] * args.beta
-                        pg_clipfrac_stats[i] = masked_mean(
-                            (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
-                        )
-                        pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
-                        loss_stats[i] = loss
-                        ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
+                        kl1_stats = torch.mean(torch.stack([masked_mean(kl1_list[j], mb_response_masks_bool, args.masked_mean_axis).float() for j in range(len(mb_advantages_list))]))
+                        kl2_stats = torch.mean(torch.stack([masked_mean(kl2_list[j], mb_response_masks_bool, args.masked_mean_axis).float() for j in range(len(mb_advantages_list))]))
+                        kl3_stats = torch.mean(torch.stack([masked_mean(kl3_list[j], mb_response_masks_bool, args.masked_mean_axis).float() for j in range(len(mb_advantages_list))]))
+                        kl4_stats = torch.mean(torch.stack([masked_mean(kl4_list[j], mb_response_masks_bool, args.masked_mean_axis).float() for j in range(len(mb_advantages_list))]))
+                        kl_loss_stats = torch.mean(torch.stack([kl1_stats * args.beta, kl2_stats * args.beta, kl3_stats * args.beta, kl4_stats * args.beta]))
+                        pg_clipfrac_stats = torch.mean(torch.stack([masked_mean(
+                            (pg_losses2_list[j] > pg_losses_list[j]).float(), mb_response_masks_bool, args.masked_mean_axis) for j in range(len(mb_advantages_list))]))
+                        pg_loss_stats = torch.mean(torch.stack([masked_mean(pg_loss_max_list[j], mb_response_masks_bool, args.masked_mean_axis) for j in range(len(mb_advantages_list))]))
+                        loss_stats = torch.mean(torch.stack([loss_list[j] for j in range(len(mb_advantages_list))]))
+                        ratio_stats = torch.mean(torch.stack([masked_mean(ratio_list[j], mb_response_masks_bool, args.masked_mean_axis) for j in range(len(mb_advantages_list))]))
 
             with torch.no_grad():
                 self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
@@ -1172,23 +1168,115 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
-            scores, reward_metrics = asyncio.run(
-                reward_fn(
-                    responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries
+            if args.advantage_normalization_type == "finegrained":
+                # fine-grained rewards are a list of [score, effective_span, reward_group_id] of length num responses
+                # effective_span is now a tuple (start, end, total_length) for memory efficiency
+                # we need to normalize the advantages over each reward group but not average them
+                finegrained_scores, reward_metrics = asyncio.run(
+                    reward_fn(
+                        responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries
+                    )
                 )
-            )
-            scores = np.array(scores)
-            scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
-            mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
-            mean_grouped_rewards = np.repeat(mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
-            std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            std_grouped_rewards = np.repeat(std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
-            if args.advantage_normalization_type == "standard":
-                advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
-            elif args.advantage_normalization_type == "centered":
-                advantages = scores - mean_grouped_rewards
+                
+                def gather_mean_and_std_from_the_same_reward_group(finegrained_scores, reward_group_id):
+                    scores = [score for score, effective_span, group_id in finegrained_scores if group_id == reward_group_id]
+                    return np.mean(scores), np.std(scores) + 1e-8
+                
+                # Extract components from finegrained_scores
+                scores = np.array([score for score, _, _ in finegrained_scores])
+                effective_spans = [effective_span for _, effective_span, _ in finegrained_scores]
+                reward_group_ids = [reward_group_id for _, _, reward_group_id in finegrained_scores]
+                
+                # Get unique reward groups and normalize advantages per group
+                unique_groups = list(set(reward_group_ids))
+                advantages = np.zeros_like(scores, dtype=np.float32)
+                
+                # Create group-specific advantage masks and normalize per group
+                for group_id in unique_groups:
+                    group_indices = [i for i, gid in enumerate(reward_group_ids) if gid == group_id]
+                    group_scores = scores[group_indices]
+                    
+                    # Normalize advantages for this group
+                    group_mean, group_std = gather_mean_and_std_from_the_same_reward_group(finegrained_scores, group_id)
+                    finegrained_normalization_type = args.get("finegrained_normalization_type", "standard")
+                    if finegrained_normalization_type == "standard":
+                        group_advantages = (group_scores - group_mean) / group_std
+                    elif finegrained_normalization_type == "centered":
+                        group_advantages = group_scores - group_mean
+                    elif finegrained_normalization_type == "none":
+                        group_advantages = group_scores  # fallback
+                    else:
+                        raise ValueError(f"Invalid finegrained normalization type: {finegrained_normalization_type}")
+                    
+                    # Assign normalized advantages back to the main array
+                    for idx, group_idx in enumerate(group_indices):
+                        advantages[group_idx] = group_advantages[idx]
+
+                # Create span masks for each effective span
+                span_masks = []
+                for i, effective_span in enumerate(effective_spans):
+                    # effective_span is now a tuple (start, end, total_length) for memory efficiency
+                    if isinstance(effective_span, (tuple, list)) and len(effective_span) == 3:
+                        start, end, total_length = effective_span
+                        # Validate that the span matches the response length
+                        expected_length = len(responses[i])
+                        if total_length != expected_length:
+                            print(f"Warning: effective_span total_length ({total_length}) doesn't match response length ({expected_length}) for response {i}")
+                        
+                        # Create boolean mask from span indices
+                        span_mask = np.zeros(expected_length, dtype=bool)
+                        # Ensure indices are within bounds
+                        start = max(0, min(start, expected_length))
+                        end = max(start, min(end, expected_length))
+                        span_mask[start:end] = True
+                    elif isinstance(effective_span, (list, np.ndarray)):
+                        # Fallback: handle old boolean array format for backward compatibility
+                        span_mask = np.array(effective_span, dtype=bool)
+                    else:
+                        # If effective_span is a single value or different format, handle appropriately
+                        span_mask = np.ones(len(responses[i]), dtype=bool)  # default to all tokens
+                    
+                    span_masks.append(span_mask)
+                
+                # Group advantages and masks by reward group for the training loop
+                # Create lists of advantages and masks grouped by reward_group_id
+                grouped_advantages = {}
+                grouped_masks = {}
+                
+                for i, group_id in enumerate(reward_group_ids):
+                    if group_id not in grouped_advantages:
+                        grouped_advantages[group_id] = []
+                        grouped_masks[group_id] = []
+                    grouped_advantages[group_id].append(advantages[i])
+                    grouped_masks[group_id].append(span_masks[i])
+                
+                # Convert to the format expected by the training loop
+                # The training loop expects mb_advantages_list and mb_advantages_mask_list
+                advantages_list = []
+                advantages_mask_list = []
+                
+                for group_id in sorted(unique_groups):
+                    advantages_list.append(np.array(grouped_advantages[group_id]))
+                    advantages_mask_list.append(grouped_masks[group_id])
+                
             else:
-                raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
+                scores, reward_metrics = asyncio.run(
+                    reward_fn(
+                        responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries
+                    )
+                )
+                scores = np.array(scores)
+                scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
+                mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
+                mean_grouped_rewards = np.repeat(mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
+                std_grouped_rewards = scores_per_prompt.std(axis=-1)
+                std_grouped_rewards = np.repeat(std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
+                if args.advantage_normalization_type == "standard":
+                    advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
+                elif args.advantage_normalization_type == "centered":
+                    advantages = scores - mean_grouped_rewards
+                else:
+                    raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved
@@ -1198,13 +1286,45 @@ def data_preparation_thread(
             if args.apply_r1_style_format_reward and args.additive_format_reward:
                 max_possible_score += args.r1_style_format_reward
             unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
-            # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
-            # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
-            non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
-            real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
-            expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
-            non_zero_gradient_index = np.where(expanded_mask)[0]
-            advantages = advantages[non_zero_gradient_index]
+            
+            if args.advantage_normalization_type == "finegrained":
+                # For finegrained, we need to filter based on whether any group has non-zero std
+                # Check if any reward group has non-zero std
+                non_zero_std_groups = set()
+                for group_id in unique_groups:
+                    group_indices = [i for i, gid in enumerate(reward_group_ids) if gid == group_id]
+                    group_scores = scores[group_indices]
+                    if len(group_scores) > 1 and np.std(group_scores) != 0:
+                        non_zero_std_groups.add(group_id)
+                
+                # Filter to keep only responses from groups with non-zero std
+                non_zero_gradient_index = [i for i, gid in enumerate(reward_group_ids) if gid in non_zero_std_groups]
+                real_batch_size_ratio = len(non_zero_gradient_index) / len(scores)
+                
+                # Filter all the data
+                filtered_advantages_list = []
+                filtered_advantages_mask_list = []
+                for group_idx, group_id in enumerate(sorted(unique_groups)):
+                    if group_id in non_zero_std_groups:
+                        # Keep advantages and masks for this group
+                        group_indices_in_filtered = [i for i, orig_idx in enumerate(non_zero_gradient_index) 
+                                                   if reward_group_ids[orig_idx] == group_id]
+                        filtered_advantages_list.append(advantages_list[group_idx][group_indices_in_filtered])
+                        filtered_advantages_mask_list.append([advantages_mask_list[group_idx][i] for i in group_indices_in_filtered])
+                
+                advantages_list = filtered_advantages_list
+                advantages_mask_list = filtered_advantages_mask_list
+                
+            else:
+                # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
+                # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
+                scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
+                non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
+                real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
+                expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
+                non_zero_gradient_index = np.where(expanded_mask)[0]
+                advantages = advantages[non_zero_gradient_index]
+            
             scores = scores[non_zero_gradient_index]
             responses = [responses[i] for i in non_zero_gradient_index]
             masks = [masks[i] for i in non_zero_gradient_index]
@@ -1212,16 +1332,38 @@ def data_preparation_thread(
             ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
             datasets = [datasets[i] for i in non_zero_gradient_index]
             finish_reasons = [finish_reasons[i] for i in non_zero_gradient_index]
+            
+            if args.advantage_normalization_type == "finegrained":
+                # Also filter the group IDs and spans
+                reward_group_ids = [reward_group_ids[i] for i in non_zero_gradient_index]
+                effective_spans = [effective_spans[i] for i in non_zero_gradient_index]
+            
             if args.mask_truncated_completions:
                 stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
                 scores = scores[stop_idxes]
-                advantages = advantages[stop_idxes]
                 responses = [responses[i] for i in stop_idxes]
                 masks = [masks[i] for i in stop_idxes]
                 queries = [queries[i] for i in stop_idxes]
                 ground_truths = [ground_truths[i] for i in stop_idxes]
                 datasets = [datasets[i] for i in stop_idxes]
                 finish_reasons = [finish_reasons[i] for i in stop_idxes]
+                
+                if args.advantage_normalization_type == "finegrained":
+                    # Also filter finegrained data
+                    reward_group_ids = [reward_group_ids[i] for i in stop_idxes]
+                    effective_spans = [effective_spans[i] for i in stop_idxes]
+                    # Filter advantages_list and advantages_mask_list
+                    filtered_advantages_list = []
+                    filtered_advantages_mask_list = []
+                    for group_idx, group_id in enumerate(sorted(non_zero_std_groups)):
+                        group_stop_indices = [i for i, stop_idx in enumerate(stop_idxes) 
+                                            if reward_group_ids[stop_idx] == group_id]
+                        filtered_advantages_list.append(advantages_list[group_idx][group_stop_indices])
+                        filtered_advantages_mask_list.append([advantages_mask_list[group_idx][i] for i in group_stop_indices])
+                    advantages_list = filtered_advantages_list
+                    advantages_mask_list = filtered_advantages_mask_list
+                else:
+                    advantages = advantages[stop_idxes]
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
@@ -1232,15 +1374,57 @@ def data_preparation_thread(
                 pad_token_id=tokenizer.pad_token_id,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
-            # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
-            # and each value is the corresponding advantage score: index 0 is set to 0 since response masks start from 1 (1-indexed)
-            lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
-            lookup_advantages[1:] = advantages
-            packed_advantages = [
-                torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
-                for packed_mask in packed_sequences.response_masks
-            ]
-            packed_sequences.advantages = packed_advantages
+            
+            if args.advantage_normalization_type == "finegrained":
+                # For finegrained, we need to create multiple advantage arrays and masks
+                # Each corresponds to a different reward group/segment
+                packed_advantages_list = []
+                packed_advantages_mask_list = []
+                
+                for group_idx, group_id in enumerate(sorted(non_zero_std_groups)):
+                    # Create lookup for this group's advantages
+                    group_advantages = advantages_list[group_idx]
+                    lookup_advantages = np.zeros(len(group_advantages) + 1, dtype=np.float32)
+                    lookup_advantages[1:] = group_advantages
+                    
+                    # Pack advantages for this group
+                    packed_advantages = [
+                        torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
+                        for packed_mask in packed_sequences.response_masks
+                    ]
+                    packed_advantages_list.append(packed_advantages)
+                    
+                    # Create span masks for this group
+                    group_spans = advantages_mask_list[group_idx]
+                    packed_span_masks = []
+                    for i, packed_mask in enumerate(packed_sequences.response_masks):
+                        # Create span mask based on effective_spans
+                        span_mask = torch.zeros_like(packed_mask, dtype=torch.bool)
+                        # Map the effective spans to the packed format
+                        # This is a simplified version - you may need to adjust based on your exact span format
+                        for j, mask_val in enumerate(packed_mask):
+                            if mask_val > 0:  # This is a response token
+                                response_idx = mask_val - 1  # Convert to 0-indexed
+                                if response_idx < len(group_spans):
+                                    # Use the span mask for this response
+                                    span_mask[j] = True if j < len(group_spans[response_idx]) else False
+                        packed_span_masks.append(span_mask)
+                    packed_advantages_mask_list.append(packed_span_masks)
+                
+                # Store as tuples of (advantages_list, mask_list) for each packed sequence
+                packed_sequences.advantages = [(packed_advantages_list, packed_advantages_mask_list)]
+                
+            else:
+                # Original advantage packing for non-finegrained case
+                # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
+                # and each value is the corresponding advantage score: index 0 is set to 0 since response masks start from 1 (1-indexed)
+                lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
+                lookup_advantages[1:] = advantages
+                packed_advantages = [
+                    torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
+                    for packed_mask in packed_sequences.response_masks
+                ]
+                packed_sequences.advantages = packed_advantages
 
         # if we have less batches than world size, we need to pad out so each world is fine
         # ideally, you should avoid this since its wasting computation.
@@ -1265,7 +1449,17 @@ def data_preparation_thread(
                         packed_sequences.attention_masks.append(dummy_attention)
                         packed_sequences.position_ids.append(dummy_position_ids)
                         packed_sequences.response_masks.append(dummy_response_mask)
-                        packed_sequences.advantages.append(dummy_advantage)
+                        if args.advantage_normalization_type == "finegrained":
+                            # For finegrained, advantages is a list of tuples, so we need to handle it differently
+                            # The structure is [(packed_advantages_list, packed_advantages_mask_list)]
+                            # We need to pad each group's advantages
+                            if len(packed_sequences.advantages) > 0:
+                                packed_advantages_list, packed_advantages_mask_list = packed_sequences.advantages[0]
+                                for group_idx in range(len(packed_advantages_list)):
+                                    packed_advantages_list[group_idx].append(dummy_advantage)
+                                    packed_advantages_mask_list[group_idx].append(torch.zeros_like(dummy_qr, dtype=torch.bool))
+                        else:
+                            packed_sequences.advantages.append(dummy_advantage)
 
         with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
             B = (
@@ -1277,7 +1471,25 @@ def data_preparation_thread(
                 per_device_packed_tool_masks = packed_sequences.tool_masks[B * i : B * (i + 1)]
                 per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
                 per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
-                per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
+                if args.advantage_normalization_type == "finegrained":
+                    # For finegrained, advantages is stored as [(packed_advantages_list, packed_advantages_mask_list)]
+                    # We need to slice each group's advantages
+                    if len(packed_sequences.advantages) > 0:
+                        packed_advantages_list, packed_advantages_mask_list = packed_sequences.advantages[0]
+                        per_device_packed_advantages_list = []
+                        per_device_packed_advantages_mask_list = []
+                        for group_idx in range(len(packed_advantages_list)):
+                            per_device_packed_advantages_list.append(
+                                packed_advantages_list[group_idx][B * i : B * (i + 1)]
+                            )
+                            per_device_packed_advantages_mask_list.append(
+                                packed_advantages_mask_list[group_idx][B * i : B * (i + 1)]
+                            )
+                        per_device_packed_advantages = (per_device_packed_advantages_list, per_device_packed_advantages_mask_list)
+                    else:
+                        per_device_packed_advantages = ([], [])
+                else:
+                    per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
                 per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
 
                 # Shuffle the batch and collate the data
@@ -1307,9 +1519,43 @@ def data_preparation_thread(
                     collated_response_masks.append(
                         collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0)
                     )
-                    collated_advantages.append(
-                        collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0)
-                    )
+                    
+                    if args.advantage_normalization_type == "finegrained":
+                        # For finegrained, we need to handle the special structure
+                        # per_device_packed_advantages contains the structure from packed_sequences.advantages
+                        # which is [(packed_advantages_list, packed_advantages_mask_list)]
+                        if len(per_device_packed_advantages) > 0:
+                            packed_advantages_list, packed_advantages_mask_list = per_device_packed_advantages
+                            
+                            # Collate advantages for each group
+                            collated_advantages_list = []
+                            collated_advantages_mask_list = []
+                            
+                            for group_idx in range(len(packed_advantages_list)):
+                                # Collate advantages for this group
+                                group_advantages = [
+                                    packed_advantages_list[group_idx][idx] for idx in micro_range
+                                ]
+                                collated_group_advantages = collate_fn(group_advantages, 0)
+                                collated_advantages_list.append(collated_group_advantages)
+                                
+                                # Collate masks for this group
+                                group_masks = [
+                                    packed_advantages_mask_list[group_idx][idx] for idx in micro_range
+                                ]
+                                collated_group_masks = collate_fn([mask.float() for mask in group_masks], 0).bool()
+                                collated_advantages_mask_list.append(collated_group_masks)
+                            
+                            # Store as the expected format for the training loop
+                            collated_advantages.append((collated_advantages_list, collated_advantages_mask_list))
+                        else:
+                            # Handle empty case
+                            collated_advantages.append(([], []))
+                    else:
+                        # Original advantage collation for non-finegrained case
+                        collated_advantages.append(
+                            collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0)
+                        )
                 collated_data.append(
                     {
                         "collated_query_responses": collated_query_responses,
