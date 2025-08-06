@@ -1182,7 +1182,11 @@ class PendingQueriesMap:
 
 
 def accumulate_inference_batches(
-    inference_results_Q: ray_queue.Queue, pending_queries_map: PendingQueriesMap, args: Args, training_step: int
+    inference_results_Q: ray_queue.Queue,
+    pending_queries_map: PendingQueriesMap,
+    args: Args,
+    training_step: int,
+    timeout: float = None,
 ) -> tuple[GenerationResult, list, list, list]:
     """Accumulate multiple inference results into a single training batch.
 
@@ -1191,9 +1195,13 @@ def accumulate_inference_batches(
         pending_queries_map: PendingQueriesMap instance for thread-safe query tracking
         args: Arguments containing vllm_num_engines and num_samples_per_prompt_rollout
         training_step: Current training step for error reporting
+        timeout: Optional timeout for queue.get(). If None, blocks indefinitely.
 
     Returns:
         Tuple of (combined_result, queries, ground_truths, datasets)
+
+    Raises:
+        queue.Empty: If timeout is specified and no data is available within timeout.
     """
     # Collect results from all engines with non-blocking progress bar
     results = []
@@ -1207,7 +1215,7 @@ def accumulate_inference_batches(
         desc=f"Accumulating results from {args.vllm_num_engines} engines",
         bar_format="{l_bar}{bar}{r_bar}\n",
     ):
-        result = inference_results_Q.get()
+        result = inference_results_Q.get(timeout=timeout)
         dataset_indices = result.dataset_index
 
         if dataset_indices is None:
@@ -1303,9 +1311,17 @@ def data_preparation_thread(
             return
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            result, queries, ground_truths, datasets = accumulate_inference_batches(
-                inference_results_Q, pending_queries_map, args, training_step
-            )
+            while True:
+                if stop_event.is_set():
+                    logger.info("[Data Preparation Thread] Shutting down due to stop event")
+                    return  # Simply return to exit the thread cleanly
+                try:
+                    result, queries, ground_truths, datasets = accumulate_inference_batches(
+                        inference_results_Q, pending_queries_map, args, training_step, timeout=1.0
+                    )
+                    break  # Successfully got results, exit retry loop
+                except Empty:
+                    continue  # Timeout occurred, loop back to check stop_event
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -2192,7 +2208,9 @@ def cleanup_judge_clients():
     ray.shutdown()
 
 
-def check_threads_healthy(futures: list, stop_event: threading.Event, executor: futures.ThreadPoolExecutor) -> None:
+def check_threads_healthy(
+    futures: list, stop_event: threading.Event, executor: futures.ThreadPoolExecutor, queues: list[ray_queue.Queue]
+) -> None:
     """Check if any threads have failed and raise their exception if so."""
     for future in futures:
         if not future.done():
@@ -2201,8 +2219,7 @@ def check_threads_healthy(futures: list, stop_event: threading.Event, executor: 
             future.result()
         except Exception as e:
             logger.error(f"Thread failed with exception: {e}")
-            stop_event.set()
-            executor.shutdown(wait=False)
+            cleanup_training_resources(stop_event, executor, queues)
             raise
 
 
@@ -2342,7 +2359,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     num_total_tokens = 0
     start_time = time.time()
     for training_step in range(resume_training_step, args.num_training_steps + 1):
-        check_threads_healthy([packing_future, generation_future], stop_event, executor)
+        check_threads_healthy(
+            [packing_future, generation_future],
+            stop_event,
+            executor,
+            [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
+        )
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         queries_next, ground_truths_next, datasets_next, dataset_indices = sync_weights_and_prepare_prompts(
