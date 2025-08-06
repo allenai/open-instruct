@@ -208,7 +208,6 @@ class LLMRayActor:
         resume_training_step=1,
         timeout=0.1,
     ):
-        assert False, "There's a fake bug!"
         """Process a single element from the queue."""
         try:
             request = self.prompt_queue.get(timeout=timeout)
