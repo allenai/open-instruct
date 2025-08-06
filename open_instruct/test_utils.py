@@ -17,8 +17,9 @@ import unittest
 
 import pytest
 from dateutil import parser
+from parameterized import parameterized
 
-from open_instruct.utils import get_datasets
+from open_instruct.utils import get_datasets, repeat_each
 
 
 class GetDatasetsTest(unittest.TestCase):
@@ -73,6 +74,26 @@ class GetDatasetsTest(unittest.TestCase):
         # two special cases which beaker uses
         self.assertTrue(parser.parse("2024-09-16T19:03:02.31502Z"))
         self.assertTrue(parser.parse("0001-01-01T00:00:00Z"))
+
+
+class TestUtilityFunctions(unittest.TestCase):
+    """Test utility functions in utils module."""
+
+    @parameterized.expand(
+        [
+            ("basic_repeat", ["a", "b", "c"], 3, ["a", "a", "a", "b", "b", "b", "c", "c", "c"]),
+            ("repeat_once", ["a", "b", "c"], 1, ["a", "b", "c"]),
+            ("repeat_zero", ["a", "b", "c"], 0, []),
+            ("empty_sequence", [], 3, []),
+            ("integers", [1, 2, 3], 2, [1, 1, 2, 2, 3, 3]),
+            ("mixed_types", ["a", 1, None, True], 2, ["a", "a", 1, 1, None, None, True, True]),
+            ("single_element", ["x"], 5, ["x", "x", "x", "x", "x"]),
+        ]
+    )
+    def test_repeat_each(self, name, sequence, k, expected):
+        """Test the repeat_each function with various inputs."""
+        result = repeat_each(sequence, k)
+        self.assertEqual(result, expected)
 
 
 # useful for checking if public datasets are still available

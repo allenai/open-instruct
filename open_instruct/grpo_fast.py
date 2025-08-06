@@ -125,6 +125,7 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
+    repeat_each,
     sync_gs_bucket,
 )
 from open_instruct.vllm_utils3 import (
@@ -439,16 +440,6 @@ class Args:
                 if tool not in ["search", "code"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
-
-
-def flatten(nested_list: List[List[Any]]) -> List[Any]:
-    """Flatten a list of lists into a single list."""
-    return [item for sublist in nested_list for item in sublist]
-
-
-def repeat_each(seq, k):
-    """Repeat each element in a sequence k times."""
-    return [item for item in seq for _ in range(k)]
 
 
 def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
