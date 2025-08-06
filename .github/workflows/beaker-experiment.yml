@@ -5,6 +5,7 @@ on:
     # Run this workflow anytime a push updates one of the files in the image's directory
     # (other than the README), and anytime there's a new release tag for this image.
     paths:
+      - 'mason.py'
       - 'open_instruct/**'
       - '!open_instruct/README.md'
       - 'requirements.txt'
