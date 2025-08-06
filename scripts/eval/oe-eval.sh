@@ -251,6 +251,8 @@ if [[ -n "$PROCESS_OUTPUT" ]]; then
     MODEL_ARGS+=", \"process_output\": \"${PROCESS_OUTPUT}\""
 fi
 MODEL_ARGS+="}"
+# Source the non-AI2 models list for bfcl
+source "$(dirname "$0")/bfcl_supported_models.sh"
 
 for TASK in "${TASKS[@]}"; do
     # mmlu and truthfulqa need different batch sizes and gpu counts because they are multiple choice and we cannot use vllm.
@@ -262,6 +264,36 @@ for TASK in "${TASKS[@]}"; do
         BATCH_SIZE=$BATCH_SIZE_VLLM
         MODEL_TYPE="--model-type vllm"
         GPU_COUNT="$NUM_GPUS"
+    fi
+    # Handle special case for bfcl_all::std task
+    if [[ "$TASK" == "bfcl_all::std" ]]; then
+        # Check if MODEL_LOCATION is a local model (starts with beaker:// or /weka/)
+        if [[ "$MODEL_LOCATION" == beaker://* || "$MODEL_LOCATION" == /weka/* ]]; then
+            # Local model: keep model_path as MODEL_LOCATION, add metadata with allenai/general-tool-use-dev
+            MODEL_ARGS="${MODEL_ARGS%?}, \"metadata\": {\"extra_eval_config\": {\"model_name\": \"allenai/general-tool-use-dev\"}}}"
+        else
+            # HF model: check if it's a non-AI2 model
+            MODEL_NAME=$MODEL_LOCATION
+            if [[ " ${NON_AI2_MODELS[*]} " =~ " ${MODEL_LOCATION} " ]]; then
+                # Non-AI2 model: remove model_path, no metadata needed
+                BASE_ARGS="{\"max_length\": ${MAX_LENGTH}, \"trust_remote_code\": \"true\""
+                if [[ -n "$PROCESS_OUTPUT" ]]; then
+                    BASE_ARGS+=", \"process_output\": \"${PROCESS_OUTPUT}\""
+                fi
+                BASE_ARGS+="}"
+                MODEL_ARGS="$BASE_ARGS"
+            else
+                # AI2 model: remove model_path, add metadata with allenai/general-tool-use-dev
+                BASE_ARGS="{\"max_length\": ${MAX_LENGTH}, \"trust_remote_code\": \"true\""
+                if [[ -n "$PROCESS_OUTPUT" ]]; then
+                    BASE_ARGS+=", \"process_output\": \"${PROCESS_OUTPUT}\""
+                fi
+                BASE_ARGS+=", \"metadata\": {\"extra_eval_config\": {\"model_name\": \"allenai/general-tool-use-dev\"}}}"
+                MODEL_ARGS="$BASE_ARGS"
+            fi
+        fi
+    else
+        MODEL_ARGS="$MODEL_ARGS"
     fi
 
     # NOTE: For gantry args here and below, random numbers like #42 are added to the env variables because they need to be unique names. The numbers are ignored.
@@ -277,7 +309,7 @@ for TASK in "${TASKS[@]}"; do
             --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
-            --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1", "env-secret#42": "AZURE_EVAL_API_KEY=azure_eval_api_key"}' \
+            --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1", "env-secret#42": "AZURE_EVAL_API_KEY=azure_eval_api_key", "env-secret#2":"HF_TOKEN=HF_TOKEN", "env#111": "MAX_TOKENS=4096"}' \
             ${REVISION_ARG} \
             --cluster "$CLUSTER" \
             --beaker-retries 2 \
