@@ -171,7 +171,7 @@ NEXT_MODEL_DEV=(
     "mmlu:cot::hamish_zs_reasoning"
     "popqa::hamish_zs_reasoning"
     "simpleqa::tulu-thinker"
-
+    
     # Reasoning
     "bbh:cot::hamish_zs_reasoning"
     "gpqa:0shot_cot::hamish_zs_reasoning"
