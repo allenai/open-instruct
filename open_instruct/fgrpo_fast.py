@@ -1178,33 +1178,155 @@ def data_preparation_thread(
                     )
                 )
                 
+                def convert_string_span_to_token_span(effective_span, decoded_responses, responses, tokenizer):
+                    """
+                    Optimized character-to-token span conversion with multiple acceleration strategies.
+                    
+                    Args:
+                        effective_span: Tuple of (start_char, end_char) in decoded response
+                        decoded_responses: List of decoded string responses
+                        responses: List of tokenized responses (list of token IDs)
+                        tokenizer: Tokenizer used to decode the responses
+                    
+                    Returns:
+                        List of tuples (token_start, token_end) for each response
+                    """
+                    start_char, end_char = effective_span
+                    token_spans = []
+                    
+                    for resp_idx, (decoded_resp, token_resp) in enumerate(zip(decoded_responses, responses)):
+                        # Handle edge cases
+                        if start_char >= len(decoded_resp):
+                            token_spans.append((len(token_resp), len(token_resp)))
+                            continue
+                        if end_char <= 0:
+                            token_spans.append((0, 0))
+                            continue
+                        
+                        # Clamp character indices to valid range
+                        start_char_clamped = max(0, min(start_char, len(decoded_resp)))
+                        end_char_clamped = max(start_char_clamped, min(end_char, len(decoded_resp)))
+                        
+                        # Strategy 1: Try offset mapping (fastest when available)
+                        char_to_token = None
+                        try:
+                            encoding = tokenizer(decoded_resp, return_offsets_mapping=True, add_special_tokens=False)
+                            if hasattr(encoding, 'offset_mapping') and encoding.offset_mapping is not None:
+                                # Build character-to-token mapping from offsets
+                                char_to_token = {}
+                                for token_idx, (offset_start, offset_end) in enumerate(encoding.offset_mapping):
+                                    for char_idx in range(offset_start, offset_end):
+                                        char_to_token[char_idx] = token_idx
+                        except Exception:
+                            pass  # Fall back to boundary detection
+                        
+                        # Strategy 2: Boundary detection (fallback, works with any tokenizer)
+                        if char_to_token is None:
+                            char_to_token = {}
+                            current_pos = 0
+                            
+                            # Decode individual tokens and find their positions in the full text
+                            for token_idx, token_id in enumerate(token_resp):
+                                token_text = tokenizer.decode([token_id], skip_special_tokens=True)
+                                if not token_text:
+                                    continue
+                                
+                                # Find where this token appears starting from current position
+                                token_start = decoded_resp.find(token_text, current_pos)
+                                if token_start != -1:
+                                    token_end = token_start + len(token_text)
+                                    # Map characters to this token
+                                    for char_idx in range(token_start, token_end):
+                                        char_to_token[char_idx] = token_idx
+                                    current_pos = token_end
+                                else:
+                                    # Handle tokenizer quirks
+                                    if current_pos < len(decoded_resp):
+                                        char_to_token[current_pos] = token_idx
+                                        current_pos += 1
+                            
+                            # Fill any remaining characters
+                            for char_idx in range(current_pos, len(decoded_resp)):
+                                char_to_token[char_idx] = len(token_resp) - 1
+                        
+                        # Find token boundaries for the character span
+                        token_start = char_to_token.get(start_char_clamped, 0)
+                        
+                        # For end position, find the token containing end_char_clamped - 1
+                        if end_char_clamped > 0:
+                            token_end = char_to_token.get(end_char_clamped - 1, len(token_resp) - 1) + 1
+                        else:
+                            token_end = token_start
+                        
+                        # Clamp to valid token range
+                        token_start = max(0, min(token_start, len(token_resp)))
+                        token_end = max(token_start, min(token_end, len(token_resp)))
+                        
+                        token_spans.append((token_start, token_end))
+                    
+                    return token_spans
+                
                 def gather_mean_and_std_from_the_same_reward_group(finegrained_scores, reward_group_id):
                     scores = [score for score, effective_span, group_id in finegrained_scores if group_id == reward_group_id]
                     return np.mean(scores), np.std(scores) + 1e-8
                 
                 # Extract components from finegrained_scores
-                scores = np.array([score for score, _, _ in finegrained_scores])
-                effective_spans = [effective_span for _, effective_span, _ in finegrained_scores]
-                reward_group_ids = [reward_group_id for _, _, reward_group_id in finegrained_scores]
+                # Support both formats:
+                # - 3-tuple: (score, effective_span, reward_group_id) - implicit response mapping
+                # - 4-tuple: (score, effective_span, reward_group_id, response_idx) - explicit response mapping
+                scores = []
+                effective_spans = []
+                reward_group_ids = []
+                response_indices = []
+                
+                for i, item in enumerate(finegrained_scores):
+                    if len(item) == 3:
+                        # Old format: (score, effective_span, reward_group_id)
+                        score, effective_span, reward_group_id = item
+                        # Implicit mapping: assume scores are grouped by response then by reward group
+                        response_idx = i // len(set([gid for _, _, gid in finegrained_scores]))
+                    elif len(item) == 4:
+                        # New format: (score, effective_span, reward_group_id, response_idx)
+                        score, effective_span, reward_group_id, response_idx = item
+                    else:
+                        raise ValueError(f"Invalid finegrained_scores format: each item should be 3-tuple or 4-tuple, got {len(item)}-tuple")
+                    
+                    scores.append(score)
+                    effective_spans.append(effective_span)
+                    reward_group_ids.append(reward_group_id)
+                    response_indices.append(response_idx)
+                
+                scores = np.array(scores)
+                
+                # Validate response indices
+                max_response_idx = max(response_indices) if response_indices else -1
+                if max_response_idx >= len(responses):
+                    raise ValueError(f"Invalid response_idx {max_response_idx} in finegrained_scores: only {len(responses)} responses available")
+                
+                print(f"Debug: Processing {len(finegrained_scores)} finegrained scores for {len(responses)} responses")
+                print(f"Debug: Response indices range: {min(response_indices) if response_indices else 'N/A'} to {max_response_idx}")
+                print(f"Debug: Reward groups: {sorted(set(reward_group_ids))}")
                 
                 # Get unique reward groups and normalize advantages per group
                 unique_groups = list(set(reward_group_ids))
                 advantages = np.zeros_like(scores, dtype=np.float32)
                 
-                # Create group-specific advantage masks and normalize per group
+                # Normalize advantages per group
                 for group_id in unique_groups:
                     group_indices = [i for i, gid in enumerate(reward_group_ids) if gid == group_id]
                     group_scores = scores[group_indices]
                     
-                    # Normalize advantages for this group
-                    group_mean, group_std = gather_mean_and_std_from_the_same_reward_group(finegrained_scores, group_id)
-                    finegrained_normalization_type = args.get("finegrained_normalization_type", "standard")
+                    # Calculate group statistics
+                    group_mean = np.mean(group_scores)
+                    group_std = np.std(group_scores) + 1e-8
+                    
+                    finegrained_normalization_type = getattr(args, "finegrained_normalization_type", "standard")
                     if finegrained_normalization_type == "standard":
                         group_advantages = (group_scores - group_mean) / group_std
                     elif finegrained_normalization_type == "centered":
                         group_advantages = group_scores - group_mean
                     elif finegrained_normalization_type == "none":
-                        group_advantages = group_scores  # fallback
+                        group_advantages = group_scores
                     else:
                         raise ValueError(f"Invalid finegrained normalization type: {finegrained_normalization_type}")
                     
@@ -1212,34 +1334,56 @@ def data_preparation_thread(
                     for idx, group_idx in enumerate(group_indices):
                         advantages[group_idx] = group_advantages[idx]
 
-                # Create span masks for each effective span
+                # Create span masks using explicit response indices
                 span_masks = []
-                for i, effective_span in enumerate(effective_spans):
-                    # effective_span is now a tuple (start, end, total_length) for memory efficiency
-                    if isinstance(effective_span, (tuple, list)) and len(effective_span) == 3:
-                        start, end, total_length = effective_span
-                        # Validate that the span matches the response length
-                        expected_length = len(responses[i])
-                        if total_length != expected_length:
-                            print(f"Warning: effective_span total_length ({total_length}) doesn't match response length ({expected_length}) for response {i}")
+                
+                for i, (effective_span, response_idx) in enumerate(zip(effective_spans, response_indices)):
+                    if isinstance(effective_span, (tuple, list)) and len(effective_span) == 2:
+                        # New format: (start_char, end_char) - convert to token spans
+                        start_char, end_char = effective_span
+                        decoded_resp = decoded_responses[response_idx]
+                        token_resp = responses[response_idx]
                         
-                        # Create boolean mask from span indices
-                        span_mask = np.zeros(expected_length, dtype=bool)
-                        # Ensure indices are within bounds
-                        start = max(0, min(start, expected_length))
-                        end = max(start, min(end, expected_length))
-                        span_mask[start:end] = True
+                        # Convert single response span
+                        token_spans = convert_string_span_to_token_span(
+                            effective_span, [decoded_resp], [token_resp], tokenizer
+                        )
+                        token_start, token_end = token_spans[0]
+                        
+                        # Create span mask
+                        response_length = len(token_resp)
+                        span_mask = np.zeros(response_length, dtype=bool)
+                        token_start = max(0, min(token_start, response_length))
+                        token_end = max(token_start, min(token_end, response_length))
+                        span_mask[token_start:token_end] = True
+                        span_masks.append(span_mask)
+                        
+                    elif isinstance(effective_span, (tuple, list)) and len(effective_span) == 3:
+                        # Old format: (start_token, end_token, total_length) - use directly
+                        start_token, end_token, total_length = effective_span
+                        response_length = len(responses[response_idx])
+                        
+                        if total_length != response_length:
+                            print(f"Warning: effective_span total_length ({total_length}) doesn't match response length ({response_length}) for response {response_idx}")
+                        
+                        # Create boolean mask from token span
+                        span_mask = np.zeros(response_length, dtype=bool)
+                        start_token = max(0, min(start_token, response_length))
+                        end_token = max(start_token, min(end_token, response_length))
+                        span_mask[start_token:end_token] = True
+                        span_masks.append(span_mask)
+                        
                     elif isinstance(effective_span, (list, np.ndarray)):
                         # Fallback: handle old boolean array format for backward compatibility
                         span_mask = np.array(effective_span, dtype=bool)
+                        span_masks.append(span_mask)
                     else:
-                        # If effective_span is a single value or different format, handle appropriately
-                        span_mask = np.ones(len(responses[i]), dtype=bool)  # default to all tokens
-                    
-                    span_masks.append(span_mask)
-                
+                        # Default: apply to all tokens if format is unrecognized
+                        response_length = len(responses[response_idx])
+                        span_mask = np.ones(response_length, dtype=bool)
+                        span_masks.append(span_mask)
+
                 # Group advantages and masks by reward group for the training loop
-                # Create lists of advantages and masks grouped by reward_group_id
                 grouped_advantages = {}
                 grouped_masks = {}
                 
@@ -1251,32 +1395,12 @@ def data_preparation_thread(
                     grouped_masks[group_id].append(span_masks[i])
                 
                 # Convert to the format expected by the training loop
-                # The training loop expects mb_advantages_list and mb_advantages_mask_list
                 advantages_list = []
                 advantages_mask_list = []
                 
                 for group_id in sorted(unique_groups):
                     advantages_list.append(np.array(grouped_advantages[group_id]))
                     advantages_mask_list.append(grouped_masks[group_id])
-                
-            else:
-                scores, reward_metrics = asyncio.run(
-                    reward_fn(
-                        responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries
-                    )
-                )
-                scores = np.array(scores)
-                scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
-                mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
-                mean_grouped_rewards = np.repeat(mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
-                std_grouped_rewards = scores_per_prompt.std(axis=-1)
-                std_grouped_rewards = np.repeat(std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
-                if args.advantage_normalization_type == "standard":
-                    advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
-                elif args.advantage_normalization_type == "centered":
-                    advantages = scores - mean_grouped_rewards
-                else:
-                    raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved

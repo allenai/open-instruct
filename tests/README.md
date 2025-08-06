@@ -19,6 +19,13 @@ conda activate open-instruct
 - `test_fgrpo_gradients.py`: Tests the gradient flow and computation with finegrained advantages
 - `test_fgrpo_realistic_spans.py`: Tests realistic finegrained reward scenarios with proper span masking
 - `test_fgrpo_span_tuples.py`: Tests efficient span tuple format (start, end, total_length) for memory optimization
+- `test_string_span_conversion.py`: Tests conversion from character-based spans to token-based spans
+- `test_explicit_response_mapping.py`: Tests the new explicit response mapping format with 4-tuple scores
+- `test_realistic_tokenizer_spans.py`: Tests with actual tokenizer and varying reward counts per response
+- `test_mapping_explanation.py`: Detailed explanation and visualization of character-to-token mapping approaches
+- `test_optimized_mapping.py`: Benchmark of different optimization strategies for character-to-token mapping
+- `test_final_optimized_mapping.py`: Performance comparison showing the optimization benefits in production
+- `test_llama_tokenizer_optimization.py`: Tests offset mapping support across different tokenizers (GPT-2, Llama, RoBERTa)
 
 ### Running Individual Tests
 
