@@ -901,6 +901,18 @@ DATASET_ORIGIN_KEY = "dataset_source"  # just 'dataset' clashes with RLVR stuff 
 TOKENIZED_SFT_DATASET_KEYS = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY]
 TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY, DATASET_ORIGIN_KEY]
 
+
+def remove_dataset_source_field(dataset: Dataset) -> Dataset:
+    """Remove dataset_source field from dataset if it exists.
+
+    This should be called after statistics collection but before returning
+    the final dataset to avoid storing unnecessary metadata in cached datasets.
+    """
+    if DATASET_ORIGIN_KEY in dataset.column_names:
+        return dataset.remove_columns([DATASET_ORIGIN_KEY])
+    return dataset
+
+
 # Preference dataset
 # NOTE (Costa): the `INPUT_IDS_PROMPT_KEY` is just for visualization purposes only
 # also we don't really need `CHOSEN_ATTENTION_MASK_KEY` and `REJECTED_ATTENTION_MASK_KEY`
@@ -1436,10 +1448,11 @@ class DatasetConfig:
             extra_indices = rng.choice(original_size, size=extra_samples, replace=False)
             indices.extend(extra_indices.tolist())
 
-        print(
-            f"Upsampling dataset {self.dataset_name} from {original_size} to {target_size} samples "
-            f"({full_repeats} full repeats + {extra_samples} random samples)"
-        )
+        if target_size > original_size:
+            print(
+                f"Upsampling dataset {self.dataset_name} from {original_size} to {target_size} samples "
+                f"({full_repeats} full repeats + {extra_samples} random samples)"
+            )
 
         return self.dataset.select(indices)
 
@@ -1605,12 +1618,8 @@ class LocalDatasetTransformationCache:
             json.dump(config_dict, f, indent=2)
 
     def load_or_transform_dataset(
-        self,
-        dcs: List[DatasetConfig],
-        tc: TokenizerConfig,
-        dataset_skip_cache: bool = False,
-        return_statistics: bool = False,
-    ) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
+        self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
+    ) -> Tuple[Dataset, Dict[str, Any]]:
         """Load dataset from local cache if it exists, otherwise transform and cache it locally."""
         cache_path = self.get_cache_path()
 
@@ -1618,17 +1627,15 @@ class LocalDatasetTransformationCache:
         if os.path.exists(cache_path) and not dataset_skip_cache:
             print(f"✅ Found cached dataset at {cache_path}")
             dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
-            if return_statistics:
-                # Load statistics from cache if available
-                stats_path = os.path.join(cache_path, "dataset_statistics.json")
-                if os.path.exists(stats_path):
-                    with open(stats_path, "r") as f:
-                        statistics = json.load(f)
-                    return dataset, statistics
-                else:
-                    # Return empty statistics if not cached
-                    return dataset, {"per_dataset_stats": [], "dataset_order": []}
-            return dataset, None
+            # Load statistics from cache if available
+            stats_path = os.path.join(cache_path, "dataset_statistics.json")
+            if os.path.exists(stats_path):
+                with open(stats_path, "r") as f:
+                    statistics = json.load(f)
+                return dataset, statistics
+            else:
+                # Return empty statistics if not cached
+                return dataset, {"per_dataset_stats": [], "dataset_order": []}
 
         print(f"Cache not found or invalid, transforming datasets...")
 
@@ -1683,9 +1690,7 @@ class LocalDatasetTransformationCache:
         all_statistics = {"per_dataset_stats": dataset_statistics, "dataset_order": dataset_order}
 
         if dataset_skip_cache:
-            if return_statistics:
-                return combined_dataset, all_statistics
-            return combined_dataset, None
+            return combined_dataset, all_statistics
 
         # Save to local cache
         combined_dataset.save_to_disk(cache_path)
@@ -1700,9 +1705,7 @@ class LocalDatasetTransformationCache:
         print(f"✅ Found cached dataset at {cache_path}")
 
         loaded_dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
-        if return_statistics:
-            return loaded_dataset, all_statistics
-        return loaded_dataset, None
+        return loaded_dataset, all_statistics
 
 
 def get_cached_dataset(
@@ -1711,15 +1714,12 @@ def get_cached_dataset(
     hf_entity: Optional[str] = None,
     dataset_local_cache_dir: Optional[str] = None,
     dataset_skip_cache: bool = False,
-    return_statistics: bool = False,
 ) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
     if dataset_local_cache_dir is not None:
         cache = LocalDatasetTransformationCache(dataset_local_cache_dir=dataset_local_cache_dir)
     else:
         cache = DatasetTransformationCache(hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(
-        dcs, tc, dataset_skip_cache=dataset_skip_cache, return_statistics=return_statistics
-    )[0]
+    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
 
 
 def get_cached_dataset_tulu_with_statistics(
@@ -1734,7 +1734,7 @@ def get_cached_dataset_tulu_with_statistics(
     hf_entity: Optional[str] = None,
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
-    return_statistics: bool = False,
+    drop_dataset_source: bool = True,
 ) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
     dcs = []
     if dataset_config_hash is None:
@@ -1787,9 +1787,13 @@ def get_cached_dataset_tulu_with_statistics(
         )
     elif dataset_cache_mode == "hf":
         cache = DatasetTransformationCache(config_hash=dataset_config_hash, hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(
-        dcs, tc, dataset_skip_cache=dataset_skip_cache, return_statistics=return_statistics
-    )
+
+    dataset, statistics = cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
+
+    if drop_dataset_source:
+        dataset = remove_dataset_source_field(dataset)
+
+    return dataset, statistics
 
 
 def get_cached_dataset_tulu(
@@ -1817,7 +1821,6 @@ def get_cached_dataset_tulu(
         hf_entity,
         dataset_local_cache_dir,
         dataset_skip_cache,
-        return_statistics=False,
     )[0]
 
 

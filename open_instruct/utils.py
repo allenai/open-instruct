@@ -14,6 +14,8 @@
 # isort: off
 import os
 
+# We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
+# https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
@@ -30,6 +32,7 @@ import dataclasses
 import functools
 import json
 import logging
+import multiprocessing as mp
 import os
 import random
 import re
@@ -38,10 +41,12 @@ import socket
 from collections import defaultdict
 import subprocess
 import sys
+import threading
 import time
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
-from dataclasses import dataclass
-from typing import Any, List, NewType, Optional, Tuple, Union
+from dataclasses import dataclass, field
+from multiprocessing import resource_tracker as _rt
+from typing import Any, Iterable, List, NewType, Optional, Tuple, Union
 
 import numpy as np
 import ray
@@ -52,6 +57,7 @@ from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
 from huggingface_hub import HfApi
+from ray.util import state as ray_state
 from rich.pretty import pprint
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
@@ -1440,154 +1446,124 @@ def extract_final_answer(prediction: str) -> str:
 
     return prediction
 
-import torch
-import torch.nn.functional as F
-from typing import List, Optional
 
-def pad_and_stack(
-    tensor_list: List[torch.Tensor],
-    *,
-    multiple_of: Optional[int] = None,
-    dim: int = -1,
-    pad_value: float = -100.0
-) -> torch.Tensor:
+# ---- Runtime leak detection -----------------------------------------------------------------
+
+DEFAULT_THREAD_ALLOWLIST = {
+    "MainThread",
+    "pytest-watcher",  # pytest
+    "pydevd.",  # debugger
+    "IPythonHistorySavingThread",
+    "raylet_client",  # ray internal when still up during test body
+}
+
+DEFAULT_THREAD_ALLOW_PREFIXES = {
+    "ThreadPoolExecutor-",  # executors create transient threads; adjust if you join them
+    "ray-",  # ray internal threads
+    "grpc-default-executor",  # grpc internal
+}
+
+
+@dataclass
+class LeakReport:
+    bad_threads: List[threading.Thread] = field(default_factory=list)
+    bad_processes: List[mp.Process] = field(default_factory=list)
+    ray_actors: list = field(default_factory=list)
+    ray_tasks: list = field(default_factory=list)
+    ray_workers: list = field(default_factory=list)
+    leaked_semaphores: List[str] = field(default_factory=list)
+    leaked_shm: List[str] = field(default_factory=list)
+
+    @property
+    def is_clean(self) -> bool:
+        return not (
+            self.bad_threads
+            or self.bad_processes
+            or self.ray_actors
+            or self.ray_tasks
+            or self.ray_workers
+            or self.leaked_semaphores
+            or self.leaked_shm
+        )
+
+    def pretty(self) -> str:
+        lines = []
+        if self.bad_threads:
+            lines.append("Leaked threads:")
+            for t in self.bad_threads:
+                target = getattr(t, "_target", None)
+                tgt_name = getattr(target, "__name__", repr(target)) if target else "?"
+                lines.append(f"  - {t.name} (alive={t.is_alive()}, daemon={t.daemon}, target={tgt_name})")
+        if self.bad_processes:
+            lines.append("Leaked multiprocessing children:")
+            for p in self.bad_processes:
+                lines.append(f"  - PID {p.pid} alive={p.is_alive()} name={p.name}")
+        if self.ray_actors:
+            lines.append("Live Ray actors:")
+            for a in self.ray_actors:
+                lines.append(f"  - {a.get('class_name')} id={a.get('actor_id')}")
+        if self.ray_tasks:
+            lines.append("Live Ray tasks:")
+            for t in self.ray_tasks:
+                lines.append(f"  - {t.get('name')} id={t.get('task_id')}")
+        if self.ray_workers:
+            lines.append("Live Ray workers:")
+            for w in self.ray_workers:
+                lines.append(f"  - pid={w.get('pid')} id={w.get('worker_id')}")
+        if self.leaked_semaphores:
+            lines.append("Leaked POSIX semaphores (multiprocessing):")
+            for name in self.leaked_semaphores:
+                lines.append(f"  - {name}")
+        if self.leaked_shm:
+            lines.append("Leaked shared_memory blocks:")
+            for name in self.leaked_shm:
+                lines.append(f"  - {name}")
+        return "\n".join(lines) if lines else "No leaks detected."
+
+
+def check_runtime_leaks(
+    thread_allowlist: Iterable[str] = DEFAULT_THREAD_ALLOWLIST,
+    thread_allow_prefixes: Iterable[str] = DEFAULT_THREAD_ALLOW_PREFIXES,
+    include_daemon_threads: bool = False,
+) -> LeakReport:
     """
-    Collate a list of tensors by right-padding them along `dim` and stacking
-    on a new 0-th batch dimension.
+    Inspect runtime state for leftovers.
 
-    Parameters
-    ----------
-    tensor_list : list[Tensor]
-        Tensors to collate.  They may differ in size along `dim`, but must
-        match everywhere else.
-    multiple_of : int | None, default None
-        If given (e.g. 8 or 64), the final length along `dim` is **rounded up**
-        so it is a multiple of this value; otherwise we pad only to the max
-        length in the batch.
-    dim : int, default -1
-        Which dimension to pad (negative indices are supported).
-    pad_value : float, default -100.0
-        Fill value for padded elements.
-
-    Returns
-    -------
-    Tensor
-        Shape (batch, *) where the `dim` dimension is the padded one.
+    Returns a LeakReport; call .is_clean or .pretty().
     """
-    # 1. Determine target length.
-    current_max = max(t.shape[dim] for t in tensor_list)
-    if multiple_of and multiple_of > 1:
-        target_len = ((current_max + multiple_of - 1) // multiple_of) * multiple_of
-    else:
-        target_len = current_max
+    report = LeakReport()
 
-    # 2. Pad each tensor to target_len on the right side of `dim`.
-    padded = []
-    for t in tensor_list:
-        pad_needed = target_len - t.shape[dim]
-        if pad_needed == 0:
-            padded.append(t)
+    # Threads
+    for t in threading.enumerate():
+        if t.name in thread_allowlist or any(t.name.startswith(p) for p in thread_allow_prefixes):
             continue
+        if not include_daemon_threads and t.daemon:
+            continue
+        if t is threading.main_thread():
+            continue
+        # ignore ones already finished
+        if not t.is_alive():
+            continue
+        report.bad_threads.append(t)
 
-        # torch.nn.functional.pad wants pad sizes as
-        # (..., pad_left, pad_right) for the last dim, then second-last, etc.
-        pad_spec = [0] * (2 * t.dim())
-        pad_spec[-(2 * (dim % t.dim()) + 1)] = pad_needed  # right-pad only
-        padded.append(F.pad(t, pad_spec, value=pad_value))
+    # Multiprocessing children
+    for child in mp.active_children():
+        if child.is_alive():
+            report.bad_processes.append(child)
 
-    return torch.stack(padded, dim=0).squeeze().contiguous()
+    # Ray state (only if ray is present & initialized)
+    if ray_state is not None and ray is not None and ray.is_initialized():
+        report.ray_actors = ray_state.list_actors(filters=[("state", "=", "ALIVE")])
+        report.ray_tasks = ray_state.list_tasks(filters=[("state", "=", "RUNNING")])
+        report.ray_workers = ray_state.list_workers(filters=[("is_alive", "=", True)])
 
-import deepspeed.comm as dist
-class UlyssesSPSplitter:
+    # Multiprocessing resource_tracker cache (private API, so guard carefully)
+    if _rt is not None and hasattr(_rt, "_resource_tracker"):
+        cache = getattr(_rt._resource_tracker, "_cache", {})
+        for name, (count, rtype) in cache.items():
+            if count > 0 and rtype == "semaphore":
+                report.leaked_semaphores.append(name)
+            if count > 0 and rtype == "shared_memory":
+                report.leaked_shm.append(name)
 
-    def __init__(
-        self,
-        sp_rank: int,
-        sp_group,
-        sp_world_size,
-        device,
-    ):
-        """
-        Adapted from the UlyssesSPDataLoaderAdapter
-        (https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/runtime/sequence_parallel/ulysses_sp.py#L427)
-        Rather than wrapping a dataloader, we just want to split a given batch into the shards across sp group.
-        """
-        self.sp_rank = sp_rank
-        self.sp_group = sp_group
-        self.sp_world_size = sp_world_size
-        self.device = device
-
-    def split_batch(self, batch, sequence_parallel_size=None, padding_token_id=0):
-        micro_batches = defaultdict(dict)
-
-        input_ids = pad_and_stack(batch["input_ids"], pad_value=padding_token_id, multiple_of=sequence_parallel_size)
-        attention_mask = pad_and_stack(batch["attention_mask"], pad_value=0, multiple_of=sequence_parallel_size)
-        position_ids = pad_and_stack(batch["position_ids"], pad_value=0, multiple_of=sequence_parallel_size)
-        response_masks = pad_and_stack(batch["response_masks"], pad_value=0, multiple_of=sequence_parallel_size)
-        tool_masks = pad_and_stack(batch["tool_masks"], pad_value=0, multiple_of=sequence_parallel_size)
-        advantages = pad_and_stack(batch["advantages"], pad_value=0, multiple_of=sequence_parallel_size)
-
-        batch = {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "position_ids": position_ids,
-            "response_masks": response_masks,
-            "tool_masks": tool_masks,
-            "advantages": advantages,
-        }
-
-        # we have batches of variable seqlen so in order to do all_gather on batches - we need to know the exact length of each tensor on each rank
-        seqlen = torch.tensor(input_ids.shape[1], dtype=torch.int64, device=self.device)
-        seqlens = [torch.zeros(1, dtype=torch.int64, device=self.device) for _ in range(self.sp_world_size)]
-        dist.all_gather(seqlens, seqlen, group=self.sp_group)
-        seqlens = [x[0].item() for x in seqlens]
-
-        for k in batch.keys():
-            if torch.is_tensor(batch[k]):
-                batch[k] = batch[k].to(self.device)
-                with torch.no_grad():
-                    tensor_list = [
-                        torch.zeros((batch[k].shape[0], seqlens[i]), dtype=batch[k].dtype, device=batch[k].device)
-                        for i in range(self.sp_world_size)
-                    ]
-                    dist.all_gather(tensor_list, batch[k], group=self.sp_group)
-            else:
-                tensor_list = [None for _ in range(self.sp_world_size)]
-                dist.all_gather_object(tensor_list, batch[k], group=self.sp_group)
-
-            for rank, tensor in enumerate(tensor_list):
-                micro_batches[rank][k] = tensor
-
-        del tensor_list
-        del batch
-
-        batch_shards = []
-        for batch in micro_batches.values():
-            seq_length = len(batch["input_ids"][0])
-
-            if seq_length % self.sp_world_size != 0:
-                raise ValueError(f"batch's seqlen={seq_length} isn't divisible by sp-size={self.sp_world_size}")
-            chunk_len = seq_length // self.sp_world_size
-
-            # for rl training, we don't have labels, so we don't need to do this
-            if "labels" in batch:
-                # because we have to gather logits from all sp ranks we have to do the loss function ourselves
-                # therefore remove labels to avoid an attempt to calculate loss by transformers
-                labels = batch.pop("labels")
-                labels = torch.nn.functional.pad(labels, (0, 1), value=-100)
-                batch["shift_labels"] = labels[..., 1:].contiguous()
-                # free up temp memory
-                del labels
-
-            # batch sharding
-            for k in batch.keys():
-                # leave non-tensors alone
-                if not torch.is_tensor(batch[k]):
-                    continue
-                # at seqlen>10M and 32+ gpus this can take GBs of memory so keep the prefill buffer on cpu
-                print(f"{self.sp_rank} {chunk_len}, chunk_len * self.sp_rank:{chunk_len * self.sp_rank}, chunk_len * (self.sp_rank + 1):{chunk_len * (self.sp_rank + 1)}")
-                batch[k] = batch[k][:, chunk_len * self.sp_rank:chunk_len * (self.sp_rank + 1)].cpu()
-
-            batch_shards.append(batch)
-
-        return batch_shards
+    return report

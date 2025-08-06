@@ -1,6 +1,7 @@
 import argparse
 import os
 import random
+import hashlib
 import re
 import secrets
 import select
@@ -170,6 +171,12 @@ def get_args():
         help="If given, automatically replace the `--checkpoint_state_dir` argument with this path, essentially using it as a prefix"
     )
     parser.add_argument(
+        "--gs_model_name",
+        type=str,
+        default=None,
+        help="If given, set as the name of the model uploaded to GS for Augusta",
+    )
+    parser.add_argument(
         "--env",
         type=parse_env_var,
         action="append",
@@ -189,6 +196,12 @@ def get_args():
         "--no-host-networking",
         action="store_true",
         help="If set, don't use host networking in experiment. Note this will make multi-node jobs error.",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=str,
+        help="Timeout for the Beaker task (e.g., '2h', '30m', '1d'). If not specified, no timeout is set.",
+        default=None,
     )
     # Split up the mason args from the Python args.
     mason_args, command_args = parser.parse_known_args()
@@ -701,8 +714,12 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
             commit_hash = get_commit_hash(model_name_or_path, model_revision, "config.json", "model")
             if os.path.exists(model_name_or_path):
                 path = model_name_or_path
-                model_name_or_path = os.path.basename(model_name_or_path)
-                console.log(f"Local model is already downloaded, using path basename as model name {model_name_or_path}, note that commit hash is {commit_hash}")
+                assert args.gs_model_name is not None, "for local models to upload to gs, you must set --gs_model_name"
+                model_name_or_path = args.gs_model_name
+                commit_hash = hashlib.md5(model_name_or_path.encode("utf-8")).hexdigest()[:8]
+                console.log(
+                    f"Local model is already downloaded, using gs_model_name {model_name_or_path}, with hash of model path {commit_hash}"
+                )
             else:
                 download_from_hf(model_name_or_path, model_revision) # first download the model
                 path = download_from_hf(model_name_or_path, model_revision) # then get the path
@@ -838,6 +855,9 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         spec.host_networking = False
     else:
         spec.host_networking = True
+    
+    if args.timeout is not None:
+        spec.timeout = args.timeout
 
     return spec
 

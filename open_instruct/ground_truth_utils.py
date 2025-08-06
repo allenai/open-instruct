@@ -78,6 +78,7 @@ class CodeVerifierConfig(VerifierConfig):
     code_api_url: str
     code_max_execution_time: float
     code_pass_rate_reward_threshold: float
+    code_apply_perf_penalty: bool
 
 
 @dataclass
@@ -761,9 +762,13 @@ class CodeVerifier(VerifierFunction):
     The API URL should be provided during initialization.
     """
 
+    # Class-level session cache to reuse connections
+    _session_cache = weakref.WeakKeyDictionary()
+
     def __init__(self, verifier_config: CodeVerifierConfig) -> None:
         super().__init__("code", verifier_config=verifier_config, weight=1.0)
         self.pass_rate_reward_threshold = verifier_config.code_pass_rate_reward_threshold
+        self.apply_perf_penalty = verifier_config.code_apply_perf_penalty
 
     def extract_python_code(self, model_output: str) -> str:
         """Extract the last code block between ``` markers from the model output."""
@@ -776,6 +781,25 @@ class CodeVerifier(VerifierFunction):
 
         # Return the last match, stripped of whitespace
         return matches[-1].strip()
+
+    # Create a session pool for better performance
+    _session_pool = None
+
+    @classmethod
+    def _get_session(cls):
+        if cls._session_pool is None:
+            cls._session_pool = requests.Session()
+            # Configure connection pooling
+            adapter = requests.adapters.HTTPAdapter(
+                pool_connections=100,
+                pool_maxsize=100,
+                max_retries=requests.adapters.Retry(
+                    total=3, backoff_factor=0.3, status_forcelist=[500, 502, 503, 504]
+                ),
+            )
+            cls._session_pool.mount("http://", adapter)
+            cls._session_pool.mount("https://", adapter)
+        return cls._session_pool
 
     async def async_call(
         self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
@@ -792,39 +816,30 @@ class CodeVerifier(VerifierFunction):
         Returns:
             VerificationResult with score as the pass rate of test cases
         """
-        # Parse label to get test cases
-        if isinstance(label, str):
-            try:
-                tests = json.loads(label)
-            except json.JSONDecodeError:
-                logger.warning(f"Failed to parse label as JSON: {label}")
-                return VerificationResult(score=0.0)
-        else:
-            tests = label
-
-        if not isinstance(tests, list):
-            logger.warning(f"Label must be a list of test cases, got: {type(tests)}")
-            return VerificationResult(score=0.0)
-
-        if not tests:
-            logger.warning("No test cases provided")
-            return VerificationResult(score=0.0)
-
         # Extract Python code from the model output
         python_code = self.extract_python_code(prediction)
 
         # Test data
         payload = {
             "program": python_code,
-            "tests": tests,
+            "tests": label,
             "max_execution_time": self.verifier_config.code_max_execution_time,
         }
 
         try:
-            # Make the request in a thread pool to keep it async
+            # Use connection pooling session
+            session = self._get_session()
+
+            # Calculate timeout
+            http_timeout = max(30, min(300, self.verifier_config.code_max_execution_time * 10))
+
+            # Make request in thread pool to keep it async
             def make_request():
-                response = requests.post(
-                    self.verifier_config.code_api_url, json=payload, headers={"Content-Type": "application/json"}
+                response = session.post(
+                    self.verifier_config.code_api_url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=http_timeout,
                 )
                 response.raise_for_status()
                 return response.json()
@@ -833,6 +848,16 @@ class CodeVerifier(VerifierFunction):
             passes = result["results"]
             pass_rate = sum(passes) / len(passes) if passes else 0.0
             score = 0.0 if pass_rate < self.pass_rate_reward_threshold else pass_rate
+            if self.apply_perf_penalty and score > 0.0:
+                runtimes = result["runtimes"]
+                # for each runtime, multiply the percent of the timeout that was used
+                multipliers = [
+                    (self.verifier_config.code_max_execution_time - runtime)
+                    / self.verifier_config.code_max_execution_time
+                    for runtime in runtimes
+                ]
+                penalized_passes = [passes[i] * multipliers[i] for i in range(len(passes))]
+                score = sum(penalized_passes) / len(penalized_passes)
             return VerificationResult(score=score)
         except Exception as e:
             logger.warning(f"Error verifying code sample: {e}")

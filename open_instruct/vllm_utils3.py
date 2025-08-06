@@ -17,6 +17,7 @@
 
 import dataclasses
 import os
+import queue
 from datetime import timedelta
 from typing import Any, List, Optional, Union
 
@@ -201,38 +202,30 @@ class LLMRayActor:
 
     def process_from_queue(
         self,
-        sampling_params: vllm.SamplingParams,
-        eval_sampling_params: Optional[vllm.SamplingParams] = None,
-        eval_freq: Optional[int] = None,
-        num_training_steps: Optional[int] = None,
-        resume_training_step: int = 1,
-        batch_size: Optional[int] = None,
-    ) -> None:
-        """Process prompts from the queue and put results in the results queue."""
-        for training_step in range(resume_training_step, num_training_steps + 1):
-            prompts_batch = []
-            dataset_indices_batch = []
-            eval_prompts = None
-
-            # Process training prompts
+        sampling_params,
+        eval_sampling_params=None,
+        eval_freq=None,
+        num_training_steps=None,
+        resume_training_step=1,
+        timeout=0.1,
+    ):
+        """Process a single element from the queue."""
+        try:
+            request = self.prompt_queue.get(timeout=timeout)
             result = self._generate_batch(
-                request.prompts, sampling_params, request.dataset_index, request.training_step
+                request.prompts,
+                sampling_params,
+                dataset_index=request.dataset_index,
+                training_step=request.training_step,
             )
             self.results_queue.put(result)
-
-            # Handle evaluation if needed
-            if (
-                request.eval_prompts is not None
-                and eval_sampling_params is not None
-                and (training_step - 1) % eval_freq == 0
-            ):
-                eval_result = self._generate_batch(
-                    request.eval_prompts, eval_sampling_params, request.dataset_index, request.training_step
-                )
+            if request.eval_prompts and request.training_step % eval_freq == 0:
+                eval_result = self._generate_batch(request.eval_prompts, eval_sampling_params)
                 eval_result.is_eval = True
-                # Put eval results in separate queue if available
-                if self.eval_results_queue is not None:
-                    self.eval_results_queue.put(eval_result)
+                self.eval_results_queue.put(eval_result)
+            return 1  # Successfully processed a request
+        except queue.Empty:
+            return 0  # No request to process
 
     def _generate_batch(
         self,
@@ -307,6 +300,26 @@ class LLMRayActor:
 
     def wake_up(self):
         self.llm.wake_up()
+
+    def ready(self):
+        return True
+
+
+def get_cuda_arch_list() -> str:
+    """Get CUDA compute capabilities and format them for TORCH_CUDA_ARCH_LIST."""
+    if not torch.cuda.is_available():
+        return ""
+
+    cuda_capabilities = []
+    for i in range(torch.cuda.device_count()):
+        major, minor = torch.cuda.get_device_capability(i)
+        cuda_capabilities.append(f"{major}.{minor}")
+
+    # Remove duplicates and sort
+    cuda_capabilities = sorted(set(cuda_capabilities))
+    cuda_arch_list = ";".join(cuda_capabilities)
+    print(f"Detected CUDA compute capabilities: {cuda_capabilities}, setting TORCH_CUDA_ARCH_LIST={cuda_arch_list}")
+    return cuda_arch_list
 
 
 def create_vllm_engines(
@@ -384,7 +397,9 @@ def create_vllm_engines(
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
                 # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
-                runtime_env=ray.runtime_env.RuntimeEnv(env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0"}),
+                runtime_env=ray.runtime_env.RuntimeEnv(
+                    env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
+                ),
             ).remote(
                 model=pretrain,
                 revision=revision,

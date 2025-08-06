@@ -33,6 +33,8 @@
 # https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero
 import os
 
+# We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
+# https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     import deepspeed
@@ -294,6 +296,8 @@ class Args:
     """the max execution time to use for the code verifier"""
     code_pass_rate_reward_threshold: float = 0.0
     """the pass rate reward threshold for the code verifier. If pass rate is less than this threshold, reward is 0.0, otherwise reward is pass rate"""
+    code_apply_perf_penalty: bool = False
+    """whether to apply a performance penalty to the code verifier"""
 
     # -- non stop penalty
     non_stop_penalty: bool = False

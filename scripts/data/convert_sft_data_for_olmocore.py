@@ -55,6 +55,7 @@ from open_instruct.dataset_transformation import (
     TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE,
     TokenizerConfig,
     get_cached_dataset_tulu_with_statistics,
+    remove_dataset_source_field,
     visualize_token,
 )
 from open_instruct.utils import ArgumentParserPlus, is_beaker_job
@@ -161,7 +162,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         ("sft_tulu_filter_v1", {}),  # remove examples that don't have any labels
     ]
 
-    result = get_cached_dataset_tulu_with_statistics(
+    train_dataset, dataset_statistics = get_cached_dataset_tulu_with_statistics(
         dataset_mixer_list=args.dataset_mixer_list,
         dataset_mixer_list_splits=args.dataset_mixer_list_splits,
         tc=tc,
@@ -172,11 +173,8 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         dataset_config_hash=args.dataset_config_hash,
         dataset_local_cache_dir=args.dataset_local_cache_dir,
         dataset_skip_cache=args.dataset_skip_cache,
-        return_statistics=True,
+        drop_dataset_source=False,
     )
-    
-    # Unpack the result
-    train_dataset, dataset_statistics = result
 
     train_dataset = train_dataset.shuffle()
 
@@ -244,6 +242,8 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         assert all(mask == 1 for mask in sample[ATTENTION_MASK_KEY]), (
             f"Expected all attention mask values to be 1, but found: {sample[ATTENTION_MASK_KEY]}"
         )
+    
+    train_dataset = remove_dataset_source_field(train_dataset)
 
     # Calculate final statistics
     total_instances = len(train_dataset)
