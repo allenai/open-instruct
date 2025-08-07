@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - main
+  merge_group:
 
 jobs:
 
@@ -24,4 +25,4 @@ jobs:
       - name: Set up Python
         run: uv python install
       - name: Run unit tests
-        run: uv run pytest
+        run: uv run pytest -n auto
