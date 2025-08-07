@@ -2423,7 +2423,7 @@ requires-dist = [
     { name = "immutabledict", specifier = "==1.2.0" },
     { name = "langdetect", specifier = "==1.0.9" },
     { name = "liger-kernel", marker = "extra == 'compile'", specifier = ">=0.5.4" },
-    { name = "litellm" },
+    { name = "litellm", specifier = ">=1.72.0" },
     { name = "matplotlib", specifier = ">=3.9.3" },
     { name = "nltk", specifier = ">=3.9.1" },
     { name = "numpy", specifier = "<2" },

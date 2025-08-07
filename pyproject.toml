@@ -12,7 +12,7 @@ dependencies = [
     "debugpy>=1.8.13",
     "deepspeed==0.15.4", # 0.16.0 bugs out https://github.com/microsoft/DeepSpeed/issues/6793
     "hf-transfer>=0.1.8",
-    "litellm",
+    "litellm>=1.72.0",
     "matplotlib>=3.9.3",
     "nltk>=3.9.1",
     "numpy<2",
