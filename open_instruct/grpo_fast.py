@@ -41,7 +41,6 @@ try:
     from deepspeed.utils import groups
     from deepspeed.runtime.utils import move_to_device
 
-
     # @vwxyzjn: when importing on CPU-only machines, we get the following error:
     # RuntimeError: 0 active drivers ([]). There should only be one.
     # so we need to catch the exception and do nothing
@@ -568,7 +567,13 @@ class PolicyTrainerRayProcess(RayProcess):
         self.device = torch.device(self.local_rank)
         deepspeed.init_distributed()
 
-        ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True, sequence_parallel_size=args.sequence_parallel_size)
+        ds_config = get_train_ds_config(
+            offload=False,
+            adam_offload=False,
+            stage=args.deepspeed_stage,
+            bf16=True,
+            sequence_parallel_size=args.sequence_parallel_size,
+        )
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
         # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
@@ -685,10 +690,7 @@ class PolicyTrainerRayProcess(RayProcess):
             self.sp_rank = groups._get_sequence_parallel_rank()
             print(f"SETTING UP: {self.sp_rank=} {self.sp_world_size=}")
             self.splitter = UlyssesSPSplitter(
-                sp_rank=self.sp_rank,
-                sp_group=self.sp_group,
-                sp_world_size=self.sp_world_size,
-                device=self.device
+                sp_rank=self.sp_rank, sp_group=self.sp_group, sp_world_size=self.sp_world_size, device=self.device
             )
         else:
             self.splitter = None
@@ -870,10 +872,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         seq_length = batch[k][i].shape[1]
                         if seq_length % self.sp_world_size != 0:
                             padding_length = self.sp_world_size - (seq_length % self.sp_world_size)
-                            padding = torch.zeros((batch[k][i].shape[0], padding_length), dtype=batch[k][i].dtype, device=batch[k][i].device)
+                            padding = torch.zeros(
+                                (batch[k][i].shape[0], padding_length),
+                                dtype=batch[k][i].dtype,
+                                device=batch[k][i].device,
+                            )
                             batch[k][i] = torch.cat((batch[k][i], padding), dim=1)
             sharded_batches = self.splitter.split_batch(batch)
-            
+
             # we need to flatten out the sharded batches so its like:
             # b0 sp0, b0 sp1, ..., b1 sp0, b1 sp1, ..., b2 sp0, b2 sp1, ... etc.
             # right now, it comes out a list of sp shards, and inside is (bsz, seq_len)
@@ -913,7 +919,15 @@ class PolicyTrainerRayProcess(RayProcess):
                     attention_mask = collated_attention_masks[i]
                     position_id = collated_position_ids[i]
                     response_mask = collated_response_masks[i]
-                    ref_logprob, _ = self.forward( self.ref_policy, query_response, attention_mask, position_id, pad_token_id, args.temperature, return_entropy=False)
+                    ref_logprob, _ = self.forward(
+                        self.ref_policy,
+                        query_response,
+                        attention_mask,
+                        position_id,
+                        pad_token_id,
+                        args.temperature,
+                        return_entropy=False,
+                    )
                     if args.mask_tool_use and args.tool_use:
                         # mask logprobs for tool tokens
                         response_mask = response_mask.bool() & tool_mask.bool()
@@ -1026,14 +1040,21 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     if args.sequence_parallel_size == 1:
                         # grpo change: directly subtract KL in loss (add)
-                        loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
+                        loss = masked_mean(
+                            pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis
+                        )
                     else:
                         # if SP, compute per-token loss, then we need to gather across SP ranks
                         per_tok_loss = pg_loss_max + (args.beta * kl) * mb_response_masks_bool.float()
                         losses_per_rank = torch.distributed.nn.functional.all_gather(per_tok_loss, group=self.sp_group)
                         non_masked_tokens = mb_response_masks_bool.sum()
-                        non_masked_tokens_per_rank = torch.distributed.nn.functional.all_gather(non_masked_tokens, group=self.sp_group)
-                        total_loss = sum(losses_per_rank[rank] * non_masked_tokens_per_rank[rank] for rank in range(self.sp_world_size))
+                        non_masked_tokens_per_rank = torch.distributed.nn.functional.all_gather(
+                            non_masked_tokens, group=self.sp_group
+                        )
+                        total_loss = sum(
+                            losses_per_rank[rank] * non_masked_tokens_per_rank[rank]
+                            for rank in range(self.sp_world_size)
+                        )
                         total_non_masked_tokens = sum(non_masked_tokens_per_rank)
                         loss = (total_loss / total_non_masked_tokens).sum()
                     # TODO: do we still need grad acc...? I think so.

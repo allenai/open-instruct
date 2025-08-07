@@ -1608,15 +1608,9 @@ def check_runtime_leaks(
 
     return report
 
-class UlyssesSPSplitter:
 
-    def __init__(
-        self,
-        sp_rank: int,
-        sp_group,
-        sp_world_size,
-        device,
-    ):
+class UlyssesSPSplitter:
+    def __init__(self, sp_rank: int, sp_group, sp_world_size, device):
         """
         Adapted from the UlyssesSPDataLoaderAdapter
         (https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/runtime/sequence_parallel/ulysses_sp.py#L427)
@@ -1679,7 +1673,7 @@ class UlyssesSPSplitter:
                 if not torch.is_tensor(batch[k]):
                     continue
                 # at seqlen>10M and 32+ gpus this can take GBs of memory so keep the prefill buffer on cpu
-                batch[k] = batch[k][:, chunk_len * self.sp_rank:chunk_len * (self.sp_rank + 1)].cpu()
+                batch[k] = batch[k][:, chunk_len * self.sp_rank : chunk_len * (self.sp_rank + 1)].cpu()
 
             batch_shards.append(batch)
 
