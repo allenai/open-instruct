@@ -337,6 +337,8 @@ class Args:
     """whether to enable prefix caching"""
     vllm_top_p: float = 1.0
     """vLLM top p for nucleus sampling"""
+    inference_batch_size: Optional[int] = None
+    """Number of inference requests to batch together for vLLM processing"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     gather_whole_model: bool = True
@@ -419,6 +421,12 @@ class Args:
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
+        # Set default inference_batch_size if not provided
+        if self.inference_batch_size is None:
+            self.inference_batch_size = self.num_unique_prompts_rollout // self.vllm_num_engines
+            logger.info(
+                f"Setting inference_batch_size to {self.inference_batch_size} (num_unique_prompts_rollout={self.num_unique_prompts_rollout} // vllm_num_engines={self.vllm_num_engines})"
+            )
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
@@ -1783,6 +1791,7 @@ def create_model_and_optimizer(
         max_len,
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
+        args.inference_batch_size,
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
         max_tool_calls=args.max_tool_calls,

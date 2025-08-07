@@ -523,8 +523,9 @@ def create_vllm_engines(
     seed: int,
     enable_prefix_caching: bool,
     max_model_len: int,
-    vllm_gpu_memory_utilization: float = 0.9,
-    single_gpu_mode: bool = False,
+    vllm_gpu_memory_utilization: float,
+    single_gpu_mode: bool,
+    inference_batch_size: int,
     pg: Optional[ray.util.placement_group] = None,
     vllm_enable_sleep=False,
     tools: Optional[List[Any]] = None,
@@ -533,7 +534,6 @@ def create_vllm_engines(
     results_queue=None,
     eval_results_queue=None,
     actor_manager=None,
-    inference_batch_size: int = None,
     update_weights_inflight: bool = False,
 ) -> list[LLMRayActor]:
     import vllm
