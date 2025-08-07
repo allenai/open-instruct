@@ -44,6 +44,7 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent import futures
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from dataclasses import dataclass, field
 from multiprocessing import resource_tracker as _rt
@@ -60,6 +61,7 @@ from dateutil import parser
 from huggingface_hub import HfApi
 from ray.util import state as ray_state
 from rich.pretty import pprint
+from tqdm import tqdm
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
@@ -68,6 +70,43 @@ MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 logger = get_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
+
+
+def repeat_each(seq, k):
+    """Repeat each element in a sequence k times."""
+    return [item for item in seq for _ in range(k)]
+
+
+def ray_get_with_progress(
+    ray_refs: List[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: Optional[float] = None
+) -> List[Any]:
+    """Execute ray.get() with a progress bar using futures.
+
+    Args:
+        ray_refs: List of ray object references
+        desc: Description for the progress bar
+        enable: Whether to show the progress bar (default: True)
+        timeout: Optional timeout in seconds for all operations to complete
+
+    Returns:
+        List of results in the same order as ray_refs
+
+    Raises:
+        TimeoutError: If timeout is specified and operations don't complete in time
+    """
+    ray_futures = [ref.future() for ref in ray_refs]
+    results = [None] * len(ray_refs)
+
+    futures_iter = futures.as_completed(ray_futures, timeout=timeout)
+    if enable:
+        futures_iter = tqdm(futures_iter, total=len(ray_futures), desc=desc, bar_format="{l_bar}{bar}{r_bar}\n")
+
+    for future in futures_iter:
+        idx = ray_futures.index(future)
+        results[idx] = future.result()
+
+    return results
+
 
 """
 Notes:
