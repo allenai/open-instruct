@@ -65,6 +65,7 @@ import ray
 import torch
 import torch.utils
 import torch.utils.data
+import vllm
 import wandb
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
@@ -76,7 +77,6 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
-import vllm
 
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
@@ -1256,10 +1256,10 @@ def accumulate_inference_batches(
             logger.error(f"  Response lengths: {[len(r) for r in result.responses[:5]]}...")  # First 5
             logger.error(f"  Finish reasons: {result.finish_reasons[:5]}...")  # First 5
             assert len(result.responses) == expected_responses, (
-            f"Mismatch: number of responses ({len(result.responses)}) "
-            f"doesn't match expected ({expected_responses}) for result {i}"
-            f". {generation_config.n=}"
-            f", {len(dataset_indices)=}"
+                f"Mismatch: number of responses ({len(result.responses)}) "
+                f"doesn't match expected ({expected_responses}) for result {i}"
+                f". {generation_config.n=}"
+                f", {len(dataset_indices)=}"
             )
 
         # Get corresponding queries, ground_truths, datasets for each individual prompt
@@ -1846,23 +1846,6 @@ def create_generation_configs(args: Args):
         # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode
         # ensures all n completions are returned together in a single output.
         output_kind=vllm.sampling_params.RequestOutputKind.FINAL_ONLY,
-    )
-    eval_generation_config = generation_config.clone()
-    eval_generation_config.temperature = 0.0
-    eval_generation_config.n = 1
-    return {"train": generation_config, "eval": eval_generation_config}
-
-
-def create_generation_configs(args: Args):
-    """Create generation configs for training and evaluation."""
-    generation_config = SamplingParams(
-        temperature=args.temperature,
-        top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
-        max_tokens=args.response_length,
-        include_stop_str_in_output=True,
-        skip_special_tokens=False,
-        n=args.num_samples_per_prompt_rollout,
-        stop=args.stop_strings,
     )
     eval_generation_config = generation_config.clone()
     eval_generation_config.temperature = 0.0

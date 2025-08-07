@@ -250,7 +250,6 @@ class LLMRayActor:
             except queue.Empty:
                 self.logger.warning("[LLMRayActor] No request in the queue to process. Continuing.")
                 continue
-                
 
             # Process the request
             prompts = request.prompts
