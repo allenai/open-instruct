@@ -1934,7 +1934,15 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
         return collated_data, data_thread_metrics, num_total_tokens
 
 
-def generate_thread(vllm_engines, local_eval_freq, num_training_steps, resume_training_step, stop_event):
+def generate_thread(
+    vllm_engines,
+    train_generation_config,
+    eval_generation_config,
+    local_eval_freq,
+    num_training_steps,
+    resume_training_step,
+    stop_event,
+):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
 
@@ -2261,7 +2269,11 @@ def cleanup_judge_clients():
 
 
 def check_threads_healthy(
-    futures: list, stop_event: threading.Event, executor: futures.ThreadPoolExecutor, queues: list[ray_queue.Queue]
+    futures: list,
+    stop_event: threading.Event,
+    executor: futures.ThreadPoolExecutor,
+    queues: list[ray_queue.Queue],
+    actor_manager: ActorManager,
 ) -> None:
     """Check if any threads have failed and raise their exception if so."""
     for future in futures:
@@ -2271,7 +2283,7 @@ def check_threads_healthy(
             future.result()
         except Exception as e:
             logger.error(f"Thread failed with exception: {e}")
-            cleanup_training_resources(stop_event, executor, queues)
+            cleanup_training_resources(stop_event, executor, queues, actor_manager)
             raise
 
 
@@ -2419,6 +2431,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             stop_event,
             executor,
             [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
+            actor_manager,
         )
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
