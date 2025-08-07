@@ -215,7 +215,7 @@ class Args:
     num_training_steps: Optional[int] = None
     """RUNTIME VALUE: The number of training_steps to train"""
     local_eval_every: int = 100
-    """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup."""
+    """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup. Set to -1 to disable."""
     save_freq: int = 200
     """How many train steps to save the model"""
     allow_world_padding: bool = False
