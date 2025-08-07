@@ -124,6 +124,7 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
+    repeat_each,
     sync_gs_bucket,
 )
 from open_instruct.vllm_utils3 import (
@@ -341,6 +342,8 @@ class Args:
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
 
     # Experiment tracking
+    verbose: bool = False
+    """If toggled, debug output will be shown"""
     with_tracking: bool = False
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
@@ -437,11 +440,6 @@ class Args:
                 if tool not in ["search", "code"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
-
-
-def flatten(nested_list: List[List[Any]]) -> List[Any]:
-    """Flatten a list of lists into a single list."""
-    return [item for sublist in nested_list for item in sublist]
 
 
 def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
@@ -771,9 +769,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
         if torch.distributed.get_rank() == 0:
-            ray_get_with_progress(refss, desc="Broadcasting weights to vLLM")
+            ray_get_with_progress(refss, desc="Broadcasting weights to vLLM", enable=self.args.verbose)
         if self.args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
-            ray_get_with_progress(cache_reset_refs, desc="Resetting vLLM prefix cache")
+            ray_get_with_progress(cache_reset_refs, desc="Resetting vLLM prefix cache", enable=self.args.verbose)
 
     def update_ref_policy(self):
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
@@ -1257,13 +1255,12 @@ def accumulate_inference_batches(
             logger.error(f"  Dataset indices: {dataset_indices}")
             logger.error(f"  Response lengths: {[len(r) for r in result.responses[:5]]}...")  # First 5
             logger.error(f"  Finish reasons: {result.finish_reasons[:5]}...")  # First 5
-
-        assert len(result.responses) == expected_responses, (
+            assert len(result.responses) == expected_responses, (
             f"Mismatch: number of responses ({len(result.responses)}) "
             f"doesn't match expected ({expected_responses}) for result {i}"
             f". {generation_config.n=}"
             f", {len(dataset_indices)=}"
-        )
+            )
 
         # Get corresponding queries, ground_truths, datasets for each individual prompt
         batch_queries = []
@@ -1376,12 +1373,10 @@ def data_preparation_thread(
         # Pack sequences
         if args.num_samples_per_prompt_rollout > 1:
             batch = Batch(
-                queries=flatten([[item] * args.num_samples_per_prompt_rollout for item in batch.queries]),
-                ground_truths=flatten([[item] * args.num_samples_per_prompt_rollout for item in batch.ground_truths]),
-                datasets=flatten([[item] * args.num_samples_per_prompt_rollout for item in batch.datasets]),
-                indices=flatten([[item] * args.num_samples_per_prompt_rollout for item in batch.indices])
-                if batch.indices
-                else None,
+                queries=repeat_each(batch.queries, args.num_samples_per_prompt_rollout),
+                ground_truths=repeat_each(batch.ground_truths, args.num_samples_per_prompt_rollout),
+                datasets=repeat_each(batch.datasets, args.num_samples_per_prompt_rollout),
+                indices=repeat_each(batch.indices, args.num_samples_per_prompt_rollout) if batch.indices else None,
             )
             good_outputs = [
                 len(result.request_info.tool_outputs[i]) > 0
@@ -1830,6 +1825,7 @@ def create_model_and_optimizer(
             ray_get_with_progress(
                 [m.broadcast_to_vllm.remote() for m in policy_group.models],
                 desc="Broadcasting weights to vLLM engines",
+                enable=args.verbose,
             )
 
     return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager
@@ -1850,6 +1846,23 @@ def create_generation_configs(args: Args):
         # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode
         # ensures all n completions are returned together in a single output.
         output_kind=vllm.sampling_params.RequestOutputKind.FINAL_ONLY,
+    )
+    eval_generation_config = generation_config.clone()
+    eval_generation_config.temperature = 0.0
+    eval_generation_config.n = 1
+    return {"train": generation_config, "eval": eval_generation_config}
+
+
+def create_generation_configs(args: Args):
+    """Create generation configs for training and evaluation."""
+    generation_config = SamplingParams(
+        temperature=args.temperature,
+        top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
+        max_tokens=args.response_length,
+        include_stop_str_in_output=True,
+        skip_special_tokens=False,
+        n=args.num_samples_per_prompt_rollout,
+        stop=args.stop_strings,
     )
     eval_generation_config = generation_config.clone()
     eval_generation_config.temperature = 0.0
@@ -1884,7 +1897,7 @@ def split_and_insert_batch(
         param_prompt_Q.put(
             PromptRequest(
                 prompts=sub_batch.queries,
-                sampling_params=generation_config,
+                generation_config=generation_config,
                 training_step=training_step,
                 dataset_index=sub_batch.indices,
                 is_eval=is_eval,
@@ -1906,7 +1919,6 @@ def sync_weights_and_prepare_prompts(
     """Sync weights and send the next batch of prompts to vLLM."""
     dataset_indices = next(iter_dataloader)
     batch = next_batch(dataset_indices, train_dataset)
-
     with Timer(
         "[Main Thread] 🔄 Loading weights using shared memory"
         if args.async_steps > 0
@@ -1919,7 +1931,8 @@ def sync_weights_and_prepare_prompts(
         # Sync weights to vLLM
         ray_get_with_progress(
             [m.broadcast_to_vllm.remote() for m in policy_group.models],
-            desc=f"🔄 Broadcasting weights to vLLM at step {training_step}",
+            desc=f"[Main thread] Broadcasting weights to vLLM engines at training step {training_step}",
+            enable=args.verbose,
         )
 
         # Signal actors to resume
@@ -1958,12 +1971,10 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
 def generate_thread(vllm_engines, local_eval_freq, num_training_steps, resume_training_step, stop_event):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
-
     while not stop_event.is_set():
         with Timer("🔥 Generation time"):
             engine_refs = [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines]
             ray_get_with_progress(engine_refs, desc="[Generate Thread] Waiting for vLLM engines to process")
-
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
