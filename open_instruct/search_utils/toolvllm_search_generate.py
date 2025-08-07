@@ -5,14 +5,13 @@ Used for astabench
 export MCP_TRANSPORT=StreamableHttpTransport
 export S2_API_KEY=xxxx
 python open_instruct/search_utils/toolvllm_search_generate.py \
-    --json_path surveyqa_test.json \
-    --model_path /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/rl_rag_surveyqa_samples_search_mcp_reward_longer__1__1753400976_checkpoints/step_100 \
-    --output_dir /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/rl_rag_surveyqa_samples_search_mcp_reward_longer__1__1753400976_checkpoints/step_100/surveyqa_test_offset_3000 \
+    --json_path rubrics_v2_recomputed.json \
+    --model_path /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/rl_rag_surveyqa_samples_search_mcp_reward_longer_direct__1__1754497107_step600 \
+    --output_dir /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/rl_rag_surveyqa_samples_search_mcp_reward_longer_direct__1__1754497107_step600/sqa_test \
     --max_eval_samples 1000 \
-    --offset 3000 \
+    --offset 0 \
     --num_docs 3 \
-    --search_api_endpoint https://api.semanticscholar.org/graph/v1/snippet/search \
-    --use_mcp_tool
+    --search_api_endpoint https://api.semanticscholar.org/graph/v1/snippet/search
 """
 
 import argparse
@@ -135,6 +134,8 @@ def main():
         # load the json data
         with open(args.json_path, "r") as f:
             dataset = json.load(f)
+
+        original_dataset = dataset
         
         # surveyqa has "query", asta-bench has "question" -- check
         if "query" in dataset[0]:
@@ -158,6 +159,7 @@ def main():
 
         if args.max_eval_samples > -1 and args.max_eval_samples < len(ds):
             ds = ds.select(range(args.offset, max(args.offset + args.max_eval_samples, len(ds))))
+            original_dataset = original_dataset[args.offset:max(args.offset + args.max_eval_samples, len(original_dataset))]
 
         prompt_token_ids = [tokenizer.apply_chat_template(data["messages"], add_generation_prompt=True) for data in ds]
 
@@ -210,8 +212,8 @@ def main():
         # save predictions with sample data.
         os.makedirs(args.output_dir, exist_ok=True)
         with open(f"{args.output_dir}/predictions.jsonl", "w") as f:
-            for sample, prediction, generation in zip(ds, predictions, generations):
-                f.write(json.dumps({**sample, "answer": prediction, "generation": generation}) + "\n")
+            for sample, prediction, generation, original_sample in zip(ds, predictions, generations, original_dataset):
+                f.write(json.dumps({**sample, **original_sample, "answer": prediction, "generation": generation}) + "\n")
 
         if args.use_astabench_format:
             predictions = [format_citation_data_into_sqa_format(x) for x in generations]
