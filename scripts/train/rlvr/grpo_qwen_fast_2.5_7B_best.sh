@@ -47,7 +47,7 @@ python mason.py \
     --lr_scheduler_type linear \
     --apply_verifiable_reward true \
     --seed 1 \
-    --local_eval_every 78 \
+    --local_eval_every 80 \
     --reward_model_multiplier 0.0 \
     --gradient_checkpointing \
     --with_tracking

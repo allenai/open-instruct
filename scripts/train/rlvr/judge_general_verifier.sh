@@ -51,7 +51,7 @@ python mason.py \
             --vllm_tensor_parallel_size 1 \
             --beta 0.0 \
             --seed 3 \
-            --local_eval_every 9 \
+            --local_eval_every 10 \
             --vllm_enforce_eager \
             --gradient_checkpointing \
             --push_to_hub false \
