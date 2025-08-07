@@ -214,10 +214,8 @@ class Args:
     """RUNTIME VALUE: The number of processes (GPUs) to use"""
     num_training_steps: Optional[int] = None
     """RUNTIME VALUE: The number of training_steps to train"""
-    num_evals: int = 10
-    """this sets how many in-loop evals we do during training. in-loop evals reuse the generation/reward verifier setup."""
-    local_eval_freq: Optional[int] = None
-    """this controls the number of in-loop evals, which reuses the generation/reward verifier setup. don't set this directly, but set via num_evals."""
+    local_eval_every: int = 100
+    """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup."""
     save_freq: int = 200
     """How many train steps to save the model"""
     allow_world_padding: bool = False
@@ -1621,9 +1619,6 @@ def setup_runtime_variables(args: Args) -> Args:
     args.num_training_steps = args.total_episodes // (
         args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     )
-    if args.local_eval_freq is not None:
-        raise ValueError("local_eval_freq should not be set manually; it will be computed automatically")
-    args.local_eval_freq = max(1, args.num_training_steps // args.num_evals)
     args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
@@ -1913,7 +1908,7 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
         return collated_data, data_thread_metrics, num_total_tokens
 
 
-def generate_thread(vllm_engines, local_eval_freq, num_training_steps, resume_training_step, stop_event):
+def generate_thread(vllm_engines, local_eval_every, num_training_steps, resume_training_step, stop_event):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
 
@@ -2055,7 +2050,7 @@ def maybe_evaluate(
     try:
         # timeout 0.01 if this is the last training step or we're not evaluating
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
-        timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_freq < 0) else 100
+        timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_every < 0) else 100
 
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch = accumulate_inference_batches(
@@ -2368,7 +2363,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         vllm_engines,
         generation_configs["train"],
         generation_configs["eval"],
-        args.local_eval_freq,
+        args.local_eval_every,
         args.num_training_steps,
         resume_training_step,
         stop_event,
@@ -2407,7 +2402,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             param_prompt_Q,
             generation_configs,
         )
-        if training_step % args.local_eval_freq == 0 and eval_batch is not None:
+        if training_step % args.local_eval_every == 0 and eval_batch is not None:
             split_and_insert_batch(
                 eval_batch,
                 training_step,
