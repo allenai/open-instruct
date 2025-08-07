@@ -66,7 +66,6 @@ import ray
 import torch
 import torch.utils
 import torch.utils.data
-import wandb
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util import queue as ray_queue
@@ -79,6 +78,7 @@ from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokeni
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
+import wandb
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -532,6 +532,7 @@ class PolicyTrainerRayProcess(RayProcess):
         model_config: ModelConfig,
         beaker_config: BeakerRuntimeConfig,
         wandb_url: str,
+        wandb_run_id: str,
         tokenizer: PreTrainedTokenizer,
     ):
         # ------------------------------------------------------------
@@ -558,6 +559,17 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.cuda.set_device(self.local_rank)
         self.device = torch.device(self.local_rank)
         deepspeed.init_distributed()
+
+        if args.with_tracking and wandb_run_id is not None:
+            wandb.init(
+                settings=wandb.Settings(
+                    x_label=f"trainer_rank{self.rank}",
+                    mode="shared",
+                    x_primary=False,
+                    x_stats_gpu_device_ids=[self.local_rank],
+                ),
+                id=wandb_run_id,
+            )
 
         ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
@@ -1083,7 +1095,12 @@ class PolicyTrainerRayProcess(RayProcess):
 
 class ModelGroup:
     def __init__(
-        self, pg: PlacementGroup, ray_process_cls: RayProcess, num_gpus_per_node: List[int], single_gpu_mode: bool
+        self,
+        pg: PlacementGroup,
+        ray_process_cls: RayProcess,
+        num_gpus_per_node: List[int],
+        single_gpu_mode: bool,
+        wandb_run_id: str = None,
     ):
         self.pg = pg
         self.ray_process_cls = ray_process_cls
@@ -1130,7 +1147,7 @@ class ModelGroup:
                 num_cpus=self.num_cpus_per_actor,
                 num_gpus=self.num_gpus_per_actor,
                 scheduling_strategy=scheduling_strategy,
-            ).remote(world_size, rank, 0, master_addr, master_port)
+            ).remote(world_size, rank, 0, master_addr, master_port, wandb_run_id)
             self.models.append(worker_policy)
 
 
@@ -1653,8 +1670,9 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
     all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config))
 
     wandb_url = None
+    wandb_run_id = None
     if args.with_tracking:
-        wandb.init(
+        run = wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
             sync_tensorboard=True,
@@ -1662,8 +1680,10 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
             name=args.run_name,
             save_code=True,
             tags=[args.exp_name] + get_wandb_tags(),
+            settings=wandb.Settings(mode="shared", x_label="main_process", x_primary=True),
         )
-        wandb_url = wandb.run.get_url()
+        wandb_url = run.url
+        wandb_run_id = run.id
 
     writer = SummaryWriter(f"runs/{args.run_name}")
     writer.add_text(
@@ -1671,7 +1691,7 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    return beaker_config, writer, wandb_url
+    return beaker_config, writer, wandb_url, wandb_run_id
 
 
 def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer):
@@ -1722,6 +1742,7 @@ def create_model_and_optimizer(
     model_config: ModelConfig,
     beaker_config: BeakerRuntimeConfig,
     wandb_url: str,
+    wandb_run_id: str,
     tokenizer: PreTrainedTokenizer,
     inference_results_Q: ray_queue.Queue,
     param_prompt_Q: ray_queue.Queue,
@@ -1734,9 +1755,8 @@ def create_model_and_optimizer(
     ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
     inits = []
     policy_group = ModelGroup(pg, PolicyTrainerRayProcess, args.num_learners_per_node, args.single_gpu_mode)
-    wandb_url = wandb.run.get_url() if args.with_tracking else None
     inits.extend(
-        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
+        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, wandb_run_id, tokenizer)
         for model in policy_group.models
     )
 
@@ -1786,6 +1806,7 @@ def create_model_and_optimizer(
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
+        wandb_run_id=wandb_run_id,
     )
 
     resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
@@ -2289,7 +2310,7 @@ def cleanup_training_resources(
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_samples: int = 32):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
-    beaker_config, writer, wandb_url = setup_experiment_tracking(args, tc, model_config)
+    beaker_config, writer, wandb_url, wandb_run_id = setup_experiment_tracking(args, tc, model_config)
 
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
     if args.cache_dataset_only:
@@ -2312,6 +2333,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         model_config,
         beaker_config,
         wandb_url,
+        wandb_run_id,
         tokenizer,
         inference_results_Q,
         param_prompt_Q,

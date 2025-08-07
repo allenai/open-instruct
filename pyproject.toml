@@ -25,7 +25,7 @@ dependencies = [
     "torch==2.7.0",
     "transformers>=4.52.4",
     "vllm==0.9.1",    
-    "wandb==0.18.1",
+    "wandb==0.21.0",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
     "pytest-xdist==3.8.0",
@@ -98,6 +98,7 @@ addopts = "--ignore=oe-eval-internal/"
 [tool.black]
 line-length = 119
 target-version = ['py310']
+extend-exclude = 'mason\.py'
 
 [tool.isort]
 known_first_party = ["open_instruct"]
@@ -109,7 +110,7 @@ target-version = "py310"
 line-length = 119
 # do both . and open_instruct to make sure known-first-party below works
 src = [".", "open_instruct"]
-exclude = ["wandb"]
+exclude = ["wandb", "mason.py"]
 
 [tool.ruff.format]
 # Use black-compatible formatting
