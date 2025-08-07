@@ -29,6 +29,7 @@
 # limitations under the License.
 # isort: off
 import os
+from concurrent import futures
 
 # We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
 # https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
@@ -1835,23 +1836,6 @@ def create_generation_configs(args: Args):
     return {"train": generation_config, "eval": eval_generation_config}
 
 
-def create_generation_configs(args: Args):
-    """Create generation configs for training and evaluation."""
-    generation_config = SamplingParams(
-        temperature=args.temperature,
-        top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
-        max_tokens=args.response_length,
-        include_stop_str_in_output=True,
-        skip_special_tokens=False,
-        n=args.num_samples_per_prompt_rollout,
-        stop=args.stop_strings,
-    )
-    eval_generation_config = generation_config.clone()
-    eval_generation_config.temperature = 0.0
-    eval_generation_config.n = 1
-    return {"train": generation_config, "eval": eval_generation_config}
-
-
 def split_and_insert_batch(
     batch: Batch,
     training_step,
@@ -1957,8 +1941,9 @@ def generate_thread(vllm_engines, local_eval_freq, num_training_steps, resume_tr
     while not stop_event.is_set():
         with Timer("🔥 Generation time"):
             ray_get_with_progress(
-              [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines], 
-              desc="[Generate Thread] Waiting for vLLM engines to process")
+                [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
+                desc="[Generate Thread] Waiting for vLLM engines to process",
+            )
 
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
@@ -2291,7 +2276,9 @@ def check_threads_healthy(
 
 
 def cleanup_training_resources(
-    stop_event: threading.Event, executor: futures.ThreadPoolExecutor, queues: list[ray_queue.Queue],
+    stop_event: threading.Event,
+    executor: futures.ThreadPoolExecutor,
+    queues: list[ray_queue.Queue],
     actor_manager: ActorManager,
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
@@ -2498,10 +2485,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     # Clean up resources
     cleanup_training_resources(
-        stop_event,
-        [packing_thread, generation_thread],
-        [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
-        actor_manager,
+        stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q], actor_manager
     )
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
