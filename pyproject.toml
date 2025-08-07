@@ -56,9 +56,11 @@ explicit = true
 
 # flash-attn related setups
 [project.optional-dependencies]
-compile = ["flash-attn>=2.8.0.post2",
-		   "flashinfer-python==0.2.8"]
-liger = ["liger-kernel>=0.5.4"]
+compile = [
+    "flash-attn>=2.8.0.post2",
+    "flashinfer-python==0.2.8",
+    "liger-kernel>=0.5.4",
+]
 code = [
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0", 

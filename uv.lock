@@ -2389,8 +2389,6 @@ code = [
 compile = [
     { name = "flash-attn" },
     { name = "flashinfer-python" },
-]
-liger = [
     { name = "liger-kernel" },
 ]
 
@@ -2424,7 +2422,7 @@ requires-dist = [
     { name = "hf-transfer", specifier = ">=0.1.8" },
     { name = "immutabledict", specifier = "==1.2.0" },
     { name = "langdetect", specifier = "==1.0.9" },
-    { name = "liger-kernel", marker = "extra == 'liger'", specifier = ">=0.5.4" },
+    { name = "liger-kernel", marker = "extra == 'compile'", specifier = ">=0.5.4" },
     { name = "litellm" },
     { name = "matplotlib", specifier = ">=3.9.3" },
     { name = "nltk", specifier = ">=3.9.1" },
