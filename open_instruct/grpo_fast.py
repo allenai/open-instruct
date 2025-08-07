@@ -124,6 +124,7 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
+    repeat_each,
     sync_gs_bucket,
 )
 from open_instruct.vllm_utils3 import (
@@ -341,6 +342,8 @@ class Args:
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
 
     # Experiment tracking
+    verbose: bool = False
+    """If toggled, debug output will be shown"""
     with_tracking: bool = False
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
@@ -437,11 +440,6 @@ class Args:
                 if tool not in ["search", "code"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
-
-
-def flatten(nested_list: List[List[Any]]) -> List[Any]:
-    """Flatten a list of lists into a single list."""
-    return [item for sublist in nested_list for item in sublist]
 
 
 def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
@@ -724,7 +722,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 rank=0,
                 group_name="openrlhf",
             )
-            ray_get_with_progress(refs, desc="Initializing process group")
+            ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=60)
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
@@ -771,9 +769,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
         if torch.distributed.get_rank() == 0:
-            ray_get_with_progress(refss, desc="Broadcasting weights to vLLM")
+            ray_get_with_progress(refss, desc="Broadcasting weights to vLLM", enable=self.args.verbose)
         if self.args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
-            ray_get_with_progress(cache_reset_refs, desc="Resetting vLLM prefix cache")
+            ray_get_with_progress(cache_reset_refs, desc="Resetting vLLM prefix cache", enable=self.args.verbose)
 
     def update_ref_policy(self):
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
@@ -1222,6 +1220,9 @@ def accumulate_inference_batches(
         generation_config: Generation config containing n (number of samples per prompt)
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
 
+    Raises:
+        queue.Empty: If timeout is specified and no data is available within timeout.
+
     Returns:
         Tuple of (combined_result, Batch with queries, ground_truths, datasets)
     """
@@ -1247,17 +1248,6 @@ def accumulate_inference_batches(
         # but dataset_indices only contains the unique indices (not replicated)
         # So we expect: len(responses) == len(dataset_indices) * generation_config.n
         expected_responses = len(dataset_indices) * generation_config.n
-        if len(result.responses) != expected_responses:
-            # Print detailed debugging info before asserting
-            logger.error(f"Response count mismatch for result {i}:")
-            logger.error(
-                f"  Expected: {expected_responses} (dataset_indices={len(dataset_indices)} * n={generation_config.n})"
-            )
-            logger.error(f"  Actual: {len(result.responses)}")
-            logger.error(f"  Dataset indices: {dataset_indices}")
-            logger.error(f"  Response lengths: {[len(r) for r in result.responses[:5]]}...")  # First 5
-            logger.error(f"  Finish reasons: {result.finish_reasons[:5]}...")  # First 5
-
         assert len(result.responses) == expected_responses, (
             f"Mismatch: number of responses ({len(result.responses)}) "
             f"doesn't match expected ({expected_responses}) for result {i}"
@@ -1332,29 +1322,6 @@ def accumulate_inference_batches(
     return combined_result, batch
 
 
-def create_thread_error_wrapper(
-    stop_event: threading.Event,
-    threads: list[threading.Thread],
-    queues: list[ray_queue.Queue],
-    actor_manager: ActorManager,
-):
-    """Create a wrapper that handles thread errors and triggers cleanup."""
-
-    def wrap_thread_func(func):
-        def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                logger.error(f"🚨 Fatal error in {func.__name__}: {e}", exc_info=True)
-                # Signal main thread to stop instead of calling cleanup directly
-                stop_event.set()
-                logger.info(f"[{func.__name__}] Set stop event due to error")
-
-        return wrapper
-
-    return wrap_thread_func
-
-
 def data_preparation_thread(
     reward_fn: Callable,
     inference_results_Q: ray_queue.Queue,  # Ray queue
@@ -1363,25 +1330,35 @@ def data_preparation_thread(
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
+    stop_event: threading.Event,
     generation_config,
 ):
     for training_step in range(1, num_training_steps + 1):
+        if stop_event.is_set():
+            logger.info("[Data Preparation Thread] Shutting down")
+            return
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            result, batch = accumulate_inference_batches(
-                inference_results_Q, pending_queries_map, args, training_step, generation_config
-            )
+            while True:
+                if stop_event.is_set():
+                    logger.info("[Data Preparation Thread] Shutting down due to stop event")
+                    return  # Simply return to exit the thread cleanly
+                try:
+                    result, batch = accumulate_inference_batches(
+                        inference_results_Q, pending_queries_map, args, training_step, generation_config, timeout=1.0
+                    )
+                    break  # Successfully got results, exit retry loop
+                except Empty:
+                    continue  # Timeout occurred, loop back to check stop_event
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
         if args.num_samples_per_prompt_rollout > 1:
             batch = Batch(
-                queries=flatten([[item] * args.num_samples_per_prompt_rollout for item in batch.queries]),
-                ground_truths=flatten([[item] * args.num_samples_per_prompt_rollout for item in batch.ground_truths]),
-                datasets=flatten([[item] * args.num_samples_per_prompt_rollout for item in batch.datasets]),
-                indices=flatten([[item] * args.num_samples_per_prompt_rollout for item in batch.indices])
-                if batch.indices
-                else None,
+                queries=repeat_each(batch.queries, args.num_samples_per_prompt_rollout),
+                ground_truths=repeat_each(batch.ground_truths, args.num_samples_per_prompt_rollout),
+                datasets=repeat_each(batch.datasets, args.num_samples_per_prompt_rollout),
+                indices=repeat_each(batch.indices, args.num_samples_per_prompt_rollout) if batch.indices else None,
             )
             good_outputs = [
                 len(result.request_info.tool_outputs[i]) > 0
@@ -1830,6 +1807,7 @@ def create_model_and_optimizer(
             ray_get_with_progress(
                 [m.broadcast_to_vllm.remote() for m in policy_group.models],
                 desc="Broadcasting weights to vLLM engines",
+                enable=args.verbose,
             )
 
     return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager
@@ -1850,6 +1828,23 @@ def create_generation_configs(args: Args):
         # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode
         # ensures all n completions are returned together in a single output.
         output_kind=vllm.sampling_params.RequestOutputKind.FINAL_ONLY,
+    )
+    eval_generation_config = generation_config.clone()
+    eval_generation_config.temperature = 0.0
+    eval_generation_config.n = 1
+    return {"train": generation_config, "eval": eval_generation_config}
+
+
+def create_generation_configs(args: Args):
+    """Create generation configs for training and evaluation."""
+    generation_config = SamplingParams(
+        temperature=args.temperature,
+        top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
+        max_tokens=args.response_length,
+        include_stop_str_in_output=True,
+        skip_special_tokens=False,
+        n=args.num_samples_per_prompt_rollout,
+        stop=args.stop_strings,
     )
     eval_generation_config = generation_config.clone()
     eval_generation_config.temperature = 0.0
@@ -1906,7 +1901,6 @@ def sync_weights_and_prepare_prompts(
     """Sync weights and send the next batch of prompts to vLLM."""
     dataset_indices = next(iter_dataloader)
     batch = next_batch(dataset_indices, train_dataset)
-
     with Timer(
         "[Main Thread] 🔄 Loading weights using shared memory"
         if args.async_steps > 0
@@ -1920,6 +1914,7 @@ def sync_weights_and_prepare_prompts(
         ray_get_with_progress(
             [m.broadcast_to_vllm.remote() for m in policy_group.models],
             desc=f"🔄 Broadcasting weights to vLLM at step {training_step}",
+            enable=args.verbose,
         )
 
         # Signal actors to resume
@@ -1961,8 +1956,9 @@ def generate_thread(vllm_engines, local_eval_freq, num_training_steps, resume_tr
 
     while not stop_event.is_set():
         with Timer("🔥 Generation time"):
-            engine_refs = [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines]
-            ray_get_with_progress(engine_refs, desc="[Generate Thread] Waiting for vLLM engines to process")
+            ray_get_with_progress(
+              [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines], 
+              desc="[Generate Thread] Waiting for vLLM engines to process")
 
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
@@ -2279,24 +2275,28 @@ def cleanup_judge_clients():
     logger.info("✅ Ray shut down")
 
 
+def check_threads_healthy(
+    futures: list, stop_event: threading.Event, executor: futures.ThreadPoolExecutor, queues: list[ray_queue.Queue]
+) -> None:
+    """Check if any threads have failed and raise their exception if so."""
+    for future in futures:
+        if not future.done():
+            continue
+        try:
+            future.result()
+        except Exception as e:
+            logger.error(f"Thread failed with exception: {e}")
+            cleanup_training_resources(stop_event, executor, queues)
+            raise
+
+
 def cleanup_training_resources(
-    stop_event: threading.Event,
-    threads: list[threading.Thread],
-    queues: list[ray_queue.Queue],
+    stop_event: threading.Event, executor: futures.ThreadPoolExecutor, queues: list[ray_queue.Queue],
     actor_manager: ActorManager,
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
     # Signal threads to stop
     stop_event.set()
-
-    # Clean up threads with timeout
-    logger.info("Cleaning up threads...")
-    for thread in threads:
-        thread.join(timeout=30)
-        if thread.is_alive():
-            logger.warning(f"Thread {thread.name} did not stop cleanly")
-        else:
-            logger.info(f"======== ✅ Thread {thread.name} ends =========")
 
     # Signal all actors to stop
     logger.info("Signaling all actors to stop...")
@@ -2304,6 +2304,9 @@ def cleanup_training_resources(
     logger.info("✅ Signaled all actors to stop")
 
     # Shutdown Ray queues to prevent semaphore leaks
+    logger.info("Shutting down thread pool executor...")
+    executor.shutdown(wait=True)
+
     logger.info("Shutting down Ray queues...")
     for queue in queues:
         try:
@@ -2367,45 +2370,45 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         eval_batch = next_batch(eval_dataset_indices, eval_dataset)
     reward_fn = make_reward_fn(args)
 
-    # Verify none of the engines crashed during initialization.
-    ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], desc="Verifying vLLM engines are ready")
+    try:
+        ray_get_with_progress(
+            [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
+        )
+    except TimeoutError as e:
+        logger.error(f"vLLM engines failed to initialize within timeout: {e}")
+        # Clean up using existing cleanup function
+        cleanup_judge_clients()  # This calls ray.shutdown()
+        raise RuntimeError("vLLM engine initialization timed out")
 
-    # Create and start the generate thread
     stop_event = threading.Event()
-
-    # Create error wrapper for threads
-    thread_wrapper = create_thread_error_wrapper(
-        stop_event,
-        [],  # Will be populated with actual threads
-        [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
-        actor_manager,
-    )
-
+    executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="grpo")
     logger.info("======== ✅ data preparation thread starts =========")
-    packing_thread = threading.Thread(
-        target=thread_wrapper(data_preparation_thread),
-        args=(
-            reward_fn,
-            inference_results_Q,
-            packed_sequences_Q,
-            pending_queries_map,
-            args,
-            tokenizer,
-            args.num_training_steps,
-            generation_configs["train"],
-        ),
+    packing_future = executor.submit(
+        data_preparation_thread,
+        reward_fn,
+        inference_results_Q,
+        packed_sequences_Q,
+        pending_queries_map,
+        args,
+        tokenizer,
+        args.num_training_steps,
+        stop_event,
+        generation_configs["train"],
     )
-    packing_thread.start()
 
-    generation_thread = threading.Thread(
-        target=thread_wrapper(generate_thread),
-        args=(vllm_engines, args.local_eval_freq, args.num_training_steps, resume_training_step, stop_event),
-    )
-    generation_thread.start()
     logger.info("======== ✅ generation thread starts =========")
+    generation_future = executor.submit(
+        generate_thread,
+        vllm_engines,
+        generation_configs["train"],
+        generation_configs["eval"],
+        args.local_eval_freq,
+        args.num_training_steps,
+        resume_training_step,
+        stop_event,
+    )
 
-    # Send initial data to ensure we have a N-step offset. This is what
-    # the async_steps arg does.
+    # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps):
         dataset_indices = next(iter_dataloader)
         batch = next_batch(dataset_indices, train_dataset)
@@ -2423,8 +2426,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         if stop_event.is_set():
             logger.warning("⚠️ Stop event detected, breaking out of training loop")
-            error_occurred = True
             break
+        check_threads_healthy(
+            [packing_future, generation_future],
+            stop_event,
+            executor,
+            [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
+        )
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         batch = sync_weights_and_prepare_prompts(
