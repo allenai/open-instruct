@@ -54,6 +54,7 @@ import threading
 import time
 from argparse import Namespace
 from collections import defaultdict
+from concurrent import futures
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
@@ -2304,27 +2305,24 @@ def check_threads_healthy(
 
 
 def cleanup_training_resources(
-    stop_event: threading.Event, executor: futures.ThreadPoolExecutor, queues: list[ray_queue.Queue],
+    stop_event: threading.Event,
+    executor: futures.ThreadPoolExecutor,
+    queues: list[ray_queue.Queue],
     actor_manager: ActorManager,
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
     # Signal threads to stop
     stop_event.set()
 
-    # Clean up threads with timeout
-    logger.info("Cleaning up threads...")
-    for thread in threads:
-        thread.join(timeout=30)
-        if thread.is_alive():
-            logger.warning(f"Thread {thread.name} did not stop cleanly")
-        else:
-            logger.info(f"======== ✅ Thread {thread.name} ends =========")
-
     # Signal all actors to stop
     logger.info("Signaling all actors to stop...")
     ray.get(actor_manager.set_should_stop.remote(True))
     logger.info("✅ Signaled all actors to stop")
+
+    # Clean up threads via executor
+    logger.info("Cleaning up threads...")
     executor.shutdown(wait=True)
+    logger.info("✅ Threads cleaned up")
 
     logger.info("Shutting down Ray queues...")
     for queue in queues:
@@ -2514,8 +2512,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     # Clean up resources
     cleanup_training_resources(
-        stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
-        actor_manager,
+        stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q], actor_manager
     )
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
