@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import string
+import warnings
 import weakref
 from abc import ABC, abstractmethod
 from collections import Counter
@@ -906,7 +907,40 @@ class CodeSearchVerifier(VerifierFunction):
         """
         tool_call_pattern = r"<tool_call>\s*(.*?)\s*</tool_call>"
         tool_calls = re.findall(tool_call_pattern, prediction, re.DOTALL)
-        return [json.loads(tool_call) for tool_call in tool_calls]
+
+        parsed_calls = []
+        for tool_call in tool_calls:
+            try:
+                # Try to parse the JSON directly
+                parsed = json.loads(tool_call)
+                parsed_calls.append(parsed)
+            except json.JSONDecodeError as e:
+                # Log the error for debugging
+                warnings.warn(f"Failed to parse tool call JSON: {e}\nRaw content: {tool_call[:200]}...")
+
+                # Try to fix common JSON issues
+                try:
+                    # Attempt to fix single quotes (common LLM output issue)
+                    fixed_json = tool_call.replace("'", '"')
+                    parsed = json.loads(fixed_json)
+                    parsed_calls.append(parsed)
+                except json.JSONDecodeError:
+                    # If that doesn't work, try regex-based extraction for common format
+                    name_match = re.search(r'"name"\s*:\s*"([^"]+)"', tool_call)
+                    args_match = re.search(r'"arguments"\s*:\s*(\{[^}]*\})', tool_call)
+
+                    if name_match:
+                        # Create a minimal valid tool call
+                        parsed = {"name": name_match.group(1), "arguments": {}}
+                        if args_match:
+                            try:
+                                parsed["arguments"] = json.loads(args_match.group(1))
+                            except json.JSONDecodeError:
+                                pass  # Keep empty arguments if parsing fails
+                        parsed_calls.append(parsed)
+                    # If we can't parse it at all, skip this tool call
+
+        return parsed_calls
 
     async def async_call(
         self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
