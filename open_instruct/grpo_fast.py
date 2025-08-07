@@ -834,14 +834,25 @@ class PolicyTrainerRayProcess(RayProcess):
         original_length = len(collated_query_responses)
 
         if self.splitter is not None:
-            sharded_batches = self.splitter.split_batch({
+            batch = {
                 "input_ids": collated_query_responses,
                 "attention_mask": collated_attention_masks,
                 "position_ids": collated_position_ids,
                 "response_masks": collated_response_masks,
                 "tool_masks": collated_tool_masks,
                 "advantages": collated_advantages,
-            }, sequence_parallel_size=self.args.sequence_parallel_size, padding_token_id=pad_token_id)
+            }
+            # Pad the items in the batch so they are divisible by sp_world_size
+            # TODO: pad value.
+            for i in range(len(batch["input_ids"])):
+                for k in batch.keys():
+                    if torch.is_tensor(batch[k][i]):
+                        seq_length = batch[k][i].shape[1]
+                        if seq_length % self.sp_world_size != 0:
+                            padding_length = self.sp_world_size - (seq_length % self.sp_world_size)
+                            padding = torch.zeros((batch[k][i].shape[0], padding_length), dtype=batch[k][i].dtype, device=batch[k][i].device)
+                            batch[k][i] = torch.cat((batch[k][i], padding), dim=1)
+            sharded_batches = self.splitter.split_batch(batch)
             
             # we need to flatten out the sharded batches so its like:
             # b0 sp0, b0 sp1, ..., b1 sp0, b1 sp1, ..., b2 sp0, b2 sp1, ... etc.
@@ -855,13 +866,12 @@ class PolicyTrainerRayProcess(RayProcess):
 
             for batch_idx in range(original_length):
                 for sp_idx in range(len(sharded_batches)):
-                    # None to re-add in the batch dimension.
-                    collated_query_responses.append(sharded_batches[sp_idx]["input_ids"][batch_idx, None])
-                    collated_attention_masks.append(sharded_batches[sp_idx]["attention_mask"][batch_idx, None])
-                    collated_position_ids.append(sharded_batches[sp_idx]["position_ids"][batch_idx, None])
-                    collated_response_masks.append(sharded_batches[sp_idx]["response_masks"][batch_idx, None])
-                    collated_tool_masks.append(sharded_batches[sp_idx]["tool_masks"][batch_idx, None])
-                    collated_advantages.append(sharded_batches[sp_idx]["advantages"][batch_idx, None])
+                    collated_query_responses.append(sharded_batches[sp_idx]["input_ids"][batch_idx])
+                    collated_attention_masks.append(sharded_batches[sp_idx]["attention_mask"][batch_idx])
+                    collated_position_ids.append(sharded_batches[sp_idx]["position_ids"][batch_idx])
+                    collated_response_masks.append(sharded_batches[sp_idx]["response_masks"][batch_idx])
+                    collated_tool_masks.append(sharded_batches[sp_idx]["tool_masks"][batch_idx])
+                    collated_advantages.append(sharded_batches[sp_idx]["advantages"][batch_idx])
 
             collated_query_responses = move_to_device(collated_query_responses, self.ref_policy.device)
             collated_attention_masks = move_to_device(collated_attention_masks, self.ref_policy.device)

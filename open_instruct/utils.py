@@ -20,6 +20,7 @@ os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
     from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum
+    import deepspeed.comm as dist
 
     # @vwxyzjn: when importing on CPU-only machines, we get the following error:
     # RuntimeError: 0 active drivers ([]). There should only be one.
@@ -1591,7 +1592,7 @@ class UlyssesSPSplitter:
         micro_batches = defaultdict(dict)
 
         # we have batches of variable seqlen so in order to do all_gather on batches - we need to know the exact length of each tensor on each rank
-        seqlen = torch.tensor(batch["input_ids"].shape[1], dtype=torch.int64, device=self.device)
+        seqlen = torch.tensor(len(batch["input_ids"][0][0]), dtype=torch.int64, device=self.device)
         seqlens = [torch.zeros(1, dtype=torch.int64, device=self.device) for _ in range(self.sp_world_size)]
         dist.all_gather(seqlens, seqlen, group=self.sp_group)
         seqlens = [x[0].item() for x in seqlens]
@@ -1617,10 +1618,10 @@ class UlyssesSPSplitter:
 
         batch_shards = []
         for batch in micro_batches.values():
-            seq_length = len(batch["input_ids"][0])
-
+            seq_length = len(batch["input_ids"][0][0])
             if seq_length % self.sp_world_size != 0:
                 raise ValueError(f"batch's seqlen={seq_length} isn't divisible by sp-size={self.sp_world_size}")
+
             chunk_len = seq_length // self.sp_world_size
 
             # for rl training, we don't have labels, so we don't need to do this
