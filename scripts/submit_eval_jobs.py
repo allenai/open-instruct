@@ -633,32 +633,18 @@ if args.run_oe_eval_experiments:
         oe_eval_cmd += f" --step {args.step}"
     
     # add string with number of gpus
-    if args.oe_eval_task_suite == 'SAFETY_EVAL' or args.oe_eval_task_suite == 'SAFETY_EVAL_REASONING':
-        # pull num gpu logic from old safety eval code
-        task_spec = adjust_gpus(
-            task_spec=task_spec,
-            experiment_group="safety_eval",
-            model_name=model_info[0],
-            gpu_multiplier=args.gpu_multiplier,
-        )
-        # add gpu information.
-        # we just assume you want to use all the gpus for one task at a time
-        if "70B" in model_info[0]:
-            task_spec['resources']['gpuCount'] = 8
-        num_gpus = task_spec['resources']['gpuCount'] 
-        # double GPUs for reasoning models
-        if args.oe_eval_task_suite == 'SAFETY_EVAL_REASONING':
-            num_gpus *= 2
-    else:
-        num_gpus = task_spec['resources']['gpuCount']
-        # if num_gpus > 1, double it again for oe-eval configs
-        # open_instruct GPT adjustment wasn't quite enough
-        # adjusted here so the GPU configs in open-instruct eval are not impacted by the change
-        # tested reasonably extensively with 70B
-        if num_gpus > 1:
-            num_gpus *= 2
-    
+    num_gpus = task_spec['resources']['gpuCount']
+    # if num_gpus > 1, double it again for oe-eval configs
+    # open_instruct GPT adjustment wasn't quite enough
+    # adjusted here so the GPU configs in open-instruct eval are not impacted by the change
+    # tested reasonably extensively with 70B
+    if num_gpus > 1:
+        num_gpus *= 2
+    # double GPUs for reasoning models
+    if args.oe_eval_task_suite == 'SAFETY_EVAL_REASONING':
+        num_gpus *= 2
     oe_eval_cmd += f" --num_gpus {num_gpus}"
+
     if args.oe_eval_max_length:
         oe_eval_cmd += f" --max-length {args.oe_eval_max_length}"
     # Add task suite parameter
