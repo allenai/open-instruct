@@ -2364,14 +2364,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     logger.info("======== ✅ generation thread starts =========")
     generation_future = executor.submit(
-        generate_thread,
-        vllm_engines,
-        generation_configs["train"],
-        generation_configs["eval"],
-        args.local_eval_freq,
-        args.num_training_steps,
-        resume_training_step,
-        stop_event,
+        generate_thread, vllm_engines, args.local_eval_freq, args.num_training_steps, resume_training_step, stop_event
     )
 
     # Send initial data to ensure we have a N-step offset.
