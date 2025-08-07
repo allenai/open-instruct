@@ -169,7 +169,6 @@ class LLMRayActor:
         eval_results_queue=None,
         **kwargs,
     ):
-        assert False, "Fake bug during init."
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
