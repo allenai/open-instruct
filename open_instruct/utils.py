@@ -75,8 +75,9 @@ def repeat_each(seq, k):
     return [item for item in seq for _ in range(k)]
 
 
-def ray_get_with_progress(ray_refs: List[ray.ObjectRef], desc: str = "Processing", enable: bool = True,
-                          timeout: Optional[float] = None) -> List[Any]:
+def ray_get_with_progress(
+    ray_refs: List[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: Optional[float] = None
+) -> List[Any]:
     """Execute ray.get() with a progress bar using futures.
 
     Args:

@@ -1219,7 +1219,7 @@ def accumulate_inference_batches(
         training_step: Current training step for error reporting
         generation_config: Generation config containing n (number of samples per prompt)
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
-        
+
     Raises:
         queue.Empty: If timeout is specified and no data is available within timeout.
 
@@ -1345,7 +1345,7 @@ def data_preparation_thread(
                     logger.info("[Data Preparation Thread] Shutting down due to stop event")
                     return  # Simply return to exit the thread cleanly
                 try:
-                    result, queries, ground_truths, datasets = accumulate_inference_batches(
+                    result, batch = accumulate_inference_batches(
                         inference_results_Q, pending_queries_map, args, training_step, generation_config, timeout=1.0
                     )
                     break  # Successfully got results, exit retry loop
@@ -2359,14 +2359,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         tokenizer,
         args.num_training_steps,
         stop_event,
+        generation_configs["train"],
     )
 
     logger.info("======== ✅ generation thread starts =========")
     generation_future = executor.submit(
         generate_thread,
         vllm_engines,
-        generation_config,
-        eval_generation_config,
+        generation_configs["train"],
+        generation_configs["eval"],
         args.local_eval_freq,
         args.num_training_steps,
         resume_training_step,
