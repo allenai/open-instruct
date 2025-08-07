@@ -39,7 +39,7 @@ python mason.py \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --num_evals 100 \
+    --local_eval_every 26 \
     --save_freq 40 \
     --gradient_checkpointing \
     --with_tracking

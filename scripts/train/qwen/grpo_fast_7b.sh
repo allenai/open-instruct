@@ -41,7 +41,7 @@ python mason.py \
     --vllm_num_engines 12 \
     --lr_scheduler_type linear \
     --seed 1 \
-    --num_evals 200 \
+    --local_eval_every 32 \
     --save_freq 40 \
     --try_launch_beaker_eval_jobs_on_weka \
     --gradient_checkpointing \

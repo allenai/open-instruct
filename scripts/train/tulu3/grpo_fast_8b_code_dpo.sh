@@ -45,7 +45,7 @@ python mason.py \
     --vllm_num_engines 10 \
     --lr_scheduler_type constant \
     --seed 1 \
-    --num_evals 100 \
+    --local_eval_every 260 \
     --save_freq 40 \
     --gradient_checkpointing \
     --with_tracking 
