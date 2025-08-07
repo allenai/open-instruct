@@ -65,8 +65,8 @@ from open_instruct.dataset_transformation import (
     TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
     get_cached_dataset_tulu,
+    remove_non_tensor_columns,
     visualize_token,
-    remove_non_tensor_columns
 )
 from open_instruct.dpo_utils import (
     DataCollatorForSeq2SeqDPO,

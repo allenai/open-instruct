@@ -42,6 +42,7 @@ The main things we are looking for are:
 
 import copy
 import hashlib
+from inspect import signature
 import json
 import multiprocessing
 import warnings
@@ -50,6 +51,7 @@ from dataclasses import asdict, dataclass, field
 from functools import cached_property, partial
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
+from transformers.training_args import _convert_str_dict
 import numpy as np
 import torch
 import transformers
@@ -935,6 +937,13 @@ def add_special_chat_tokens(tokenizer, add_special_tokens: List):
 
 @dataclass
 class TokenizerConfig:
+    # Sometimes users will pass in a `str` repr of a dict in the CLI
+    # We need to track what fields those can be. Each time a new arg
+    # has a dict type, it must be added to this list.
+    # Important: These should be typed with Optional[Union[dict,str,...]]
+    # Note: the suggested ellipses typing above causes errors on python 3.10, so they are omitted.
+    _VALID_DICT_FIELDS = ["transform_fn_kwargs"]
+
     tokenizer_name_or_path: Optional[str] = None
     tokenizer_revision: Optional[str] = None
     trust_remote_code: bool = False
@@ -958,6 +967,14 @@ class TokenizerConfig:
     add_special_tokens: Optional[List[str]] = field(
         default=None, metadata={"help": "List of additional special tokens to add to the tokenizer"}
     )
+    transform_fn_kwargs: Optional[Union[dict, str]] = field(
+        default_factory=dict,
+        metadata={
+            "help": "A dictionary of additional kwargs for the dataset_transform_fns. "
+            "Note: in general multiple transform functions will be applied and the kwargs provided here"
+            "will be checked against the signature of each transform and passed when matches are found."
+        },
+    )
 
     @cached_property
     def tokenizer(self):
@@ -980,6 +997,18 @@ class TokenizerConfig:
             tokenizer = add_special_chat_tokens(tokenizer, self.add_special_tokens)
 
         return tokenizer
+
+    def __post_init__(self):
+        # Parse in args that could be `dict` sent in from the CLI as a string
+        for dict_field in self._VALID_DICT_FIELDS:
+            passed_value = getattr(self, dict_field)
+            # We only want to do this if the str starts with a bracket to indicate a `dict`
+            # else its likely a filename if supported
+            if isinstance(passed_value, str) and passed_value.startswith("{"):
+                loaded_dict = json.loads(passed_value)
+                # Convert str values to types if applicable
+                loaded_dict = _convert_str_dict(loaded_dict)
+                setattr(self, dict_field, loaded_dict)
 
 
 # TODO: for testing, we should load the tokenizer from the sft / dpo / rl and make sure they are all the same.
@@ -1689,6 +1718,12 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         fn, fn_type = TRANSFORM_FNS[fn_name]
         # always pass in tokenizer and other args if needed
         fn_kwargs = {"tokenizer": tokenizer}
+        if tc.transform_fn_kwargs:
+            fn_params = signature(fn_name).parameters
+            extra_kwargs = {k: v for k, v in tc.transform_fn_kwargs.items() if k in fn_params}
+            if extra_kwargs:
+                print(f"Using kwargs {extra_kwargs} for data transform fn {fn_name}.")
+                fn_kwargs = {**fn_kwargs, **extra_kwargs}
         fn_kwargs.update(fn_args)
 
         # perform the transformation
