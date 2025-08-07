@@ -38,6 +38,10 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
+from open_instruct.utils import ray_get_with_progress
+
+logger = logging.getLogger(__name__)
+
 
 @dataclasses.dataclass
 class RequestInfo:
@@ -165,6 +169,7 @@ class LLMRayActor:
         eval_results_queue=None,
         **kwargs,
     ):
+        assert False, "Fake bug during init."
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
@@ -422,6 +427,18 @@ def create_vllm_engines(
                 **additional_kwargs,
             )
         )
+
+    # Verify engines initialized successfully
+    try:
+        ray_get_with_progress(
+            [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300
+        )
+    except TimeoutError as e:
+        logger.error(f"vLLM engines failed to initialize: {e}")
+        # Kill partially initialized actors before raising
+        for engine in vllm_engines:
+            ray.kill(engine)
+        raise RuntimeError(f"vLLM engine initialization timed out: {e}")
 
     if vllm_enable_sleep:
         batch_vllm_engine_call(vllm_engines, "sleep", rank_0_only=False)
