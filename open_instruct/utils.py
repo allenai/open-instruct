@@ -75,21 +75,27 @@ def repeat_each(seq, k):
     return [item for item in seq for _ in range(k)]
 
 
-def ray_get_with_progress(ray_refs: List[ray.ObjectRef], desc: str = "Processing", enable: bool = True) -> List[Any]:
+def ray_get_with_progress(
+    ray_refs: List[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: Optional[float] = None
+) -> List[Any]:
     """Execute ray.get() with a progress bar using futures.
 
     Args:
         ray_refs: List of ray object references
         desc: Description for the progress bar
         enable: Whether to show the progress bar (default: True)
+        timeout: Optional timeout in seconds for all operations to complete
 
     Returns:
         List of results in the same order as ray_refs
+
+    Raises:
+        TimeoutError: If timeout is specified and operations don't complete in time
     """
     ray_futures = [ref.future() for ref in ray_refs]
     results = [None] * len(ray_refs)
 
-    futures_iter = futures.as_completed(ray_futures)
+    futures_iter = futures.as_completed(ray_futures, timeout=timeout)
     if enable:
         futures_iter = tqdm(futures_iter, total=len(ray_futures), desc=desc, bar_format="{l_bar}{bar}{r_bar}\n")
 
