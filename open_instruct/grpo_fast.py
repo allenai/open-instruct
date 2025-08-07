@@ -1911,7 +1911,8 @@ def one_training_step(
 ):
     """Train the model for one step."""
     update_ref_policy_future = []
-    with Timer("[Main Thread] 🗡️ Training"):
+    timer = Timer("[Main Thread] 🗡️ Training")
+    with timer:
         metrics_list: List[dict[str, float]] = ray.get(
             [
                 policy_group.models[i].train.remote(
@@ -1936,6 +1937,7 @@ def one_training_step(
             "val/num_total_tokens": num_total_tokens,
             "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
             "tokens_per_second": num_total_tokens / (time.time() - start_time),
+            "training_time": timer.current_duration(),
             **data_thread_metrics,
             **average_metrics,
         }
@@ -2369,10 +2371,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             generate_metrics = generate_metrics_Q.get_nowait()
         except queue.Empty:
             logging.info("[Main Thread] didn't get generation metrics")
-
-        import pdb
-
-        pdb.set_trace()
 
         data_thread_metrics = {**data_thread_metrics, **generate_metrics}
 

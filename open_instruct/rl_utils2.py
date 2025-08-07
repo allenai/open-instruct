@@ -24,6 +24,9 @@ class Timer:
         self.start_time = time.perf_counter()
         return self
 
+    def current_duration(self):
+        return time.perf_counter() - self.start_time
+
     def __exit__(self, type, value, traceback):
         if self.noop:
             return
