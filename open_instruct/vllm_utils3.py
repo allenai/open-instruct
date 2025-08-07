@@ -248,117 +248,156 @@ class LLMRayActor:
             except queue.Full:
                 self.logger.warning("Results queue is full, discarding result.")
 
+    def _maybe_add_requests(
+        self,
+        prompt_queue,
+        llm_engine,
+        pending_requests,
+        active_request_count,
+        request_counter,
+        inference_batch_size,
+        should_stop,
+        timeout,
+    ):
+        """Pull requests off the queue and add them to the engine until we have inference_batch_size requests queued.
+
+        Returns updated (active_request_count, request_counter).
+        """
+        while active_request_count < inference_batch_size and not should_stop:
+            try:
+                # Try to get a request with very short timeout to avoid blocking
+                request = prompt_queue.get(timeout=0.001 if active_request_count > 0 else timeout)
+
+                # Add each prompt in the request to the engine
+                for prompt_idx, prompt in enumerate(request.prompts):
+                    request_id = f"req_{request_counter}_{prompt_idx}"
+                    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
+                    llm_engine.add_request(request_id, tokens_prompt, request.sampling_params)
+
+                    # Track this request
+                    pending_requests[request_id] = (request, prompt_idx)
+                    active_request_count += 1
+
+                request_counter += 1
+
+            except queue.Empty:
+                # No more requests available
+                break
+
+        return active_request_count, request_counter
+
     def _run_generation_loop(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly."""
+        # Track pending requests and their metadata
+        pending_requests = {}  # request_id -> (original_request, prompt_index_in_request)
+        active_request_count = 0
+        request_counter = 0
+
         while True:
+            # Check if we should stop
             should_stop = ray.get(self.actor_manager.should_stop.remote())
 
-            # If update_weights_inflight is True, exit immediately when stop is signaled
+            # Exit conditions
             if should_stop and self.update_weights_inflight:
                 self.logger.info(
                     "[LLMRayActor] Actor manager signaled to stop (update_weights_inflight=True). Exiting immediately."
                 )
                 return
 
-            # If update_weights_inflight is False and should_stop, finish current requests first
-            if should_stop and not self.update_weights_inflight and not self.llm_engine.has_unfinished_requests():
-                self.logger.info("[LLMRayActor] Actor manager signaled to stop and no unfinished requests. Exiting.")
+            if should_stop and not self.llm_engine.has_unfinished_requests():
+                self.logger.info("[LLMRayActor] Actor manager signaled to stop. Exiting generation loop.")
                 return
 
-            # Don't accept new requests if we should stop (but might still be processing existing ones)
-            if should_stop and not self.update_weights_inflight:
-                # Just process existing requests without accepting new ones
-                if self.llm_engine.has_unfinished_requests():
-                    step_outputs = self.llm_engine.step()
-                    continue
-                else:
-                    return
-
-            # Normal operation - collect requests
-            requests = []
-            try:
-                # Get first request (wait with timeout)
-                first_request = self.prompt_queue.get(timeout=timeout)
-                requests.append(first_request)
-
-                # Try to get more requests without waiting
-                for _ in range(self.inference_batch_size - 1):
-                    try:
-                        request = self.prompt_queue.get(timeout=0.001)  # Very short timeout
-                        requests.append(request)
-                    except queue.Empty:
-                        break
-            except queue.Empty:
-                self.logger.warning("[LLMRayActor] No request in the queue to process. Continuing.")
-                continue
-
-            # Batch all prompts together
-            all_prompts = []
-            all_dataset_indices = []
-            request_mapping = []  # Track which prompts belong to which request
-
-            for req_idx, request in enumerate(requests):
-                for prompt in request.prompts:
-                    all_prompts.append(prompt)
-                    all_dataset_indices.extend(request.dataset_index if request.dataset_index else [])
-                    request_mapping.append((req_idx, request))
-
-            # Debug logging
-            n_samples = requests[0].sampling_params.n if requests[0].sampling_params else 1
-            print(
-                f"[LLMRayActor] Processing batch: {len(all_prompts)} prompts from {len(requests)} requests, "
-                f"n={n_samples}, expecting {len(all_prompts) * n_samples} total outputs"
+            # Pull requests off the queue and add them to the engine
+            active_request_count, request_counter = self._maybe_add_requests(
+                self.prompt_queue,
+                self.llm_engine,
+                pending_requests,
+                active_request_count,
+                request_counter,
+                self.inference_batch_size,
+                should_stop,
+                timeout,
             )
 
-            # Add requests to the engine
-            for i, prompt in enumerate(all_prompts):
-                request_id = f"batch_{requests[0].training_step}_{i}"
-                tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
-                self.llm_engine.add_request(request_id, tokens_prompt, requests[0].sampling_params)
+            # Process each output
+            for output in self.llm_engine.step():
+                processed_count = self._process_single_output(output, pending_requests)
+                active_request_count -= processed_count
 
-            # Run the engine event loop until all requests are finished
-            outputs = []
-            while self.llm_engine.has_unfinished_requests():
-                # Check if we should stop immediately during processing
-                if self.update_weights_inflight and ray.get(self.actor_manager.should_stop.remote()):
-                    self.logger.info(
-                        "[LLMRayActor] Stopping immediately during request processing (update_weights_inflight=True)"
-                    )
-                    return
+    def _process_single_output(self, output, pending_requests):
+        """Process a single vLLM RequestOutput and handle it completely.
 
-                step_outputs = self.llm_engine.step()
-                for output in step_outputs:
-                    if output.finished:
-                        outputs.append(output)
+        Returns the number of requests that were processed (0 or 1).
+        """
+        # Only process finished outputs
+        if not output.finished:
+            return 0
 
-            # Sort outputs by prompt index (i)
-            # Request IDs are now in format: batch_{step}_{i}
-            outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
+        request_id = output.request_id
+        if request_id not in pending_requests:
+            return 0
 
-            # Debug logging
-            total_responses = sum(len(output.outputs) for output in outputs)
-            self.logger.info(
-                f"[LLMRayActor] Collected {len(outputs)} RequestOutputs with "
-                f"{total_responses} total responses (expected {len(all_prompts) * n_samples})"
-            )
+        original_request, prompt_idx = pending_requests[request_id]
 
-            # Process outputs and send results back for each original request
-            prompt_idx = 0
-            for request in requests:
-                # Extract outputs for this request
-                num_prompts_in_request = len(request.prompts)
-                request_outputs = outputs[prompt_idx : prompt_idx + num_prompts_in_request]
-                prompt_idx += num_prompts_in_request
+        # Extract response data from the output
+        response_ids = [list(out.token_ids) for out in output.outputs]
+        finish_reasons = [out.finish_reason for out in output.outputs]
 
-                # Process and send result
-                result = self._process_outputs(request_outputs, dataset_index=request.dataset_index)
-                try:
-                    if request.is_eval:
-                        self.eval_results_queue.put(result, timeout=10)
-                    else:
-                        self.results_queue.put(result, timeout=10)
-                except queue.Full:
-                    self.logger.warning("Results queue is full, discarding result.")
+        if self.tool_use:
+            masks = [out.mask for out in output.outputs]
+            num_calls = [out.num_calls for out in output.outputs]
+            timeouts = [out.timeout for out in output.outputs]
+            tool_errors = [out.tool_error for out in output.outputs]
+            tool_outputs = [out.tool_output for out in output.outputs]
+            tool_runtimes = [out.tool_runtime for out in output.outputs]
+            tool_calleds = [out.tool_called for out in output.outputs]
+        else:
+            masks = [[1] * len(resp) for resp in response_ids]
+            num_calls = [0] * len(response_ids)
+            timeouts = [0] * len(response_ids)
+            tool_errors = [""] * len(response_ids)
+            tool_outputs = [""] * len(response_ids)
+            tool_runtimes = [0] * len(response_ids)
+            tool_calleds = [False] * len(response_ids)
+
+        request_info = RequestInfo(
+            num_calls=num_calls,
+            timeouts=timeouts,
+            tool_errors=tool_errors,
+            tool_outputs=tool_outputs,
+            tool_runtimes=tool_runtimes,
+            tool_calleds=tool_calleds,
+        )
+
+        # Get the appropriate dataset index for this prompt
+        dataset_index = None
+        if original_request.dataset_index:
+            # If we have dataset indices, extract the one for this prompt
+            if prompt_idx < len(original_request.dataset_index):
+                dataset_index = [original_request.dataset_index[prompt_idx]]
+
+        result = GenerationResult(
+            responses=response_ids,
+            finish_reasons=finish_reasons,
+            masks=masks,
+            request_info=request_info,
+            dataset_index=dataset_index,
+        )
+
+        # Send result to appropriate queue
+        try:
+            if original_request.is_eval:
+                self.eval_results_queue.put(result, timeout=1)
+            else:
+                self.results_queue.put(result, timeout=1)
+        except queue.Full:
+            self.logger.warning("Results queue is full, discarding result.")
+
+        # Clean up the pending request
+        del pending_requests[request_id]
+
+        return 1
 
     def process_from_queue(self, timeout=0.1):
         """Process a single element from the queue."""
