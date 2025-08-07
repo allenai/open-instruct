@@ -1939,8 +1939,10 @@ def generate_thread(vllm_engines, local_eval_freq, num_training_steps, resume_tr
     logger.info("[Generate Thread] 🚀 Starting generation thread")
     while not stop_event.is_set():
         with Timer("🔥 Generation time"):
-            engine_refs = [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines]
-            ray_get_with_progress(engine_refs, desc="[Generate Thread] Waiting for vLLM engines to process")
+            ray_get_with_progress(
+                [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
+                desc="[Generate Thread] Waiting for vLLM engines to process",
+            )
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
@@ -2406,7 +2408,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         )
     num_total_tokens = 0
     start_time = time.time()
-    error_occurred = False
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         check_threads_healthy(
             [packing_future, generation_future],
@@ -2508,10 +2509,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         logger.warning("Runtime leaks detected:\n" + leak_report.pretty())
     else:
         logger.info("No runtime leaks detected.")
-
-    # Raise error if one occurred during training
-    if error_occurred:
-        raise RuntimeError("Training stopped due to error in worker thread")
 
 
 if __name__ == "__main__":
