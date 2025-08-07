@@ -30,14 +30,13 @@
 # isort: off
 import os
 from concurrent import futures
-import tqdm
 
 # We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
 # https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     import deepspeed
-    from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF, UlyssesSPDataLoaderAdapter
+    from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF
     from deepspeed.utils import groups
     from deepspeed.runtime.utils import move_to_device
 
