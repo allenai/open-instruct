@@ -29,6 +29,7 @@
 # limitations under the License.
 # isort: off
 import os
+from concurrent import futures
 
 # We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
 # https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
@@ -54,7 +55,6 @@ import threading
 import time
 from argparse import Namespace
 from collections import defaultdict
-from concurrent import futures
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
@@ -1249,22 +1249,12 @@ def accumulate_inference_batches(
         # but dataset_indices only contains the unique indices (not replicated)
         # So we expect: len(responses) == len(dataset_indices) * generation_config.n
         expected_responses = len(dataset_indices) * generation_config.n
-        if len(result.responses) != expected_responses:
-            # Print detailed debugging info before asserting
-            logger.error(f"Response count mismatch for result {i}:")
-            logger.error(
-                f"  Expected: {expected_responses} (dataset_indices={len(dataset_indices)} * n={generation_config.n})"
-            )
-            logger.error(f"  Actual: {len(result.responses)}")
-            logger.error(f"  Dataset indices: {dataset_indices}")
-            logger.error(f"  Response lengths: {[len(r) for r in result.responses[:5]]}...")  # First 5
-            logger.error(f"  Finish reasons: {result.finish_reasons[:5]}...")  # First 5
-            assert len(result.responses) == expected_responses, (
-                f"Mismatch: number of responses ({len(result.responses)}) "
-                f"doesn't match expected ({expected_responses}) for result {i}"
-                f". {generation_config.n=}"
-                f", {len(dataset_indices)=}"
-            )
+        assert len(result.responses) == expected_responses, (
+            f"Mismatch: number of responses ({len(result.responses)}) "
+            f"doesn't match expected ({expected_responses}) for result {i}"
+            f". {generation_config.n=}"
+            f", {len(dataset_indices)=}"
+        )
 
         # Get corresponding queries, ground_truths, datasets for each individual prompt
         batch_queries = []
@@ -1331,29 +1321,6 @@ def accumulate_inference_batches(
         indices=None,  # Not meaningful for combined results
     )
     return combined_result, batch
-
-
-def create_thread_error_wrapper(
-    stop_event: threading.Event,
-    threads: list[threading.Thread],
-    queues: list[ray_queue.Queue],
-    actor_manager: ActorManager,
-):
-    """Create a wrapper that handles thread errors and triggers cleanup."""
-
-    def wrap_thread_func(func):
-        def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                logger.error(f"🚨 Fatal error in {func.__name__}: {e}", exc_info=True)
-                # Signal main thread to stop instead of calling cleanup directly
-                stop_event.set()
-                logger.info(f"[{func.__name__}] Set stop event due to error")
-
-        return wrapper
-
-    return wrap_thread_func
 
 
 def data_preparation_thread(
