@@ -30,6 +30,7 @@
 # isort: off
 import os
 from concurrent import futures
+from datetime import timedelta
 
 # We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
 # https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
@@ -564,7 +565,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.wandb_url = wandb_url
         torch.cuda.set_device(self.local_rank)
         self.device = torch.device(self.local_rank)
-        deepspeed.init_distributed()
+        deepspeed.init_distributed(timeout=timedelta(minutes=180))
 
         ds_config = get_train_ds_config(
             offload=False,
