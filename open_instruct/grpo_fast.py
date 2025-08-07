@@ -693,7 +693,7 @@ class PolicyTrainerRayProcess(RayProcess):
             input_ids=input_ids[:, :-1],
             # @vwxyzjn: without clamp, we get index out of bounds errors; TODO: investigate
             attention_mask=attention_mask[:, :-1].clamp(0, 1),
-            # position_ids=position_ids[:, :-1],
+            position_ids=position_ids[:, :-1],
             return_dict=True,
         )
         logits = output.logits
@@ -843,7 +843,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 "advantages": collated_advantages,
             }
             # Pad the items in the batch so they are divisible by sp_world_size
-            # TODO: pad value.
+            # where attention mask is 0, we dont end up using anyway.
             for i in range(len(batch["input_ids"])):
                 for k in batch.keys():
                     if torch.is_tensor(batch[k][i]):
