@@ -215,7 +215,7 @@ class LLMRayActor:
         self.logger = logging.getLogger(__name__)
         self.actor_manager = actor_manager
 
-    def _run_generation_loop(self, timeout: float = 60.0):
+    def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly."""
         while True:
             if ray.get(self.actor_manager.should_stop.remote()):
@@ -278,26 +278,12 @@ class LLMRayActor:
             except queue.Full:
                 self.logger.warning("Results queue is full, discarding result.")
 
-    def process_from_queue(self, timeout=0.1):
-        """Process a single element from the queue."""
-        self._run_generation_loop(timeout)
-
     def _process_outputs(
         self,
         outputs: List[Any],  # List of vllm.RequestOutput objects
         dataset_index: Optional[List[int]] = None,
     ) -> GenerationResult:
         """Process vLLM RequestOutputs into GenerationResult format."""
-        # Debug logging
-        self.logger.info(
-            f"[_process_outputs] Processing {len(outputs)} RequestOutputs, dataset_indices={dataset_index}"
-        )
-        for i, output in enumerate(outputs):
-            self.logger.info(
-                f"[_process_outputs] Output {i}: request_id={output.request_id}, num_completions={len(output.outputs)}"
-            )
-
-        # Process outputs
         response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
         finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
 
@@ -324,12 +310,6 @@ class LLMRayActor:
             masks=masks,
             request_info=request_info,
             dataset_index=dataset_index,
-        )
-
-        # Debug logging
-        self.logger.info(
-            f"[_process_outputs] Returning GenerationResult with {len(result.responses)} responses "
-            f"for {len(dataset_index) if dataset_index else 0} dataset indices"
         )
 
         return result
@@ -382,34 +362,28 @@ class ToolLLMRayActor(LLMRayActor):
         self.tools = tools
         self.max_tool_calls = max_tool_calls
 
-        # Don't pass tools and max_tool_calls to parent
-        kwargs_copy = kwargs.copy()
-        noset_visible_devices = kwargs_copy.pop("noset_visible_devices")
+        # Call parent init (but we need to bypass the LLMEngine creation)
+        # So we'll temporarily set up the environment before calling super
+        super().__init__(
+            *args,
+            bundle_indices=bundle_indices,
+            prompt_queue=prompt_queue,
+            results_queue=results_queue,
+            eval_results_queue=eval_results_queue,
+            actor_manager=actor_manager,
+            **kwargs,
+        )
 
-        # Handle environment setup (same as parent)
-        if kwargs_copy.get("distributed_executor_backend") == "ray":
-            os.environ.pop("CUDA_VISIBLE_DEVICES", None)
-            os.environ.pop("ROCR_VISIBLE_DEVICES", None)
-        elif noset_visible_devices:
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
-
-        num_gpus = kwargs_copy.pop("num_gpus")
-        if bundle_indices is not None:
-            os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
-            os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
-            print(f"creating LLM with bundle_indices={bundle_indices}")
-
-        # Initialize with ToolUseLLM instead of regular LLMEngine
+        # Now override with ToolUseLLM instead of regular LLMEngine
         from open_instruct.tool_utils.tool_vllm import ToolUseLLM
+
+        # Need to reconstruct kwargs without the ones already consumed by parent
+        kwargs_copy = kwargs.copy()
+        kwargs_copy.pop("noset_visible_devices", None)
+        kwargs_copy.pop("num_gpus", None)
 
         self.llm = ToolUseLLM(tools=tools, max_tool_calls=max_tool_calls, *args, **kwargs_copy)
         self.llm_engine = self.llm.llm_engine
-
-        self.prompt_queue = prompt_queue
-        self.results_queue = results_queue
-        self.eval_results_queue = eval_results_queue
-        self.logger = logging.getLogger(__name__)
-        self.actor_manager = actor_manager
 
     def process_from_queue(self, timeout=0.1):
         """Process a single element from the queue using tool generation loop."""
