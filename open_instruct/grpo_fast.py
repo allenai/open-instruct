@@ -389,6 +389,10 @@ class Args:
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
 
+    # Evaluation behavior
+    eval_on_step_0: bool = False
+    """Whether to run local evaluation at training step 0. Defaults to False."""
+
     # Tool settings
     tools: Optional[List[str]] = None
     """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
@@ -2001,7 +2005,7 @@ def one_training_step(
                     writer.add_histogram(key, value, episode)
         print_rich_single_line_metrics(scalar_metrics)
 
-        if args.save_freq > 0 and training_step % args.save_freq == 0:
+        if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
             with Timer("[Main Thread] 🗡️ Saving model"):
                 checkpoint_dir = f"{args.output_dir}_checkpoints"
                 step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
