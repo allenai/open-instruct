@@ -1913,7 +1913,7 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
 
 
 def generate_thread(
-    vllm_engines, local_eval_freq, num_training_steps, resume_training_step, stop_event, generate_metrics_Q
+    vllm_engines, local_eval_every, num_training_steps, resume_training_step, stop_event, generate_metrics_Q
 ):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
@@ -2373,7 +2373,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     generation_future = executor.submit(
         generate_thread,
         vllm_engines,
-        args.local_eval_freq,
+        args.local_eval_every,
         args.num_training_steps,
         resume_training_step,
         stop_event,
