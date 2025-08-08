@@ -562,12 +562,13 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         mock_generation_config = Mock()
         mock_generation_config.n = num_samples_per_prompt
 
-        combined_result, batch = grpo_fast.accumulate_inference_batches(
+        combined_result, batch, _ = grpo_fast.accumulate_inference_batches(
             inference_results_Q,
             pending_queries_map,
             mock_args,
             training_step=1,
             generation_config=mock_generation_config,
+            partial_state=None,
         )
 
         # Verify results work correctly even with out-of-order processing
@@ -654,12 +655,13 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                 mock_generation_config = Mock()
                 mock_generation_config.n = 1
 
-                grpo_fast.accumulate_inference_batches(
+                result, batch, partial_state = grpo_fast.accumulate_inference_batches(
                     inference_results_Q,
                     pending_queries_map,
                     mock_args,
                     training_step=1,
                     generation_config=mock_generation_config,
+                    partial_state=None,
                 )
                 completed.set()
             except Exception:

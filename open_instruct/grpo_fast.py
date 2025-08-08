@@ -1207,7 +1207,8 @@ def accumulate_inference_batches(
     training_step: int,
     generation_config,
     timeout: Optional[float] = None,
-) -> tuple[GenerationResult, Batch]:
+    partial_state: Optional[dict] = None,
+) -> tuple[Optional[GenerationResult], Optional[Batch], dict]:
     """Accumulate multiple inference results into a single training batch.
 
     Args:
@@ -1217,26 +1218,51 @@ def accumulate_inference_batches(
         training_step: Current training step for error reporting
         generation_config: Generation config containing n (number of samples per prompt)
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
-
-    Raises:
-        queue.Empty: If timeout is specified and no data is available within timeout.
+        partial_state: Dictionary containing partial results from previous attempts.
+                      Should contain 'results', 'all_queries', 'all_ground_truths',
+                      'all_datasets', and 'collected_count' keys.
 
     Returns:
-        Tuple of (combined_result, Batch with queries, ground_truths, datasets)
+        Tuple of (combined_result or None, Batch or None, updated partial_state dict).
+        If incomplete, returns (None, None, partial_state) for resumption.
     """
-    # Collect results from all engines with non-blocking progress bar
-    results = []
-    all_queries = []
-    all_ground_truths = []
-    all_datasets = []
+    # Initialize or restore partial state
+    if partial_state is None:
+        results = []
+        all_queries = []
+        all_ground_truths = []
+        all_datasets = []
+        collected_count = 0
+    else:
+        results = partial_state.get("results", [])
+        all_queries = partial_state.get("all_queries", [])
+        all_ground_truths = partial_state.get("all_ground_truths", [])
+        all_datasets = partial_state.get("all_datasets", [])
+        collected_count = partial_state.get("collected_count", 0)
 
+    # Collect remaining results from engines
+    engines_collected_this_round = 0
     for i in tqdm(
-        range(args.vllm_num_engines),
-        total=args.vllm_num_engines,
-        desc=f"Accumulating results from {args.vllm_num_engines} engines ({timeout=})",
+        range(collected_count, args.vllm_num_engines),
+        total=args.vllm_num_engines - collected_count,
+        initial=0,
+        desc=f"Accumulating results from engines {collected_count + 1}-{args.vllm_num_engines} ({timeout=})",
         bar_format="{l_bar}{bar}{r_bar}\n",
     ):
-        result = inference_results_Q.get(timeout=timeout)
+        try:
+            result = inference_results_Q.get(timeout=timeout)
+            engines_collected_this_round += 1
+        except Empty:
+            # Save partial state and return for resumption
+            partial_state = {
+                "results": results,
+                "all_queries": all_queries,
+                "all_ground_truths": all_ground_truths,
+                "all_datasets": all_datasets,
+                "collected_count": collected_count + engines_collected_this_round,
+            }
+            return None, None, partial_state
+
         dataset_indices = result.dataset_index
 
         if dataset_indices is None:
@@ -1269,7 +1295,7 @@ def accumulate_inference_batches(
         all_ground_truths.extend(batch_ground_truths)
         all_datasets.extend(batch_datasets)
 
-    # Combine all results into a single GenerationResult
+    # All results collected successfully - combine them
     combined_responses = []
     combined_finish_reasons = []
     combined_masks = []
@@ -1318,7 +1344,9 @@ def accumulate_inference_batches(
         datasets=all_datasets,
         indices=None,  # Not meaningful for combined results
     )
-    return combined_result, batch
+
+    # Return completed results with empty partial state
+    return combined_result, batch, {}
 
 
 def data_preparation_thread(
@@ -1338,23 +1366,34 @@ def data_preparation_thread(
             return
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
+            partial_state = None  # Initialize partial state for this training step
             while True:
                 if stop_event.is_set():
                     logger.info("[Data Preparation Thread] Shutting down due to stop event")
                     return  # Simply return to exit the thread cleanly
-                try:
-                    result, batch = accumulate_inference_batches(
-                        inference_results_Q,
-                        pending_queries_map,
-                        args,
-                        training_step,
-                        generation_config,
-                        # We only timeout after half an hour. This is to avoid jobs hanging forever.
-                        timeout=1800.0,
+
+                result, batch, partial_state = accumulate_inference_batches(
+                    inference_results_Q,
+                    pending_queries_map,
+                    args,
+                    training_step,
+                    generation_config,
+                    # We only timeout after half an hour. This is to avoid jobs hanging forever.
+                    timeout=1800.0,
+                    partial_state=partial_state,
+                )
+
+                if result is not None and batch is not None:
+                    # Successfully got all results
+                    break
+                else:
+                    # Partial results collected, continue with partial_state
+                    logger.info(
+                        f"[Data Preparation Thread] Timeout during accumulation, "
+                        f"collected {partial_state.get('collected_count', 0)}/{args.vllm_num_engines} engines. "
+                        f"Retrying..."
                     )
-                    break  # Successfully got results, exit retry loop
-                except Empty:
-                    continue  # Timeout occurred, loop back to check stop_event
+                    continue
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -2059,14 +2098,19 @@ def maybe_evaluate(
         timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_every < 0) else 100
 
         # Accumulate evaluation results from all vLLM engines
-        eval_result, eval_batch = accumulate_inference_batches(
+        eval_result, eval_batch, _ = accumulate_inference_batches(
             evaluation_inference_results_Q,
             eval_pending_queries_map,
             args,
             training_step,
             eval_generation_config,
             timeout=timeout,
+            partial_state=None,
         )
+
+        # If we got partial results (timeout), treat it as Empty for evaluation
+        if eval_result is None or eval_batch is None:
+            raise Empty()
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
 
