@@ -1344,7 +1344,13 @@ def data_preparation_thread(
                     return  # Simply return to exit the thread cleanly
                 try:
                     result, batch = accumulate_inference_batches(
-                        inference_results_Q, pending_queries_map, args, training_step, generation_config, timeout=1.0
+                        inference_results_Q,
+                        pending_queries_map,
+                        args,
+                        training_step,
+                        generation_config,
+                        # We only timeout after half an hour. This is to avoid jobs hanging forever.
+                        timeout=1800.0,
                     )
                     break  # Successfully got results, exit retry loop
                 except Empty:
