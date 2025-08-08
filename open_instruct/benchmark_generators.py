@@ -27,6 +27,7 @@ import vllm
 from ray.util import queue as ray_queue
 
 from open_instruct import dataset_transformation, grpo_fast, model_utils, utils, vllm_utils3
+from open_instruct.queue_types import PromptRequest
 
 # For FLOPS, we assume bf16 and ignore sparsity.
 GPU_SPECS = {
@@ -383,7 +384,7 @@ def run_benchmark(
     ]
     submission_start_time = time.time()
     for batch_idx in range(num_batches):
-        param_prompt_Q.put(vllm_utils3.PromptRequest(prompts=all_prompts[batch_idx], dataset_index=batch_idx))
+        param_prompt_Q.put(PromptRequest(prompts=all_prompts[batch_idx], dataset_index=batch_idx))
     submission_time = time.time() - submission_start_time
     logger.info(f"All batches submitted in {submission_time:.2f}s")
 

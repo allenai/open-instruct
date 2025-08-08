@@ -19,8 +19,6 @@ class Timer:
         self.noop = noop
 
     def __enter__(self):
-        if self.noop:
-            return
         self.start_time = time.perf_counter()
         return self
 
