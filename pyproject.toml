@@ -57,7 +57,6 @@ name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
-# flash-attn related setups
 [project.optional-dependencies]
 code = [
     "fastapi>=0.100.0",
@@ -70,12 +69,6 @@ code = [
 [tool.uv]
 preview = true
 python-preference = "only-managed"
-no-build-isolation-package = ["flash-attn"]
-
-[[tool.uv.dependency-metadata]]
-name = "flash-attn"
-version = "2.7.2.post1"
-requires-dist = ["torch", "setuptools"]
 
 [dependency-groups]
 dev = [
