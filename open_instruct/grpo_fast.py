@@ -128,14 +128,8 @@ from open_instruct.utils import (
     repeat_each,
     sync_gs_bucket,
 )
-from open_instruct.vllm_utils3 import (
-    GenerationResult,
-    LLMRayActor,
-    PromptRequest,
-    RequestInfo,
-    create_vllm_engines,
-    init_process_group,
-)
+from open_instruct.vllm_utils3 import LLMRayActor, create_vllm_engines, init_process_group
+from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo
 
 # Setup logging with filename and line number format
 logging.basicConfig(
@@ -1230,12 +1224,18 @@ def accumulate_inference_batches(
     all_ground_truths = []
     all_datasets = []
 
-    for i in tqdm(
-        range(args.vllm_num_engines),
-        total=args.vllm_num_engines,
-        desc=f"Accumulating results from {args.vllm_num_engines} engines ({timeout=})",
-        bar_format="{l_bar}{bar}{r_bar}\n",
-    ):
+
+    if args.verbose:
+        engine_iter = tqdm(
+            range(args.vllm_num_engines),
+            total=args.vllm_num_engines,
+            desc=f"Accumulating results from {args.vllm_num_engines} engines ({timeout=})",
+            bar_format="{l_bar}{bar}{r_bar}\n",
+        )
+    else:
+        engine_iter = range(args.vllm_num_engines)
+
+    for i in engine_iter:
         result = inference_results_Q.get(timeout=timeout)
         dataset_indices = result.dataset_index
 
@@ -1913,22 +1913,29 @@ def generate_thread(vllm_engines, local_eval_every, num_training_steps, resume_t
     logger.info("[Generate Thread] 🚀 Starting generation thread")
 
     while not stop_event.is_set():
-        with Timer("🔥 Generation time"):
+        with Timer("🔥 Generation time") as _gen_timer:
             engine_refs = [
                 engine.process_from_queue.remote(num_training_steps, resume_training_step, timeout=0.1)
                 for engine in vllm_engines
             ]
             engine_futures = [ref.future() for ref in engine_refs]
             processed_results = []
-            with tqdm(
-                total=len(vllm_engines),
-                desc="[Generate Thread] Waiting for vLLM engines to return",
-                bar_format="{l_bar}{bar}{r_bar}\n",
-            ) as pbar:
+            if args.verbose:
+                with tqdm(
+                    total=len(vllm_engines),
+                    desc="[Generate Thread] Waiting for vLLM engines to return",
+                    bar_format="{l_bar}{bar}{r_bar}\n",
+                ) as pbar:
+                    for future in futures.as_completed(engine_futures):
+                        processed_results.append(future.result())
+                        pbar.update(1)
+            else:
                 for future in futures.as_completed(engine_futures):
                     processed_results.append(future.result())
-                    pbar.update(1)
             num_processed = sum(int(result) for result in processed_results)
+            # Suppress timing output if nothing was processed
+            if num_processed == 0:
+                _gen_timer.noop = 1
         if num_processed == 0:
             # If no batches were processed, sleep for a short time to avoid busy waiting
             time.sleep(1)
