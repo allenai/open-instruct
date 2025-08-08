@@ -33,7 +33,7 @@ python open_instruct/grpo_fast.py \
     --vllm_num_engines 1 \
     --lr_scheduler_type constant \
     --seed 1 \
-    --num_evals 100 \
+    --local_eval_every 200 \
     --save_freq 40 \
     --gradient_checkpointing \
     --single_gpu_mode 
