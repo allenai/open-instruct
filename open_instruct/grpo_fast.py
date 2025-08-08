@@ -30,12 +30,16 @@
 # isort: off
 import os
 from concurrent import futures
+from datetime import timedelta
 
 # We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
 # https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     import deepspeed
+    from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF
+    from deepspeed.utils import groups
+    from deepspeed.runtime.utils import move_to_device
 
     # @vwxyzjn: when importing on CPU-only machines, we get the following error:
     # RuntimeError: 0 active drivers ([]). There should only be one.
@@ -127,6 +131,7 @@ from open_instruct.utils import (
     ray_get_with_progress,
     repeat_each,
     sync_gs_bucket,
+    UlyssesSPSplitter,
 )
 from open_instruct.vllm_utils3 import (
     GenerationResult,
@@ -320,6 +325,9 @@ class Args:
     num_learners_per_node: List[int] = field(default_factory=lambda: [1])
     """number of GPU deepspeed learners per node (e.g., --num_learners_per_node 2 4 means 2 learner processes
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
+    sequence_parallel_size: int = 1
+    """sequence parallel size - how many GPUs we will parallelize sequences across during training.
+    Useful for super-long context lengths."""
     vllm_num_engines: int = 1
     """number of vLLM Engines, set to 0 to disable vLLM"""
     vllm_tensor_parallel_size: int = 1
@@ -555,9 +563,15 @@ class PolicyTrainerRayProcess(RayProcess):
         self.wandb_url = wandb_url
         torch.cuda.set_device(self.local_rank)
         self.device = torch.device(self.local_rank)
-        deepspeed.init_distributed()
+        deepspeed.init_distributed(timeout=timedelta(minutes=180))
 
-        ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
+        ds_config = get_train_ds_config(
+            offload=False,
+            adam_offload=False,
+            stage=args.deepspeed_stage,
+            bf16=True,
+            sequence_parallel_size=args.sequence_parallel_size,
+        )
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
         # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
@@ -569,6 +583,18 @@ class PolicyTrainerRayProcess(RayProcess):
         else:
             dschf = None
         logger.info(f"Deepspeed config: {dschf=}")
+
+        # set sequence parallel
+        self.mpu = None
+        if args.sequence_parallel_size > 1:
+            self.mpu = UlyssesSPAttentionHF.register_with_transformers(
+                model_name_or_path=model_config.model_name_or_path,
+                core_attn_implementation="flash_attention_2",
+                sequence_parallel_size=args.sequence_parallel_size,
+                max_length=args.max_token_length,
+                micro_batch_size=args.per_device_train_batch_size,
+                seq_length_is_variable=True,
+            )
 
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
@@ -603,6 +629,7 @@ class PolicyTrainerRayProcess(RayProcess):
             config=ds_config,
             lr_scheduler=scheduler,
             dist_init_required=True,
+            mpu=self.mpu,
         )
         optimization_steps_done = 0
         if args.checkpoint_state_dir:
@@ -651,9 +678,21 @@ class PolicyTrainerRayProcess(RayProcess):
             use_cache=False,
         )
         disable_dropout_in_model(self.ref_policy)
-        self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
+        self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config, mpu=self.mpu)
         self.ref_policy.eval()
         self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
+
+        if self.mpu is not None:
+            self.sp_group = groups._get_sequence_parallel_group()
+            self.sp_world_size = groups._get_sequence_parallel_world_size()
+            self.sp_rank = groups._get_sequence_parallel_rank()
+            print(f"SETTING UP: {self.sp_rank=} {self.sp_world_size=}")
+            self.splitter = UlyssesSPSplitter(
+                sp_rank=self.sp_rank, sp_group=self.sp_group, sp_world_size=self.sp_world_size, device=self.device
+            )
+        else:
+            self.splitter = None
+
         return optimization_steps_done
 
     def forward(
@@ -719,6 +758,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 world_size=world_size,
                 rank=0,
                 group_name="openrlhf",
+                timeout=timedelta(minutes=180),
             )
             ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=60)
         torch.distributed.barrier()
@@ -812,6 +852,61 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # recalculate the "real" number of mini-batches
         num_mini_batches = len(collated_query_responses) // accumulation_steps
+        original_length = len(collated_query_responses)
+
+        if self.splitter is not None:
+            batch = {
+                "input_ids": collated_query_responses,
+                "attention_mask": collated_attention_masks,
+                "position_ids": collated_position_ids,
+                "response_masks": collated_response_masks,
+                "tool_masks": collated_tool_masks,
+                "advantages": collated_advantages,
+            }
+            # Pad the items in the batch so they are divisible by sp_world_size
+            # where attention mask is 0, we dont end up using anyway.
+            for i in range(len(batch["input_ids"])):
+                for k in batch.keys():
+                    if torch.is_tensor(batch[k][i]):
+                        seq_length = batch[k][i].shape[1]
+                        if seq_length % self.sp_world_size != 0:
+                            padding_length = self.sp_world_size - (seq_length % self.sp_world_size)
+                            padding = torch.zeros(
+                                (batch[k][i].shape[0], padding_length),
+                                dtype=batch[k][i].dtype,
+                                device=batch[k][i].device,
+                            )
+                            batch[k][i] = torch.cat((batch[k][i], padding), dim=1)
+            sharded_batches = self.splitter.split_batch(batch)
+
+            # we need to flatten out the sharded batches so its like:
+            # b0 sp0, b0 sp1, ..., b1 sp0, b1 sp1, ..., b2 sp0, b2 sp1, ... etc.
+            # right now, it comes out a list of sp shards, and inside is (bsz, seq_len)
+            collated_query_responses = []
+            collated_attention_masks = []
+            collated_position_ids = []
+            collated_response_masks = []
+            collated_tool_masks = []
+            collated_advantages = []
+
+            for batch_idx in range(original_length):
+                for sp_idx in range(len(sharded_batches)):
+                    collated_query_responses.append(sharded_batches[sp_idx]["input_ids"][batch_idx])
+                    collated_attention_masks.append(sharded_batches[sp_idx]["attention_mask"][batch_idx])
+                    collated_position_ids.append(sharded_batches[sp_idx]["position_ids"][batch_idx])
+                    collated_response_masks.append(sharded_batches[sp_idx]["response_masks"][batch_idx])
+                    collated_tool_masks.append(sharded_batches[sp_idx]["tool_masks"][batch_idx])
+                    collated_advantages.append(sharded_batches[sp_idx]["advantages"][batch_idx])
+
+            collated_query_responses = move_to_device(collated_query_responses, self.ref_policy.device)
+            collated_attention_masks = move_to_device(collated_attention_masks, self.ref_policy.device)
+            collated_position_ids = move_to_device(collated_position_ids, self.ref_policy.device)
+            collated_response_masks = move_to_device(collated_response_masks, self.ref_policy.device)
+            collated_tool_masks = move_to_device(collated_tool_masks, self.ref_policy.device)
+            collated_advantages = move_to_device(collated_advantages, self.ref_policy.device)
+
+            # adjust accumulation steps for sp (do we need to do this?)
+            # accumulation_steps = accumulation_steps * self.sp_world_size
 
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
@@ -942,8 +1037,26 @@ class PolicyTrainerRayProcess(RayProcess):
                     elif args.kl_estimator == "kl4":
                         kl = kl4
 
-                    # grpo change: directly subtract KL in loss (add)
-                    loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
+                    if args.sequence_parallel_size == 1:
+                        # grpo change: directly subtract KL in loss (add)
+                        loss = masked_mean(
+                            pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis
+                        )
+                    else:
+                        # if SP, compute per-token loss, then we need to gather across SP ranks
+                        per_tok_loss = pg_loss_max + (args.beta * kl) * mb_response_masks_bool.float()
+                        losses_per_rank = torch.distributed.nn.functional.all_gather(per_tok_loss, group=self.sp_group)
+                        non_masked_tokens = mb_response_masks_bool.sum()
+                        non_masked_tokens_per_rank = torch.distributed.nn.functional.all_gather(
+                            non_masked_tokens, group=self.sp_group
+                        )
+                        total_loss = sum(
+                            losses_per_rank[rank] * non_masked_tokens_per_rank[rank]
+                            for rank in range(self.sp_world_size)
+                        )
+                        total_non_masked_tokens = sum(non_masked_tokens_per_rank)
+                        loss = (total_loss / total_non_masked_tokens).sum()
+                    # TODO: do we still need grad acc...? I think so.
                     loss = loss / accumulation_steps
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:

@@ -5,12 +5,12 @@ description = "Train open, instruction-following language models"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
-    "accelerate>=1.1.1",
+    "accelerate>=1.9.0",
     "antlr4-python3-runtime==4.11",
     "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
     "datasets>=3.1.0",
     "debugpy>=1.8.13",
-    "deepspeed==0.15.4", # 0.16.0 bugs out https://github.com/microsoft/DeepSpeed/issues/6793
+    "deepspeed==0.17.2",
     "hf-transfer>=0.1.8",
     "litellm",
     "matplotlib>=3.9.3",
@@ -19,11 +19,12 @@ dependencies = [
     "nvitop>=1.4.2",
     "packaging>=24.2",
     "peft>=0.13.2",
+    "tqdm",
     "ray[default]>=2.44.1",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch==2.7.0",
-    "transformers>=4.52.4",
+    "transformers>=4.52.4,<4.54.0",
     "vllm==0.9.1",    
     "wandb==0.18.1",
     "langdetect==1.0.9",
