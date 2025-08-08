@@ -172,13 +172,13 @@ class ActorManager:
         return self._should_stop
 
 
-@ray.remote
 class LLMRayActor:
+    """Ray actor for standard LLM generation."""
+
     def __init__(
         self,
         *args,
         bundle_indices: list = None,
-        tool_use: bool = False,
         prompt_queue=None,
         results_queue=None,
         eval_results_queue=None,
@@ -204,44 +204,16 @@ class LLMRayActor:
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             print(f"creating LLM with bundle_indices={bundle_indices}")
 
-        if tool_use:
-            # TODO: Need to update ToolUseLLM to use LLMEngine as well
-            from open_instruct.tool_utils.tool_vllm import ToolUseLLM
-
-            self.llm = ToolUseLLM(*args, **kwargs)
-            self.llm_engine = self.llm.llm_engine
-        else:
-            # Create EngineArgs and initialize LLMEngine
-            engine_args = vllm.EngineArgs(*args, **kwargs)
-            self.llm_engine = vllm.LLMEngine.from_engine_args(engine_args)
-            self.llm = None  # Set llm to None when using engine directly
+        # Create EngineArgs and initialize LLMEngine
+        engine_args = vllm.EngineArgs(*args, **kwargs)
+        self.llm_engine = vllm.LLMEngine.from_engine_args(engine_args)
+        self.llm = None  # Set llm to None when using engine directly
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
-        self.tool_use = tool_use
         self.logger = logging.getLogger(__name__)
         self.actor_manager = actor_manager
-
-    def _tool_generation_loop(self, timeout: float = 60.0):
-        while True:
-            if ray.get(self.actor_manager.should_stop.remote()):
-                self.logger.info("[LLMRayActor] Actor manager signaled to stop. Exiting generation loop.")
-                return
-            try:
-                request = self.prompt_queue.get(timeout=timeout)
-                outputs = self.llm.generate(
-                    sampling_params=request.sampling_params, prompt_token_ids=request.prompts, use_tqdm=False
-                )
-                result = self._process_outputs(outputs, dataset_index=request.dataset_index)
-                if request.is_eval:
-                    self.eval_results_queue.put(result)
-                else:
-                    self.results_queue.put(result)
-            except queue.Empty:
-                pass
-            except queue.Full:
-                self.logger.warning("Results queue is full, discarding result.")
 
     def _run_generation_loop(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly."""
@@ -308,10 +280,7 @@ class LLMRayActor:
 
     def process_from_queue(self, timeout=0.1):
         """Process a single element from the queue."""
-        if self.tool_use:
-            self.run_tool_generation_loop(timeout)
-        else:
-            self._run_generation_loop(timeout)
+        self._run_generation_loop(timeout)
 
     def _process_outputs(
         self,
@@ -332,22 +301,13 @@ class LLMRayActor:
         response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
         finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
 
-        if self.tool_use:
-            masks = [out.mask for output in outputs for out in output.outputs]
-            num_calls = [out.num_calls for output in outputs for out in output.outputs]
-            timeouts = [out.timeout for output in outputs for out in output.outputs]
-            tool_errors = [out.tool_error for output in outputs for out in output.outputs]
-            tool_outputs = [out.tool_output for output in outputs for out in output.outputs]
-            tool_runtimes = [out.tool_runtime for output in outputs for out in output.outputs]
-            tool_calleds = [out.tool_called for output in outputs for out in output.outputs]
-        else:
-            masks = [[1] * len(resp) for resp in response_ids]
-            num_calls = [0] * len(response_ids)
-            timeouts = [0] * len(response_ids)
-            tool_errors = [""] * len(response_ids)
-            tool_outputs = [""] * len(response_ids)
-            tool_runtimes = [0] * len(response_ids)
-            tool_calleds = [False] * len(response_ids)
+        masks = [[1] * len(resp) for resp in response_ids]
+        num_calls = [0] * len(response_ids)
+        timeouts = [0] * len(response_ids)
+        tool_errors = [""] * len(response_ids)
+        tool_outputs = [""] * len(response_ids)
+        tool_runtimes = [0] * len(response_ids)
+        tool_calleds = [False] * len(response_ids)
 
         request_info = RequestInfo(
             num_calls=num_calls,
@@ -403,6 +363,133 @@ class LLMRayActor:
         return True
 
 
+class ToolLLMRayActor(LLMRayActor):
+    """Ray actor for tool-based LLM generation."""
+
+    def __init__(
+        self,
+        *args,
+        tools: dict = None,
+        max_tool_calls: dict = None,
+        bundle_indices: list = None,
+        prompt_queue=None,
+        results_queue=None,
+        eval_results_queue=None,
+        actor_manager=None,
+        **kwargs,
+    ):
+        # Extract the parameters we need before calling parent init
+        self.tools = tools
+        self.max_tool_calls = max_tool_calls
+
+        # Don't pass tools and max_tool_calls to parent
+        kwargs_copy = kwargs.copy()
+        noset_visible_devices = kwargs_copy.pop("noset_visible_devices")
+
+        # Handle environment setup (same as parent)
+        if kwargs_copy.get("distributed_executor_backend") == "ray":
+            os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+            os.environ.pop("ROCR_VISIBLE_DEVICES", None)
+        elif noset_visible_devices:
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
+
+        num_gpus = kwargs_copy.pop("num_gpus")
+        if bundle_indices is not None:
+            os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
+            os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
+            print(f"creating LLM with bundle_indices={bundle_indices}")
+
+        # Initialize with ToolUseLLM instead of regular LLMEngine
+        from open_instruct.tool_utils.tool_vllm import ToolUseLLM
+
+        self.llm = ToolUseLLM(tools=tools, max_tool_calls=max_tool_calls, *args, **kwargs_copy)
+        self.llm_engine = self.llm.llm_engine
+
+        self.prompt_queue = prompt_queue
+        self.results_queue = results_queue
+        self.eval_results_queue = eval_results_queue
+        self.logger = logging.getLogger(__name__)
+        self.actor_manager = actor_manager
+
+    def process_from_queue(self, timeout=0.1):
+        """Process a single element from the queue using tool generation loop."""
+        self._tool_generation_loop(timeout)
+
+    def _tool_generation_loop(self, timeout: float = 60.0):
+        """Tool-specific generation loop."""
+        while True:
+            if ray.get(self.actor_manager.should_stop.remote()):
+                self.logger.info("[ToolLLMRayActor] Actor manager signaled to stop. Exiting generation loop.")
+                return
+            try:
+                request = self.prompt_queue.get(timeout=timeout)
+                outputs = self.llm.generate(
+                    sampling_params=request.sampling_params, prompt_token_ids=request.prompts, use_tqdm=False
+                )
+                result = self._process_outputs(outputs, dataset_index=request.dataset_index)
+                if request.is_eval:
+                    self.eval_results_queue.put(result)
+                else:
+                    self.results_queue.put(result)
+            except queue.Empty:
+                pass
+            except queue.Full:
+                self.logger.warning("Results queue is full, discarding result.")
+
+    def _process_outputs(
+        self,
+        outputs: List[Any],  # List of vllm.RequestOutput objects
+        dataset_index: Optional[List[int]] = None,
+    ) -> GenerationResult:
+        """Process vLLM RequestOutputs into GenerationResult format with tool information."""
+        # Debug logging
+        self.logger.info(
+            f"[_process_outputs] Processing {len(outputs)} RequestOutputs, dataset_indices={dataset_index}"
+        )
+        for i, output in enumerate(outputs):
+            self.logger.info(
+                f"[_process_outputs] Output {i}: request_id={output.request_id}, num_completions={len(output.outputs)}"
+            )
+
+        # Process outputs with tool-specific attributes
+        response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
+        finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
+
+        # Extract tool-specific attributes from outputs
+        masks = [out.mask for output in outputs for out in output.outputs]
+        num_calls = [out.num_calls for output in outputs for out in output.outputs]
+        timeouts = [out.timeout for output in outputs for out in output.outputs]
+        tool_errors = [out.tool_error for output in outputs for out in output.outputs]
+        tool_outputs = [out.tool_output for output in outputs for out in output.outputs]
+        tool_runtimes = [out.tool_runtime for output in outputs for out in output.outputs]
+        tool_calleds = [out.tool_called for output in outputs for out in output.outputs]
+
+        request_info = RequestInfo(
+            num_calls=num_calls,
+            timeouts=timeouts,
+            tool_errors=tool_errors,
+            tool_outputs=tool_outputs,
+            tool_runtimes=tool_runtimes,
+            tool_calleds=tool_calleds,
+        )
+
+        result = GenerationResult(
+            responses=response_ids,
+            finish_reasons=finish_reasons,
+            masks=masks,
+            request_info=request_info,
+            dataset_index=dataset_index,
+        )
+
+        # Debug logging
+        self.logger.info(
+            f"[_process_outputs] Returning GenerationResult with {len(result.responses)} responses "
+            f"for {len(dataset_index) if dataset_index else 0} dataset indices"
+        )
+
+        return result
+
+
 def get_cuda_arch_list() -> str:
     """Get CUDA compute capabilities and format them for TORCH_CUDA_ARCH_LIST."""
     if not torch.cuda.is_available():
@@ -440,7 +527,7 @@ def create_vllm_engines(
     results_queue=None,
     eval_results_queue=None,
     actor_manager=None,
-) -> list[LLMRayActor]:
+) -> list:
     import vllm
 
     assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
@@ -483,15 +570,18 @@ def create_vllm_engines(
             placement_group_bundle_index=i * tensor_parallel_size,
         )
 
-        additional_kwargs = {}
-        tool_use = False
+        # Determine which actor class to use based on tool usage
         if tools is not None and len(tools) > 0:
-            tool_use = True
-            additional_kwargs["tools"] = tools
-            additional_kwargs["max_tool_calls"] = max_tool_calls_dict
+            # Use ToolLLMRayActor for tool-based generation
+            actor_class = ray.remote(ToolLLMRayActor)
+            additional_kwargs = {"tools": tools, "max_tool_calls": max_tool_calls_dict}
+        else:
+            # Use regular LLMRayActor for standard generation
+            actor_class = ray.remote(LLMRayActor)
+            additional_kwargs = {}
 
         vllm_engines.append(
-            LLMRayActor.options(
+            actor_class.options(
                 num_cpus=num_gpus,
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
@@ -518,7 +608,6 @@ def create_vllm_engines(
                 num_gpus=0.2 if use_hybrid_engine else 1,
                 enable_sleep_mode=vllm_enable_sleep,
                 noset_visible_devices=ray_noset_visible_devices(),
-                tool_use=tool_use,
                 prompt_queue=prompt_queue,
                 results_queue=results_queue,
                 eval_results_queue=eval_results_queue,
