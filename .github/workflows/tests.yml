@@ -21,8 +21,8 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
-          version: "0.7.17"
+          version: "0.8.6"
       - name: Set up Python
-        run: uv python install
+        run: uv sync
       - name: Run unit tests
         run: uv run pytest -n auto

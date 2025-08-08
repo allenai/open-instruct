@@ -328,6 +328,8 @@ class Args:
     """whether to enable prefix caching"""
     vllm_top_p: float = 1.0
     """vLLM top p for nucleus sampling"""
+    accumulate_inference_batches_timeout: float = 1800.0  # 30 minutes
+    """Timeout in seconds for accumulating inference batches during training"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     gather_whole_model: bool = True
@@ -380,6 +382,10 @@ class Args:
     """the max generation length for evaluation for oe-eval"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
+
+    # Evaluation behavior
+    eval_on_step_0: bool = False
+    """Whether to run local evaluation at training step 0. Defaults to False."""
 
     # Tool settings
     tools: Optional[List[str]] = None
@@ -1343,7 +1349,13 @@ def data_preparation_thread(
                     return  # Simply return to exit the thread cleanly
                 try:
                     result, batch = accumulate_inference_batches(
-                        inference_results_Q, pending_queries_map, args, training_step, generation_config, timeout=1.0
+                        inference_results_Q,
+                        pending_queries_map,
+                        args,
+                        training_step,
+                        generation_config,
+                        # Use configurable timeout from args
+                        timeout=args.accumulate_inference_batches_timeout,
                     )
                     break  # Successfully got results, exit retry loop
                 except Empty:
@@ -1999,7 +2011,7 @@ def one_training_step(
                     writer.add_histogram(key, value, episode)
         print_rich_single_line_metrics(scalar_metrics)
 
-        if args.save_freq > 0 and training_step % args.save_freq == 0:
+        if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
             with Timer("[Main Thread] 🗡️ Saving model"):
                 checkpoint_dir = f"{args.output_dir}_checkpoints"
                 step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
