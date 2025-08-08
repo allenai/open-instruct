@@ -1340,7 +1340,8 @@ def data_preparation_thread(
             logger.info("[Data Preparation Thread] Shutting down")
             return
         # Streaming accumulation: collect results as they arrive
-        with Timer("🚀 [Data Preparation Thread] Getting response ids"):
+        timer = Timer("🚀 [Data Preparation Thread] Getting response ids")
+        with timer:
             while True:
                 if stop_event.is_set():
                     logger.info("[Data Preparation Thread] Shutting down due to stop event")
@@ -1352,6 +1353,8 @@ def data_preparation_thread(
                     break  # Successfully got results, exit retry loop
                 except Empty:
                     continue  # Timeout occurred, loop back to check stop_event
+
+        getting_response_time = timer.duration()
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -1578,6 +1581,7 @@ def data_preparation_thread(
                 "val/good_outputs_rate": np.array(good_outputs).mean(),
                 "val/tool_runtimes_rate": np.array(result.request_info.tool_runtimes).mean(),
                 "val/tool_calleds_rate": np.array(result.request_info.tool_calleds).mean(),
+                "time/getting_response": getting_response_time,
                 **reward_metrics,
             }
 
@@ -1942,7 +1946,7 @@ def generate_thread(
             # If no batches were processed, sleep for a short time to avoid busy waiting
             time.sleep(1)
         else:
-            generate_metrics_Q.put({"generation_time": timer.duration})
+            generate_metrics_Q.put({"time/generation": timer.duration})
 
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
@@ -1992,7 +1996,7 @@ def one_training_step(
             "val/num_total_tokens": num_total_tokens,
             "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
             "tokens_per_second": num_total_tokens / (time.time() - start_time),
-            "training_time": timer.current_duration(),
+            "time/training": timer.current_duration(),
             **data_thread_metrics,
             **average_metrics,
         }
