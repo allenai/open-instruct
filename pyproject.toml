@@ -37,8 +37,12 @@ dependencies = [
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
 ]
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.hooks.custom]
 path = "build.py"
+
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]
