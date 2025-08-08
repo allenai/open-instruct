@@ -565,7 +565,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.wandb_url = wandb_url
         torch.cuda.set_device(self.local_rank)
         self.device = torch.device(self.local_rank)
-        deepspeed.init_distributed(timeout=timedelta(minutes=180))
+        deepspeed.init_distributed()
 
         ds_config = get_train_ds_config(
             offload=False,
