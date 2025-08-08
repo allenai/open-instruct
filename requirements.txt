@@ -837,7 +837,7 @@ tqdm==4.67.1
     #   peft
     #   transformers
     #   vllm
-transformers==4.55.0
+transformers==4.53.3
     # via
     #   compressed-tensors
     #   open-instruct
