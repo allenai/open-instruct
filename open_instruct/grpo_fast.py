@@ -2361,8 +2361,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     generation_future = executor.submit(
         generate_thread,
         vllm_engines,
-        generation_configs["train"],
-        generation_configs["eval"],
         args.local_eval_every,
         args.num_training_steps,
         resume_training_step,
