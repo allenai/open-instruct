@@ -48,6 +48,43 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class Batch:
+    """Container for batch data including queries, ground truths, and datasets."""
+
+    queries: List[List[int]]
+    ground_truths: List[List[int]]
+    datasets: List[str]
+    indices: Optional[List[int]]
+
+    def __getitem__(self, key: Union[slice, int, List[int]]) -> "Batch":
+        """Enable indexing and slicing: batch[5], batch[start:end], or batch[[1,3,5]]."""
+        if isinstance(key, slice):
+            # Handle slice object: batch[start:end]
+            return Batch(
+                queries=self.queries[key],
+                ground_truths=self.ground_truths[key],
+                datasets=self.datasets[key],
+                indices=self.indices[key] if self.indices else None,
+            )
+        elif isinstance(key, int):
+            # Handle single index: batch[5]
+            return Batch(
+                queries=[self.queries[key]],
+                ground_truths=[self.ground_truths[key]],
+                datasets=[self.datasets[key]],
+                indices=[self.indices[key]] if self.indices else None,
+            )
+        else:
+            # Handle list of indices: batch[[1,3,5]]
+            return Batch(
+                queries=[self.queries[i] for i in key],
+                ground_truths=[self.ground_truths[i] for i in key],
+                datasets=[self.datasets[i] for i in key],
+                indices=[self.indices[i] for i in key] if self.indices else None,
+            )
+
+
+@dataclass
 class ModelConfig:
     model_name_or_path: Optional[str] = None
     """The model checkpoint for weights initialization."""
@@ -102,6 +139,16 @@ def disable_dropout_in_model(model: torch.nn.Module) -> None:
     for module in model.modules():
         if isinstance(module, torch.nn.Dropout):
             module.p = 0
+
+
+def entropy_from_logits(logits: torch.Tensor) -> torch.Tensor:
+    """
+    Compute the entropy of the logits.
+    Borrowed from verl (https://github.com/volcengine/verl/blob/main/verl/utils/torch_functional.py#L145)
+    """
+    pd = torch.nn.functional.softmax(logits, dim=-1)
+    entropy = torch.logsumexp(logits, dim=-1) - torch.sum(pd * logits, dim=-1)
+    return entropy
 
 
 def first_true_indices(bools: torch.Tensor, dtype=torch.long) -> torch.Tensor:
@@ -211,8 +258,7 @@ async def apply_verifiable_reward(
     reward_fn_mapping: Dict[str, VerifierFunction],
     responses: List[torch.Tensor],
     decoded_responses: List[str],
-    ground_truths: List[str],
-    datasets: List[Union[str, List[str]]],
+    batch: Batch,
     reward_mult: int = 10,
     queries: Optional[List[str]] = None,
 ):
@@ -224,7 +270,7 @@ async def apply_verifiable_reward(
     task_metadata = []
 
     for i, (tok_prediction, prediction, ground_truth, dataset, query) in enumerate(
-        zip(responses, decoded_responses, ground_truths, datasets, queries)
+        zip(responses, decoded_responses, batch.ground_truths, batch.datasets, queries)
     ):
         # allow multiple ground truths and datasets for a single response
 
@@ -251,8 +297,14 @@ async def apply_verifiable_reward(
                 tokenized_prediction=tok_prediction, prediction=prediction, label=gt, query=query
             )
             async_tasks.append(task)
+            # use reward_func.name to get the name of the verifier, rather than ds in case we have done remapping.
             task_metadata.append(
-                {"response_idx": i, "dataset": ds, "reward_weight": reward_func.weight, "reward_mult": reward_mult}
+                {
+                    "response_idx": i,
+                    "dataset": reward_func.name,
+                    "reward_weight": reward_func.weight,
+                    "reward_mult": reward_mult,
+                }
             )
 
     # Execute all tasks in parallel
@@ -387,6 +439,14 @@ def batch_generation(
     return torch.cat(query_responses, 0), torch.cat(logitss, 0)
 
 
+def get_olmo3_generation_config(tokenizer):
+    return transformers.GenerationConfig(
+        temperature=None,
+        top_p=None,
+        eos_token_id=[tokenizer.convert_tokens_to_ids("<|im_end|>"), tokenizer.convert_tokens_to_ids("<|endoftext|>")],
+    )
+
+
 def save_with_accelerate(
     accelerator: Accelerator,
     model: torch.nn.Module,
@@ -394,14 +454,20 @@ def save_with_accelerate(
     output_dir: str,
     use_lora: bool = False,
     model_attribute_to_save: Optional[str] = None,
+    chat_template_name: str = "tulu",
 ) -> None:
     """`model_attribute_to_save` is for used to save PPO's policy instead of the full model"""
     # set the generation config to an empty setting to be safe.
     # we usually do greedy decoding for generation, so this should be okay.
     # otherwise, we get an error thrown at save time.
-    model.generation_config = transformers.GenerationConfig(
-        temperature=None, top_p=None, eos_token_id=tokenizer.eos_token_id, bos_token_id=tokenizer.bos_token_id
-    )
+    if "olmo" in chat_template_name:
+        # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
+        logger.info(f"Detected olmo chat template: {chat_template_name}, updating model generation config.")
+        model.generation_config = get_olmo3_generation_config(tokenizer)
+    else:
+        model.generation_config = transformers.GenerationConfig(
+            temperature=None, top_p=None, eos_token_id=tokenizer.eos_token_id, bos_token_id=tokenizer.bos_token_id
+        )
 
     unwrapped_model: PreTrainedModel = accelerator.unwrap_model(model)
     if model_attribute_to_save is not None:

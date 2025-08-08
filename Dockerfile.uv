@@ -1,4 +1,6 @@
-FROM ghcr.io/allenai/oi-cuda-no-conda:12.1-cudnn8-dev-ubuntu20.04
+ARG BASE_IMAGE=ghcr.io/allenai/cuda:12.8-dev-ubuntu22.04-torch2.7.0-v1.2.170
+
+FROM ${BASE_IMAGE}
 
 # Set default cache directory but allow override from environment
 ARG CACHE_DIR=/root/.cache/uv
@@ -9,12 +11,8 @@ RUN echo "UV_CACHE_DIR: ${UV_CACHE_DIR}"
 # setup files
 WORKDIR /stage/
 
-# Install uv first
-# COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
-ADD https://astral.sh/uv/install.sh /uv-installer.sh
-RUN sh /uv-installer.sh && rm /uv-installer.sh
-ENV PATH="/root/.local/bin/:$PATH"
+# Install nginx and create conf.d directory
+RUN apt-get update --no-install-recommends && apt-get install -y nginx && mkdir -p /etc/nginx/conf.d && rm -rf /var/lib/apt/lists/*
 
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
@@ -28,15 +26,14 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-install-project --link-mode=copy
 
-# Install flash-attn
-RUN uv pip install flash-attn==2.7.2.post1 --no-build-isolation
+# rerun with extras
+RUN uv sync --extra compile --extra liger
+
+# punkt / punkt_tab
+RUN uv run -m nltk.downloader punkt
+RUN uv run -m nltk.downloader punkt_tab
 
 WORKDIR /stage/
-
-# install google cloud sdk
-RUN apt-get update && apt-get install -y gnupg curl
-RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && apt-get update -y && apt-get install google-cloud-cli -y
-RUN apt-get install -y nginx
 
 # Copy all runtime files directly to final stage
 COPY open_instruct open_instruct

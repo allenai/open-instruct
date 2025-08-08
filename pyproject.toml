@@ -3,7 +3,7 @@ name = "open-instruct"
 version = "0.1.0"
 description = "Train open, instruction-following language models"
 readme = "README.md"
-requires-python = ">=3.10,<3.12"
+requires-python = ">=3.10,<3.13"
 dependencies = [
     "accelerate>=1.1.1",
     "antlr4-python3-runtime==4.11",
@@ -20,14 +20,15 @@ dependencies = [
     "packaging>=24.2",
     "peft>=0.13.2",
     "ray[default]>=2.44.1",
-    "setuptools>=75.6.0",
+    "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
-    "torch>=2.6.0",
+    "torch==2.7.0",
     "transformers>=4.52.4",
-    "vllm>=0.8.5.post1",    
+    "vllm==0.9.1",    
     "wandb==0.18.1",
     "langdetect==1.0.9",
-    "immutabledict==1.2.0"
+    "immutabledict==1.2.0",
+    "pytest-xdist==3.8.0",
 ]
 
 [build-system]
@@ -40,12 +41,12 @@ py-modules = ["open_instruct"]
 # pytorch related setups
 [tool.uv.sources]
 torch = [
-  { index = "pytorch-cu124", marker = "platform_system != 'Darwin'"},
+  { index = "pytorch-cu128", marker = "platform_system != 'Darwin'"},
 ]
 
 [[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [[tool.uv.index]]
@@ -55,7 +56,8 @@ explicit = true
 
 # flash-attn related setups
 [project.optional-dependencies]
-compile = ["flash-attn>=2.7.2.post1"]
+compile = ["flash-attn>=2.8.0.post2",
+		   "flashinfer-python==0.2.8"]
 liger = ["liger-kernel>=0.5.4"]
 code = [
     "fastapi>=0.100.0",
@@ -85,8 +87,13 @@ dev = [
     "markdown-include>=0.8.1",
     "pytest>=8.3.4",
     "ruff>=0.11.13",
-	"parameterized>=0.9.0",
+    "parameterized>=0.9.0",
+    "rich>=13.7.0",
 ]
+
+[tool.pytest.ini_options]
+addopts = "--ignore=oe-eval-internal/"
+
 
 [tool.black]
 line-length = 119

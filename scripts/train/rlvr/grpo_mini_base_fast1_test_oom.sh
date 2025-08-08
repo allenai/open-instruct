@@ -32,7 +32,7 @@ python open_instruct/grpo_fast.py \
     --beta 0.01 \
     --apply_verifiable_reward true \
     --seed 3 \
-    --num_evals 1 \
+    --local_eval_every 15000 \
     --reward_model_multiplier 0.0 \
     --no_try_launch_beaker_eval_jobs \
     --vllm_sync_backend nccl \

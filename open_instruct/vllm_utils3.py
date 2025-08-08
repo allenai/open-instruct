@@ -15,13 +15,16 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
+import logging
 import os
+import queue
 from datetime import timedelta
 from typing import Any, List, Optional, Union
 
 import ray
 import torch
 import torch.distributed
+import vllm
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed.distributed_c10d import (
@@ -33,6 +36,11 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+
+from open_instruct.queue_types import GenerationResult, RequestInfo
+from open_instruct.utils import ray_get_with_progress
+
+logger = logging.getLogger(__name__)
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -116,7 +124,16 @@ def init_process_group(
 
 @ray.remote
 class LLMRayActor:
-    def __init__(self, *args, bundle_indices: list = None, tool_use: bool = False, **kwargs):
+    def __init__(
+        self,
+        *args,
+        bundle_indices: list = None,
+        tool_use: bool = False,
+        prompt_queue=None,
+        results_queue=None,
+        eval_results_queue=None,
+        **kwargs,
+    ):
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
@@ -145,8 +162,86 @@ class LLMRayActor:
 
             self.llm = LLM(*args, **kwargs)
 
+        self.prompt_queue = prompt_queue
+        self.results_queue = results_queue
+        self.eval_results_queue = eval_results_queue
+        self.tool_use = tool_use
+        self.logger = logging.getLogger(__name__)
+
     def generate(self, *args, **kwargs):
         return self.llm.generate(*args, **kwargs)
+
+    def process_from_queue(self, num_training_steps=None, resume_training_step=1, timeout=0.1):
+        """Process a single element from the queue."""
+        try:
+            request = self.prompt_queue.get(timeout=timeout)
+            # Use generation_config from the request
+            result = self._generate_batch(
+                request.prompts,
+                request.generation_config,
+                dataset_index=request.dataset_index,
+                training_step=request.training_step,
+            )
+            if request.is_eval:
+                self.eval_results_queue.put(result, timeout=1)
+            else:
+                self.results_queue.put(result, timeout=1)
+            return 1  # Successfully processed a request
+        except queue.Empty:
+            self.logger.warning("[LLMRayActor] No request in the queue to process. Returning from process_from_queue.")
+            return 0  # No request to process
+        except queue.Full:
+            self.logger.warning(f"[LLMRayActor] Results queue is full. Skipping insert. {request.is_eval=}.")
+            return 0
+
+    def _generate_batch(
+        self,
+        prompts: List[List[int]],
+        sampling_params,
+        dataset_index: Optional[List[int]] = None,
+        training_step: Optional[int] = None,
+    ) -> GenerationResult:
+        """Generate responses for a batch of prompts."""
+        outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
+
+        # Process outputs
+        response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
+        finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
+
+        if self.tool_use:
+            masks = [out.mask for output in outputs for out in output.outputs]
+            num_calls = [out.num_calls for output in outputs for out in output.outputs]
+            timeouts = [out.timeout for output in outputs for out in output.outputs]
+            tool_errors = [out.tool_error for output in outputs for out in output.outputs]
+            tool_outputs = [out.tool_output for output in outputs for out in output.outputs]
+            tool_runtimes = [out.tool_runtime for output in outputs for out in output.outputs]
+            tool_calleds = [out.tool_called for output in outputs for out in output.outputs]
+        else:
+            masks = [[1] * len(resp) for resp in response_ids]
+            num_calls = [0] * len(response_ids)
+            timeouts = [0] * len(response_ids)
+            tool_errors = [""] * len(response_ids)
+            tool_outputs = [""] * len(response_ids)
+            tool_runtimes = [0] * len(response_ids)
+            tool_calleds = [False] * len(response_ids)
+
+        request_info = RequestInfo(
+            num_calls=num_calls,
+            timeouts=timeouts,
+            tool_errors=tool_errors,
+            tool_outputs=tool_outputs,
+            tool_runtimes=tool_runtimes,
+            tool_calleds=tool_calleds,
+        )
+
+        return GenerationResult(
+            responses=response_ids,
+            finish_reasons=finish_reasons,
+            masks=masks,
+            request_info=request_info,
+            dataset_index=dataset_index,
+            training_step=training_step,
+        )
 
     def init_process_group(
         self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
@@ -171,6 +266,26 @@ class LLMRayActor:
     def wake_up(self):
         self.llm.wake_up()
 
+    def ready(self):
+        return True
+
+
+def get_cuda_arch_list() -> str:
+    """Get CUDA compute capabilities and format them for TORCH_CUDA_ARCH_LIST."""
+    if not torch.cuda.is_available():
+        return ""
+
+    cuda_capabilities = []
+    for i in range(torch.cuda.device_count()):
+        major, minor = torch.cuda.get_device_capability(i)
+        cuda_capabilities.append(f"{major}.{minor}")
+
+    # Remove duplicates and sort
+    cuda_capabilities = sorted(set(cuda_capabilities))
+    cuda_arch_list = ";".join(cuda_capabilities)
+    print(f"Detected CUDA compute capabilities: {cuda_capabilities}, setting TORCH_CUDA_ARCH_LIST={cuda_arch_list}")
+    return cuda_arch_list
+
 
 def create_vllm_engines(
     num_engines: int,
@@ -188,9 +303,10 @@ def create_vllm_engines(
     vllm_enable_sleep=False,
     tools: Optional[List[Any]] = None,
     max_tool_calls: List[int] = [5],
-):
-    import vllm
-
+    prompt_queue=None,
+    results_queue=None,
+    eval_results_queue=None,
+) -> list[LLMRayActor]:
     assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
 
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
@@ -244,7 +360,9 @@ def create_vllm_engines(
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
                 # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
-                runtime_env=ray.runtime_env.RuntimeEnv(env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0"}),
+                runtime_env=ray.runtime_env.RuntimeEnv(
+                    env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
+                ),
             ).remote(
                 model=pretrain,
                 revision=revision,
@@ -265,9 +383,24 @@ def create_vllm_engines(
                 enable_sleep_mode=vllm_enable_sleep,
                 noset_visible_devices=ray_noset_visible_devices(),
                 tool_use=tool_use,
+                prompt_queue=prompt_queue,
+                results_queue=results_queue,
+                eval_results_queue=eval_results_queue,
                 **additional_kwargs,
             )
         )
+
+    # Verify engines initialized successfully
+    try:
+        ray_get_with_progress(
+            [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300
+        )
+    except TimeoutError as e:
+        logger.error(f"vLLM engines failed to initialize: {e}")
+        # Kill partially initialized actors before raising
+        for engine in vllm_engines:
+            ray.kill(engine)
+        raise RuntimeError(f"vLLM engine initialization timed out: {e}")
 
     if vllm_enable_sleep:
         batch_vllm_engine_call(vllm_engines, "sleep", rank_0_only=False)

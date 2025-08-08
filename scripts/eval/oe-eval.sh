@@ -47,7 +47,8 @@ set -ex
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--unseen-evals] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>] [--process-output <process_output>]"
+    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--task-suite TASK_SUITE] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>] [--process-output <process_output>]"
+    echo "TASK_SUITE should be one of: NEXT_MODEL_DEV, NEXT_MODEL_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN (default: NEXT_MODEL_DEV)"
     echo "TASKS should be a comma-separated list of task specifications (e.g., 'gsm8k::tulu,bbh:cot::tulu')"
     echo "STOP_SEQUENCES should be a comma-separated list of strings to stop generation at (e.g., '</answer>,\\n\\n')"
     echo "PROCESS_OUTPUT should be a string specifying how to process the model output (e.g., 'r1_style')"
@@ -63,7 +64,7 @@ while [[ "$#" -gt 0 ]]; do
         --upload_to_hf) UPLOAD_TO_HF="$2"; shift ;;
         --revision) REVISION="$2"; shift ;;
         --max-length) MAX_LENGTH="$2"; shift ;;
-        --unseen-evals) UNSEEN_EVALS="true" ;;
+        --task-suite) TASK_SUITE="$2"; shift ;;
         --priority) PRIORITY="$2"; shift ;;
         --tasks) CUSTOM_TASKS="$2"; shift ;;
         --evaluate_on_weka) EVALUATE_ON_WEKA="true" ;;
@@ -93,7 +94,7 @@ MODEL_NAME_SAFE=${MODEL_NAME//\//_}
 
 # Set defaults for optional arguments
 MAX_LENGTH="${MAX_LENGTH:-4096}"
-UNSEEN_EVALS="${UNSEEN_EVALS:-false}"
+TASK_SUITE="${TASK_SUITE:-NEXT_MODEL_DEV}"
 PRIORITY="${PRIORITY:normal}"
 EVALUATE_ON_WEKA="${EVALUATE_ON_WEKA:-false}"
 RUN_ID="${RUN_ID:-}"
@@ -124,11 +125,7 @@ fi
 
 # Set HF_UPLOAD_ARG only if UPLOAD_TO_HF is specified
 if [[ -n "$UPLOAD_TO_HF" ]]; then
-    if [ "$UNSEEN_EVALS" == "true" ]; then
-        HF_UPLOAD_ARG="--hf-save-dir ${UPLOAD_TO_HF}-unseen//results/${MODEL_NAME_SAFE}"
-    else
-        HF_UPLOAD_ARG="--hf-save-dir ${UPLOAD_TO_HF}//results/${MODEL_NAME_SAFE}"
-    fi
+    HF_UPLOAD_ARG="--hf-save-dir ${UPLOAD_TO_HF}//results/${MODEL_NAME_SAFE}"
 else
     HF_UPLOAD_ARG=""
 fi
@@ -142,7 +139,7 @@ fi
 
 # Define default tasks if no custom tasks provided
 #    "alpaca_eval_v2::tulu" # Removed for high cost of judge
-DEFAULT_TASKS=(
+TULU_3_DEV=(
     "gsm8k::tulu"
     "bbh:cot-v1::tulu"
     "drop::llama3"
@@ -157,7 +154,7 @@ DEFAULT_TASKS=(
     # "alpaca_eval_v4::tulu" # GPT 4.1, judge on Azure 
     "truthfulqa::tulu"
 )
-UNSEEN_TASKS=(
+TULU_3_UNSEEN=(
     "agi_eval_english:0shot_cot::tulu3"
     "gpqa:0shot_cot::tulu3"
     "mmlu_pro:0shot_cot::tulu3"
@@ -168,13 +165,79 @@ UNSEEN_TASKS=(
     "bigcodebench::tulu"
 )
 
+# New default task suites
+NEXT_MODEL_DEV=(
+    # Knowledge
+    "mmlu:cot::hamish_zs_reasoning"
+    "popqa::hamish_zs_reasoning"
+    "simpleqa::tulu-thinker"
+    
+    # Reasoning
+    "bbh:cot::hamish_zs_reasoning"
+    "gpqa:0shot_cot::hamish_zs_reasoning"
+    "zebralogic::hamish_zs_reasoning"
+    "agi_eval_english:0shot_cot::hamish_zs_reasoning"
+
+    # Math
+    # [faster] minerva_math_500::hamish_zs_reasoning
+    "minerva_math::hamish_zs_reasoning"
+    "gsm8k::zs_cot_latex"
+    "omega:0-shot-chat"
+    "aime:zs_cot_r1::pass_at_32_2024_temp1"
+    "aime:zs_cot_r1::pass_at_32_2025_temp1"  # OLD: "aime::hamish_zs_reasoning"
+    
+    # Coding
+    "codex_humanevalplus:0-shot-chat::tulu-thinker"
+    "mbppplus:0-shot-chat::tulu-thinker"
+    "livecodebench_codegeneration::tulu-thinker"
+    # [TODO not merged] codeeditorbench - requires separate server
+    # [TODO, maybe] cruxeval
+    
+    # Chat / IF / Vibes
+    "alpaca_eval_v3::hamish_zs_reasoning"
+    "ifeval::hamish_zs_reasoning"
+    # [expensive, multi-turn all versions] multiturn_alpacaeval::tulu
+    # [expensive, typos vibes] styled_evals::tulu
+    # [optional, typos compare] styled_math500::tulu
+    # [optional, typos compare] styled_popqa::tulu
+    # [optional, typos compare] styled_truthfulqa::tulu
+
+    # Tool Use
+    "bfcl_all::std" # This requires special logic on model_args and metadata, handled below
+)
+
+NEXT_MODEL_UNSEEN=(
+    "mmlu_pro:0shot_cot::tulu3"
+    # [TODO, not implemented] Humanity's Last Exam
+    # [TODO, not implemented] SuperGPQA
+    # [TODO, not implemented] BigBenchExtraHard
+    "livecodebench_codegeneration::tulu-thinker-hidden"
+    "ifbench::tulu"
+)
+
 # If custom tasks provided, convert comma-separated string to array
-if [ "$UNSEEN_EVALS" == "true" ]; then
-    TASKS=("${UNSEEN_TASKS[@]}")
-elif [[ -n "$CUSTOM_TASKS" ]]; then
+if [[ -n "$CUSTOM_TASKS" ]]; then
     IFS=',' read -ra TASKS <<< "$CUSTOM_TASKS"
 else
-    TASKS=("${DEFAULT_TASKS[@]}")
+    # Use the specified task suite or default
+    case "$TASK_SUITE" in
+        NEXT_MODEL_DEV)
+            TASKS=("${NEXT_MODEL_DEV[@]}")
+            ;;
+        NEXT_MODEL_UNSEEN)
+            TASKS=("${NEXT_MODEL_UNSEEN[@]}")
+            ;;
+        TULU_3_DEV)
+            TASKS=("${TULU_3_DEV[@]}")
+            ;;
+        TULU_3_UNSEEN)
+            TASKS=("${TULU_3_UNSEEN[@]}")
+            ;;
+        *)
+            echo "Error: Unknown task suite '$TASK_SUITE'"
+            usage
+            ;;
+    esac
 fi
 
 MODEL_TYPE="--model-type vllm"
@@ -186,11 +249,13 @@ GPU_COUNT_OTHER=$((NUM_GPUS * 2))
 MODEL_TYPE_OTHER=""
 
 # Build model args JSON with optional process_output
-MODEL_ARGS="{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}"
+MODEL_ARGS="{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"trust_remote_code\": \"true\""
 if [[ -n "$PROCESS_OUTPUT" ]]; then
     MODEL_ARGS+=", \"process_output\": \"${PROCESS_OUTPUT}\""
 fi
 MODEL_ARGS+="}"
+# Source the non-AI2 models list for bfcl
+source "$(dirname "$0")/bfcl_supported_models.sh"
 
 for TASK in "${TASKS[@]}"; do
     # mmlu and truthfulqa need different batch sizes and gpu counts because they are multiple choice and we cannot use vllm.
@@ -204,12 +269,53 @@ for TASK in "${TASKS[@]}"; do
         GPU_COUNT="$NUM_GPUS"
     fi
 
+    # Handle special case for bfcl_all::std task - requires additional metadata
+    if [[ "$TASK" == "bfcl_all::std" ]]; then
+        # Update MODEL_ARGS
+        # Check if MODEL_LOCATION is a local model (starts with beaker:// or /weka/ or gs://)
+            if [[ "$MODEL_LOCATION" == beaker://* ]] || [[ "$MODEL_LOCATION" == /weka/* ]] || [[ "$MODEL_LOCATION" == gs://* ]]; then
+            # Local model: keep model_path as MODEL_LOCATION, add metadata with allenai/general-tool-use-dev
+            MODEL_ARGS="${MODEL_ARGS%?}, \"metadata\": {\"extra_eval_config\": {\"model_name\": \"allenai/general-tool-use-dev\"}}}"
+        else
+            # HF model: check if it's supported
+            if [[ " ${SUPPORTED_MODELS[*]} " =~ " ${MODEL_LOCATION} " ]]; then
+                # Supported HF model: remove model_path, no metadata needed
+                BASE_ARGS="{\"max_length\": ${MAX_LENGTH}, \"trust_remote_code\": \"true\""
+                if [[ -n "$PROCESS_OUTPUT" ]]; then
+                    BASE_ARGS+=", \"process_output\": \"${PROCESS_OUTPUT}\""
+                fi
+                BASE_ARGS+="}"
+                MODEL_ARGS="$BASE_ARGS"
+
+                # remove hf- from model name
+                MODEL_NAME="${MODEL_NAME#hf-}"
+            else
+                # Unsupported HF model: skip this task
+                echo "Warning: Model '${MODEL_LOCATION}' is not supported for bfcl_all::std task. Skipping..."
+                continue
+            fi
+        fi
+        # Update env length variable in gantry-args, needed for bfcl
+        MAX_TOKENS_ARG=", \"env#111\": \"MAX_TOKENS=${MAX_LENGTH}\""
+    else
+        # For other tasks, use the original MODEL_ARGS without metadata, and no gantry-arg for length
+        MAX_TOKENS_ARG=""
+    fi
+
     # NOTE: For gantry args here and below, random numbers like #42 are added to the env variables because they need to be unique names. The numbers are ignored.
+    # Build gantry args
+    if [ "$EVALUATE_ON_WEKA" == "true" ]; then
+        GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"weka\": \"oe-adapt-default:/weka/oe-adapt-default\", \"weka#44\": \"oe-training-default:/weka/oe-training-default\", \"env#132\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#42\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\"${MAX_TOKENS_ARG}}"
+    else
+        GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env-secret#43\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"${MAX_TOKENS_ARG}}"
+    fi
+
     if [ "$EVALUATE_ON_WEKA" == "true" ]; then
         python oe-eval-internal/oe_eval/launch.py \
             --model "$MODEL_NAME" \
             --beaker-workspace "ai2/tulu-3-results" \
             --beaker-budget ai2/oe-adapt \
+            --beaker-timeout 48h \
             --task "$TASK" \
             $MODEL_TYPE \
             --batch-size "$BATCH_SIZE" \
@@ -217,7 +323,7 @@ for TASK in "${TASKS[@]}"; do
             --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
-            --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1", "env-secret#42": "AZURE_EVAL_API_KEY=azure_eval_api_key"}' \
+            --gantry-args "$GANTRY_ARGS" \
             ${REVISION_ARG} \
             --cluster "$CLUSTER" \
             --beaker-retries 2 \
@@ -230,6 +336,7 @@ for TASK in "${TASKS[@]}"; do
         --model "$MODEL_NAME" \
         --beaker-workspace "ai2/tulu-3-results" \
         --beaker-budget ai2/oe-adapt \
+        --beaker-timeout 48h \
         --task "$TASK" \
         $MODEL_TYPE \
         --batch-size "$BATCH_SIZE" \
@@ -237,7 +344,7 @@ for TASK in "${TASKS[@]}"; do
         --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
         ${HF_UPLOAD_ARG} \
         --gpus "$GPU_COUNT" \
-        --gantry-args "{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env-secret#43\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"}" \
+        --gantry-args "$GANTRY_ARGS" \
         ${REVISION_ARG} \
         --cluster ai2/augusta-google-1 \
         --beaker-retries 2 \

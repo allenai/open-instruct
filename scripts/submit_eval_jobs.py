@@ -14,7 +14,7 @@ import yaml
 def adjust_batch_size(task_spec, model_name, batch_size_reduction):
     "Adjust batch size using heuristics that are good for A100-size GPUs."
     reduce_by_2 = ["13B"]
-    reduce_by_4 = ["30B", "34B", "40B", "65B", "70B", "70b", "72B", "72b"]
+    reduce_by_4 = ["30B",  "32B", "34B", "40B", "65B", "70B", "70b", "72B", "72b"]
     # If not given, choose a value based on the model name.
     if batch_size_reduction is None:
         if any([pattern in model_name for pattern in reduce_by_2]):
@@ -36,7 +36,7 @@ def adjust_batch_size(task_spec, model_name, batch_size_reduction):
 def adjust_gpus(task_spec, experiment_group, model_name, gpu_multiplier):
     "Adjust GPU count using heuristics that are good for A100-size GPUs."
     medium = ["30B", "34B"]
-    large = ["40B", "65B", "70B", "70b", "72B", "72b"]
+    large = ["32B", "40B", "65B", "70B", "70b", "72B", "72b"]
     # If not given, choose a value based on model name.
     if gpu_multiplier is None:
         if any([pattern in model_name for pattern in medium]):
@@ -110,7 +110,7 @@ parser.add_argument("--run_oe_eval_experiments", action="store_true", help="Run 
 parser.add_argument("--run_safety_evaluations", action="store_true", help="Run the OE safety evaluations too.")
 parser.add_argument("--skip_oi_evals", action="store_true", help="Don't run open instruct evals.")
 parser.add_argument("--oe_eval_max_length", type=int, default=4096, help="Max length for OE eval.")
-parser.add_argument("--oe_eval_unseen_evals", action="store_true", help="Run unseen task evals instead of dev task evals on OE Eval.")
+parser.add_argument("--oe_eval_task_suite", type=str, default="NEXT_MODEL_DEV", help="Task suite for OE eval: NEXT_MODEL_DEV, NEXT_MODEL_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN (default: NEXT_MODEL_DEV)")
 parser.add_argument("--use_alternate_safety_image", type=str, default=None, help="Use a different image for safety eval.")
 parser.add_argument("--evaluate_on_weka", action="store_true", help="Evaluate OE eval on Beaker.")
 # NOTE: evaluate on weka is expected to be on by default. If not, the evals will run on the google augusta cluster.
@@ -203,7 +203,8 @@ model_name = model_info[0] + f"_{model_info[2]}" if model_info[2] is not None el
 eval_task_specs = []
 
 for experiment_group in experiment_groups:
-    print(f"Submitting {experiment_group} for model: {model_info[0]}")
+    if not args.skip_oi_evals:
+        print(f"Submitting {experiment_group} for model: {model_info[0]}")
     task_spec = copy.deepcopy(d1["tasks"][0])
 
     name = f"open_instruct_eval_{experiment_group}_{model_name}_{today}"
@@ -561,7 +562,8 @@ for experiment_group in experiment_groups:
 
     if any([x in model_info[0] for x in ["opt", "pythia", "falcon", "olmoe"]]):
         if "--use_vllm" in task_spec['arguments'][0]:
-            print(f"Removing --use_vllm for {model_info[0]}")
+            if not args.skip_oi_evals:
+                print(f"Removing --use_vllm for {model_info[0]}")
             task_spec['arguments'] = [task_spec['arguments'][0].replace("--use_vllm", "")]
 
     # Add additional stop sequences if needed.
@@ -576,7 +578,8 @@ for experiment_group in experiment_groups:
             # by default, we dont upload oi-evals, only safety and oe-evals.
             args.hf_upload_experiments = []
         if experiment_group not in args.hf_upload_experiments:
-            print(f"Skipping HF upload for {experiment_group}")
+            if not args.skip_oi_evals: 
+                print(f"Skipping HF upload for {experiment_group}")
         else:
             hf_dataset = args.upload_to_hf
             # to match the way oe-eval script works.
@@ -606,7 +609,7 @@ if not args.skip_oi_evals:
     cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
     subprocess.Popen(cmd, shell=True)
 
-if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
+if args.run_oe_eval_experiments:
     # if so, run oe-eval. We assume it is cloned in the top-level repo directory.
     oe_eval_cmd = f"scripts/eval/oe-eval.sh --model-name {model_name}"
     if args.upload_to_hf:
@@ -641,8 +644,9 @@ if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
     oe_eval_cmd += f" --num_gpus {num_gpus}"
     if args.oe_eval_max_length:
         oe_eval_cmd += f" --max-length {args.oe_eval_max_length}"
-    if args.oe_eval_unseen_evals:
-        oe_eval_cmd += " --unseen-evals"
+    # Add task suite parameter
+    if args.oe_eval_task_suite:
+        oe_eval_cmd += f" --task-suite {args.oe_eval_task_suite}"
     # add priority
     oe_eval_cmd += f" --priority {args.priority}"
 
