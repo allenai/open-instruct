@@ -1344,7 +1344,7 @@ def data_preparation_thread(
                     return  # Simply return to exit the thread cleanly
                 try:
                     result, batch = accumulate_inference_batches(
-                        inference_results_Q, pending_queries_map, args, training_step, generation_config, timeout=1.0
+                        inference_results_Q, pending_queries_map, args, training_step, generation_config, timeout=10.0
                     )
                     break  # Successfully got results, exit retry loop
                 except Empty:
@@ -2048,7 +2048,7 @@ def maybe_evaluate(
 ):
     """Optionally evaluate the model."""
     try:
-        # timeout 0.01 if this is the last training step or we're not evaluating
+        # timeout 0.01 if this isn't the last training step or we're not evaluating
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
         timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_every < 0) else 100
 
