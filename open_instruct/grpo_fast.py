@@ -1235,6 +1235,7 @@ def accumulate_inference_batches(
         total=args.vllm_num_engines,
         desc=f"Accumulating results from {args.vllm_num_engines} engines ({timeout=})",
         bar_format="{l_bar}{bar}{r_bar}\n",
+        miniters=1,
     ):
         result = inference_results_Q.get(timeout=timeout)
         dataset_indices = result.dataset_index
