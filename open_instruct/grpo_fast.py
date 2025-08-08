@@ -1224,7 +1224,6 @@ def accumulate_inference_batches(
     all_ground_truths = []
     all_datasets = []
 
-
     if args.verbose:
         engine_iter = tqdm(
             range(args.vllm_num_engines),

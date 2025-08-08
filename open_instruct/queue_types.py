@@ -40,5 +40,3 @@ class PromptRequest:
     training_step: Optional[int] = None
     dataset_index: Optional[List[int]] = None
     is_eval: bool = False
-
-

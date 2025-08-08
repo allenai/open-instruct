@@ -43,7 +43,6 @@ from open_instruct.queue_types import GenerationResult, PromptRequest, RequestIn
 logger = logging.getLogger(__name__)
 
 
-
 def ray_noset_visible_devices(env_vars=os.environ):
     # Refer to
     # https://github.com/ray-project/ray/blob/161849364a784442cc659fb9780f1a6adee85fce/python/ray/_private/accelerators/nvidia_gpu.py#L95-L96
