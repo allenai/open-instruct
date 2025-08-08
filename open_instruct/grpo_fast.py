@@ -1349,8 +1349,8 @@ def data_preparation_thread(
                         args,
                         training_step,
                         generation_config,
-                        # We only timeout after half an hour. This is to avoid jobs hanging forever.
-                        timeout=1800.0,
+                        # We only timeout after two hours. This is to avoid jobs hanging forever.
+                        timeout=2 * 60 * 60,
                     )
                     break  # Successfully got results, exit retry loop
                 except Empty:
