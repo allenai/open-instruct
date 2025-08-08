@@ -319,7 +319,7 @@ for TASK in "${TASKS[@]}"; do
     # NOTE: For gantry args here and below, random numbers like #42 are added to the env variables because they need to be unique names. The numbers are ignored.
     # Build gantry args
     if [ "$EVALUATE_ON_WEKA" == "true" ]; then
-        GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"weka\": \"oe-adapt-default:/weka/oe-adapt-default\", \"weka#44\": \"oe-training-default:/weka/oe-training-default\", \"env#132\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#42\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\"${MAX_TOKENS_ARG}, \"env-secret#2":"HF_TOKEN=HF_TOKEN\"}"
+        GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"weka\": \"oe-adapt-default:/weka/oe-adapt-default\", \"weka#44\": \"oe-training-default:/weka/oe-training-default\", \"env#132\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#42\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\"${MAX_TOKENS_ARG}, \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\"}"
     else
         GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env-secret#43\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"${MAX_TOKENS_ARG}}"
     fi
