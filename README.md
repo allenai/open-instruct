@@ -49,16 +49,7 @@ Our setup mostly follows our [Dockerfile](./Dockerfile), which uses Python 3.10.
 
 ### Installation with uv (recommended)
 
-We recommend using [uv](https://docs.astral.sh/uv/) for installation. You can install via:
-
-```bash
-# Install base dependencies
-uv sync
-
-# Install with compilation dependencies (flash attention, flash infer, and liger-kernel)
-uv sync --extra compile
-```
-
+We recommend using [uv](https://docs.astral.sh/uv/) for installation. You can install with `uv sync`.
 
 * **Docker installation**: You can also use the Dockerfile to build a Docker image. You can build the image with the following command:
 

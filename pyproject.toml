@@ -29,6 +29,9 @@ dependencies = [
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
     "pytest-xdist==3.8.0",
+    "flash-attn>=2.8.0.post2; platform_system != 'Darwin'",
+    "flashinfer-python==0.2.8; platform_system != 'Darwin'",
+    "liger-kernel>=0.5.4; platform_system != 'Darwin'",
 ]
 
 [build-system]
@@ -37,6 +40,12 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 py-modules = ["open_instruct"]
+
+[tool.uv.extra-build-dependencies]
+flash-attn = [{ requirement = "torch", match-runtime = true }]
+
+[tool.uv.extra-build-variables]
+flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 
 # pytorch related setups
 [tool.uv.sources]
@@ -56,11 +65,6 @@ explicit = true
 
 # flash-attn related setups
 [project.optional-dependencies]
-compile = [
-    "flash-attn>=2.8.0.post2",
-    "flashinfer-python==0.2.8",
-    "liger-kernel>=0.5.4",
-]
 code = [
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0", 
