@@ -1,6 +1,4 @@
-"""
-python open_instruct/tool_utils/tool_vllm.py
-"""
+"""Tool utilities for vLLM integration."""
 
 import copy
 import re
@@ -14,7 +12,6 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional, Union
 
 import requests
-from rich.console import Console
 from tqdm import tqdm
 from vllm import LLM, PoolingParams, PoolingRequestOutput, PromptType, RequestOutput, SamplingParams, TokensPrompt
 from vllm.lora.request import LoRARequest
@@ -376,8 +373,6 @@ class ToolUseLLM(LLM):
             setattr(concat_outputs[req_id].outputs[0], "tool_runtime", tool_runtime[req_id])
             setattr(concat_outputs[req_id].outputs[0], "tool_called", tool_called[req_id])
             if len(masks[req_id]) != len(concat_outputs[req_id].outputs[0].token_ids):
-                visualize_token_role(concat_outputs[req_id].outputs[0].token_ids, masks[req_id], tokenizer)
-                breakpoint()
                 raise ValueError(
                     f"Mask length {len(masks[req_id])} does not match "
                     f"token IDs length {len(concat_outputs[req_id].outputs[0].token_ids)}"
@@ -401,134 +396,3 @@ class ToolUseLLM(LLM):
             merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1]))
         )
         return final_outputs
-
-
-if __name__ == "__main__":
-    console = Console()
-    from transformers import AutoTokenizer
-
-    # Sample prompts.
-    system_prompt = """Below is a conversation between an user and an assitant. The assistant helps with the user's tasks. When the task is completed, the assistant ends the conversation with <endoftext>. The assistant can also use a tool for multiple times. The assitant has the following tools:
-
-1. `<code>`: Python execution service:
-You could run python code by putting your code between <code> and </code> tags. For example, it could be
-<code>
-print("Hello, world!")
-</code>
-and you will get the output between the <output> and </output> tags.
-"""
-
-    console.print(f"system_prompt: {system_prompt}")
-    prompts = [
-        "User: Write a python program which calculates the sum of 1 3 4. Then write another separate program to calculate the product of 1 3 4.\nAssistant:",
-        "User: Write a python program which prints 'Hello, Costa!'.\nAssistant:",
-    ]
-    prompts = [system_prompt + "\n\n" + p for p in prompts]
-
-    # Create a tool.
-    python_code_tool = PythonCodeTool(api_endpoint="http://localhost:1212", start_str="<code>", end_str="</code>")
-    tools = {python_code_tool.end_str: python_code_tool}
-    # Create a sampling params object.
-    sampling_params = SamplingParams(
-        temperature=0.8,
-        top_p=0.95,
-        stop=[item.end_str for item in tools.values()] + ["<endoftext>"],
-        n=3,
-        max_tokens=1000,
-        include_stop_str_in_output=True,
-    )
-    print(f"{sampling_params.n=}")
-    # Create an LLM.
-    model_name = "Qwen/Qwen2.5-7B"
-    llm = ToolUseLLM(
-        tools=tools, model=model_name, tensor_parallel_size=1, gpu_memory_utilization=0.9, max_model_len=10000
-    )
-
-    # Tokenization generation
-    from open_instruct.dataset_transformation import visualize_token_role
-
-    tok = AutoTokenizer.from_pretrained(model_name)
-    prompt_token_ids = [tok.encode(p) for p in prompts]
-    outputs = llm.generate(prompt_token_ids=prompt_token_ids, sampling_params=sampling_params)
-    for i, output in enumerate(outputs):
-        prompt = tok.decode(output.prompt_token_ids)
-        console.rule(f"Conversation {i}")
-        console.rule("Prompt")
-        console.print(prompt)
-        for j, o in enumerate(output.outputs):
-            generated_text = tok.decode(o.token_ids)
-            assert len(o.mask) == len(o.token_ids)
-            console.rule(f"Generated text {j}")
-            console.rule("Generated text w/ masks")
-            visualize_token_role(o.token_ids, o.mask, tok)
-            # console.rule("Generated text")
-            # visualize_token(o.token_ids, tok)
-    print(f"{sampling_params.n=}")
-    print("debugging tests 2 all done")
-    # breakpoint()
-    # More serious benchmarks
-
-    # from datasets import load_dataset
-    # tok = AutoTokenizer.from_pretrained(model_name)
-    # ds = load_dataset("ai2-adapt-dev/rlvr_open_reasoner_math", split="train")
-    # ds = ds.select(range(8192))
-    # def process(example):
-    #     messages = [{"role": "system", "content": system_prompt}] + example["messages"]
-    #     example["input_ids_prompt"] = tok.apply_chat_template(messages, add_generation_prompt=True)
-    #     return example
-    # ds = ds.map(process, remove_columns=["messages"])
-
-    # print("ds:", ds)
-    # outputs = llm.generate(prompt_token_ids=ds["input_ids_prompt"], sampling_params=sampling_params)
-    # print(f"len(outputs): {len(outputs)}")
-    # print("debugging tests all done")
-    # # need to handle the case the response length actually goes down overtime
-    from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
-
-    tc = TokenizerConfig(tokenizer_name_or_path=model_name, chat_template_name="r1_simple_chat_postpend_think_tools7")
-    transform_fn_args = [{}, {"max_token_length": 8192, "max_prompt_token_length": 2048}]
-    train_dataset = get_cached_dataset_tulu(
-        dataset_mixer_list=["ai2-adapt-dev/rlvr_open_reasoner_math", "1.0"],
-        dataset_mixer_list_splits=["train"],
-        tc=tc,
-        dataset_transform_fn=["rlvr_tokenize_v1", "rlvr_filter_v1"],
-        transform_fn_args=transform_fn_args,
-        dataset_cache_mode="local",
-        hf_entity="allenai",
-        dataset_local_cache_dir="/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache",
-    )
-    outputs = llm.generate(prompt_token_ids=train_dataset["input_ids_prompt"][:30], sampling_params=sampling_params)
-    # calculate the percentage of timeout
-    timeouts = [o for output in outputs for o in output.outputs if o.timeout]
-    print(f"Timeout percentage: {len(timeouts) / (len(outputs) * sampling_params.n)}")
-    empty_outputs = [o for output in outputs for o in output.outputs if len(o.tool_output) == 0 and o.tool_called]
-    print(f"Empty output percentage: {len(empty_outputs) / (len(outputs) * sampling_params.n)}")
-    errors = [o for output in outputs for o in output.outputs if len(o.tool_error) > 0]
-    print(f"Error percentage: {len(errors) / (len(outputs) * sampling_params.n)}")
-    tool_called = [o for output in outputs for o in output.outputs if o.tool_called]
-    print(f"Tool called percentage: {len(tool_called) / (len(outputs) * sampling_params.n)}")
-    tool_runtime = [o for output in outputs for o in output.outputs if o.tool_runtime > 0]
-    print(f"Tool runtime > 0 percentage: {len(tool_runtime) / (len(outputs) * sampling_params.n)}")
-    # print(tok.decode(empty_outputs[0].token_ids))
-
-    print_samples = True
-    if print_samples:
-        for i, output in enumerate(outputs):
-            prompt = tok.decode(output.prompt_token_ids)
-            console.rule(f"Conversation {i}")
-            console.rule("Prompt")
-            console.print(prompt)
-            console.rule("Ground truth")
-            console.print(train_dataset[i]["ground_truth"])
-            for j, o in enumerate(output.outputs):
-                generated_text = tok.decode(o.token_ids)
-                assert len(o.mask) == len(o.token_ids)
-                console.rule(f"Generated text {j}")
-                console.rule("Generated text w/ masks")
-                visualize_token_role(o.token_ids, o.mask, tok)
-                # console.rule("Generated text")
-                # visualize_token(o.token_ids, tok)
-            breakpoint()
-
-    # breakpoint()
-    print("debugging tests all done")
