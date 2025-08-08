@@ -38,6 +38,7 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
+from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 from open_instruct.utils import ray_get_with_progress
 
 logger = logging.getLogger(__name__)
@@ -230,13 +231,6 @@ class LLMRayActor:
             # Process the request
             prompts = request.prompts
 
-            # Debug logging
-            n_samples = request.sampling_params.n if request.sampling_params else 1
-            print(
-                f"[LLMRayActor] Processing batch: {len(prompts)} prompts, "
-                f"n={n_samples}, expecting {len(prompts) * n_samples} total outputs"
-            )
-
             # Add requests to the engine
             for i, prompt in enumerate(prompts):
                 request_id = f"batch_{request.training_step}_{i}"
@@ -254,20 +248,6 @@ class LLMRayActor:
             # Sort outputs by prompt index (i)
             # Request IDs are now in format: batch_{step}_{i}
             outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
-
-            # Debug logging
-            total_responses = sum(len(output.outputs) for output in outputs)
-            self.logger.info(
-                f"[LLMRayActor] Collected {len(outputs)} RequestOutputs with "
-                f"{total_responses} total responses (expected {len(prompts) * n_samples})"
-            )
-
-            # Additional debug info
-            for i, output in enumerate(outputs):
-                self.logger.info(
-                    f"[LLMRayActor] RequestOutput {i} (request_id={output.request_id}): "
-                    f"has {len(output.outputs)} completions"
-                )
 
             result = self._process_outputs(outputs, dataset_index=request.dataset_index)
             try:
@@ -375,8 +355,6 @@ class ToolLLMRayActor(LLMRayActor):
         )
 
         # Now override with ToolUseLLM instead of regular LLMEngine
-        from open_instruct.tool_utils.tool_vllm import ToolUseLLM
-
         # Need to reconstruct kwargs without the ones already consumed by parent
         kwargs_copy = kwargs.copy()
         kwargs_copy.pop("noset_visible_devices", None)
