@@ -37,8 +37,8 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
+from open_instruct.queue_types import GenerationResult, RequestInfo
 from open_instruct.utils import ray_get_with_progress
-from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo
 
 logger = logging.getLogger(__name__)
 
@@ -307,7 +307,6 @@ def create_vllm_engines(
     results_queue=None,
     eval_results_queue=None,
 ) -> list[LLMRayActor]:
-    import vllm
 
     assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
 
