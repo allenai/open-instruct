@@ -334,6 +334,8 @@ class Args:
     """whether to enable prefix caching"""
     vllm_top_p: float = 1.0
     """vLLM top p for nucleus sampling"""
+    accumulate_inference_batches_timeout: float = 1800.0  # 30 minutes
+    """Timeout in seconds for accumulating inference batches during training"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     gather_whole_model: bool = True
@@ -1344,7 +1346,13 @@ def data_preparation_thread(
                     return  # Simply return to exit the thread cleanly
                 try:
                     result, batch = accumulate_inference_batches(
-                        inference_results_Q, pending_queries_map, args, training_step, generation_config, timeout=1.0
+                        inference_results_Q,
+                        pending_queries_map,
+                        args,
+                        training_step,
+                        generation_config,
+                        # Use configurable timeout from args
+                        timeout=args.accumulate_inference_batches_timeout,
                     )
                     break  # Successfully got results, exit retry loop
                 except Empty:
