@@ -34,12 +34,6 @@ dependencies = [
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
 ]
 
-[build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools]
-py-modules = ["open_instruct"]
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]
