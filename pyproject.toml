@@ -74,6 +74,7 @@ code = [
 ]
 
 [tool.uv]
+preview = true
 python-preference = "only-managed"
 no-build-isolation-package = ["flash-attn"]
 
