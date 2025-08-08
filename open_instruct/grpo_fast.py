@@ -108,6 +108,7 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
+from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo
 from open_instruct.rl_utils2 import Timer, pack_sequences
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -133,14 +134,7 @@ from open_instruct.utils import (
     sync_gs_bucket,
     UlyssesSPSplitter,
 )
-from open_instruct.vllm_utils3 import (
-    GenerationResult,
-    LLMRayActor,
-    PromptRequest,
-    RequestInfo,
-    create_vllm_engines,
-    init_process_group,
-)
+from open_instruct.vllm_utils3 import LLMRayActor, create_vllm_engines, init_process_group
 
 # Setup logging with filename and line number format
 logging.basicConfig(
@@ -219,10 +213,8 @@ class Args:
     """RUNTIME VALUE: The number of processes (GPUs) to use"""
     num_training_steps: Optional[int] = None
     """RUNTIME VALUE: The number of training_steps to train"""
-    num_evals: int = 10
-    """this sets how many in-loop evals we do during training. in-loop evals reuse the generation/reward verifier setup."""
-    local_eval_freq: Optional[int] = None
-    """this controls the number of in-loop evals, which reuses the generation/reward verifier setup. don't set this directly, but set via num_evals."""
+    local_eval_every: int = 100
+    """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup. Set to -1 to disable."""
     save_freq: int = 200
     """How many train steps to save the model"""
     allow_world_padding: bool = False
@@ -1345,12 +1337,17 @@ def accumulate_inference_batches(
     all_ground_truths = []
     all_datasets = []
 
-    for i in tqdm(
-        range(args.vllm_num_engines),
-        total=args.vllm_num_engines,
-        desc=f"Accumulating results from {args.vllm_num_engines} engines ({timeout=})",
-        bar_format="{l_bar}{bar}{r_bar}\n",
-    ):
+    if args.verbose:
+        engine_iter = tqdm(
+            range(args.vllm_num_engines),
+            total=args.vllm_num_engines,
+            desc=f"Accumulating results from {args.vllm_num_engines} engines ({timeout=})",
+            bar_format="{l_bar}{bar}{r_bar}\n",
+        )
+    else:
+        engine_iter = range(args.vllm_num_engines)
+
+    for i in engine_iter:
         result = inference_results_Q.get(timeout=timeout)
         dataset_indices = result.dataset_index
 
@@ -1734,9 +1731,6 @@ def setup_runtime_variables(args: Args) -> Args:
     args.num_training_steps = args.total_episodes // (
         args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     )
-    if args.local_eval_freq is not None:
-        raise ValueError("local_eval_freq should not be set manually; it will be computed automatically")
-    args.local_eval_freq = max(1, args.num_training_steps // args.num_evals)
     args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
@@ -2026,27 +2020,34 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
         return collated_data, data_thread_metrics, num_total_tokens
 
 
-def generate_thread(vllm_engines, local_eval_freq, num_training_steps, resume_training_step, stop_event):
+def generate_thread(vllm_engines, local_eval_every, num_training_steps, resume_training_step, stop_event):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
 
     while not stop_event.is_set():
-        with Timer("🔥 Generation time"):
+        with Timer("🔥 Generation time") as _gen_timer:
             engine_refs = [
                 engine.process_from_queue.remote(num_training_steps, resume_training_step, timeout=0.1)
                 for engine in vllm_engines
             ]
             engine_futures = [ref.future() for ref in engine_refs]
             processed_results = []
-            with tqdm(
-                total=len(vllm_engines),
-                desc="[Generate Thread] Waiting for vLLM engines to return",
-                bar_format="{l_bar}{bar}{r_bar}\n",
-            ) as pbar:
+            if args.verbose:
+                with tqdm(
+                    total=len(vllm_engines),
+                    desc="[Generate Thread] Waiting for vLLM engines to return",
+                    bar_format="{l_bar}{bar}{r_bar}\n",
+                ) as pbar:
+                    for future in futures.as_completed(engine_futures):
+                        processed_results.append(future.result())
+                        pbar.update(1)
+            else:
                 for future in futures.as_completed(engine_futures):
                     processed_results.append(future.result())
-                    pbar.update(1)
             num_processed = sum(int(result) for result in processed_results)
+            # Suppress timing output if nothing was processed
+            if num_processed == 0:
+                _gen_timer.noop = 1
         if num_processed == 0:
             # If no batches were processed, sleep for a short time to avoid busy waiting
             time.sleep(1)
@@ -2168,7 +2169,7 @@ def maybe_evaluate(
     try:
         # timeout 0.01 if this is the last training step or we're not evaluating
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
-        timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_freq < 0) else 100
+        timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_every < 0) else 100
 
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch = accumulate_inference_batches(
@@ -2477,7 +2478,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     logger.info("======== ✅ generation thread starts =========")
     generation_future = executor.submit(
-        generate_thread, vllm_engines, args.local_eval_freq, args.num_training_steps, resume_training_step, stop_event
+        generate_thread, vllm_engines, args.local_eval_every, args.num_training_steps, resume_training_step, stop_event
     )
 
     # Send initial data to ensure we have a N-step offset.
@@ -2513,7 +2514,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             param_prompt_Q,
             generation_configs,
         )
-        if training_step % args.local_eval_freq == 0 and eval_batch is not None:
+        if training_step % args.local_eval_every == 0 and eval_batch is not None:
             split_and_insert_batch(
                 eval_batch,
                 training_step,
