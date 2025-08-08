@@ -565,7 +565,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.wandb_url = wandb_url
         torch.cuda.set_device(self.local_rank)
         self.device = torch.device(self.local_rank)
-        deepspeed.init_distributed()
+        deepspeed.init_distributed(timeout=timedelta(minutes=180))
 
         ds_config = get_train_ds_config(
             offload=False,
@@ -760,6 +760,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 world_size=world_size,
                 rank=0,
                 group_name="openrlhf",
+                timeout=timedelta(minutes=180),
             )
             ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=60)
         torch.distributed.barrier()
