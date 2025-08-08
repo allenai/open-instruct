@@ -49,7 +49,6 @@ import json
 import logging
 import math
 import os
-import queue
 import shutil
 import socket
 import threading
@@ -2283,9 +2282,9 @@ def cleanup_training_resources(
     executor.shutdown(wait=True)
 
     logger.info("Shutting down Ray queues...")
-    for q in queues:
+    for queue in queues:
         try:
-            q.shutdown()
+            queue.shutdown()
         except Exception as e:
             logger.warning(f"Error shutting down Ray queue: {e}")
 
@@ -2434,7 +2433,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
         try:
             generate_metrics = generate_metrics_Q.get_nowait()
-        except queue.Empty:
+        except Empty:
             logging.info("[Main Thread] didn't get generation metrics")
 
         data_thread_metrics = {**data_thread_metrics, **generate_metrics}
