@@ -307,7 +307,6 @@ def create_vllm_engines(
     results_queue=None,
     eval_results_queue=None,
 ) -> list[LLMRayActor]:
-
     assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
 
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
