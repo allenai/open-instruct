@@ -1343,8 +1343,7 @@ def data_preparation_thread(
             logger.info("[Data Preparation Thread] Shutting down")
             return
         # Streaming accumulation: collect results as they arrive
-        timer = Timer("🚀 [Data Preparation Thread] Getting response ids")
-        with timer:
+        with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
             while True:
                 if stop_event.is_set():
                     logger.info("[Data Preparation Thread] Shutting down due to stop event")
@@ -1931,8 +1930,7 @@ def generate_thread(
     logger.info("[Generate Thread] 🚀 Starting generation thread")
 
     while not stop_event.is_set():
-        timer = Timer("🔥 Generation time")
-        with timer:
+        with Timer("🔥 Generation time") as timer:
             engine_refs = [
                 engine.process_from_queue.remote(num_training_steps, resume_training_step, timeout=0.1)
                 for engine in vllm_engines
@@ -1975,8 +1973,7 @@ def one_training_step(
 ):
     """Train the model for one step."""
     update_ref_policy_future = []
-    timer = Timer("[Main Thread] 🗡️ Training")
-    with timer:
+    with Timer("[Main Thread] 🗡️ Training") as timer:
         metrics_list: List[dict[str, float]] = ray_get_with_progress(
             [
                 policy_group.models[i].train.remote(
