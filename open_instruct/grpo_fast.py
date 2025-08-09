@@ -1343,7 +1343,7 @@ def data_preparation_thread(
             logger.info("[Data Preparation Thread] Shutting down")
             return
         # Streaming accumulation: collect results as they arrive
-        with Timer("🚀 [Data Preparation Thread] Getting response ids"):
+        with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
             while True:
                 if stop_event.is_set():
                     logger.info("[Data Preparation Thread] Shutting down due to stop event")
@@ -1361,6 +1361,8 @@ def data_preparation_thread(
                     break  # Successfully got results, exit retry loop
                 except Empty:
                     continue  # Timeout occurred, loop back to check stop_event
+
+        getting_response_time = timer.duration()
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -1587,6 +1589,7 @@ def data_preparation_thread(
                 "val/good_outputs_rate": np.array(good_outputs).mean(),
                 "val/tool_runtimes_rate": np.array(result.request_info.tool_runtimes).mean(),
                 "val/tool_calleds_rate": np.array(result.request_info.tool_calleds).mean(),
+                "time/getting_response": getting_response_time,
                 **reward_metrics,
             }
 
@@ -1920,12 +1923,14 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
         return collated_data, data_thread_metrics, num_total_tokens
 
 
-def generate_thread(vllm_engines, local_eval_every, num_training_steps, resume_training_step, stop_event):
+def generate_thread(
+    vllm_engines, local_eval_every, num_training_steps, resume_training_step, stop_event, generate_metrics_Q
+):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
 
     while not stop_event.is_set():
-        with Timer("🔥 Generation time"):
+        with Timer("🔥 Generation time") as timer:
             engine_refs = [
                 engine.process_from_queue.remote(num_training_steps, resume_training_step, timeout=0.1)
                 for engine in vllm_engines
@@ -1944,6 +1949,8 @@ def generate_thread(vllm_engines, local_eval_every, num_training_steps, resume_t
         if num_processed == 0:
             # If no batches were processed, sleep for a short time to avoid busy waiting
             time.sleep(1)
+        else:
+            generate_metrics_Q.put({"time/generation": timer.duration})
 
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
@@ -1966,7 +1973,7 @@ def one_training_step(
 ):
     """Train the model for one step."""
     update_ref_policy_future = []
-    with Timer("[Main Thread] 🗡️ Training"):
+    with Timer("[Main Thread] 🗡️ Training") as timer:
         metrics_list: List[dict[str, float]] = ray_get_with_progress(
             [
                 policy_group.models[i].train.remote(
@@ -1992,6 +1999,7 @@ def one_training_step(
             "val/num_total_tokens": num_total_tokens,
             "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
             "tokens_per_second": num_total_tokens / (time.time() - start_time),
+            "time/training": timer.current_duration(),
             **data_thread_metrics,
             **average_metrics,
         }
@@ -2335,6 +2343,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     packed_sequences_Q = Queue(maxsize=args.async_steps)
     pending_queries_map = PendingQueriesMap()
     eval_pending_queries_map = PendingQueriesMap()
+    generate_metrics_Q = Queue(maxsize=args.async_steps)
 
     if eval_dataset is None:
         eval_batch = None
@@ -2371,7 +2380,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     logger.info("======== ✅ generation thread starts =========")
     generation_future = executor.submit(
-        generate_thread, vllm_engines, args.local_eval_every, args.num_training_steps, resume_training_step, stop_event
+        generate_thread,
+        vllm_engines,
+        args.local_eval_every,
+        args.num_training_steps,
+        resume_training_step,
+        stop_event,
+        generate_metrics_Q,
     )
 
     # Send initial data to ensure we have a N-step offset.
@@ -2424,6 +2439,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         )
         if collated_data is None:
             continue
+
+        try:
+            generate_metrics = generate_metrics_Q.get_nowait()
+        except Empty:
+            logging.info("[Main Thread] didn't get generation metrics")
+
+        data_thread_metrics = {**data_thread_metrics, **generate_metrics}
 
         one_training_step(
             args,
