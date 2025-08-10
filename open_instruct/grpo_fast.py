@@ -1230,12 +1230,12 @@ def accumulate_inference_batches(
     all_ground_truths = []
     all_datasets = []
     for i in tqdm(
-            range(args.vllm_num_engines),
-            total=args.vllm_num_engines,
-            desc=f"Accumulating results from {args.vllm_num_engines} engines ({timeout=})",
-            bar_format="{l_bar}{bar}{r_bar}\n",
-            disable=not args.verbose,
-        ):
+        range(args.vllm_num_engines),
+        total=args.vllm_num_engines,
+        desc=f"Accumulating results from {args.vllm_num_engines} engines ({timeout=})",
+        bar_format="{l_bar}{bar}{r_bar}\n",
+        disable=not args.verbose,
+    ):
         result = inference_results_Q.get(timeout=timeout)
         dataset_indices = result.dataset_index
 
