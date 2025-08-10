@@ -1229,18 +1229,13 @@ def accumulate_inference_batches(
     all_queries = []
     all_ground_truths = []
     all_datasets = []
-
-    if args.verbose:
-        engine_iter = tqdm(
+    for i in tqdm(
             range(args.vllm_num_engines),
             total=args.vllm_num_engines,
             desc=f"Accumulating results from {args.vllm_num_engines} engines ({timeout=})",
             bar_format="{l_bar}{bar}{r_bar}\n",
-        )
-    else:
-        engine_iter = range(args.vllm_num_engines)
-
-    for i in engine_iter:
+            disable=not args.verbose,
+        ):
         result = inference_results_Q.get(timeout=timeout)
         dataset_indices = result.dataset_index
 
@@ -1931,18 +1926,15 @@ def generate_thread(vllm_engines, local_eval_every, num_training_steps, resume_t
             ]
             engine_futures = [ref.future() for ref in engine_refs]
             processed_results = []
-            if args.verbose:
-                with tqdm(
-                    total=len(vllm_engines),
-                    desc="[Generate Thread] Waiting for vLLM engines to return",
-                    bar_format="{l_bar}{bar}{r_bar}\n",
-                ) as pbar:
-                    for future in futures.as_completed(engine_futures):
-                        processed_results.append(future.result())
-                        pbar.update(1)
-            else:
+            with tqdm(
+                total=len(vllm_engines),
+                desc="[Generate Thread] Waiting for vLLM engines to return",
+                bar_format="{l_bar}{bar}{r_bar}\n",
+                disable=not args.verbose,
+            ) as pbar:
                 for future in futures.as_completed(engine_futures):
                     processed_results.append(future.result())
+                    pbar.update(1)
             num_processed = sum(int(result) for result in processed_results)
             # Suppress timing output if nothing was processed
             if num_processed == 0:
