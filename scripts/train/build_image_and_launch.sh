@@ -5,6 +5,7 @@ image_name=open-instruct-integration-test
 
 # Build the Docker image exactly like push-image.yml does
 docker build \
+    --platform linux/amd64 \
     --build-arg BUILDKIT_INLINE_CACHE=1 \
     --build-arg CUDA=12.1.0 \
     --build-arg TARGET=cudnn8-devel \
