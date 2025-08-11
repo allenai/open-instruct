@@ -30,7 +30,7 @@ fi
 
 # Install Python dependencies
 echo "Installing dependencies with uv..."
-uv sync --only-group dev
+uv sync 
 
 # Run the provided script
 bash $1 "$beaker_user/$image_name"

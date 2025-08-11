@@ -361,9 +361,9 @@ def create_vllm_engines(
     use_hybrid_engine = pg is not None
     num_gpus = int(tensor_parallel_size == 1)
     if use_hybrid_engine and tensor_parallel_size == 1 and single_gpu_mode:
-        # every worker will use 0.5 GPU, so that we can schedule
-        # 2 instances on the same GPUs.
-        num_gpus = 0.5
+        # every worker will use 0.5/num_engines GPU, so that we can schedule
+        # multiple instances on the same GPU while leaving 0.5 for the learner.
+        num_gpus = 0.5 / num_engines
 
     print(f"num_gpus: {num_gpus}")
 
@@ -381,7 +381,7 @@ def create_vllm_engines(
         scheduling_strategy = PlacementGroupSchedulingStrategy(
             placement_group=pg,
             placement_group_capture_child_tasks=True,
-            placement_group_bundle_index=i * tensor_parallel_size,
+            placement_group_bundle_index=0 if single_gpu_mode else i * tensor_parallel_size,
         )
 
         additional_kwargs = {}

@@ -34,7 +34,7 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path Qwen/Qwen3-1.7B \
+    --model_name_or_path EleutherAI/pythia-14m \
     --stop_strings "</answer>" \
     --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
@@ -46,6 +46,7 @@ uv run python mason.py \
     --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
+    --vllm_num_engines 2 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.01 \
     --seed 3 \

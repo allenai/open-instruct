@@ -47,7 +47,6 @@ uv run python mason.py \
     --with_tracking \
     --num_epochs 1 \
     --num_learners_per_node 1 \
-    --vllm_num_engines 2 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.01 \
     --seed 3 \
