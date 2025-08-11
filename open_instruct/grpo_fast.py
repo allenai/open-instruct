@@ -1208,6 +1208,7 @@ def accumulate_inference_batches(
     args: Args,
     training_step: int,
     generation_config,
+    timeout: Optional[float] = None,
 ) -> tuple[GenerationResult, Batch]:
     """Accumulate multiple inference results into a single training batch.
 
@@ -1217,6 +1218,10 @@ def accumulate_inference_batches(
         args: Arguments containing vllm_num_engines
         training_step: Current training step for error reporting
         generation_config: Generation config containing n (number of samples per prompt)
+        timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
+
+    Raises:
+        queue.Empty: If timeout is specified and no data is available within timeout.
 
     Returns:
         Tuple of (combined_result, Batch with queries, ground_truths, datasets) or (ShutdownSentinel, None) if shutdown signal received
@@ -1233,7 +1238,7 @@ def accumulate_inference_batches(
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     ):
-        result = inference_results_Q.get()
+        result = inference_results_Q.get(timeout=timeout)
 
         if isinstance(result, ShutdownSentinel):
             return result, None
@@ -2042,55 +2047,67 @@ def maybe_evaluate(
     eval_generation_config,
 ):
     """Optionally evaluate the model."""
-    # Accumulate evaluation results from all vLLM engines
-    eval_result, eval_batch = accumulate_inference_batches(
-        evaluation_inference_results_Q, eval_pending_queries_map, args, training_step, eval_generation_config
-    )
+    try:
+        # timeout 0.01 if this is the last training step or we're not evaluating
+        # otherwise, wait to get the last evaluation generations (long timeout just in case)
+        timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_every < 0) else 100
 
-    logger.info("[Main Thread] 📊 Evaluation responses received")
-
-    eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
-    eval_decoded_responses = tokenizer.batch_decode(eval_result.responses, skip_special_tokens=True)
-    eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_result.finish_reasons) / len(
-        eval_result.finish_reasons
-    )
-
-    # get and log evaluation metrics
-    eval_scores, eval_reward_metrics = asyncio.run(
-        reward_fn(
-            eval_result.responses,
-            eval_decoded_responses,
-            eval_batch if eval_batch else Batch(queries=[], ground_truths=[], datasets=[], indices=None),
-            eval_result.finish_reasons,
-            eval_result.request_info,
+        # Accumulate evaluation results from all vLLM engines
+        eval_result, eval_batch = accumulate_inference_batches(
+            evaluation_inference_results_Q,
+            eval_pending_queries_map,
+            args,
+            training_step,
+            eval_generation_config,
+            timeout=timeout,
         )
-    )
-    eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
-    eval_metrics = {
-        "eval/scores": np.array(eval_scores).mean(),
-        "eval/sequence_lengths": eval_sequence_lengths.mean(),
-        "eval/sequence_lengths_min": eval_sequence_lengths.min(),
-        "eval/sequence_lengths_max": eval_sequence_lengths.max(),
-        "eval/stop_rate": eval_stop_rate,
-        **eval_reward_metrics,
-    }
-    print_rich_single_line_metrics(eval_metrics)
-    for key, value in eval_metrics.items():
-        writer.add_scalar(key, value, episode)
-    table = {}
-    table["prompt"] = tokenizer.batch_decode(eval_batch.queries if eval_batch else [])
-    table["response"] = eval_decoded_responses
-    table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
-    table["scores"] = eval_scores
-    table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
-    df = pd.DataFrame(table)
-    if args.with_tracking:
-        import wandb
 
-        wandb.log({"sample_completions": wandb.Table(dataframe=df)})
-    else:
-        print_rich_table(df.iloc[:1])
-    del table
+        logger.info("[Main Thread] 📊 Evaluation responses received")
+
+        eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
+        eval_decoded_responses = tokenizer.batch_decode(eval_result.responses, skip_special_tokens=True)
+        eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_result.finish_reasons) / len(
+            eval_result.finish_reasons
+        )
+
+        # get and log evaluation metrics
+        eval_scores, eval_reward_metrics = asyncio.run(
+            reward_fn(
+                eval_result.responses,
+                eval_decoded_responses,
+                eval_batch if eval_batch else Batch(queries=[], ground_truths=[], datasets=[], indices=None),
+                eval_result.finish_reasons,
+                eval_result.request_info,
+            )
+        )
+        eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
+        eval_metrics = {
+            "eval/scores": np.array(eval_scores).mean(),
+            "eval/sequence_lengths": eval_sequence_lengths.mean(),
+            "eval/sequence_lengths_min": eval_sequence_lengths.min(),
+            "eval/sequence_lengths_max": eval_sequence_lengths.max(),
+            "eval/stop_rate": eval_stop_rate,
+            **eval_reward_metrics,
+        }
+        print_rich_single_line_metrics(eval_metrics)
+        for key, value in eval_metrics.items():
+            writer.add_scalar(key, value, episode)
+        table = {}
+        table["prompt"] = tokenizer.batch_decode(eval_batch.queries if eval_batch else [])
+        table["response"] = eval_decoded_responses
+        table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
+        table["scores"] = eval_scores
+        table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
+        df = pd.DataFrame(table)
+        if args.with_tracking:
+            import wandb
+
+            wandb.log({"sample_completions": wandb.Table(dataframe=df)})
+        else:
+            print_rich_table(df.iloc[:1])
+        del table
+    except Empty:
+        logger.warning("[Main Thread] 🙈 Evaluation responses not received")
 
 
 def save_final_model(
