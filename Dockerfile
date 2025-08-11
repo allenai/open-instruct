@@ -26,7 +26,7 @@ COPY pyproject.toml uv.lock build.py README.md ./
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --link-mode=copy
+    uv sync --frozen --no-install-project
 
 # Annoyingly, we need this before `uv run`, or it complains.
 COPY open_instruct open_instruct
