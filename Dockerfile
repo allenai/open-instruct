@@ -20,7 +20,7 @@ ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
 
 # Copy only dependency-related files first
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml build.py README.md uv.lock ./
 
 # Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
@@ -28,17 +28,13 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-install-project --link-mode=copy
 
-# rerun with extras
-RUN uv sync --extra compile --extra liger
-
-# punkt / punkt_tab
-RUN uv run -m nltk.downloader punkt
-RUN uv run -m nltk.downloader punkt_tab
+# Annoyingly, we need this before `uv run`, or it complains.
+COPY open_instruct open_instruct
+RUN uv run -m nltk.downloader punkt punkt_tab
 
 WORKDIR /stage/
 
 # Copy all runtime files directly to final stage
-COPY open_instruct open_instruct
 COPY eval eval
 COPY configs configs
 COPY scripts scripts
