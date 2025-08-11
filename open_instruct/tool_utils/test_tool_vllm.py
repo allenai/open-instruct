@@ -133,31 +133,32 @@ class TestToolUseLLMIntegration(unittest.TestCase):
         self.assertIsInstance(len(tool_called), int)
 
 
+def create_mock_request_output(request_id, prompt_token_ids, output_tokens, output_text):
+    """Helper to create mock RequestOutput with proper structure."""
+    mock_output = mock.Mock()
+    mock_output.request_id = request_id
+    mock_output.prompt_token_ids = prompt_token_ids
+    mock_output.outputs = []
+
+    # Create mock completion output
+    completion = mock.Mock()
+    completion.token_ids = output_tokens
+    completion.text = output_text
+    # Add the custom attributes that ToolUseLLM adds
+    completion.mask = []
+    completion.num_calls = 0
+    completion.timeout = False
+    completion.tool_error = ""
+    completion.tool_output = ""
+    completion.tool_runtime = 0.0
+    completion.tool_called = False
+
+    mock_output.outputs.append(completion)
+    return mock_output
+
+
 class TestToolUseLLMWithMockedVLLM(unittest.TestCase):
     """Integration tests with mocked vLLM - same as TestToolUseLLMIntegration but runs without GPU."""
-
-    def create_mock_request_output(self, request_id, prompt_token_ids, output_tokens, output_text):
-        """Helper to create mock RequestOutput with proper structure."""
-        mock_output = mock.Mock()
-        mock_output.request_id = request_id
-        mock_output.prompt_token_ids = prompt_token_ids
-        mock_output.outputs = []
-
-        # Create mock completion output
-        completion = mock.Mock()
-        completion.token_ids = output_tokens
-        completion.text = output_text
-        # Add the custom attributes that ToolUseLLM adds
-        completion.mask = []
-        completion.num_calls = 0
-        completion.timeout = False
-        completion.tool_error = ""
-        completion.tool_output = ""
-        completion.tool_runtime = 0.0
-        completion.tool_called = False
-
-        mock_output.outputs.append(completion)
-        return mock_output
 
     @mock.patch("vllm.LLM.generate")
     @mock.patch("vllm.LLM.__init__")
@@ -203,7 +204,7 @@ class TestToolUseLLMWithMockedVLLM(unittest.TestCase):
         prompt_token_ids = [tok.encode(p) for p in prompts]
 
         # Create mock outputs - one output with 2 completions (n=2)
-        mock_output = self.create_mock_request_output(
+        mock_output = create_mock_request_output(
             request_id="0-0",
             prompt_token_ids=prompt_token_ids[0],
             output_tokens=[1, 2, 3, 4, 5],  # Mock token IDs
@@ -285,7 +286,7 @@ class TestToolUseLLMWithMockedVLLM(unittest.TestCase):
         # Create mock outputs for 2 prompts
         mock_outputs = []
         for i in range(2):
-            mock_output = self.create_mock_request_output(
+            mock_output = create_mock_request_output(
                 request_id=f"{i}-0",
                 prompt_token_ids=train_dataset["input_ids_prompt"][i]
                 if i < len(train_dataset["input_ids_prompt"])
