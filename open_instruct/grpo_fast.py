@@ -2044,67 +2044,55 @@ def maybe_evaluate(
     eval_generation_config,
 ):
     """Optionally evaluate the model."""
-    try:
-        # timeout 0.01 if this is the last training step or we're not evaluating
-        # otherwise, wait to get the last evaluation generations (long timeout just in case)
-        timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_every < 0) else 100
+    # Accumulate evaluation results from all vLLM engines
+    eval_result, eval_batch = accumulate_inference_batches(
+        evaluation_inference_results_Q, eval_pending_queries_map, args, training_step, eval_generation_config
+    )
 
-        # Accumulate evaluation results from all vLLM engines
-        eval_result, eval_batch = accumulate_inference_batches(
-            evaluation_inference_results_Q,
-            eval_pending_queries_map,
-            args,
-            training_step,
-            eval_generation_config,
-            timeout=timeout,
+    logger.info("[Main Thread] 📊 Evaluation responses received")
+
+    eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
+    eval_decoded_responses = tokenizer.batch_decode(eval_result.responses, skip_special_tokens=True)
+    eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_result.finish_reasons) / len(
+        eval_result.finish_reasons
+    )
+
+    # get and log evaluation metrics
+    eval_scores, eval_reward_metrics = asyncio.run(
+        reward_fn(
+            eval_result.responses,
+            eval_decoded_responses,
+            eval_batch if eval_batch else Batch(queries=[], ground_truths=[], datasets=[], indices=None),
+            eval_result.finish_reasons,
+            eval_result.request_info,
         )
+    )
+    eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
+    eval_metrics = {
+        "eval/scores": np.array(eval_scores).mean(),
+        "eval/sequence_lengths": eval_sequence_lengths.mean(),
+        "eval/sequence_lengths_min": eval_sequence_lengths.min(),
+        "eval/sequence_lengths_max": eval_sequence_lengths.max(),
+        "eval/stop_rate": eval_stop_rate,
+        **eval_reward_metrics,
+    }
+    print_rich_single_line_metrics(eval_metrics)
+    for key, value in eval_metrics.items():
+        writer.add_scalar(key, value, episode)
+    table = {}
+    table["prompt"] = tokenizer.batch_decode(eval_batch.queries if eval_batch else [])
+    table["response"] = eval_decoded_responses
+    table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
+    table["scores"] = eval_scores
+    table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
+    df = pd.DataFrame(table)
+    if args.with_tracking:
+        import wandb
 
-        logger.info("[Main Thread] 📊 Evaluation responses received")
-
-        eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
-        eval_decoded_responses = tokenizer.batch_decode(eval_result.responses, skip_special_tokens=True)
-        eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_result.finish_reasons) / len(
-            eval_result.finish_reasons
-        )
-
-        # get and log evaluation metrics
-        eval_scores, eval_reward_metrics = asyncio.run(
-            reward_fn(
-                eval_result.responses,
-                eval_decoded_responses,
-                eval_batch if eval_batch else Batch(queries=[], ground_truths=[], datasets=[], indices=None),
-                eval_result.finish_reasons,
-                eval_result.request_info,
-            )
-        )
-        eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
-        eval_metrics = {
-            "eval/scores": np.array(eval_scores).mean(),
-            "eval/sequence_lengths": eval_sequence_lengths.mean(),
-            "eval/sequence_lengths_min": eval_sequence_lengths.min(),
-            "eval/sequence_lengths_max": eval_sequence_lengths.max(),
-            "eval/stop_rate": eval_stop_rate,
-            **eval_reward_metrics,
-        }
-        print_rich_single_line_metrics(eval_metrics)
-        for key, value in eval_metrics.items():
-            writer.add_scalar(key, value, episode)
-        table = {}
-        table["prompt"] = tokenizer.batch_decode(eval_batch.queries if eval_batch else [])
-        table["response"] = eval_decoded_responses
-        table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
-        table["scores"] = eval_scores
-        table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
-        df = pd.DataFrame(table)
-        if args.with_tracking:
-            import wandb
-
-            wandb.log({"sample_completions": wandb.Table(dataframe=df)})
-        else:
-            print_rich_table(df.iloc[:1])
-        del table
-    except Empty:
-        logger.warning("[Main Thread] 🙈 Evaluation responses not received")
+        wandb.log({"sample_completions": wandb.Table(dataframe=df)})
+    else:
+        print_rich_table(df.iloc[:1])
+    del table
 
 
 def save_final_model(
