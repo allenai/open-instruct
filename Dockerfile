@@ -2,6 +2,8 @@ FROM ghcr.io/allenai/cuda:12.8-dev-ubuntu22.04-torch2.7.0-v1.2.170
 
 COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
 
+COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
+
 # Set default cache directory but allow override from environment
 ARG CACHE_DIR=/root/.cache/uv
 ARG UV_CACHE_DIR
