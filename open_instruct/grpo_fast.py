@@ -340,8 +340,6 @@ class Args:
     """whether to enable prefix caching"""
     vllm_top_p: float = 1.0
     """vLLM top p for nucleus sampling"""
-    accumulate_inference_batches_timeout: float = 1800.0  # 30 minutes
-    """Timeout in seconds for accumulating inference batches during training"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     gather_whole_model: bool = True
@@ -1911,11 +1909,11 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
         return collated_data, data_thread_metrics, num_total_tokens
 
 
-def generate_thread(vllm_engines, local_eval_every, num_training_steps, resume_training_step):
+def generate_thread(vllm_engines, local_eval_every, num_training_steps, resume_training_step, shutdown_event):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
 
-    while True:
+    while not shutdown_event.is_set():
         with Timer("🔥 Generation time"):
             engine_refs = [
                 engine.process_from_queue.remote(num_training_steps, resume_training_step, timeout=0.1)
@@ -2248,7 +2246,9 @@ def cleanup_judge_clients():
     ray.shutdown()
 
 
-def check_threads_healthy(futures: list, executor: futures.ThreadPoolExecutor, queues: list[ray_queue.Queue]) -> None:
+def check_threads_healthy(
+    futures: list, shutdown_event: threading.Event, executor: futures.ThreadPoolExecutor, queues: list[ray_queue.Queue]
+) -> None:
     """Check if any threads have failed and raise their exception if so."""
     for future in futures:
         if not future.done():
@@ -2257,22 +2257,23 @@ def check_threads_healthy(futures: list, executor: futures.ThreadPoolExecutor, q
             future.result()
         except Exception as e:
             logger.error(f"Thread failed with exception: {e}")
-            cleanup_training_resources(executor, queues)
+            cleanup_training_resources(shutdown_event, executor, queues)
             raise
 
 
-def cleanup_training_resources(executor: futures.ThreadPoolExecutor, queues: list[ray_queue.Queue]) -> None:
+def cleanup_training_resources(
+    shutdown_event: threading.Event, executor: futures.ThreadPoolExecutor, queues: list[ray_queue.Queue]
+) -> None:
     """Clean up all training resources including threads and Ray queues."""
-    # Push sentinel to signal threads to stop
+    # Signal generate_thread to stop
+    shutdown_event.set()
+
+    # Push sentinel to signal data_preparation_thread to stop
     logger.info("Pushing shutdown sentinel to queues...")
     if queues and len(queues) > 0:
         # Push sentinel to the first queue (inference_results_Q)
-        try:
-            queues[0].put(ShutdownSentinel(), timeout=1)
-        except Exception as e:
-            logger.warning(f"Error pushing sentinel: {e}")
+        queues[0].put(ShutdownSentinel(), timeout=1)
 
-    # Shutdown queues before stopping executor
     logger.info("Shutting down Ray queues...")
     for queue in queues:
         try:
@@ -2347,6 +2348,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         cleanup_judge_clients()  # This calls ray.shutdown()
         raise RuntimeError("vLLM engine initialization timed out")
 
+    shutdown_event = threading.Event()
     executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="grpo")
     logger.info("======== ✅ data preparation thread starts =========")
     packing_future = executor.submit(
@@ -2363,7 +2365,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     logger.info("======== ✅ generation thread starts =========")
     generation_future = executor.submit(
-        generate_thread, vllm_engines, args.local_eval_every, args.num_training_steps, resume_training_step
+        generate_thread,
+        vllm_engines,
+        args.local_eval_every,
+        args.num_training_steps,
+        resume_training_step,
+        shutdown_event,
     )
 
     # Send initial data to ensure we have a N-step offset.
@@ -2383,6 +2390,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         check_threads_healthy(
             [packing_future, generation_future],
+            shutdown_event,
             executor,
             [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
         )
@@ -2449,7 +2457,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
     # Clean up resources
-    cleanup_training_resources(executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q])
+    cleanup_training_resources(
+        shutdown_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q]
+    )
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
     # make a copy of the model to `/output` in the end.
