@@ -1449,39 +1449,40 @@ def data_preparation_thread(
                 finish_reasons = [finish_reasons[i] for i in stop_idxes]
 
             if args.fill_completions:
-                current_batch_size = len(scores)  
-                original_prompt_cnt = original_batch_size // args.num_samples_per_prompt_rollout
-                current_prompt_cnt = current_batch_size // args.num_samples_per_prompt_rollout
-                need_to_fill_prompt = original_prompt_cnt - current_prompt_cnt
-                k = args.num_samples_per_prompt_rollout
-
-                if need_to_fill_prompt > 0 and current_prompt_cnt > 0:
-                    scores_matrix = scores.reshape(current_prompt_cnt, k)
-                    stds = scores_matrix.std(axis=1) + 1e-8
-                    probs = stds / stds.sum()
-
-                    sampled_prompt_ids = np.random.choice(
-                        current_prompt_cnt,
-                        size=need_to_fill_prompt,
-                        replace=True,
-                        p=probs
-                    )
-
-                    sampled_indices = []
-                    for pid in sampled_prompt_ids:
-                        start = pid * k
-                        sampled_indices.extend(range(start, start + k))
-
-                    advantages = np.concatenate([advantages, advantages[sampled_indices]])
-                    scores = np.concatenate([scores, scores[sampled_indices]])
-                    responses += [responses[i] for i in sampled_indices]
-                    masks += [masks[i] for i in sampled_indices]
-                    queries += [queries[i] for i in sampled_indices]
-                    ground_truths += [ground_truths[i] for i in sampled_indices]
-                    datasets += [datasets[i] for i in sampled_indices]
-                    finish_reasons += [finish_reasons[i] for i in sampled_indices]
-
-                    print(f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses")
+                with Timer("⏱ [Data Preparation Thread] Refill completions"):
+                    current_batch_size = len(scores)  
+                    original_prompt_cnt = original_batch_size // args.num_samples_per_prompt_rollout
+                    current_prompt_cnt = current_batch_size // args.num_samples_per_prompt_rollout
+                    need_to_fill_prompt = original_prompt_cnt - current_prompt_cnt
+                    k = args.num_samples_per_prompt_rollout
+    
+                    if need_to_fill_prompt > 0 and current_prompt_cnt > 0:
+                        scores_matrix = scores.reshape(current_prompt_cnt, k)
+                        stds = scores_matrix.std(axis=1) + 1e-8
+                        probs = stds / stds.sum()
+    
+                        sampled_prompt_ids = np.random.choice(
+                            current_prompt_cnt,
+                            size=need_to_fill_prompt,
+                            replace=True,
+                            p=probs
+                        )
+    
+                        sampled_indices = []
+                        for pid in sampled_prompt_ids:
+                            start = pid * k
+                            sampled_indices.extend(range(start, start + k))
+    
+                        advantages = np.concatenate([advantages, advantages[sampled_indices]])
+                        scores = np.concatenate([scores, scores[sampled_indices]])
+                        responses += [responses[i] for i in sampled_indices]
+                        masks += [masks[i] for i in sampled_indices]
+                        queries += [queries[i] for i in sampled_indices]
+                        ground_truths += [ground_truths[i] for i in sampled_indices]
+                        datasets += [datasets[i] for i in sampled_indices]
+                        finish_reasons += [finish_reasons[i] for i in sampled_indices]
+    
+                        print(f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses")
          
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
