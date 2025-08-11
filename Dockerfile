@@ -1,6 +1,4 @@
-ARG BASE_IMAGE=ghcr.io/allenai/cuda:12.8-dev-ubuntu22.04-torch2.7.0-v1.2.170
-
-FROM ${BASE_IMAGE}
+FROM nvidia/cuda:12.8-devel-ubuntu22.04
 
 COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
 
@@ -20,7 +18,7 @@ ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
 
 # Copy only dependency-related files first
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock build.py README.md ./
 
 # Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
