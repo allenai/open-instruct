@@ -1481,7 +1481,7 @@ def data_preparation_thread(
                     datasets += [datasets[i] for i in sampled_indices]
                     finish_reasons += [finish_reasons[i] for i in sampled_indices]
 
-                    print(f"📊 {need_to_fill_prompt}  prompts， {len(sampled_indices)} responses")
+                    print(f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses")
          
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
