@@ -23,7 +23,6 @@ COPY oe-eval-internal oe-eval-internal
 # install the package in editable mode
 COPY pyproject.toml README.md build.py .
 RUN pip install -e .
-COPY .git/ ./.git/
 COPY eval eval
 COPY configs configs
 COPY scripts scripts

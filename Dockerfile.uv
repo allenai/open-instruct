@@ -27,7 +27,8 @@ ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
 
 # Copy only dependency-related files first
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml README.md build.py uv.lock ./
+COPY open_instruct open_instruct
 
 # Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
@@ -42,7 +43,6 @@ RUN uv run -m nltk.downloader punkt_tab
 WORKDIR /stage/
 
 # Copy all runtime files directly to final stage
-COPY open_instruct open_instruct
 COPY eval eval
 COPY configs configs
 COPY scripts scripts
