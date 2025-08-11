@@ -15,14 +15,21 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
+import copy
 import dataclasses
 import logging
 import os
 import queue
+import re
+import time
+import traceback
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
-from typing import Any, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import ray
+import requests
 import torch
 import torch.distributed
 import vllm
@@ -38,10 +45,92 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
-from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 from open_instruct.utils import ray_get_with_progress
 
 logger = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass
+class ToolOutput:
+    output: str
+    called: bool
+    error: str
+    timeout: bool
+    runtime: float
+    start_str: str = "<output>\n"
+    end_str: str = "\n</output>"
+
+
+class Tool:
+    def __init__(self, start_str: str, end_str: str):
+        self.start_str = start_str
+        self.end_str = end_str
+
+    def __call__(self, prompt: str) -> ToolOutput:
+        raise NotImplementedError("Subclasses must implement this method")
+
+
+class MaxCallsExceededTool(Tool):
+    def __call__(self, prompt: str) -> ToolOutput:
+        return ToolOutput(output="Max tool calls exceeded.", called=False, error="", timeout=False, runtime=0)
+
+
+class PythonCodeTool(Tool):
+    """Tool for executing Python code via an API endpoint."""
+
+    def __init__(self, api_endpoint: str, *args, **kwargs):
+        self.api_endpoint = api_endpoint
+        super().__init__(*args, **kwargs)
+
+    def __call__(self, prompt: str) -> ToolOutput:
+        re_str = r"(?s)(?<!`)<tool>\s*(.*?)\s*</tool>"
+        re_str = re_str.replace("<tool>", "<code>").replace("</tool>", "</code>")
+
+        code_blocks = re.findall(re_str, prompt, re.DOTALL)
+        all_outputs = []
+        timeout = False
+        error = ""
+        if len(code_blocks) == 0:
+            return ToolOutput(output="", called=False, error="", timeout=False, runtime=0)
+
+        # Only execute the last code block
+        code = code_blocks[-1]
+
+        # Define timeout in seconds
+        timeout_seconds = 3
+        start_time = time.time()
+        try:
+            # Call the FastAPI endpoint to execute the code with client-side timeout
+            response = requests.post(
+                self.api_endpoint, json={"code": code, "timeout": timeout_seconds}, timeout=timeout_seconds
+            )
+
+            # Parse the response
+            result = response.json()
+
+            # Process the API response
+            output = result["output"]
+            error = result.get("error") or ""
+
+            all_outputs.append(output)
+            if len(error) > 0:
+                all_outputs.append("\n" + error)
+
+        except requests.Timeout:
+            # Handle client-side timeout specifically
+            all_outputs.append(f"Timeout after {timeout_seconds} seconds")
+            timeout = True
+
+        except Exception as e:
+            # Capture any other exceptions that occur during the API call
+            error_message = f"Error calling API: {str(e)}\n"
+            error_traceback = traceback.format_exc()
+            all_outputs.append(error_message + error_traceback)
+
+        # Return all captured outputs as a single string
+        return ToolOutput(
+            output="\n".join(all_outputs), called=True, error=error, timeout=timeout, runtime=time.time() - start_time
+        )
 
 
 @dataclasses.dataclass
@@ -174,11 +263,13 @@ class ActorManager:
 
 
 class LLMRayActor:
-    """Ray actor for standard LLM generation."""
+    """Ray actor for LLM generation with optional tool support."""
 
     def __init__(
         self,
         *args,
+        tools: Optional[Dict[str, Tool]] = None,
+        max_tool_calls: Optional[Dict[str, int]] = None,
         bundle_indices: list = None,
         prompt_queue=None,
         results_queue=None,
@@ -186,6 +277,18 @@ class LLMRayActor:
         actor_manager=None,
         **kwargs,
     ):
+        # Store tool-related parameters
+        self.tools = tools or {}
+        self.max_tool_calls = max_tool_calls or {}
+
+        # Initialize tool executor if tools are provided
+        if self.tools:
+            self.executor = ThreadPoolExecutor(max_workers=20)
+            self.pending_tool_futures = {}
+        else:
+            self.executor = None
+            self.pending_tool_futures = {}
+
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
@@ -217,7 +320,7 @@ class LLMRayActor:
         self.actor_manager = actor_manager
 
     def process_from_queue(self, timeout: float = 60.0):
-        """Run generation loop using LLMEngine directly."""
+        """Run generation loop using LLMEngine directly, with optional tool support."""
         while True:
             if ray.get(self.actor_manager.should_stop.remote()):
                 self.logger.info("[LLMRayActor] Actor manager signaled to stop. Exiting generation loop.")
@@ -228,28 +331,14 @@ class LLMRayActor:
                 self.logger.warning("[LLMRayActor] No request in the queue to process. Continuing.")
                 continue
 
-            # Process the request
-            prompts = request.prompts
+            # Process the request based on whether tools are available
+            if self.tools:
+                # Use tool-aware generation
+                result = self._process_with_tools(request)
+            else:
+                # Use standard generation
+                result = self._process_without_tools(request)
 
-            # Add requests to the engine
-            for i, prompt in enumerate(prompts):
-                request_id = f"batch_{request.training_step}_{i}"
-                tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
-                self.llm_engine.add_request(request_id, tokens_prompt, request.sampling_params)
-
-            # Run the engine event loop until all requests are finished
-            outputs = []
-            while self.llm_engine.has_unfinished_requests():
-                step_outputs = self.llm_engine.step()
-                for output in step_outputs:
-                    if output.finished:
-                        outputs.append(output)
-
-            # Sort outputs by prompt index (i)
-            # Request IDs are now in format: batch_{step}_{i}
-            outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
-
-            result = self._process_outputs(outputs, dataset_index=request.dataset_index)
             try:
                 if request.is_eval:
                     self.eval_results_queue.put(result, timeout=10)
@@ -257,6 +346,190 @@ class LLMRayActor:
                     self.results_queue.put(result, timeout=10)
             except queue.Full:
                 self.logger.warning("Results queue is full, discarding result.")
+
+    def _process_without_tools(self, request):
+        """Standard generation without tool support."""
+        prompts = request.prompts
+
+        # Add requests to the engine
+        for i, prompt in enumerate(prompts):
+            request_id = f"batch_{request.training_step}_{i}"
+            tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
+            self.llm_engine.add_request(request_id, tokens_prompt, request.sampling_params)
+
+        # Run the engine event loop until all requests are finished
+        outputs = []
+        while self.llm_engine.has_unfinished_requests():
+            step_outputs = self.llm_engine.step()
+            for output in step_outputs:
+                if output.finished:
+                    outputs.append(output)
+
+        # Sort outputs by prompt index (i)
+        outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
+
+        return self._process_outputs(outputs, dataset_index=request.dataset_index)
+
+    def _process_with_tools(self, request):
+        """Tool-aware generation using the ToolUseLLM approach."""
+        prompts = request.prompts
+        sampling_params = request.sampling_params
+
+        # Override sampling params to have n=1 for individual processing
+        single_n_sampling_params = copy.deepcopy(sampling_params)
+        single_n_sampling_params.n = 1
+        single_n_sampling_params.output_kind = vllm.sampling_params.RequestOutputKind.FINAL_ONLY
+
+        # Add requests to the engine (handling n > 1 by creating multiple requests)
+        for i, prompt in enumerate(prompts):
+            for j in range(sampling_params.n):
+                request_id = f"{i}-{j}"
+                tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
+                self.llm_engine.add_request(request_id, tokens_prompt, single_n_sampling_params)
+
+        # Initialize tracking variables
+        num_calls = defaultdict(int)
+        timeout = defaultdict(bool)
+        tool_error = defaultdict(str)
+        tool_output = defaultdict(str)
+        tool_runtime = defaultdict(float)
+        tool_called = defaultdict(bool)
+        concat_outputs = {}
+        masks = defaultdict(list)
+
+        # Get tokenizer for encoding tool outputs
+        tokenizer = self.llm_engine.get_tokenizer()
+
+        # Run the engine with tool support
+        outputs = []
+        while True:
+            # Poll pending tool futures
+            dict_keys_to_delete = []
+            for req_id, (future, last_o, last_output) in self.pending_tool_futures.items():
+                if future.done():
+                    tool_result = future.result()
+                    last_prompt_token_ids = last_output.prompt_token_ids
+                    last_token_ids = last_o.token_ids
+                    tool_output_token_ids = tokenizer.encode(
+                        "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+                    )
+                    timeout[req_id] = tool_result.timeout
+                    tool_error[req_id] += "" if tool_result.error is None else tool_result.error
+                    tool_output[req_id] += tool_result.output
+                    tool_runtime[req_id] += tool_result.runtime
+                    tool_called[req_id] = True
+
+                    # Edge case 1: clip against model context length
+                    prompt_and_tool_output_token = last_prompt_token_ids + last_token_ids + tool_output_token_ids
+                    num_calls[req_id] += 1
+                    excess = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len
+                    if excess > 0:
+                        tool_output_token_ids = tool_output_token_ids[:-excess]
+                        can_make_new_request = False
+                    else:
+                        can_make_new_request = True
+
+                    # Edge case 2: clip against per-request max_tokens
+                    remaining = single_n_sampling_params.max_tokens - len(masks[req_id])
+                    if remaining <= 0:
+                        tool_output_token_ids = []
+                    elif len(tool_output_token_ids) > remaining:
+                        tool_output_token_ids = tool_output_token_ids[:remaining]
+
+                    concat_outputs[req_id].outputs[0].token_ids.extend(tool_output_token_ids)
+                    masks[req_id].extend([0] * len(tool_output_token_ids))
+                    new_sample_tokens = single_n_sampling_params.max_tokens - len(masks[req_id])
+                    can_make_new_request = can_make_new_request and new_sample_tokens > 0
+
+                    if can_make_new_request:
+                        try:
+                            new_sampling_params = copy.deepcopy(single_n_sampling_params)
+                            new_sampling_params.max_tokens = new_sample_tokens
+                            self.llm_engine.add_request(
+                                req_id,
+                                vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token),
+                                new_sampling_params,
+                            )
+                        except Exception as e:
+                            self.logger.error(f"Error adding request: {e}")
+
+                    dict_keys_to_delete.append(req_id)
+
+            for req_id in dict_keys_to_delete:
+                del self.pending_tool_futures[req_id]
+
+            # Process engine steps
+            if self.llm_engine.has_unfinished_requests():
+                step_outputs = self.llm_engine.step()
+                for output in step_outputs:
+                    if output.finished:
+                        assert len(output.outputs) <= 1  # because sampling_params.n == 1
+                        o = output.outputs[0]
+                        output_processed = False
+
+                        if output.request_id not in concat_outputs:
+                            concat_outputs[output.request_id] = output
+                        else:
+                            concat_outputs[output.request_id].outputs[0].token_ids.extend(o.token_ids)
+
+                        masks[output.request_id].extend([1] * len(o.token_ids))
+
+                        # Check if output ends with a tool stop string
+                        for stop_str in single_n_sampling_params.stop:
+                            if (
+                                o.text.endswith(stop_str)
+                                and stop_str in self.tools
+                                and num_calls[output.request_id] < self.max_tool_calls.get(stop_str, 0)
+                            ):
+                                # Schedule tool call asynchronously
+                                tool = self.tools[stop_str]
+                                future = self.executor.submit(tool, o.text)
+                                self.pending_tool_futures[output.request_id] = (future, o, output)
+                                output_processed = True
+                                break
+                            elif (
+                                o.text.endswith(stop_str)
+                                and stop_str in self.tools
+                                and num_calls[output.request_id] >= self.max_tool_calls.get(stop_str, 0)
+                            ):
+                                # Tool call limit exceeded
+                                tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
+                                future = self.executor.submit(tool, o.text)
+                                self.pending_tool_futures[output.request_id] = (future, o, output)
+                                output_processed = True
+                                break
+
+                        if not output_processed:
+                            outputs.append(output)
+
+            if not self.llm_engine.has_unfinished_requests() and len(self.pending_tool_futures) == 0:
+                break
+
+        # Add tool metadata to outputs
+        for req_id in masks:
+            assert req_id in concat_outputs
+            setattr(concat_outputs[req_id].outputs[0], "mask", masks[req_id])
+            setattr(concat_outputs[req_id].outputs[0], "num_calls", num_calls[req_id])
+            setattr(concat_outputs[req_id].outputs[0], "timeout", timeout[req_id])
+            setattr(concat_outputs[req_id].outputs[0], "tool_error", tool_error[req_id])
+            setattr(concat_outputs[req_id].outputs[0], "tool_output", tool_output[req_id])
+            setattr(concat_outputs[req_id].outputs[0], "tool_runtime", tool_runtime[req_id])
+            setattr(concat_outputs[req_id].outputs[0], "tool_called", tool_called[req_id])
+
+        # Merge n completions into the same outputs
+        merged_outputs = {}
+        for req_id in concat_outputs:
+            real_req_id, _ = req_id.split("-")
+            if real_req_id not in merged_outputs:
+                merged_outputs[real_req_id] = concat_outputs[req_id]
+            else:
+                merged_outputs[real_req_id].outputs.append(concat_outputs[req_id].outputs[0])
+
+        final_outputs = sorted(
+            merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1]))
+        )
+
+        return self._process_outputs_with_tools(final_outputs, dataset_index=request.dataset_index)
 
     def _process_outputs(
         self,
@@ -274,6 +547,43 @@ class LLMRayActor:
         tool_outputs = [""] * len(response_ids)
         tool_runtimes = [0] * len(response_ids)
         tool_calleds = [False] * len(response_ids)
+
+        request_info = RequestInfo(
+            num_calls=num_calls,
+            timeouts=timeouts,
+            tool_errors=tool_errors,
+            tool_outputs=tool_outputs,
+            tool_runtimes=tool_runtimes,
+            tool_calleds=tool_calleds,
+        )
+
+        result = GenerationResult(
+            responses=response_ids,
+            finish_reasons=finish_reasons,
+            masks=masks,
+            request_info=request_info,
+            dataset_index=dataset_index,
+        )
+
+        return result
+
+    def _process_outputs_with_tools(
+        self,
+        outputs: List[Any],  # List of vllm.RequestOutput objects
+        dataset_index: Optional[List[int]] = None,
+    ) -> GenerationResult:
+        """Process vLLM RequestOutputs into GenerationResult format with tool information."""
+        response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
+        finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
+
+        # Extract tool-specific attributes from outputs
+        masks = [out.mask for output in outputs for out in output.outputs]
+        num_calls = [out.num_calls for output in outputs for out in output.outputs]
+        timeouts = [out.timeout for output in outputs for out in output.outputs]
+        tool_errors = [out.tool_error for output in outputs for out in output.outputs]
+        tool_outputs = [out.tool_output for output in outputs for out in output.outputs]
+        tool_runtimes = [out.tool_runtime for output in outputs for out in output.outputs]
+        tool_calleds = [out.tool_called for output in outputs for out in output.outputs]
 
         request_info = RequestInfo(
             num_calls=num_calls,
@@ -323,125 +633,6 @@ class LLMRayActor:
         return True
 
 
-class ToolLLMRayActor(LLMRayActor):
-    """Ray actor for tool-based LLM generation."""
-
-    def __init__(
-        self,
-        *args,
-        tools: dict = None,
-        max_tool_calls: dict = None,
-        bundle_indices: list = None,
-        prompt_queue=None,
-        results_queue=None,
-        eval_results_queue=None,
-        actor_manager=None,
-        **kwargs,
-    ):
-        # Extract the parameters we need before calling parent init
-        self.tools = tools
-        self.max_tool_calls = max_tool_calls
-
-        # Call parent init (but we need to bypass the LLMEngine creation)
-        # So we'll temporarily set up the environment before calling super
-        super().__init__(
-            *args,
-            bundle_indices=bundle_indices,
-            prompt_queue=prompt_queue,
-            results_queue=results_queue,
-            eval_results_queue=eval_results_queue,
-            actor_manager=actor_manager,
-            **kwargs,
-        )
-
-        # Now override with ToolUseLLM instead of regular LLMEngine
-        # Need to reconstruct kwargs without the ones already consumed by parent
-        kwargs_copy = kwargs.copy()
-        kwargs_copy.pop("noset_visible_devices", None)
-        kwargs_copy.pop("num_gpus", None)
-
-        self.llm = ToolUseLLM(tools=tools, max_tool_calls=max_tool_calls, *args, **kwargs_copy)
-        self.llm_engine = self.llm.llm_engine
-
-    def process_from_queue(self, timeout=0.1):
-        """Process a single element from the queue using tool generation loop."""
-        self._tool_generation_loop(timeout)
-
-    def _tool_generation_loop(self, timeout: float = 60.0):
-        """Tool-specific generation loop."""
-        while True:
-            if ray.get(self.actor_manager.should_stop.remote()):
-                self.logger.info("[ToolLLMRayActor] Actor manager signaled to stop. Exiting generation loop.")
-                return
-            try:
-                request = self.prompt_queue.get(timeout=timeout)
-                outputs = self.llm.generate(
-                    sampling_params=request.sampling_params, prompt_token_ids=request.prompts, use_tqdm=False
-                )
-                result = self._process_outputs(outputs, dataset_index=request.dataset_index)
-                if request.is_eval:
-                    self.eval_results_queue.put(result)
-                else:
-                    self.results_queue.put(result)
-            except queue.Empty:
-                pass
-            except queue.Full:
-                self.logger.warning("Results queue is full, discarding result.")
-
-    def _process_outputs(
-        self,
-        outputs: List[Any],  # List of vllm.RequestOutput objects
-        dataset_index: Optional[List[int]] = None,
-    ) -> GenerationResult:
-        """Process vLLM RequestOutputs into GenerationResult format with tool information."""
-        # Debug logging
-        self.logger.info(
-            f"[_process_outputs] Processing {len(outputs)} RequestOutputs, dataset_indices={dataset_index}"
-        )
-        for i, output in enumerate(outputs):
-            self.logger.info(
-                f"[_process_outputs] Output {i}: request_id={output.request_id}, num_completions={len(output.outputs)}"
-            )
-
-        # Process outputs with tool-specific attributes
-        response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
-        finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
-
-        # Extract tool-specific attributes from outputs
-        masks = [out.mask for output in outputs for out in output.outputs]
-        num_calls = [out.num_calls for output in outputs for out in output.outputs]
-        timeouts = [out.timeout for output in outputs for out in output.outputs]
-        tool_errors = [out.tool_error for output in outputs for out in output.outputs]
-        tool_outputs = [out.tool_output for output in outputs for out in output.outputs]
-        tool_runtimes = [out.tool_runtime for output in outputs for out in output.outputs]
-        tool_calleds = [out.tool_called for output in outputs for out in output.outputs]
-
-        request_info = RequestInfo(
-            num_calls=num_calls,
-            timeouts=timeouts,
-            tool_errors=tool_errors,
-            tool_outputs=tool_outputs,
-            tool_runtimes=tool_runtimes,
-            tool_calleds=tool_calleds,
-        )
-
-        result = GenerationResult(
-            responses=response_ids,
-            finish_reasons=finish_reasons,
-            masks=masks,
-            request_info=request_info,
-            dataset_index=dataset_index,
-        )
-
-        # Debug logging
-        self.logger.info(
-            f"[_process_outputs] Returning GenerationResult with {len(result.responses)} responses "
-            f"for {len(dataset_index) if dataset_index else 0} dataset indices"
-        )
-
-        return result
-
-
 def get_cuda_arch_list() -> str:
     """Get CUDA compute capabilities and format them for TORCH_CUDA_ARCH_LIST."""
     if not torch.cuda.is_available():
@@ -473,7 +664,7 @@ def create_vllm_engines(
     single_gpu_mode: bool = False,
     pg: Optional[ray.util.placement_group] = None,
     vllm_enable_sleep=False,
-    tools: Optional[List[Any]] = None,
+    tools: Optional[Dict[str, Tool]] = None,
     max_tool_calls: List[int] = [5],
     prompt_queue=None,
     results_queue=None,
@@ -485,14 +676,17 @@ def create_vllm_engines(
     assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
 
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
-    assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
-        "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
-    )
-    # tool key is the end_str
-    if len(max_tool_calls) == 1:
-        max_tool_calls_dict = {tool: max_tool_calls[0] for tool in tools.keys()} if tools else {}
+    if tools:
+        assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
+            "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
+        )
+        # tool key is the end_str
+        if len(max_tool_calls) == 1:
+            max_tool_calls_dict = {end_str: max_tool_calls[0] for end_str in tools.keys()}
+        else:
+            max_tool_calls_dict = {end_str: limit for end_str, limit in zip(tools.keys(), max_tool_calls)}
     else:
-        max_tool_calls_dict = {tool: limit for tool, limit in zip(tools.keys(), max_tool_calls)} if tools else {}
+        max_tool_calls_dict = {}
 
     vllm_engines = []
     distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "ray"
@@ -522,18 +716,10 @@ def create_vllm_engines(
             placement_group_bundle_index=i * tensor_parallel_size,
         )
 
-        # Determine which actor class to use based on tool usage
-        if tools is not None and len(tools) > 0:
-            # Use ToolLLMRayActor for tool-based generation
-            actor_class = ray.remote(ToolLLMRayActor)
-            additional_kwargs = {"tools": tools, "max_tool_calls": max_tool_calls_dict}
-        else:
-            # Use regular LLMRayActor for standard generation
-            actor_class = ray.remote(LLMRayActor)
-            additional_kwargs = {}
-
+        # Always use LLMRayActor with optional tool parameters
         vllm_engines.append(
-            actor_class.options(
+            ray.remote(LLMRayActor)
+            .options(
                 num_cpus=num_gpus,
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
@@ -541,7 +727,8 @@ def create_vllm_engines(
                 runtime_env=ray.runtime_env.RuntimeEnv(
                     env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
                 ),
-            ).remote(
+            )
+            .remote(
                 model=pretrain,
                 revision=revision,
                 tokenizer=tokenizer_name_or_path,
@@ -564,7 +751,8 @@ def create_vllm_engines(
                 results_queue=results_queue,
                 eval_results_queue=eval_results_queue,
                 actor_manager=actor_manager,
-                **additional_kwargs,
+                tools=tools,
+                max_tool_calls=max_tool_calls_dict,
             )
         )
 
