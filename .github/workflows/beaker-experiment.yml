@@ -87,7 +87,7 @@ jobs:
       - name: Install dependencies
         run: |
           # Install development dependencies needed for mason.py
-          uv sync --only-group dev
+          uv sync
 
       - name: Delete huge unnecessary tools folder
         run: |
@@ -141,7 +141,7 @@ jobs:
           
           # Build image and launch experiment
           # Use tee to both stream output and capture it for parsing
-          ./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh 2>&1 | tee /tmp/beaker_output.log || {
+          ./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_integration_test.sh 2>&1 | tee /tmp/beaker_output.log || {
             EXIT_CODE=$?
             echo "ERROR: build_image_and_launch.sh failed with exit code $EXIT_CODE"
             exit $EXIT_CODE
