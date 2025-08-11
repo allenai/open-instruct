@@ -377,11 +377,12 @@ def create_vllm_engines(
         bundle_indices = None
         if tensor_parallel_size > 1:
             bundle_indices = list(range(i * tensor_parallel_size, (i + 1) * tensor_parallel_size))
-
+        if single_gpu_mode:
+            pg_index = 0
+        else:
+            pg_index = i * tensor_parallel_size
         scheduling_strategy = PlacementGroupSchedulingStrategy(
-            placement_group=pg,
-            placement_group_capture_child_tasks=True,
-            placement_group_bundle_index=0 if single_gpu_mode else i * tensor_parallel_size,
+            placement_group=pg, placement_group_capture_child_tasks=True, placement_group_bundle_index=pg_index
         )
 
         additional_kwargs = {}
