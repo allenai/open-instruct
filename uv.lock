@@ -2348,7 +2348,7 @@ wheels = [
 [[package]]
 name = "open-instruct"
 version = "0.1.0"
-source = { editable = "." }
+source = { virtual = "." }
 dependencies = [
     { name = "accelerate" },
     { name = "antlr4-python3-runtime" },
