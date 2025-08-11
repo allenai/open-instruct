@@ -1782,6 +1782,7 @@ def split_and_insert_batch(
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q,
     eval_prompt_token_ids=None,
+    tool_contexts_next=None,
 ):
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
     # Split the batch over the VLLM engines.
@@ -1805,6 +1806,9 @@ def split_and_insert_batch(
                 training_step=training_step,
                 eval_prompts=eval_prompt_token_ids if batch_idx == 0 else None,
                 dataset_index=batch_dataset_indices,
+                tool_contexts=(
+                    tool_contexts_next[start_idx:end_idx] if tool_contexts_next is not None else None
+                ),
             )
         )
 
@@ -1832,6 +1836,35 @@ def sync_weights_and_prepare_prompts(
     ):
         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
+    # Prepare per-sample tool contexts if present in dataset items
+    tool_contexts_next = None
+    try:
+        # Prefer explicit column in dataset batch if present
+        if isinstance(data_next, dict) and (
+            "tool_context" in data_next or "patch_metadata" in data_next
+        ):
+            col = data_next.get("tool_context") or data_next.get("patch_metadata")
+            tool_contexts_next = list(col)
+        else:
+            tool_contexts_next = []
+            for ds_item in datasets_next:
+                ctx = None
+                if isinstance(ds_item, dict) and ds_item.get("patch_metadata"):
+                    ctx = ds_item["patch_metadata"]
+                elif isinstance(ds_item, dict) and ds_item.get("tool_context"):
+                    ctx = ds_item["tool_context"]
+                elif isinstance(ds_item, str):
+                    try:
+                        parsed = json.loads(ds_item)
+                        ctx = parsed.get("patch_metadata") or parsed.get("tool_context")
+                    except Exception:
+                        ctx = None
+                tool_contexts_next.append(ctx)
+        if tool_contexts_next is not None and all(c is None for c in tool_contexts_next):
+            tool_contexts_next = None
+    except Exception:
+        tool_contexts_next = None
+
     split_and_insert_batch(
         queries_next,
         ground_truths_next,
@@ -1842,6 +1875,7 @@ def sync_weights_and_prepare_prompts(
         pending_queries_map,
         param_prompt_Q,
         eval_prompt_token_ids,
+        tool_contexts_next,
     )
 
     return queries_next, ground_truths_next, datasets_next, dataset_indices

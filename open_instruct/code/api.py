@@ -28,6 +28,9 @@ import logging
 import os
 import traceback
 from typing import Any, List, Optional
+import tempfile
+import subprocess
+import threading
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -57,6 +60,7 @@ class ViewFileRequest(BaseModel):
     path: str
     view_range: Optional[List[int]] = None
     base_commit: Optional[str] = None
+    patches: Optional[List[str]] = None
 
 
 @app.get("/health")
@@ -119,12 +123,102 @@ async def view_file_endpoint(request: ViewFileRequest):
         # Clone the repository and get the path
         repo_path = clone_repo(repo_info, config)
 
-        # View the file
-        file_content = "OBSERVATION:\n" + view_file(repo_path, request.path, request.view_range) + "\n"
+        # Acquire a per-repo lock to avoid patch races
+        repo_lock = _get_repo_lock(request.repo_name)
+        repo_lock.acquire()
+        try:
+            # Always hard reset to the base commit before applying patches
+            base_commit = repo_info.get("base_commit")
+            if request.base_commit:
+                base_commit = request.base_commit
+            if base_commit:
+                _git_checkout(repo_path, base_commit)
 
-        return {"content": file_content, "repo_path": repo_path}
+            # Apply patches (if any), serve content, then revert
+            if request.patches:
+                _apply_patches(repo_path, request.patches)
+
+            # View the file
+            file_content = "OBSERVATION:\n" + view_file(repo_path, request.path, request.view_range) + "\n"
+
+            # Perform cleanup BEFORE releasing the lock/returning, to guarantee no state leak
+            try:
+                _git_reset_hard(repo_path)
+                if base_commit:
+                    _git_checkout(repo_path, base_commit)
+            except Exception as cleanup_err:
+                logger.warning(f"Cleanup after view_file failed: {cleanup_err}")
+            finally:
+                repo_lock.release()
+
+            return {"content": file_content, "repo_path": repo_path}
+        except Exception:
+            # Ensure the lock is released in case of unexpected exceptions
+            try:
+                repo_lock.release()
+            except Exception:
+                pass
+            raise
     except HTTPException:
         raise
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# --------------------------------------------------------------------------------------
+# Internal helpers for safe patch application and cleanup
+# --------------------------------------------------------------------------------------
+
+_REPO_LOCKS: dict[str, threading.Lock] = {}
+_LOCKS_GUARD = threading.Lock()
+
+
+def _get_repo_lock(repo_name: str) -> threading.Lock:
+    with _LOCKS_GUARD:
+        lock = _REPO_LOCKS.get(repo_name)
+        if lock is None:
+            lock = threading.Lock()
+            _REPO_LOCKS[repo_name] = lock
+        return lock
+
+
+def _run_git(repo_path: str, args: List[str]) -> None:
+    completed = subprocess.run(["git", "-C", repo_path] + args, capture_output=True, text=True)
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"git command failed: git -C {repo_path} {' '.join(args)}\nstdout: {completed.stdout}\nstderr: {completed.stderr}"
+        )
+
+
+def _git_checkout(repo_path: str, commit: str) -> None:
+    # Force checkout to avoid local changes interference
+    _run_git(repo_path, ["checkout", "-f", commit])
+
+
+def _git_reset_hard(repo_path: str) -> None:
+    _run_git(repo_path, ["reset", "--hard"])
+    _run_git(repo_path, ["clean", "-fd"])
+
+
+def _apply_patches(repo_path: str, patches: List[str]) -> None:
+    for patch_text in patches:
+        if not patch_text:
+            continue
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".patch", delete=False) as tf:
+            tf.write(patch_text)
+            tf.flush()
+            patch_file = tf.name
+        # Try p0 then p1 for path stripping robustness
+        errors: list[str] = []
+        for strip in ("0", "1"):
+            try:
+                _run_git(repo_path, ["apply", "--whitespace=nowarn", "-p", strip, patch_file])
+                break
+            except Exception as e:
+                errors.append(str(e))
+        else:
+            # If both attempts failed, surface a concise error
+            raise RuntimeError(
+                "Failed to apply patch with -p0 and -p1. Last error: " + (errors[-1] if errors else "unknown")
+            )

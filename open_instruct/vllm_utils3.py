@@ -70,6 +70,7 @@ class PromptRequest:
     training_step: Optional[int] = None
     eval_prompts: Optional[List[List[int]]] = None
     dataset_index: Optional[List[int]] = None
+    tool_contexts: Optional[List[Optional[str]]] = None
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -216,6 +217,7 @@ class LLMRayActor:
                 sampling_params,
                 dataset_index=request.dataset_index,
                 training_step=request.training_step,
+                tool_contexts=request.tool_contexts,
             )
             self.results_queue.put(result)
             if request.eval_prompts and request.training_step % eval_freq == 0:
@@ -232,8 +234,17 @@ class LLMRayActor:
         sampling_params,
         dataset_index: Optional[List[int]] = None,
         training_step: Optional[int] = None,
+        tool_contexts: Optional[List[Optional[str]]] = None,
     ) -> GenerationResult:
         """Generate responses for a batch of prompts."""
+        # If tool contexts are provided and the underlying LLM supports them, set before generate
+        try:
+            if self.tool_use and tool_contexts is not None and hasattr(self.llm, "set_tool_contexts"):
+                # Pass per-request context to the ToolUseLLM so tools can access it
+                self.llm.set_tool_contexts(tool_contexts)
+        except Exception:
+            pass
+
         outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
 
         # Process outputs

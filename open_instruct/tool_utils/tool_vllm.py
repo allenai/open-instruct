@@ -157,6 +157,16 @@ class CodeViewTool(Tool):
         The repo_name should be provided in the tool call. If not provided, will fallback to "testbed".
         """
 
+        # Extract optional hidden per-request tool context appended by the engine
+        # Pattern: <!--tool_context:{...}-->
+        ctx_match = re.search(r"<!--tool_context:(.*?)-->", prompt, re.DOTALL)
+        tool_ctx = {}
+        if ctx_match:
+            try:
+                tool_ctx = json.loads(ctx_match.group(1))
+            except Exception:
+                tool_ctx = {}
+
         # Find tool calls in the prompt
         tool_call_pattern = r"<tool_call>\s*(.*?)\s*</tool_call>"
         tool_calls = re.findall(tool_call_pattern, prompt, re.DOTALL)
@@ -181,6 +191,8 @@ class CodeViewTool(Tool):
                 # Extract the path and view_range
                 path = tool_call["arguments"].get("path", "")
                 view_range = tool_call["arguments"].get("view_range", None)
+                patches = tool_call["arguments"].get("patches", None)
+                base_commit = tool_call["arguments"].get("base_commit", None)
 
                 # Remove /testbed/ prefix if present
                 if path.startswith("/testbed/"):
@@ -188,8 +200,8 @@ class CodeViewTool(Tool):
                 elif path.startswith("testbed/"):
                     path = path[8:]  # Remove "testbed/" prefix
 
-                # Extract repo_name from the tool call arguments
-                repo_name = tool_call.get("arguments", {}).get("repo_name")
+                # Extract repo_name from the tool call arguments or fallback to context
+                repo_name = tool_call.get("arguments", {}).get("repo_name") or tool_ctx.get("repo_name")
 
                 # Fallback to instance variable if not in tool call
                 if not repo_name:
@@ -203,11 +215,23 @@ class CodeViewTool(Tool):
                     # Try to infer from the prompt or use a default
                     repo_name = "testbed"
 
+                # If not provided in the call, fallback to context for base_commit and patches
+                if base_commit is None:
+                    base_commit = tool_ctx.get("base_commit")
+                if patches is None:
+                    patches = tool_ctx.get("patches")
+
                 # Call the API endpoint
                 timeout_seconds = 60
                 response = requests.post(
                     self.api_endpoint,
-                    json={"repo_name": repo_name, "path": path, "view_range": view_range},
+                    json={
+                        "repo_name": repo_name,
+                        "path": path,
+                        "view_range": view_range,
+                        "base_commit": base_commit,
+                        "patches": patches,
+                    },
                     timeout=timeout_seconds,
                 )
 
@@ -258,7 +282,13 @@ class ToolUseLLM(LLM):
         # Initialize executor and store for pending tool calls
         self.executor = ThreadPoolExecutor(max_workers=20)
         self.pending_tool_futures = {}
+        # Optional per-request context strings, aligned with prompts order
+        self._tool_contexts: Optional[list[Optional[str]]] = None
         super().__init__(*args, **kwargs)
+
+    # Allow the actor to set per-request tool contexts that tools can access if needed
+    def set_tool_contexts(self, tool_contexts: Optional[list[Optional[str]]]):
+        self._tool_contexts = tool_contexts
 
     def _validate_and_add_requests(
         self,
@@ -443,7 +473,19 @@ class ToolUseLLM(LLM):
                             ):
                                 # Schedule tool call asynchronously
                                 tool = self.tools[stop_str]
-                                future = self.executor.submit(tool, o.text)
+                                # If the tool supports context via prompt augmentation, attach context
+                                augmented_text = o.text
+                                try:
+                                    if self._tool_contexts is not None:
+                                        real_req_id, _ = last_output.request_id.split("-")
+                                        idx = int(real_req_id)
+                                        ctx = self._tool_contexts[idx]
+                                        if ctx:
+                                            # Append a hidden JSON block the tool can parse if needed
+                                            augmented_text = o.text + f"\n<!--tool_context:{json.dumps(ctx)}-->"
+                                except Exception:
+                                    pass
+                                future = self.executor.submit(tool, augmented_text)
                                 self.pending_tool_futures[output.request_id] = (future, o, output)
                                 output_processed = True
                                 break
