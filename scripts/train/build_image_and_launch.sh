@@ -4,15 +4,7 @@ set -euo pipefail
 image_name=open-instruct-integration-test
 
 # Build the Docker image exactly like push-image.yml does
-docker build \
-    --platform linux/amd64 \
-    --build-arg BUILDKIT_INLINE_CACHE=1 \
-    --build-arg CUDA=12.1.0 \
-    --build-arg TARGET=cudnn8-devel \
-    --build-arg DIST=ubuntu20.04 \
-    --build-arg REQUIRE=requirements.txt \
-    . \
-    -t $image_name
+docker build --platform linux/amd64 . -t $image_name
 
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 
