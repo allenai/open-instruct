@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod:*)",
+      "Bash(make:*)",
+      "Bash(python test:*)",
+      "Bash(python:*)",
+      "Bash(ls:*)",
+      "Bash(rm:*)",
+      "Bash(uv run ruff check:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(uv run:*)",
+      "Bash(ldd:*)",
+      "Bash(uv pip show:*)",
+      "Bash(uv sync:*)",
+      "Bash(uv pip uninstall:*)"
+    ],
+    "deny": []
+  }
+}

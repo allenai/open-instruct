@@ -48,6 +48,43 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class Batch:
+    """Container for batch data including queries, ground truths, and datasets."""
+
+    queries: List[List[int]]
+    ground_truths: List[List[int]]
+    datasets: List[str]
+    indices: Optional[List[int]]
+
+    def __getitem__(self, key: Union[slice, int, List[int]]) -> "Batch":
+        """Enable indexing and slicing: batch[5], batch[start:end], or batch[[1,3,5]]."""
+        if isinstance(key, slice):
+            # Handle slice object: batch[start:end]
+            return Batch(
+                queries=self.queries[key],
+                ground_truths=self.ground_truths[key],
+                datasets=self.datasets[key],
+                indices=self.indices[key] if self.indices else None,
+            )
+        elif isinstance(key, int):
+            # Handle single index: batch[5]
+            return Batch(
+                queries=[self.queries[key]],
+                ground_truths=[self.ground_truths[key]],
+                datasets=[self.datasets[key]],
+                indices=[self.indices[key]] if self.indices else None,
+            )
+        else:
+            # Handle list of indices: batch[[1,3,5]]
+            return Batch(
+                queries=[self.queries[i] for i in key],
+                ground_truths=[self.ground_truths[i] for i in key],
+                datasets=[self.datasets[i] for i in key],
+                indices=[self.indices[i] for i in key] if self.indices else None,
+            )
+
+
+@dataclass
 class ModelConfig:
     model_name_or_path: Optional[str] = None
     """The model checkpoint for weights initialization."""
@@ -221,8 +258,7 @@ async def apply_verifiable_reward(
     reward_fn_mapping: Dict[str, VerifierFunction],
     responses: List[torch.Tensor],
     decoded_responses: List[str],
-    ground_truths: List[str],
-    datasets: List[Union[str, List[str]]],
+    batch: Batch,
     reward_mult: int = 10,
     queries: Optional[List[str]] = None,
 ):
@@ -234,7 +270,7 @@ async def apply_verifiable_reward(
     task_metadata = []
 
     for i, (tok_prediction, prediction, ground_truth, dataset, query) in enumerate(
-        zip(responses, decoded_responses, ground_truths, datasets, queries)
+        zip(responses, decoded_responses, batch.ground_truths, batch.datasets, queries)
     ):
         # allow multiple ground truths and datasets for a single response
 
