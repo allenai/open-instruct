@@ -20,7 +20,7 @@ ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
 
 # Copy only dependency-related files first
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml build.py README.md uv.lock ./
 
 # Annoyingly, we need this before `uv run`, or it complains.
 COPY open_instruct open_instruct
