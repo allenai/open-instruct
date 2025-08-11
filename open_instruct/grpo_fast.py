@@ -152,8 +152,6 @@ INVALID_LOGPROB = 1.0
 class ShutdownSentinel:
     """Sentinel value to signal thread shutdown via queue."""
 
-    pass
-
 
 @dataclass
 class Args:
