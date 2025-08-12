@@ -16,7 +16,8 @@ jobs:
     name: Run unit tests
     runs-on: ubuntu-latest
     container:
-      image: nvidia/cuda:13.0.0-cudnn-devel-ubuntu24.04
+      # Use minimal Ubuntu image instead of huge CUDA dev image
+      image: ubuntu:24.04
     steps:
       - name: Initial disk space check
         run: |
@@ -25,24 +26,30 @@ jobs:
           echo ""
           echo "=== Largest directories in / ==="
           du -h -d 1 / 2>/dev/null | sort -rh | head -20 || true
-          echo ""
-          echo "=== Breakdown of /usr (usually the largest) ==="
-          du -h -d 1 /usr 2>/dev/null | sort -rh | head -20 || true
-          echo ""
-          echo "=== Breakdown of /opt ==="
-          du -h -d 1 /opt 2>/dev/null | sort -rh | head -20 || true
-          echo ""
-          echo "=== Breakdown of /__t ==="
-          du -h -d 1 /__t 2>/dev/null | sort -rh | head -20 || true
-          echo ""
-          echo "=== Breakdown of /__e ==="
-          du -h -d 1 /__e 2>/dev/null | sort -rh | head -20 || true
-          echo ""
-          echo "=== Looking for CUDA/NVIDIA installations ==="
-          find /usr -type d -name "*cuda*" -o -name "*nvidia*" -o -name "*cudnn*" 2>/dev/null | xargs du -sh 2>/dev/null | sort -rh | head -20 || true
-          echo ""
-          echo "=== Checking for large files (>100MB) ==="
-          find / -type f -size +100M 2>/dev/null | xargs du -sh 2>/dev/null | sort -rh | head -20 || true
+          
+      - name: Install minimal CUDA toolkit for nvcc
+        run: |
+          # Install only the minimal CUDA toolkit needed for nvcc
+          apt-get update
+          apt-get install -y wget software-properties-common
+          
+          # Add NVIDIA package repositories
+          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+          dpkg -i cuda-keyring_1.1-1_all.deb
+          rm cuda-keyring_1.1-1_all.deb
+          
+          # Install only cuda-nvcc package (much smaller than full toolkit)
+          apt-get update
+          apt-get install -y cuda-nvcc-12-6
+          
+          # Create symlink so nvcc is available
+          ln -s /usr/local/cuda-12.6/bin/nvcc /usr/bin/nvcc || true
+          
+          echo "nvcc installed, checking version:"
+          nvcc --version || echo "nvcc not found"
+          
+          echo "Disk space after CUDA install:"
+          df -h
           
       - name: Checkout code
         uses: actions/checkout@v4
@@ -54,60 +61,6 @@ jobs:
           echo ""
           echo "=== Repository size ==="
           du -sh .
-          echo ""
-          echo "=== Largest files/dirs in repo ==="
-          du -h -d 1 . | sort -rh | head -20
-          
-      - name: Clean up unnecessary files to free disk space
-        run: |
-          echo "=== Disk space before cleanup ==="
-          df -h /
-          echo ""
-          
-          # Remove CUDA static libraries (saves ~3GB while keeping nvcc functional)
-          echo "Removing unnecessary CUDA static libraries..."
-          echo "Size before: $(du -sh /usr/local/cuda-13.0/targets/x86_64-linux/lib 2>/dev/null | cut -f1)"
-          find /usr/local/cuda-13.0 -name "*.a" -type f -delete 2>/dev/null || true
-          echo "Size after: $(du -sh /usr/local/cuda-13.0/targets/x86_64-linux/lib 2>/dev/null | cut -f1)"
-          
-          # Remove duplicate CUDA libraries (PyTorch will install its own)
-          echo "Removing duplicate CUDA libraries that will be installed by PyTorch..."
-          # Keep only essential runtime libraries, remove the rest
-          rm -f /usr/local/cuda-13.0/targets/x86_64-linux/lib/libcublas.so.13* 2>/dev/null || true
-          rm -f /usr/local/cuda-13.0/targets/x86_64-linux/lib/libcublasLt.so.13* 2>/dev/null || true
-          rm -f /usr/local/cuda-13.0/targets/x86_64-linux/lib/libcufft.so.12* 2>/dev/null || true
-          rm -f /usr/local/cuda-13.0/targets/x86_64-linux/lib/libcurand.so.10* 2>/dev/null || true
-          rm -f /usr/local/cuda-13.0/targets/x86_64-linux/lib/libcusolver.so.12* 2>/dev/null || true
-          rm -f /usr/local/cuda-13.0/targets/x86_64-linux/lib/libcusparse.so.12* 2>/dev/null || true
-          
-          # Remove Nsight tools (saves ~500MB+)
-          echo "Removing Nsight tools..."
-          rm -rf /opt/nvidia 2>/dev/null || true
-          
-          # Remove CUDA samples, documentation, and extras
-          echo "Removing CUDA samples, docs, and extras..."
-          rm -rf /usr/local/cuda-13.0/samples 2>/dev/null || true
-          rm -rf /usr/local/cuda-13.0/doc 2>/dev/null || true
-          rm -rf /usr/local/cuda-13.0/extras 2>/dev/null || true
-          rm -rf /usr/local/cuda-13.0/tools 2>/dev/null || true
-          rm -rf /usr/local/cuda-13.0/libnvvp 2>/dev/null || true
-          rm -rf /usr/local/cuda-13.0/nsightee_plugins 2>/dev/null || true
-          
-          # Clean apt cache if it exists
-          echo "Cleaning apt cache..."
-          apt-get clean 2>/dev/null || true
-          rm -rf /var/lib/apt/lists/* 2>/dev/null || true
-          
-          # Remove pip cache if it exists
-          echo "Cleaning pip cache..."
-          rm -rf /root/.cache/pip 2>/dev/null || true
-          
-          echo ""
-          echo "=== Disk space after cleanup ==="
-          df -h /
-          echo ""
-          echo "=== Space freed ==="
-          echo "Note: /__t and /__e are read-only and cannot be removed"
           
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -118,76 +71,23 @@ jobs:
         run: |
           echo "=== Disk space before uv sync ==="
           df -h
-          echo ""
-          echo "=== Check what's using space in key directories ==="
-          du -sh /usr 2>/dev/null || true
-          du -sh /opt 2>/dev/null || true
-          du -sh /__t 2>/dev/null || true
-          du -sh /__e 2>/dev/null || true
-          echo ""
-          echo "=== UV cache location check ==="
-          echo "UV_CACHE_DIR: ${UV_CACHE_DIR:-not set}"
-          echo "HOME: $HOME"
-          du -sh ~/.cache 2>/dev/null || echo "No ~/.cache yet"
           
-      - name: Set up Python (with monitoring)
+      - name: Set up Python
         run: |
           # Set environment variables to minimize disk usage
           export UV_LINK_MODE=copy  # Suppress hardlink warnings
-          export TMPDIR=/tmp  # Ensure temp files go to /tmp
-          
-          # Clean /tmp before starting
-          echo "Cleaning /tmp before installation..."
-          rm -rf /tmp/* 2>/dev/null || true
-          
-          # Monitor disk usage during uv sync
-          (while true; do 
-            echo "=== Live disk check during uv sync ==="
-            df -h | grep -E "overlay|/dev/root" | head -2
-            echo "Workspace: $(du -sh . 2>/dev/null | cut -f1)"
-            echo "/tmp usage: $(du -sh /tmp 2>/dev/null | cut -f1 || echo '0')"
-            echo "---"
-            sleep 10
-          done) &
-          MONITOR_PID=$!
           
           # Run uv sync with optimizations for minimal disk usage
           # --no-cache: Don't cache downloaded packages
-          uv sync --no-cache || EXIT_CODE=$?
-          
-          # Stop monitoring
-          kill $MONITOR_PID 2>/dev/null || true
-          
-          # Clean /tmp after installation
-          echo "Cleaning /tmp after installation..."
-          rm -rf /tmp/* 2>/dev/null || true
-          
-          # Exit with the original exit code if failed
-          exit ${EXIT_CODE:-0}
+          uv sync --no-cache
         
       - name: Disk space after dependencies
         run: |
           echo "=== Disk space after installing dependencies ==="
           df -h
           echo ""
-          echo "=== UV cache location and size ==="
-          echo "UV cache dir: $(uv cache dir)"
-          du -sh $(uv cache dir) 2>/dev/null || echo "No UV cache found"
-          echo ""
-          echo "=== Breakdown of UV cache ==="
-          du -h -d 1 $(uv cache dir) 2>/dev/null | sort -rh | head -10 || true
-          echo ""
           echo "=== Virtual environment size ==="
           du -sh .venv/ 2>/dev/null || echo "No .venv found"
-          echo ""
-          echo "=== Largest packages in site-packages ==="
-          find .venv -name "site-packages" -type d -exec du -h -d 1 {} \; 2>/dev/null | sort -rh | head -20 || true
-          echo ""
-          echo "=== Workspace largest directories ==="
-          du -h -d 1 . | sort -rh | head -20
-          echo ""
-          echo "=== Check root filesystem largest dirs again ==="
-          du -h -d 1 / 2>/dev/null | sort -rh | head -20 || true
           
       - name: Run unit tests
         run: uv run pytest -n auto
@@ -197,9 +97,3 @@ jobs:
         run: |
           echo "=== Final disk space ==="
           df -h
-          echo ""
-          echo "=== Temp directory size ==="
-          du -sh /tmp 2>/dev/null || echo "Cannot access /tmp"
-          echo ""
-          echo "=== Final workspace size ==="
-          du -sh .
