@@ -1934,7 +1934,6 @@ def one_training_step(
     collated_data,
     tokenizer,
     data_thread_metrics,
-    average_metrics,
     episode,
     training_step,
     num_total_tokens,
@@ -1974,21 +1973,17 @@ def one_training_step(
             **data_thread_metrics,
             **average_metrics,
         }
-        scalar_metrics = {}
-        wandb_metrics = {}
-        for key, value in metrics.items():
-            if isinstance(value, float) or isinstance(value, int):
-                scalar_metrics[key] = value
-                wandb_metrics[key] = value
-            elif isinstance(value, np.ndarray) or isinstance(value, list):
-                if len(value) > 0:
-                    # Log histogram data to wandb
-                    wandb_metrics[key] = wandb.Histogram(value)
+        # Print only scalar metrics
+        scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (float, int))}
         print_rich_single_line_metrics(scalar_metrics)
 
-        # Log to wandb once per training step instead of per metric
-        if args.with_tracking and wandb_metrics:
-            wandb.log(wandb_metrics, step=episode)
+        # Convert array/list metrics to wandb histograms for logging
+        if args.with_tracking:
+            for key, value in metrics.items():
+                if isinstance(value, np.ndarray) or isinstance(value, list):
+                    if len(value) > 0:
+                        metrics[key] = wandb.Histogram(value)
+            wandb.log(metrics, step=episode)
 
         if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
             with Timer("[Main Thread] 🗡️ Saving model"):
@@ -2423,7 +2418,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             collated_data,
             tokenizer,
             data_thread_metrics,
-            {},
             episode,
             training_step,
             num_total_tokens,
