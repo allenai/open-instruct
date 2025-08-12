@@ -94,7 +94,6 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
             pending_tool_futures[output.request_id] = (future, o, output)
             return None  # Output is being held for tool processing
 
-    # No tool call, return the output
     return output
 
 
@@ -242,11 +241,9 @@ class LLMRayActor:
         actor_manager=None,
         **kwargs,
     ):
-        # Store tool-related parameters
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
 
-        # Initialize tool executor if tools are provided
         if self.tools:
             self.executor = ThreadPoolExecutor(max_workers=20)
         else:
@@ -272,7 +269,6 @@ class LLMRayActor:
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             print(f"creating LLM with bundle_indices={bundle_indices}")
 
-        # Create EngineArgs and initialize LLMEngine
         self.llm_engine = vllm.LLMEngine.from_engine_args(vllm.EngineArgs(*args, **kwargs))
 
         self.prompt_queue = prompt_queue
@@ -293,7 +289,6 @@ class LLMRayActor:
                 self.logger.warning("[LLMRayActor] No request in the queue to process. Continuing.")
                 continue
 
-            # Process the request with unified method
             result = self._process_request(request)
 
             try:
@@ -419,7 +414,6 @@ class LLMRayActor:
     def _finalize_outputs(self, outputs, tracking, dataset_index):
         """Prepare final outputs based on whether tools were used."""
         if not self.tools:
-            # Non-tool mode: sort outputs and return
             outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
             return self._process_outputs(outputs, dataset_index=dataset_index)
 
@@ -452,7 +446,7 @@ class LLMRayActor:
 
     def _process_outputs(
         self,
-        outputs: List[Any],  # List of vllm.RequestOutput objects
+        outputs: List[vllm.RequestOutput],
         dataset_index: Optional[List[int]] = None,
     ) -> GenerationResult:
         """Process vLLM RequestOutputs into GenerationResult format."""
@@ -488,14 +482,13 @@ class LLMRayActor:
 
     def _process_outputs_with_tools(
         self,
-        outputs: List[Any],  # List of vllm.RequestOutput objects
+        outputs: List[vllm.RequestOutput],
         dataset_index: Optional[List[int]] = None,
     ) -> GenerationResult:
         """Process vLLM RequestOutputs into GenerationResult format with tool information."""
         response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
         finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
 
-        # Extract tool-specific attributes from outputs
         masks = [out.mask for output in outputs for out in output.outputs]
         num_calls = [out.num_calls for output in outputs for out in output.outputs]
         timeouts = [out.timeout for output in outputs for out in output.outputs]
@@ -635,7 +628,6 @@ def create_vllm_engines(
             placement_group_bundle_index=i * tensor_parallel_size,
         )
 
-        # Always use LLMRayActor with optional tool parameters
         vllm_engines.append(
             ray.remote(LLMRayActor)
             .options(

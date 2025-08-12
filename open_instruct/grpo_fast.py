@@ -1767,7 +1767,6 @@ def create_model_and_optimizer(
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 
-    # Create ActorManager to coordinate weight updates
     actor_manager = ActorManager.remote()
 
     # Create vLLM engines with queues
@@ -1890,18 +1889,15 @@ def sync_weights_and_prepare_prompts(
         if args.async_steps > 0
         else "🔄 Loading weights using shared memory"
     ):
-        # Signal actors to stop for weight sync
         ray.get(actor_manager.set_should_stop.remote(True))
         logger.info(f"[Main Thread] Set should_stop to True for weight sync at step {training_step}")
 
-        # Sync weights to vLLM
         ray_get_with_progress(
             [m.broadcast_to_vllm.remote() for m in policy_group.models],
             desc=f"[Main thread] Broadcasting weights to vLLM engines at training step {training_step}",
             enable=args.verbose,
         )
 
-        # Signal actors to resume
         ray.get(actor_manager.set_should_stop.remote(False))
         logger.info(f"[Main Thread] Set should_stop to False after weight sync at step {training_step}")
 
@@ -2283,12 +2279,10 @@ def cleanup_training_resources(
     # Signal threads to stop
     stop_event.set()
 
-    # Signal all actors to stop
     logger.info("Signaling all actors to stop...")
     ray.get(actor_manager.set_should_stop.remote(True))
     logger.info("✅ Signaled all actors to stop")
 
-    # Clean up threads via executor
     logger.info("Cleaning up threads...")
     executor.shutdown(wait=True)
     logger.info("✅ Threads cleaned up")
