@@ -129,6 +129,15 @@ jobs:
           echo "=== Disk space after installing dependencies ==="
           df -h
           echo ""
+          echo "=== ACTUAL space used by our build (what matters) ==="
+          echo "Container base + our additions:"
+          for dir in /usr /var /opt /root /home /tmp /usr/local; do
+            if [ -d "$dir" ]; then
+              size=$(du -sh "$dir" 2>/dev/null | cut -f1)
+              echo "  $size    $dir"
+            fi
+          done
+          echo ""
           echo "=== Virtual environment size ==="
           du -sh .venv/ 2>/dev/null || echo "No .venv found"
           echo ""
@@ -137,6 +146,19 @@ jobs:
           echo ""
           echo "=== CUDA installation size ==="
           du -sh /usr/local/cuda* 2>/dev/null || echo "No CUDA found in /usr/local"
+          echo ""
+          echo "=== Total actual container usage ==="
+          total=0
+          for dir in /usr /var /opt /root /home /tmp /usr/local /__w/open-instruct; do
+            if [ -d "$dir" ]; then
+              size=$(du -sb "$dir" 2>/dev/null | cut -f1)
+              if [ -n "$size" ]; then
+                total=$((total + size))
+              fi
+            fi
+          done
+          echo "Your build actually uses: $(echo $total | awk '{printf "%.2f GB", $1/1024/1024/1024}')"
+          echo "Available space: ~27GB (from df output)"
           
       - name: Run unit tests
         run: uv run pytest -n auto
