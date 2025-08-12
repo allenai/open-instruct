@@ -74,6 +74,10 @@ jobs:
           sudo apt-get clean
           sudo rm -rf /var/lib/apt/lists/*
           
+          # Clean up apt cache to save disk space
+          apt-get clean
+          rm -rf /var/lib/apt/lists/*
+          
           # Create symlink so nvcc is available
           ln -s /usr/local/cuda-12.6/bin/nvcc /usr/bin/nvcc || true
           
@@ -112,6 +116,13 @@ jobs:
           # Run uv sync with optimizations for minimal disk usage
           # --no-cache: Don't cache downloaded packages
           uv sync --no-cache
+          
+          # Clean up uv cache to save disk space
+          rm -rf ~/.cache/uv 2>/dev/null || true
+          rm -rf ~/.cache/pip 2>/dev/null || true
+          
+          # Clean up any temporary build directories
+          find /tmp -type d -name "pip-*" -exec rm -rf {} + 2>/dev/null || true
         
       - name: Disk space after dependencies
         run: |
@@ -120,6 +131,12 @@ jobs:
           echo ""
           echo "=== Virtual environment size ==="
           du -sh .venv/ 2>/dev/null || echo "No .venv found"
+          echo ""
+          echo "=== Largest directories in .venv ==="
+          du -h -d 2 .venv/ 2>/dev/null | sort -rh | head -15 || true
+          echo ""
+          echo "=== CUDA installation size ==="
+          du -sh /usr/local/cuda* 2>/dev/null || echo "No CUDA found in /usr/local"
           
       - name: Run unit tests
         run: uv run pytest -n auto
