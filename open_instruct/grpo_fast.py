@@ -1977,8 +1977,8 @@ def one_training_step(
         scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (float, int))}
         print_rich_single_line_metrics(scalar_metrics)
 
-        # Convert array/list metrics to wandb histograms for logging
         if args.with_tracking:
+            # Convert array/list metrics to wandb histograms for logging
             for key, value in metrics.items():
                 if isinstance(value, np.ndarray) or isinstance(value, list):
                     if len(value) > 0:
@@ -2081,9 +2081,7 @@ def maybe_evaluate(
             **eval_reward_metrics,
         }
         print_rich_single_line_metrics(eval_metrics)
-        # Log evaluation metrics to wandb
-        if args.with_tracking:
-            wandb.log(eval_metrics, step=episode)
+
         table = {}
         table["prompt"] = tokenizer.batch_decode(eval_batch.queries if eval_batch else [])
         table["response"] = eval_decoded_responses
@@ -2091,8 +2089,10 @@ def maybe_evaluate(
         table["scores"] = eval_scores
         table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
         df = pd.DataFrame(table)
+
         if args.with_tracking:
-            wandb.log({"sample_completions": wandb.Table(dataframe=df)})
+            eval_metrics["sample_completions"] = wandb.Table(dataframe=df)
+            wandb.log(eval_metrics, step=episode)
         else:
             print_rich_table(df.iloc[:1])
         del table
