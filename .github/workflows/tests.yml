@@ -25,6 +25,24 @@ jobs:
           echo ""
           echo "=== Largest directories in / ==="
           du -h -d 1 / 2>/dev/null | sort -rh | head -20 || true
+          echo ""
+          echo "=== Breakdown of /usr (usually the largest) ==="
+          du -h -d 1 /usr 2>/dev/null | sort -rh | head -20 || true
+          echo ""
+          echo "=== Breakdown of /opt ==="
+          du -h -d 1 /opt 2>/dev/null | sort -rh | head -20 || true
+          echo ""
+          echo "=== Breakdown of /__t ==="
+          du -h -d 1 /__t 2>/dev/null | sort -rh | head -20 || true
+          echo ""
+          echo "=== Breakdown of /__e ==="
+          du -h -d 1 /__e 2>/dev/null | sort -rh | head -20 || true
+          echo ""
+          echo "=== Looking for CUDA/NVIDIA installations ==="
+          find /usr -type d -name "*cuda*" -o -name "*nvidia*" -o -name "*cudnn*" 2>/dev/null | xargs du -sh 2>/dev/null | sort -rh | head -20 || true
+          echo ""
+          echo "=== Checking for large files (>100MB) ==="
+          find / -type f -size +100M 2>/dev/null | xargs du -sh 2>/dev/null | sort -rh | head -20 || true
           
       - name: Checkout code
         uses: actions/checkout@v4
@@ -44,37 +62,6 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           version: "0.8.6"
-          
-      - name: Delete huge unnecessary tools folder
-        run: |
-          echo "Disk space before cleanup:"
-          df -h /
-          
-          # Remove unnecessary directories (no sudo needed in container)
-          for dir in /opt/hostedtoolcache /usr/share/dotnet "$AGENT_TOOLSDIRECTORY" /usr/local/lib/android /usr/local/share/boost; do
-            if [ -d "$dir" ]; then
-              rm -rf "$dir" && echo "Removed: $dir"
-            fi
-          done
-          
-          # Remove unnecessary packages (if apt is available)
-          if command -v apt-get >/dev/null 2>&1; then
-            apt-get remove -y \
-              '^aspnetcore-.*' '^dotnet-.*' '^llvm-.*' 'php.*' \
-              '^mongodb-.*' '^mysql-.*' azure-cli google-chrome-stable \
-              firefox powershell mono-devel 2>/dev/null || true
-            
-            apt-get autoremove -y 2>/dev/null || true
-            apt-get clean 2>/dev/null || true
-          fi
-          
-          # Clean up Docker (if docker is available)
-          if command -v docker >/dev/null 2>&1; then
-            docker system prune -af --volumes 2>/dev/null || true
-          fi
-          
-          echo "Disk space after cleanup:"
-          df -h /
           
       - name: Pre-sync disk check
         run: |
