@@ -153,8 +153,7 @@ jobs:
           
           # Run uv sync with optimizations for minimal disk usage
           # --no-cache: Don't cache downloaded packages
-          # --no-build-isolation: Reuse existing packages when building
-          uv sync --no-cache --no-build-isolation || EXIT_CODE=$?
+          uv sync --no-cache || EXIT_CODE=$?
           
           # Stop monitoring
           kill $MONITOR_PID 2>/dev/null || true
