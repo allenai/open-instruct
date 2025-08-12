@@ -2400,7 +2400,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             param_prompt_Q,
             generation_configs,
         )
-        if training_step % args.local_eval_every == 0 and eval_batch is not None:
+        if (
+            training_step % args.local_eval_every == 0
+            and eval_batch is not None
+            and (args.eval_on_step_0 or training_step > 1)
+        ):
             split_and_insert_batch(
                 eval_batch,
                 training_step,
