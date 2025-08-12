@@ -31,7 +31,7 @@ dependencies = [
     "pytest-xdist==3.8.0",
     "flash-attn>=2.8.0.post2; platform_system != 'Darwin'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
-    "flashinfer-python==0.2.8; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "flashinfer-python==0.2.8; platform_system != 'Darwin'",
 ]
 
 [tool.uv.extra-build-dependencies]
