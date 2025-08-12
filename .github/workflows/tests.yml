@@ -45,16 +45,55 @@ jobs:
         with:
           version: "0.8.6"
           
-      - name: Set up Python
-        run: uv sync
+      - name: Pre-sync disk check
+        run: |
+          echo "=== Disk space before uv sync ==="
+          df -h
+          echo ""
+          echo "=== Check what's using space in key directories ==="
+          du -sh /usr 2>/dev/null || true
+          du -sh /opt 2>/dev/null || true
+          du -sh /__t 2>/dev/null || true
+          du -sh /__e 2>/dev/null || true
+          echo ""
+          echo "=== UV cache location check ==="
+          echo "UV_CACHE_DIR: ${UV_CACHE_DIR:-not set}"
+          echo "HOME: $HOME"
+          du -sh ~/.cache 2>/dev/null || echo "No ~/.cache yet"
+          
+      - name: Set up Python (with monitoring)
+        run: |
+          # Monitor disk usage during uv sync
+          (while true; do 
+            echo "=== Live disk check during uv sync ==="
+            df -h | grep -E "overlay|/dev/root" | head -2
+            echo "Workspace: $(du -sh . 2>/dev/null | cut -f1)"
+            echo "UV cache: $(du -sh ~/.cache/uv 2>/dev/null | cut -f1 || echo '0')"
+            echo "---"
+            sleep 10
+          done) &
+          MONITOR_PID=$!
+          
+          # Run uv sync with verbose output to see what it's downloading
+          uv sync -v || EXIT_CODE=$?
+          
+          # Stop monitoring
+          kill $MONITOR_PID 2>/dev/null || true
+          
+          # Exit with the original exit code if failed
+          exit ${EXIT_CODE:-0}
         
       - name: Disk space after dependencies
         run: |
           echo "=== Disk space after installing dependencies ==="
           df -h
           echo ""
-          echo "=== UV cache size ==="
-          du -sh ~/.cache/uv 2>/dev/null || echo "No UV cache found"
+          echo "=== UV cache location and size ==="
+          echo "UV cache dir: $(uv cache dir)"
+          du -sh $(uv cache dir) 2>/dev/null || echo "No UV cache found"
+          echo ""
+          echo "=== Breakdown of UV cache ==="
+          du -h -d 1 $(uv cache dir) 2>/dev/null | sort -rh | head -10 || true
           echo ""
           echo "=== Virtual environment size ==="
           du -sh .venv/ 2>/dev/null || echo "No .venv found"
@@ -64,6 +103,9 @@ jobs:
           echo ""
           echo "=== Workspace largest directories ==="
           du -h -d 1 . | sort -rh | head -20
+          echo ""
+          echo "=== Check root filesystem largest dirs again ==="
+          du -h -d 1 / 2>/dev/null | sort -rh | head -20 || true
           
       - name: Run unit tests
         run: uv run pytest -n auto
