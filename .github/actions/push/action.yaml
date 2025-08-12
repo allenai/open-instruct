@@ -29,7 +29,7 @@ runs:
                --description "$DESCRIPTION"
         # We can't delete the old image because it might be used by a running job. Instead, we rename it to an empty 
         # string, so it will not be resolved by the Beaker client.
-        echo "Deleting image $beaker_user/inputs.beaker."
+        echo "Deleting image $beaker_user/${{ inputs.beaker }}."
         beaker image rename $beaker_user/${{ inputs.beaker }} "" || true
         echo "Creating image $beaker_user/inputs.beaker."
         beaker image create \
