@@ -58,6 +58,38 @@ jobs:
           echo "=== Largest files/dirs in repo ==="
           du -h -d 1 . | sort -rh | head -20
           
+      - name: Clean up unnecessary files to free disk space
+        run: |
+          echo "=== Disk space before cleanup ==="
+          df -h /
+          echo ""
+          
+          # Remove GitHub Actions pre-installed tools (5.7GB)
+          echo "Removing GitHub Actions tools..."
+          rm -rf /__t /__e
+          
+          # Remove CUDA static libraries if they exist (we only need shared libs for running)
+          # This saves several GB while keeping nvcc functional
+          echo "Removing unnecessary CUDA static libraries..."
+          find /usr/local/cuda-13.0 -name "*.a" -type f -delete 2>/dev/null || true
+          
+          # Remove Nsight Compute (172MB just for Qt alone)
+          echo "Removing Nsight tools..."
+          rm -rf /opt/nvidia/nsight-compute 2>/dev/null || true
+          rm -rf /opt/nvidia/nsight-systems 2>/dev/null || true
+          
+          # Remove CUDA samples and documentation
+          echo "Removing CUDA samples and docs..."
+          rm -rf /usr/local/cuda-13.0/samples 2>/dev/null || true
+          rm -rf /usr/local/cuda-13.0/doc 2>/dev/null || true
+          
+          echo ""
+          echo "=== Disk space after cleanup ==="
+          df -h /
+          echo ""
+          echo "=== Space freed ==="
+          echo "Check the difference in 'Used' column above"
+          
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
