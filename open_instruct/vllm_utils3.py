@@ -16,7 +16,6 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 import copy
-import dataclasses
 import logging
 import os
 import queue
@@ -41,8 +40,8 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
-from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
 from open_instruct.queue_types import GenerationResult, RequestInfo
+from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
 logger = logging.getLogger(__name__)
@@ -200,40 +199,6 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools):
     )
 
     return _process_outputs_with_tools(final_outputs, dataset_index=dataset_index)
-
-
-@dataclasses.dataclass
-class RequestInfo:
-    """Container for tool usage information."""
-
-    num_calls: List[int]
-    timeouts: List[int]
-    tool_errors: List[str]
-    tool_outputs: List[str]
-    tool_runtimes: List[float]
-    tool_calleds: List[bool]
-
-
-@dataclasses.dataclass
-class GenerationResult:
-    """Container for generation results from vLLM."""
-
-    responses: List[List[int]]
-    finish_reasons: List[str]
-    masks: List[List[int]]
-    request_info: RequestInfo
-    dataset_index: Optional[List[int]] = None
-
-
-@dataclasses.dataclass
-class PromptRequest:
-    """Container for prompt requests to vLLM."""
-
-    prompts: List[List[int]]
-    sampling_params: vllm.SamplingParams
-    training_step: Optional[int] = None
-    dataset_index: Optional[List[int]] = None
-    is_eval: bool = False
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -581,7 +546,6 @@ def create_vllm_engines(
     eval_results_queue=None,
     actor_manager=None,
 ) -> list[LLMRayActor]:
-
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
         assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (

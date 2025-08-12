@@ -129,15 +129,7 @@ from open_instruct.utils import (
     repeat_each,
     sync_gs_bucket,
 )
-from open_instruct.vllm_utils3 import (
-    ActorManager,
-    GenerationResult,
-    LLMRayActor,
-    PromptRequest,
-    RequestInfo,
-    create_vllm_engines,
-    init_process_group,
-)
+from open_instruct.vllm_utils3 import ActorManager, LLMRayActor, create_vllm_engines, init_process_group
 
 # Setup logging with filename and line number format
 logging.basicConfig(
