@@ -51,7 +51,7 @@ Our setup follows our [Dockerfile](./Dockerfile). *Note that Open Instruct is a 
 
 ### Installation with uv
 
-We recommend using [uv](https://docs.astral.sh/uv/) for installation. You can install with `uv sync`.
+We use [uv](https://docs.astral.sh/uv/) for installation and running code. You can install with `uv sync`.
 
 * **Docker installation**: You can also use the Dockerfile to build a Docker image. You can build the image with the following command:
 
