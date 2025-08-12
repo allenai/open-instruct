@@ -77,6 +77,8 @@ class LMJudgeVerifierConfig(VerifierConfig):
 class CodeVerifierConfig(VerifierConfig):
     code_api_url: str
     code_max_execution_time: float
+    code_pass_rate_reward_threshold: float
+    code_apply_perf_penalty: bool
 
 
 @dataclass
@@ -762,6 +764,8 @@ class CodeVerifier(VerifierFunction):
 
     def __init__(self, verifier_config: CodeVerifierConfig) -> None:
         super().__init__("code", verifier_config=verifier_config, weight=1.0)
+        self.pass_rate_reward_threshold = verifier_config.code_pass_rate_reward_threshold
+        self.apply_perf_penalty = verifier_config.code_apply_perf_penalty
 
     def extract_python_code(self, model_output: str) -> str:
         """Extract the last code block between ``` markers from the model output."""
@@ -790,31 +794,13 @@ class CodeVerifier(VerifierFunction):
         Returns:
             VerificationResult with score as the pass rate of test cases
         """
-        # Parse label to get test cases
-        if isinstance(label, str):
-            try:
-                tests = json.loads(label)
-            except json.JSONDecodeError:
-                logger.warning(f"Failed to parse label as JSON: {label}")
-                return VerificationResult(score=0.0)
-        else:
-            tests = label
-
-        if not isinstance(tests, list):
-            logger.warning(f"Label must be a list of test cases, got: {type(tests)}")
-            return VerificationResult(score=0.0)
-
-        if not tests:
-            logger.warning("No test cases provided")
-            return VerificationResult(score=0.0)
-
         # Extract Python code from the model output
         python_code = self.extract_python_code(prediction)
 
         # Test data
         payload = {
             "program": python_code,
-            "tests": tests,
+            "tests": label,
             "max_execution_time": self.verifier_config.code_max_execution_time,
         }
 
@@ -830,7 +816,18 @@ class CodeVerifier(VerifierFunction):
             result = await asyncio.to_thread(make_request)
             passes = result["results"]
             pass_rate = sum(passes) / len(passes) if passes else 0.0
-            return VerificationResult(score=pass_rate)
+            score = 0.0 if pass_rate < self.pass_rate_reward_threshold else pass_rate
+            if self.apply_perf_penalty and score > 0.0:
+                runtimes = result["runtimes"]
+                # for each runtime, multiply the percent of the timeout that was used
+                multipliers = [
+                    (self.verifier_config.code_max_execution_time - runtime)
+                    / self.verifier_config.code_max_execution_time
+                    for runtime in runtimes
+                ]
+                penalized_passes = [passes[i] * multipliers[i] for i in range(len(passes))]
+                score = sum(penalized_passes) / len(penalized_passes)
+            return VerificationResult(score=score)
         except Exception as e:
             logger.warning(f"Error verifying code sample: {e}")
             return VerificationResult(score=0.0)
@@ -887,6 +884,15 @@ def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     for judge_type in JUDGE_PROMPT_MAP.keys():
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args))
         verifiers[instance.name.lower()] = instance
+
+    # if we have remap arg, remap!
+    if args.remap_verifier:
+        remap = args.remap_verifier.split("=")
+        assert len(remap) == 2, "Remap must be in the format old_name=new_name"
+        old_name, new_name = remap
+        # map so that the old name calls the new verifier
+        assert new_name.lower() in verifiers, f"{new_name} not found in verifiers during remapping"
+        verifiers[old_name.lower()] = verifiers[new_name.lower()]
 
     return verifiers
 
