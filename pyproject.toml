@@ -27,7 +27,8 @@ dependencies = [
     "vllm==0.9.1",    
     "wandb==0.18.1",
     "langdetect==1.0.9",
-    "immutabledict==1.2.0"
+    "immutabledict==1.2.0",
+    "torchrl>=0.7",
 ]
 
 [build-system]

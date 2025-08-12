@@ -70,6 +70,7 @@ from peft import PeftModel, get_peft_model_state_dict
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
+from tensordict import tensorclass
 from torch.utils.tensorboard import SummaryWriter
 from torchrl.data import ReplayBuffer
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
@@ -417,6 +418,18 @@ class Args:
                 if tool not in ["search", "code"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
+
+
+@tensorclass
+class Trajectory:
+    prompt: List[List[int]]
+    completion: List[List[int]]
+    mask: List[List[int]]
+    # advantage: torch.Tensor
+    score: torch.Tensor
+    # old_logprobs: torch.Tensor
+    # ref_logprobs: torch.Tensor
+    # finish_reason: str
 
 
 def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
@@ -1178,18 +1191,25 @@ def vllm_generate_thread(
             evaluation_inference_results_Q.put((response_ids, finish_reasons, masks, infos))
 
 
-def data_preparation_thread(
+def verification_thread(
     reward_fn: Callable,
     inference_results_Q: Queue,
-    packed_sequences_Q: Queue,
+    replay_buffer: ReplayBuffer,
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
 ):
+    # Here we get the max possible score
+    max_possible_score = 0
+    if args.apply_verifiable_reward:
+        max_possible_score += args.verification_reward
+    if args.apply_r1_style_format_reward and args.additive_format_reward:
+        max_possible_score += args.r1_style_format_reward
+
     for training_step in range(1, num_training_steps + 1):
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
-        with Timer("🚀 [Data Preparation Thread] Getting response ids"):
+        with Timer("🚀 [Verification Thread] Getting response ids"):
             (queries, ground_truths, datasets, responses, finish_reasons, masks, infos) = inference_results_Q.get()
             num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
             good_outputs = [
@@ -1206,13 +1226,13 @@ def data_preparation_thread(
                     responses[i].append(tokenizer.eos_token_id)
                     masks[i].append(1)  # never mask the eos token for now?
 
-        with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
+        with Timer("🔥 [Verification Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
             decoded_queries = tokenizer.batch_decode(queries, skip_special_tokens=True)
             decoded_queries = [extract_user_query(query) for query in decoded_queries]
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
-        with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
+        with Timer("💰 [Verification Thread] Calculating rewards and advantages"):
             scores, reward_metrics = asyncio.run(
                 reward_fn(
                     responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries
@@ -1231,143 +1251,7 @@ def data_preparation_thread(
             else:
                 raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
-        with Timer("📦 [Data Preparation Thread] Filtering sequences"):
-            # Here we get the max possible score for each prompt, and see how many prompts are unsolved
-            max_possible_score = 0
-            if args.apply_verifiable_reward:
-                max_possible_score += args.verification_reward
-            if args.apply_r1_style_format_reward and args.additive_format_reward:
-                max_possible_score += args.r1_style_format_reward
-            unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
-            # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
-            # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
-            non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
-            real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
-            expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
-            non_zero_gradient_index = np.where(expanded_mask)[0]
-            advantages = advantages[non_zero_gradient_index]
-            scores = scores[non_zero_gradient_index]
-            responses = [responses[i] for i in non_zero_gradient_index]
-            masks = [masks[i] for i in non_zero_gradient_index]
-            queries = [queries[i] for i in non_zero_gradient_index]
-            ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
-            datasets = [datasets[i] for i in non_zero_gradient_index]
-            finish_reasons = [finish_reasons[i] for i in non_zero_gradient_index]
-            if args.mask_truncated_completions:
-                stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
-                scores = scores[stop_idxes]
-                advantages = advantages[stop_idxes]
-                responses = [responses[i] for i in stop_idxes]
-                masks = [masks[i] for i in stop_idxes]
-                queries = [queries[i] for i in stop_idxes]
-                ground_truths = [ground_truths[i] for i in stop_idxes]
-                datasets = [datasets[i] for i in stop_idxes]
-                finish_reasons = [finish_reasons[i] for i in stop_idxes]
-
-        with Timer("📦 [Data Preparation Thread] Packing sequences"):
-            packed_sequences = pack_sequences(
-                queries=queries,
-                responses=responses,
-                masks=masks,
-                pack_length=args.pack_length,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-            num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
-            # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
-            # and each value is the corresponding advantage score: index 0 is set to 0 since response masks start from 1 (1-indexed)
-            lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
-            lookup_advantages[1:] = advantages
-            packed_advantages = [
-                torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
-                for packed_mask in packed_sequences.response_masks
-            ]
-            packed_sequences.advantages = packed_advantages
-
-        # if we have less batches than world size, we need to pad out so each world is fine
-        # ideally, you should avoid this since its wasting computation.
-        if args.allow_world_padding:
-            with Timer("🤺 [Data Preparation Thread] Padding sequences for world size"):
-                shortfall = args.world_size - len(packed_sequences.query_responses)
-                if shortfall > 0:
-                    logger.warning(
-                        f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this."
-                    )
-                    # construct "dummy" sequences for padding out the world size
-                    dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
-                    dummy_tool_mask = torch.zeros_like(dummy_qr)
-                    dummy_attention = torch.tensor([1, 1], dtype=torch.long)
-                    dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
-                    dummy_response_mask = torch.zeros_like(dummy_qr)
-                    dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
-                    # pad out the world size
-                    for _ in range(shortfall):
-                        packed_sequences.query_responses.append(dummy_qr)
-                        packed_sequences.tool_masks.append(dummy_tool_mask)
-                        packed_sequences.attention_masks.append(dummy_attention)
-                        packed_sequences.position_ids.append(dummy_position_ids)
-                        packed_sequences.response_masks.append(dummy_response_mask)
-                        packed_sequences.advantages.append(dummy_advantage)
-
-        with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
-            B = (
-                len(packed_sequences.query_responses) // args.world_size
-            )  # essentially doing `drop_last=True`, which is fine.
-            collated_data = []
-            for i in range(args.world_size):
-                per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
-                per_device_packed_tool_masks = packed_sequences.tool_masks[B * i : B * (i + 1)]
-                per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
-                per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
-                per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
-                per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
-
-                # Shuffle the batch and collate the data
-                b_inds = np.random.permutation(len(per_device_packed_query_responses))
-                collated_query_responses = []
-                collated_tool_masks = []
-                collated_attention_masks = []
-                collated_position_ids = []
-                collated_response_masks = []
-                collated_advantages = []
-                for j in range(0, len(per_device_packed_query_responses), args.per_device_train_batch_size):
-                    micro_range = b_inds[j : j + args.per_device_train_batch_size]
-                    collated_query_responses.append(
-                        collate_fn(
-                            [per_device_packed_query_responses[idx] for idx in micro_range], tokenizer.pad_token_id
-                        )
-                    )
-                    collated_tool_masks.append(
-                        collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0)
-                    )
-                    collated_attention_masks.append(
-                        collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0)
-                    )
-                    collated_position_ids.append(
-                        collate_fn([per_device_packed_position_ids[idx] for idx in micro_range], 0)
-                    )
-                    collated_response_masks.append(
-                        collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0)
-                    )
-                    collated_advantages.append(
-                        collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0)
-                    )
-                collated_data.append(
-                    {
-                        "collated_query_responses": collated_query_responses,
-                        "collated_tool_masks": collated_tool_masks,
-                        "collated_attention_masks": collated_attention_masks,
-                        "collated_position_ids": collated_position_ids,
-                        "collated_advantages": collated_advantages,
-                        "collated_response_masks": collated_response_masks,
-                    }
-                )
-
-        # Create a result package with metrics and data
-        if len(responses) == 0:
-            # Handle empty responses case
-            # in this case, we won't log metrics, so it should be fine.
-            metrics = {}
-        else:
+        with Timer("💰 [Verification Thread] Calculating metrics"):
             sequence_lengths = np.array([len(response) for response in responses])
             sequence_length_solved = (
                 np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == max_possible_score])
@@ -1375,11 +1259,12 @@ def data_preparation_thread(
             sequence_length_unsolved = (
                 np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
             )
+            unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
             metrics = {
                 "scores": np.array(scores).mean(),
-                "real_batch_size_ratio": real_batch_size_ratio,
+                # "real_batch_size_ratio": real_batch_size_ratio,
                 "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
-                "packed_ratio": len(packed_sequences.query_responses) / len(responses) if len(responses) > 0 else 0,
+                # "packed_ratio": len(packed_sequences.query_responses) / len(responses) if len(responses) > 0 else 0,
                 "val/sequence_lengths": sequence_lengths.mean(),
                 "val/sequence_lengths_min": sequence_lengths.min(),
                 "val/sequence_lengths_max": sequence_lengths.max(),
@@ -1421,20 +1306,191 @@ def data_preparation_thread(
                 json.dump(traces, f)
                 f.write("\n")
 
-        if len(responses) == 0:
-            logger.warning(f"No responses in batch {training_step}.")
+        trajs = Trajectory(prompts=queries, completion=responses, score=scores, batch_size=[len(queries)])
+        replay_buffer.extend(trajs)
 
-        # Put the packed sequences and metrics into the output queue
-        packed_sequences_Q.put(
-            {
-                "packed_sequences": packed_sequences,  # for debugging purposes
-                "collated_data": collated_data,
-                "metrics": metrics,
-                "responses_count": len(responses),
-                "num_new_tokens": num_new_tokens,
-                "B": B,
-            }
+
+def data_preparation_thread(
+    args: Args, tokenizer: PreTrainedTokenizer, queries: List[List[int]], responses: List[List[int]], scores: List[int]
+):
+    # ------------------------------------------------------------------------------------------------
+    # Pack sequences
+    with Timer("🚀 [Data Preparation Thread] Getting response ids"):
+        (queries, ground_truths, datasets, responses, finish_reasons, masks, infos) = inference_results_Q.get()
+        num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
+        good_outputs = [
+            len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
+            for i in range(len(tool_outputs))
+        ]
+        for i in range(len(finish_reasons)):
+            # edge case: sometimes it outputs eos immediately, and we get an empty response
+            # in that case, we need to add the eos token to the response
+            # note that this also adds eos to the end of reponses that stopped for other reasons.
+            if finish_reasons[i] == "stop" and (len(responses[i]) == 0 or responses[i][-1] != tokenizer.eos_token_id):
+                responses[i].append(tokenizer.eos_token_id)
+                masks[i].append(1)  # never mask the eos token for now?
+
+    with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
+        decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
+        decoded_queries = tokenizer.batch_decode(queries, skip_special_tokens=True)
+        decoded_queries = [extract_user_query(query) for query in decoded_queries]
+        stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
+
+    with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
+        scores, reward_metrics = asyncio.run(
+            reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries)
         )
+        scores = np.array(scores)
+        scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
+        mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
+        mean_grouped_rewards = np.repeat(mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
+        std_grouped_rewards = scores_per_prompt.std(axis=-1)
+        std_grouped_rewards = np.repeat(std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
+        if args.advantage_normalization_type == "standard":
+            advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
+        elif args.advantage_normalization_type == "centered":
+            advantages = scores - mean_grouped_rewards
+        else:
+            raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
+
+    with Timer("📦 [Data Preparation Thread] Filtering sequences"):
+        # Here we get the max possible score for each prompt, and see how many prompts are unsolved
+        max_possible_score = 0
+        if args.apply_verifiable_reward:
+            max_possible_score += args.verification_reward
+        if args.apply_r1_style_format_reward and args.additive_format_reward:
+            max_possible_score += args.r1_style_format_reward
+        unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
+        # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
+        # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
+        non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
+        real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
+        expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
+        non_zero_gradient_index = np.where(expanded_mask)[0]
+        advantages = advantages[non_zero_gradient_index]
+        scores = scores[non_zero_gradient_index]
+        responses = [responses[i] for i in non_zero_gradient_index]
+        masks = [masks[i] for i in non_zero_gradient_index]
+        queries = [queries[i] for i in non_zero_gradient_index]
+        ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
+        datasets = [datasets[i] for i in non_zero_gradient_index]
+        finish_reasons = [finish_reasons[i] for i in non_zero_gradient_index]
+        if args.mask_truncated_completions:
+            stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
+            scores = scores[stop_idxes]
+            advantages = advantages[stop_idxes]
+            responses = [responses[i] for i in stop_idxes]
+            masks = [masks[i] for i in stop_idxes]
+            queries = [queries[i] for i in stop_idxes]
+            ground_truths = [ground_truths[i] for i in stop_idxes]
+            datasets = [datasets[i] for i in stop_idxes]
+            finish_reasons = [finish_reasons[i] for i in stop_idxes]
+
+    with Timer("📦 [Data Preparation Thread] Packing sequences"):
+        packed_sequences = pack_sequences(
+            queries=queries,
+            responses=responses,
+            masks=masks,
+            pack_length=args.pack_length,
+            pad_token_id=tokenizer.pad_token_id,
+        )
+        num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
+        # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
+        # and each value is the corresponding advantage score: index 0 is set to 0 since response masks start from 1 (1-indexed)
+        lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
+        lookup_advantages[1:] = advantages
+        packed_advantages = [
+            torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
+            for packed_mask in packed_sequences.response_masks
+        ]
+        packed_sequences.advantages = packed_advantages
+
+    # if we have less batches than world size, we need to pad out so each world is fine
+    # ideally, you should avoid this since its wasting computation.
+    if args.allow_world_padding:
+        with Timer("🤺 [Data Preparation Thread] Padding sequences for world size"):
+            shortfall = args.world_size - len(packed_sequences.query_responses)
+            if shortfall > 0:
+                logger.warning(
+                    f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this."
+                )
+                # construct "dummy" sequences for padding out the world size
+                dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
+                dummy_tool_mask = torch.zeros_like(dummy_qr)
+                dummy_attention = torch.tensor([1, 1], dtype=torch.long)
+                dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
+                dummy_response_mask = torch.zeros_like(dummy_qr)
+                dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
+                # pad out the world size
+                for _ in range(shortfall):
+                    packed_sequences.query_responses.append(dummy_qr)
+                    packed_sequences.tool_masks.append(dummy_tool_mask)
+                    packed_sequences.attention_masks.append(dummy_attention)
+                    packed_sequences.position_ids.append(dummy_position_ids)
+                    packed_sequences.response_masks.append(dummy_response_mask)
+                    packed_sequences.advantages.append(dummy_advantage)
+
+    with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
+        B = (
+            len(packed_sequences.query_responses) // args.world_size
+        )  # essentially doing `drop_last=True`, which is fine.
+        collated_data = []
+        for i in range(args.world_size):
+            per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
+            per_device_packed_tool_masks = packed_sequences.tool_masks[B * i : B * (i + 1)]
+            per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
+            per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
+            per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
+            per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
+
+            # Shuffle the batch and collate the data
+            b_inds = np.random.permutation(len(per_device_packed_query_responses))
+            collated_query_responses = []
+            collated_tool_masks = []
+            collated_attention_masks = []
+            collated_position_ids = []
+            collated_response_masks = []
+            collated_advantages = []
+            for j in range(0, len(per_device_packed_query_responses), args.per_device_train_batch_size):
+                micro_range = b_inds[j : j + args.per_device_train_batch_size]
+                collated_query_responses.append(
+                    collate_fn([per_device_packed_query_responses[idx] for idx in micro_range], tokenizer.pad_token_id)
+                )
+                collated_tool_masks.append(collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0))
+                collated_attention_masks.append(
+                    collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0)
+                )
+                collated_position_ids.append(
+                    collate_fn([per_device_packed_position_ids[idx] for idx in micro_range], 0)
+                )
+                collated_response_masks.append(
+                    collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0)
+                )
+                collated_advantages.append(collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0))
+            collated_data.append(
+                {
+                    "collated_query_responses": collated_query_responses,
+                    "collated_tool_masks": collated_tool_masks,
+                    "collated_attention_masks": collated_attention_masks,
+                    "collated_position_ids": collated_position_ids,
+                    "collated_advantages": collated_advantages,
+                    "collated_response_masks": collated_response_masks,
+                }
+            )
+
+    if len(responses) == 0:
+        logger.warning(f"No responses in batch {training_step}.")
+
+    # Put the packed sequences and metrics into the output queue
+    packed_sequences_Q.put(
+        {
+            "packed_sequences": packed_sequences,  # for debugging purposes
+            "collated_data": collated_data,
+            "responses_count": len(responses),
+            "num_new_tokens": num_new_tokens,
+            "B": B,
+        }
+    )
 
 
 def setup_runtime_variables(args: Args) -> Args:
@@ -1658,7 +1714,8 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
     """Get the packed sequences with advantages from the packing thread."""
     with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
         packed_data = packed_sequences_Q.get()
-        data_thread_metrics = packed_data["metrics"]
+        # data_thread_metrics = packed_data["metrics"]
+        data_thread_metrics = None
         B = packed_data["B"]
         collated_data = packed_data["collated_data"]
         num_total_tokens += packed_data["num_new_tokens"]
@@ -2015,8 +2072,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     reward_fn = make_reward_fn(args)
 
     packing_thread = threading.Thread(
-        target=data_preparation_thread,
-        args=(reward_fn, inference_results_Q, packed_sequences_Q, args, tokenizer, args.num_training_steps),
+        target=verification_thread,
+        args=(reward_fn, inference_results_Q, replay_buffer, args, tokenizer, args.num_training_steps),
     )
     packing_thread.start()
     logger.info("======== ✅ data preparation thread starts =========")
