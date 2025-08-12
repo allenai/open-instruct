@@ -1,10 +1,7 @@
-exp_name="grpo_orz_olmo3_fullmix"
-EXP_NAME=${EXP_NAME:-${exp_name}}
-
 # full integration mix
-dataset_mix="saurabh5/rlvr_acecoder_filtered 63033 hamishivi/rlvr_orz_math_57k_collected 56878 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2 56878 allenai/IF_multi_constraints_upto5 56878"
+# dataset_mix="saurabh5/rlvr_acecoder_filtered 63033 hamishivi/rlvr_orz_math_57k_collected 56878 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2 56878 allenai/IF_multi_constraints_upto5 56878"
 # math only mix
-# dataset_mix="hamishivi/rlvr_orz_math_57k_collected 56878"
+dataset_mix="hamishivi/rlvr_orz_math_57k_collected 56878"
 
 # all evals
 # evals="minerva_math::hamish_zs_reasoning,gsm8k::zs_cot_latex,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,ifeval::hamish_zs_reasoning,popqa::hamish_zs_reasoning,mmlu:cot::hamish_zs_reasoning,alpaca_eval_v3::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,mbppplus:0-shot-chat::tulu-thinker,codex_humanevalplus:0-shot-chat-v1::tulu-thinker"
@@ -35,8 +32,21 @@ evals="minerva_math::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,a
 # model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/ianm/decon-anneal-round3-webround2-100B-olmo3_7b_with-reasoning-anneal-12T-fc803782/step47684-hf"
 # gs_model_name="olmo3-midtraining-round3-decon"
 
-model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round4-100B-olmo3_7b-anneal-decon-12T-081e9449/step47684-hf"
-gs_model_name="olmo3-midtraining-round4"
+# model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round4-100B-olmo3_7b-anneal-decon-12T-081e9449/step47684-hf"
+# gs_model_name="olmo3-midtraining-round4"
+
+# model_name_or_path="/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/olmo3-hparam-search/olmo3-12t-r3-1e-4-2_epochs-olmo2-tulu3-mix-num_3"
+# gs_model_name="olmo3-midtraining-round3-jacobsft-num3"
+
+# model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round5-100B-olmo3_7b-anneal-decon-12T-00bb6023/step47684-hf"
+# gs_model_name="olmo3-midtraining-round5"
+
+model_name_or_path="/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/olmo3-hparam-search/olmo3-12t-r5-100b-olmo2-tulu3-mix-num_3/"
+gs_model_name="olmo3-midtraining-round5-jacobsft-mix3"
+
+exp_name="grpo_mathonly_1m_${gs_model_name}"
+EXP_NAME=${EXP_NAME:-${exp_name}}
+
 
 # cluster
 cluster=ai2/augusta-google-1
@@ -66,7 +76,7 @@ python open_instruct/grpo_fast.py \
     --beta 0.0 \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 64 \
-    --num_mini_batches 1 \
+    --num_mini_batches 4 \
     --num_epochs 1 \
     --learning_rate 5e-7 \
     --per_device_train_batch_size 1 \
@@ -84,7 +94,7 @@ python open_instruct/grpo_fast.py \
     --stop_strings "</answer>" \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 256000 \
+    --total_episodes 1024000 \
     --deepspeed_stage 2 \
     --num_learners_per_node 8 \
     --vllm_num_engines 8 \
