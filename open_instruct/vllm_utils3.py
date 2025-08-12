@@ -98,7 +98,9 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     return output
 
 
-def _process_outputs(outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None) -> GenerationResult:
+def _process_outputs(
+    outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None
+) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
     finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
@@ -133,7 +135,7 @@ def _process_outputs(outputs: List[vllm.RequestOutput], dataset_index: Optional[
 
 def _process_outputs_with_tools(
     outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None
-) -> GenerationResult:
+) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format with tool information."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
     finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
