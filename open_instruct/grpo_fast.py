@@ -143,6 +143,10 @@ api = HfApi()
 INVALID_LOGPROB = 1.0
 
 
+class ShutdownSentinel:
+    """Sentinel value to signal thread shutdown via queue."""
+
+
 @dataclass
 class Args:
     # Dataset
@@ -328,8 +332,6 @@ class Args:
     """whether to enable prefix caching"""
     vllm_top_p: float = 1.0
     """vLLM top p for nucleus sampling"""
-    accumulate_inference_batches_timeout: float = 1800.0  # 30 minutes
-    """Timeout in seconds for accumulating inference batches during training"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     gather_whole_model: bool = True
@@ -1222,7 +1224,7 @@ def accumulate_inference_batches(
         queue.Empty: If timeout is specified and no data is available within timeout.
 
     Returns:
-        Tuple of (combined_result, Batch with queries, ground_truths, datasets)
+        Tuple of (combined_result, Batch with queries, ground_truths, datasets) or (ShutdownSentinel, None) if shutdown signal received
     """
     # Collect results from all engines with non-blocking progress bar
     results = []
@@ -1232,11 +1234,14 @@ def accumulate_inference_batches(
     for i in tqdm(
         range(args.vllm_num_engines),
         total=args.vllm_num_engines,
-        desc=f"Accumulating results from {args.vllm_num_engines} engines ({timeout=})",
+        desc=f"Accumulating results from {args.vllm_num_engines} engines",
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     ):
         result = inference_results_Q.get(timeout=timeout)
+
+        if isinstance(result, ShutdownSentinel):
+            return result, None
         dataset_indices = result.dataset_index
 
         if dataset_indices is None:
@@ -1329,32 +1334,17 @@ def data_preparation_thread(
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
-    stop_event: threading.Event,
     generation_config,
 ):
     for training_step in range(1, num_training_steps + 1):
-        if stop_event.is_set():
-            logger.info("[Data Preparation Thread] Shutting down")
-            return
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            while True:
-                if stop_event.is_set():
-                    logger.info("[Data Preparation Thread] Shutting down due to stop event")
-                    return  # Simply return to exit the thread cleanly
-                try:
-                    result, batch = accumulate_inference_batches(
-                        inference_results_Q,
-                        pending_queries_map,
-                        args,
-                        training_step,
-                        generation_config,
-                        # Use configurable timeout from args
-                        timeout=args.accumulate_inference_batches_timeout,
-                    )
-                    break  # Successfully got results, exit retry loop
-                except Empty:
-                    continue  # Timeout occurred, loop back to check stop_event
+            result, batch = accumulate_inference_batches(
+                inference_results_Q, pending_queries_map, args, training_step, generation_config
+            )
+            if isinstance(result, ShutdownSentinel):
+                logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
+                return
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -2274,11 +2264,14 @@ def cleanup_training_resources(
     stop_event: threading.Event, executor: futures.ThreadPoolExecutor, queues: list[ray_queue.Queue]
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
-    # Signal threads to stop
+    # Signal generate_thread to stop
     stop_event.set()
 
-    logger.info("Shutting down thread pool executor...")
-    executor.shutdown(wait=True)
+    # Push sentinel to signal data_preparation_thread to stop
+    logger.info("Pushing shutdown sentinel to queues...")
+    if queues and len(queues) > 0:
+        # Push sentinel to the first queue (inference_results_Q)
+        queues[0].put(ShutdownSentinel(), timeout=1)
 
     logger.info("Shutting down Ray queues...")
     for queue in queues:
@@ -2286,6 +2279,9 @@ def cleanup_training_resources(
             queue.shutdown()
         except Exception as e:
             logger.warning(f"Error shutting down Ray queue: {e}")
+
+    logger.info("Shutting down thread pool executor...")
+    executor.shutdown(wait=True)
 
     # Clean up judge clients
     cleanup_judge_clients()
@@ -2363,7 +2359,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         args,
         tokenizer,
         args.num_training_steps,
-        stop_event,
         generation_configs["train"],
     )
 
