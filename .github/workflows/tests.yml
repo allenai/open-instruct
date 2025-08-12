@@ -21,11 +21,112 @@ jobs:
     steps:
       - name: Initial disk space check
         run: |
-          echo "=== Initial disk space ==="
+          echo "=========================================="
+          echo "COMPREHENSIVE DISK SPACE INVESTIGATION"
+          echo "=========================================="
+          echo ""
+          echo "=== df output (showing 46G used) ==="
           df -h
           echo ""
-          echo "=== Largest directories in / ==="
-          du -h -d 1 / 2>/dev/null | sort -rh | head -20 || true
+          echo "=== Container image info ==="
+          cat /etc/os-release | head -5
+          echo ""
+          echo "=== Understanding the 46G mystery ==="
+          echo "Note: We're using ubuntu:24.04 which is ~70MB, so where's the 46G from?"
+          echo ""
+          echo "=== Filesystem mounts (this is key!) ==="
+          mount | grep -v "^cgroup" | grep -v "^proc" | grep -v "^sys"
+          echo ""
+          echo "=== Check what's mounted at root ==="
+          stat -f / | grep -E "Type|Block"
+          echo ""
+          echo "=== All top-level directories with real sizes ==="
+          for dir in /*; do
+            if [ -d "$dir" ]; then
+              size=$(du -sh "$dir" 2>/dev/null | cut -f1)
+              echo "$size    $dir"
+            fi
+          done | sort -rh
+          echo ""
+          echo "=== GitHub Actions directories (/__t, /__e, /__w) ==="
+          echo "These are bind-mounted from the host runner:"
+          ls -la / | grep "^d" | grep "__"
+          echo ""
+          echo "Checking if /__t exists and its size:"
+          if [ -d "/__t" ]; then
+            echo "/__t exists - checking contents:"
+            du -sh /__t 2>/dev/null || echo "Cannot read /__t"
+            ls -la /__t 2>/dev/null | head -10 || echo "Cannot list /__t"
+          else
+            echo "/__t does not exist"
+          fi
+          echo ""
+          echo "Checking if /__e exists and its size:"
+          if [ -d "/__e" ]; then
+            echo "/__e exists - checking contents:"
+            du -sh /__e 2>/dev/null || echo "Cannot read /__e"
+            ls -la /__e 2>/dev/null | head -10 || echo "Cannot list /__e"
+          else
+            echo "/__e does not exist"  
+          fi
+          echo ""
+          echo "Checking if /__w exists and its size:"
+          if [ -d "/__w" ]; then
+            echo "/__w exists - checking contents:"
+            du -sh /__w 2>/dev/null || echo "Cannot read /__w"
+            ls -la /__w 2>/dev/null | head -10 || echo "Cannot list /__w"
+          else
+            echo "/__w does not exist"
+          fi
+          echo ""
+          echo "=== Checking /opt (common location for pre-installed tools) ==="
+          if [ -d "/opt" ]; then
+            du -sh /opt 2>/dev/null || echo "/opt exists but cannot calculate size"
+            echo "Contents of /opt:"
+            ls -la /opt 2>/dev/null || echo "Cannot list /opt"
+            if [ "$(ls -A /opt 2>/dev/null)" ]; then
+              echo "Subdirectories in /opt:"
+              du -h -d 1 /opt 2>/dev/null | sort -rh | head -10
+            fi
+          else
+            echo "/opt does not exist"
+          fi
+          echo ""
+          echo "=== Checking Docker info ==="
+          if [ -f /.dockerenv ]; then
+            echo "Running inside Docker (/.dockerenv exists)"
+          else
+            echo "/.dockerenv not found"
+          fi
+          echo ""
+          echo "=== Checking for overlay filesystem layers ==="
+          cat /proc/mounts | grep overlay || echo "No overlay mounts found"
+          echo ""
+          echo "=== Docker/Container runtime info ==="
+          echo "Checking container runtime directories:"
+          ls -la /var/lib/docker 2>/dev/null || echo "/var/lib/docker not accessible"
+          ls -la /var/lib/containerd 2>/dev/null || echo "/var/lib/containerd not accessible"
+          echo ""
+          echo "=== Process tree to understand container setup ==="
+          ps auxf | head -20 || ps aux | head -20
+          echo ""
+          echo "=== Finding large files (>100M) ==="
+          find / -type f -size +100M 2>/dev/null | head -20 || echo "No large files found or permission denied"
+          echo ""
+          echo "=== Actual vs reported disk usage ==="
+          echo "Sum of all directories:"
+          total=0
+          for dir in /*; do
+            if [ -d "$dir" ] && [ "$dir" != "/proc" ] && [ "$dir" != "/sys" ] && [ "$dir" != "/dev" ]; then
+              size=$(du -sb "$dir" 2>/dev/null | cut -f1)
+              if [ -n "$size" ]; then
+                total=$((total + size))
+              fi
+            fi
+          done
+          echo "Total calculated: $(echo $total | awk '{printf "%.2f GB", $1/1024/1024/1024}')"
+          echo "Total reported by df: 46G"
+          echo "Difference likely due to overlay filesystem overhead or host mounts"
           
       - name: Install minimal CUDA toolkit for nvcc
         run: |
@@ -42,13 +143,17 @@ jobs:
           apt-get update
           apt-get install -y cuda-nvcc-12-6
           
+          # Clean up apt cache to save disk space
+          apt-get clean
+          rm -rf /var/lib/apt/lists/*
+          
           # Create symlink so nvcc is available
           ln -s /usr/local/cuda-12.6/bin/nvcc /usr/bin/nvcc || true
           
           echo "nvcc installed, checking version:"
           nvcc --version || echo "nvcc not found"
           
-          echo "Disk space after CUDA install:"
+          echo "Disk space after CUDA install and cleanup:"
           df -h
           
       - name: Checkout code
@@ -80,6 +185,13 @@ jobs:
           # Run uv sync with optimizations for minimal disk usage
           # --no-cache: Don't cache downloaded packages
           uv sync --no-cache
+          
+          # Clean up uv cache to save disk space
+          rm -rf ~/.cache/uv 2>/dev/null || true
+          rm -rf ~/.cache/pip 2>/dev/null || true
+          
+          # Clean up any temporary build directories
+          find /tmp -type d -name "pip-*" -exec rm -rf {} + 2>/dev/null || true
         
       - name: Disk space after dependencies
         run: |
@@ -88,6 +200,12 @@ jobs:
           echo ""
           echo "=== Virtual environment size ==="
           du -sh .venv/ 2>/dev/null || echo "No .venv found"
+          echo ""
+          echo "=== Largest directories in .venv ==="
+          du -h -d 2 .venv/ 2>/dev/null | sort -rh | head -15 || true
+          echo ""
+          echo "=== CUDA installation size ==="
+          du -sh /usr/local/cuda* 2>/dev/null || echo "No CUDA found in /usr/local"
           
       - name: Run unit tests
         run: uv run pytest -n auto
