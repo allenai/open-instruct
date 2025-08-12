@@ -1,3 +1,5 @@
+[![Beaker Experiment Launch](https://github.com/allenai/open-instruct/actions/workflows/beaker-experiment.yml/badge.svg)](https://github.com/allenai/open-instruct/actions/workflows/beaker-experiment.yml) [![build_open_instruct](https://github.com/allenai/open-instruct/actions/workflows/push-image.yml/badge.svg)](https://github.com/allenai/open-instruct/actions/workflows/push-image.yml)
+
 # Training Open Instruction-Following Language Models
 
 This repo serves as an open effort on instruction-tuning and post-training popular pretrained language models on publicly available datasets. We release this repo and will keep updating it with:
@@ -45,26 +47,11 @@ Try some of the models we train with Open Instruct. There is a [free demo](https
 
 ## Setup
 
-Our setup mostly follows our [Dockerfile](./Dockerfile), which uses Python 3.10. *Note that Open Instruct is a research codebase and does not guarantee backward compatibility.* We offer two installation strategies:
+Our setup mostly follows our [Dockerfile](./Dockerfile), which uses Python 3.10. *Note that Open Instruct is a research codebase and does not guarantee backward compatibility.*
 
-* **Local installation**: This is the recommended way to install Open Instruct. You can install the dependencies by running the following commands:
-```bash
-pip install --upgrade pip "setuptools<70.0.0" wheel 
-# TODO, unpin setuptools when this issue in flash attention is resolved
-pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
-pip install packaging
-pip install flash-attn==2.7.2.post2 flashinfer-python>=0.2.7.post1 --no-build-isolation
-pip install -r requirements.txt
-pip install -e .
-python -m nltk.downloader punkt
-```
+### Installation with uv (recommended)
 
-* **Local installation with uv (preview)**: We are experimenting with using [uv](https://docs.astral.sh/uv/). You can install via
-```bash
-uv sync
-uv sync --extra compile --extra liger # to install flash attention, flash infer, and liger-kernel
-```
-
+We recommend using [uv](https://docs.astral.sh/uv/) for installation. You can install with `uv sync`.
 
 * **Docker installation**: You can also use the Dockerfile to build a Docker image. You can build the image with the following command:
 

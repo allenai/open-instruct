@@ -42,6 +42,7 @@ from torch.distributed.distributed_c10d import (
 )
 
 from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
+from open_instruct.queue_types import GenerationResult, RequestInfo
 from open_instruct.utils import ray_get_with_progress
 
 logger = logging.getLogger(__name__)
@@ -577,10 +578,7 @@ def create_vllm_engines(
     results_queue=None,
     eval_results_queue=None,
     actor_manager=None,
-) -> list:
-    import vllm
-
-    assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
+) -> list[LLMRayActor]:
 
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
