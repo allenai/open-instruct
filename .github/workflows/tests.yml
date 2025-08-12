@@ -18,13 +18,64 @@ jobs:
     container:
       image: nvidia/cuda:13.0.0-cudnn-devel-ubuntu24.04
     steps:
+      - name: Initial disk space check
+        run: |
+          echo "=== Initial disk space ==="
+          df -h
+          echo ""
+          echo "=== Largest directories in / ==="
+          du -h -d 1 / 2>/dev/null | sort -rh | head -20 || true
+          
       - name: Checkout code
         uses: actions/checkout@v4
+        
+      - name: Disk space after checkout
+        run: |
+          echo "=== Disk space after checkout ==="
+          df -h
+          echo ""
+          echo "=== Repository size ==="
+          du -sh .
+          echo ""
+          echo "=== Largest files/dirs in repo ==="
+          du -h -d 1 . | sort -rh | head -20
+          
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
           version: "0.8.6"
+          
       - name: Set up Python
         run: uv sync
+        
+      - name: Disk space after dependencies
+        run: |
+          echo "=== Disk space after installing dependencies ==="
+          df -h
+          echo ""
+          echo "=== UV cache size ==="
+          du -sh ~/.cache/uv 2>/dev/null || echo "No UV cache found"
+          echo ""
+          echo "=== Virtual environment size ==="
+          du -sh .venv/ 2>/dev/null || echo "No .venv found"
+          echo ""
+          echo "=== Largest packages in site-packages ==="
+          find .venv -name "site-packages" -type d -exec du -h -d 1 {} \; 2>/dev/null | sort -rh | head -20 || true
+          echo ""
+          echo "=== Workspace largest directories ==="
+          du -h -d 1 . | sort -rh | head -20
+          
       - name: Run unit tests
         run: uv run pytest -n auto
+        
+      - name: Final disk space check
+        if: always()
+        run: |
+          echo "=== Final disk space ==="
+          df -h
+          echo ""
+          echo "=== Temp directory size ==="
+          du -sh /tmp 2>/dev/null || echo "Cannot access /tmp"
+          echo ""
+          echo "=== Final workspace size ==="
+          du -sh .
