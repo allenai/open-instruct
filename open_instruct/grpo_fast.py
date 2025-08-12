@@ -1852,7 +1852,7 @@ def split_and_insert_batch(
         param_prompt_Q.put(
             PromptRequest(
                 prompts=sub_batch.queries,
-                sampling_params=generation_config,
+                generation_config=generation_config,
                 training_step=training_step,
                 dataset_index=sub_batch.indices,
                 is_eval=is_eval,
