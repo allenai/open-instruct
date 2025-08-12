@@ -174,8 +174,9 @@ jobs:
           done) &
           MONITOR_PID=$!
           
-          # Run uv sync with verbose output to see what it's downloading
-          uv sync -v || EXIT_CODE=$?
+          # Run uv sync with verbose output and no cache to save disk space
+          # --no-cache prevents UV from storing downloaded wheels, saving significant space
+          uv sync --no-cache || EXIT_CODE=$?
           
           # Stop monitoring
           kill $MONITOR_PID 2>/dev/null || true
