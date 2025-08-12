@@ -15,9 +15,6 @@ jobs:
   unit-tests:
     name: Run unit tests
     runs-on: ubuntu-latest
-    container:
-      # Use minimal Ubuntu image instead of huge CUDA dev image
-      image: ubuntu:24.04
     steps:
     
       - name: Delete huge unnecessary tools folder
