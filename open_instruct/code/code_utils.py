@@ -183,8 +183,8 @@ def get_successful_tests_fast(
         p.join(timeout=max_execution_time)
         if p.is_alive():
             p.kill()
-            p.join()  # Wait for the process to fully terminate after killing
-        p.close()  # Explicitly release resources
+            p.join()
+        p.close()
 
     return [shared_test_results[i] for i in range(len(tests))], [shared_runtimes[i] for i in range(len(tests))]
 
@@ -238,7 +238,6 @@ def get_successful_tests_stdio(
         logger.info("Not executing program %s", program)
         return [0] * len(tests), [-1.0] * len(tests)
 
-    # Create local multiprocessing arrays for this function call
     stdio_test_results = multiprocessing.Array("i", test_ct)
     stdio_runtimes = multiprocessing.Array("d", test_ct)
 
@@ -257,8 +256,8 @@ def get_successful_tests_stdio(
 
     if p.is_alive():
         p.kill()
-        p.join()  # Wait for the process to fully terminate after killing
-    p.close()  # Explicitly release resources
+        p.join()
+    p.close()
 
     return [stdio_test_results[i] for i in range(test_ct)], [stdio_runtimes[i] for i in range(test_ct)]
 
