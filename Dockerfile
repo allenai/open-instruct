@@ -17,6 +17,10 @@ RUN apt-get update --no-install-recommends && apt-get install -y nginx && mkdir 
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
 
+# Accept git commit as build argument and set as environment variable
+ARG GIT_COMMIT
+ENV GIT_COMMIT=${GIT_COMMIT}
+
 # Copy only dependency-related files first
 COPY pyproject.toml uv.lock ./
 
@@ -39,7 +43,6 @@ COPY configs configs
 COPY scripts scripts
 COPY oe-eval-internal oe-eval-internal
 COPY mason.py mason.py
-COPY .git/ ./.git/
 
 # Set up the environment
 ENV PATH=/stage/.venv/bin:$PATH

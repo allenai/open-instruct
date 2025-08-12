@@ -651,32 +651,14 @@ class ArgumentParserPlus(HfArgumentParser):
 # Experiment tracking utilities
 def get_git_tag() -> str:
     """Try to get the latest Git tag (e.g., `no-tag-404-g98dc659` or `v1.0.0-4-g98dc659`)"""
-    git_tag = ""
-    try:
-        git_tag = (
-            subprocess.check_output(["git", "describe", "--tags"], stderr=subprocess.DEVNULL).decode("ascii").strip()
-        )
-    except subprocess.CalledProcessError as e:
-        logging.debug(f"Failed to get Git tag: {e}")
+    # Check if we have git commit from environment variable (Docker build)
+    git_commit = os.environ.get("GIT_COMMIT", "")
+    if git_commit:
+        # Use the first 7 characters of the commit hash for consistency
+        return f"env-{git_commit[:7]}"
 
-    # If no Git tag found, create a custom tag based on commit count and hash
-    if len(git_tag) == 0:
-        try:
-            count = int(
-                subprocess.check_output(["git", "rev-list", "--count", "HEAD"], stderr=subprocess.DEVNULL)
-                .decode("ascii")
-                .strip()
-            )
-            hash = (
-                subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL)
-                .decode("ascii")
-                .strip()
-            )
-            git_tag = f"no-tag-{count}-g{hash}"
-        except subprocess.CalledProcessError as e:
-            logging.debug(f"Failed to get commit count and hash: {e}")
-
-    return git_tag
+    # If no environment variable, return empty string
+    return ""
 
 
 def get_pr_tag() -> str:

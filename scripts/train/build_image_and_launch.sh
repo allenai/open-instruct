@@ -1,8 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# Get the current git commit hash (short version)
+# Get the current git commit hash (short version and full)
 git_hash=$(git rev-parse --short HEAD)
+git_commit_full=$(git rev-parse HEAD)
 image_name=open-instruct-integration-test-${git_hash}
 
 # Build the Docker image exactly like push-image.yml does
