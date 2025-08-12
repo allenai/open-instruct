@@ -86,27 +86,12 @@ jobs:
           
       - name: Checkout code
         uses: actions/checkout@v4
-        
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
           version: "0.8.6"
-          
       - name: Set up Python
         run: |
-          # Set environment variables to minimize disk usage
-          export UV_LINK_MODE=copy  # Suppress hardlink warnings
-          
-          # Run uv sync with optimizations for minimal disk usage
-          # --no-cache: Don't cache downloaded packages
-          uv sync --no-cache
-          
-          # Clean up uv cache to save disk space
-          rm -rf ~/.cache/uv 2>/dev/null || true
-          rm -rf ~/.cache/pip 2>/dev/null || true
-          
-          # Clean up any temporary build directories
-          find /tmp -type d -name "pip-*" -exec rm -rf {} + 2>/dev/null || true
-        
+          uv sync        
       - name: Run unit tests
         run: uv run pytest -n auto
