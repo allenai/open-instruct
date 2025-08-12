@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.8-devel-ubuntu22.04
+FROM ghcr.io/allenai/cuda:12.8-dev-ubuntu22.04-torch2.7.0-v1.2.170
 
 COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
 
@@ -20,14 +20,15 @@ ENV UV_COMPILE_BYTECODE=0
 # Copy only dependency-related files first
 COPY pyproject.toml uv.lock build.py README.md ./
 
+# Annoyingly, we need this before `uv run`, or it complains.
+COPY open_instruct open_instruct
+
 # Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project
+    uv sync --frozen
 
-# Annoyingly, we need this before `uv run`, or it complains.
-COPY open_instruct open_instruct
 RUN uv run -m nltk.downloader punkt punkt_tab
 
 WORKDIR /stage/

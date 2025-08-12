@@ -2,18 +2,14 @@ import shutil
 import subprocess
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
+
 def has_nvcc():
     nvcc_path = shutil.which("nvcc")
-    if not nvcc_path:
+    if nvcc_path is None:
         return False
-    try:
-        subprocess.run([nvcc_path, "--version"],
-                       stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL,
-                       check=True)
+    else:
         return True
-    except Exception:
-        return False
+
 
 class CustomHook(BuildHookInterface):
     def update_metadata(self, metadata):
