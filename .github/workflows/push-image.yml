@@ -69,19 +69,10 @@ jobs:
         run: df -h
   
       - name: Build image
-        run: |
-          docker build \
-              --build-arg BUILDKIT_INLINE_CACHE=1 \
-              --build-arg CUDA=12.1.0 \
-              --build-arg TARGET=cudnn8-devel \
-              --build-arg DIST=ubuntu20.04 \
-              --build-arg REQUIRE=requirements.txt . \
-              -t open_instruct
-              
+        run: docker build -t open_instruct              
 
       - name: Check image
-        run: |
-          docker run --rm open_instruct
+        run: docker run --rm open_instruct
 
       - name: Push image
         # if: github.event_name != 'pull_request'

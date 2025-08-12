@@ -18,7 +18,7 @@ ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
 
 # Copy only dependency-related files first
-COPY pyproject.toml uv.lock build.py README.md ./
+COPY pyproject.toml uv.lock ./
 
 # Annoyingly, we need this before `uv run`, or it complains.
 COPY open_instruct open_instruct
@@ -27,7 +27,7 @@ COPY open_instruct open_instruct
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync
+    uv sync --frozen --no-install-project --link-mode=copy
 
 RUN uv run -m nltk.downloader punkt punkt_tab
 
