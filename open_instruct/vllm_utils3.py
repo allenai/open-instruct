@@ -15,7 +15,6 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
-import dataclasses
 import logging
 import os
 import queue
@@ -38,6 +37,7 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
+from open_instruct.queue_types import GenerationResult, RequestInfo
 from open_instruct.utils import ray_get_with_progress
 
 logger = logging.getLogger(__name__)
@@ -225,7 +225,6 @@ class LLMRayActor:
                 self.results_queue.put(result, timeout=1)
             return 1  # Successfully processed a request
         except queue.Empty:
-            self.logger.warning("[LLMRayActor] No request in the queue to process. Returning from process_from_queue.")
             return 0  # No request to process
         except queue.Full:
             self.logger.warning(f"[LLMRayActor] Results queue is full. Skipping insert. {request.is_eval=}.")
@@ -353,8 +352,6 @@ def create_vllm_engines(
     results_queue=None,
     eval_results_queue=None,
 ) -> list[LLMRayActor]:
-    import vllm
-
     assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
 
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
