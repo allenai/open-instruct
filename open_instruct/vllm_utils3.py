@@ -348,16 +348,20 @@ class LLMRayActor:
         self.actor_manager = actor_manager
 
     def process_from_queue(self, timeout: float = 60.0):
-        """Run generation loop using LLMEngine directly, with optional tool support."""
+        """Run generation loop using LLMEngine directly, with optional tool support.
+
+        Returns:
+            int: Number of requests processed (0 or 1)
+        """
         while True:
             if ray.get(self.actor_manager.should_stop.remote()):
                 self.logger.info("[LLMRayActor] Actor manager signaled to stop. Exiting generation loop.")
-                return
+                return 0
             try:
                 request = self.prompt_queue.get(timeout=timeout)
             except queue.Empty:
                 self.logger.warning("[LLMRayActor] No request in the queue to process. Continuing.")
-                continue
+                return 0
 
             result = self._process_request(request)
 
@@ -366,8 +370,10 @@ class LLMRayActor:
                     self.eval_results_queue.put(result, timeout=10)
                 else:
                     self.results_queue.put(result, timeout=10)
+                return 1  # Successfully processed one request
             except queue.Full:
                 self.logger.warning("Results queue is full, discarding result.")
+                return 0
 
     def _process_request(self, request):
         """Unified processing for both tool and non-tool generation."""

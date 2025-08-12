@@ -1924,11 +1924,15 @@ def generate_thread(vllm_engines, local_eval_every, num_training_steps, resume_t
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
     while not stop_event.is_set():
-        with Timer("🔥 Generation time"):
-            ray_get_with_progress(
+        with Timer("🔥 Generation time") as _gen_timer:
+            processed_results = ray_get_with_progress(
                 [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
                 desc="[Generate Thread] Waiting for vLLM engines to process",
             )
+            num_processed = sum(int(result) for result in processed_results)
+            # Suppress timing output if nothing was processed
+            if num_processed == 0:
+                _gen_timer.noop = 1
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
