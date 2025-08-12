@@ -279,10 +279,9 @@ class LLMRayActor:
 
         # Main processing loop
         outputs = []
-        while True:
-            # Poll tool futures if any exist
-            if self.tools and self.pending_tool_futures:
-                self._poll_tool_futures(tracking, sampling_params, tokenizer)
+        while self.llm_engine.has_unfinished_requests() or self.pending_tool_futures:
+            # Poll tool futures
+            self._poll_tool_futures(tracking, sampling_params, tokenizer)
 
             # Process engine steps
             if self.llm_engine.has_unfinished_requests():
@@ -293,11 +292,6 @@ class LLMRayActor:
                             self._handle_tool_output(output, outputs, tracking, sampling_params)
                         else:
                             outputs.append(output)
-
-            # Check exit condition
-            if not self.llm_engine.has_unfinished_requests():
-                if not self.tools or len(self.pending_tool_futures) == 0:
-                    break
 
         # Finalize and return outputs
         return self._finalize_outputs(outputs, tracking, request.dataset_index)
@@ -332,6 +326,10 @@ class LLMRayActor:
 
     def _poll_tool_futures(self, tracking, sampling_params, tokenizer):
         """Poll and handle completed tool executions."""
+        # Early return if no tools or no pending futures
+        if not self.tools or not self.pending_tool_futures:
+            return
+
         dict_keys_to_delete = []
         for req_id, (future, last_o, last_output) in self.pending_tool_futures.items():
             if future.done():
