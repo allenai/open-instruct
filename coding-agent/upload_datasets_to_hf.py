@@ -227,7 +227,19 @@ def create_multi_step_dataset(entries: List[Dict[str, Any]], yaml_ground_truth: 
             return commands
 
         def _truncate_to_pre_view_phase(conv: List[Dict[str, str]]):
-            view_like = {"view", "cat"}
+            def _is_view_like_command(cmd: str) -> bool:
+                """Return True if the tool command is a view-like operation.
+                - Explicit tool command 'view' (str_replace_editor)
+                - Shell commands that start with 'cat' (e.g., 'cat -n ...')
+                """
+                if not isinstance(cmd, str):
+                    return False
+                cmd_l = cmd.strip().lower()
+                if cmd_l == "view":
+                    return True
+                if cmd_l.startswith("cat"):
+                    return True
+                return False
             last_non_view_idx = None
             for idx, m in enumerate(conv):
                 if m.get("role") != "assistant":
@@ -236,7 +248,7 @@ def create_multi_step_dataset(entries: List[Dict[str, Any]], yaml_ground_truth: 
                 if "<tool_call>" not in content:
                     continue
                 cmds = _parse_tool_commands_from_content(content)
-                if any(c not in view_like for c in cmds):
+                if any(not _is_view_like_command(c) for c in cmds):
                     last_non_view_idx = idx
             # If there was no non-view command, trim up to the first view-only call
             if last_non_view_idx is None:
@@ -248,7 +260,7 @@ def create_multi_step_dataset(entries: List[Dict[str, Any]], yaml_ground_truth: 
                     if "<tool_call>" not in content:
                         continue
                     cmds = _parse_tool_commands_from_content(content)
-                    if cmds and all(c in view_like for c in cmds):
+                    if cmds and all(_is_view_like_command(c) for c in cmds):
                         first_view_idx = idx
                         break
                 if first_view_idx is not None:

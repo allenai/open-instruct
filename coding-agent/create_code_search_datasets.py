@@ -81,7 +81,19 @@ def _parse_tool_commands_from_content(content: str) -> List[str]:
 
 
 def _truncate_to_pre_view_phase(conversation: List[Dict[str, str]]) -> List[Dict[str, str]]:
-    view_like_commands = {"view", "cat"}
+    def _is_view_like_command(cmd: str) -> bool:
+        """Return True if the tool command is a view-like operation.
+        - Explicit tool command 'view' (str_replace_editor)
+        - Shell commands that start with 'cat' (e.g., 'cat -n ...')
+        """
+        if not isinstance(cmd, str):
+            return False
+        cmd_l = cmd.strip().lower()
+        if cmd_l == "view":
+            return True
+        if cmd_l.startswith("cat"):
+            return True
+        return False
     last_non_view_assistant_index: Optional[int] = None
 
     for idx, msg in enumerate(conversation):
@@ -91,7 +103,7 @@ def _truncate_to_pre_view_phase(conversation: List[Dict[str, str]]) -> List[Dict
         if "<tool_call>" not in content:
             continue
         commands = _parse_tool_commands_from_content(content)
-        if any((cmd not in view_like_commands) for cmd in commands):
+        if any((not _is_view_like_command(cmd)) for cmd in commands):
             last_non_view_assistant_index = idx
 
     # If there's no non-view command at all, then we are already in the
@@ -108,7 +120,9 @@ def _truncate_to_pre_view_phase(conversation: List[Dict[str, str]]) -> List[Dict
                 continue
             commands = _parse_tool_commands_from_content(content)
             # If all commands are view-like, this is a view-only call
-            if commands and all((cmd in view_like_commands) for cmd in commands):
+            if commands and all((
+                _is_view_like_command(cmd)
+            ) for cmd in commands):
                 first_view_idx = idx
                 break
         # If we found a first view, keep everything before it; otherwise, keep as-is

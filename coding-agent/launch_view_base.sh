@@ -1,4 +1,4 @@
-exp_name=rlvr_code_view_tool_sft
+exp_name=rlvr_code_view_tool_base
     python mason.py \
         --cluster ai2/jupiter-cirrascale-2 \
         --image saurabhs/open-coding-agent \
@@ -6,8 +6,8 @@ exp_name=rlvr_code_view_tool_sft
         --priority high \
         --preemptible \
         --num_nodes 4 \
-        --gs_model_name saurabhs/ethans-Qwen3-8B-nothink \
-        --description "rlvr code view tool sft" \
+        --gs_model_name qwen3-8B \
+        --description "rlvr code view tool base" \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         --env VLLM_DISABLE_COMPILE_CACHE=1 \
@@ -31,7 +31,7 @@ exp_name=rlvr_code_view_tool_sft
         --max_prompt_token_length 16384 \
         --response_length 16384 \
         --pack_length 32768 \
-        --model_name_or_path  /weka/oe-adapt-default/ethans/llm-weights/Qwen3.2-8B-nothink \
+        --model_name_or_path Qwen/Qwen3-8B \
         --chat_template_name chatml \
         --non_stop_penalty False \
         --temperature 1.0 \
@@ -54,4 +54,3 @@ exp_name=rlvr_code_view_tool_sft
         --oe_eval_max_length 16384 \
         --tools code_view \
         --max_tool_calls 15 \
-        --vllm_top_p 0.95 
