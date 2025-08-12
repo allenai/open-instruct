@@ -73,6 +73,7 @@ from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
+from torchrl.data import ReplayBuffer
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
@@ -1289,7 +1290,8 @@ def accumulate_inference_batches(
 def data_preparation_thread(
     reward_fn: Callable,
     inference_results_Q: ray_queue.Queue,  # Ray queue
-    packed_sequences_Q: Queue,
+    inference_metrics_Q: Queue,
+    replay_buffer: ReplayBuffer,
     pending_queries_map: dict,
     args: Args,
     tokenizer: PreTrainedTokenizer,
@@ -1410,85 +1412,6 @@ def data_preparation_thread(
             ]
             packed_sequences.advantages = packed_advantages
 
-        # if we have less batches than world size, we need to pad out so each world is fine
-        # ideally, you should avoid this since its wasting computation.
-        if args.allow_world_padding:
-            with Timer("🤺 [Data Preparation Thread] Padding sequences for world size"):
-                shortfall = args.world_size - len(packed_sequences.query_responses)
-                if shortfall > 0:
-                    logger.warning(
-                        f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this."
-                    )
-                    # construct "dummy" sequences for padding out the world size
-                    dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
-                    dummy_tool_mask = torch.zeros_like(dummy_qr)
-                    dummy_attention = torch.tensor([1, 1], dtype=torch.long)
-                    dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
-                    dummy_response_mask = torch.zeros_like(dummy_qr)
-                    dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
-                    # pad out the world size
-                    for _ in range(shortfall):
-                        packed_sequences.query_responses.append(dummy_qr)
-                        packed_sequences.tool_masks.append(dummy_tool_mask)
-                        packed_sequences.attention_masks.append(dummy_attention)
-                        packed_sequences.position_ids.append(dummy_position_ids)
-                        packed_sequences.response_masks.append(dummy_response_mask)
-                        packed_sequences.advantages.append(dummy_advantage)
-
-        with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
-            B = (
-                len(packed_sequences.query_responses) // args.world_size
-            )  # essentially doing `drop_last=True`, which is fine.
-            collated_data = []
-            for i in range(args.world_size):
-                per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
-                per_device_packed_tool_masks = packed_sequences.tool_masks[B * i : B * (i + 1)]
-                per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
-                per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
-                per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
-                per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
-
-                # Shuffle the batch and collate the data
-                b_inds = np.random.permutation(len(per_device_packed_query_responses))
-                collated_query_responses = []
-                collated_tool_masks = []
-                collated_attention_masks = []
-                collated_position_ids = []
-                collated_response_masks = []
-                collated_advantages = []
-                for j in range(0, len(per_device_packed_query_responses), args.per_device_train_batch_size):
-                    micro_range = b_inds[j : j + args.per_device_train_batch_size]
-                    collated_query_responses.append(
-                        collate_fn(
-                            [per_device_packed_query_responses[idx] for idx in micro_range], tokenizer.pad_token_id
-                        )
-                    )
-                    collated_tool_masks.append(
-                        collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0)
-                    )
-                    collated_attention_masks.append(
-                        collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0)
-                    )
-                    collated_position_ids.append(
-                        collate_fn([per_device_packed_position_ids[idx] for idx in micro_range], 0)
-                    )
-                    collated_response_masks.append(
-                        collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0)
-                    )
-                    collated_advantages.append(
-                        collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0)
-                    )
-                collated_data.append(
-                    {
-                        "collated_query_responses": collated_query_responses,
-                        "collated_tool_masks": collated_tool_masks,
-                        "collated_attention_masks": collated_attention_masks,
-                        "collated_position_ids": collated_position_ids,
-                        "collated_advantages": collated_advantages,
-                        "collated_response_masks": collated_response_masks,
-                    }
-                )
-
         # Create a result package with metrics and data
         if len(responses) == 0:
             # Handle empty responses case
@@ -1551,15 +1474,15 @@ def data_preparation_thread(
         if len(responses) == 0:
             logger.warning(f"No responses in batch {training_step}.")
 
-        # Put the packed sequences and metrics into the output queue
-        packed_sequences_Q.put(
+        replay_buffer.extend(packed_sequences)
+
+        # Put only metrics into the metrics queue
+        inference_metrics_Q.put(
             {
-                "packed_sequences": packed_sequences,  # for debugging purposes
-                "collated_data": collated_data,
                 "metrics": metrics,
                 "responses_count": len(responses),
                 "num_new_tokens": num_new_tokens,
-                "B": B,
+                "training_step": training_step,
             }
         )
 
@@ -1828,18 +1751,108 @@ def sync_weights_and_prepare_prompts(
     return queries_next, ground_truths_next, datasets_next, dataset_indices
 
 
-def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
-    """Get the packed sequences with advantages from the packing thread."""
-    with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
-        packed_data = packed_sequences_Q.get()
-        data_thread_metrics = packed_data["metrics"]
-        B = packed_data["B"]
-        collated_data = packed_data["collated_data"]
-        num_total_tokens += packed_data["num_new_tokens"]
-        if B == 0:
-            logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
+def load_data_from_replay_buffer(
+    inference_metrics_Q: Queue,
+    replay_buffer: ReplayBuffer,
+    args: Args,
+    tokenizer: PreTrainedTokenizer,
+    num_total_tokens: int,
+):
+    """Get metrics from the metrics queue and sample training data from the replay buffer."""
+    with Timer("[Main Thread] 📦 Getting metrics from thread"):
+        metrics_data = inference_metrics_Q.get()
+        data_thread_metrics = metrics_data["metrics"]
+        num_total_tokens += metrics_data["num_new_tokens"]
+        responses_count = metrics_data["responses_count"]
+
+        if responses_count == 0:
+            logger.warning("[Main Thread] 🤡 No responses in batch")
             return None, data_thread_metrics, num_total_tokens
-        return collated_data, data_thread_metrics, num_total_tokens
+
+    # Sample from replay buffer if it has enough data
+    if len(replay_buffer) == 0:
+        logger.warning("[Main Thread] 🤡 Replay buffer is empty")
+        return None, data_thread_metrics, num_total_tokens
+
+    with Timer("[Main Thread] 📦 Sampling from replay buffer"):
+        # Sample a batch from the replay buffer
+        packed_sequences = replay_buffer.sample()
+
+    # if we have less batches than world size, we need to pad out so each world is fine
+    # ideally, you should avoid this since its wasting computation.
+    if args.allow_world_padding:
+        with Timer("🤺 [Data Preparation Thread] Padding sequences for world size"):
+            shortfall = args.world_size - len(packed_sequences.query_responses)
+            if shortfall > 0:
+                logger.warning(
+                    f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this."
+                )
+                # construct "dummy" sequences for padding out the world size
+                dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
+                dummy_tool_mask = torch.zeros_like(dummy_qr)
+                dummy_attention = torch.tensor([1, 1], dtype=torch.long)
+                dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
+                dummy_response_mask = torch.zeros_like(dummy_qr)
+                dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
+                # pad out the world size
+                for _ in range(shortfall):
+                    packed_sequences.query_responses.append(dummy_qr)
+                    packed_sequences.tool_masks.append(dummy_tool_mask)
+                    packed_sequences.attention_masks.append(dummy_attention)
+                    packed_sequences.position_ids.append(dummy_position_ids)
+                    packed_sequences.response_masks.append(dummy_response_mask)
+                    packed_sequences.advantages.append(dummy_advantage)
+
+    with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
+        B = (
+            len(packed_sequences.query_responses) // args.world_size
+        )  # essentially doing `drop_last=True`, which is fine.
+        data_thread_metrics["B"] = B
+        collated_data = []
+        for i in range(args.world_size):
+            per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
+            per_device_packed_tool_masks = packed_sequences.tool_masks[B * i : B * (i + 1)]
+            per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
+            per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
+            per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
+            per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
+
+            # Shuffle the batch and collate the data
+            b_inds = np.random.permutation(len(per_device_packed_query_responses))
+            collated_query_responses = []
+            collated_tool_masks = []
+            collated_attention_masks = []
+            collated_position_ids = []
+            collated_response_masks = []
+            collated_advantages = []
+            for j in range(0, len(per_device_packed_query_responses), args.per_device_train_batch_size):
+                micro_range = b_inds[j : j + args.per_device_train_batch_size]
+                collated_query_responses.append(
+                    collate_fn([per_device_packed_query_responses[idx] for idx in micro_range], tokenizer.pad_token_id)
+                )
+                collated_tool_masks.append(collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0))
+                collated_attention_masks.append(
+                    collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0)
+                )
+                collated_position_ids.append(
+                    collate_fn([per_device_packed_position_ids[idx] for idx in micro_range], 0)
+                )
+                collated_response_masks.append(
+                    collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0)
+                )
+                collated_advantages.append(collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0))
+            collated_data.append(
+                {
+                    "collated_query_responses": collated_query_responses,
+                    "collated_tool_masks": collated_tool_masks,
+                    "collated_attention_masks": collated_attention_masks,
+                    "collated_position_ids": collated_position_ids,
+                    "collated_advantages": collated_advantages,
+                    "collated_response_masks": collated_response_masks,
+                }
+            )
+
+    return collated_data, data_thread_metrics, num_total_tokens
 
 
 def generate_thread(
@@ -2268,7 +2281,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
 
     # Create additional queues (main queues already created above)
-    packed_sequences_Q = Queue(maxsize=args.async_steps)
+    inference_metrics_Q = Queue(maxsize=args.async_steps)
+    replay_buffer = ReplayBuffer(batch_size=128)
     pending_queries_map = PendingQueriesMap()
 
     eval_prompt_token_ids = None
@@ -2290,7 +2304,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         args=(
             reward_fn,
             inference_results_Q,
-            packed_sequences_Q,
+            inference_metrics_Q,
+            replay_buffer,
             pending_queries_map,
             args,
             tokenizer,
@@ -2352,8 +2367,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
         # The generate_thread is now handling vLLM processing asynchronously
 
-        collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
-            packed_sequences_Q, num_total_tokens
+        collated_data, data_thread_metrics, num_total_tokens = load_data_from_replay_buffer(
+            inference_metrics_Q, replay_buffer, args, tokenizer, num_total_tokens
         )
         if collated_data is None:
             continue
