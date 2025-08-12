@@ -47,6 +47,20 @@ from open_instruct.utils import ray_get_with_progress
 logger = logging.getLogger(__name__)
 
 
+def _init_tool_tracking():
+    """Initialize tracking variables for tool mode."""
+    return {
+        "num_calls": defaultdict(int),
+        "timeout": defaultdict(bool),
+        "tool_error": defaultdict(str),
+        "tool_output": defaultdict(str),
+        "tool_runtime": defaultdict(float),
+        "tool_called": defaultdict(bool),
+        "concat_outputs": {},
+        "masks": defaultdict(list),
+    }
+
+
 def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, executor, pending_tool_futures):
     """
     Handle a finished output. Returns the output if it should be added to results,
@@ -235,10 +249,9 @@ class LLMRayActor:
         # Initialize tool executor if tools are provided
         if self.tools:
             self.executor = ThreadPoolExecutor(max_workers=20)
-            self.pending_tool_futures = {}
         else:
             self.executor = None
-            self.pending_tool_futures = {}
+        self.pending_tool_futures = {}
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
@@ -260,9 +273,7 @@ class LLMRayActor:
             print(f"creating LLM with bundle_indices={bundle_indices}")
 
         # Create EngineArgs and initialize LLMEngine
-        engine_args = vllm.EngineArgs(*args, **kwargs)
-        self.llm_engine = vllm.LLMEngine.from_engine_args(engine_args)
-        self.llm = None  # Set llm to None when using engine directly
+        self.llm_engine = vllm.LLMEngine.from_engine_args(vllm.EngineArgs(*args, **kwargs))
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
@@ -304,7 +315,7 @@ class LLMRayActor:
             sampling_params = copy.deepcopy(sampling_params)
             original_n = request.sampling_params.n
             sampling_params.n = 1
-            tracking = self._init_tool_tracking()
+            tracking = _init_tool_tracking()
             tokenizer = self.llm_engine.get_tokenizer()
         else:
             original_n = 1
@@ -331,19 +342,6 @@ class LLMRayActor:
                         outputs.append(result)
         return self._finalize_outputs(outputs, tracking, request.dataset_index)
 
-    def _init_tool_tracking(self) -> dict[str, Any]:
-        """Initialize tracking variables for tool mode."""
-        return {
-            "num_calls": defaultdict(int),
-            "timeout": defaultdict(bool),
-            "tool_error": defaultdict(str),
-            "tool_output": defaultdict(str),
-            "tool_runtime": defaultdict(float),
-            "tool_called": defaultdict(bool),
-            "concat_outputs": {},
-            "masks": defaultdict(list),
-        }
-
     def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step):
         """Add initial requests to the engine."""
         for i, prompt in enumerate(prompts):
@@ -367,54 +365,53 @@ class LLMRayActor:
 
         dict_keys_to_delete = []
         for req_id, (future, last_o, last_output) in self.pending_tool_futures.items():
-            if future.done():
-                tool_result = future.result()
-                last_prompt_token_ids = last_output.prompt_token_ids
-                last_token_ids = last_o.token_ids
-                tool_output_token_ids = tokenizer.encode(
-                    "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+            if not future.done():
+                continue
+                
+            tool_result = future.result()
+            last_prompt_token_ids = last_output.prompt_token_ids
+            last_token_ids = last_o.token_ids
+            tool_output_token_ids = tokenizer.encode(
+                "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+            )
+            tracking["timeout"][req_id] = tool_result.timeout
+            tracking["tool_error"][req_id] += "" if tool_result.error is None else tool_result.error
+            tracking["tool_output"][req_id] += tool_result.output
+            tracking["tool_runtime"][req_id] += tool_result.runtime
+            tracking["tool_called"][req_id] = True
+
+            # Edge case 1: clip against model context length
+            prompt_and_tool_output_token = last_prompt_token_ids + last_token_ids + tool_output_token_ids
+            tracking["num_calls"][req_id] += 1
+            excess = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len
+            if excess > 0:
+                tool_output_token_ids = tool_output_token_ids[:-excess]
+                can_make_new_request = False
+            else:
+                can_make_new_request = True
+
+            # Edge case 2: clip against per-request max_tokens
+            remaining = sampling_params.max_tokens - len(tracking["masks"][req_id])
+            if remaining <= 0:
+                tool_output_token_ids = []
+            elif len(tool_output_token_ids) > remaining:
+                tool_output_token_ids = tool_output_token_ids[:remaining]
+
+            tracking["concat_outputs"][req_id].outputs[0].token_ids.extend(tool_output_token_ids)
+            tracking["masks"][req_id].extend([0] * len(tool_output_token_ids))
+            new_sample_tokens = sampling_params.max_tokens - len(tracking["masks"][req_id])
+            can_make_new_request = can_make_new_request and new_sample_tokens > 0
+
+            if can_make_new_request:
+                new_sampling_params = copy.deepcopy(sampling_params)
+                new_sampling_params.max_tokens = new_sample_tokens
+                self.llm_engine.add_request(
+                    req_id,
+                    vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token),
+                    new_sampling_params,
                 )
-                tracking["timeout"][req_id] = tool_result.timeout
-                tracking["tool_error"][req_id] += "" if tool_result.error is None else tool_result.error
-                tracking["tool_output"][req_id] += tool_result.output
-                tracking["tool_runtime"][req_id] += tool_result.runtime
-                tracking["tool_called"][req_id] = True
 
-                # Edge case 1: clip against model context length
-                prompt_and_tool_output_token = last_prompt_token_ids + last_token_ids + tool_output_token_ids
-                tracking["num_calls"][req_id] += 1
-                excess = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len
-                if excess > 0:
-                    tool_output_token_ids = tool_output_token_ids[:-excess]
-                    can_make_new_request = False
-                else:
-                    can_make_new_request = True
-
-                # Edge case 2: clip against per-request max_tokens
-                remaining = sampling_params.max_tokens - len(tracking["masks"][req_id])
-                if remaining <= 0:
-                    tool_output_token_ids = []
-                elif len(tool_output_token_ids) > remaining:
-                    tool_output_token_ids = tool_output_token_ids[:remaining]
-
-                tracking["concat_outputs"][req_id].outputs[0].token_ids.extend(tool_output_token_ids)
-                tracking["masks"][req_id].extend([0] * len(tool_output_token_ids))
-                new_sample_tokens = sampling_params.max_tokens - len(tracking["masks"][req_id])
-                can_make_new_request = can_make_new_request and new_sample_tokens > 0
-
-                if can_make_new_request:
-                    try:
-                        new_sampling_params = copy.deepcopy(sampling_params)
-                        new_sampling_params.max_tokens = new_sample_tokens
-                        self.llm_engine.add_request(
-                            req_id,
-                            vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token),
-                            new_sampling_params,
-                        )
-                    except Exception as e:
-                        self.logger.error(f"Error adding request: {e}")
-
-                dict_keys_to_delete.append(req_id)
+            dict_keys_to_delete.append(req_id)
 
         for req_id in dict_keys_to_delete:
             del self.pending_tool_futures[req_id]
