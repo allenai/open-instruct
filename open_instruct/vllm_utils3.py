@@ -16,6 +16,7 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 import logging
+import dataclasses
 import os
 import queue
 from datetime import timedelta
