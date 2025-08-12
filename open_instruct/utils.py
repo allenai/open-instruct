@@ -20,6 +20,7 @@ os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
     from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum
+    import deepspeed.comm as dist
 
     # @vwxyzjn: when importing on CPU-only machines, we get the following error:
     # RuntimeError: 0 active drivers ([]). There should only be one.
@@ -38,6 +39,7 @@ import random
 import re
 import shutil
 import socket
+from collections import defaultdict
 import subprocess
 import sys
 import threading
@@ -1237,6 +1239,7 @@ def get_train_ds_config(
     zpg=8,
     grad_accum_dtype=None,
     disable_trace_cache=False,
+    sequence_parallel_size=1,
 ):
     device = "cpu" if offload else "none"
     zero_opt_dict = {
@@ -1259,7 +1262,7 @@ def get_train_ds_config(
         zero_opt_dict["stage3_max_live_parameters"] = 0
         zero_opt_dict["stage3_max_reuse_distance"] = 0
 
-    return {
+    config = {
         "steps_per_print": 100,
         "zero_optimization": zero_opt_dict,
         "bf16": {"enabled": bf16},
@@ -1268,6 +1271,11 @@ def get_train_ds_config(
         "wall_clock_breakdown": False,
         "data_types": {"grad_accum_dtype": grad_accum_dtype if grad_accum_dtype else "fp32"},
     }
+
+    if sequence_parallel_size > 1:
+        config["sequence_parallel_size"] = sequence_parallel_size
+
+    return config
 
 
 def get_eval_ds_config(offload, stage=0, bf16=True):
@@ -1599,3 +1607,74 @@ def check_runtime_leaks(
                 report.leaked_shm.append(name)
 
     return report
+
+
+class UlyssesSPSplitter:
+    def __init__(self, sp_rank: int, sp_group, sp_world_size, device):
+        """
+        Adapted from the UlyssesSPDataLoaderAdapter
+        (https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/runtime/sequence_parallel/ulysses_sp.py#L427)
+        Rather than wrapping a dataloader, we just want to split a given batch into the shards across sp group.
+        """
+        self.sp_rank = sp_rank
+        self.sp_group = sp_group
+        self.sp_world_size = sp_world_size
+        self.device = device
+
+    def split_batch(self, batch):
+        micro_batches = defaultdict(dict)
+
+        # we have batches of variable seqlen so in order to do all_gather on batches - we need to know the exact length of each tensor on each rank
+        seqlen = torch.tensor(len(batch["input_ids"][0][0]), dtype=torch.int64, device=self.device)
+        seqlens = [torch.zeros(1, dtype=torch.int64, device=self.device) for _ in range(self.sp_world_size)]
+        dist.all_gather(seqlens, seqlen, group=self.sp_group)
+        seqlens = [x[0].item() for x in seqlens]
+
+        for k in batch.keys():
+            if torch.is_tensor(batch[k]):
+                batch[k] = batch[k].to(self.device)
+                with torch.no_grad():
+                    tensor_list = [
+                        torch.zeros((batch[k].shape[0], seqlens[i]), dtype=batch[k].dtype, device=batch[k].device)
+                        for i in range(self.sp_world_size)
+                    ]
+                    dist.all_gather(tensor_list, batch[k], group=self.sp_group)
+            else:
+                tensor_list = [None for _ in range(self.sp_world_size)]
+                dist.all_gather_object(tensor_list, batch[k], group=self.sp_group)
+
+            for rank, tensor in enumerate(tensor_list):
+                micro_batches[rank][k] = tensor
+
+        del tensor_list
+        del batch
+
+        batch_shards = []
+        for batch in micro_batches.values():
+            seq_length = len(batch["input_ids"][0][0])
+            if seq_length % self.sp_world_size != 0:
+                raise ValueError(f"batch's seqlen={seq_length} isn't divisible by sp-size={self.sp_world_size}")
+
+            chunk_len = seq_length // self.sp_world_size
+
+            # for rl training, we don't have labels, so we don't need to do this
+            if "labels" in batch:
+                # because we have to gather logits from all sp ranks we have to do the loss function ourselves
+                # therefore remove labels to avoid an attempt to calculate loss by transformers
+                labels = batch.pop("labels")
+                labels = torch.nn.functional.pad(labels, (0, 1), value=-100)
+                batch["shift_labels"] = labels[..., 1:].contiguous()
+                # free up temp memory
+                del labels
+
+            # batch sharding
+            for k in batch.keys():
+                # leave non-tensors alone
+                if not torch.is_tensor(batch[k]):
+                    continue
+                # at seqlen>10M and 32+ gpus this can take GBs of memory so keep the prefill buffer on cpu
+                batch[k] = batch[k][:, chunk_len * self.sp_rank : chunk_len * (self.sp_rank + 1)].cpu()
+
+            batch_shards.append(batch)
+
+        return batch_shards
