@@ -83,23 +83,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         
-      - name: Disk space after checkout
-        run: |
-          echo "=== Disk space after checkout ==="
-          df -h
-          echo ""
-          echo "=== Repository size ==="
-          du -sh .
-          
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
           version: "0.8.6"
-          
-      - name: Pre-sync disk check
-        run: |
-          echo "=== Disk space before uv sync ==="
-          df -h
           
       - name: Set up Python
         run: |
@@ -117,47 +104,5 @@ jobs:
           # Clean up any temporary build directories
           find /tmp -type d -name "pip-*" -exec rm -rf {} + 2>/dev/null || true
         
-      - name: Disk space after dependencies
-        run: |
-          echo "=== Disk space after installing dependencies ==="
-          df -h
-          echo ""
-          echo "=== ACTUAL space used by our build (what matters) ==="
-          echo "Container base + our additions:"
-          for dir in /usr /var /opt /root /home /tmp /usr/local; do
-            if [ -d "$dir" ]; then
-              size=$(du -sh "$dir" 2>/dev/null | cut -f1)
-              echo "  $size    $dir"
-            fi
-          done
-          echo ""
-          echo "=== Virtual environment size ==="
-          du -sh .venv/ 2>/dev/null || echo "No .venv found"
-          echo ""
-          echo "=== Largest directories in .venv ==="
-          du -h -d 2 .venv/ 2>/dev/null | sort -rh | head -15 || true
-          echo ""
-          echo "=== CUDA installation size ==="
-          du -sh /usr/local/cuda* 2>/dev/null || echo "No CUDA found in /usr/local"
-          echo ""
-          echo "=== Total actual container usage ==="
-          total=0
-          for dir in /usr /var /opt /root /home /tmp /usr/local /__w/open-instruct; do
-            if [ -d "$dir" ]; then
-              size=$(du -sb "$dir" 2>/dev/null | cut -f1)
-              if [ -n "$size" ]; then
-                total=$((total + size))
-              fi
-            fi
-          done
-          echo "Your build actually uses: $(echo $total | awk '{printf "%.2f GB", $1/1024/1024/1024}')"
-          echo "Available space: ~27GB (from df output)"
-          
       - name: Run unit tests
         run: uv run pytest -n auto
-        
-      - name: Final disk space check
-        if: always()
-        run: |
-          echo "=== Final disk space ==="
-          df -h
