@@ -15,6 +15,8 @@ jobs:
   unit-tests:
     name: Run unit tests
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/allenai/cuda:12.8-dev-ubuntu22.04-torch2.7.0-v1.2.170
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
