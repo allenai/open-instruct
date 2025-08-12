@@ -1,0 +1,5 @@
+# Ignore oe-eval-internal/.git, which is really big.
+*/.git
+
+# Ignore venvs:
+.venv/
