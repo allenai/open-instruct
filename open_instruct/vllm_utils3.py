@@ -372,13 +372,13 @@ class LLMRayActor:
     def _process_request(self, request):
         """Unified processing for both tool and non-tool generation."""
         prompts = request.prompts
-        sampling_params = request.sampling_params
+        sampling_params = request.generation_config
 
         # Tool mode adjustments
         if self.tools:
             # Need n=1 for individual tool tracking
             sampling_params = copy.deepcopy(sampling_params)
-            original_n = request.sampling_params.n
+            original_n = request.generation_config.n
             sampling_params.n = 1
             tracking = _init_tool_tracking()
             tokenizer = self.llm_engine.get_tokenizer()
