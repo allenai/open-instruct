@@ -97,6 +97,108 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     return output
 
 
+def _process_outputs(outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None) -> GenerationResult:
+    """Process vLLM RequestOutputs into GenerationResult format."""
+    response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
+    finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
+
+    masks = [[1] * len(resp) for resp in response_ids]
+    num_calls = [0] * len(response_ids)
+    timeouts = [0] * len(response_ids)
+    tool_errors = [""] * len(response_ids)
+    tool_outputs = [""] * len(response_ids)
+    tool_runtimes = [0] * len(response_ids)
+    tool_calleds = [False] * len(response_ids)
+
+    request_info = RequestInfo(
+        num_calls=num_calls,
+        timeouts=timeouts,
+        tool_errors=tool_errors,
+        tool_outputs=tool_outputs,
+        tool_runtimes=tool_runtimes,
+        tool_calleds=tool_calleds,
+    )
+
+    result = GenerationResult(
+        responses=response_ids,
+        finish_reasons=finish_reasons,
+        masks=masks,
+        request_info=request_info,
+        dataset_index=dataset_index,
+    )
+
+    return result
+
+
+def _process_outputs_with_tools(
+    outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None
+) -> GenerationResult:
+    """Process vLLM RequestOutputs into GenerationResult format with tool information."""
+    response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
+    finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
+
+    masks = [out.mask for output in outputs for out in output.outputs]
+    num_calls = [out.num_calls for output in outputs for out in output.outputs]
+    timeouts = [out.timeout for output in outputs for out in output.outputs]
+    tool_errors = [out.tool_error for output in outputs for out in output.outputs]
+    tool_outputs = [out.tool_output for output in outputs for out in output.outputs]
+    tool_runtimes = [out.tool_runtime for output in outputs for out in output.outputs]
+    tool_calleds = [out.tool_called for output in outputs for out in output.outputs]
+
+    request_info = RequestInfo(
+        num_calls=num_calls,
+        timeouts=timeouts,
+        tool_errors=tool_errors,
+        tool_outputs=tool_outputs,
+        tool_runtimes=tool_runtimes,
+        tool_calleds=tool_calleds,
+    )
+
+    result = GenerationResult(
+        responses=response_ids,
+        finish_reasons=finish_reasons,
+        masks=masks,
+        request_info=request_info,
+        dataset_index=dataset_index,
+    )
+
+    return result
+
+
+def _finalize_outputs(outputs, tracking, dataset_index, tools):
+    """Prepare final outputs based on whether tools were used."""
+    if not tools:
+        outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
+        return _process_outputs(outputs, dataset_index=dataset_index)
+
+    # Tool mode: add metadata and merge completions
+    for req_id in tracking["masks"]:
+        assert req_id in tracking["concat_outputs"]
+        output = tracking["concat_outputs"][req_id].outputs[0]
+        setattr(output, "mask", tracking["masks"][req_id])
+        setattr(output, "num_calls", tracking["num_calls"][req_id])
+        setattr(output, "timeout", tracking["timeout"][req_id])
+        setattr(output, "tool_error", tracking["tool_error"][req_id])
+        setattr(output, "tool_output", tracking["tool_output"][req_id])
+        setattr(output, "tool_runtime", tracking["tool_runtime"][req_id])
+        setattr(output, "tool_called", tracking["tool_called"][req_id])
+
+    # Merge n completions into the same outputs
+    merged_outputs = {}
+    for req_id in tracking["concat_outputs"]:
+        real_req_id, _ = req_id.split("-")
+        if real_req_id not in merged_outputs:
+            merged_outputs[real_req_id] = tracking["concat_outputs"][req_id]
+        else:
+            merged_outputs[real_req_id].outputs.append(tracking["concat_outputs"][req_id].outputs[0])
+
+    final_outputs = sorted(
+        merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1]))
+    )
+
+    return _process_outputs_with_tools(final_outputs, dataset_index=dataset_index)
+
+
 @dataclasses.dataclass
 class RequestInfo:
     """Container for tool usage information."""
@@ -335,7 +437,7 @@ class LLMRayActor:
                     )
                     if result is not None:
                         outputs.append(result)
-        return self._finalize_outputs(outputs, tracking, request.dataset_index)
+        return _finalize_outputs(outputs, tracking, request.dataset_index, self.tools)
 
     def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step):
         """Add initial requests to the engine."""
@@ -408,107 +510,6 @@ class LLMRayActor:
 
         for req_id in dict_keys_to_delete:
             del self.pending_tool_futures[req_id]
-
-    def _finalize_outputs(self, outputs, tracking, dataset_index):
-        """Prepare final outputs based on whether tools were used."""
-        if not self.tools:
-            outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
-            return self._process_outputs(outputs, dataset_index=dataset_index)
-
-        # Tool mode: add metadata and merge completions
-        for req_id in tracking["masks"]:
-            assert req_id in tracking["concat_outputs"]
-            output = tracking["concat_outputs"][req_id].outputs[0]
-            setattr(output, "mask", tracking["masks"][req_id])
-            setattr(output, "num_calls", tracking["num_calls"][req_id])
-            setattr(output, "timeout", tracking["timeout"][req_id])
-            setattr(output, "tool_error", tracking["tool_error"][req_id])
-            setattr(output, "tool_output", tracking["tool_output"][req_id])
-            setattr(output, "tool_runtime", tracking["tool_runtime"][req_id])
-            setattr(output, "tool_called", tracking["tool_called"][req_id])
-
-        # Merge n completions into the same outputs
-        merged_outputs = {}
-        for req_id in tracking["concat_outputs"]:
-            real_req_id, _ = req_id.split("-")
-            if real_req_id not in merged_outputs:
-                merged_outputs[real_req_id] = tracking["concat_outputs"][req_id]
-            else:
-                merged_outputs[real_req_id].outputs.append(tracking["concat_outputs"][req_id].outputs[0])
-
-        final_outputs = sorted(
-            merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1]))
-        )
-
-        return self._process_outputs_with_tools(final_outputs, dataset_index=dataset_index)
-
-    def _process_outputs(
-        self, outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None
-    ) -> GenerationResult:
-        """Process vLLM RequestOutputs into GenerationResult format."""
-        response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
-        finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
-
-        masks = [[1] * len(resp) for resp in response_ids]
-        num_calls = [0] * len(response_ids)
-        timeouts = [0] * len(response_ids)
-        tool_errors = [""] * len(response_ids)
-        tool_outputs = [""] * len(response_ids)
-        tool_runtimes = [0] * len(response_ids)
-        tool_calleds = [False] * len(response_ids)
-
-        request_info = RequestInfo(
-            num_calls=num_calls,
-            timeouts=timeouts,
-            tool_errors=tool_errors,
-            tool_outputs=tool_outputs,
-            tool_runtimes=tool_runtimes,
-            tool_calleds=tool_calleds,
-        )
-
-        result = GenerationResult(
-            responses=response_ids,
-            finish_reasons=finish_reasons,
-            masks=masks,
-            request_info=request_info,
-            dataset_index=dataset_index,
-        )
-
-        return result
-
-    def _process_outputs_with_tools(
-        self, outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None
-    ) -> GenerationResult:
-        """Process vLLM RequestOutputs into GenerationResult format with tool information."""
-        response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
-        finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
-
-        masks = [out.mask for output in outputs for out in output.outputs]
-        num_calls = [out.num_calls for output in outputs for out in output.outputs]
-        timeouts = [out.timeout for output in outputs for out in output.outputs]
-        tool_errors = [out.tool_error for output in outputs for out in output.outputs]
-        tool_outputs = [out.tool_output for output in outputs for out in output.outputs]
-        tool_runtimes = [out.tool_runtime for output in outputs for out in output.outputs]
-        tool_calleds = [out.tool_called for output in outputs for out in output.outputs]
-
-        request_info = RequestInfo(
-            num_calls=num_calls,
-            timeouts=timeouts,
-            tool_errors=tool_errors,
-            tool_outputs=tool_outputs,
-            tool_runtimes=tool_runtimes,
-            tool_calleds=tool_calleds,
-        )
-
-        result = GenerationResult(
-            responses=response_ids,
-            finish_reasons=finish_reasons,
-            masks=masks,
-            request_info=request_info,
-            dataset_index=dataset_index,
-        )
-
-        return result
 
     def init_process_group(
         self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
