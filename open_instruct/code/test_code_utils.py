@@ -20,9 +20,7 @@ class BaseCodeTestCase(unittest.TestCase):
 
     def tearDown(self):
         """Clean up multiprocessing resources after each test."""
-        # Force garbage collection to clean up any lingering Process objects
         gc.collect()
-        # Close any active children processes
         for child in multiprocessing.active_children():
             child.terminate()
             child.join(timeout=1)
