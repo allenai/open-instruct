@@ -53,6 +53,12 @@ Our setup mostly follows our [Dockerfile](./Dockerfile), which uses Python 3.10.
 
 We recommend using [uv](https://docs.astral.sh/uv/) for installation. You can install with `uv sync`.
 
+**Note for flash-attn**: Due to flash-attn's build requirements, it's configured as an optional dependency. To install it separately:
+```bash
+uv sync  # Install main dependencies
+uv pip install --no-build-isolation flash-attn>=2.8.0.post2  # Install flash-attn without build isolation
+```
+
 * **Docker installation**: You can also use the Dockerfile to build a Docker image. You can build the image with the following command:
 
 ```bash

@@ -33,8 +33,7 @@ dependencies = [
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
     "pytest-xdist==3.8.0",
-    "flash-attn>=2.8.0.post2; platform_system != 'Darwin'",
-    "liger-kernel>=0.5.4; platform_system != 'Darwin'",
+    "einops>=0.8.0",
 ]
 
 [tool.hatch.metadata]
@@ -44,11 +43,9 @@ allow-direct-references = true
 path = "build.py"
 
 
-[tool.uv.extra-build-dependencies]
-flash-attn = [{ requirement = "torch", match-runtime = true }]
-
-[tool.uv.extra-build-variables]
-flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
+[tool.uv]
+preview = true
+python-preference = "only-managed"
 
 # pytorch related setups
 [tool.uv.sources]
@@ -74,10 +71,12 @@ code = [
     "datasets>=3.1.0",
     "requests>=2.28.0",
 ]
-
-[tool.uv]
-preview = true
-python-preference = "only-managed"
+compile = [
+    "flash-attn>=2.8.0.post2; platform_system != 'Darwin'",
+]
+liger = [
+    "liger-kernel>=0.5.4; platform_system != 'Darwin'",
+]
 
 [dependency-groups]
 dev = [
