@@ -20,16 +20,12 @@ import dataclasses
 import logging
 import os
 import queue
-import re
-import time
-import traceback
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Union
 
 import ray
-import requests
 import torch
 import torch.distributed
 import vllm
@@ -45,92 +41,10 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
+from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
 logger = logging.getLogger(__name__)
-
-
-@dataclasses.dataclass
-class ToolOutput:
-    output: str
-    called: bool
-    error: str
-    timeout: bool
-    runtime: float
-    start_str: str = "<output>\n"
-    end_str: str = "\n</output>"
-
-
-class Tool:
-    def __init__(self, start_str: str, end_str: str):
-        self.start_str = start_str
-        self.end_str = end_str
-
-    def __call__(self, prompt: str) -> ToolOutput:
-        raise NotImplementedError("Subclasses must implement this method")
-
-
-class MaxCallsExceededTool(Tool):
-    def __call__(self, prompt: str) -> ToolOutput:
-        return ToolOutput(output="Max tool calls exceeded.", called=False, error="", timeout=False, runtime=0)
-
-
-class PythonCodeTool(Tool):
-    """Tool for executing Python code via an API endpoint."""
-
-    def __init__(self, api_endpoint: str, *args, **kwargs):
-        self.api_endpoint = api_endpoint
-        super().__init__(*args, **kwargs)
-
-    def __call__(self, prompt: str) -> ToolOutput:
-        re_str = r"(?s)(?<!`)<tool>\s*(.*?)\s*</tool>"
-        re_str = re_str.replace("<tool>", "<code>").replace("</tool>", "</code>")
-
-        code_blocks = re.findall(re_str, prompt, re.DOTALL)
-        all_outputs = []
-        timeout = False
-        error = ""
-        if len(code_blocks) == 0:
-            return ToolOutput(output="", called=False, error="", timeout=False, runtime=0)
-
-        # Only execute the last code block
-        code = code_blocks[-1]
-
-        # Define timeout in seconds
-        timeout_seconds = 3
-        start_time = time.time()
-        try:
-            # Call the FastAPI endpoint to execute the code with client-side timeout
-            response = requests.post(
-                self.api_endpoint, json={"code": code, "timeout": timeout_seconds}, timeout=timeout_seconds
-            )
-
-            # Parse the response
-            result = response.json()
-
-            # Process the API response
-            output = result["output"]
-            error = result.get("error") or ""
-
-            all_outputs.append(output)
-            if len(error) > 0:
-                all_outputs.append("\n" + error)
-
-        except requests.Timeout:
-            # Handle client-side timeout specifically
-            all_outputs.append(f"Timeout after {timeout_seconds} seconds")
-            timeout = True
-
-        except Exception as e:
-            # Capture any other exceptions that occur during the API call
-            error_message = f"Error calling API: {str(e)}\n"
-            error_traceback = traceback.format_exc()
-            all_outputs.append(error_message + error_traceback)
-
-        # Return all captured outputs as a single string
-        return ToolOutput(
-            output="\n".join(all_outputs), called=True, error=error, timeout=timeout, runtime=time.time() - start_time
-        )
 
 
 @dataclasses.dataclass
@@ -331,13 +245,8 @@ class LLMRayActor:
                 self.logger.warning("[LLMRayActor] No request in the queue to process. Continuing.")
                 continue
 
-            # Process the request based on whether tools are available
-            if self.tools:
-                # Use tool-aware generation
-                result = self._process_with_tools(request)
-            else:
-                # Use standard generation
-                result = self._process_without_tools(request)
+            # Process the request with unified method
+            result = self._process_request(request)
 
             try:
                 if request.is_eval:
@@ -347,189 +256,204 @@ class LLMRayActor:
             except queue.Full:
                 self.logger.warning("Results queue is full, discarding result.")
 
-    def _process_without_tools(self, request):
-        """Standard generation without tool support."""
-        prompts = request.prompts
-
-        # Add requests to the engine
-        for i, prompt in enumerate(prompts):
-            request_id = f"batch_{request.training_step}_{i}"
-            tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
-            self.llm_engine.add_request(request_id, tokens_prompt, request.sampling_params)
-
-        # Run the engine event loop until all requests are finished
-        outputs = []
-        while self.llm_engine.has_unfinished_requests():
-            step_outputs = self.llm_engine.step()
-            for output in step_outputs:
-                if output.finished:
-                    outputs.append(output)
-
-        # Sort outputs by prompt index (i)
-        outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
-
-        return self._process_outputs(outputs, dataset_index=request.dataset_index)
-
-    def _process_with_tools(self, request):
-        """Tool-aware generation using the ToolUseLLM approach."""
+    def _process_request(self, request):
+        """Unified processing for both tool and non-tool generation."""
         prompts = request.prompts
         sampling_params = request.sampling_params
 
-        # Override sampling params to have n=1 for individual processing
-        single_n_sampling_params = copy.deepcopy(sampling_params)
-        single_n_sampling_params.n = 1
-        single_n_sampling_params.output_kind = vllm.sampling_params.RequestOutputKind.FINAL_ONLY
+        # Tool mode adjustments
+        if self.tools:
+            # Need n=1 for individual tool tracking
+            sampling_params = copy.deepcopy(sampling_params)
+            original_n = request.sampling_params.n
+            sampling_params.n = 1
+            tracking = self._init_tool_tracking()
+            tokenizer = self.llm_engine.get_tokenizer()
+        else:
+            original_n = 1
+            tracking = None
+            tokenizer = None
 
-        # Add requests to the engine (handling n > 1 by creating multiple requests)
-        for i, prompt in enumerate(prompts):
-            for j in range(sampling_params.n):
-                request_id = f"{i}-{j}"
-                tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
-                self.llm_engine.add_request(request_id, tokens_prompt, single_n_sampling_params)
+        # Add initial requests
+        self._add_initial_requests(prompts, sampling_params, original_n, request.training_step)
 
-        # Initialize tracking variables
-        num_calls = defaultdict(int)
-        timeout = defaultdict(bool)
-        tool_error = defaultdict(str)
-        tool_output = defaultdict(str)
-        tool_runtime = defaultdict(float)
-        tool_called = defaultdict(bool)
-        concat_outputs = {}
-        masks = defaultdict(list)
-
-        # Get tokenizer for encoding tool outputs
-        tokenizer = self.llm_engine.get_tokenizer()
-
-        # Run the engine with tool support
+        # Main processing loop
         outputs = []
         while True:
-            # Poll pending tool futures
-            dict_keys_to_delete = []
-            for req_id, (future, last_o, last_output) in self.pending_tool_futures.items():
-                if future.done():
-                    tool_result = future.result()
-                    last_prompt_token_ids = last_output.prompt_token_ids
-                    last_token_ids = last_o.token_ids
-                    tool_output_token_ids = tokenizer.encode(
-                        "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
-                    )
-                    timeout[req_id] = tool_result.timeout
-                    tool_error[req_id] += "" if tool_result.error is None else tool_result.error
-                    tool_output[req_id] += tool_result.output
-                    tool_runtime[req_id] += tool_result.runtime
-                    tool_called[req_id] = True
-
-                    # Edge case 1: clip against model context length
-                    prompt_and_tool_output_token = last_prompt_token_ids + last_token_ids + tool_output_token_ids
-                    num_calls[req_id] += 1
-                    excess = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len
-                    if excess > 0:
-                        tool_output_token_ids = tool_output_token_ids[:-excess]
-                        can_make_new_request = False
-                    else:
-                        can_make_new_request = True
-
-                    # Edge case 2: clip against per-request max_tokens
-                    remaining = single_n_sampling_params.max_tokens - len(masks[req_id])
-                    if remaining <= 0:
-                        tool_output_token_ids = []
-                    elif len(tool_output_token_ids) > remaining:
-                        tool_output_token_ids = tool_output_token_ids[:remaining]
-
-                    concat_outputs[req_id].outputs[0].token_ids.extend(tool_output_token_ids)
-                    masks[req_id].extend([0] * len(tool_output_token_ids))
-                    new_sample_tokens = single_n_sampling_params.max_tokens - len(masks[req_id])
-                    can_make_new_request = can_make_new_request and new_sample_tokens > 0
-
-                    if can_make_new_request:
-                        try:
-                            new_sampling_params = copy.deepcopy(single_n_sampling_params)
-                            new_sampling_params.max_tokens = new_sample_tokens
-                            self.llm_engine.add_request(
-                                req_id,
-                                vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token),
-                                new_sampling_params,
-                            )
-                        except Exception as e:
-                            self.logger.error(f"Error adding request: {e}")
-
-                    dict_keys_to_delete.append(req_id)
-
-            for req_id in dict_keys_to_delete:
-                del self.pending_tool_futures[req_id]
+            # Poll tool futures if any exist
+            if self.tools and self.pending_tool_futures:
+                self._poll_tool_futures(tracking, sampling_params, tokenizer)
 
             # Process engine steps
             if self.llm_engine.has_unfinished_requests():
                 step_outputs = self.llm_engine.step()
                 for output in step_outputs:
                     if output.finished:
-                        assert len(output.outputs) <= 1  # because sampling_params.n == 1
-                        o = output.outputs[0]
-                        output_processed = False
-
-                        if output.request_id not in concat_outputs:
-                            concat_outputs[output.request_id] = output
+                        if self.tools:
+                            self._handle_tool_output(output, outputs, tracking, sampling_params)
                         else:
-                            concat_outputs[output.request_id].outputs[0].token_ids.extend(o.token_ids)
-
-                        masks[output.request_id].extend([1] * len(o.token_ids))
-
-                        # Check if output ends with a tool stop string
-                        for stop_str in single_n_sampling_params.stop:
-                            if (
-                                o.text.endswith(stop_str)
-                                and stop_str in self.tools
-                                and num_calls[output.request_id] < self.max_tool_calls.get(stop_str, 0)
-                            ):
-                                # Schedule tool call asynchronously
-                                tool = self.tools[stop_str]
-                                future = self.executor.submit(tool, o.text)
-                                self.pending_tool_futures[output.request_id] = (future, o, output)
-                                output_processed = True
-                                break
-                            elif (
-                                o.text.endswith(stop_str)
-                                and stop_str in self.tools
-                                and num_calls[output.request_id] >= self.max_tool_calls.get(stop_str, 0)
-                            ):
-                                # Tool call limit exceeded
-                                tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
-                                future = self.executor.submit(tool, o.text)
-                                self.pending_tool_futures[output.request_id] = (future, o, output)
-                                output_processed = True
-                                break
-
-                        if not output_processed:
                             outputs.append(output)
 
-            if not self.llm_engine.has_unfinished_requests() and len(self.pending_tool_futures) == 0:
-                break
+            # Check exit condition
+            if not self.llm_engine.has_unfinished_requests():
+                if not self.tools or len(self.pending_tool_futures) == 0:
+                    break
 
-        # Add tool metadata to outputs
-        for req_id in masks:
-            assert req_id in concat_outputs
-            setattr(concat_outputs[req_id].outputs[0], "mask", masks[req_id])
-            setattr(concat_outputs[req_id].outputs[0], "num_calls", num_calls[req_id])
-            setattr(concat_outputs[req_id].outputs[0], "timeout", timeout[req_id])
-            setattr(concat_outputs[req_id].outputs[0], "tool_error", tool_error[req_id])
-            setattr(concat_outputs[req_id].outputs[0], "tool_output", tool_output[req_id])
-            setattr(concat_outputs[req_id].outputs[0], "tool_runtime", tool_runtime[req_id])
-            setattr(concat_outputs[req_id].outputs[0], "tool_called", tool_called[req_id])
+        # Finalize and return outputs
+        return self._finalize_outputs(outputs, tracking, request.dataset_index)
+
+    def _init_tool_tracking(self):
+        """Initialize tracking variables for tool mode."""
+        return {
+            "num_calls": defaultdict(int),
+            "timeout": defaultdict(bool),
+            "tool_error": defaultdict(str),
+            "tool_output": defaultdict(str),
+            "tool_runtime": defaultdict(float),
+            "tool_called": defaultdict(bool),
+            "concat_outputs": {},
+            "masks": defaultdict(list),
+        }
+
+    def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step):
+        """Add initial requests to the engine."""
+        for i, prompt in enumerate(prompts):
+            if self.tools:
+                # Create individual requests for each sample when using tools
+                for j in range(n_samples):
+                    request_id = f"{i}-{j}"
+                    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
+                    self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
+            else:
+                # Standard request format for non-tool mode
+                request_id = f"batch_{training_step}_{i}"
+                tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
+                self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
+
+    def _poll_tool_futures(self, tracking, sampling_params, tokenizer):
+        """Poll and handle completed tool executions."""
+        dict_keys_to_delete = []
+        for req_id, (future, last_o, last_output) in self.pending_tool_futures.items():
+            if future.done():
+                tool_result = future.result()
+                last_prompt_token_ids = last_output.prompt_token_ids
+                last_token_ids = last_o.token_ids
+                tool_output_token_ids = tokenizer.encode(
+                    "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+                )
+                tracking["timeout"][req_id] = tool_result.timeout
+                tracking["tool_error"][req_id] += "" if tool_result.error is None else tool_result.error
+                tracking["tool_output"][req_id] += tool_result.output
+                tracking["tool_runtime"][req_id] += tool_result.runtime
+                tracking["tool_called"][req_id] = True
+
+                # Edge case 1: clip against model context length
+                prompt_and_tool_output_token = last_prompt_token_ids + last_token_ids + tool_output_token_ids
+                tracking["num_calls"][req_id] += 1
+                excess = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len
+                if excess > 0:
+                    tool_output_token_ids = tool_output_token_ids[:-excess]
+                    can_make_new_request = False
+                else:
+                    can_make_new_request = True
+
+                # Edge case 2: clip against per-request max_tokens
+                remaining = sampling_params.max_tokens - len(tracking["masks"][req_id])
+                if remaining <= 0:
+                    tool_output_token_ids = []
+                elif len(tool_output_token_ids) > remaining:
+                    tool_output_token_ids = tool_output_token_ids[:remaining]
+
+                tracking["concat_outputs"][req_id].outputs[0].token_ids.extend(tool_output_token_ids)
+                tracking["masks"][req_id].extend([0] * len(tool_output_token_ids))
+                new_sample_tokens = sampling_params.max_tokens - len(tracking["masks"][req_id])
+                can_make_new_request = can_make_new_request and new_sample_tokens > 0
+
+                if can_make_new_request:
+                    try:
+                        new_sampling_params = copy.deepcopy(sampling_params)
+                        new_sampling_params.max_tokens = new_sample_tokens
+                        self.llm_engine.add_request(
+                            req_id,
+                            vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token),
+                            new_sampling_params,
+                        )
+                    except Exception as e:
+                        self.logger.error(f"Error adding request: {e}")
+
+                dict_keys_to_delete.append(req_id)
+
+        for req_id in dict_keys_to_delete:
+            del self.pending_tool_futures[req_id]
+
+    def _handle_tool_output(self, output, outputs, tracking, sampling_params):
+        """Handle a finished output in tool mode."""
+        assert len(output.outputs) <= 1  # because sampling_params.n == 1
+        o = output.outputs[0]
+        output_processed = False
+
+        # Update concatenated outputs
+        if output.request_id not in tracking["concat_outputs"]:
+            tracking["concat_outputs"][output.request_id] = output
+        else:
+            tracking["concat_outputs"][output.request_id].outputs[0].token_ids.extend(o.token_ids)
+
+        tracking["masks"][output.request_id].extend([1] * len(o.token_ids))
+
+        # Check for tool calls
+        for stop_str in sampling_params.stop:
+            if stop_str in self.tools and o.text.endswith(stop_str):
+                if tracking["num_calls"][output.request_id] < self.max_tool_calls.get(stop_str, 0):
+                    # Schedule tool call
+                    tool = self.tools[stop_str]
+                    future = self.executor.submit(tool, o.text)
+                    self.pending_tool_futures[output.request_id] = (future, o, output)
+                    output_processed = True
+                    break
+                else:
+                    # Max calls exceeded
+                    tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
+                    future = self.executor.submit(tool, o.text)
+                    self.pending_tool_futures[output.request_id] = (future, o, output)
+                    output_processed = True
+                    break
+
+        if not output_processed:
+            outputs.append(output)
+
+    def _finalize_outputs(self, outputs, tracking, dataset_index):
+        """Prepare final outputs based on whether tools were used."""
+        if not self.tools:
+            # Non-tool mode: sort outputs and return
+            outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
+            return self._process_outputs(outputs, dataset_index=dataset_index)
+
+        # Tool mode: add metadata and merge completions
+        for req_id in tracking["masks"]:
+            assert req_id in tracking["concat_outputs"]
+            output = tracking["concat_outputs"][req_id].outputs[0]
+            setattr(output, "mask", tracking["masks"][req_id])
+            setattr(output, "num_calls", tracking["num_calls"][req_id])
+            setattr(output, "timeout", tracking["timeout"][req_id])
+            setattr(output, "tool_error", tracking["tool_error"][req_id])
+            setattr(output, "tool_output", tracking["tool_output"][req_id])
+            setattr(output, "tool_runtime", tracking["tool_runtime"][req_id])
+            setattr(output, "tool_called", tracking["tool_called"][req_id])
 
         # Merge n completions into the same outputs
         merged_outputs = {}
-        for req_id in concat_outputs:
+        for req_id in tracking["concat_outputs"]:
             real_req_id, _ = req_id.split("-")
             if real_req_id not in merged_outputs:
-                merged_outputs[real_req_id] = concat_outputs[req_id]
+                merged_outputs[real_req_id] = tracking["concat_outputs"][req_id]
             else:
-                merged_outputs[real_req_id].outputs.append(concat_outputs[req_id].outputs[0])
+                merged_outputs[real_req_id].outputs.append(tracking["concat_outputs"][req_id].outputs[0])
 
         final_outputs = sorted(
             merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1]))
         )
 
-        return self._process_outputs_with_tools(final_outputs, dataset_index=request.dataset_index)
+        return self._process_outputs_with_tools(final_outputs, dataset_index=dataset_index)
 
     def _process_outputs(
         self,
