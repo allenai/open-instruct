@@ -362,7 +362,7 @@ class LLMRayActor:
         for req_id, (future, last_o, last_output) in self.pending_tool_futures.items():
             if not future.done():
                 continue
-                
+
             tool_result = future.result()
             last_prompt_token_ids = last_output.prompt_token_ids
             last_token_ids = last_o.token_ids
@@ -401,9 +401,7 @@ class LLMRayActor:
                 new_sampling_params = copy.deepcopy(sampling_params)
                 new_sampling_params.max_tokens = new_sample_tokens
                 self.llm_engine.add_request(
-                    req_id,
-                    vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token),
-                    new_sampling_params,
+                    req_id, vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token), new_sampling_params
                 )
 
             dict_keys_to_delete.append(req_id)
@@ -445,9 +443,7 @@ class LLMRayActor:
         return self._process_outputs_with_tools(final_outputs, dataset_index=dataset_index)
 
     def _process_outputs(
-        self,
-        outputs: List[vllm.RequestOutput],
-        dataset_index: Optional[List[int]] = None,
+        self, outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None
     ) -> GenerationResult:
         """Process vLLM RequestOutputs into GenerationResult format."""
         response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -481,9 +477,7 @@ class LLMRayActor:
         return result
 
     def _process_outputs_with_tools(
-        self,
-        outputs: List[vllm.RequestOutput],
-        dataset_index: Optional[List[int]] = None,
+        self, outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None
     ) -> GenerationResult:
         """Process vLLM RequestOutputs into GenerationResult format with tool information."""
         response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
