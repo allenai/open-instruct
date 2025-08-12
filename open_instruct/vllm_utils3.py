@@ -47,6 +47,43 @@ from open_instruct.utils import ray_get_with_progress
 logger = logging.getLogger(__name__)
 
 
+def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, executor, pending_tool_futures):
+    """
+    Handle a finished output. Returns the output if it should be added to results,
+    or None if it's being held for tool processing.
+
+    This is a free function to keep the processing logic separate from the actor state.
+    """
+    if not tools:
+        # Non-tool mode: just return the output
+        return output
+
+    assert len(output.outputs) <= 1  # because sampling_params.n == 1
+    o = output.outputs[0]
+
+    # Update concatenated outputs
+    if output.request_id not in tracking["concat_outputs"]:
+        tracking["concat_outputs"][output.request_id] = output
+    else:
+        tracking["concat_outputs"][output.request_id].outputs[0].token_ids.extend(o.token_ids)
+
+    tracking["masks"][output.request_id].extend([1] * len(o.token_ids))
+
+    # Check for tool calls
+    for stop_str in sampling_params.stop:
+        if stop_str in tools and o.text.endswith(stop_str):
+            if tracking["num_calls"][output.request_id] < max_tool_calls.get(stop_str, 0):
+                tool = tools[stop_str]
+            else:
+                tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
+            future = executor.submit(tool, o.text)
+            pending_tool_futures[output.request_id] = (future, o, output)
+            return None  # Output is being held for tool processing
+
+    # No tool call, return the output
+    return output
+
+
 @dataclasses.dataclass
 class RequestInfo:
     """Container for tool usage information."""
@@ -274,29 +311,27 @@ class LLMRayActor:
             tracking = None
             tokenizer = None
 
-        # Add initial requests
         self._add_initial_requests(prompts, sampling_params, original_n, request.training_step)
 
-        # Main processing loop
         outputs = []
         while self.llm_engine.has_unfinished_requests() or self.pending_tool_futures:
-            # Poll tool futures
             self._poll_tool_futures(tracking, sampling_params, tokenizer)
-
-            # Process engine steps
-            if self.llm_engine.has_unfinished_requests():
-                step_outputs = self.llm_engine.step()
-                for output in step_outputs:
-                    if output.finished:
-                        if self.tools:
-                            self._handle_tool_output(output, outputs, tracking, sampling_params)
-                        else:
-                            outputs.append(output)
-
-        # Finalize and return outputs
+            for output in self.llm_engine.step():
+                if output.finished:
+                    result = _handle_output(
+                        output,
+                        self.tools,
+                        tracking,
+                        sampling_params,
+                        self.max_tool_calls,
+                        self.executor,
+                        self.pending_tool_futures,
+                    )
+                    if result is not None:
+                        outputs.append(result)
         return self._finalize_outputs(outputs, tracking, request.dataset_index)
 
-    def _init_tool_tracking(self):
+    def _init_tool_tracking(self) -> dict[str, Any]:
         """Initialize tracking variables for tool mode."""
         return {
             "num_calls": defaultdict(int),
@@ -383,41 +418,6 @@ class LLMRayActor:
 
         for req_id in dict_keys_to_delete:
             del self.pending_tool_futures[req_id]
-
-    def _handle_tool_output(self, output, outputs, tracking, sampling_params):
-        """Handle a finished output in tool mode."""
-        assert len(output.outputs) <= 1  # because sampling_params.n == 1
-        o = output.outputs[0]
-        output_processed = False
-
-        # Update concatenated outputs
-        if output.request_id not in tracking["concat_outputs"]:
-            tracking["concat_outputs"][output.request_id] = output
-        else:
-            tracking["concat_outputs"][output.request_id].outputs[0].token_ids.extend(o.token_ids)
-
-        tracking["masks"][output.request_id].extend([1] * len(o.token_ids))
-
-        # Check for tool calls
-        for stop_str in sampling_params.stop:
-            if stop_str in self.tools and o.text.endswith(stop_str):
-                if tracking["num_calls"][output.request_id] < self.max_tool_calls.get(stop_str, 0):
-                    # Schedule tool call
-                    tool = self.tools[stop_str]
-                    future = self.executor.submit(tool, o.text)
-                    self.pending_tool_futures[output.request_id] = (future, o, output)
-                    output_processed = True
-                    break
-                else:
-                    # Max calls exceeded
-                    tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
-                    future = self.executor.submit(tool, o.text)
-                    self.pending_tool_futures[output.request_id] = (future, o, output)
-                    output_processed = True
-                    break
-
-        if not output_processed:
-            outputs.append(output)
 
     def _finalize_outputs(self, outputs, tracking, dataset_index):
         """Prepare final outputs based on whether tools were used."""
