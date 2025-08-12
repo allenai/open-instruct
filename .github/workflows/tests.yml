@@ -51,26 +51,18 @@ jobs:
           df -h /
           
           # Remove unnecessary directories
-          DIRS_TO_REMOVE=(
-            "/opt/hostedtoolcache"
-            "/usr/share/dotnet"
-            "$AGENT_TOOLSDIRECTORY"
-            "/usr/local/lib/android"
-            "/usr/local/share/boost"
-          )
-          
-          for dir in "${DIRS_TO_REMOVE[@]}"; do
-            [ -d "$dir" ] && sudo rm -rf "$dir" && echo "Removed: $dir"
+          for dir in /opt/hostedtoolcache /usr/share/dotnet "$AGENT_TOOLSDIRECTORY" /usr/local/lib/android /usr/local/share/boost; do
+            if [ -d "$dir" ]; then
+              sudo rm -rf "$dir" && echo "Removed: $dir"
+            fi
           done
           
           # Remove unnecessary packages
-          PACKAGES_TO_REMOVE=(
-            '^aspnetcore-.*' '^dotnet-.*' '^llvm-.*' 'php.*'
-            '^mongodb-.*' '^mysql-.*' azure-cli google-chrome-stable
-            firefox powershell mono-devel
-          )
+          sudo apt-get remove -y \
+            '^aspnetcore-.*' '^dotnet-.*' '^llvm-.*' 'php.*' \
+            '^mongodb-.*' '^mysql-.*' azure-cli google-chrome-stable \
+            firefox powershell mono-devel 2>/dev/null || true
           
-          sudo apt-get remove -y "${PACKAGES_TO_REMOVE[@]}" 2>/dev/null || true
           sudo apt-get autoremove -y
           sudo apt-get clean
           
