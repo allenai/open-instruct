@@ -967,7 +967,7 @@ def maybe_get_beaker_config():
     )
 
 
-def update_beaker_description_with_wandb_url(wandb_url: str) -> None:
+def maybe_update_beaker_description_with_wandb_url(wandb_url: str) -> None:
     """Update Beaker experiment description with wandb URL if running on Beaker."""
     if not is_beaker_job() or wandb_url is None:
         return
