@@ -2227,11 +2227,8 @@ def make_reward_fn(args: Args) -> Callable:
 
 def cleanup_judge_clients():
     """Cleans up all LLM judge clients and shutdown Ray."""
-    try:
-        asyncio.run(cleanup_all_llm_judge_clients())
-        logger.info("✅ LLM judge clients cleaned up")
-    except Exception as cleanup_error:
-        logger.warning(f"Error during LLM judge cleanup: {cleanup_error}")
+    asyncio.run(cleanup_all_llm_judge_clients())
+    logger.info("✅ LLM judge clients cleaned up")
     ray.shutdown()
 
 
@@ -2264,12 +2261,7 @@ def cleanup_training_resources(
         queues[0].put(ShutdownSentinel(), timeout=1)
 
     logger.info("Shutting down Ray queues...")
-    for queue in queues:
-        try:
-            queue.shutdown()
-        except Exception as e:
-            logger.warning(f"Error shutting down Ray queue: {e}")
-
+    [queue.shutdown() for queue in queues]
     logger.info("Shutting down thread pool executor...")
     executor.shutdown(wait=True)
 
