@@ -1,16 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
-# Get the current git commit hash (short version and full)
+# Get the current git commit hash (short version)
 git_hash=$(git rev-parse --short HEAD)
-git_commit_full=$(git rev-parse HEAD)
 image_name=open-instruct-integration-test-${git_hash}
 
 # Build the Docker image exactly like push-image.yml does
 docker build --platform=linux/amd64 . -t "$image_name"
 
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
-
 
 beaker image rename "$beaker_user/$image_name" "" || echo "Image not found, skipping rename."
 
