@@ -9,7 +9,7 @@ uv run python mason.py \
         --cluster ai2/augusta-google-1 \
         --image "$BEAKER_IMAGE" \
 	--pure_docker_mode \
-        --workspace ai2/oe-adapt-code \
+        --workspace ai2/tulu-thinker \
         --priority high \
         --preemptible \
         --num_nodes 2 \
