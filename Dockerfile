@@ -10,6 +10,8 @@ RUN apt-get update && apt-get install -y \
     git \
     make \
     sudo \
+    nginx \
+    && mkdir -p /etc/nginx/conf.d \
     && rm -rf /var/lib/apt/lists/*
 
 # This ensures the dynamic linker (or NVIDIA's container runtime, I'm not sure)
@@ -57,19 +59,13 @@ RUN echo "UV_CACHE_DIR: ${UV_CACHE_DIR}"
 # setup files
 WORKDIR /stage/
 
-# Install nginx and create conf.d directory
-RUN apt-get update --no-install-recommends && apt-get install -y nginx && mkdir -p /etc/nginx/conf.d && rm -rf /var/lib/apt/lists/*
-
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
 
 # Copy only dependency-related files first
 COPY pyproject.toml uv.lock ./
 
-# Annoyingly, we need this before `uv run`, or it complains.
-COPY open_instruct open_instruct
-
-# Install dependencies
+# Install dependencies without the project itself
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
@@ -79,7 +75,8 @@ RUN uv run -m nltk.downloader punkt punkt_tab
 
 WORKDIR /stage/
 
-# Copy all runtime files directly to final stage
+# Copy all application code at the end
+COPY open_instruct open_instruct
 COPY eval eval
 COPY configs configs
 COPY scripts scripts
