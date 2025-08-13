@@ -973,7 +973,7 @@ def update_beaker_description_with_wandb_url(wandb_url: str) -> None:
         return
 
     client = beaker.Beaker.from_env()
-    spec = client.experiment.get_spec(os.environ["BEAKER_WORKLOAD_ID"])
+    spec = client.experiment.get(os.environ["BEAKER_WORKLOAD_ID"])
     current_description = spec.description or ""
     client.experiment.set_description(os.environ["BEAKER_WORKLOAD_ID"], f"{current_description}\n{wandb_url}")
 
