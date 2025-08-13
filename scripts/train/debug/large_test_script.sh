@@ -52,7 +52,7 @@ uv run python mason.py \
         --apply_verifiable_reward true \
         --code_api_url \$CODE_API_URL/test_program \
         --seed 1 \
-        --num_evals 100 \
+        --local_eval_every 1 \
         --gradient_checkpointing \
         --try_launch_beaker_eval_jobs_on_weka True \
         --with_tracking \
