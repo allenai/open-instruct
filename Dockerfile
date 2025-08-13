@@ -25,7 +25,6 @@ COPY open_instruct open_instruct
 
 # Install custom vllm for olmo3
 RUN git clone -b shanea/olmo3 https://github.com/2015aroras/vllm.git vllm_olmo3
-RUN VLLM_USE_PRECOMPILED=1 uv pip install -e vllm_olmo3
 
 # Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
