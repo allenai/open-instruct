@@ -649,8 +649,8 @@ class ArgumentParserPlus(HfArgumentParser):
 
 # ----------------------------------------------------------------------------
 # Experiment tracking utilities
-def get_git_tag() -> str:
-    """Try to get the latest Git tag (e.g., `no-tag-404-g98dc659` or `v1.0.0-4-g98dc659`)"""
+def get_git_hash() -> str:
+    """Try to get the latest Git hash (e.g., `no-tag-404-g98dc659` or `v1.0.0-4-g98dc659`)"""
     # Check if we have git commit from environment variable (Docker build)
     git_commit = os.environ.get("GIT_COMMIT", "")
     if git_commit:
@@ -664,22 +664,20 @@ def get_git_tag() -> str:
 def get_pr_tag() -> str:
     """Try to find associated pull request on GitHub (e.g., `pr-123`)"""
     pr_tag = ""
-    try:
-        git_commit = (
-            subprocess.check_output(["git", "rev-parse", "--verify", "HEAD"], stderr=subprocess.DEVNULL)
-            .decode("ascii")
-            .strip()
-        )
-        # try finding the pull request number on github
-        prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
-        if prs.status_code == 200:
-            prs = prs.json()
-            if len(prs["items"]) > 0:
-                pr = prs["items"][0]
-                pr_number = pr["number"]
-                pr_tag = f"pr-{pr_number}"
-    except Exception as e:
-        logging.debug(f"Failed to get PR number: {e}")
+
+    # Get git commit from environment variable or empty string
+    git_commit = os.environ.get("GIT_COMMIT", "")
+    if not git_commit:
+        return pr_tag
+
+    # try finding the pull request number on github
+    prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
+    if prs.status_code == 200:
+        prs = prs.json()
+        if len(prs["items"]) > 0:
+            pr = prs["items"][0]
+            pr_number = pr["number"]
+            pr_tag = f"pr-{pr_number}"
 
     return pr_tag
 
@@ -687,7 +685,7 @@ def get_pr_tag() -> str:
 def get_wandb_tags() -> List[str]:
     """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123`)"""
     existing_wandb_tags = os.environ.get("WANDB_TAGS", "")
-    git_tag = get_git_tag()
+    git_tag = get_git_hash()
     pr_tag = get_pr_tag()
     non_empty_tags = [tag for tag in [existing_wandb_tags, git_tag, pr_tag] if len(tag) > 0]
     return non_empty_tags
