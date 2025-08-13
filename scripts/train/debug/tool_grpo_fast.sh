@@ -1,0 +1,51 @@
+# note: you might have to setup your own search api endpoint. I've been using massive-serve:
+# https://github.com/RulinShao/massive-serve
+# and then set the search_api_endpoint accordingly.
+python open_instruct/grpo_fast.py \
+        --exp_name 0605_general_tool_use_without_good_outputs \
+        --wandb_project_name rl-rag \
+        --wandb_entity rl-rag \
+        --beta 0.01 \
+        --num_samples_per_prompt_rollout 4 \
+        --num_unique_prompts_rollout 8 \
+        --num_mini_batches 1 \
+        --num_epochs 1 \
+        --learning_rate 5e-7 \
+        --per_device_train_batch_size 1 \
+        --output_dir /output \
+        --kl_estimator kl3 \
+        --dataset_mixer_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 1.0 \
+        --dataset_mixer_list_splits train \
+        --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 32 \
+        --dataset_mixer_eval_list_splits train \
+        --max_token_length 10240 \
+        --max_prompt_token_length 2048 \
+        --response_length 8192 \
+        --pack_length 16384 \
+        --model_name_or_path Qwen/Qwen3-1.7B \
+        --non_stop_penalty True \
+        --non_stop_penalty_value 0.0 \
+        --temperature 1.0 \
+        --ground_truths_key ground_truth \
+        --sft_messages_key messages \
+        --total_episodes 500000 \
+        --deepspeed_stage 2 \
+        --num_learners_per_node 1 \
+        --vllm_num_engines 1 \
+        --vllm_tensor_parallel_size 1 \
+        --lr_scheduler_type constant \
+        --apply_verifiable_reward true \
+        --stop_strings "</answer>" \
+        --seed 1 \
+        --save_freq 100 \
+        --try_launch_beaker_eval_jobs_on_weka False \
+        --gradient_checkpointing \
+        --with_tracking \
+        --vllm_sync_backend gloo \
+        --vllm_gpu_memory_utilization 0.3 \
+        --single_gpu_mode \
+        --max_tool_calls 5 \
+        --vllm_enable_prefix_caching \
+        --tools code search \
+        --search_api_endpoint "http://saturn-cs-aus-232.reviz.ai2.in:44177/search" \
+        --code_tool_api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute
