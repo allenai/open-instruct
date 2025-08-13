@@ -653,7 +653,8 @@ def get_wandb_tags() -> List[str]:
     """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123,branch-main`)"""
     tags = [t for t in os.environ.get("WANDB_TAGS", "").split(",") if t != ""]
     if "GIT_COMMIT" in os.environ:
-        tags.append(f"commit: {os.environ['GIT_COMMIT']}")
+        git_commit = os.environ["GIT_COMMIT"]
+        tags.append(f"commit: {git_commit}")
         # try finding the pull request number on github
         prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
         if prs.status_code == 200:
