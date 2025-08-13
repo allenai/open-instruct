@@ -12,7 +12,7 @@ uv run python mason.py \
         --workspace ai2/oe-adapt-code \
         --priority high \
         --preemptible \
-        --num_nodes 4 \
+        --num_nodes 2 \
         --description "rlvr ace fn and og ocr stdio from base with perf penalty" \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
@@ -21,7 +21,7 @@ uv run python mason.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 16 \
-        --num_unique_prompts_rollout 256 \
+        --num_unique_prompts_rollout 128 \
         --num_mini_batches 1 \
         --num_epochs 1 \
         --learning_rate 5e-7 \
@@ -34,7 +34,7 @@ uv run python mason.py \
         --dataset_mixer_eval_list_splits train \
         --max_token_length 10240 \
         --max_prompt_token_length 2048 \
-        --response_length 16384 \
+        --response_length 4096 \
         --pack_length 20480 \
         --model_name_or_path Qwen/Qwen2.5-7B \
         --chat_template_name tulu_thinker \
@@ -45,8 +45,8 @@ uv run python mason.py \
         --sft_messages_key messages \
         --total_episodes 10_000 \
         --deepspeed_stage 2 \
-        --num_learners_per_node 8 8 \
-        --vllm_num_engines 16 \
+        --num_learners_per_node 8 \
+        --vllm_num_engines 8 \
         --vllm_tensor_parallel_size 1 \
         --lr_scheduler_type constant \
         --apply_verifiable_reward true \
