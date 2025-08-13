@@ -26,7 +26,7 @@ python open_instruct/grpo_fast.py \
     --vllm_tensor_parallel_size 1 \
     --beta 0.01 \
     --seed 3 \
-    --num_evals 20 \
+    --local_eval_every 1 \
     --vllm_sync_backend nccl \
     --save_traces \
     --vllm_enforce_eager \

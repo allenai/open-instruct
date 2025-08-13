@@ -34,7 +34,7 @@ python open_instruct/grpo_fast.py \
     --beta 0.01 \
     --apply_verifiable_reward true \
     --seed 3 \
-    --num_evals 100 \
+    --local_eval_every 150 \
     --save_freq 100 \
     --reward_model_multiplier 0.0 \
     --no_try_launch_beaker_eval_jobs \

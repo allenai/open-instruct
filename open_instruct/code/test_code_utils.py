@@ -1,5 +1,7 @@
 """Unit-tests for `get_successful_tests_fast`."""
 
+import gc
+import multiprocessing
 import unittest
 
 import datasets
@@ -13,7 +15,19 @@ PASSING_TEST = "assert True"
 TIMEOUT_TEST = "import time\ntime.sleep(10)"
 
 
-class GetSuccessfulTestsFastTests(unittest.TestCase):
+class BaseCodeTestCase(unittest.TestCase):
+    """Base test class with cleanup for multiprocessing resources."""
+
+    def tearDown(self):
+        """Clean up multiprocessing resources after each test."""
+        gc.collect()
+        for child in multiprocessing.active_children():
+            child.terminate()
+            child.join(timeout=1)
+            child.close()
+
+
+class GetSuccessfulTestsFastTests(BaseCodeTestCase):
     def test_mixed_pass_and_fail(self):
         """Bad + good + timeout tests: expect [F, T, F, T, T, F, T]."""
         tests = [FAILING_TEST, PASSING_TEST, FAILING_TEST, PASSING_TEST, PASSING_TEST, TIMEOUT_TEST, PASSING_TEST]
@@ -58,7 +72,7 @@ class GetSuccessfulTestsFastTests(unittest.TestCase):
         self.assertEqual(result, expected)
 
 
-class ReliabilityGuardNetworkTests(unittest.TestCase):
+class ReliabilityGuardNetworkTests(BaseCodeTestCase):
     """Tests to verify network operations behavior under reliability_guard."""
 
     def test_socket_operations_allowed(self):
@@ -91,7 +105,7 @@ except:
         self.assertEqual(result, [0])
 
 
-class ReliabilityGuardFileSystemTests(unittest.TestCase):
+class ReliabilityGuardFileSystemTests(BaseCodeTestCase):
     """Tests to ensure file system operations are properly sandboxed."""
 
     @parameterized.parameterized.expand(
@@ -167,7 +181,7 @@ except:
         self.assertEqual(result, [0])
 
 
-class ReliabilityGuardProcessTests(unittest.TestCase):
+class ReliabilityGuardProcessTests(BaseCodeTestCase):
     """Tests to ensure process/subprocess operations are blocked."""
 
     def test_subprocess_blocked(self):
@@ -215,7 +229,7 @@ except:
         self.assertEqual(result, [0])
 
 
-class ReliabilityGuardResourceTests(unittest.TestCase):
+class ReliabilityGuardResourceTests(BaseCodeTestCase):
     """Tests to ensure resource exhaustion attacks are prevented."""
 
     def test_infinite_recursion_protection(self):
@@ -264,7 +278,7 @@ except:
         self.assertEqual(result, [1])
 
 
-class ReliabilityGuardModuleImportTests(unittest.TestCase):
+class ReliabilityGuardModuleImportTests(BaseCodeTestCase):
     """Tests to ensure dangerous module imports are blocked."""
 
     @parameterized.parameterized.expand(
@@ -298,7 +312,7 @@ class ReliabilityGuardModuleImportTests(unittest.TestCase):
         self.assertEqual(result, [1])
 
 
-class ReliabilityGuardEdgeCaseTests(unittest.TestCase):
+class ReliabilityGuardEdgeCaseTests(BaseCodeTestCase):
     """Tests for edge cases and combined attack vectors."""
 
     def test_builtins_modifications(self):

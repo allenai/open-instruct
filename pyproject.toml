@@ -12,7 +12,7 @@ dependencies = [
     "debugpy>=1.8.13",
     "deepspeed==0.15.4", # 0.16.0 bugs out https://github.com/microsoft/DeepSpeed/issues/6793
     "hf-transfer>=0.1.8",
-    "litellm",
+    "litellm>=1.72.0",
     "matplotlib>=3.9.3",
     "nltk>=3.9.1",
     "numpy<2",
@@ -27,6 +27,10 @@ dependencies = [
     "wandb==0.18.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
+    "pytest-xdist==3.8.0",
+    "flash-attn>=2.8.0.post2; platform_system != 'Darwin'",
+    "liger-kernel>=0.5.4; platform_system != 'Darwin'",
+    "flashinfer-python==0.2.8; platform_system != 'Darwin'",
 ]
 
 [build-system]
@@ -35,6 +39,12 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 py-modules = ["open_instruct"]
+
+[tool.uv.extra-build-dependencies]
+flash-attn = [{ requirement = "torch", match-runtime = true }]
+
+[tool.uv.extra-build-variables]
+flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 
 # pytorch related setups
 [tool.uv.sources]
@@ -53,11 +63,7 @@ name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
-# flash-attn related setups
 [project.optional-dependencies]
-compile = ["flash-attn>=2.8.0.post2",
-		   "flashinfer-python>=0.2.7.post1"]
-liger = ["liger-kernel>=0.5.4"]
 code = [
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0", 
@@ -70,8 +76,8 @@ vllm = [
 ]
 
 [tool.uv]
+preview = true
 python-preference = "only-managed"
-no-build-isolation-package = ["flash-attn"]
 
 [[tool.uv.dependency-metadata]]
 name = "flash-attn"
@@ -89,7 +95,8 @@ dev = [
     "markdown-include>=0.8.1",
     "pytest>=8.3.4",
     "ruff>=0.11.13",
-	"parameterized>=0.9.0",
+    "parameterized>=0.9.0",
+    "rich>=13.7.0",
 ]
 local = ["vllm"]
 
