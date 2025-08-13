@@ -50,7 +50,7 @@ COPY pyproject.toml uv.lock ./
 COPY open_instruct open_instruct
 
 # Install dependencies with aggressive cleanup
-RUN uv sync --frozen --no-project-install --no-cache && \
+RUN uv sync --frozen --no-install-project --no-cache && \
     uv run -m nltk.downloader punkt punkt_tab && \
     # Clean Python cache
     find /stage/.venv -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
@@ -65,8 +65,6 @@ RUN uv sync --frozen --no-project-install --no-cache && \
     rm -rf /stage/.venv/lib/python*/site-packages/nvidia/cudnn/lib/libcudnn_*_train.so.* 2>/dev/null || true && \
     rm -rf /stage/.venv/lib/python*/site-packages/torch/test 2>/dev/null || true && \
     rm -rf /stage/.venv/lib/python*/site-packages/torch/bin/test_* 2>/dev/null || true && \
-    # Strip debug symbols from .so files
-    find /stage/.venv -type f -name "*.so" -exec strip --strip-debug {} \; 2>/dev/null || true && \
     # Clear all caches
     rm -rf /root/.cache /tmp/* /var/tmp/*
 
