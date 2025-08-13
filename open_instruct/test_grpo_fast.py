@@ -11,7 +11,8 @@ from transformers import AutoTokenizer
 from vllm import SamplingParams
 
 from open_instruct import grpo_fast, model_utils, utils
-from open_instruct.vllm_utils3 import GenerationResult, PromptRequest, RequestInfo, create_vllm_engines
+from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo
+from open_instruct.vllm_utils3 import create_vllm_engines
 
 
 class TestGrpoFastBase(unittest.TestCase):
@@ -252,18 +253,12 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         )
 
         # Start vLLM engines to process from queues
-        for engine in vllm_engines:
-            engine.process_from_queue.remote(
-                generation_config,
-                generation_config,  # eval_sampling_params
-                999,  # eval_freq (avoid evaluation)
-                1,  # num_training_steps
-                1,  # resume_training_step
-            )
+        [e.process_from_queue.remote() for e in vllm_engines]
 
         # Put the test prompt in the queue using PromptRequest
-        request = PromptRequest(prompts=[prompt_token_ids], dataset_index=0)
-        param_prompt_Q.put(request)
+        param_prompt_Q.put(
+            PromptRequest(prompts=[prompt_token_ids], dataset_index=0, generation_config=generation_config)
+        )
 
         # Get the result
         result = inference_results_Q.get()
