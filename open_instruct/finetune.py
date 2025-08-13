@@ -565,7 +565,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 config=config,
                 trust_remote_code=tc.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
-                use_flash_attention_2=True if args.use_flash_attn else False,
+                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
                 # liger-kernel specific args
                 fused_linear_cross_entropy=fused_linear_cross_entropy,
             )
