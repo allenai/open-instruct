@@ -39,7 +39,6 @@ os.makedirs(REPO_DIR, exist_ok=True)
 # The slow but  accurate version
 # -------------------------------------------------------------
 original_builtins = __builtins__
-return_var = multiprocessing.Value("i", 0)
 
 
 def encode_tests(tests: list) -> str:
@@ -93,7 +92,6 @@ def decode_tests(tests: Any) -> list:
 # -------------------------------------------------------------
 # The fast but more readable version
 # -------------------------------------------------------------
-test_results = multiprocessing.Array("i", 1000)  # Support up to 1000 tests
 
 
 def run_tests_against_program_helper_2(func: str, tests: List[str], shared_results) -> None:
@@ -187,6 +185,8 @@ def get_successful_tests_fast(
         p.join(timeout=max_execution_time)
         if p.is_alive():
             p.kill()
+            p.join()
+        p.close()
 
     return [shared_test_results[i] for i in range(len(tests))], [shared_runtimes[i] for i in range(len(tests))]
 
@@ -194,11 +194,11 @@ def get_successful_tests_fast(
 # -------------------------------------------------------------
 # Stdio format - mostly copied from livecodebench
 # -------------------------------------------------------------
-stdio_test_results = multiprocessing.Array("i", 1000)  # Support up to 1000 tests for stdio
-stdio_runtimes = multiprocessing.Array("d", 1000)
 
 
-def run_tests_stdio_helper(program: str, tests: List[Any], max_execution_time: float):
+def run_tests_stdio_helper(
+    program: str, tests: List[Any], max_execution_time: float, stdio_test_results, stdio_runtimes
+):
     """Helper to run stdio tests in a separate process."""
     reliability_guard()
     try:
@@ -240,6 +240,9 @@ def get_successful_tests_stdio(
         logger.info("Not executing program %s", program)
         return [0] * len(tests), [-1.0] * len(tests)
 
+    stdio_test_results = multiprocessing.Array("i", test_ct)
+    stdio_runtimes = multiprocessing.Array("d", test_ct)
+
     for i in range(test_ct):
         stdio_test_results[i] = 0  # Initialize results to 0 (failure)
         stdio_runtimes[i] = -1.0
@@ -247,12 +250,16 @@ def get_successful_tests_stdio(
     # Total timeout needs to account for all tests running sequentially.
     total_timeout = max_execution_time * test_ct + 5.0
 
-    p = multiprocessing.Process(target=run_tests_stdio_helper, args=(program, tests, max_execution_time))
+    p = multiprocessing.Process(
+        target=run_tests_stdio_helper, args=(program, tests, max_execution_time, stdio_test_results, stdio_runtimes)
+    )
     p.start()
     p.join(timeout=total_timeout)
 
     if p.is_alive():
         p.kill()
+        p.join()
+    p.close()
 
     return [stdio_test_results[i] for i in range(test_ct)], [stdio_runtimes[i] for i in range(test_ct)]
 
