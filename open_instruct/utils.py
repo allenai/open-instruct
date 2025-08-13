@@ -654,40 +654,34 @@ def get_git_hash() -> str:
     # Check if we have git commit from environment variable (Docker build)
     git_commit = os.environ.get("GIT_COMMIT", "")
     if git_commit:
-        # Use the first 7 characters of the commit hash for consistency
         return f"env-{git_commit[:7]}"
-
-    # If no environment variable, return empty string
-    return ""
+    else:
+        return ""
 
 
 def get_pr_tag() -> str:
     """Try to find associated pull request on GitHub (e.g., `pr-123`)"""
-    pr_tag = ""
-
     # Get git commit from environment variable or empty string
     git_commit = os.environ.get("GIT_COMMIT", "")
-    if not git_commit:
-        return pr_tag
+    if git_commit == "":
+        return ""
 
     # try finding the pull request number on github
     prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
-    if prs.status_code == 200:
-        prs = prs.json()
-        if len(prs["items"]) > 0:
-            pr = prs["items"][0]
-            pr_number = pr["number"]
-            pr_tag = f"pr-{pr_number}"
-
-    return pr_tag
+    if prs.status_code != 200:
+        return ""
+    prs = prs.json()
+    if len(prs["items"]):
+        pr = prs["items"][0]
+        return f"pr-{pr['number']}"
 
 
 def get_wandb_tags() -> List[str]:
     """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123`)"""
     existing_wandb_tags = os.environ.get("WANDB_TAGS", "")
-    git_tag = get_git_hash()
-    pr_tag = get_pr_tag()
-    non_empty_tags = [tag for tag in [existing_wandb_tags, git_tag, pr_tag] if len(tag) > 0]
+    git_hash = get_git_hash()
+    pr_name = get_pr_tag()
+    non_empty_tags = [tag for tag in [existing_wandb_tags, git_hash, pr_name] if len(tag)]
     return non_empty_tags
 
 
