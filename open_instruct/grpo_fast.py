@@ -122,12 +122,12 @@ from open_instruct.utils import (
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
+    maybe_update_beaker_description_with_wandb_url,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
     repeat_each,
     sync_gs_bucket,
-    update_beaker_description_with_wandb_url,
 )
 from open_instruct.vllm_utils3 import LLMRayActor, create_vllm_engines, init_process_group
 
@@ -1654,7 +1654,7 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
             tags=[args.exp_name] + get_wandb_tags(),
         )
         wandb_url = wandb.run.get_url()
-        update_beaker_description_with_wandb_url(wandb_url)
+        maybe_update_beaker_description_with_wandb_url(wandb_url)
 
     return beaker_config, wandb_url
 

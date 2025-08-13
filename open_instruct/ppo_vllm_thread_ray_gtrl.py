@@ -117,9 +117,9 @@ from open_instruct.utils import (
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
+    maybe_update_beaker_description_with_wandb_url,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
-    maybe_update_beaker_description_with_wandb_url,
 )
 from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
 

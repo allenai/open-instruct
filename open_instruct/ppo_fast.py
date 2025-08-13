@@ -123,9 +123,9 @@ from open_instruct.utils import (
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
+    maybe_update_beaker_description_with_wandb_url,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
-    update_beaker_description_with_wandb_url,
 )
 from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
 
@@ -1599,7 +1599,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     inits = []
     policy_group = ModelGroup(pg, PolicyTrainerRayProcess, args.num_learners_per_node, args.single_gpu_mode)
     wandb_url = wandb.run.get_url() if args.with_tracking else None
-    update_beaker_description_with_wandb_url(wandb_url)
+    maybe_update_beaker_description_with_wandb_url(wandb_url)
     inits.extend(
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
         for model in policy_group.models
