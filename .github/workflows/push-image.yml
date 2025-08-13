@@ -69,7 +69,7 @@ jobs:
         run: df -h
   
       - name: Build image
-        run: docker build -t open_instruct              
+        run: docker build -t open_instruct .
 
       - name: Check image
         run: docker run --rm open_instruct
