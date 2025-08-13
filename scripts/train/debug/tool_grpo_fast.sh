@@ -1,10 +1,30 @@
+# Get the Beaker username to construct the image name
+BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+
+echo "Using Beaker image: $BEAKER_IMAGE"
+
 # note: you might have to setup your own search api endpoint. I've been using massive-serve:
 # https://github.com/RulinShao/massive-serve
 # and then set the search_api_endpoint accordingly.
-python open_instruct/grpo_fast.py \
+uv run python mason.py \
+       --cluster ai2/jupiter-cirrascale-2 \
+       --cluster ai2/augusta-google-1 \
+       --cluster ai2/saturn-cirrascale \
+       --image "$BEAKER_IMAGE" \
+       --pure_docker_mode \
+       --workspace ai2/tulu-thinker \
+       --priority high \
+       --preemptible \
+       --num_nodes 1 \
+       --max_retries 0 \
+       --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+       --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
+       --budget ai2/oe-adapt \
+       --no-host-networking \
+       --gpus 1 \
+	   -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
         --exp_name 0605_general_tool_use_without_good_outputs \
-        --wandb_project_name rl-rag \
-        --wandb_entity rl-rag \
         --beta 0.01 \
         --num_samples_per_prompt_rollout 4 \
         --num_unique_prompts_rollout 8 \
@@ -48,4 +68,5 @@ python open_instruct/grpo_fast.py \
         --vllm_enable_prefix_caching \
         --tools code search \
         --search_api_endpoint "http://saturn-cs-aus-232.reviz.ai2.in:44177/search" \
-        --code_tool_api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute
+        --code_tool_api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute \
+	--push_to_hub false
