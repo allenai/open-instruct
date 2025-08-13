@@ -674,14 +674,25 @@ def get_pr_tag() -> str:
     if len(prs["items"]):
         pr = prs["items"][0]
         return f"pr-{pr['number']}"
+    return ""
+
+
+def get_git_branch() -> str:
+    """Try to get the current Git branch name"""
+    git_branch = os.environ.get("GIT_BRANCH", "")
+    if git_branch:
+        return f"branch-{git_branch}"
+    else:
+        return ""
 
 
 def get_wandb_tags() -> List[str]:
-    """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123`)"""
+    """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123,branch-main`)"""
     existing_wandb_tags = os.environ.get("WANDB_TAGS", "")
     git_hash = get_git_hash()
     pr_name = get_pr_tag()
-    non_empty_tags = [tag for tag in [existing_wandb_tags, git_hash, pr_name] if len(tag)]
+    git_branch = get_git_branch()
+    non_empty_tags = [tag for tag in [existing_wandb_tags, git_hash, pr_name, git_branch] if len(tag)]
     return non_empty_tags
 
 

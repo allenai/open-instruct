@@ -6,6 +6,7 @@ import re
 import secrets
 import select
 import string
+import subprocess
 import sys
 import time
 from typing import Dict, List
@@ -266,6 +267,13 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
                 secret=secret["value"],
             )
         )
+    
+    # Add Git commit and branch information
+    git_commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+    env_vars.append(beaker.EnvVar(name="GIT_COMMIT", value=git_commit))
+    
+    git_branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip()
+    env_vars.append(beaker.EnvVar(name="GIT_BRANCH", value=git_branch))
 
     useful_secrets = [
         "HF_TOKEN",
