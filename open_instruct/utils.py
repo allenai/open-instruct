@@ -973,13 +973,14 @@ def maybe_update_beaker_description_with_wandb_url(wandb_url: str) -> None:
         return
 
     client = beaker.Beaker.from_env()
-    spec = client.experiment.get(os.environ["BEAKER_WORKLOAD_ID"])
-    current_description = spec.description or ""
     try:
-        client.experiment.set_description(os.environ["BEAKER_WORKLOAD_ID"], f"{current_description}\n{wandb_url}")
-    except requests.exceptions.HTTPError:
+        spec = client.experiment.get(os.environ["BEAKER_WORKLOAD_ID"])
+    except beaker.exceptions.ExperimentNotFound:
         print(f"Failed to update Beaker experiment description with wandb URL: {wandb_url}")
         print(f"This might be fine if you are e.g. running in an interactive job.")
+        return
+    current_description = spec.description or ""
+    client.experiment.set_description(os.environ["BEAKER_WORKLOAD_ID"], f"{current_description}\n{wandb_url}")
 
 
 def live_subprocess_output(cmd: List[str]) -> str:
