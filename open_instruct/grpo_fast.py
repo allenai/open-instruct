@@ -1345,7 +1345,7 @@ def data_preparation_thread(
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
                 return
 
-        getting_response_time = timer.duration()
+        getting_response_time = timer.current_duration()
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -2427,6 +2427,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         if collated_data is None:
             continue
 
+        generate_metrics = {}
         try:
             generate_metrics = generate_metrics_Q.get_nowait()
         except Empty:
