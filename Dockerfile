@@ -17,10 +17,6 @@ RUN apt-get update --no-install-recommends && apt-get install -y nginx && mkdir 
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
 
-# Accept git commit as build argument and set as environment variable
-ARG GIT_COMMIT
-ENV GIT_COMMIT=${GIT_COMMIT}
-
 # Copy only dependency-related files first
 COPY pyproject.toml uv.lock ./
 
