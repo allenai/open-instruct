@@ -1670,13 +1670,12 @@ class LocalDatasetTransformationCache:
             if INPUT_IDS_KEY in dataset.column_names:
                 total_tokens = 0
                 trainable_tokens = 0
+
                 def count_tokens(sample):
                     token_count = len(sample[INPUT_IDS_KEY])
                     trainable_tokens = sum(1 for label in sample[LABELS_KEY] if label != -100)
-                    return {
-                        "token_count": token_count,
-                        "label_token_count": trainable_tokens,
-                    }
+                    return {"token_count": token_count, "label_token_count": trainable_tokens}
+
                 token_count_dataset = dataset.map(count_tokens, batched=False)
                 total_tokens = sum(token_count_dataset["token_count"])
                 trainable_tokens = sum(token_count_dataset["label_token_count"])
