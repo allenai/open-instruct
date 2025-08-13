@@ -48,6 +48,7 @@ from dataclasses import dataclass, field
 from multiprocessing import resource_tracker as _rt
 from typing import Any, Iterable, List, NewType, Optional, Tuple, Union
 
+import beaker
 import numpy as np
 import ray
 import requests
@@ -964,6 +965,17 @@ def maybe_get_beaker_config():
         beaker_dataset_ids=get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"]),
         beaker_dataset_id_urls=beaker_dataset_id_urls,
     )
+
+
+def update_beaker_description_with_wandb_url(wandb_url: str) -> None:
+    """Update Beaker experiment description with wandb URL if running on Beaker."""
+    if "BEAKER_WORKLOAD_ID" not in os.environ:
+        return
+
+    client = beaker.Beaker.from_env()
+    spec = client.experiment.get_spec(os.environ["BEAKER_WORKLOAD_ID"])
+    current_description = spec.description or ""
+    client.experiment.set_description(os.environ["BEAKER_WORKLOAD_ID"], f"{current_description}\n{wandb_url}")
 
 
 def live_subprocess_output(cmd: List[str]) -> str:
