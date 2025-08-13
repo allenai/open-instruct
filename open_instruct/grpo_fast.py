@@ -1433,8 +1433,8 @@ def data_preparation_thread(
             expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
             non_zero_gradient_index = np.where(expanded_mask)[0]
             advantages = advantages[non_zero_gradient_index]
-            scores = scores[non_zero_gradient_index]
             original_batch_size = len(scores)
+            scores = scores[non_zero_gradient_index]
             responses = [result.responses[i] for i in non_zero_gradient_index]
             masks = [result.masks[i] for i in non_zero_gradient_index]
             batch = batch[non_zero_gradient_index.tolist()]
