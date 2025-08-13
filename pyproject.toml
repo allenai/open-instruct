@@ -1,7 +1,3 @@
-[build-system]
-requires = ["hatchling>=1.24"]
-build-backend = "hatchling.build"
-
 [project]
 name = "open-instruct"
 version = "0.1.0"
@@ -12,7 +8,7 @@ dependencies = [
     "accelerate>=1.1.1",
     "antlr4-python3-runtime==4.11",
     "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
-    "datasets>=3.1.0",
+    "datasets>=4.0.0",
     "debugpy>=1.8.13",
     "deepspeed==0.15.4", # 0.16.0 bugs out https://github.com/microsoft/DeepSpeed/issues/6793
     "hf-transfer>=0.1.8",
@@ -35,14 +31,15 @@ dependencies = [
     "pytest-xdist==3.8.0",
     "flash-attn>=2.8.0.post2; platform_system != 'Darwin'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
+    "flashinfer-python==0.2.8; platform_system != 'Darwin'",
 ]
 
-[tool.hatch.metadata]
-allow-direct-references = true
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
 
-[tool.hatch.build.hooks.custom]
-path = "build.py"
-
+[tool.setuptools]
+py-modules = ["open_instruct"]
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]

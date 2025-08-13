@@ -54,7 +54,9 @@ jobs:
           repository: allenai/oe-eval-internal
           path: './oe-eval-internal'
           ssh-key: ${{ secrets.OE_EVAL_GIT_CLONE_ACCESS_PRIVATE_SSH_DEPLOY_KEY }}
-      
+          fetch-depth: 1
+          filter: 'blob:none'
+
       - name: Get trigger information
         id: get-trigger-info
         run: |
@@ -87,7 +89,7 @@ jobs:
       - name: Install dependencies
         run: |
           # Install development dependencies needed for mason.py
-          uv sync --only-group dev
+          uv sync
 
       - name: Delete huge unnecessary tools folder
         run: |
