@@ -73,7 +73,7 @@ COPY open_instruct open_instruct
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project
+    uv sync --frozen --no-install-project --link-mode=copy
 
 RUN uv run -m nltk.downloader punkt punkt_tab
 
