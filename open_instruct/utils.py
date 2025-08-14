@@ -650,66 +650,22 @@ class ArgumentParserPlus(HfArgumentParser):
 
 # ----------------------------------------------------------------------------
 # Experiment tracking utilities
-def get_git_tag() -> str:
-    """Try to get the latest Git tag (e.g., `no-tag-404-g98dc659` or `v1.0.0-4-g98dc659`)"""
-    git_tag = ""
-    try:
-        git_tag = (
-            subprocess.check_output(["git", "describe", "--tags"], stderr=subprocess.DEVNULL).decode("ascii").strip()
-        )
-    except subprocess.CalledProcessError as e:
-        logging.debug(f"Failed to get Git tag: {e}")
-
-    # If no Git tag found, create a custom tag based on commit count and hash
-    if len(git_tag) == 0:
-        try:
-            count = int(
-                subprocess.check_output(["git", "rev-list", "--count", "HEAD"], stderr=subprocess.DEVNULL)
-                .decode("ascii")
-                .strip()
-            )
-            hash = (
-                subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL)
-                .decode("ascii")
-                .strip()
-            )
-            git_tag = f"no-tag-{count}-g{hash}"
-        except subprocess.CalledProcessError as e:
-            logging.debug(f"Failed to get commit count and hash: {e}")
-
-    return git_tag
-
-
-def get_pr_tag() -> str:
-    """Try to find associated pull request on GitHub (e.g., `pr-123`)"""
-    pr_tag = ""
-    try:
-        git_commit = (
-            subprocess.check_output(["git", "rev-parse", "--verify", "HEAD"], stderr=subprocess.DEVNULL)
-            .decode("ascii")
-            .strip()
-        )
+def get_wandb_tags() -> List[str]:
+    """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123,branch-main`)"""
+    tags = [t for t in os.environ.get("WANDB_TAGS", "").split(",") if t != ""]
+    if "GIT_COMMIT" in os.environ:
+        git_commit = os.environ["GIT_COMMIT"]
+        tags.append(f"commit: {git_commit}")
         # try finding the pull request number on github
         prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
         if prs.status_code == 200:
             prs = prs.json()
-            if len(prs["items"]) > 0:
+            if len(prs["items"]):
                 pr = prs["items"][0]
-                pr_number = pr["number"]
-                pr_tag = f"pr-{pr_number}"
-    except Exception as e:
-        logging.debug(f"Failed to get PR number: {e}")
-
-    return pr_tag
-
-
-def get_wandb_tags() -> List[str]:
-    """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123`)"""
-    existing_wandb_tags = os.environ.get("WANDB_TAGS", "")
-    git_tag = get_git_tag()
-    pr_tag = get_pr_tag()
-    non_empty_tags = [tag for tag in [existing_wandb_tags, git_tag, pr_tag] if len(tag) > 0]
-    return non_empty_tags
+                tags.append(f"pr: {pr['number']}")
+    if "GIT_BRANCH" in os.environ:
+        tags.append(f"branch: {os.environ['GIT_BRANCH']}")
+    return tags
 
 
 # ----------------------------------------------------------------------------
