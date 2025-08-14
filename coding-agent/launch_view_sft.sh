@@ -1,16 +1,15 @@
 exp_name=rlvr_code_view_tool_sft
     python mason.py \
         --cluster ai2/jupiter-cirrascale-2 \
-        --image saurabhs/open-coding-agent \
-        --workspace ai2/open-coding-agent \
-        --priority high \
+        --image saurabhs/open-coding-agent  \
+        --workspace ai2/open-coding-agent-dev \
+        --priority urgent \
         --preemptible \
         --num_nodes 4 \
         --gs_model_name saurabhs/ethans-Qwen3-8B-nothink \
         --description "rlvr code view tool sft" \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-        --env VLLM_DISABLE_COMPILE_CACHE=1 \
         --budget ai2/oe-adapt \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \

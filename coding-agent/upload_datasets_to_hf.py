@@ -17,8 +17,8 @@ import argparse
 
 
 # HuggingFace repository names
-HF_OUTPUT_MULTI_STEP_TOOL = "saurabh5/rlvr-code-view-tool"
-HF_OUTPUT_SINGLE_STEP = "saurabh5/rlvr-code-view-single-turn"
+HF_OUTPUT_MULTI_STEP_TOOL = "saurabh5/rlvr-code-view-tool-new"
+HF_OUTPUT_SINGLE_STEP = "saurabh5/rlvr-code-view-single-turn-new"
 
 
 def _normalize_repo_name(extra: Dict[str, Any]) -> Optional[str]:
