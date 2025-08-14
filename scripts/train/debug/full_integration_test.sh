@@ -1,5 +1,10 @@
 export split_int_mix_3="hamishivi/omega-combined 63033 allenai/IF_multi_constraints_upto5 63033 saurabh5/rlvr_acecoder_filtered 63033 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2 63033"
 
+# Get the Beaker username to construct the image name
+BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+
+echo "Using Beaker image: $BEAKER_IMAGE"
 # testing general-ish data with from base + llm judge
 for split_var in split_int_mix_3; do
     split_value="${!split_var}"
@@ -7,7 +12,8 @@ for split_var in split_int_mix_3; do
     exp_name="${exp_name}_${RANDOM}"
 
     uv run python mason.py \
-        --cluster ai2/augusta-google-1 --image saurabhs/oi_stable2 \
+        --cluster ai2/augusta-google-1 \
+        --image "$BEAKER_IMAGE" \
         --pure_docker_mode \
         --workspace ai2/olmo-instruct \
         --priority high \
