@@ -56,7 +56,7 @@ import time
 from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
-from queue import Empty, Queue
+from queue import Empty, Full, Queue
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
 
 import datasets
@@ -1882,7 +1882,7 @@ def sync_weights_and_prepare_prompts(
 
 def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
     """Get the packed sequences with advantages from the packing thread."""
-    with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
+    with Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
         while True:
             try:
                 packed_data = packed_sequences_Q.get(timeout=30.0)
@@ -1893,10 +1893,12 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
         B = packed_data["B"]
         collated_data = packed_data["collated_data"]
         num_total_tokens += packed_data["num_new_tokens"]
-        if B == 0:
-            logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-            return None, data_thread_metrics, num_total_tokens
-        return collated_data, data_thread_metrics, num_total_tokens
+
+    data_thread_metrics["time/trainer_idling"] = timer.duration
+    if B == 0:
+        logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
+        return None, data_thread_metrics, num_total_tokens
+    return collated_data, data_thread_metrics, num_total_tokens
 
 
 def generate_thread(
@@ -1930,7 +1932,10 @@ def generate_thread(
             # If no batches were processed, sleep for a short time to avoid busy waiting
             time.sleep(1)
         else:
-            generate_metrics_Q.put({"time/generation": timer.duration})
+            try:
+                generate_metrics_Q.put_nowait({"time/generation": timer.duration})
+            except Full:
+                logging.warning("[Generate Thread] generate metrics queue full, skipping metric")
 
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
@@ -2049,6 +2054,7 @@ def maybe_evaluate(
     episode,
     eval_pending_queries_map: PendingQueriesMap,
     eval_generation_config,
+    generate_metrics_Q: Queue,
 ):
     """Optionally evaluate the model."""
     try:
@@ -2067,6 +2073,11 @@ def maybe_evaluate(
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
+
+        try:
+            eval_generate_metrics = generate_metrics_Q.get_nowait()
+        except Empty:
+            logging.info("[Main Thread] didn't get eval generation metrics")
 
         eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
         eval_decoded_responses = tokenizer.batch_decode(eval_result.responses, skip_special_tokens=True)
@@ -2091,6 +2102,7 @@ def maybe_evaluate(
             "eval/sequence_lengths_min": eval_sequence_lengths.min(),
             "eval/sequence_lengths_max": eval_sequence_lengths.max(),
             "eval/stop_rate": eval_stop_rate,
+            "eval/generation_time": eval_generate_metrics["time/generation"],
             **eval_reward_metrics,
         }
         print_rich_single_line_metrics(eval_metrics)
@@ -2390,8 +2402,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             generation_configs["train"],
         )
     num_total_tokens = 0
-    start_time = time.time()
     for training_step in range(resume_training_step, args.num_training_steps + 1):
+        start_time = time.time()
         check_threads_healthy(
             [packing_future, generation_future],
             stop_event,
@@ -2465,6 +2477,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             episode,
             eval_pending_queries_map,
             generation_configs["eval"],
+            generate_metrics_Q,
         )
 
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
