@@ -6,12 +6,13 @@ export MCP_TRANSPORT=StreamableHttpTransport
 export S2_API_KEY=xxxx
 python open_instruct/search_utils/toolvllm_search_generate.py \
     --json_path rubrics_v2_recomputed.json \
-    --model_path /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/rl_rag_surveyqa_samples_search_mcp_reward_longer_direct__1__1754497107_step600 \
-    --output_dir /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/rl_rag_surveyqa_samples_search_mcp_reward_longer_direct__1__1754497107_step600/sqa_test \
+    --model_path ai2-adapt-dev/tulu_3_long_finetune_qwen_7b_reg \
+    --output_dir baseline_tulu_3_qwen25_7b_reg_asta_naive_rag \
     --max_eval_samples 1000 \
     --offset 0 \
     --num_docs 3 \
-    --search_api_endpoint https://api.semanticscholar.org/graph/v1/snippet/search
+    --search_api_endpoint https://api.semanticscholar.org/graph/v1/snippet/search \
+    --naive_rag_setting
 """
 
 import argparse
@@ -20,6 +21,7 @@ import os
 import re
 import time
 import signal
+from tqdm import tqdm
 
 import ray
 from datasets import Dataset, load_dataset
@@ -123,6 +125,8 @@ def main():
         parser.add_argument("--search_api_endpoint", type=str, default="http://localhost:8000", help="Search API endpoint.")
         parser.add_argument("--use_mcp_tool", action="store_true", help="Use the MCP search tool.")
         parser.add_argument("--use_astabench_format", action="store_true", help="Format citations into a format that can be used for astabench cached solver.")
+        parser.add_argument("--dont_use_system_prompt", action="store_true", help="Don't use the system prompt.")
+        parser.add_argument("--naive_rag_setting", action="store_true", help="Naive rag setting: do a search, and directly generate after.")
         args = parser.parse_args()
 
         # make output directory
@@ -147,22 +151,6 @@ def main():
         else:
             raise ValueError(f"Question key not found in dataset: {dataset[0]}")
 
-
-        if question_key == "prompt":
-            # we have a list of messages instead of just the single string.
-            new_data = []
-            for data in dataset:
-                new_data.append({"messages": [{"role": "system", "content": SYSTEM_PROMPT}] + data["prompt"]})
-        else:
-            ds = [{"messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": data[question_key]}]} for data in dataset]
-        ds = Dataset.from_list(ds)
-
-        if args.max_eval_samples > -1 and args.max_eval_samples < len(ds):
-            ds = ds.select(range(args.offset, max(args.offset + args.max_eval_samples, len(ds))))
-            original_dataset = original_dataset[args.offset:max(args.offset + args.max_eval_samples, len(original_dataset))]
-
-        prompt_token_ids = [tokenizer.apply_chat_template(data["messages"], add_generation_prompt=True) for data in ds]
-
         if args.use_mcp_tool:
             # rn just hardcode the mcp server command
             mcp_process = launch_mcp_subprocess(True, "fastmcp run rl-rag-mcp/rag_mcp/main.py:mcp --transport streamable-http --port 8000")
@@ -179,6 +167,41 @@ def main():
                 api_endpoint=args.search_api_endpoint,
                 number_documents_to_search=args.num_docs,
             )
+
+        if args.naive_rag_setting:
+            # for each prompt, directly search with our tool.
+            # then we will add the resulting answer to the prompt.
+            search_results = []
+            for sample in tqdm(dataset):
+                output = tool(f"<search>{sample[question_key]}</search>")
+                output_str = output.output
+                search_results.append(output_str)
+
+        # naive rag also doesn't use the system prompt.
+        if not args.dont_use_system_prompt and not args.naive_rag_setting:
+            initial_message = [{"role": "system", "content": SYSTEM_PROMPT}]
+        else:
+            initial_message = []
+
+        if question_key == "prompt":
+            # we have a list of messages instead of just the single string.
+            new_data = []
+            for i, data in enumerate(dataset):
+                messages = initial_message + data["prompt"]
+                if args.naive_rag_setting:
+                    data["prompt"][-1]["content"] = f"Answer the question given the following documents.\nDocuments: {search_results[i]}\nQuestion: {data[question_key]}"
+                new_data.append({"messages": messages})
+        else:
+            ds = [{"messages": initial_message + [{"role": "user", "content": data[question_key]}]} for data in dataset]
+            if args.naive_rag_setting:
+                ds = [{"messages": initial_message + [{"role": "user", "content": f"Answer the question given the following documents.\nDocuments: {search_results[i]}\nQuestion: {data[question_key]}"}]} for i, data in enumerate(dataset)]
+        ds = Dataset.from_list(ds)
+
+        if args.max_eval_samples > -1 and args.max_eval_samples < len(ds):
+            ds = ds.select(range(args.offset, max(args.offset + args.max_eval_samples, len(ds))))
+            original_dataset = original_dataset[args.offset:max(args.offset + args.max_eval_samples, len(original_dataset))]
+
+        prompt_token_ids = [tokenizer.apply_chat_template(data["messages"], add_generation_prompt=True) for data in ds]
 
         # make actor.
         actor = ToolUseLLM(
