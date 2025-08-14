@@ -84,19 +84,27 @@ logger = logging.getLogger(__name__)
 def local_generate_thread(vllm_actors, stop_event):
     """Thread function that repeatedly calls process_from_queue on local vLLM actors."""
     logger.info("[Generate Thread] 🚀 Starting local generation thread")
+    iteration = 0
     while not stop_event.is_set():
+        iteration += 1
+        logger.info(f"[Generate Thread] Iteration {iteration} starting")
         with Timer("🔥 Generation time") as _gen_timer:
             # Call process_from_queue directly on local actors
             processed_results = []
-            for actor in vllm_actors:
+            for i, actor in enumerate(vllm_actors):
                 try:
+                    logger.info(f"[Generate Thread] Calling process_from_queue on actor {i}")
                     result = actor.process_from_queue(timeout=20)
+                    logger.info(f"[Generate Thread] Actor {i} returned: {result}")
                     processed_results.append(result)
                 except Exception as e:
-                    logger.warning(f"[Generate Thread] Error processing: {e}")
+                    logger.warning(f"[Generate Thread] Error processing actor {i}: {e}")
+                    import traceback
+                    logger.warning(traceback.format_exc())
                     processed_results.append(0)
             
             num_processed = sum(int(result) for result in processed_results)
+            logger.info(f"[Generate Thread] Processed {num_processed} requests in iteration {iteration}")
             # Suppress timing output if nothing was processed
             if num_processed == 0:
                 _gen_timer.noop = 1
@@ -109,6 +117,37 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     # Setup tokenizer (needed for padding)
     tokenizer = make_tokenizer(tc, model_config)
     logger.info(f"Tokenizer loaded: {tc.tokenizer_name_or_path}")
+    
+    # Setup tools (matching grpo_fast.py)
+    tool_objects = {}
+    if args.tools:
+        logger.info(f"Setting up tools: {args.tools}")
+        for tool in args.tools:
+            if tool.lower() == "search":
+                from open_instruct.search_utils.search_tool import SearchTool
+                tool = SearchTool(
+                    start_str="<query>",
+                    end_str="</query>",
+                    api_endpoint=args.search_api_endpoint,
+                    number_documents_to_search=args.number_documents_to_search,
+                )
+                tool_objects[tool.end_str] = tool
+                args.stop_strings.append(tool.end_str)
+                logger.info(f"Added search tool with end_str: {tool.end_str}")
+            elif tool.lower() == "code":
+                from open_instruct.tool_utils.tool_vllm import PythonCodeTool
+                tool = PythonCodeTool(
+                    start_str="<code>", 
+                    end_str="</code>", 
+                    api_endpoint=args.code_tool_api_endpoint
+                )
+                tool_objects[tool.end_str] = tool
+                args.stop_strings.append(tool.end_str)
+                logger.info(f"Added code tool with end_str: {tool.end_str}")
+        logger.info(f"Tool objects created: {list(tool_objects.keys())}")
+        logger.info(f"Updated stop_strings: {args.stop_strings}")
+    else:
+        logger.info("No tools configured")
     
     # Setup runtime variables
     args.run_name = f"{args.exp_name}_local__{args.seed}__{int(time.time())}"
@@ -147,6 +186,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     logger.info(f"Initializing {args.vllm_num_engines} local LLMRayActor instances...")
     vllm_actors = []
     for i in range(args.vllm_num_engines):
+        logger.info(f"Creating LLMRayActor {i}...")
         llm_actor = LLMRayActor(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
@@ -168,10 +208,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             results_queue=inference_results_Q,
             eval_results_queue=evaluation_inference_results_Q,
             actor_manager=actor_manager,
-            tools=None,  # No tools for this test
-            max_tool_calls=None,
+            tools=tool_objects,  # Use the tool objects we created
+            max_tool_calls=args.max_tool_calls,  # Use max_tool_calls from args
         )
         vllm_actors.append(llm_actor)
+        logger.info(f"LLMRayActor {i} created successfully")
     logger.info("All LLMRayActor instances initialized successfully")
     
     # Setup training data iterator
