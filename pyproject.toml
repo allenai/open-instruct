@@ -19,12 +19,11 @@ dependencies = [
     "nvitop>=1.4.2",
     "packaging>=24.2",
     "peft>=0.13.2",
-    "ray[default]>=2.44.1",
+    "ray[default]==2.46.0",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch==2.7.0",
-    "transformers>=4.52.4,<4.54.0", # see https://github.com/vllm-project/vllm-ascend/issues/2046
-    "vllm==0.9.1",    
+    "transformers @ git+https://github.com/2015aroras/transformers.git@shanea/olmo2-retrofit",
     "wandb==0.18.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
@@ -32,6 +31,7 @@ dependencies = [
     "flash-attn>=2.8.0.post2; platform_system != 'Darwin'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
     "flashinfer-python==0.2.8; platform_system != 'Darwin'",
+    "vllm",
 ]
 
 [build-system]
@@ -46,12 +46,14 @@ flash-attn = [{ requirement = "torch", match-runtime = true }]
 
 [tool.uv.extra-build-variables]
 flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
+vllm = { VLLM_USE_PRECOMPILED = "1" }
 
 # pytorch related setups
 [tool.uv.sources]
 torch = [
   { index = "pytorch-cu128", marker = "platform_system != 'Darwin'"},
 ]
+vllm = { path = "./vllm_olmo3", editable = true }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
@@ -101,6 +103,7 @@ target-version = ['py310']
 
 [tool.isort]
 known_first_party = ["open_instruct"]
+known-third-party = ["wandb"]
 profile = "black"
 src_paths = ["open_instruct"]
 
