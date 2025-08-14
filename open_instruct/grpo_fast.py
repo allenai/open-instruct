@@ -1345,7 +1345,7 @@ def data_preparation_thread(
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
                 return
 
-        getting_response_time = timer.current_duration()
+        getting_response_time = timer.duration
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -1951,7 +1951,7 @@ def one_training_step(
 ):
     """Train the model for one step."""
     update_ref_policy_future = []
-    with Timer("[Main Thread] 🗡️ Training") as timer:
+    with Timer("[Main Thread] 🗡️ Training") as train_timer:
         metrics_list: List[dict[str, float]] = ray_get_with_progress(
             [
                 policy_group.models[i].train.remote(
@@ -1970,68 +1970,73 @@ def one_training_step(
                 [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
             )
 
-        average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
-        metrics = {
-            "episode": episode,
-            "training_step": training_step,
-            "val/num_total_tokens": num_total_tokens,
-            "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
-            "tokens_per_second": num_total_tokens / (time.time() - start_time),
-            "time/training": timer.current_duration(),
-            **data_thread_metrics,
-            **average_metrics,
-        }
-        # Print only scalar metrics
-        scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (float, int))}
-        print_rich_single_line_metrics(scalar_metrics)
+    save_time = 0
+    if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
+        with Timer("[Main Thread] 🗡️ Saving model") as timer:
+            checkpoint_dir = f"{args.output_dir}_checkpoints"
+            step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
+            logger.info(f"Saving model at step {training_step} to {step_dir}")
+            ray_get_with_progress(
+                [
+                    policy_group.models[i].save_model.remote(step_dir, chat_template_name, tokenizer)
+                    for i in range(args.world_size)
+                ],
+                desc=f"Saving model at step {training_step}",
+            )
+            if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
+                leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
+                for i in range(args.world_size):
+                    policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                        step_dir, leaderboard_name, wandb_url, training_step
+                    )
+        save_time += timer.duration
 
-        if args.with_tracking:
-            # Convert array/list metrics to wandb histograms for logging
-            for key, value in metrics.items():
-                if isinstance(value, np.ndarray) or isinstance(value, list):
-                    if len(value) > 0:
-                        metrics[key] = wandb.Histogram(value)
-            wandb.log(metrics, step=episode)
-
-        if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
-            with Timer("[Main Thread] 🗡️ Saving model"):
-                checkpoint_dir = f"{args.output_dir}_checkpoints"
-                step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-                logger.info(f"Saving model at step {training_step} to {step_dir}")
-                ray_get_with_progress(
-                    [
-                        policy_group.models[i].save_model.remote(step_dir, chat_template_name, tokenizer)
-                        for i in range(args.world_size)
-                    ],
-                    desc=f"Saving model at step {training_step}",
-                )
-                if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
-                    leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
-                    for i in range(args.world_size):
-                        policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                            step_dir, leaderboard_name, wandb_url, training_step
-                        )
-        if (
-            args.checkpoint_state_freq > 0
-            and training_step % args.checkpoint_state_freq == 0
-            and args.checkpoint_state_dir is not None
-        ):
-            with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
-                client_state = {"training_step": training_step}
-                ray_get_with_progress(
-                    [
-                        policy_group.models[i].save_checkpoint_state.remote(args.checkpoint_state_dir, client_state)
-                        for i in range(args.world_size)
-                    ],
-                    desc=f"Saving checkpoint state at step {training_step}",
-                )
-                logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
+    if (
+        args.checkpoint_state_freq > 0
+        and training_step % args.checkpoint_state_freq == 0
+        and args.checkpoint_state_dir is not None
+    ):
+        with Timer("[Main Thread] 🗡️ Saving checkpoint state") as timer:
+            client_state = {"training_step": training_step}
+            ray_get_with_progress(
+                [
+                    policy_group.models[i].save_checkpoint_state.remote(args.checkpoint_state_dir, client_state)
+                    for i in range(args.world_size)
+                ],
+                desc=f"Saving checkpoint state at step {training_step}",
+            )
+            logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
+        save_time += timer.duration
 
     if len(update_ref_policy_future) > 0:
         with Timer("[Main Thread] 🔃 Updating reference policy"):
             ray_get_with_progress(update_ref_policy_future, desc="Updating reference policy")
 
-    return average_metrics
+    average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
+    total_time = time.time() - start_time
+    metrics = {
+        "episode": episode,
+        "training_step": training_step,
+        "val/num_total_tokens": num_total_tokens,
+        "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
+        "tokens_per_second": num_total_tokens / total_time,
+        "time/total": total_time,
+        "time/training": train_timer.duration,
+        "time/saving": save_time,
+        **data_thread_metrics,
+        **average_metrics,
+    }
+    # Print only scalar metrics
+    scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (float, int))}
+    print_rich_single_line_metrics(scalar_metrics)
+
+    if args.with_tracking:
+        # Convert array/list metrics to wandb histograms for logging
+        for key, value in metrics.items():
+            if isinstance(value, np.ndarray) or isinstance(value, list):
+                if len(value) > 0:
+                    metrics[key] = wandb.Histogram(value)
+        wandb.log(metrics, step=episode)
 
 
 def maybe_evaluate(
