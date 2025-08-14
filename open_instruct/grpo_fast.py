@@ -64,6 +64,7 @@ import numpy as np
 import pandas as pd
 import ray
 import torch
+import torch.distributed as dist
 import torch.utils
 import torch.utils.data
 import vllm
@@ -2293,6 +2294,12 @@ def cleanup_training_resources(
 
     # Clean up judge clients
     cleanup_judge_clients()
+
+    # Clean up distributed process group if it was initialized
+    if dist.is_initialized():
+        logger.info("Destroying process group...")
+        dist.destroy_process_group()
+        logger.info("✅ Process group destroyed")
 
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_samples: int = 32):

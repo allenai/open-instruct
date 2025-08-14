@@ -20,34 +20,14 @@ import ray
 from ray.util import queue as ray_queue
 from tqdm import tqdm
 
-# Import from grpo_fast.py - main components
-from open_instruct.grpo_fast import (
-    Args,
-    PendingQueriesMap,
-    ShufflingIterator,
-    ShutdownSentinel,
-    accumulate_inference_batches,
-    check_threads_healthy,
-    collate_fn,
-    create_generation_configs,
-    data_preparation_thread,
-    load_data_from_packing_thread,
-    make_reward_fn,
-    make_tokenizer,
-    next_batch,
-    setup_datasets,
-    split_and_insert_batch,
-)
+# Import grpo_fast as a module
+import open_instruct.grpo_fast as grpo_fast
 
 # Import from other modules
 from open_instruct.dataset_transformation import TokenizerConfig
-from open_instruct.model_utils import (
-    Batch,
-    ModelConfig,
-)
-from open_instruct.queue_types import GenerationResult, PromptRequest
-from open_instruct.rl_utils2 import Timer, pack_sequences
-from open_instruct.utils import ArgumentParserPlus, ray_get_with_progress
+from open_instruct.model_utils import ModelConfig
+from open_instruct.rl_utils2 import Timer
+from open_instruct.utils import ArgumentParserPlus
 from open_instruct.vllm_utils3 import ActorManager, LLMRayActor
 
 
@@ -111,11 +91,11 @@ def local_generate_thread(vllm_actors, stop_event):
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
-def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
+def main(args: grpo_fast.Args, tc: TokenizerConfig, model_config: ModelConfig):
     """Main function to run local GRPO generation and token counting."""
     
     # Setup tokenizer (needed for padding)
-    tokenizer = make_tokenizer(tc, model_config)
+    tokenizer = grpo_fast.make_tokenizer(tc, model_config)
     logger.info(f"Tokenizer loaded: {tc.tokenizer_name_or_path}")
     
     # Setup tools (matching grpo_fast.py)
@@ -155,7 +135,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     args.num_training_steps = args.num_training_steps or 10
     
     # Setup datasets
-    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
+    train_dataset, eval_dataset = grpo_fast.setup_datasets(args, tc, tokenizer)
     
     if not train_dataset:
         logger.error("No training dataset available!")
@@ -180,7 +160,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     actor_manager = ActorManager.remote()
     
     # Create generation configs
-    generation_configs = create_generation_configs(args)
+    generation_configs = grpo_fast.create_generation_configs(args)
     
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tool_objects:
@@ -229,21 +209,21 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     
     # Setup training data iterator
     train_dataset_idxs = np.arange(len(train_dataset))
-    iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
+    iter_dataloader = grpo_fast.ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
     
     # Create pending queries maps
-    pending_queries_map = PendingQueriesMap()
-    eval_pending_queries_map = PendingQueriesMap()
+    pending_queries_map = grpo_fast.PendingQueriesMap()
+    eval_pending_queries_map = grpo_fast.PendingQueriesMap()
     
     # Prepare eval batch if needed
     if eval_dataset is None:
         eval_batch = None
     else:
         eval_dataset_indices = list(range(min(32, len(eval_dataset))))  # Use 32 eval samples
-        eval_batch = next_batch(eval_dataset_indices, eval_dataset)
+        eval_batch = grpo_fast.next_batch(eval_dataset_indices, eval_dataset)
     
     # Create reward function
-    reward_fn = make_reward_fn(args)
+    reward_fn = grpo_fast.make_reward_fn(args)
     
     # Start threads
     stop_event = threading.Event()
@@ -251,7 +231,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     
     logger.info("======== ✅ data preparation thread starts =========")
     packing_future = executor.submit(
-        data_preparation_thread,
+        grpo_fast.data_preparation_thread,
         reward_fn,
         inference_results_Q,
         packed_sequences_Q,
@@ -270,8 +250,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     # Send initial data to ensure we have a N-step offset
     for _ in range(args.async_steps):
         dataset_indices = next(iter_dataloader)
-        batch = next_batch(dataset_indices, train_dataset)
-        split_and_insert_batch(
+        batch = grpo_fast.next_batch(dataset_indices, train_dataset)
+        grpo_fast.split_and_insert_batch(
             batch,
             1,  # training_step
             args.vllm_num_engines,
@@ -289,7 +269,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     
     for training_step in range(1, args.num_training_steps + 1):
         # Check thread health
-        check_threads_healthy(
+        grpo_fast.check_threads_healthy(
             [packing_future, generation_future],
             stop_event,
             executor,
@@ -298,8 +278,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         
         # Prepare next batch of prompts
         dataset_indices = next(iter_dataloader)
-        batch = next_batch(dataset_indices, train_dataset)
-        split_and_insert_batch(
+        batch = grpo_fast.next_batch(dataset_indices, train_dataset)
+        grpo_fast.split_and_insert_batch(
             batch,
             training_step + args.async_steps,  # Future step for async
             args.vllm_num_engines,
@@ -309,7 +289,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         )
         
         # Get packed data from packing thread
-        collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
+        collated_data, data_thread_metrics, num_total_tokens = grpo_fast.load_data_from_packing_thread(
             packed_sequences_Q, num_total_tokens, stop_event
         )
         
@@ -348,19 +328,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     logger.info(f"Average tokens/sec: {num_total_tokens / total_time:.1f}")
     logger.info("=" * 50)
     
-    # Clean up
+    # Clean up using the same cleanup function as grpo_fast.py
     logger.info("Cleaning up...")
-    stop_event.set()
-    
-    # Send shutdown sentinels
-    for _ in range(args.vllm_num_engines):
-        try:
-            param_prompt_Q.put(ShutdownSentinel(), timeout=1.0)
-        except:
-            pass
-    
-    # Wait for threads to finish
-    executor.shutdown(wait=True)
+    queues = [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q]
+    grpo_fast.cleanup_training_resources(stop_event, executor, queues, actor_manager)
     
     # Shutdown Ray
     ray.shutdown()
@@ -369,11 +340,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
 if __name__ == "__main__":
     # Parse arguments
-    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
+    parser = ArgumentParserPlus((grpo_fast.Args, TokenizerConfig, ModelConfig))
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
     
     # Validate types
-    assert isinstance(args, Args)
+    assert isinstance(args, grpo_fast.Args)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
     
