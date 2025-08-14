@@ -182,6 +182,18 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     # Create generation configs
     generation_configs = create_generation_configs(args)
     
+    # Convert max_tool_calls to a dict mapping tool end strings to their limits
+    if tool_objects:
+        assert len(args.max_tool_calls) == 1 or len(args.max_tool_calls) == len(tool_objects), (
+            "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
+        )
+        if len(args.max_tool_calls) == 1:
+            max_tool_calls_dict = {end_str: args.max_tool_calls[0] for end_str in tool_objects.keys()}
+        else:
+            max_tool_calls_dict = {end_str: limit for end_str, limit in zip(tool_objects.keys(), args.max_tool_calls)}
+    else:
+        max_tool_calls_dict = {}
+    
     # Initialize local LLMRayActor instances (not as ray.remote)
     logger.info(f"Initializing {args.vllm_num_engines} local LLMRayActor instances...")
     vllm_actors = []
@@ -209,7 +221,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             eval_results_queue=evaluation_inference_results_Q,
             actor_manager=actor_manager,
             tools=tool_objects,  # Use the tool objects we created
-            max_tool_calls=args.max_tool_calls,  # Use max_tool_calls from args
+            max_tool_calls=max_tool_calls_dict,  # Use the converted dictionary
         )
         vllm_actors.append(llm_actor)
         logger.info(f"LLMRayActor {i} created successfully")
