@@ -307,7 +307,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             pass
     
     # Wait for threads to finish
-    executor.shutdown(wait=True, timeout=10)
+    executor.shutdown(wait=True)
     
     # Shutdown Ray
     ray.shutdown()
