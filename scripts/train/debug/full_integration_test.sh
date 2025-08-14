@@ -12,7 +12,7 @@ for split_var in split_int_mix_3; do
         --workspace ai2/olmo-instruct \
         --priority high \
         --preemptible \
-        --num_nodes 5 \
+        --num_nodes 2 \
         --max_retries 0 \
         --env VLLM_DISABLE_COMPILE_CACHE=1 \
         --env HOSTED_VLLM_API_BASE=http://saturn-cs-aus-233.reviz.ai2.in:8001/v1 \
@@ -23,7 +23,7 @@ for split_var in split_int_mix_3; do
         --exp_name ${exp_name} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 8 \
-        --num_unique_prompts_rollout 64 \
+        --num_unique_prompts_rollout 32 \
         --num_mini_batches 4 \
         --num_epochs 1 \
         --learning_rate 1e-6 \
@@ -45,15 +45,15 @@ for split_var in split_int_mix_3; do
         --temperature 1.0 \
         --ground_truths_key ground_truth \
         --sft_messages_key messages \
-        --total_episodes 10000000 \
+        --total_episodes 10_000 \
         --deepspeed_stage 3 \
-        --num_learners_per_node 8 8 \
-        --vllm_num_engines 24 \
+        --num_learners_per_node 8 \
+        --vllm_num_engines 8 \
         --vllm_tensor_parallel_size 1 \
         --lr_scheduler_type constant \
         --apply_verifiable_reward true \
         --seed 1 \
-        --num_evals 5 \
+        --local_eval_every 100 \
         --save_freq 100 \
         --eval_priority high \
         --try_launch_beaker_eval_jobs_on_weka True \
