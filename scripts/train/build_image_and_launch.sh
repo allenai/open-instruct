@@ -1,12 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
-# Get the current git branch
+git_hash=$(git rev-parse --short HEAD)
 git_branch=$(git rev-parse --abbrev-ref HEAD)
 image_name=open-instruct-integration-test-${git_branch}
 
-# Build the Docker image exactly like push-image.yml does
-docker build --platform=linux/amd64 . -t "$image_name"
+# Build the Docker image exactly like push-image.yml does, passing git info as build args
+docker build --platform=linux/amd64 \
+  --build-arg GIT_COMMIT="$git_hash" \
+  --build-arg GIT_BRANCH="$git_branch" \
+  . -t "$image_name"
 
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 

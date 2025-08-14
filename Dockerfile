@@ -75,6 +75,14 @@ RUN uv run -m nltk.downloader punkt punkt_tab
 
 WORKDIR /stage/
 
+# Add build arguments for git information
+ARG GIT_COMMIT=""
+ARG GIT_BRANCH=""
+
+# Set them as environment variables
+ENV GIT_COMMIT=${GIT_COMMIT}
+ENV GIT_BRANCH=${GIT_BRANCH}
+
 # Copy all application code at the end
 COPY open_instruct open_instruct
 COPY eval eval
@@ -82,7 +90,6 @@ COPY configs configs
 COPY scripts scripts
 COPY oe-eval-internal oe-eval-internal
 COPY mason.py mason.py
-COPY .git/ ./.git/
 
 # Set up the environment
 ENV PATH=/stage/.venv/bin:$PATH
