@@ -182,7 +182,7 @@ NEXT_MODEL_DEV=(
     # [faster] minerva_math_500::hamish_zs_reasoning
     "minerva_math::hamish_zs_reasoning"
     "gsm8k::zs_cot_latex"
-    "omega:0-shot-chat"
+    "omega_500:0-shot-chat" # OLD: "omega:0-shot-chat"
     "aime:zs_cot_r1::pass_at_32_2024_temp1"
     "aime:zs_cot_r1::pass_at_32_2025_temp1"  # OLD: "aime::hamish_zs_reasoning"
     
