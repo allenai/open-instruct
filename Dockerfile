@@ -34,6 +34,14 @@ RUN wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOFED_VER}/host/doca-ho
     apt-get update && apt-get -y install doca-ofed-userspace && \
     rm doca-host_${DOFED_VER}-093000-25.01-${OS_VER}_amd64.deb
 
+# Install Google Cloud CLI
+RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" \
+        | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list \
+    && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+        | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - \
+    && apt-get update -y && apt-get install google-cloud-sdk -y \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN curl --silent \
     --connect-timeout 5 \
     --max-time 10 \
@@ -44,7 +52,7 @@ RUN curl --silent \
     "https://beaker.org/api/v3/release/cli?os=linux&arch=amd64&version=${BEAKER_VERSION}" \
     && tar -zxf beaker.tar.gz -C /usr/local/bin/ ./beaker \
     && rm beaker.tar.gz
-    
+
 COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
 
 # Install Beaker Gantry user-wide in an isolated venv
