@@ -382,6 +382,8 @@ class Args:
     """The beaker evaluation tasks to launch"""
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
+    oe_eval_beaker_image: Optional[str] = None
+    """the docker image for evaluation for oe-eval"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
 
@@ -1078,6 +1080,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 args.stop_strings,
                 args.gs_bucket_path,
                 args.eval_priority,
+                args.oe_eval_beaker_image,
             )
 
 
