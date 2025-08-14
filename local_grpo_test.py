@@ -6,6 +6,9 @@ Directly instantiates LLMRayActor locally and reports token counts instead of le
 
 import logging
 import os
+
+# Set NCCL_CUMEM_ENABLE for performance reasons before importing vllm
+os.environ["NCCL_CUMEM_ENABLE"] = "0"
 import threading
 import time
 from concurrent import futures
@@ -30,22 +33,44 @@ from open_instruct.grpo_fast import (
     data_preparation_thread,
     load_data_from_packing_thread,
     make_reward_fn,
+    make_tokenizer,
     next_batch,
     setup_datasets,
     split_and_insert_batch,
 )
 
 # Import from other modules
+from open_instruct.dataset_transformation import TokenizerConfig
 from open_instruct.model_utils import (
     Batch,
     ModelConfig,
-    TokenizerConfig,
-    make_tokenizer,
 )
 from open_instruct.queue_types import GenerationResult, PromptRequest
 from open_instruct.rl_utils2 import Timer, pack_sequences
 from open_instruct.utils import ArgumentParserPlus, ray_get_with_progress
 from open_instruct.vllm_utils3 import ActorManager, LLMRayActor
+
+
+class MockQueue:
+    """Mock queue that works like a Ray queue but uses Python Queue internally."""
+    def __init__(self, maxsize=0):
+        self._queue = Queue(maxsize=maxsize)
+    
+    def put(self, item, timeout=None):
+        """Put item in queue, compatible with Ray queue interface."""
+        self._queue.put(item, timeout=timeout)
+    
+    def get(self, timeout=None):
+        """Get item from queue, compatible with Ray queue interface."""
+        return self._queue.get(timeout=timeout)
+    
+    def empty(self):
+        """Check if queue is empty."""
+        return self._queue.empty()
+    
+    def qsize(self):
+        """Get queue size."""
+        return self._queue.qsize()
 
 # Setup logging
 logging.basicConfig(
@@ -98,10 +123,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         return
     
     # Calculate max model length
-    max_model_len = tc.max_seq_length or 4096
+    max_model_len = args.max_token_length
     
-    # Initialize Ray for queues
-    ray.init(ignore_reinit_error=True)
+    # Initialize Ray before creating Ray objects (same as grpo_fast.py)
+    ray.init(dashboard_host="0.0.0.0")
     
     # Create Ray queues for vLLM communication
     queue_size = (args.async_steps + 1) * args.vllm_num_engines
@@ -113,7 +138,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     packed_sequences_Q = Queue(maxsize=args.async_steps)
     
     # Create ActorManager as a Ray actor
-    actor_manager = ray.remote(ActorManager).remote()
+    actor_manager = ActorManager.remote()
     
     # Create generation configs
     generation_configs = create_generation_configs(args)
