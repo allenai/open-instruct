@@ -26,11 +26,11 @@ curl -X POST http://localhost:1234/view_file -H "Content-Type: application/json"
 import json
 import logging
 import os
+import subprocess
+import tempfile
+import threading
 import traceback
 from typing import Any, List, Optional
-import tempfile
-import subprocess
-import threading
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel

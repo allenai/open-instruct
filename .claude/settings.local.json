@@ -13,8 +13,10 @@
       "Bash(ldd:*)",
       "Bash(uv pip show:*)",
       "Bash(uv sync:*)",
-      "Bash(uv pip uninstall:*)"
+      "Bash(uv pip uninstall:*)",
+      "Bash(curl:*)"
     ],
-    "deny": []
+    "deny": [],
+    "defaultMode": "acceptEdits"
   }
 }

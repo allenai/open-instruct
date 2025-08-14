@@ -3,7 +3,7 @@ exp_name=rlvr_code_view_tool_sft
         --cluster ai2/jupiter-cirrascale-2 \
         --image saurabhs/open-coding-agent  \
         --workspace ai2/open-coding-agent-dev \
-        --priority urgent \
+        --priority high \
         --preemptible \
         --num_nodes 4 \
         --gs_model_name saurabhs/ethans-Qwen3-8B-nothink \
@@ -14,8 +14,8 @@ exp_name=rlvr_code_view_tool_sft
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
-        --num_samples_per_prompt_rollout 16 \
-        --num_unique_prompts_rollout 256 \
+        --num_samples_per_prompt_rollout 8 \
+        --num_unique_prompts_rollout 32 \
         --num_mini_batches 1 \
         --num_epochs 1 \
         --learning_rate 5e-7 \

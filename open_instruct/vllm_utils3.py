@@ -15,8 +15,8 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
-import logging
 import dataclasses
+import logging
 import os
 import queue
 from datetime import timedelta
@@ -218,7 +218,7 @@ class LLMRayActor:
                 request.generation_config,
                 dataset_index=request.dataset_index,
                 training_step=request.training_step,
-                tool_contexts=request.tool_contexts
+                tool_contexts=request.tool_contexts,
             )
             if request.is_eval:
                 self.eval_results_queue.put(result, timeout=1)

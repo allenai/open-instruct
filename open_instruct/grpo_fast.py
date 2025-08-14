@@ -1871,9 +1871,7 @@ def split_and_insert_batch(
                 training_step=training_step,
                 dataset_index=sub_batch.indices,
                 is_eval=is_eval,
-                tool_contexts=(
-                    tool_contexts_next[start_idx:end_idx] if tool_contexts_next is not None else None
-                ),
+                tool_contexts=(tool_contexts_next[start_idx:end_idx] if tool_contexts_next is not None else None),
             )
         )
 
@@ -1908,7 +1906,7 @@ def sync_weights_and_prepare_prompts(
     try:
         # Build from batch.datasets; each item may be a dict with tool_context/patch_metadata, or a JSON string
         ctx_list = []
-        for ds_item in (batch.datasets or []):
+        for ds_item in batch.datasets or []:
             ctx = None
             if isinstance(ds_item, dict):
                 ctx = ds_item.get("tool_context") or ds_item.get("patch_metadata")

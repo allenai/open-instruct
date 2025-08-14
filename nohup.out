@@ -303,3 +303,56 @@ INFO:     Application startup complete.
 ERROR:    [Errno 98] error while attempting to bind on address ('0.0.0.0', 1234): address already in use
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
+INFO:     Started server process [1634910]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:1234 (Press CTRL+C to quit)
+INFO:     127.0.0.1:34756 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55662 - "POST / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:55674 - "POST / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:55684 - "POST / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:55690 - "POST / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:48374 - "POST /view_file HTTP/1.1" 404 Not Found
+Cloning into 'starlette'...
+Note: switching to 'db5063c2'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+HEAD is now at db5063c Bump the python-packages group with 5 updates (#2779)
+	Set cwd to /weka/oe-adapt-default/saurabhs/repos/open-instruct-3/open_instruct/code/repos/starlette and checked out db5063c2...
+INFO:     127.0.0.1:36264 - "POST /view_file HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56326 - "POST / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:56334 - "POST / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:56340 - "POST / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:56352 - "POST / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:40190 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49352 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49362 - "POST /view HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:58446 - "POST /code_view HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:47920 - "POST /file HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:47922 - "GET /docs HTTP/1.1" 200 OK
+HEAD is now at db5063c Bump the python-packages group with 5 updates (#2779)
+	Set cwd to /weka/oe-adapt-default/saurabhs/repos/open-instruct-3/open_instruct/code/repos/starlette and checked out db5063c2...
+INFO:     127.0.0.1:53812 - "POST /view_file HTTP/1.1" 200 OK
+HEAD is now at db5063c Bump the python-packages group with 5 updates (#2779)
+	Set cwd to /weka/oe-adapt-default/saurabhs/repos/open-instruct-3/open_instruct/code/repos/starlette and checked out db5063c2...
+INFO:     127.0.0.1:53824 - "POST /view_file HTTP/1.1" 200 OK
+HEAD is now at db5063c Bump the python-packages group with 5 updates (#2779)
+	Set cwd to /weka/oe-adapt-default/saurabhs/repos/open-instruct-3/open_instruct/code/repos/starlette and checked out db5063c2...
+INFO:     127.0.0.1:53832 - "POST /view_file HTTP/1.1" 200 OK
+HEAD is now at db5063c Bump the python-packages group with 5 updates (#2779)
+	Set cwd to /weka/oe-adapt-default/saurabhs/repos/open-instruct-3/open_instruct/code/repos/starlette and checked out db5063c2...
+INFO:     127.0.0.1:53844 - "POST /view_file HTTP/1.1" 200 OK
