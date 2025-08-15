@@ -589,7 +589,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if args.sequence_parallel_size > 1:
             self.mpu = UlyssesSPAttentionHF.register_with_transformers(
                 model_name_or_path=model_config.model_name_or_path,
-                core_attn_implementation="flash_attention_2",
+                core_attn_implementation="sdpa",
                 sequence_parallel_size=args.sequence_parallel_size,
                 max_length=args.max_token_length,
                 micro_batch_size=args.per_device_train_batch_size,
@@ -600,7 +600,7 @@ class PolicyTrainerRayProcess(RayProcess):
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
+            attn_implementation="sdpa",
             use_cache=False,
         )
         disable_dropout_in_model(self.policy)
@@ -628,7 +628,7 @@ class PolicyTrainerRayProcess(RayProcess):
             optimizer=self.optimizer,
             config=ds_config,
             lr_scheduler=scheduler,
-            dist_init_required=True,
+            dist_init_required=False,
             mpu=self.mpu,
         )
         optimization_steps_done = 0
@@ -674,7 +674,7 @@ class PolicyTrainerRayProcess(RayProcess):
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
+            attn_implementation="sdpa",
             use_cache=False,
         )
         disable_dropout_in_model(self.ref_policy)
@@ -688,10 +688,12 @@ class PolicyTrainerRayProcess(RayProcess):
             self.sp_rank = groups._get_sequence_parallel_rank()
             print(f"SETTING UP: {self.sp_rank=} {self.sp_world_size=}")
             self.splitter = UlyssesSPSplitter(
-                sp_rank=self.sp_rank, sp_group=self.sp_group, sp_world_size=self.sp_world_size, device=self.device
+                sp_rank=self.sp_rank, sp_group=self.sp_group, sp_world_size=self.sp_world_size, device=self.device, pad_token_id=self.tokenizer.pad_token_id
             )
         else:
             self.splitter = None
+
+        print("WE SETUP !!")
 
         return optimization_steps_done
 
@@ -709,6 +711,7 @@ class PolicyTrainerRayProcess(RayProcess):
         padding_mask = query_response != pad_token_id
         input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
         # NOTE: the [:-1] and [1:] are because the logits and generated tokens are off by 1 in index
+        print("pre forward")
         output = model(
             input_ids=input_ids[:, :-1],
             # @vwxyzjn: without clamp, we get index out of bounds errors; TODO: investigate
@@ -716,6 +719,7 @@ class PolicyTrainerRayProcess(RayProcess):
             position_ids=position_ids[:, :-1],
             return_dict=True,
         )
+        print("post forward")
         logits = output.logits
         logits /= temperature + 1e-7
         logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
@@ -918,6 +922,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     attention_mask = collated_attention_masks[i]
                     position_id = collated_position_ids[i]
                     response_mask = collated_response_masks[i]
+                    print(f"Calling forward! {groups._get_sequence_parallel_rank()=}")
                     ref_logprob, _ = self.forward(
                         self.ref_policy,
                         query_response,

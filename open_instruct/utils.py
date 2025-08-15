@@ -1608,9 +1608,8 @@ def check_runtime_leaks(
 
     return report
 
-
 class UlyssesSPSplitter:
-    def __init__(self, sp_rank: int, sp_group, sp_world_size, device):
+    def __init__(self, sp_rank: int, sp_group, sp_world_size, device, pad_token_id):
         """
         Adapted from the UlyssesSPDataLoaderAdapter
         (https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/runtime/sequence_parallel/ulysses_sp.py#L427)
@@ -1620,26 +1619,49 @@ class UlyssesSPSplitter:
         self.sp_group = sp_group
         self.sp_world_size = sp_world_size
         self.device = device
+        self.pad_token_id = pad_token_id
 
     def split_batch(self, batch):
         micro_batches = defaultdict(dict)
 
-        # we have batches of variable seqlen so in order to do all_gather on batches - we need to know the exact length of each tensor on each rank
-        seqlen = torch.tensor(len(batch["input_ids"][0][0]), dtype=torch.int64, device=self.device)
+        # Get all sequence lengths and find the maximum
+        # batch[k] is a list of tensors, so we need to get the first item's sequence length
+        local_seqlen = torch.tensor([len(batch["input_ids"][0])], dtype=torch.int64, device=self.device)
         seqlens = [torch.zeros(1, dtype=torch.int64, device=self.device) for _ in range(self.sp_world_size)]
-        dist.all_gather(seqlens, seqlen, group=self.sp_group)
+        dist.all_gather(seqlens, local_seqlen, group=self.sp_group)
         seqlens = [x[0].item() for x in seqlens]
+
+        # Use the maximum sequence length for padding
+        max_seqlen = max(seqlens)
+
+        # Ensure max_seqlen is divisible by sp_world_size
+        if max_seqlen % self.sp_world_size != 0:
+            max_seqlen = ((max_seqlen + self.sp_world_size - 1) // self.sp_world_size) * self.sp_world_size
 
         for k in batch.keys():
             if torch.is_tensor(batch[k]):
+                # batch[k] is a single tensor, move to device and pad
                 batch[k] = batch[k].to(self.device)
+
+                # Pad the tensor to max_seqlen if needed
+                if batch[k].shape[1] < max_seqlen:
+                    pad_len = max_seqlen - batch[k].shape[1]
+                    if k == "input_ids":
+                        batch[k] = F.pad(batch[k], (0, pad_len), value=self.pad_token_id)
+                    elif k == "attention_mask":
+                        batch[k] = F.pad(batch[k], (0, pad_len), value=0)
+                    else:
+                        batch[k] = F.pad(batch[k], (0, pad_len), value=-100 if k == "labels" else 0)
+
                 with torch.no_grad():
+                    # Now all tensors have the same shape (batch_size, max_seqlen)
                     tensor_list = [
-                        torch.zeros((batch[k].shape[0], seqlens[i]), dtype=batch[k].dtype, device=batch[k].device)
-                        for i in range(self.sp_world_size)
+                        torch.zeros((batch[k].shape[0], max_seqlen), dtype=batch[k].dtype, device=batch[k].device)
+                        for _ in range(self.sp_world_size)
                     ]
                     dist.all_gather(tensor_list, batch[k], group=self.sp_group)
             else:
+                # batch[k] is a list or other non-tensor
                 tensor_list = [None for _ in range(self.sp_world_size)]
                 dist.all_gather_object(tensor_list, batch[k], group=self.sp_group)
 
@@ -1651,7 +1673,8 @@ class UlyssesSPSplitter:
 
         batch_shards = []
         for batch in micro_batches.values():
-            seq_length = len(batch["input_ids"][0][0])
+            # After all_gather, batch[k] should be tensors again
+            seq_length = len(batch["input_ids"][0][0]) if isinstance(batch["input_ids"], list) else batch["input_ids"].shape[1]
             if seq_length % self.sp_world_size != 0:
                 raise ValueError(f"batch's seqlen={seq_length} isn't divisible by sp-size={self.sp_world_size}")
 
@@ -1672,8 +1695,9 @@ class UlyssesSPSplitter:
                 # leave non-tensors alone
                 if not torch.is_tensor(batch[k]):
                     continue
-                # at seqlen>10M and 32+ gpus this can take GBs of memory so keep the prefill buffer on cpu
-                batch[k] = batch[k][:, chunk_len * self.sp_rank : chunk_len * (self.sp_rank + 1)].cpu()
+                for idx in range(len(batch[k])):
+                    # at seqlen>10M and 32+ gpus this can take GBs of memory so keep the prefill buffer on cpu
+                    batch[k][idx] = batch[k][idx][:, chunk_len * self.sp_rank : chunk_len * (self.sp_rank + 1)].cpu()
 
             batch_shards.append(batch)
 
