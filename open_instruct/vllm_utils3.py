@@ -19,7 +19,6 @@ import copy
 import logging
 import os
 import queue
-import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -102,7 +101,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
                 )
 
             future = executor.submit(tool, o.text)
-            pending_tool_futures[output.request_id] = (future, o, output, time.time())
+            pending_tool_futures[output.request_id] = (future, o, output)
 
             return None  # Output is being held for tool processing
 
@@ -394,6 +393,8 @@ class LLMRayActor:
         """Unified processing for both tool and non-tool generation."""
         prompts = request.prompts
         sampling_params = request.generation_config
+        
+        self.logger.info(f"[LLMRayActor] Processing request with {len(prompts)} prompts, tools={bool(self.tools)}")
 
         # Tool mode adjustments
         if self.tools:
@@ -411,101 +412,56 @@ class LLMRayActor:
         self._add_initial_requests(prompts, sampling_params, original_n, request.training_step)
 
         outputs = []
-        max_iterations = 10000  # Safety limit to prevent infinite loops
         iteration = 0
-        last_operation_time = time.time()
 
-        while (self.llm_engine.has_unfinished_requests() or self.pending_tool_futures) and iteration < max_iterations:
+        while True:
             iteration += 1
-            current_time = time.time()
-
-            # Detect infinite loop with no progress
+            
+            # Log loop status
             has_unfinished = self.llm_engine.has_unfinished_requests()
             num_pending_futures = len(self.pending_tool_futures)
-
-            # Detect stuck state: no engine requests but futures keep cycling
-            if not has_unfinished and num_pending_futures > 0 and iteration > 2000:
-                if iteration % 50 == 0:
-                    self.logger.warning(
-                        f"[LLMRayActor] STUCK STATE DETECTED at iteration {iteration}: "
-                        f"Engine has no requests but {num_pending_futures} futures pending. "
-                        f"Future IDs: {list(self.pending_tool_futures.keys())}"
-                    )
-
-            # Detect another stuck state: engine has requests but no progress
-            if has_unfinished and num_pending_futures == 0 and iteration > 4000:
-                if iteration % 100 == 0:
-                    self.logger.error(
-                        f"[LLMRayActor] DEADLOCK DETECTED at iteration {iteration}: "
-                        f"Engine reports unfinished requests but no futures and no outputs. "
-                        f"Breaking out of loop to prevent infinite hang."
-                    )
-                    # Force exit after too many iterations with no progress
-                    if iteration > 5000:
-                        self.logger.error("[LLMRayActor] Force breaking loop after 5000 iterations with no progress")
-                        break
-
-            # Check for stuck operations
-            if current_time - last_operation_time > 10:
-                self.logger.error(
-                    f"[LLMRayActor] WARNING: Operation stuck for {current_time - last_operation_time:.1f}s at iteration {iteration}! "
-                    f"Dumping state: pending_futures={list(self.pending_tool_futures.keys())}"
+            
+            if iteration % 100 == 1:  # Log every 100 iterations
+                self.logger.info(
+                    f"[LLMRayActor] Iteration {iteration}: "
+                    f"has_unfinished={has_unfinished}, "
+                    f"pending_futures={num_pending_futures}"
                 )
-                # Try to get more info about what's stuck in the engine
-                if hasattr(self.llm_engine, "scheduler"):
-                    if hasattr(self.llm_engine.scheduler, "waiting"):
-                        self.logger.error(
-                            f"[LLMRayActor] Engine waiting queue: {list(self.llm_engine.scheduler.waiting.keys())}"
-                        )
-                    if hasattr(self.llm_engine.scheduler, "running"):
-                        self.logger.error(
-                            f"[LLMRayActor] Engine running queue: {list(self.llm_engine.scheduler.running.keys())}"
-                        )
-
-            has_unfinished = self.llm_engine.has_unfinished_requests()
-
-            # Poll tool futures first
+            
+            # Poll tool futures first (matching ToolUseLLM order)
             if self.pending_tool_futures:
-                poll_start = time.time()
                 self._poll_tool_futures(tracking, sampling_params, tokenizer)
-                poll_time = time.time() - poll_start
-                if poll_time > 2:
-                    self.logger.warning(f"[LLMRayActor] _poll_tool_futures took {poll_time:.2f}s")
 
-            # Process engine steps - ONLY if there are unfinished requests (matching original ToolUseLLM)
-            if has_unfinished:
-                step_start = time.time()
+            # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
+            if self.llm_engine.has_unfinished_requests():
                 step_outputs = list(self.llm_engine.step())
-                step_time = time.time() - step_start
-                if step_time > 2:
-                    self.logger.warning(f"[LLMRayActor] engine.step() took {step_time:.2f}s")
-            else:
-                step_outputs = []  # No engine step if no unfinished requests
+                if iteration % 100 == 1 and step_outputs:
+                    self.logger.info(f"[LLMRayActor] Got {len(step_outputs)} outputs from engine.step()")
+                    
+                for output in step_outputs:
+                    if output.finished:
+                        result = _handle_output(
+                            output,
+                            self.tools,
+                            tracking,
+                            sampling_params,
+                            self.max_tool_calls,
+                            self.executor,
+                            self.pending_tool_futures,
+                        )
+                        if result is not None:
+                            outputs.append(result)
+                            self.logger.info(f"[LLMRayActor] Added output {output.request_id} to results")
 
-            for output in step_outputs:
-                last_operation_time = time.time()  # Reset watchdog
-                if output.finished:
-                    result = _handle_output(
-                        output,
-                        self.tools,
-                        tracking,
-                        sampling_params,
-                        self.max_tool_calls,
-                        self.executor,
-                        self.pending_tool_futures,
-                    )
-                    if result is not None:
-                        outputs.append(result)
-
-        if iteration >= max_iterations:
-            self.logger.error(
-                f"[LLMRayActor] Hit max iterations ({max_iterations})! "
-                f"Still has_unfinished={self.llm_engine.has_unfinished_requests()}, "
-                f"pending_futures={len(self.pending_tool_futures)}"
-            )
-            # Force cleanup of pending futures
-            for req_id in list(self.pending_tool_futures.keys()):
-                del self.pending_tool_futures[req_id]
+            # Check termination condition (matching ToolUseLLM exactly)
+            if not self.llm_engine.has_unfinished_requests() and len(self.pending_tool_futures) == 0:
+                self.logger.info(f"[LLMRayActor] Terminating after {iteration} iterations with {len(outputs)} outputs")
+                break
+                
+            # Safety check to prevent infinite loops
+            if iteration > 10000:
+                self.logger.error(f"[LLMRayActor] Safety limit reached after {iteration} iterations!")
+                break
 
         result = _finalize_outputs(outputs, tracking, request.dataset_index, self.tools)
         return result
@@ -532,33 +488,13 @@ class LLMRayActor:
             return
 
         dict_keys_to_delete = []
-        num_done = 0
-        current_time = time.time()
-        tool_timeout_seconds = 30.0  # Maximum time to wait for a tool
 
-        for req_id, (future, last_o, last_output, start_time) in self.pending_tool_futures.items():
-            # Check for timeout
-            if not future.done() and (current_time - start_time) > tool_timeout_seconds:
-                self.logger.warning(
-                    f"[LLMRayActor] Tool future timed out for request {req_id} after {current_time - start_time:.1f}s"
-                )
-                future.cancel()  # Try to cancel the future
-                dict_keys_to_delete.append(req_id)
-                continue
-
+        for req_id, (future, last_o, last_output) in self.pending_tool_futures.items():
             if not future.done():
                 continue
 
-            num_done += 1
-
-            try:
-                tool_result = future.result(timeout=0.1)  # Quick timeout since it's already done
-            except Exception as e:
-                self.logger.error(f"[LLMRayActor] Tool execution failed for {req_id}: {e}")
-                # Create error result
-                from open_instruct.tool_utils.tool_vllm import ToolResult
-
-                tool_result = ToolResult(output=f"Tool error: {str(e)}", error=str(e), timeout=False, runtime=0.0)
+            # Tool future is done, process it
+            tool_result = future.result()  # Get the tool result
 
             last_prompt_token_ids = last_output.prompt_token_ids
             last_token_ids = last_o.token_ids
