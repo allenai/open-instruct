@@ -580,7 +580,6 @@ def create_vllm_engines(
     results_queue=None,
     eval_results_queue=None,
     actor_manager=None,
-    local: bool = False,
 ) -> list[LLMRayActor]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
@@ -596,8 +595,8 @@ def create_vllm_engines(
         max_tool_calls_dict = {}
 
     vllm_engines = []
-    distributed_executor_backend = None if local else ("uni" if tensor_parallel_size == 1 else "ray")
-    use_hybrid_engine = pg is not None and not local
+    distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "ray"
+    use_hybrid_engine = pg is not None
     num_gpus = int(tensor_parallel_size == 1)
     if use_hybrid_engine and tensor_parallel_size == 1 and single_gpu_mode:
         # every worker will use 0.5 GPU, so that we can schedule

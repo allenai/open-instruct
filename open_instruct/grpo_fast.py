@@ -79,6 +79,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
+from open_instruct import vllm_utils3
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -130,7 +131,6 @@ from open_instruct.utils import (
     repeat_each,
     sync_gs_bucket,
 )
-from open_instruct.vllm_utils3 import ActorManager, LLMRayActor, create_vllm_engines, init_process_group
 
 # Setup logging with filename and line number format
 logging.basicConfig(
@@ -716,7 +716,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
                 for i, engine in enumerate(vllm_engines)
             ]
-            self.model_update_group = init_process_group(
+            self.model_update_group = vllm_utils3.init_process_group(
                 backend=backend,
                 init_method=f"tcp://{master_address}:{master_port}",
                 world_size=world_size,
@@ -1711,7 +1711,7 @@ def create_model_and_optimizer(
     inference_results_Q: ray_queue.Queue,
     param_prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q: ray_queue.Queue,
-) -> tuple[ModelGroup, list[LLMRayActor], dict, int, int]:
+) -> tuple[ModelGroup, list[vllm_utils3.LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -1752,10 +1752,10 @@ def create_model_and_optimizer(
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 
-    actor_manager = ActorManager.remote()
+    actor_manager = vllm_utils3.ActorManager.remote()
 
     # Create vLLM engines with queues
-    vllm_engines = create_vllm_engines(
+    vllm_engines = vllm_utils3.create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
         args.vllm_enforce_eager,
@@ -1864,7 +1864,7 @@ def sync_weights_and_prepare_prompts(
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q: ray_queue.Queue,
     generation_configs: Dict[str, vllm.SamplingParams],
-    actor_manager: ActorManager,
+    actor_manager: vllm_utils3.ActorManager,
 ) -> Batch:
     """Sync weights and send the next batch of prompts to vLLM."""
     dataset_indices = next(iter_dataloader)
@@ -2256,7 +2256,7 @@ def cleanup_training_resources(
     stop_event: threading.Event,
     executor: futures.ThreadPoolExecutor,
     queues: list[ray_queue.Queue],
-    actor_manager: ActorManager,
+    actor_manager: vllm_utils3.ActorManager,
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
     # Signal generate_thread to stop
