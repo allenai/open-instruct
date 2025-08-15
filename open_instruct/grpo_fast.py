@@ -1881,7 +1881,7 @@ def sync_weights_and_prepare_prompts(
         else "🔄 Loading weights using shared memory"
     ):
         ray.get(actor_manager.set_should_stop.remote(True))
-        logger.info(f"[Main Thread] Set should_stop to True for weight sync at step {training_step}")
+        logger.debug(f"[Main Thread] Set should_stop to True for weight sync at step {training_step}")
 
         ray_get_with_progress(
             [m.broadcast_to_vllm.remote() for m in policy_group.models],
@@ -1890,7 +1890,7 @@ def sync_weights_and_prepare_prompts(
         )
 
         ray.get(actor_manager.set_should_stop.remote(False))
-        logger.info(f"[Main Thread] Set should_stop to False after weight sync at step {training_step}")
+        logger.debug(f"[Main Thread] Set should_stop to False after weight sync at step {training_step}")
 
     split_and_insert_batch(
         batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]
@@ -1929,6 +1929,7 @@ def generate_thread(vllm_engines, local_eval_every, num_training_steps, resume_t
             processed_results = ray_get_with_progress(
                 [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
                 desc="[Generate Thread] Waiting for vLLM engines to process",
+                verbose_only=True,
             )
             num_processed = sum(int(result) for result in processed_results)
             # Suppress timing output if nothing was processed
@@ -2280,14 +2281,16 @@ def cleanup_training_resources(
 
     logger.info("Pushing shutdown sentinel to queues...")
     # Push sentinel to the first queue (inference_results_Q)
-    queues[0].put(ShutdownSentinel(), timeout=1)
+    if queues and len(queues) > 0:
+        queues[0].put(ShutdownSentinel(), timeout=1)
 
     logger.info("Shutting down Ray queues...")
-    for queue in queues:
-        try:
-            queue.shutdown()
-        except Exception as e:
-            logger.warning(f"Error shutting down Ray queue: {e}")
+    if queues and len(queues) > 0:
+        for queue in queues:
+            try:
+                queue.shutdown()
+            except Exception as e:
+                logger.warning(f"Error shutting down Ray queue: {e}")
 
     logger.info("Shutting down thread pool executor...")
     executor.shutdown(wait=True)

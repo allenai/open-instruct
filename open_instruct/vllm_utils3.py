@@ -70,17 +70,16 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     This is a free function to keep the processing logic separate from the actor state.
     """
     if not tools:
-        # Non-tool mode: just return the output
         return output
 
-    assert len(output.outputs) <= 1  # because sampling_params.n == 1
+    assert len(output.outputs) <= 1  # In tool mode, sampling_params.n == 1
     o = output.outputs[0]
 
     # Update concatenated outputs
-    if output.request_id not in tracking["concat_outputs"]:
-        tracking["concat_outputs"][output.request_id] = output
-    else:
+    if output.request_id in tracking["concat_outputs"]:
         tracking["concat_outputs"][output.request_id].outputs[0].token_ids.extend(o.token_ids)
+    else:
+        tracking["concat_outputs"][output.request_id] = output
 
     tracking["masks"][output.request_id].extend([1] * len(o.token_ids))
 
@@ -91,15 +90,6 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
                 tool = tools[stop_str]
             else:
                 tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
-
-            # Check if we're adding a future for a request that already has one
-            if output.request_id in tracking["pending_tool_futures"]:
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    f"[_handle_output] WARNING: Overwriting existing future for {output.request_id}! "
-                    f"This may cause an infinite loop."
-                )
 
             future = executor.submit(tool, o.text)
             tracking["pending_tool_futures"][output.request_id] = (future, o, output)
@@ -396,7 +386,6 @@ class LLMRayActor:
 
         self.logger.info(f"[LLMRayActor] Processing request with {len(prompts)} prompts, tools={bool(self.tools)}")
 
-        # Tool mode adjustments
         if self.tools:
             # Need n=1 for individual tool tracking
             sampling_params = copy.deepcopy(sampling_params)
@@ -416,17 +405,6 @@ class LLMRayActor:
 
         while True:
             iteration += 1
-
-            # Log loop status
-            has_unfinished = self.llm_engine.has_unfinished_requests()
-            num_pending_futures = len(tracking["pending_tool_futures"]) if tracking else 0
-
-            if iteration % 100 == 1:  # Log every 100 iterations
-                self.logger.info(
-                    f"[LLMRayActor] Iteration {iteration}: "
-                    f"has_unfinished={has_unfinished}, "
-                    f"pending_futures={num_pending_futures}"
-                )
 
             # Poll tool futures first (matching ToolUseLLM order)
             if tracking and tracking.get("pending_tool_futures"):
@@ -473,7 +451,6 @@ class LLMRayActor:
 
     def _poll_tool_futures(self, tracking, sampling_params, tokenizer):
         """Poll and handle completed tool executions."""
-        # Early return if no tools or no pending futures
         if not self.tools or not tracking["pending_tool_futures"]:
             return
 
