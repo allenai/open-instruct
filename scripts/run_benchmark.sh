@@ -32,6 +32,7 @@ fi
 
 uv run python -m open_instruct.benchmark_generators \
     --model_name_or_path "$model_name" \
+    --tokenizer_name_or_path "$model_name" \
     --dataset_mixer_list "TTTXXX01/MathSub-30K" "1.0" \
     --dataset_mixer_list_splits "train" \
     --max_token_length 10240 \
@@ -51,4 +52,4 @@ uv run python -m open_instruct.benchmark_generators \
     --dataset_local_cache_dir "benchmark_cache" \
     --dataset_cache_mode "local" \
     --dataset_transform_fn "rlvr_tokenize_v1" "rlvr_filter_v1" \
-    "$@"
+    --add_bos
