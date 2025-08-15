@@ -58,10 +58,11 @@ def _init_tool_tracking():
         "tool_called": defaultdict(bool),
         "concat_outputs": {},
         "masks": defaultdict(list),
+        "pending_tool_futures": {},
     }
 
 
-def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, executor, pending_tool_futures):
+def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, executor):
     """
     Handle a finished output. Returns the output if it should be added to results,
     or None if it's being held for tool processing.
@@ -92,7 +93,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
                 tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
 
             # Check if we're adding a future for a request that already has one
-            if output.request_id in pending_tool_futures:
+            if output.request_id in tracking["pending_tool_futures"]:
                 import logging
 
                 logging.getLogger(__name__).warning(
@@ -101,7 +102,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
                 )
 
             future = executor.submit(tool, o.text)
-            pending_tool_futures[output.request_id] = (future, o, output)
+            tracking["pending_tool_futures"][output.request_id] = (future, o, output)
 
             return None  # Output is being held for tool processing
 
@@ -329,7 +330,6 @@ class LLMRayActor:
             self.executor = ThreadPoolExecutor(max_workers=20)
         else:
             self.executor = None
-        self.pending_tool_futures = {}
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
@@ -419,7 +419,7 @@ class LLMRayActor:
             
             # Log loop status
             has_unfinished = self.llm_engine.has_unfinished_requests()
-            num_pending_futures = len(self.pending_tool_futures)
+            num_pending_futures = len(tracking["pending_tool_futures"]) if tracking else 0
             
             if iteration % 100 == 1:  # Log every 100 iterations
                 self.logger.info(
@@ -429,7 +429,7 @@ class LLMRayActor:
                 )
             
             # Poll tool futures first (matching ToolUseLLM order)
-            if self.pending_tool_futures:
+            if tracking and tracking.get("pending_tool_futures"):
                 self._poll_tool_futures(tracking, sampling_params, tokenizer)
 
             # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
@@ -447,20 +447,15 @@ class LLMRayActor:
                             sampling_params,
                             self.max_tool_calls,
                             self.executor,
-                            self.pending_tool_futures,
                         )
                         if result is not None:
                             outputs.append(result)
                             self.logger.info(f"[LLMRayActor] Added output {output.request_id} to results")
 
             # Check termination condition (matching ToolUseLLM exactly)
-            if not self.llm_engine.has_unfinished_requests() and len(self.pending_tool_futures) == 0:
+            pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
+            if not self.llm_engine.has_unfinished_requests() and pending_count == 0:
                 self.logger.info(f"[LLMRayActor] Terminating after {iteration} iterations with {len(outputs)} outputs")
-                break
-                
-            # Safety check to prevent infinite loops
-            if iteration > 10000:
-                self.logger.error(f"[LLMRayActor] Safety limit reached after {iteration} iterations!")
                 break
 
         result = _finalize_outputs(outputs, tracking, request.dataset_index, self.tools)
@@ -484,12 +479,12 @@ class LLMRayActor:
     def _poll_tool_futures(self, tracking, sampling_params, tokenizer):
         """Poll and handle completed tool executions."""
         # Early return if no tools or no pending futures
-        if not self.tools or not self.pending_tool_futures:
+        if not self.tools or not tracking["pending_tool_futures"]:
             return
 
         dict_keys_to_delete = []
 
-        for req_id, (future, last_o, last_output) in self.pending_tool_futures.items():
+        for req_id, (future, last_o, last_output) in tracking["pending_tool_futures"].items():
             if not future.done():
                 continue
 
@@ -544,8 +539,8 @@ class LLMRayActor:
             dict_keys_to_delete.append(req_id)
 
         for req_id in dict_keys_to_delete:
-            if req_id in self.pending_tool_futures:
-                del self.pending_tool_futures[req_id]
+            if req_id in tracking["pending_tool_futures"]:
+                del tracking["pending_tool_futures"][req_id]
 
     def init_process_group(
         self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
