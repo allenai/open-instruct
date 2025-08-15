@@ -27,16 +27,8 @@ import vllm
 from ray.util import queue as ray_queue
 
 from open_instruct import dataset_transformation, grpo_fast, model_utils, utils, vllm_utils3
+from open_instruct.utils import GPU_SPECS, get_device_name
 from open_instruct.queue_types import PromptRequest
-
-# For FLOPS, we assume bf16 and ignore sparsity.
-GPU_SPECS = {
-    "a100": {"flops": 312e12, "memory_size": 80e9},
-    "b200": {"flops": 2250e12, "memory_size": 192e9},
-    "h100": {"flops": 990e12, "memory_size": 80e9},
-    "a6000": {"flops": 155e12, "memory_size": 48e9},
-    "l40s": {"flops": 362e12, "memory_size": 48e9},
-}
 
 
 logger = logging.getLogger(__name__)
@@ -238,15 +230,6 @@ def calculate_model_usage_per_token(model_path: str) -> int:
         model(input_ids)
 
     return flop_counter.get_total_flops()
-
-
-def get_device_name(device_name: str) -> str:
-    processed_device_name = [
-        val for val in device_name.lower().split(" ") if val not in ["nvidia", "80gb", "hbm3", "rtx"]
-    ]
-    if len(processed_device_name) != 1 or processed_device_name[0] not in GPU_SPECS:
-        raise ValueError(f"Unsupported device name: {device_name}.")
-    return processed_device_name[0]
 
 
 def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation.TokenizerConfig) -> datasets.Dataset:

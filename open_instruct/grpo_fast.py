@@ -106,6 +106,7 @@ from open_instruct.model_utils import (
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo
 from open_instruct.rl_utils2 import Timer, pack_sequences
 from open_instruct.utils import (
+    GPU_SPECS,
     ArgumentParserPlus,
     BeakerRuntimeConfig,
     RayProcess,
@@ -115,6 +116,7 @@ from open_instruct.utils import (
     download_latest_checkpoint_from_gs,
     extract_user_query,
     get_beaker_whoami,
+    get_device_name,
     get_eval_ds_config,
     get_optimizer_grouped_parameters,
     get_train_ds_config,
@@ -1079,6 +1081,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 args.eval_priority,
             )
 
+    def get_num_params(self):
+        """Get the total number of parameters in the model."""
+        return sum(p.numel() for p in self.policy.parameters())
+
 
 class ModelGroup:
     def __init__(
@@ -2018,13 +2024,31 @@ def one_training_step(
             ray_get_with_progress(update_ref_policy_future, desc="Updating reference policy")
 
     average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
-    total_time = time.time() - start_time
+    total_time = time.perf_counter() - start_time
+
+    # Calculate MFU (Model FLOPs Utilization)
+    # Get model parameters count from the first model in the policy group
+    num_params_future = policy_group.models[0].get_num_params.remote()
+    num_params = ray.get(num_params_future)
+    device_name = get_device_name(torch.cuda.get_device_name(0))
+    gpu_flops = GPU_SPECS[device_name]["flops"]
+
+    # For GRPO, we have mixed workload:
+    # - Generation: ~6 * num_params FLOPs per token (forward pass for autoregressive generation)
+    # - Training: ~6 * num_params FLOPs per token (forward + backward pass)
+    # Using 6x multiplier as a reasonable approximation for transformer inference/training FLOPs
+    # This accounts for the fact that num_total_tokens represents generated tokens, not training tokens
+    model_flops_per_token = 6 * num_params
+    total_model_flops = model_flops_per_token * num_total_tokens
+    mfu = (total_model_flops / total_time) / gpu_flops * 100  # Convert to percentage
+
     metrics = {
         "episode": episode,
         "training_step": training_step,
         "val/num_total_tokens": num_total_tokens,
         "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
         "tokens_per_second": num_total_tokens / total_time,
+        "mfu": mfu,
         "time/total": total_time,
         "time/training": train_timer.duration,
         "time/saving": save_time,
@@ -2403,7 +2427,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         )
     num_total_tokens = 0
     for training_step in range(resume_training_step, args.num_training_steps + 1):
-        start_time = time.time()
+        start_time = time.perf_counter()
         check_threads_healthy(
             [packing_future, generation_future],
             stop_event,

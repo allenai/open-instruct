@@ -69,6 +69,25 @@ logger = get_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
 
+# GPU specifications for MFU calculation (for FLOPS, we assume bf16 and ignore sparsity)
+GPU_SPECS = {
+    "a100": {"flops": 312e12, "memory_size": 80e9},
+    "b200": {"flops": 2250e12, "memory_size": 192e9},
+    "h100": {"flops": 990e12, "memory_size": 80e9},
+    "a6000": {"flops": 155e12, "memory_size": 48e9},
+    "l40s": {"flops": 362e12, "memory_size": 48e9},
+}
+
+
+def get_device_name(device_name: str) -> str:
+    """Extract device name from CUDA device string for GPU specs lookup."""
+    processed_device_name = [
+        val for val in device_name.lower().split(" ") if val not in ["nvidia", "80gb", "hbm3", "rtx"]
+    ]
+    if len(processed_device_name) != 1 or processed_device_name[0] not in GPU_SPECS:
+        raise ValueError(f"Unsupported device name: {device_name}.")
+    return processed_device_name[0]
+
 
 def repeat_each(seq, k):
     """Repeat each element in a sequence k times."""
