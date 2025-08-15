@@ -2220,14 +2220,6 @@ def make_reward_fn(args: Args) -> Callable:
                     metrics[f"objective/{key}_reward"] = np_value.mean()
                     metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
 
-        # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
-        if args.non_stop_penalty:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty"):
-                assert len(finish_reasons) == len(scores)
-                for i in range(len(finish_reasons)):
-                    if finish_reasons[i] != "stop":
-                        scores[i] = args.non_stop_penalty_value
-
         # here we want to scale the rewards. maybe multiply each by shortest / (longest ^ factor)?
         if args.reward_shortest:
             with Timer("[Data Preparation Thread] Calculating rewards -- 📈 Applying length penalty"):
@@ -2247,6 +2239,14 @@ def make_reward_fn(args: Args) -> Callable:
                         if query_idx in min_lengths:
                             length_ratio = min_lengths[query_idx] / len(decoded_responses[i])
                             scores[i] *= length_ratio ** args.reward_shortest_gamma  # e.g., args.length_penalty_exp=1.0
+
+        # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
+        if args.non_stop_penalty:
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty"):
+                assert len(finish_reasons) == len(scores)
+                for i in range(len(finish_reasons)):
+                    if finish_reasons[i] != "stop":
+                        scores[i] = args.non_stop_penalty_value
 
         return scores, metrics
 
