@@ -30,10 +30,10 @@ uv run python mason.py \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 32 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 10240 \
-    --max_prompt_token_length 2048 \
-    --response_length 8192 \
-    --pack_length 16384 \
+    --max_token_length 512 \
+    --max_prompt_token_length 512 \
+    --response_length 512 \
+    --pack_length 1024 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
@@ -45,7 +45,7 @@ uv run python mason.py \
     --sft_messages_key messages \
     --exp_name 0605_general_tool_use_without_good_outputs \
     --learning_rate 5e-7 \
-    --total_episodes 500000 \
+    --total_episodes 500_000 \
     --deepspeed_stage 2 \
     --with_tracking \
     --num_epochs 1 \
@@ -53,6 +53,7 @@ uv run python mason.py \
     --vllm_tensor_parallel_size 1 \
     --beta 0.01 \
     --seed 1 \
+    --local_eval_every 10 \
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.3 \
     --gradient_checkpointing \
