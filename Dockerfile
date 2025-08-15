@@ -28,9 +28,6 @@ ENV UV_COMPILE_BYTECODE=0
 # Copy only dependency-related files first
 COPY pyproject.toml uv.lock ./
 
-# Annoyingly, we need this before `uv run`, or it complains.
-COPY open_instruct open_instruct
-
 # Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
@@ -47,6 +44,7 @@ COPY configs configs
 COPY scripts scripts
 COPY oe-eval-internal oe-eval-internal
 COPY mason.py mason.py
+COPY open_instruct open_instruct
 
 # Set up the environment
 ENV PATH=/stage/.venv/bin:$PATH
