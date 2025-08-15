@@ -1915,7 +1915,7 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
         return collated_data, data_thread_metrics, num_total_tokens
 
 
-def generate_thread(vllm_engines, local_eval_every, num_training_steps, resume_training_step, stop_event):
+def generate_thread(args, vllm_engines, resume_training_step, stop_event):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
     while not stop_event.is_set():
@@ -1923,7 +1923,7 @@ def generate_thread(vllm_engines, local_eval_every, num_training_steps, resume_t
             processed_results = ray_get_with_progress(
                 [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
                 desc="[Generate Thread] Waiting for vLLM engines to process",
-                enable=False,
+                enable=args.verbose,
             )
             num_processed = sum(int(result) for result in processed_results)
             # Suppress timing output if nothing was processed
@@ -2365,9 +2365,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     )
 
     logger.info("======== ✅ generation thread starts =========")
-    generation_future = executor.submit(
-        generate_thread, vllm_engines, args.local_eval_every, args.num_training_steps, resume_training_step, stop_event
-    )
+    generation_future = executor.submit(generate_thread, args, vllm_engines, resume_training_step, stop_event)
 
     # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps):
