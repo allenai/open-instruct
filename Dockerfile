@@ -1,5 +1,13 @@
 FROM ghcr.io/allenai/cuda:12.8-dev-ubuntu22.04-torch2.7.0-v1.2.170
 
+# Add build arguments for git information
+ARG GIT_COMMIT=""
+ARG GIT_BRANCH=""
+
+# Set them as environment variables
+ENV GIT_COMMIT=${GIT_COMMIT}
+ENV GIT_BRANCH=${GIT_BRANCH}
+
 COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
 
 # Set default cache directory but allow override from environment
@@ -39,7 +47,6 @@ COPY configs configs
 COPY scripts scripts
 COPY oe-eval-internal oe-eval-internal
 COPY mason.py mason.py
-COPY .git/ ./.git/
 
 # Set up the environment
 ENV PATH=/stage/.venv/bin:$PATH

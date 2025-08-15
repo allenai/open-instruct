@@ -23,7 +23,7 @@ dependencies = [
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch==2.7.0",
-    "transformers>=4.52.4,<4.54.0",
+    "transformers>=4.52.4,<4.54.0", # see https://github.com/vllm-project/vllm-ascend/issues/2046
     "vllm==0.9.1",    
     "wandb==0.18.1",
     "langdetect==1.0.9",

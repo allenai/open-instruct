@@ -75,7 +75,6 @@ from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
-from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
@@ -124,6 +123,7 @@ from open_instruct.utils import (
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
+    maybe_update_beaker_description_with_wandb_url,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
@@ -1648,21 +1648,15 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
         wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
-            sync_tensorboard=True,
             config=all_configs,
             name=args.run_name,
             save_code=True,
             tags=[args.exp_name] + get_wandb_tags(),
         )
         wandb_url = wandb.run.get_url()
+        maybe_update_beaker_description_with_wandb_url(wandb_url)
 
-    writer = SummaryWriter(f"runs/{args.run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
-
-    return beaker_config, writer, wandb_url
+    return beaker_config, wandb_url
 
 
 def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer):
@@ -1944,13 +1938,11 @@ def one_training_step(
     collated_data,
     tokenizer,
     data_thread_metrics,
-    average_metrics,
     episode,
     training_step,
     num_total_tokens,
     start_time,
     train_dataset,
-    writer,
     wandb_url,
     chat_template_name,
 ):
@@ -1985,15 +1977,17 @@ def one_training_step(
             **data_thread_metrics,
             **average_metrics,
         }
-        scalar_metrics = {}
-        for key, value in metrics.items():
-            if isinstance(value, float) or isinstance(value, int):
-                writer.add_scalar(key, value, episode)
-                scalar_metrics[key] = value
-            if isinstance(value, np.ndarray) or isinstance(value, list):
-                if len(value) > 0:
-                    writer.add_histogram(key, value, episode)
+        # Print only scalar metrics
+        scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (float, int))}
         print_rich_single_line_metrics(scalar_metrics)
+
+        if args.with_tracking:
+            # Convert array/list metrics to wandb histograms for logging
+            for key, value in metrics.items():
+                if isinstance(value, np.ndarray) or isinstance(value, list):
+                    if len(value) > 0:
+                        metrics[key] = wandb.Histogram(value)
+            wandb.log(metrics, step=episode)
 
         if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
             with Timer("[Main Thread] 🗡️ Saving model"):
@@ -2044,7 +2038,6 @@ def maybe_evaluate(
     eval_batch: Optional[Batch],
     reward_fn,
     episode,
-    writer,
     eval_pending_queries_map: PendingQueriesMap,
     eval_generation_config,
 ):
@@ -2092,8 +2085,7 @@ def maybe_evaluate(
             **eval_reward_metrics,
         }
         print_rich_single_line_metrics(eval_metrics)
-        for key, value in eval_metrics.items():
-            writer.add_scalar(key, value, episode)
+
         table = {}
         table["prompt"] = tokenizer.batch_decode(eval_batch.queries if eval_batch else [])
         table["response"] = eval_decoded_responses
@@ -2101,10 +2093,10 @@ def maybe_evaluate(
         table["scores"] = eval_scores
         table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
         df = pd.DataFrame(table)
-        if args.with_tracking:
-            import wandb
 
-            wandb.log({"sample_completions": wandb.Table(dataframe=df)})
+        if args.with_tracking:
+            eval_metrics["sample_completions"] = wandb.Table(dataframe=df)
+            wandb.log(eval_metrics, step=episode)
         else:
             print_rich_table(df.iloc[:1])
         del table
@@ -2239,13 +2231,8 @@ def make_reward_fn(args: Args) -> Callable:
 
 def cleanup_judge_clients():
     """Cleans up all LLM judge clients and shutdown Ray."""
-    try:
-        asyncio.run(cleanup_all_llm_judge_clients())
-        logger.info("✅ LLM judge clients cleaned up")
-    except Exception as cleanup_error:
-        logger.warning(f"Error during LLM judge cleanup: {cleanup_error}")
-
-    logger.info("Shutting down Ray...")
+    asyncio.run(cleanup_all_llm_judge_clients())
+    logger.info("✅ LLM judge clients cleaned up")
     ray.shutdown()
     logger.info("✅ Ray shut down")
 
@@ -2286,12 +2273,7 @@ def cleanup_training_resources(
 
     logger.info("Shutting down Ray queues...")
     if queues and len(queues) > 0:
-        for queue in queues:
-            try:
-                queue.shutdown()
-            except Exception as e:
-                logger.warning(f"Error shutting down Ray queue: {e}")
-
+        [queue.shutdown() for queue in queues]
     logger.info("Shutting down thread pool executor...")
     executor.shutdown(wait=True)
 
@@ -2308,7 +2290,7 @@ def cleanup_training_resources(
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_samples: int = 32):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
-    beaker_config, writer, wandb_url = setup_experiment_tracking(args, tc, model_config)
+    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
     if args.cache_dataset_only:
@@ -2449,13 +2431,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             collated_data,
             tokenizer,
             data_thread_metrics,
-            {},
             episode,
             training_step,
             num_total_tokens,
             start_time,
             train_dataset,
-            writer,
             wandb_url,
             tc.chat_template_name,
         )
@@ -2468,7 +2448,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             eval_batch,
             reward_fn,
             episode,
-            writer,
             eval_pending_queries_map,
             generation_configs["eval"],
         )

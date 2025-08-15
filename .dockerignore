@@ -3,5 +3,8 @@
 
 local_dataset_cache/
 
+# Ignore the main .git directory
+.git
+
 # Ignore venvs:
 .venv/
