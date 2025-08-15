@@ -393,7 +393,7 @@ class LLMRayActor:
         """Unified processing for both tool and non-tool generation."""
         prompts = request.prompts
         sampling_params = request.generation_config
-        
+
         self.logger.info(f"[LLMRayActor] Processing request with {len(prompts)} prompts, tools={bool(self.tools)}")
 
         # Tool mode adjustments
@@ -416,18 +416,18 @@ class LLMRayActor:
 
         while True:
             iteration += 1
-            
+
             # Log loop status
             has_unfinished = self.llm_engine.has_unfinished_requests()
             num_pending_futures = len(tracking["pending_tool_futures"]) if tracking else 0
-            
+
             if iteration % 100 == 1:  # Log every 100 iterations
                 self.logger.info(
                     f"[LLMRayActor] Iteration {iteration}: "
                     f"has_unfinished={has_unfinished}, "
                     f"pending_futures={num_pending_futures}"
                 )
-            
+
             # Poll tool futures first (matching ToolUseLLM order)
             if tracking and tracking.get("pending_tool_futures"):
                 self._poll_tool_futures(tracking, sampling_params, tokenizer)
@@ -437,16 +437,11 @@ class LLMRayActor:
                 step_outputs = list(self.llm_engine.step())
                 if iteration % 100 == 1 and step_outputs:
                     self.logger.info(f"[LLMRayActor] Got {len(step_outputs)} outputs from engine.step()")
-                    
+
                 for output in step_outputs:
                     if output.finished:
                         result = _handle_output(
-                            output,
-                            self.tools,
-                            tracking,
-                            sampling_params,
-                            self.max_tool_calls,
-                            self.executor,
+                            output, self.tools, tracking, sampling_params, self.max_tool_calls, self.executor
                         )
                         if result is not None:
                             outputs.append(result)
