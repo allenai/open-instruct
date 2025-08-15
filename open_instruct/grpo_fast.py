@@ -264,6 +264,10 @@ class Args:
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
     mask_truncated_completions: bool = False
     """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
+
+    fill_completions: bool = False
+    """Whether to refill the batchsize with after filtering."""
+
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
 
@@ -1419,6 +1423,7 @@ def data_preparation_thread(
             expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
             non_zero_gradient_index = np.where(expanded_mask)[0]
             advantages = advantages[non_zero_gradient_index]
+            original_batch_size = len(scores)
             scores = scores[non_zero_gradient_index]
             responses = [result.responses[i] for i in non_zero_gradient_index]
             masks = [result.masks[i] for i in non_zero_gradient_index]
@@ -1432,6 +1437,48 @@ def data_preparation_thread(
                 masks = [masks[i] for i in stop_idxes]
                 batch = batch[stop_idxes.tolist()]
                 finish_reasons = [finish_reasons[i] for i in stop_idxes]
+
+            if args.fill_completions:
+                with Timer("⏱ [Data Preparation Thread] Refill completions"):
+                    current_batch_size = len(scores)
+                    original_prompt_cnt = original_batch_size // args.num_samples_per_prompt_rollout
+                    current_prompt_cnt = current_batch_size // args.num_samples_per_prompt_rollout
+                    need_to_fill_prompt = original_prompt_cnt - current_prompt_cnt
+                    k = args.num_samples_per_prompt_rollout
+
+                    if need_to_fill_prompt > 0 and current_prompt_cnt > 0:
+                        scores_matrix = scores.reshape(current_prompt_cnt, k)
+                        stds = scores_matrix.std(axis=1) + 1e-8
+                        probs = stds / stds.sum()
+
+                        sampled_prompt_ids = np.random.choice(
+                            current_prompt_cnt, size=need_to_fill_prompt, replace=True, p=probs
+                        )
+
+                        sampled_indices = []
+                        for pid in sampled_prompt_ids:
+                            start = pid * k
+                            sampled_indices.extend(range(start, start + k))
+
+                        advantages = np.concatenate([advantages, advantages[sampled_indices]])
+                        scores = np.concatenate([scores, scores[sampled_indices]])
+                        responses += [responses[i] for i in sampled_indices]
+                        masks += [masks[i] for i in sampled_indices]
+
+                        sampled_batch = batch[sampled_indices]
+
+                        batch = Batch(
+                            queries=batch.queries + sampled_batch.queries,
+                            ground_truths=batch.ground_truths + sampled_batch.ground_truths,
+                            datasets=batch.datasets + sampled_batch.datasets,
+                            indices=batch.indices + sampled_batch.indices if batch.indices is not None else None,
+                        )
+
+                        finish_reasons += [finish_reasons[i] for i in sampled_indices]
+
+                        print(
+                            f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses"
+                        )
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
