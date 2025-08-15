@@ -2073,6 +2073,7 @@ def one_training_step(
     total_time = time.perf_counter() - start_time
     metrics = {
         "episode": episode,
+        "global_step": episode,
         "training_step": training_step,
         "val/num_total_tokens": num_total_tokens,
         "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
