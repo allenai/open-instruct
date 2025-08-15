@@ -359,15 +359,31 @@ def run_benchmark(
 
     eval_generation_config = vllm.SamplingParams(temperature=0.0, max_tokens=args.response_length, n=1)
 
-    # Start vLLM engines to process from queues
+    # Create a remote function to run the processing loop
+    @ray.remote
+    def engine_processing_loop(engine, num_iterations):
+        """Run process_from_queue in a loop for the specified number of iterations."""
+        processed_count = 0
+        max_attempts = num_iterations * 10  # Allow plenty of attempts
+        attempts = 0
+        
+        while processed_count < num_iterations and attempts < max_attempts:
+            result = ray.get(engine.process_from_queue.remote(timeout=30.0))
+            attempts += 1
+            if result > 0:  # Successfully processed a request
+                processed_count += 1
+            else:
+                # No request processed, wait a bit before trying again
+                time.sleep(0.1)
+        
+        return processed_count
+
+    # Start processing loops for all engines
+    # Each engine should process num_batches requests
+    engine_tasks = []
     for engine in vllm_engines:
-        engine.process_from_queue.remote(
-            generation_config,
-            eval_generation_config,
-            num_batches + 1,  # eval_freq (avoid evaluation)
-            num_batches,  # num_training_steps
-            1,  # resume_training_step
-        )
+        task = engine_processing_loop.remote(engine, num_batches)
+        engine_tasks.append(task)
 
     # Wait for engines to be ready
     time.sleep(0.1)
@@ -384,7 +400,11 @@ def run_benchmark(
     ]
     submission_start_time = time.time()
     for batch_idx in range(num_batches):
-        param_prompt_Q.put(PromptRequest(prompts=all_prompts[batch_idx], dataset_index=batch_idx))
+        param_prompt_Q.put(PromptRequest(
+            prompts=all_prompts[batch_idx], 
+            generation_config=generation_config,
+            dataset_index=batch_idx
+        ))
     submission_time = time.time() - submission_start_time
     logger.info(f"All batches submitted in {submission_time:.2f}s")
 
@@ -424,6 +444,11 @@ def run_benchmark(
 
     # Send stop signal
     param_prompt_Q.put(None)
+
+    # Wait for all engine tasks to complete
+    logger.info("Waiting for all engine processing tasks to complete...")
+    processed_counts = ray.get(engine_tasks)
+    logger.info(f"Engine processing complete. Processed counts: {processed_counts}")
 
     print_summary(results, total_time, args, model_config)
     save_benchmark_results_to_csv(results, total_time, args, model_config)
