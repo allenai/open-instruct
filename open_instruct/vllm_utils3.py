@@ -188,7 +188,6 @@ class LLMRayActor:
                 self.results_queue.put(result, timeout=1)
             return 1  # Successfully processed a request
         except queue.Empty:
-            self.logger.warning("[LLMRayActor] No request in the queue to process. Returning from process_from_queue.")
             return 0  # No request to process
         except queue.Full:
             self.logger.warning(f"[LLMRayActor] Results queue is full. Skipping insert. {request.is_eval=}.")
