@@ -253,7 +253,7 @@ def main(args: grpo_fast.Args, tc: TokenizerConfig, model_config: ModelConfig):
         batch = grpo_fast.next_batch(dataset_indices, train_dataset)
         grpo_fast.split_and_insert_batch(
             batch,
-            1,  # training_step
+            1,  # All initial batches labeled as step 1
             args.vllm_num_engines,
             pending_queries_map,
             param_prompt_Q,
@@ -276,12 +276,12 @@ def main(args: grpo_fast.Args, tc: TokenizerConfig, model_config: ModelConfig):
             [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
         )
         
-        # Prepare next batch of prompts
+        # Prepare next batch of prompts (no weight sync needed in local mode)
         dataset_indices = next(iter_dataloader)
         batch = grpo_fast.next_batch(dataset_indices, train_dataset)
         grpo_fast.split_and_insert_batch(
             batch,
-            training_step + args.async_steps,  # Future step for async
+            training_step,  # Current training step, not future
             args.vllm_num_engines,
             pending_queries_map,
             param_prompt_Q,

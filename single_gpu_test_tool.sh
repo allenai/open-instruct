@@ -15,6 +15,7 @@ python local_grpo_test.py \
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 32 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 10240 \
+    --async_steps 0 \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
     --pack_length 16384 \
