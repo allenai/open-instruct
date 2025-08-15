@@ -21,7 +21,7 @@ for split_var in split_int_mix_3; do
         --num_nodes 2 \
         --max_retries 0 \
         --env VLLM_DISABLE_COMPILE_CACHE=1 \
-        --env HOSTED_VLLM_API_BASE=http://saturn-cs-aus-233.reviz.ai2.in:8001/v1 \
+        --env HOSTED_VLLM_API_BASE=http://saturn-cs-aus-253.reviz.ai2.in:8001/v1 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         --env LITELLM_LOG="ERROR" \
         --budget ai2/oe-adapt \
