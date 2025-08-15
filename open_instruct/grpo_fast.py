@@ -1923,7 +1923,7 @@ def generate_thread(vllm_engines, local_eval_every, num_training_steps, resume_t
             processed_results = ray_get_with_progress(
                 [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
                 desc="[Generate Thread] Waiting for vLLM engines to process",
-                verbose_only=True,
+                enable=False,
             )
             num_processed = sum(int(result) for result in processed_results)
             # Suppress timing output if nothing was processed
