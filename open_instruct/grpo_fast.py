@@ -1968,6 +1968,7 @@ def one_training_step(
         average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
         metrics = {
             "episode": episode,
+            "global_step": episode,
             "training_step": training_step,
             "val/num_total_tokens": num_total_tokens,
             "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
