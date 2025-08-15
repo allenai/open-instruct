@@ -922,7 +922,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     attention_mask = collated_attention_masks[i]
                     position_id = collated_position_ids[i]
                     response_mask = collated_response_masks[i]
-                    print(f"Calling forward! {groups._get_sequence_parallel_rank()=}")
+                    print(f"Calling forward! {groups._get_sequence_parallel_rank()=} {query_response.shape=}")
                     ref_logprob, _ = self.forward(
                         self.ref_policy,
                         query_response,
@@ -1048,20 +1048,17 @@ class PolicyTrainerRayProcess(RayProcess):
                             pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis
                         )
                     else:
-                        # if SP, compute per-token loss, then we need to gather across SP ranks
-                        per_tok_loss = pg_loss_max + (args.beta * kl) * mb_response_masks_bool.float()
-                        losses_per_rank = torch.distributed.nn.functional.all_gather(per_tok_loss, group=self.sp_group)
-                        non_masked_tokens = mb_response_masks_bool.sum()
-                        non_masked_tokens_per_rank = torch.distributed.nn.functional.all_gather(
-                            non_masked_tokens, group=self.sp_group
-                        )
-                        total_loss = sum(
-                            losses_per_rank[rank] * non_masked_tokens_per_rank[rank]
-                            for rank in range(self.sp_world_size)
-                        )
-                        total_non_masked_tokens = sum(non_masked_tokens_per_rank)
-                        loss = (total_loss / total_non_masked_tokens).sum()
-                    # TODO: do we still need grad acc...? I think so.
+                        # SP: gather loss sums from all ranks, divide by total valid tokens
+                        local_loss_sum = ((pg_loss_max + args.beta * kl) * mb_response_masks_bool.float()).sum()
+                        good_tokens = mb_response_masks_bool.sum()
+        
+                        loss_sums_per_rank = torch.distributed.nn.functional.all_gather(local_loss_sum, group=self.sp_group)
+                        good_tokens_per_rank = torch.distributed.nn.functional.all_gather(good_tokens, group=self.sp_group)
+                        
+                        total_loss_sum = sum(loss_sums_per_rank)
+                        total_good_tokens = sum(good_tokens_per_rank)
+                        
+                        loss = total_loss_sum / total_good_tokens if total_good_tokens > 0 else torch.tensor(0.0, device=local_loss_sum.device)
                     loss = loss / accumulation_steps
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
