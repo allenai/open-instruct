@@ -2018,7 +2018,7 @@ def one_training_step(
             ray_get_with_progress(update_ref_policy_future, desc="Updating reference policy")
 
     average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
-    total_time = time.time() - start_time
+    total_time = time.perf_counter() - start_time
     metrics = {
         "episode": episode,
         "training_step": training_step,
@@ -2403,7 +2403,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         )
     num_total_tokens = 0
     for training_step in range(resume_training_step, args.num_training_steps + 1):
-        start_time = time.time()
+        start_time = time.perf_counter()
         check_threads_healthy(
             [packing_future, generation_future],
             stop_event,
