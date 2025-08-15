@@ -9,8 +9,11 @@ dataset_mix="hamishivi/rlvr_orz_math_57k_collected 56878"
 evals="minerva_math::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,aime::hamish_zs_reasoning"
 
 # all I've changed with the checkpoints is the config.json, model_type=olmo3 and architectures is OLMo3ForCausalLM 
-model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/allysone/anneal-round5-10B-olmo25_7b-anneal-2T-5f3eae92/step4769-hf"
-gs_model_name="olmo2.5-midtraining-round5"
+# model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/allysone/anneal-round5-10B-olmo25_7b-anneal-2T-5f3eae92/step4769-hf"
+# gs_model_name="olmo2.5-midtraining-round5"
+#
+model_name_or_path="/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/olmo3-hparam-search/olmo2.5-LC-R3-olmo2-tulu3-mix-num_3"
+gs_model_name="olmo2.5-lc-r3-jacobsft-mix3"
 
 exp_name="grpo_mathonly_1m_${gs_model_name}"
 EXP_NAME=${EXP_NAME:-${exp_name}}
@@ -28,7 +31,7 @@ python mason.py \
     --workspace ai2/tulu-thinker \
     --priority high \
     --pure_docker_mode \
-    --image michaeln/open_instruct_dev_uv_olmo3 \
+    --image michaeln/open_instruct_olmo2_retrofit \
     --preemptible \
     --num_nodes 2 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
