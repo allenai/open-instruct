@@ -1462,14 +1462,20 @@ def data_preparation_thread(
                         for pid in sampled_prompt_ids:
                             start = pid * k
                             sampled_indices.extend(range(start, start + k))
-    
+                            
                         advantages = np.concatenate([advantages, advantages[sampled_indices]])
                         scores = np.concatenate([scores, scores[sampled_indices]])
                         responses += [responses[i] for i in sampled_indices]
                         masks += [masks[i] for i in sampled_indices]
-                        queries += [queries[i] for i in sampled_indices]
-                        ground_truths += [ground_truths[i] for i in sampled_indices]
-                        datasets += [datasets[i] for i in sampled_indices]
+
+                        sampled_batch = batch[sampled_indices]
+
+                        batch = Batch(
+                            queries=batch.queries + sampled_batch.queries,
+                            ground_truths=batch.ground_truths + sampled_batch.ground_truths,
+                            datasets=batch.datasets + sampled_batch.datasets,
+                            indices=batch.indices + sampled_batch.indices if batch.indices is not None else None )
+
                         finish_reasons += [finish_reasons[i] for i in sampled_indices]
     
                         print(f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses")
