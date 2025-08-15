@@ -30,13 +30,17 @@ if [[ $# -ge 1 ]]; then
   shift
 fi
 
+# Calculate pack_length dynamically
+max_prompt_token_length=2048
+pack_length=$((max_prompt_token_length + response_length))
+
 uv run python -m open_instruct.benchmark_generators \
     --model_name_or_path "$model_name" \
     --tokenizer_name_or_path "$model_name" \
     --dataset_mixer_list "TTTXXX01/MathSub-30K" "1.0" \
     --dataset_mixer_list_splits "train" \
     --max_token_length 10240 \
-    --max_prompt_token_length 2048 \
+    --max_prompt_token_length "$max_prompt_token_length" \
     --temperature 1.0 \
     --response_length "$response_length" \
     --vllm_top_p 0.9 \
@@ -45,7 +49,7 @@ uv run python -m open_instruct.benchmark_generators \
     --vllm_num_engines 1 \
     --vllm_tensor_parallel_size 1 \
     --vllm_gpu_memory_utilization 0.9 \
-    --pack_length 20480 \
+    --pack_length "$pack_length" \
     --chat_template_name "tulu_thinker" \
     --trust_remote_code \
     --seed 42 \
