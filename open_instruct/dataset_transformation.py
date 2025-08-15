@@ -1719,7 +1719,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # always pass in tokenizer and other args if needed
         fn_kwargs = {"tokenizer": tokenizer}
         if tc.transform_fn_kwargs:
-            fn_params = signature(fn_name).parameters
+            fn_params = signature(fn).parameters
             extra_kwargs = {k: v for k, v in tc.transform_fn_kwargs.items() if k in fn_params}
             if extra_kwargs:
                 print(f"Using kwargs {extra_kwargs} for data transform fn {fn_name}.")
