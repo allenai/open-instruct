@@ -2161,9 +2161,10 @@ def maybe_evaluate(
             "eval/sequence_lengths_min": eval_sequence_lengths.min(),
             "eval/sequence_lengths_max": eval_sequence_lengths.max(),
             "eval/stop_rate": eval_stop_rate,
-            "eval/generation_time": eval_generate_metrics["time/generation"],
             **eval_reward_metrics,
         }
+        if "time/generation" in eval_generate_metrics:
+            eval_metrics["eval/generation_time"] = eval_generate_metrics["time/generation"]
         print_rich_single_line_metrics(eval_metrics)
 
         table = {}
