@@ -72,7 +72,9 @@ from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
+from tensordict import tensorclass
 from torch.utils.tensorboard import SummaryWriter
+from torchrl.data import ReplayBuffer
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
@@ -143,6 +145,32 @@ logger = logging.getLogger(__name__)
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
+
+
+@tensorclass
+class PackedLogProbSequence:
+    query_response: torch.Tensor
+    """packed query and response (batch_size, pack_length)"""
+    tool_mask: Optional[torch.Tensor] = None
+    """tool mask for packed sequences (batch_size, pack_length)"""
+    attention_mask: torch.Tensor
+    """3D attention mask for packed sequences (batch_size, pack_length, pack_length);
+    it basically uses a intra-document mask for each query response pair;
+    see https://huggingface.co/blog/sirluk/llm-sequence-packing for more details
+    """
+    position_id: Optional[torch.Tensor] = None
+    """packed position ids (batch_size, pack_length)"""
+    advantage: Optional[torch.Tensor] = None
+    """packed advantages (batch_size, pack_length) (to be filled in by the main process)"""
+    response_mask: torch.Tensor
+    """response mask for packed sequences (batch_size, pack_length)"""
+    reward: Optional[torch.Tensor] = None
+    """packed rewards (batch_size, pack_length)"""
+
+    ref_logprob: Optional[torch.Tensor] = None
+    """packed rewards (batch_size, pack_length)"""
+    old_logprob: Optional[torch.Tensor] = None
+    """packed rewards (batch_size, pack_length)"""
 
 
 @dataclass
@@ -772,6 +800,7 @@ class PolicyTrainerRayProcess(RayProcess):
         collated_response_masks,
         pad_token_id: int,
         num_mini_batches: int,
+        replay_buffer: ReplayBuffer,
     ):
         args = self.args
         to_device_inplace(collated_query_responses, self.device)
@@ -825,6 +854,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
         # from the generator (note that async mode means these are a bit diff!)
+        replay_buffer_list = []
         old_logprobs = [None for _ in range(len(collated_query_responses))]
         if num_mini_batches > 1:
             with Timer("Old logprobs Calculation", noop=self.rank != 0):
@@ -851,6 +881,20 @@ class PolicyTrainerRayProcess(RayProcess):
                         old_logprob = torch.masked_fill(old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
                         old_logprobs[i] = old_logprob
                         torch.cuda.empty_cache()
+
+                    replay_buffer_list.append(
+                        PackedLogProbSequence(
+                            query_response=query_response,
+                            attention_mask=attention_mask,
+                            response_mask=response_mask,
+                            tool_mask=tool_mask,
+                            advantage=collated_advantages[i],
+                            position_id=position_id,
+                            old_logprob=old_logprob,
+                            ref_logprob=ref_logprob,
+                        )
+                    )
+                replay_buffer.extend(replay_buffer_list)
 
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
@@ -1903,6 +1947,7 @@ def one_training_step(
     writer,
     wandb_url,
     chat_template_name,
+    replay_buffer,
 ):
     """Train the model for one step."""
     update_ref_policy_future = []
@@ -1910,7 +1955,10 @@ def one_training_step(
         metrics_list: List[dict[str, float]] = ray.get(
             [
                 policy_group.models[i].train.remote(
-                    **collated_data[i], pad_token_id=tokenizer.pad_token_id, num_mini_batches=args.num_mini_batches
+                    **collated_data[i],
+                    pad_token_id=tokenizer.pad_token_id,
+                    num_mini_batches=args.num_mini_batches,
+                    replay_buffer=replay_buffer,
                 )
                 for i in range(args.world_size)
             ]
@@ -2234,6 +2282,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
     evaluation_inference_results_Q = ray_queue.Queue(maxsize=1)
+    replay_buffer = ReplayBuffer(batch_size=128)
 
     policy_group, vllm_engines, tool_objects, resume_training_step, episode = create_model_and_optimizer(
         args,
@@ -2373,6 +2422,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             writer,
             wandb_url,
             tc.chat_template_name,
+            replay_buffer,
         )
 
         maybe_evaluate(
