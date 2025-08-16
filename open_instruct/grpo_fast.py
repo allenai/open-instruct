@@ -56,7 +56,7 @@ import time
 from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
-from queue import Empty, Queue
+from queue import Empty, Full, Queue
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
 
 import datasets
@@ -264,6 +264,10 @@ class Args:
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
     mask_truncated_completions: bool = False
     """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
+
+    fill_completions: bool = False
+    """Whether to refill the batchsize with after filtering."""
+
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
 
@@ -1341,13 +1345,15 @@ def data_preparation_thread(
 ):
     for training_step in range(1, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
-        with Timer("🚀 [Data Preparation Thread] Getting response ids"):
+        with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
             result, batch = accumulate_inference_batches(
                 inference_results_Q, pending_queries_map, args, training_step, generation_config
             )
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
                 return
+
+        getting_response_time = timer.duration
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -1422,6 +1428,7 @@ def data_preparation_thread(
             expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
             non_zero_gradient_index = np.where(expanded_mask)[0]
             advantages = advantages[non_zero_gradient_index]
+            original_batch_size = len(scores)
             scores = scores[non_zero_gradient_index]
             responses = [result.responses[i] for i in non_zero_gradient_index]
             masks = [result.masks[i] for i in non_zero_gradient_index]
@@ -1435,6 +1442,48 @@ def data_preparation_thread(
                 masks = [masks[i] for i in stop_idxes]
                 batch = batch[stop_idxes.tolist()]
                 finish_reasons = [finish_reasons[i] for i in stop_idxes]
+
+            if args.fill_completions:
+                with Timer("⏱ [Data Preparation Thread] Refill completions"):
+                    current_batch_size = len(scores)
+                    original_prompt_cnt = original_batch_size // args.num_samples_per_prompt_rollout
+                    current_prompt_cnt = current_batch_size // args.num_samples_per_prompt_rollout
+                    need_to_fill_prompt = original_prompt_cnt - current_prompt_cnt
+                    k = args.num_samples_per_prompt_rollout
+
+                    if need_to_fill_prompt > 0 and current_prompt_cnt > 0:
+                        scores_matrix = scores.reshape(current_prompt_cnt, k)
+                        stds = scores_matrix.std(axis=1) + 1e-8
+                        probs = stds / stds.sum()
+
+                        sampled_prompt_ids = np.random.choice(
+                            current_prompt_cnt, size=need_to_fill_prompt, replace=True, p=probs
+                        )
+
+                        sampled_indices = []
+                        for pid in sampled_prompt_ids:
+                            start = pid * k
+                            sampled_indices.extend(range(start, start + k))
+
+                        advantages = np.concatenate([advantages, advantages[sampled_indices]])
+                        scores = np.concatenate([scores, scores[sampled_indices]])
+                        responses += [responses[i] for i in sampled_indices]
+                        masks += [masks[i] for i in sampled_indices]
+
+                        sampled_batch = batch[sampled_indices]
+
+                        batch = Batch(
+                            queries=batch.queries + sampled_batch.queries,
+                            ground_truths=batch.ground_truths + sampled_batch.ground_truths,
+                            datasets=batch.datasets + sampled_batch.datasets,
+                            indices=batch.indices + sampled_batch.indices if batch.indices is not None else None,
+                        )
+
+                        finish_reasons += [finish_reasons[i] for i in sampled_indices]
+
+                        print(
+                            f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses"
+                        )
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
@@ -1574,6 +1623,7 @@ def data_preparation_thread(
                 "val/good_outputs_rate": np.array(good_outputs).mean(),
                 "val/tool_runtimes_rate": np.array(result.request_info.tool_runtimes).mean(),
                 "val/tool_calleds_rate": np.array(result.request_info.tool_calleds).mean(),
+                "time/getting_response": getting_response_time,
                 **reward_metrics,
             }
 
@@ -1884,7 +1934,7 @@ def sync_weights_and_prepare_prompts(
 
 def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
     """Get the packed sequences with advantages from the packing thread."""
-    with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
+    with Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
         while True:
             try:
                 packed_data = packed_sequences_Q.get(timeout=30.0)
@@ -1895,18 +1945,22 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
         B = packed_data["B"]
         collated_data = packed_data["collated_data"]
         num_total_tokens += packed_data["num_new_tokens"]
-        if B == 0:
-            logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-            return None, data_thread_metrics, num_total_tokens
-        return collated_data, data_thread_metrics, num_total_tokens
+
+    data_thread_metrics["time/trainer_idling"] = timer.duration
+    if B == 0:
+        logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
+        return None, data_thread_metrics, num_total_tokens
+    return collated_data, data_thread_metrics, num_total_tokens
 
 
-def generate_thread(vllm_engines, local_eval_every, num_training_steps, resume_training_step, stop_event):
+def generate_thread(
+    vllm_engines, local_eval_every, num_training_steps, resume_training_step, stop_event, generate_metrics_Q
+):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
 
     while not stop_event.is_set():
-        with Timer("🔥 Generation time") as _gen_timer:
+        with Timer("🔥 Generation time") as timer:
             engine_refs = [
                 engine.process_from_queue.remote(num_training_steps, resume_training_step, timeout=0.1)
                 for engine in vllm_engines
@@ -1925,10 +1979,15 @@ def generate_thread(vllm_engines, local_eval_every, num_training_steps, resume_t
             num_processed = sum(int(result) for result in processed_results)
             # Suppress timing output if nothing was processed
             if num_processed == 0:
-                _gen_timer.noop = 1
+                timer.noop = 1
         if num_processed == 0:
             # If no batches were processed, sleep for a short time to avoid busy waiting
             time.sleep(1)
+        else:
+            try:
+                generate_metrics_Q.put_nowait({"time/generation": timer.duration})
+            except Full:
+                logging.warning("[Generate Thread] generate metrics queue full, skipping metric")
 
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
@@ -1949,7 +2008,7 @@ def one_training_step(
 ):
     """Train the model for one step."""
     update_ref_policy_future = []
-    with Timer("[Main Thread] 🗡️ Training"):
+    with Timer("[Main Thread] 🗡️ Training") as train_timer:
         metrics_list: List[dict[str, float]] = ray_get_with_progress(
             [
                 policy_group.models[i].train.remote(
@@ -1968,67 +2027,74 @@ def one_training_step(
                 [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
             )
 
-        average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
-        metrics = {
-            "episode": episode,
-            "training_step": training_step,
-            "val/num_total_tokens": num_total_tokens,
-            "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
-            "tokens_per_second": num_total_tokens / (time.time() - start_time),
-            **data_thread_metrics,
-            **average_metrics,
-        }
-        # Print only scalar metrics
-        scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (float, int))}
-        print_rich_single_line_metrics(scalar_metrics)
+    save_time = 0
+    if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
+        with Timer("[Main Thread] 🗡️ Saving model") as timer:
+            checkpoint_dir = f"{args.output_dir}_checkpoints"
+            step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
+            logger.info(f"Saving model at step {training_step} to {step_dir}")
+            ray_get_with_progress(
+                [
+                    policy_group.models[i].save_model.remote(step_dir, chat_template_name, tokenizer)
+                    for i in range(args.world_size)
+                ],
+                desc=f"Saving model at step {training_step}",
+            )
+            if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
+                leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
+                for i in range(args.world_size):
+                    policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                        step_dir, leaderboard_name, wandb_url, training_step
+                    )
+        save_time += timer.duration
 
-        if args.with_tracking:
-            # Convert array/list metrics to wandb histograms for logging
-            for key, value in metrics.items():
-                if isinstance(value, np.ndarray) or isinstance(value, list):
-                    if len(value) > 0:
-                        metrics[key] = wandb.Histogram(value)
-            wandb.log(metrics, step=episode)
-
-        if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
-            with Timer("[Main Thread] 🗡️ Saving model"):
-                checkpoint_dir = f"{args.output_dir}_checkpoints"
-                step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-                logger.info(f"Saving model at step {training_step} to {step_dir}")
-                ray_get_with_progress(
-                    [
-                        policy_group.models[i].save_model.remote(step_dir, chat_template_name, tokenizer)
-                        for i in range(args.world_size)
-                    ],
-                    desc=f"Saving model at step {training_step}",
-                )
-                if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
-                    leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
-                    for i in range(args.world_size):
-                        policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                            step_dir, leaderboard_name, wandb_url, training_step
-                        )
-        if (
-            args.checkpoint_state_freq > 0
-            and training_step % args.checkpoint_state_freq == 0
-            and args.checkpoint_state_dir is not None
-        ):
-            with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
-                client_state = {"training_step": training_step}
-                ray_get_with_progress(
-                    [
-                        policy_group.models[i].save_checkpoint_state.remote(args.checkpoint_state_dir, client_state)
-                        for i in range(args.world_size)
-                    ],
-                    desc=f"Saving checkpoint state at step {training_step}",
-                )
-                logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
+    if (
+        args.checkpoint_state_freq > 0
+        and training_step % args.checkpoint_state_freq == 0
+        and args.checkpoint_state_dir is not None
+    ):
+        with Timer("[Main Thread] 🗡️ Saving checkpoint state") as timer:
+            client_state = {"training_step": training_step}
+            ray_get_with_progress(
+                [
+                    policy_group.models[i].save_checkpoint_state.remote(args.checkpoint_state_dir, client_state)
+                    for i in range(args.world_size)
+                ],
+                desc=f"Saving checkpoint state at step {training_step}",
+            )
+            logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
+        save_time += timer.duration
 
     if len(update_ref_policy_future) > 0:
         with Timer("[Main Thread] 🔃 Updating reference policy"):
             ray_get_with_progress(update_ref_policy_future, desc="Updating reference policy")
 
-    return average_metrics
+    average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
+    total_time = time.perf_counter() - start_time
+    metrics = {
+        "episode": episode,
+        "global_step": episode,
+        "training_step": training_step,
+        "val/num_total_tokens": num_total_tokens,
+        "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
+        "tokens_per_second": num_total_tokens / total_time,
+        "time/total": total_time,
+        "time/training": train_timer.duration,
+        "time/saving": save_time,
+        **data_thread_metrics,
+        **average_metrics,
+    }
+    # Print only scalar metrics
+    scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (float, int))}
+    print_rich_single_line_metrics(scalar_metrics)
+
+    if args.with_tracking:
+        # Convert array/list metrics to wandb histograms for logging
+        for key, value in metrics.items():
+            if isinstance(value, np.ndarray) or isinstance(value, list):
+                if len(value) > 0:
+                    metrics[key] = wandb.Histogram(value)
+        wandb.log(metrics, step=episode)
 
 
 def maybe_evaluate(
@@ -2041,6 +2107,7 @@ def maybe_evaluate(
     episode,
     eval_pending_queries_map: PendingQueriesMap,
     eval_generation_config,
+    generate_metrics_Q: Queue,
 ):
     """Optionally evaluate the model."""
     try:
@@ -2059,6 +2126,11 @@ def maybe_evaluate(
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
+
+        try:
+            eval_generate_metrics = generate_metrics_Q.get_nowait()
+        except Empty:
+            logging.info("[Main Thread] didn't get eval generation metrics")
 
         eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
         eval_decoded_responses = tokenizer.batch_decode(eval_result.responses, skip_special_tokens=True)
@@ -2083,6 +2155,7 @@ def maybe_evaluate(
             "eval/sequence_lengths_min": eval_sequence_lengths.min(),
             "eval/sequence_lengths_max": eval_sequence_lengths.max(),
             "eval/stop_rate": eval_stop_rate,
+            "eval/generation_time": eval_generate_metrics["time/generation"],
             **eval_reward_metrics,
         }
         print_rich_single_line_metrics(eval_metrics)
@@ -2316,6 +2389,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     packed_sequences_Q = Queue(maxsize=args.async_steps)
     pending_queries_map = PendingQueriesMap()
     eval_pending_queries_map = PendingQueriesMap()
+    generate_metrics_Q = Queue(maxsize=args.async_steps)
 
     if eval_dataset is None:
         eval_batch = None
@@ -2351,7 +2425,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     logger.info("======== ✅ generation thread starts =========")
     generation_future = executor.submit(
-        generate_thread, vllm_engines, args.local_eval_every, args.num_training_steps, resume_training_step, stop_event
+        generate_thread,
+        vllm_engines,
+        args.local_eval_every,
+        args.num_training_steps,
+        resume_training_step,
+        stop_event,
+        generate_metrics_Q,
     )
 
     # Send initial data to ensure we have a N-step offset.
@@ -2367,8 +2447,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             generation_configs["train"],
         )
     num_total_tokens = 0
-    start_time = time.time()
     for training_step in range(resume_training_step, args.num_training_steps + 1):
+        start_time = time.perf_counter()
         check_threads_healthy(
             [packing_future, generation_future],
             stop_event,
@@ -2409,6 +2489,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         if collated_data is None:
             continue
 
+        generate_metrics = {}
+        try:
+            generate_metrics = generate_metrics_Q.get_nowait()
+        except Empty:
+            logging.info("[Main Thread] didn't get generation metrics")
+
+        data_thread_metrics = {**data_thread_metrics, **generate_metrics}
+
         one_training_step(
             args,
             policy_group,
@@ -2434,6 +2522,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             episode,
             eval_pending_queries_map,
             generation_configs["eval"],
+            generate_metrics_Q,
         )
 
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
