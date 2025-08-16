@@ -1050,6 +1050,7 @@ def launch_ai2_evals_on_weka(
     stop_strings: Optional[List[str]] = None,
     gs_bucket_path: Optional[str] = None,
     eval_priority: Optional[str] = "normal",
+    beaker_image: Optional[str] = None,
 ) -> None:
     weka_cluster = "ai2/saturn-cirrascale ai2/neptune-cirrascale"
     gcp_cluster = "ai2/augusta-google-1"
@@ -1101,6 +1102,8 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
     if stop_strings is not None:
         command += f" --oe_eval_stop_sequences '{','.join(stop_strings)}'"
+    if beaker_image is not None:
+        command += f" --beaker_image {beaker_image}"
     print(f"Launching eval jobs with command: {command}")
     process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
