@@ -532,19 +532,12 @@ name = "cuda-bindings"
 version = "13.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cuda-pathfinder", marker = "sys_platform != 'darwin'" },
-    { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "cuda-pathfinder", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8e/01/cc08a8d66a5c68a8ff1e708930ee3fa1137df491f5aed59aa8a1bfa67ca2/cuda_bindings-13.0.0-cp310-cp310-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:de13f1d770fa318e1e44a391478270dade22361c6053e5455ee8cb336e5b1505", size = 12230651, upload-time = "2025-08-07T02:40:52.114Z" },
     { url = "https://files.pythonhosted.org/packages/85/1a/840df75bafc8268653fb596379b071a6295e913ced6d733c515492bd5c2e/cuda_bindings-13.0.0-cp310-cp310-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:bcb611c3e1a470a947cf4c52190ff65463a76ee5f629a3324f500e8e78a978d8", size = 12652887, upload-time = "2025-08-07T02:40:54.491Z" },
-    { url = "https://files.pythonhosted.org/packages/53/d8/fa72c4a775f1dd020fdb7b271ce1269f6ea0b1ef4340593372758ff1a0df/cuda_bindings-13.0.0-cp310-cp310-win_amd64.whl", hash = "sha256:9ac03f6a3629b59ffe90725c9d4ab82d4b16cf797d64aa3857376f08bf58235d", size = 11807758, upload-time = "2025-08-07T02:40:56.638Z" },
-    { url = "https://files.pythonhosted.org/packages/81/b0/fb27fbbe0d872e4db07ba0c7393a9fe748fb145b11e14efa1fe570480688/cuda_bindings-13.0.0-cp311-cp311-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:e9f017c7907f5a3560bc6746a0088631be2e435d2a194b04a63870f6660b1716", size = 12294066, upload-time = "2025-08-07T02:40:58.833Z" },
     { url = "https://files.pythonhosted.org/packages/89/ad/dfba84a1f5259584c7aed9fba93acf74ebcc6cfc608345bd6a27fef76c34/cuda_bindings-13.0.0-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d74f0f6de5006a4ffd2dd30544b10359488d9af71d1cb755205cb3094102a2d9", size = 12708768, upload-time = "2025-08-07T02:41:01.22Z" },
-    { url = "https://files.pythonhosted.org/packages/e8/b4/988f40da7a7aa9756f0c724ac416d4399b1b12dc636a976529e4a094883f/cuda_bindings-13.0.0-cp311-cp311-win_amd64.whl", hash = "sha256:fd0020b182dfdb6518036287a93774d642ed2f9a76c1c3d2104072459dbe52bd", size = 11841433, upload-time = "2025-08-07T02:41:03.508Z" },
-    { url = "https://files.pythonhosted.org/packages/94/f6/89f536526e57d8ff2568e9c7363ebdf8a2f12058ee26fd6ab2a735a24fab/cuda_bindings-13.0.0-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:200605a72e3956cffaee6a0448c2b36461eb88f625a233bea1d47bcc2cf8d747", size = 11880615, upload-time = "2025-08-07T02:41:05.599Z" },
     { url = "https://files.pythonhosted.org/packages/4c/fd/f633a08f9c9fe408156b2eae757327a76d0967d6accd3e8b2bc0862afd99/cuda_bindings-13.0.0-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:21f653f32db0a278b68059a995822a067f78b2ffaf63b05a420de4609c57a9e8", size = 12249404, upload-time = "2025-08-07T02:41:07.934Z" },
-    { url = "https://files.pythonhosted.org/packages/b0/7b/d5d1a90480f5c76ea5c3a9d57121125e6320d1913e12296cfcbad500b6f0/cuda_bindings-13.0.0-cp312-cp312-win_amd64.whl", hash = "sha256:da68049a1dd3b693fa6469b14eeb7e9a4bb0d49f0ac22bb7aafe15932af98643", size = 12028122, upload-time = "2025-08-07T02:41:09.78Z" },
 ]
 
 [[package]]
@@ -560,7 +553,7 @@ name = "cuda-python"
 version = "13.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cuda-bindings", marker = "sys_platform != 'darwin'" },
+    { name = "cuda-bindings", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/05/99/7df7b57a5eba85b25a76c9c247c88e79770b4902bce266dbf0fc58f21198/cuda_python-13.0.0-py3-none-any.whl", hash = "sha256:c0b2257f2460d6d32b142ad9b53747c9bdcf0d2b2a747f45023cc1eec75c8b6e", size = 7602, upload-time = "2025-08-07T03:31:46.322Z" },
@@ -892,14 +885,14 @@ name = "flashinfer-python"
 version = "0.2.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cuda-python", marker = "sys_platform != 'darwin'" },
-    { name = "einops", marker = "sys_platform != 'darwin'" },
-    { name = "ninja", marker = "sys_platform != 'darwin'" },
-    { name = "numpy", marker = "sys_platform != 'darwin'" },
-    { name = "nvidia-nvshmem-cu12", marker = "sys_platform != 'darwin'" },
-    { name = "pynvml", marker = "sys_platform != 'darwin'" },
-    { name = "requests", marker = "sys_platform != 'darwin'" },
-    { name = "torch", version = "2.7.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform != 'darwin'" },
+    { name = "cuda-python", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
+    { name = "einops", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
+    { name = "ninja", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
+    { name = "numpy", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
+    { name = "nvidia-nvshmem-cu12", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
+    { name = "pynvml", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
+    { name = "requests", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
+    { name = "torch", version = "2.7.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/72/0e/827624993516e80f62ba88dd368ad5e180c41324f063c00d27fa638a430e/flashinfer_python-0.2.8.tar.gz", hash = "sha256:f662861323d0db0ff10fd90653a00b4a700eb8b478e87411ff55444ab34d2d3f", size = 3425936, upload-time = "2025-07-21T23:19:25.01Z" }
 
@@ -2234,7 +2227,6 @@ name = "nvidia-nvshmem-cu12"
 version = "3.3.20"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/92/9d/3dd98852568fb845ec1f7902c90a22b240fe1cbabda411ccedf2fd737b7b/nvidia_nvshmem_cu12-3.3.20-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:0b0b960da3842212758e4fa4696b94f129090b30e5122fea3c5345916545cff0", size = 124484616, upload-time = "2025-08-04T20:24:59.172Z" },
     { url = "https://files.pythonhosted.org/packages/3b/6c/99acb2f9eb85c29fc6f3a7ac4dccfd992e22666dd08a642b303311326a97/nvidia_nvshmem_cu12-3.3.20-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:d00f26d3f9b2e3c3065be895e3059d6479ea5c638a3f38c9fec49b1b9dd7c1e5", size = 124657145, upload-time = "2025-08-04T20:25:19.995Z" },
 ]
 
@@ -2273,7 +2265,7 @@ dependencies = [
     { name = "debugpy" },
     { name = "deepspeed" },
     { name = "flash-attn", marker = "sys_platform != 'darwin'" },
-    { name = "flashinfer-python", marker = "sys_platform != 'darwin'" },
+    { name = "flashinfer-python", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "hf-transfer" },
     { name = "immutabledict" },
     { name = "langdetect" },
@@ -2298,7 +2290,6 @@ dependencies = [
 
 [package.optional-dependencies]
 code = [
-    { name = "datasets" },
     { name = "fastapi" },
     { name = "pydantic" },
     { name = "requests" },
@@ -2322,12 +2313,11 @@ requires-dist = [
     { name = "antlr4-python3-runtime", specifier = "==4.11" },
     { name = "bitsandbytes", marker = "sys_platform != 'darwin'", specifier = ">=0.44.1" },
     { name = "datasets", specifier = ">=4.0.0" },
-    { name = "datasets", marker = "extra == 'code'", specifier = ">=3.1.0" },
     { name = "debugpy", specifier = ">=1.8.13" },
     { name = "deepspeed", specifier = "==0.15.4" },
     { name = "fastapi", marker = "extra == 'code'", specifier = ">=0.100.0" },
     { name = "flash-attn", marker = "sys_platform != 'darwin'", specifier = ">=2.8.0.post2" },
-    { name = "flashinfer-python", marker = "sys_platform != 'darwin'", specifier = "==0.2.8" },
+    { name = "flashinfer-python", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = "==0.2.8" },
     { name = "hf-transfer", specifier = ">=0.1.8" },
     { name = "immutabledict", specifier = "==1.2.0" },
     { name = "langdetect", specifier = "==1.0.9" },
@@ -2345,8 +2335,8 @@ requires-dist = [
     { name = "requests", marker = "extra == 'code'", specifier = ">=2.28.0" },
     { name = "setuptools", specifier = ">=75.6.0,<80.0.0" },
     { name = "tensorboard", specifier = ">=2.18.0" },
-    { name = "torch", marker = "sys_platform != 'darwin'", specifier = "==2.7.0", index = "https://download.pytorch.org/whl/cu128" },
-    { name = "torch", marker = "sys_platform == 'darwin'", specifier = "==2.7.0" },
+    { name = "torch", marker = "sys_platform != 'darwin'", specifier = ">=2.7.0,<2.8", index = "https://download.pytorch.org/whl/cu128" },
+    { name = "torch", marker = "sys_platform == 'darwin'", specifier = ">=2.7.0,<2.8" },
     { name = "transformers", specifier = ">=4.52.4,<4.54.0" },
     { name = "uvicorn", marker = "extra == 'code'", specifier = ">=0.20.0" },
     { name = "vllm", specifier = "==0.9.1" },
@@ -3110,7 +3100,7 @@ name = "pynvml"
 version = "12.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-ml-py", marker = "sys_platform != 'darwin'" },
+    { name = "nvidia-ml-py", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/26/6f/6b5880ed0239e85b9a39aed103b65b2ef81425beef9f45e5c035bf008330/pynvml-12.0.0.tar.gz", hash = "sha256:299ce2451a6a17e6822d6faee750103e25b415f06f59abb8db65d30f794166f5", size = 33636, upload-time = "2024-12-02T15:04:36.631Z" }
 wheels = [
