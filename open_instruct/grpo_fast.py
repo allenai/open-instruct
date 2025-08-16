@@ -2132,6 +2132,7 @@ def maybe_evaluate(
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
 
+        eval_generate_metrics = {}
         try:
             eval_generate_metrics = generate_metrics_Q.get_nowait()
         except Empty:
