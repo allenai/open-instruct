@@ -31,6 +31,9 @@ COPY pyproject.toml uv.lock ./
 # Annoyingly, we need this before `uv run`, or it complains.
 COPY open_instruct open_instruct
 
+# Install custom vllm for olmo3
+RUN git clone -b shanea/olmo2-retrofit https://github.com/2015aroras/vllm.git vllm_olmo2.5
+
 # Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
