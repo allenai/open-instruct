@@ -384,7 +384,8 @@ class Args:
     """The maximum number of documents to retrieve for each query."""
     search_api_endpoint: Optional[str] = None
     """The API endpoint for the search engine."""
-
+    use_massive_ds: bool = False
+    """Whether to use massive ds for search."""
     # code-tool specific settings
     code_tool_api_endpoint: Optional[str] = None
 
@@ -1635,6 +1636,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     tool = SearchTool(
                         start_str="<search>",
                         end_str="</search>",
+                        use_massive_ds=args.use_massive_ds,
                         api_endpoint=args.search_api_endpoint,
                         number_documents_to_search=args.number_documents_to_search,
                     )

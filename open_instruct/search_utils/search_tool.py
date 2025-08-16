@@ -3,14 +3,18 @@ import time
 
 from open_instruct.search_rewards.format_utils import generate_snippet_id
 
-# from open_instruct.search_utils.massive_ds import get_snippets_for_query
-from open_instruct.search_utils.s2 import get_snippets_for_query
+from open_instruct.search_utils.massive_ds import get_snippets_for_query_massive_ds
+from open_instruct.search_utils.s2 import get_snippets_for_query_s2
 from open_instruct.tool_utils.tool_vllm import Tool, ToolOutput
 
 
 class SearchTool(Tool):
-    def __init__(self, api_endpoint: str, *args, **kwargs):
+    def __init__(self, api_endpoint: str, use_massive_ds: bool = False, *args, **kwargs):
         self.api_endpoint = api_endpoint
+        if use_massive_ds:
+            self.get_snippets_for_query = get_snippets_for_query_massive_ds
+        else:
+            self.get_snippets_for_query = get_snippets_for_query_s2
         self.start_str = "<search>"
         self.end_str = "</search>"
         self.number_documents_to_search = kwargs.pop("number_documents_to_search", 3)
@@ -43,7 +47,7 @@ class SearchTool(Tool):
         start_time = time.time()
         timeout = False
         error = ""
-        snippets = get_snippets_for_query(
+        snippets = self.get_snippets_for_query(
             query_string, api_endpoint=self.api_endpoint, number_of_results=self.number_documents_to_search
         )
 
