@@ -151,25 +151,25 @@ INVALID_LOGPROB = 1.0
 class PackedLogProbSequence:
     query_response: torch.Tensor
     """packed query and response (batch_size, pack_length)"""
-    tool_mask: Optional[torch.Tensor] = None
-    """tool mask for packed sequences (batch_size, pack_length)"""
     attention_mask: torch.Tensor
     """3D attention mask for packed sequences (batch_size, pack_length, pack_length);
     it basically uses a intra-document mask for each query response pair;
     see https://huggingface.co/blog/sirluk/llm-sequence-packing for more details
     """
+    response_mask: torch.Tensor
+    """response mask for packed sequences (batch_size, pack_length)"""
+    ref_logprob: Optional[torch.Tensor]
+    """packed rewards (batch_size, pack_length)"""
+    old_logprob: Optional[torch.Tensor]
+    """packed rewards (batch_size, pack_length)"""
+
+    tool_mask: Optional[torch.Tensor] = None
+    """tool mask for packed sequences (batch_size, pack_length)"""
     position_id: Optional[torch.Tensor] = None
     """packed position ids (batch_size, pack_length)"""
     advantage: Optional[torch.Tensor] = None
     """packed advantages (batch_size, pack_length) (to be filled in by the main process)"""
-    response_mask: torch.Tensor
-    """response mask for packed sequences (batch_size, pack_length)"""
     reward: Optional[torch.Tensor] = None
-    """packed rewards (batch_size, pack_length)"""
-
-    ref_logprob: Optional[torch.Tensor] = None
-    """packed rewards (batch_size, pack_length)"""
-    old_logprob: Optional[torch.Tensor] = None
     """packed rewards (batch_size, pack_length)"""
 
 
