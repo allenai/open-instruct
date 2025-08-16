@@ -1969,11 +1969,12 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
         return None, data_thread_metrics, num_total_tokens
     return collated_data, data_thread_metrics, num_total_tokens
 
+
 def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
     while not stop_event.is_set():
-        with Timer("🔥 Generation time") as _gen_timer:
+        with Timer("🔥 Generation time") as timer:
             processed_results = ray_get_with_progress(
                 [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
                 desc="[Generate Thread] Waiting for vLLM engines to process",
@@ -1982,7 +1983,7 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
             num_processed = sum(int(result) for result in processed_results)
             # Suppress timing output if nothing was processed
             if num_processed == 0:
-                _gen_timer.noop = 1
+                timer.noop = 1
             else:
                 try:
                     generate_metrics_Q.put_nowait({"time/generation": timer.duration})
@@ -2439,8 +2440,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     )
 
     logger.info("======== ✅ generation thread starts =========")
-    generation_future = executor.submit(generate_thread, args, vllm_engines, resume_training_step, stop_event,
-        generate_metrics_Q,
+    generation_future = executor.submit(
+        generate_thread, args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q
     )
 
     # Send initial data to ensure we have a N-step offset.
