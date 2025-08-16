@@ -2223,10 +2223,12 @@ def make_reward_fn(args: Args) -> Callable:
         # here we want to scale the rewards. maybe multiply each by shortest / (longest ^ factor)?
         if args.reward_shortest:
             with Timer("[Data Preparation Thread] Calculating rewards -- 📈 Applying length penalty"):
+                n_queries = len(queries) if queries else len(batch.queries)
+
                 # Find shortest correct response length per query
                 min_lengths = {}
                 for i in range(len(scores)):
-                    query_idx = i % len(queries)
+                    query_idx = i % n_queries
                     if verifiable_rewards[i] > 0:  # Only consider correct responses
                         resp_len = len(decoded_responses[i])
                         if query_idx not in min_lengths or resp_len < min_lengths[query_idx]:
@@ -2235,7 +2237,7 @@ def make_reward_fn(args: Args) -> Callable:
                 # Scale rewards based on length ratio
                 for i in range(len(scores)):
                     if scores[i] > 0:
-                        query_idx = i % len(queries)
+                        query_idx = i % n_queries
                         if query_idx in min_lengths:
                             length_ratio = min_lengths[query_idx] / len(decoded_responses[i])
                             scores[i] *= length_ratio ** args.reward_shortest_gamma  # e.g., args.length_penalty_exp=1.0
