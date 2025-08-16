@@ -827,6 +827,8 @@ class PolicyTrainerRayProcess(RayProcess):
         pad_token_id: int,
         num_mini_batches: int,
         replay_buffer: ReplayBuffer,
+        collated_ref_logprobs=None,
+        collated_old_logprobs=None,
     ):
         args = self.args
         to_device_inplace(collated_query_responses, self.device)
@@ -850,40 +852,10 @@ class PolicyTrainerRayProcess(RayProcess):
         # recalculate the "real" number of mini-batches
         num_mini_batches = len(collated_query_responses) // accumulation_steps
 
-        # Calculate the logprob of the reference policy
-        collated_ref_logprobs = []
-        with Timer("Inference Calculation", noop=self.rank != 0):
-            with torch.no_grad():
-                for i in range(len(collated_query_responses)):
-                    query_response = collated_query_responses[i]
-                    tool_mask = collated_tool_masks[i]
-                    attention_mask = collated_attention_masks[i]
-                    position_id = collated_position_ids[i]
-                    response_mask = collated_response_masks[i]
-                    ref_logprob, _ = self.forward(
-                        self.ref_policy,
-                        query_response,
-                        attention_mask,
-                        position_id,
-                        pad_token_id,
-                        args.temperature,
-                        return_entropy=False,
-                    )
-                    if args.mask_tool_use and args.tool_use:
-                        # mask logprobs for tool tokens
-                        response_mask = response_mask.bool() & tool_mask.bool()
-                    else:
-                        response_mask = response_mask.bool()
-                    ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
-                    collated_ref_logprobs.append(ref_logprob)
-                    torch.cuda.empty_cache()
-        # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
-        # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
-        # from the generator (note that async mode means these are a bit diff!)
-        replay_buffer_list = []
-        old_logprobs = [None for _ in range(len(collated_query_responses))]
-        if num_mini_batches > 1:
-            with Timer("Old logprobs Calculation", noop=self.rank != 0):
+        if collated_ref_logprobs is None:
+            # Calculate the logprob of the reference policy for non-replay batch
+            collated_ref_logprobs = []
+            with Timer("Inference Calculation", noop=self.rank != 0):
                 with torch.no_grad():
                     for i in range(len(collated_query_responses)):
                         query_response = collated_query_responses[i]
@@ -891,8 +863,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         attention_mask = collated_attention_masks[i]
                         position_id = collated_position_ids[i]
                         response_mask = collated_response_masks[i]
-                        old_logprob, _ = self.forward(
-                            self.model,
+                        ref_logprob, _ = self.forward(
+                            self.ref_policy,
                             query_response,
                             attention_mask,
                             position_id,
@@ -901,26 +873,57 @@ class PolicyTrainerRayProcess(RayProcess):
                             return_entropy=False,
                         )
                         if args.mask_tool_use and args.tool_use:
+                            # mask logprobs for tool tokens
                             response_mask = response_mask.bool() & tool_mask.bool()
                         else:
                             response_mask = response_mask.bool()
-                        old_logprob = torch.masked_fill(old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
-                        old_logprobs[i] = old_logprob
+                        ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
+                        collated_ref_logprobs.append(ref_logprob)
                         torch.cuda.empty_cache()
+            # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
+            # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
+            # from the generator (note that async mode means these are a bit diff!)
+            replay_buffer_list = []
+            collated_old_logprobs = [None for _ in range(len(collated_query_responses))]
+            if num_mini_batches > 1:
+                with Timer("Old logprobs Calculation", noop=self.rank != 0):
+                    with torch.no_grad():
+                        for i in range(len(collated_query_responses)):
+                            query_response = collated_query_responses[i]
+                            tool_mask = collated_tool_masks[i]
+                            attention_mask = collated_attention_masks[i]
+                            position_id = collated_position_ids[i]
+                            response_mask = collated_response_masks[i]
+                            old_logprob, _ = self.forward(
+                                self.model,
+                                query_response,
+                                attention_mask,
+                                position_id,
+                                pad_token_id,
+                                args.temperature,
+                                return_entropy=False,
+                            )
+                            if args.mask_tool_use and args.tool_use:
+                                response_mask = response_mask.bool() & tool_mask.bool()
+                            else:
+                                response_mask = response_mask.bool()
+                            old_logprob = torch.masked_fill(old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
+                            collated_old_logprobs[i] = old_logprob
+                            torch.cuda.empty_cache()
 
-                    replay_buffer_list.append(
-                        PackedLogProbSequence(
-                            query_response=query_response,
-                            attention_mask=attention_mask,
-                            response_mask=response_mask,
-                            tool_mask=tool_mask,
-                            advantage=collated_advantages[i],
-                            position_id=position_id,
-                            old_logprob=old_logprob,
-                            ref_logprob=ref_logprob,
+                        replay_buffer_list.append(
+                            PackedLogProbSequence(
+                                query_response=query_response,
+                                attention_mask=attention_mask,
+                                response_mask=response_mask,
+                                tool_mask=tool_mask,
+                                advantage=collated_advantages[i],
+                                position_id=position_id,
+                                old_logprob=old_logprob,
+                                ref_logprob=ref_logprob,
+                            )
                         )
-                    )
-                replay_buffer.extend(replay_buffer_list)
+                    replay_buffer.extend(replay_buffer_list)
 
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
@@ -961,12 +964,12 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Cache the old logprobs
                     if num_mini_batches > 1:
-                        mb_old_logprobs = old_logprobs[i]
+                        mb_old_logprobs = collated_old_logprobs[i]
                     else:
                         with torch.no_grad():
                             if epoch_idx == 0:
-                                old_logprobs[i] = mb_new_logprobs
-                            mb_old_logprobs = old_logprobs[i].detach()
+                                collated_old_logprobs[i] = mb_new_logprobs
+                            mb_old_logprobs = collated_old_logprobs[i].detach()
 
                     # Calculate the policy's loss
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
@@ -1978,13 +1981,12 @@ def sync_weights_and_prepare_prompts(
 
 def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
     """Get the packed sequences with advantages from the packing thread."""
-    with Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
-        while True:
-            try:
-                packed_data = packed_sequences_Q.get(timeout=30.0)
-                break
-            except Empty:
-                logger.warning("[Main Thread] Timeout waiting for packed sequences. Retrying...")
+    with Timer("[Main Thread] 📦 Trying to get packed sequences from thread") as timer:
+        try:
+            packed_data = packed_sequences_Q.get(timeout=5.0)
+        except Empty:
+            return None, {}, 0
+            # logger.warning("[Main Thread] Timeout waiting for packed sequences. Retrying...")
         data_thread_metrics = packed_data["metrics"]
         B = packed_data["B"]
         collated_data = packed_data["collated_data"]
@@ -2536,7 +2538,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             packed_sequences_Q, num_total_tokens
         )
         if collated_data is None:
-            continue
+            logging.info("[Main Thread] didn't get generations, using replay buffer")
+            collated_data = replay_buffer.sample()
 
         generate_metrics = {}
         try:
