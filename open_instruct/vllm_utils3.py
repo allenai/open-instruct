@@ -15,7 +15,7 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
-import dataclasses
+import logging
 import os
 import queue
 from datetime import timedelta
@@ -24,6 +24,7 @@ from typing import Any, List, Optional, Union
 import ray
 import torch
 import torch.distributed
+import vllm
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed.distributed_c10d import (
@@ -36,40 +37,10 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
+from open_instruct.queue_types import GenerationResult, RequestInfo
+from open_instruct.utils import ray_get_with_progress
 
-@dataclasses.dataclass
-class RequestInfo:
-    """Container for tool usage information."""
-
-    num_calls: List[int]
-    timeouts: List[int]
-    tool_errors: List[str]
-    tool_outputs: List[str]
-    tool_runtimes: List[float]
-    tool_calleds: List[bool]
-
-
-@dataclasses.dataclass
-class GenerationResult:
-    """Container for generation results from vLLM."""
-
-    responses: List[List[int]]
-    finish_reasons: List[str]
-    masks: List[List[int]]
-    request_info: RequestInfo
-    is_eval: bool = False
-    dataset_index: Optional[List[int]] = None
-    training_step: Optional[int] = None
-
-
-@dataclasses.dataclass
-class PromptRequest:
-    """Container for prompt requests to vLLM."""
-
-    prompts: List[List[int]]
-    training_step: Optional[int] = None
-    eval_prompts: Optional[List[List[int]]] = None
-    dataset_index: Optional[List[int]] = None
+logger = logging.getLogger(__name__)
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -195,36 +166,32 @@ class LLMRayActor:
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
         self.tool_use = tool_use
+        self.logger = logging.getLogger(__name__)
 
     def generate(self, *args, **kwargs):
         return self.llm.generate(*args, **kwargs)
 
-    def process_from_queue(
-        self,
-        sampling_params,
-        eval_sampling_params=None,
-        eval_freq=None,
-        num_training_steps=None,
-        resume_training_step=1,
-        timeout=0.1,
-    ):
+    def process_from_queue(self, num_training_steps=None, resume_training_step=1, timeout=0.1):
         """Process a single element from the queue."""
         try:
             request = self.prompt_queue.get(timeout=timeout)
+            # Use generation_config from the request
             result = self._generate_batch(
                 request.prompts,
-                sampling_params,
+                request.generation_config,
                 dataset_index=request.dataset_index,
                 training_step=request.training_step,
             )
-            self.results_queue.put(result)
-            if request.eval_prompts and request.training_step % eval_freq == 0:
-                eval_result = self._generate_batch(request.eval_prompts, eval_sampling_params)
-                eval_result.is_eval = True
-                self.eval_results_queue.put(eval_result)
+            if request.is_eval:
+                self.eval_results_queue.put(result, timeout=1)
+            else:
+                self.results_queue.put(result, timeout=1)
             return 1  # Successfully processed a request
         except queue.Empty:
             return 0  # No request to process
+        except queue.Full:
+            self.logger.warning(f"[LLMRayActor] Results queue is full. Skipping insert. {request.is_eval=}.")
+            return 0
 
     def _generate_batch(
         self,
@@ -302,6 +269,23 @@ class LLMRayActor:
         return True
 
 
+def get_cuda_arch_list() -> str:
+    """Get CUDA compute capabilities and format them for TORCH_CUDA_ARCH_LIST."""
+    if not torch.cuda.is_available():
+        return ""
+
+    cuda_capabilities = []
+    for i in range(torch.cuda.device_count()):
+        major, minor = torch.cuda.get_device_capability(i)
+        cuda_capabilities.append(f"{major}.{minor}")
+
+    # Remove duplicates and sort
+    cuda_capabilities = sorted(set(cuda_capabilities))
+    cuda_arch_list = ";".join(cuda_capabilities)
+    print(f"Detected CUDA compute capabilities: {cuda_capabilities}, setting TORCH_CUDA_ARCH_LIST={cuda_arch_list}")
+    return cuda_arch_list
+
+
 def create_vllm_engines(
     num_engines: int,
     tensor_parallel_size: int,
@@ -322,8 +306,6 @@ def create_vllm_engines(
     results_queue=None,
     eval_results_queue=None,
 ) -> list[LLMRayActor]:
-    import vllm
-
     assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
 
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
@@ -377,7 +359,9 @@ def create_vllm_engines(
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
                 # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
-                runtime_env=ray.runtime_env.RuntimeEnv(env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0"}),
+                runtime_env=ray.runtime_env.RuntimeEnv(
+                    env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
+                ),
             ).remote(
                 model=pretrain,
                 revision=revision,
@@ -404,6 +388,18 @@ def create_vllm_engines(
                 **additional_kwargs,
             )
         )
+
+    # Verify engines initialized successfully
+    try:
+        ray_get_with_progress(
+            [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300
+        )
+    except TimeoutError as e:
+        logger.error(f"vLLM engines failed to initialize: {e}")
+        # Kill partially initialized actors before raising
+        for engine in vllm_engines:
+            ray.kill(engine)
+        raise RuntimeError(f"vLLM engine initialization timed out: {e}")
 
     if vllm_enable_sleep:
         batch_vllm_engine_call(vllm_engines, "sleep", rank_0_only=False)

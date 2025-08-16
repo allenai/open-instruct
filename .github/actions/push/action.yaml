@@ -20,10 +20,18 @@ runs:
     - shell: bash
       if: inputs.beaker != '' # previously startsWith(github.ref, 'refs/tags/') && ...
       run: |
+        beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
         # Push release to Beaker.
         SHORT_SHA=$(git rev-parse --short HEAD)
-        beaker image create --name "${{ inputs.beaker }}-${SHORT_SHA}-${{ github.run_id }}" ${{ inputs.image }}
+        DESCRIPTION="Created from commit: ${SHORT_SHA}"
+        beaker image create \
+               --name "${{ inputs.beaker }}-${SHORT_SHA}-${{ github.run_id }}" ${{ inputs.image }} \
+               --description "$DESCRIPTION"
         # We can't delete the old image because it might be used by a running job. Instead, we rename it to an empty 
         # string, so it will not be resolved by the Beaker client.
-        beaker image rename nathanl/${{ inputs.beaker }} "" || true
-        beaker image create --name ${{ inputs.beaker }} ${{ inputs.image }}
+        echo "Deleting image $beaker_user/${{ inputs.beaker }}."
+        beaker image rename $beaker_user/${{ inputs.beaker }} "" || true
+        echo "Creating image $beaker_user/inputs.beaker."
+        beaker image create \
+               --name ${{ inputs.beaker }} ${{ inputs.image }} \
+               --description "$DESCRIPTION"

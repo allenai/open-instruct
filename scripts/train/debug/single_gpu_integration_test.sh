@@ -43,7 +43,6 @@ uv run python mason.py \
     --learning_rate 3e-7 \
     --total_episodes 200 \
     --deepspeed_stage 2 \
-    --with_tracking \
     --num_epochs 1 \
     --num_learners_per_node 1 \
     --vllm_tensor_parallel_size 1 \

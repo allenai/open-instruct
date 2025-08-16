@@ -5,6 +5,7 @@ on:
     # Run this workflow anytime a push updates one of the files in the image's directory
     # (other than the README), and anytime there's a new release tag for this image.
     paths:
+      - 'mason.py'
       - 'open_instruct/**'
       - '!open_instruct/README.md'
       - 'requirements.txt'
@@ -14,6 +15,8 @@ on:
 
     # But only on pushes to main.
     branches: [main]
+
+  merge_group:
 
   # Adding a comment to trigger a run.
   workflow_dispatch:  # This allows us to manually trigger a build through the GitHub UI.
@@ -51,7 +54,9 @@ jobs:
           repository: allenai/oe-eval-internal
           path: './oe-eval-internal'
           ssh-key: ${{ secrets.OE_EVAL_GIT_CLONE_ACCESS_PRIVATE_SSH_DEPLOY_KEY }}
-      
+          fetch-depth: 1
+          filter: 'blob:none'
+
       - name: Get trigger information
         id: get-trigger-info
         run: |
@@ -84,7 +89,7 @@ jobs:
       - name: Install dependencies
         run: |
           # Install development dependencies needed for mason.py
-          uv sync --only-group dev
+          uv sync
 
       - name: Delete huge unnecessary tools folder
         run: |
@@ -138,7 +143,7 @@ jobs:
           
           # Build image and launch experiment
           # Use tee to both stream output and capture it for parsing
-          ./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh 2>&1 | tee /tmp/beaker_output.log || {
+          ./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_integration_test.sh 2>&1 | tee /tmp/beaker_output.log || {
             EXIT_CODE=$?
             echo "ERROR: build_image_and_launch.sh failed with exit code $EXIT_CODE"
             exit $EXIT_CODE

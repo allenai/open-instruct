@@ -10,8 +10,9 @@ from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 from vllm import SamplingParams
 
-from open_instruct import grpo_fast, utils
-from open_instruct.vllm_utils3 import GenerationResult, PromptRequest, RequestInfo, create_vllm_engines
+from open_instruct import grpo_fast, model_utils, utils
+from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo
+from open_instruct.vllm_utils3 import create_vllm_engines
 
 
 class TestGrpoFastBase(unittest.TestCase):
@@ -190,8 +191,16 @@ class TestGrpoFastBase(unittest.TestCase):
         # Track queues for cleanup
         self._ray_queues.extend([param_prompt_Q, inference_results_Q])
 
+        batch = model_utils.Batch(queries=queries, ground_truths=ground_truths, datasets=datasets, indices=indices)
+
+        # Create a mock generation_config for testing
+        from unittest.mock import MagicMock
+
+        mock_generation_config = MagicMock()
+        mock_generation_config.n = 4
+
         grpo_fast.split_and_insert_batch(
-            queries, ground_truths, datasets, indices, training_step, num_engines, pending_queries_map, param_prompt_Q
+            batch, training_step, num_engines, pending_queries_map, param_prompt_Q, mock_generation_config
         )
 
         return param_prompt_Q, inference_results_Q, pending_queries_map
@@ -244,18 +253,12 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         )
 
         # Start vLLM engines to process from queues
-        for engine in vllm_engines:
-            engine.process_from_queue.remote(
-                generation_config,
-                generation_config,  # eval_sampling_params
-                999,  # eval_freq (avoid evaluation)
-                1,  # num_training_steps
-                1,  # resume_training_step
-            )
+        [e.process_from_queue.remote() for e in vllm_engines]
 
         # Put the test prompt in the queue using PromptRequest
-        request = PromptRequest(prompts=[prompt_token_ids], dataset_index=0)
-        param_prompt_Q.put(request)
+        param_prompt_Q.put(
+            PromptRequest(prompts=[prompt_token_ids], dataset_index=0, generation_config=generation_config)
+        )
 
         # Get the result
         result = inference_results_Q.get()
@@ -550,12 +553,20 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
         # Accumulate results
         mock_args = self.create_mock_args(num_engines, num_samples_per_prompt)
-        combined_result, combined_queries, _, _ = grpo_fast.accumulate_inference_batches(
-            inference_results_Q, pending_queries_map, mock_args, training_step=1
+        # Create a mock generation config with n
+        mock_generation_config = Mock()
+        mock_generation_config.n = num_samples_per_prompt
+
+        combined_result, batch = grpo_fast.accumulate_inference_batches(
+            inference_results_Q,
+            pending_queries_map,
+            mock_args,
+            training_step=1,
+            generation_config=mock_generation_config,
         )
 
         # Verify results work correctly even with out-of-order processing
-        self.assertEqual(len(combined_queries), num_prompts)
+        self.assertEqual(len(batch.queries), num_prompts)
         self.assertEqual(len(combined_result.responses), num_prompts * num_samples_per_prompt)
         self.assertEqual(len(pending_queries_map), 0)
 
@@ -634,8 +645,16 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
         def run_accumulate():
             try:
+                # Create a mock generation config with n=1 (default)
+                mock_generation_config = Mock()
+                mock_generation_config.n = 1
+
                 grpo_fast.accumulate_inference_batches(
-                    inference_results_Q, pending_queries_map, mock_args, training_step=1
+                    inference_results_Q,
+                    pending_queries_map,
+                    mock_args,
+                    training_step=1,
+                    generation_config=mock_generation_config,
                 )
                 completed.set()
             except Exception:

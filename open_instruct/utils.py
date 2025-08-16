@@ -42,11 +42,13 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent import futures
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from dataclasses import dataclass, field
 from multiprocessing import resource_tracker as _rt
 from typing import Any, Iterable, List, NewType, Optional, Tuple, Union
 
+import beaker
 import numpy as np
 import ray
 import requests
@@ -58,6 +60,7 @@ from dateutil import parser
 from huggingface_hub import HfApi
 from ray.util import state as ray_state
 from rich.pretty import pprint
+from tqdm import tqdm
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
@@ -66,6 +69,43 @@ MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 logger = get_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
+
+
+def repeat_each(seq, k):
+    """Repeat each element in a sequence k times."""
+    return [item for item in seq for _ in range(k)]
+
+
+def ray_get_with_progress(
+    ray_refs: List[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: Optional[float] = None
+) -> List[Any]:
+    """Execute ray.get() with a progress bar using futures.
+
+    Args:
+        ray_refs: List of ray object references
+        desc: Description for the progress bar
+        enable: Whether to show the progress bar (default: True)
+        timeout: Optional timeout in seconds for all operations to complete
+
+    Returns:
+        List of results in the same order as ray_refs
+
+    Raises:
+        TimeoutError: If timeout is specified and operations don't complete in time
+    """
+    ray_futures = [ref.future() for ref in ray_refs]
+    results = [None] * len(ray_refs)
+
+    futures_iter = futures.as_completed(ray_futures, timeout=timeout)
+    if enable:
+        futures_iter = tqdm(futures_iter, total=len(ray_futures), desc=desc, bar_format="{l_bar}{bar}{r_bar}\n")
+
+    for future in futures_iter:
+        idx = ray_futures.index(future)
+        results[idx] = future.result()
+
+    return results
+
 
 """
 Notes:
@@ -610,66 +650,22 @@ class ArgumentParserPlus(HfArgumentParser):
 
 # ----------------------------------------------------------------------------
 # Experiment tracking utilities
-def get_git_tag() -> str:
-    """Try to get the latest Git tag (e.g., `no-tag-404-g98dc659` or `v1.0.0-4-g98dc659`)"""
-    git_tag = ""
-    try:
-        git_tag = (
-            subprocess.check_output(["git", "describe", "--tags"], stderr=subprocess.DEVNULL).decode("ascii").strip()
-        )
-    except subprocess.CalledProcessError as e:
-        logging.debug(f"Failed to get Git tag: {e}")
-
-    # If no Git tag found, create a custom tag based on commit count and hash
-    if len(git_tag) == 0:
-        try:
-            count = int(
-                subprocess.check_output(["git", "rev-list", "--count", "HEAD"], stderr=subprocess.DEVNULL)
-                .decode("ascii")
-                .strip()
-            )
-            hash = (
-                subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL)
-                .decode("ascii")
-                .strip()
-            )
-            git_tag = f"no-tag-{count}-g{hash}"
-        except subprocess.CalledProcessError as e:
-            logging.debug(f"Failed to get commit count and hash: {e}")
-
-    return git_tag
-
-
-def get_pr_tag() -> str:
-    """Try to find associated pull request on GitHub (e.g., `pr-123`)"""
-    pr_tag = ""
-    try:
-        git_commit = (
-            subprocess.check_output(["git", "rev-parse", "--verify", "HEAD"], stderr=subprocess.DEVNULL)
-            .decode("ascii")
-            .strip()
-        )
+def get_wandb_tags() -> List[str]:
+    """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123,branch-main`)"""
+    tags = [t for t in os.environ.get("WANDB_TAGS", "").split(",") if t != ""]
+    if "GIT_COMMIT" in os.environ:
+        git_commit = os.environ["GIT_COMMIT"]
+        tags.append(f"commit: {git_commit}")
         # try finding the pull request number on github
         prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
         if prs.status_code == 200:
             prs = prs.json()
-            if len(prs["items"]) > 0:
+            if len(prs["items"]):
                 pr = prs["items"][0]
-                pr_number = pr["number"]
-                pr_tag = f"pr-{pr_number}"
-    except Exception as e:
-        logging.debug(f"Failed to get PR number: {e}")
-
-    return pr_tag
-
-
-def get_wandb_tags() -> List[str]:
-    """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123`)"""
-    existing_wandb_tags = os.environ.get("WANDB_TAGS", "")
-    git_tag = get_git_tag()
-    pr_tag = get_pr_tag()
-    non_empty_tags = [tag for tag in [existing_wandb_tags, git_tag, pr_tag] if len(tag) > 0]
-    return non_empty_tags
+                tags.append(f"pr: {pr['number']}")
+    if "GIT_BRANCH" in os.environ:
+        tags.append(f"branch: {os.environ['GIT_BRANCH']}")
+    return tags
 
 
 # ----------------------------------------------------------------------------
@@ -927,6 +923,22 @@ def maybe_get_beaker_config():
     )
 
 
+def maybe_update_beaker_description_with_wandb_url(wandb_url: str) -> None:
+    """Update Beaker experiment description with wandb URL if running on Beaker."""
+    if not is_beaker_job() or wandb_url is None:
+        return
+
+    client = beaker.Beaker.from_env()
+    try:
+        spec = client.experiment.get(os.environ["BEAKER_WORKLOAD_ID"])
+    except beaker.exceptions.ExperimentNotFound:
+        logger.warning(f"Failed to update Beaker experiment description with wandb URL: {wandb_url}")
+        logger.warning("This might be fine if you are e.g. running in an interactive job.")
+        return
+    current_description = spec.description or ""
+    client.experiment.set_description(os.environ["BEAKER_WORKLOAD_ID"], f"{current_description}\n{wandb_url}")
+
+
 def live_subprocess_output(cmd: List[str]) -> str:
     output_lines = []
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
@@ -1038,6 +1050,7 @@ def launch_ai2_evals_on_weka(
     stop_strings: Optional[List[str]] = None,
     gs_bucket_path: Optional[str] = None,
     eval_priority: Optional[str] = "normal",
+    beaker_image: Optional[str] = None,
 ) -> None:
     weka_cluster = "ai2/saturn-cirrascale ai2/neptune-cirrascale"
     gcp_cluster = "ai2/augusta-google-1"
@@ -1089,6 +1102,8 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
     if stop_strings is not None:
         command += f" --oe_eval_stop_sequences '{','.join(stop_strings)}'"
+    if beaker_image is not None:
+        command += f" --beaker_image {beaker_image}"
     print(f"Launching eval jobs with command: {command}")
     process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
