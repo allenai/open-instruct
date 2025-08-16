@@ -90,8 +90,7 @@ def init_process_group(
         backend = Backend("undefined")
 
     if timeout is None:
-        # timeout = default_pg_timeout
-        timeout = timedelta(hours=2)
+        timeout = default_pg_timeout
 
     # backward compatible API
     if store is None:
@@ -244,11 +243,11 @@ class LLMRayActor:
         )
 
     def init_process_group(
-        self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
+        self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False, timeout=120
     ):
         return self.llm.collective_rpc(
             "init_process_group",
-            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
+            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout),
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):

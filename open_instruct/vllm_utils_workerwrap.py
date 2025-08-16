@@ -1,8 +1,9 @@
 class WorkerWrap:
     def init_process_group(
-        self, master_address, master_port, rank_offset, world_size, group_name, backend="nccl", use_ray=False
+        self, master_address, master_port, rank_offset, world_size, group_name, backend="nccl", use_ray=False, timeout=120
     ):
         """Init torch process group for model weights update"""
+        from datetime import timedelta
         import torch
 
         from open_instruct.vllm_utils3 import init_process_group
@@ -25,6 +26,7 @@ class WorkerWrap:
                 world_size=world_size,
                 rank=rank,
                 group_name=group_name,
+                timeout=timedelta(minutes=timeout),
             )
         self._model_update_with_ray = use_ray
         print(
