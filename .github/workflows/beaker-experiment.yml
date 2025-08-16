@@ -89,7 +89,7 @@ jobs:
       - name: Install dependencies
         run: |
           # Install development dependencies needed for mason.py
-          uv sync
+          uv sync --frozen
 
       - name: Delete huge unnecessary tools folder
         run: |
