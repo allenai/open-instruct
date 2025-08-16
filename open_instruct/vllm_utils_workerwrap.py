@@ -12,6 +12,7 @@ class WorkerWrap:
     ):
         """Init torch process group for model weights update"""
         from datetime import timedelta
+
         import torch
 
         from open_instruct.vllm_utils3 import init_process_group
