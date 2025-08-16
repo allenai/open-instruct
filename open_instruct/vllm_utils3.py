@@ -90,7 +90,8 @@ def init_process_group(
         backend = Backend("undefined")
 
     if timeout is None:
-        timeout = default_pg_timeout
+        # timeout = default_pg_timeout
+        timeout = timedelta(hours=2)
 
     # backward compatible API
     if store is None:

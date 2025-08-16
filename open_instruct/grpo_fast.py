@@ -563,7 +563,8 @@ class PolicyTrainerRayProcess(RayProcess):
         self.wandb_url = wandb_url
         torch.cuda.set_device(self.local_rank)
         self.device = torch.device(self.local_rank)
-        deepspeed.init_distributed()
+        from datetime import timedelta
+        deepspeed.init_distributed(timeout=timedelta(hours=2))
 
         ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
