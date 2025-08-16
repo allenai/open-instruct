@@ -32,4 +32,5 @@ uv run python open_instruct/grpo_fast.py \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --single_gpu_mode \
+    --push_to_hub false \
     # --with_tracking
