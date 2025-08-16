@@ -219,7 +219,7 @@ class Args:
     """How many train steps to save the model"""
     allow_world_padding: bool = False
     """Whether to allow world padding. This is useful for model sweeps, but wastes compute."""
-    timeout: int = 120
+    backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
 
     # Generation
@@ -566,7 +566,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.wandb_url = wandb_url
         torch.cuda.set_device(self.local_rank)
         self.device = torch.device(self.local_rank)
-        deepspeed.init_distributed(timeout=timedelta(minutes=args.timeout))
+        deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
         ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
@@ -721,7 +721,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     world_size,
                     "openrlhf",
                     backend=backend,
-                    timeout=self.args.timeout,
+                    timeout=self.args.backend_timeout,
                 )
                 for i, engine in enumerate(vllm_engines)
             ]
@@ -731,7 +731,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 world_size=world_size,
                 rank=0,
                 group_name="openrlhf",
-                timeout=timedelta(minutes=self.args.timeout),
+                timeout=timedelta(minutes=self.args.backend_timeout),
             )
             ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=60)
         torch.distributed.barrier()
