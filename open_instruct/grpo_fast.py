@@ -77,7 +77,6 @@ from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
-from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
@@ -127,6 +126,7 @@ from open_instruct.utils import (
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
+    maybe_update_beaker_description_with_wandb_url,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
@@ -146,6 +146,10 @@ logger = logging.getLogger(__name__)
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
+
+
+class ShutdownSentinel:
+    """Sentinel value to signal thread shutdown via queue."""
 
 
 @dataclass
@@ -336,8 +340,6 @@ class Args:
     """whether to enable prefix caching"""
     vllm_top_p: float = 1.0
     """vLLM top p for nucleus sampling"""
-    accumulate_inference_batches_timeout: float = 1800.0  # 30 minutes
-    """Timeout in seconds for accumulating inference batches during training"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     gather_whole_model: bool = True
@@ -1364,7 +1366,7 @@ def accumulate_inference_batches(
         queue.Empty: If timeout is specified and no data is available within timeout.
 
     Returns:
-        Tuple of (combined_result, Batch with queries, ground_truths, datasets)
+        Tuple of (combined_result, Batch with queries, ground_truths, datasets) or (ShutdownSentinel, None) if shutdown signal received
     """
     # Collect results from all engines with non-blocking progress bar
     results = []
@@ -1374,11 +1376,14 @@ def accumulate_inference_batches(
     for i in tqdm(
         range(args.vllm_num_engines),
         total=args.vllm_num_engines,
-        desc=f"Accumulating results from {args.vllm_num_engines} engines ({timeout=})",
+        desc=f"Accumulating results from {args.vllm_num_engines} engines",
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     ):
         result = inference_results_Q.get(timeout=timeout)
+
+        if isinstance(result, ShutdownSentinel):
+            return result, None
         dataset_indices = result.dataset_index
 
         if dataset_indices is None:
@@ -1471,32 +1476,17 @@ def data_preparation_thread(
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
-    stop_event: threading.Event,
     generation_config,
 ):
     for training_step in range(1, num_training_steps + 1):
-        if stop_event.is_set():
-            logger.info("[Data Preparation Thread] Shutting down")
-            return
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            while True:
-                if stop_event.is_set():
-                    logger.info("[Data Preparation Thread] Shutting down due to stop event")
-                    return  # Simply return to exit the thread cleanly
-                try:
-                    result, batch = accumulate_inference_batches(
-                        inference_results_Q,
-                        pending_queries_map,
-                        args,
-                        training_step,
-                        generation_config,
-                        # Use configurable timeout from args
-                        timeout=args.accumulate_inference_batches_timeout,
-                    )
-                    break  # Successfully got results, exit retry loop
-                except Empty:
-                    continue  # Timeout occurred, loop back to check stop_event
+            result, batch = accumulate_inference_batches(
+                inference_results_Q, pending_queries_map, args, training_step, generation_config
+            )
+            if isinstance(result, ShutdownSentinel):
+                logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
+                return
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -1800,21 +1790,15 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
         wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
-            sync_tensorboard=True,
             config=all_configs,
             name=args.run_name,
             save_code=True,
             tags=[args.exp_name] + get_wandb_tags(),
         )
         wandb_url = wandb.run.get_url()
+        maybe_update_beaker_description_with_wandb_url(wandb_url)
 
-    writer = SummaryWriter(f"runs/{args.run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
-
-    return beaker_config, writer, wandb_url
+    return beaker_config, wandb_url
 
 
 def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer):
@@ -2093,13 +2077,11 @@ def one_training_step(
     collated_data,
     tokenizer,
     data_thread_metrics,
-    average_metrics,
     episode,
     training_step,
     num_total_tokens,
     start_time,
     train_dataset,
-    writer,
     wandb_url,
     chat_template_name,
 ):
@@ -2134,15 +2116,17 @@ def one_training_step(
             **data_thread_metrics,
             **average_metrics,
         }
-        scalar_metrics = {}
-        for key, value in metrics.items():
-            if isinstance(value, float) or isinstance(value, int):
-                writer.add_scalar(key, value, episode)
-                scalar_metrics[key] = value
-            if isinstance(value, np.ndarray) or isinstance(value, list):
-                if len(value) > 0:
-                    writer.add_histogram(key, value, episode)
+        # Print only scalar metrics
+        scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (float, int))}
         print_rich_single_line_metrics(scalar_metrics)
+
+        if args.with_tracking:
+            # Convert array/list metrics to wandb histograms for logging
+            for key, value in metrics.items():
+                if isinstance(value, np.ndarray) or isinstance(value, list):
+                    if len(value) > 0:
+                        metrics[key] = wandb.Histogram(value)
+            wandb.log(metrics, step=episode)
 
         if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
             with Timer("[Main Thread] 🗡️ Saving model"):
@@ -2193,7 +2177,6 @@ def maybe_evaluate(
     eval_batch: Optional[Batch],
     reward_fn,
     episode,
-    writer,
     eval_pending_queries_map: PendingQueriesMap,
     eval_generation_config,
 ):
@@ -2241,8 +2224,7 @@ def maybe_evaluate(
             **eval_reward_metrics,
         }
         print_rich_single_line_metrics(eval_metrics)
-        for key, value in eval_metrics.items():
-            writer.add_scalar(key, value, episode)
+
         table = {}
         table["prompt"] = tokenizer.batch_decode(eval_batch.queries if eval_batch else [])
         table["response"] = eval_decoded_responses
@@ -2250,10 +2232,10 @@ def maybe_evaluate(
         table["scores"] = eval_scores
         table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
         df = pd.DataFrame(table)
-        if args.with_tracking:
-            import wandb
 
-            wandb.log({"sample_completions": wandb.Table(dataframe=df)})
+        if args.with_tracking:
+            eval_metrics["sample_completions"] = wandb.Table(dataframe=df)
+            wandb.log(eval_metrics, step=episode)
         else:
             print_rich_table(df.iloc[:1])
         del table
@@ -2388,11 +2370,8 @@ def make_reward_fn(args: Args) -> Callable:
 
 def cleanup_judge_clients():
     """Cleans up all LLM judge clients and shutdown Ray."""
-    try:
-        asyncio.run(cleanup_all_llm_judge_clients())
-        logger.info("✅ LLM judge clients cleaned up")
-    except Exception as cleanup_error:
-        logger.warning(f"Error during LLM judge cleanup: {cleanup_error}")
+    asyncio.run(cleanup_all_llm_judge_clients())
+    logger.info("✅ LLM judge clients cleaned up")
     ray.shutdown()
 
 
@@ -2415,18 +2394,19 @@ def cleanup_training_resources(
     stop_event: threading.Event, executor: futures.ThreadPoolExecutor, queues: list[ray_queue.Queue]
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
-    # Signal threads to stop
+    # Signal generate_thread to stop
     stop_event.set()
 
-    logger.info("Shutting down thread pool executor...")
-    executor.shutdown(wait=True)
+    # Push sentinel to signal data_preparation_thread to stop
+    logger.info("Pushing shutdown sentinel to queues...")
+    if queues and len(queues) > 0:
+        # Push sentinel to the first queue (inference_results_Q)
+        queues[0].put(ShutdownSentinel(), timeout=1)
 
     logger.info("Shutting down Ray queues...")
-    for queue in queues:
-        try:
-            queue.shutdown()
-        except Exception as e:
-            logger.warning(f"Error shutting down Ray queue: {e}")
+    [queue.shutdown() for queue in queues]
+    logger.info("Shutting down thread pool executor...")
+    executor.shutdown(wait=True)
 
     # Clean up judge clients
     cleanup_judge_clients()
@@ -2435,7 +2415,7 @@ def cleanup_training_resources(
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_samples: int = 32):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
-    beaker_config, writer, wandb_url = setup_experiment_tracking(args, tc, model_config)
+    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
     if args.cache_dataset_only:
@@ -2504,7 +2484,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         args,
         tokenizer,
         args.num_training_steps,
-        stop_event,
         generation_configs["train"],
     )
 
@@ -2546,7 +2525,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             param_prompt_Q,
             generation_configs,
         )
-        if training_step % args.local_eval_every == 0 and eval_batch is not None:
+        if (
+            training_step % args.local_eval_every == 0
+            and eval_batch is not None
+            and (args.eval_on_step_0 or training_step > 1)
+        ):
             split_and_insert_batch(
                 eval_batch,
                 training_step,
@@ -2570,13 +2553,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             collated_data,
             tokenizer,
             data_thread_metrics,
-            {},
             episode,
             training_step,
             num_total_tokens,
             start_time,
             train_dataset,
-            writer,
             wandb_url,
             tc.chat_template_name,
         )
@@ -2589,7 +2570,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             eval_batch,
             reward_fn,
             episode,
-            writer,
             eval_pending_queries_map,
             generation_configs["eval"],
         )
