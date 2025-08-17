@@ -19,7 +19,7 @@ aiohttp-cors==0.8.1
     # via ray
 aiosignal==1.4.0
     # via aiohttp
-airportsdata==20250706
+airportsdata==20250811
     # via outlines
 annotated-types==0.7.0
     # via pydantic
@@ -46,7 +46,7 @@ babel==2.17.0
 backrefs==5.9
     # via mkdocs-material
 beaker-py==1.36.4
-bitsandbytes==0.46.1 ; sys_platform != 'darwin'
+bitsandbytes==0.47.0 ; sys_platform != 'darwin'
     # via open-instruct
 black==25.1.0
 blake3==1.0.5
@@ -63,7 +63,7 @@ certifi==2025.8.3
     #   sentry-sdk
 cffi==1.17.1 ; implementation_name == 'pypy'
     # via pyzmq
-charset-normalizer==3.4.2
+charset-normalizer==3.4.3
     # via requests
 click==8.2.1
     # via
@@ -98,12 +98,6 @@ contourpy==1.3.2 ; python_full_version < '3.11'
     # via matplotlib
 contourpy==1.3.3 ; python_full_version >= '3.11'
     # via matplotlib
-cuda-bindings==13.0.0
-    # via cuda-python
-cuda-pathfinder==1.1.0
-    # via cuda-bindings
-cuda-python==13.0.0
-    # via flashinfer-python
 cupy-cuda12x==13.5.1 ; sys_platform != 'darwin'
     # via ray
 cycler==0.12.1
@@ -112,7 +106,7 @@ datasets==4.0.0
     # via open-instruct
 debugpy==1.8.16
     # via open-instruct
-deepspeed==0.17.2
+deepspeed==0.17.4
     # via open-instruct
 depyf==0.18.0
     # via vllm
@@ -137,7 +131,6 @@ einops==0.8.1
     # via
     #   deepspeed
     #   flash-attn
-    #   flashinfer-python
     #   vllm
 email-validator==2.2.0
     # via
@@ -169,9 +162,7 @@ filelock==3.18.0
     #   virtualenv
     #   vllm
 flake8==7.3.0
-flash-attn==2.8.2
-    # via open-instruct
-flashinfer-python==0.2.8
+flash-attn==2.8.2 ; sys_platform != 'darwin'
     # via open-instruct
 fonttools==4.59.0
     # via matplotlib
@@ -227,7 +218,7 @@ httpx==0.28.1
     #   fastapi-cloud-cli
     #   litellm
     #   openai
-huggingface-hub==0.34.3
+huggingface-hub==0.34.4
     # via
     #   accelerate
     #   datasets
@@ -277,7 +268,7 @@ jsonschema==4.25.0
     #   ray
 jsonschema-specifications==2025.4.1
     # via jsonschema
-kiwisolver==1.4.8
+kiwisolver==1.4.9
     # via matplotlib
 langdetect==1.0.9
     # via open-instruct
@@ -285,9 +276,9 @@ lark==1.2.2
     # via
     #   outlines
     #   vllm
-liger-kernel==0.6.1
+liger-kernel==0.6.1 ; sys_platform != 'darwin'
     # via open-instruct
-litellm==1.75.0
+litellm==1.75.5.post1
     # via open-instruct
 llguidance==0.7.30 ; platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
     # via vllm
@@ -303,7 +294,7 @@ markdown==3.8.2
     #   pymdown-extensions
     #   tensorboard
 markdown-include==0.8.1
-markdown-it-py==3.0.0
+markdown-it-py==4.0.0
     # via rich
 markupsafe==3.0.2
     # via
@@ -337,7 +328,7 @@ msgpack==1.1.1
     #   ray
 msgspec==0.19.0
     # via vllm
-multidict==6.6.3
+multidict==6.6.4
     # via
     #   aiohttp
     #   yarl
@@ -351,10 +342,9 @@ networkx==3.4.2 ; python_full_version < '3.11'
     # via torch
 networkx==3.5 ; python_full_version >= '3.11'
     # via torch
-ninja==1.11.1.4
+ninja==1.13.0
     # via
     #   deepspeed
-    #   flashinfer-python
     #   vllm
     #   xgrammar
 nltk==3.9.1
@@ -369,7 +359,6 @@ numpy==1.26.4
     #   cupy-cuda12x
     #   datasets
     #   deepspeed
-    #   flashinfer-python
     #   gguf
     #   matplotlib
     #   mistral-common
@@ -413,9 +402,7 @@ nvidia-cusparse-cu12==12.5.7.53 ; platform_machine == 'x86_64' and sys_platform 
 nvidia-cusparselt-cu12==0.6.3 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
 nvidia-ml-py==12.575.51
-    # via
-    #   nvitop
-    #   pynvml
+    # via nvitop
 nvidia-nccl-cu12==2.26.2 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
 nvidia-nvjitlink-cu12==12.8.61 ; platform_machine == 'x86_64' and sys_platform == 'linux'
@@ -424,13 +411,11 @@ nvidia-nvjitlink-cu12==12.8.61 ; platform_machine == 'x86_64' and sys_platform =
     #   nvidia-cusolver-cu12
     #   nvidia-cusparse-cu12
     #   torch
-nvidia-nvshmem-cu12==3.3.20
-    # via flashinfer-python
 nvidia-nvtx-cu12==12.8.55 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
 nvitop==1.5.2
     # via open-instruct
-openai==1.99.2
+openai==1.99.8
     # via
     #   litellm
     #   vllm
@@ -446,7 +431,6 @@ opentelemetry-api==1.36.0
     # via
     #   opentelemetry-exporter-otlp-proto-grpc
     #   opentelemetry-exporter-otlp-proto-http
-    #   opentelemetry-exporter-prometheus
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
     #   vllm
@@ -460,20 +444,15 @@ opentelemetry-exporter-otlp-proto-grpc==1.36.0
     # via opentelemetry-exporter-otlp
 opentelemetry-exporter-otlp-proto-http==1.36.0
     # via opentelemetry-exporter-otlp
-opentelemetry-exporter-prometheus==0.57b0
-    # via ray
 opentelemetry-proto==1.36.0
     # via
     #   opentelemetry-exporter-otlp-proto-common
     #   opentelemetry-exporter-otlp-proto-grpc
     #   opentelemetry-exporter-otlp-proto-http
-    #   ray
 opentelemetry-sdk==1.36.0
     # via
     #   opentelemetry-exporter-otlp-proto-grpc
     #   opentelemetry-exporter-otlp-proto-http
-    #   opentelemetry-exporter-prometheus
-    #   ray
     #   vllm
 opentelemetry-semantic-conventions==0.57b0
     # via opentelemetry-sdk
@@ -530,7 +509,6 @@ pluggy==1.6.0
     # via pytest
 prometheus-client==0.22.1
     # via
-    #   opentelemetry-exporter-prometheus
     #   prometheus-fastapi-instrumentator
     #   ray
     #   vllm
@@ -612,8 +590,6 @@ pygments==2.19.2
     #   rich
 pymdown-extensions==10.16.1
     # via mkdocs-material
-pynvml==12.0.0
-    # via flashinfer-python
 pyparsing==3.2.3
     # via matplotlib
 pytest==8.4.1
@@ -638,9 +614,7 @@ pytz==2025.2
     #   google-api-core
     #   pandas
 pywin32==311 ; sys_platform == 'win32'
-    # via
-    #   cuda-bindings
-    #   docker
+    # via docker
 pyyaml==6.0.2
     # via
     #   accelerate
@@ -663,7 +637,7 @@ pyyaml-env-tag==1.1
     # via mkdocs
 pyzmq==27.0.1
     # via vllm
-ray==2.48.0
+ray==2.46.0
     # via
     #   open-instruct
     #   vllm
@@ -683,7 +657,6 @@ requests==2.32.4
     #   beaker-py
     #   datasets
     #   docker
-    #   flashinfer-python
     #   google-api-core
     #   huggingface-hub
     #   mistral-common
@@ -701,7 +674,7 @@ rich==13.9.4
     #   beaker-py
     #   rich-toolkit
     #   typer
-rich-toolkit==0.14.9
+rich-toolkit==0.15.0
     # via
     #   fastapi-cli
     #   fastapi-cloud-cli
@@ -714,7 +687,7 @@ rpds-py==0.27.0
 rsa==4.9.1
     # via google-auth
 ruff==0.12.8
-safetensors==0.6.1
+safetensors==0.6.2
     # via
     #   accelerate
     #   peft
@@ -772,7 +745,7 @@ tensorboard==2.20.0
     # via open-instruct
 tensorboard-data-server==0.7.2
     # via tensorboard
-tiktoken==0.10.0
+tiktoken==0.11.0
     # via
     #   litellm
     #   mistral-common
@@ -793,9 +766,6 @@ torch==2.7.0 ; sys_platform == 'darwin'
     #   accelerate
     #   compressed-tensors
     #   deepspeed
-    #   flash-attn
-    #   flashinfer-python
-    #   liger-kernel
     #   open-instruct
     #   outlines
     #   peft
@@ -810,7 +780,6 @@ torch==2.7.0+cu128 ; sys_platform != 'darwin'
     #   compressed-tensors
     #   deepspeed
     #   flash-attn
-    #   flashinfer-python
     #   liger-kernel
     #   open-instruct
     #   outlines
@@ -844,7 +813,7 @@ transformers==4.53.3
     #   peft
     #   vllm
     #   xgrammar
-triton==3.3.0
+triton==3.3.0 ; sys_platform != 'darwin'
     # via
     #   liger-kernel
     #   torch
