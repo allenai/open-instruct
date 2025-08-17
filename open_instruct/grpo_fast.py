@@ -70,6 +70,7 @@ import ray
 import torch
 import torch.utils
 import torch.utils.data
+import wandb
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util import queue as ray_queue
@@ -81,7 +82,6 @@ from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokeni
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
-import wandb
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -863,7 +863,6 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # recalculate the "real" number of mini-batches
         num_mini_batches = len(collated_query_responses) // accumulation_steps
-        original_length = len(collated_query_responses)
 
         if self.splitter is not None:
             with Timer("✂️ Splitting batch for SP", noop=self.rank != 0):
