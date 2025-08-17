@@ -2060,6 +2060,7 @@ def generate_thread(vllm_engines, local_eval_every, num_training_steps, resume_t
             ) as pbar:
                 for future in futures.as_completed(engine_futures):
                     processed_results.append(future.result())
+                    pbar.update(1)
             num_processed = sum(int(result) for result in processed_results)
             # Suppress timing output if nothing was processed
             if num_processed == 0:
