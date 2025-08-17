@@ -687,7 +687,11 @@ class PolicyTrainerRayProcess(RayProcess):
             self.sp_world_size = groups._get_sequence_parallel_world_size()
             self.sp_rank = groups._get_sequence_parallel_rank()
             self.splitter = UlyssesSPSplitter(
-                sp_rank=self.sp_rank, sp_group=self.sp_group, sp_world_size=self.sp_world_size, device=self.device, pad_token_id=self.tokenizer.pad_token_id
+                sp_rank=self.sp_rank,
+                sp_group=self.sp_group,
+                sp_world_size=self.sp_world_size,
+                device=self.device,
+                pad_token_id=self.tokenizer.pad_token_id,
             )
         else:
             self.splitter = None
@@ -885,7 +889,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 collated_position_ids = sharded_batches[self.sp_rank]["position_ids"]
                 collated_response_masks = sharded_batches[self.sp_rank]["response_masks"]
                 collated_tool_masks = sharded_batches[self.sp_rank]["tool_masks"]
-                collated_advantages = sharded_batches[self.sp_rank]["advantages"]   
+                collated_advantages = sharded_batches[self.sp_rank]["advantages"]
 
                 collated_query_responses = move_to_device(collated_query_responses, self.ref_policy.device)
                 collated_attention_masks = move_to_device(collated_attention_masks, self.ref_policy.device)
@@ -1032,12 +1036,20 @@ class PolicyTrainerRayProcess(RayProcess):
                         # SP: gather loss sums from all ranks, divide by total valid tokens
                         local_loss_sum = ((pg_loss_max + args.beta * kl) * mb_response_masks_bool.float()).sum()
                         good_tokens = mb_response_masks_bool.sum()
-                        loss_sums_per_rank = torch.distributed.nn.functional.all_gather(local_loss_sum, group=self.sp_group)
-                        good_tokens_per_rank = torch.distributed.nn.functional.all_gather(good_tokens, group=self.sp_group)
+                        loss_sums_per_rank = torch.distributed.nn.functional.all_gather(
+                            local_loss_sum, group=self.sp_group
+                        )
+                        good_tokens_per_rank = torch.distributed.nn.functional.all_gather(
+                            good_tokens, group=self.sp_group
+                        )
                         total_loss_sum = sum(loss_sums_per_rank)
                         total_good_tokens = sum(good_tokens_per_rank)
-                        
-                        loss = total_loss_sum / total_good_tokens if total_good_tokens > 0 else torch.tensor(0.0, device=local_loss_sum.device)
+
+                        loss = (
+                            total_loss_sum / total_good_tokens
+                            if total_good_tokens > 0
+                            else torch.tensor(0.0, device=local_loss_sum.device)
+                        )
                     loss = loss / accumulation_steps
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
@@ -1064,20 +1076,25 @@ class PolicyTrainerRayProcess(RayProcess):
                         else:
                             # do the rank gather thing like for the main loss.
                             # this is because we have to pad out to the max length
-                            # for the whole minibatch to get ulysses to work, so 
-                            # sometimes in a microbatch we end up with all padding 
+                            # for the whole minibatch to get ulysses to work, so
+                            # sometimes in a microbatch we end up with all padding
                             # on one rank.
                             def gather_mean_stats(stats_tensor, mask_tensor):
                                 local_stats_sum = (stats_tensor * mask_tensor.float()).sum()
                                 good_tokens = mask_tensor.sum()
-                                loss_sums_per_rank = torch.distributed.nn.functional.all_gather(local_stats_sum, group=self.sp_group)
-                                good_tokens_per_rank = torch.distributed.nn.functional.all_gather(good_tokens, group=self.sp_group)
+                                loss_sums_per_rank = torch.distributed.nn.functional.all_gather(
+                                    local_stats_sum, group=self.sp_group
+                                )
+                                good_tokens_per_rank = torch.distributed.nn.functional.all_gather(
+                                    good_tokens, group=self.sp_group
+                                )
                                 total_stats_sum = sum(loss_sums_per_rank)
                                 total_good_tokens = sum(good_tokens_per_rank)
                                 if total_good_tokens > 0:
                                     return total_stats_sum / total_good_tokens
                                 else:
                                     return torch.tensor(0.0, device=local_stats_sum.device)
+
                             kl1_stats[i] = gather_mean_stats(kl1, mb_response_masks_bool)
                             kl2_stats[i] = gather_mean_stats(kl2, mb_response_masks_bool)
                             kl3_stats[i] = gather_mean_stats(kl3, mb_response_masks_bool)
