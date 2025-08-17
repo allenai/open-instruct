@@ -70,7 +70,6 @@ import ray
 import torch
 import torch.utils
 import torch.utils.data
-import wandb
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util import queue as ray_queue
@@ -82,6 +81,7 @@ from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokeni
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
+import wandb
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -113,6 +113,7 @@ from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
     RayProcess,
+    UlyssesSPSplitter,
     _z3_params_to_fetch,
     calibrate_checkpoint_state_dir,
     clean_last_n_checkpoints_deepspeed,
@@ -132,7 +133,6 @@ from open_instruct.utils import (
     ray_get_with_progress,
     repeat_each,
     sync_gs_bucket,
-    UlyssesSPSplitter,
 )
 from open_instruct.vllm_utils3 import LLMRayActor, create_vllm_engines, init_process_group
 

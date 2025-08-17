@@ -39,11 +39,11 @@ import random
 import re
 import shutil
 import socket
-from collections import defaultdict
 import subprocess
 import sys
 import threading
 import time
+from collections import defaultdict
 from concurrent import futures
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from dataclasses import dataclass, field
