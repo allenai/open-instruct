@@ -854,7 +854,7 @@ class PolicyTrainerRayProcess(RayProcess):
         original_length = len(collated_query_responses)
 
         if self.splitter is not None:
-            with Timer("Splitting batch for SP", noop=self.rank != 0):
+            with Timer("✂️ Splitting batch for SP", noop=self.rank != 0):
                 batch = {
                     "input_ids": collated_query_responses,
                     "attention_mask": collated_attention_masks,
@@ -1032,10 +1032,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         # SP: gather loss sums from all ranks, divide by total valid tokens
                         local_loss_sum = ((pg_loss_max + args.beta * kl) * mb_response_masks_bool.float()).sum()
                         good_tokens = mb_response_masks_bool.sum()
-        
                         loss_sums_per_rank = torch.distributed.nn.functional.all_gather(local_loss_sum, group=self.sp_group)
                         good_tokens_per_rank = torch.distributed.nn.functional.all_gather(good_tokens, group=self.sp_group)
-                        
                         total_loss_sum = sum(loss_sums_per_rank)
                         total_good_tokens = sum(good_tokens_per_rank)
                         
@@ -1046,11 +1044,53 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.model.step()
                     local_step += 1
                     with torch.no_grad():
-                        # NOTE: in packed implementation, kl calculation are averages over response tokens
-                        kl1_stats[i] = masked_mean(kl1, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, args.masked_mean_axis).float()
+                        if args.sequence_parallel_size == 1:
+                            # NOTE: in packed implementation, kl calculation are averages over response tokens
+                            kl1_stats[i] = masked_mean(kl1, mb_response_masks_bool, args.masked_mean_axis).float()
+                            kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, args.masked_mean_axis).float()
+                            kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, args.masked_mean_axis).float()
+                            kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, args.masked_mean_axis).float()
+                            pg_clipfrac_stats[i] = masked_mean(
+                                (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
+                            )
+                            pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
+                            loss_stats[i] = loss
+                            ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
+                            if args.record_entropy:
+                                # Calculate entropy statistics
+                                entropy_stats[i] = masked_mean(
+                                    mb_entropy, mb_response_masks_bool, args.masked_mean_axis
+                                ).float()
+                        else:
+                            # do the rank gather thing like for the main loss.
+                            # this is because we have to pad out to the max length
+                            # for the whole minibatch to get ulysses to work, so 
+                            # sometimes in a microbatch we end up with all padding 
+                            # on one rank.
+                            def gather_mean_stats(stats_tensor, mask_tensor):
+                                local_stats_sum = (stats_tensor * mask_tensor.float()).sum()
+                                good_tokens = mask_tensor.sum()
+                                loss_sums_per_rank = torch.distributed.nn.functional.all_gather(local_stats_sum, group=self.sp_group)
+                                good_tokens_per_rank = torch.distributed.nn.functional.all_gather(good_tokens, group=self.sp_group)
+                                total_stats_sum = sum(loss_sums_per_rank)
+                                total_good_tokens = sum(good_tokens_per_rank)
+                                if total_good_tokens > 0:
+                                    return total_stats_sum / total_good_tokens
+                                else:
+                                    return torch.tensor(0.0, device=local_stats_sum.device)
+                            kl1_stats[i] = gather_mean_stats(kl1, mb_response_masks_bool)
+                            kl2_stats[i] = gather_mean_stats(kl2, mb_response_masks_bool)
+                            kl3_stats[i] = gather_mean_stats(kl3, mb_response_masks_bool)
+                            kl4_stats[i] = gather_mean_stats(kl4, mb_response_masks_bool)
+                            pg_clipfrac_stats[i] = gather_mean_stats(
+                                (pg_losses2 > pg_losses).float(), mb_response_masks_bool
+                            )
+                            pg_loss_stats[i] = gather_mean_stats(pg_loss_max, mb_response_masks_bool)
+                            loss_stats[i] = gather_mean_stats(loss, mb_response_masks_bool)
+                            ratio_stats[i] = gather_mean_stats(ratio, mb_response_masks_bool)
+                            if args.record_entropy:
+                                entropy_stats[i] = gather_mean_stats(mb_entropy, mb_response_masks_bool)
+                        # multiply by beta
                         if args.kl_estimator == "kl1":
                             kl_loss_stats[i] = kl1_stats[i] * args.beta
                         elif args.kl_estimator == "kl2":
@@ -1059,17 +1099,6 @@ class PolicyTrainerRayProcess(RayProcess):
                             kl_loss_stats[i] = kl3_stats[i] * args.beta
                         elif args.kl_estimator == "kl4":
                             kl_loss_stats[i] = kl4_stats[i] * args.beta
-                        pg_clipfrac_stats[i] = masked_mean(
-                            (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
-                        )
-                        pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
-                        loss_stats[i] = loss
-                        ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
-                        if args.record_entropy:
-                            # Calculate entropy statistics
-                            entropy_stats[i] = masked_mean(
-                                mb_entropy, mb_response_masks_bool, args.masked_mean_axis
-                            ).float()
 
             with torch.no_grad():
                 self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
