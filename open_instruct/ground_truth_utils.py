@@ -502,8 +502,8 @@ class ReSearchVerifierF1(VerifierFunction):
     """
 
     def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
-        self.answer_start_tag = "<finish>"
-        self.answer_end_tag = "</finish>"
+        self.answer_start_tag = "<answer>"
+        self.answer_end_tag = "</answer>"
         super().__init__("re_search_f1", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
@@ -541,7 +541,7 @@ class R1SearchVerifier(VerifierFunction):
     """
 
     # Precompile a case-insensitive regex to extract answer text
-    TAG_PATTERN = re.compile(r"<finish>(.*?)</finish>", re.IGNORECASE | re.DOTALL)
+    TAG_PATTERN = re.compile(r"<answer>(.*?)</answer>", re.IGNORECASE | re.DOTALL)
 
     def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
         super().__init__(name="re_search", verifier_config=verifier_config, weight=1.0)
