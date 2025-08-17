@@ -686,14 +686,11 @@ class PolicyTrainerRayProcess(RayProcess):
             self.sp_group = groups._get_sequence_parallel_group()
             self.sp_world_size = groups._get_sequence_parallel_world_size()
             self.sp_rank = groups._get_sequence_parallel_rank()
-            print(f"SETTING UP: {self.sp_rank=} {self.sp_world_size=}")
             self.splitter = UlyssesSPSplitter(
                 sp_rank=self.sp_rank, sp_group=self.sp_group, sp_world_size=self.sp_world_size, device=self.device, pad_token_id=self.tokenizer.pad_token_id
             )
         else:
             self.splitter = None
-
-        print("WE SETUP !!")
 
         return optimization_steps_done
 
@@ -711,7 +708,6 @@ class PolicyTrainerRayProcess(RayProcess):
         padding_mask = query_response != pad_token_id
         input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
         # NOTE: the [:-1] and [1:] are because the logits and generated tokens are off by 1 in index
-        print("pre forward")
         output = model(
             input_ids=input_ids[:, :-1],
             # @vwxyzjn: without clamp, we get index out of bounds errors; TODO: investigate
@@ -719,7 +715,6 @@ class PolicyTrainerRayProcess(RayProcess):
             position_ids=position_ids[:, :-1],
             return_dict=True,
         )
-        print("post forward")
         logits = output.logits
         logits /= temperature + 1e-7
         logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
@@ -859,58 +854,45 @@ class PolicyTrainerRayProcess(RayProcess):
         original_length = len(collated_query_responses)
 
         if self.splitter is not None:
-            batch = {
-                "input_ids": collated_query_responses,
-                "attention_mask": collated_attention_masks,
-                "position_ids": collated_position_ids,
-                "response_masks": collated_response_masks,
-                "tool_masks": collated_tool_masks,
-                "advantages": collated_advantages,
-            }
-            # Pad the items in the batch so they are divisible by sp_world_size
-            # where attention mask is 0, we dont end up using anyway.
-            for i in range(len(batch["input_ids"])):
-                for k in batch.keys():
-                    if torch.is_tensor(batch[k][i]):
-                        seq_length = batch[k][i].shape[1]
-                        if seq_length % self.sp_world_size != 0:
-                            padding_length = self.sp_world_size - (seq_length % self.sp_world_size)
-                            padding = torch.zeros(
-                                (batch[k][i].shape[0], padding_length),
-                                dtype=batch[k][i].dtype,
-                                device=batch[k][i].device,
-                            )
-                            batch[k][i] = torch.cat((batch[k][i], padding), dim=1)
-            sharded_batches = self.splitter.split_batch(batch)
+            with Timer("Splitting batch for SP", noop=self.rank != 0):
+                batch = {
+                    "input_ids": collated_query_responses,
+                    "attention_mask": collated_attention_masks,
+                    "position_ids": collated_position_ids,
+                    "response_masks": collated_response_masks,
+                    "tool_masks": collated_tool_masks,
+                    "advantages": collated_advantages,
+                }
+                # Pad the items in the batch so they are divisible by sp_world_size
+                # where attention mask is 0, we dont end up using anyway.
+                for i in range(len(batch["input_ids"])):
+                    for k in batch.keys():
+                        if torch.is_tensor(batch[k][i]):
+                            seq_length = batch[k][i].shape[1]
+                            if seq_length % self.sp_world_size != 0:
+                                padding_length = self.sp_world_size - (seq_length % self.sp_world_size)
+                                padding = torch.zeros(
+                                    (batch[k][i].shape[0], padding_length),
+                                    dtype=batch[k][i].dtype,
+                                    device=batch[k][i].device,
+                                )
+                                batch[k][i] = torch.cat((batch[k][i], padding), dim=1)
+                sharded_batches = self.splitter.split_batch(batch)
 
-            # we need to flatten out the sharded batches so its like:
-            # b0 sp0, b0 sp1, ..., b1 sp0, b1 sp1, ..., b2 sp0, b2 sp1, ... etc.
-            # right now, it comes out a list of sp shards, and inside is (bsz, seq_len)
-            collated_query_responses = []
-            collated_attention_masks = []
-            collated_position_ids = []
-            collated_response_masks = []
-            collated_tool_masks = []
-            collated_advantages = []
+                # take just the sp_rank item.
+                collated_query_responses = sharded_batches[self.sp_rank]["input_ids"]
+                collated_attention_masks = sharded_batches[self.sp_rank]["attention_mask"]
+                collated_position_ids = sharded_batches[self.sp_rank]["position_ids"]
+                collated_response_masks = sharded_batches[self.sp_rank]["response_masks"]
+                collated_tool_masks = sharded_batches[self.sp_rank]["tool_masks"]
+                collated_advantages = sharded_batches[self.sp_rank]["advantages"]   
 
-            for batch_idx in range(original_length):
-                for sp_idx in range(len(sharded_batches)):
-                    collated_query_responses.append(sharded_batches[sp_idx]["input_ids"][batch_idx])
-                    collated_attention_masks.append(sharded_batches[sp_idx]["attention_mask"][batch_idx])
-                    collated_position_ids.append(sharded_batches[sp_idx]["position_ids"][batch_idx])
-                    collated_response_masks.append(sharded_batches[sp_idx]["response_masks"][batch_idx])
-                    collated_tool_masks.append(sharded_batches[sp_idx]["tool_masks"][batch_idx])
-                    collated_advantages.append(sharded_batches[sp_idx]["advantages"][batch_idx])
-
-            collated_query_responses = move_to_device(collated_query_responses, self.ref_policy.device)
-            collated_attention_masks = move_to_device(collated_attention_masks, self.ref_policy.device)
-            collated_position_ids = move_to_device(collated_position_ids, self.ref_policy.device)
-            collated_response_masks = move_to_device(collated_response_masks, self.ref_policy.device)
-            collated_tool_masks = move_to_device(collated_tool_masks, self.ref_policy.device)
-            collated_advantages = move_to_device(collated_advantages, self.ref_policy.device)
-
-            # adjust accumulation steps for sp (do we need to do this?)
-            # accumulation_steps = accumulation_steps * self.sp_world_size
+                collated_query_responses = move_to_device(collated_query_responses, self.ref_policy.device)
+                collated_attention_masks = move_to_device(collated_attention_masks, self.ref_policy.device)
+                collated_position_ids = move_to_device(collated_position_ids, self.ref_policy.device)
+                collated_response_masks = move_to_device(collated_response_masks, self.ref_policy.device)
+                collated_tool_masks = move_to_device(collated_tool_masks, self.ref_policy.device)
+                collated_advantages = move_to_device(collated_advantages, self.ref_policy.device)
 
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
@@ -922,7 +904,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     attention_mask = collated_attention_masks[i]
                     position_id = collated_position_ids[i]
                     response_mask = collated_response_masks[i]
-                    print(f"Calling forward! {groups._get_sequence_parallel_rank()=} {query_response.shape=}")
                     ref_logprob, _ = self.forward(
                         self.ref_policy,
                         query_response,
