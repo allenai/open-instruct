@@ -4,11 +4,15 @@ import unittest
 from unittest.mock import Mock
 
 import ray
+import torch
 from parameterized import parameterized
 from ray.util import queue as ray_queue
+from transformers import AutoTokenizer
+from vllm import SamplingParams
 
 from open_instruct import grpo_fast, model_utils, utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo
+from open_instruct.vllm_utils3 import create_vllm_engines
 
 
 class TestGrpoFastBase(unittest.TestCase):
@@ -202,7 +206,77 @@ class TestGrpoFastBase(unittest.TestCase):
 
 
 class TestGrpoFastVLLM(TestGrpoFastBase):
-    # GPU test (test_vllm_queue_system_single_prompt) has been moved to test_grpo_fast_gpu.py
+    def test_vllm_queue_system_single_prompt(self):
+        """Test the new queue-based vLLM system with a single prompt 'What is the capital of France?'"""
+        # Check if CUDA is available
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA is not available, skipping test")
+
+        # Set up tokenizer
+        tokenizer_name = "EleutherAI/pythia-14m"  # Using a small model for testing
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+
+        # Tokenize the test prompt
+        test_prompt = "What is the capital of France?"
+        prompt_token_ids = tokenizer.encode(test_prompt, return_tensors="pt").tolist()[0]
+
+        # Create Ray queues
+        param_prompt_Q = ray_queue.Queue(maxsize=1)
+        inference_results_Q = ray_queue.Queue(maxsize=1)
+
+        # Track queues for cleanup
+        self._ray_queues.extend([param_prompt_Q, inference_results_Q])
+
+        # Create vLLM engines with queues
+        vllm_engines = create_vllm_engines(
+            num_engines=1,
+            tensor_parallel_size=1,
+            enforce_eager=True,
+            tokenizer_name_or_path=tokenizer_name,
+            pretrain=tokenizer_name,
+            revision="main",
+            seed=42,
+            enable_prefix_caching=False,
+            max_model_len=512,
+            vllm_gpu_memory_utilization=0.5,  # Use less GPU memory for testing
+            prompt_queue=param_prompt_Q,
+            results_queue=inference_results_Q,
+        )
+
+        # Set up generation config
+        generation_config = SamplingParams(
+            temperature=0.0,  # Deterministic generation
+            top_p=1.0,
+            max_tokens=5,
+            seed=42,
+        )
+
+        # Start vLLM engines to process from queues
+        [e.process_from_queue.remote() for e in vllm_engines]
+
+        # Put the test prompt in the queue using PromptRequest
+        param_prompt_Q.put(
+            PromptRequest(prompts=[prompt_token_ids], dataset_index=0, sampling_params=generation_config)
+        )
+
+        # Get the result
+        result = inference_results_Q.get()
+
+        # Verify it's a GenerationResult dataclass
+        self.assertIsInstance(result, GenerationResult)
+
+        # Check that we got a response
+        self.assertGreater(len(result.responses), 0)
+        response_ids = result.responses[0]
+
+        # Decode the response
+        generated_text = tokenizer.decode(response_ids, skip_special_tokens=True)
+
+        self.assertIsInstance(generated_text, str)
+        self.assertGreater(len(generated_text), 0)
+
+        # Send stop signal
+        param_prompt_Q.put(None)
 
     @parameterized.expand([(1, 16), (2, 32), (4, 64), (8, 128)])
     def test_batch_splitting_and_engine_configurations(self, vllm_num_engines: int, num_unique_prompts_rollout: int):
