@@ -42,7 +42,7 @@ uv run python mason.py \
         --temperature 1.0 \
         --ground_truths_key ground_truth \
         --sft_messages_key messages \
-        --total_episodes 10_000 \
+        --total_episodes 10_0 \
         --deepspeed_stage 2 \
         --num_learners_per_node 8 \
         --vllm_num_engines 8 \
@@ -58,4 +58,5 @@ uv run python mason.py \
         --vllm_enable_prefix_caching \
         --oe_eval_max_length 32768 \
         --oe_eval_tasks "codex_humanevalplus:0-shot-chat-v1::tulu-thinker,mbppplus:0-shot-chat::tulu-thinker,livecodebench_codegeneration::tulu-thinker" \
-        --dataset_skip_cache True
+        --dataset_skip_cache True \
+	--push_to_hub False
