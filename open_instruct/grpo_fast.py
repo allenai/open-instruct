@@ -2417,127 +2417,134 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     stop_event = threading.Event()
     executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="grpo")
-    logger.info("======== ✅ data preparation thread starts =========")
-    packing_future = executor.submit(
-        data_preparation_thread,
-        reward_fn,
-        inference_results_Q,
-        packed_sequences_Q,
-        pending_queries_map,
-        args,
-        tokenizer,
-        args.num_training_steps,
-        generation_configs["train"],
-    )
 
-    logger.info("======== ✅ generation thread starts =========")
-    generation_future = executor.submit(
-        generate_thread,
-        vllm_engines,
-        args.local_eval_every,
-        args.num_training_steps,
-        resume_training_step,
-        stop_event,
-        generate_metrics_Q,
-    )
-
-    # Send initial data to ensure we have a N-step offset.
-    for _ in range(args.async_steps):
-        dataset_indices = next(iter_dataloader)
-        batch = next_batch(dataset_indices, train_dataset)
-        split_and_insert_batch(
-            batch,
-            1,  # training_step
-            args.vllm_num_engines,
+    try:
+        logger.info("======== ✅ data preparation thread starts =========")
+        packing_future = executor.submit(
+            data_preparation_thread,
+            reward_fn,
+            inference_results_Q,
+            packed_sequences_Q,
             pending_queries_map,
-            param_prompt_Q,
+            args,
+            tokenizer,
+            args.num_training_steps,
             generation_configs["train"],
         )
-    num_total_tokens = 0
-    for training_step in range(resume_training_step, args.num_training_steps + 1):
-        start_time = time.perf_counter()
-        check_threads_healthy(
-            [packing_future, generation_future],
+
+        logger.info("======== ✅ generation thread starts =========")
+        generation_future = executor.submit(
+            generate_thread,
+            vllm_engines,
+            args.local_eval_every,
+            args.num_training_steps,
+            resume_training_step,
             stop_event,
-            executor,
-            [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
-        )
-
-        episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-        batch = sync_weights_and_prepare_prompts(
-            training_step,
-            args,
-            train_dataset,
-            iter_dataloader,
-            policy_group,
-            pending_queries_map,
-            param_prompt_Q,
-            generation_configs,
-        )
-        if (
-            training_step % args.local_eval_every == 0
-            and eval_batch is not None
-            and (args.eval_on_step_0 or training_step > 1)
-        ):
-            split_and_insert_batch(
-                eval_batch,
-                training_step,
-                args.vllm_num_engines,
-                eval_pending_queries_map,
-                param_prompt_Q,
-                generation_configs["eval"],
-                is_eval=True,
-            )
-
-        # The generate_thread is now handling vLLM processing asynchronously
-        collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
-            packed_sequences_Q, num_total_tokens
-        )
-        if collated_data is None:
-            continue
-
-        generate_metrics = {}
-        try:
-            generate_metrics = generate_metrics_Q.get_nowait()
-        except Empty:
-            logging.info("[Main Thread] didn't get generation metrics")
-
-        data_thread_metrics = {**data_thread_metrics, **generate_metrics}
-
-        one_training_step(
-            args,
-            policy_group,
-            collated_data,
-            tokenizer,
-            data_thread_metrics,
-            episode,
-            training_step,
-            num_total_tokens,
-            start_time,
-            train_dataset,
-            wandb_url,
-            tc.chat_template_name,
-        )
-
-        maybe_evaluate(
-            args,
-            training_step,
-            evaluation_inference_results_Q,
-            tokenizer,
-            eval_batch,
-            reward_fn,
-            episode,
-            eval_pending_queries_map,
-            generation_configs["eval"],
             generate_metrics_Q,
         )
 
-    save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
+        # Send initial data to ensure we have a N-step offset.
+        for _ in range(args.async_steps):
+            dataset_indices = next(iter_dataloader)
+            batch = next_batch(dataset_indices, train_dataset)
+            split_and_insert_batch(
+                batch,
+                1,  # training_step
+                args.vllm_num_engines,
+                pending_queries_map,
+                param_prompt_Q,
+                generation_configs["train"],
+            )
+        num_total_tokens = 0
+        for training_step in range(resume_training_step, args.num_training_steps + 1):
+            start_time = time.perf_counter()
+            check_threads_healthy(
+                [packing_future, generation_future],
+                stop_event,
+                executor,
+                [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
+            )
 
-    # Clean up resources
-    cleanup_training_resources(
-        stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q]
-    )
+            episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+            batch = sync_weights_and_prepare_prompts(
+                training_step,
+                args,
+                train_dataset,
+                iter_dataloader,
+                policy_group,
+                pending_queries_map,
+                param_prompt_Q,
+                generation_configs,
+            )
+            if (
+                training_step % args.local_eval_every == 0
+                and eval_batch is not None
+                and (args.eval_on_step_0 or training_step > 1)
+            ):
+                split_and_insert_batch(
+                    eval_batch,
+                    training_step,
+                    args.vllm_num_engines,
+                    eval_pending_queries_map,
+                    param_prompt_Q,
+                    generation_configs["eval"],
+                    is_eval=True,
+                )
+
+            # The generate_thread is now handling vLLM processing asynchronously
+            collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
+                packed_sequences_Q, num_total_tokens
+            )
+            if collated_data is None:
+                continue
+
+            generate_metrics = {}
+            try:
+                generate_metrics = generate_metrics_Q.get_nowait()
+            except Empty:
+                logging.info("[Main Thread] didn't get generation metrics")
+
+            data_thread_metrics = {**data_thread_metrics, **generate_metrics}
+
+            one_training_step(
+                args,
+                policy_group,
+                collated_data,
+                tokenizer,
+                data_thread_metrics,
+                episode,
+                training_step,
+                num_total_tokens,
+                start_time,
+                train_dataset,
+                wandb_url,
+                tc.chat_template_name,
+            )
+
+            maybe_evaluate(
+                args,
+                training_step,
+                evaluation_inference_results_Q,
+                tokenizer,
+                eval_batch,
+                reward_fn,
+                episode,
+                eval_pending_queries_map,
+                generation_configs["eval"],
+                generate_metrics_Q,
+            )
+
+        save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
+
+    except Exception as e:
+        logger.error(f"Main thread encountered error: {e}")
+        raise
+    finally:
+        # Clean up resources - this will happen whether the code succeeds or fails
+        logger.info("Cleaning up training resources...")
+        cleanup_training_resources(
+            stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q]
+        )
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
     # make a copy of the model to `/output` in the end.
