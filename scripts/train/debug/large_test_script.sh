@@ -26,7 +26,6 @@ uv run python mason.py \
         --num_epochs 1 \
         --learning_rate 5e-7 \
         --per_device_train_batch_size 1 \
-        --output_dir /output \
         --kl_estimator kl3 \
         --dataset_mixer_list saurabh5/rlvr_acecoder_filtered ${num_prompts} saurabh5/open-code-reasoning-rlvr-stdio ${num_prompts} \
         --dataset_mixer_list_splits train \
