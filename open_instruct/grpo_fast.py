@@ -1670,6 +1670,7 @@ def setup_runtime_variables(args: Args) -> Args:
     if is_beaker_job():
         args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
     args.world_size = sum(args.num_learners_per_node)
+
     args.num_training_steps = args.total_episodes // (
         args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     )
@@ -1831,8 +1832,15 @@ def create_model_and_optimizer(
         eval_results_queue=evaluation_inference_results_Q,
     )
 
-    resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
+    optimization_steps_done = ray_get_with_progress(inits, desc="Initializing models")[0]
+    resume_training_step = optimization_steps_done + 1
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+
+    logger.info("[DEBUG] Resume training step calculation:")
+    logger.info(f"  optimization_steps_done from Ray init: {optimization_steps_done}")
+    logger.info(f"  resume_training_step: {resume_training_step}")
+    logger.info(f"  episode: {episode}")
+
     logger.info("======== ✅ all models and vLLM engines initialized =========")
 
     ray_get_with_progress(
@@ -2454,6 +2462,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             generation_configs["train"],
         )
     num_total_tokens = 0
+
+    logger.info("[DEBUG] Training loop range:")
+    logger.info(f"  range({resume_training_step}, {args.num_training_steps + 1})")
+    logger.info(f"  This will iterate over: {list(range(resume_training_step, args.num_training_steps + 1))}")
+    logger.info(f"  Is range empty? {resume_training_step > args.num_training_steps}")
+
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
         check_threads_healthy(
