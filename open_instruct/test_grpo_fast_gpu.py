@@ -8,7 +8,7 @@ from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 from vllm import SamplingParams
 
-from open_instruct import utils
+from open_instruct import utils, vllm_utils3
 from open_instruct.queue_types import GenerationResult, PromptRequest
 from open_instruct.vllm_utils3 import create_vllm_engines
 
@@ -167,8 +167,11 @@ class TestGrpoFastVLLMGPU(TestGrpoFastGPUBase):
         # Track queues for cleanup
         self._ray_queues.extend([param_prompt_Q, inference_results_Q])
 
+        # Create ActorManager for controlling engine operation
+        actor_manager = vllm_utils3.ActorManager.remote()
+
         # Create vLLM engines with queues
-        _ = create_vllm_engines(
+        vllm_engines = create_vllm_engines(
             num_engines=1,
             tensor_parallel_size=1,
             enforce_eager=True,
@@ -181,6 +184,7 @@ class TestGrpoFastVLLMGPU(TestGrpoFastGPUBase):
             vllm_gpu_memory_utilization=0.5,  # Use less GPU memory for testing
             prompt_queue=param_prompt_Q,
             results_queue=inference_results_Q,
+            actor_manager=actor_manager,
         )
 
         # Set up generation config
@@ -199,8 +203,14 @@ class TestGrpoFastVLLMGPU(TestGrpoFastGPUBase):
         # Send the request
         param_prompt_Q.put(request)
 
+        # Start the vLLM engine to process from the queue
+        process_future = vllm_engines[0].process_from_queue.remote(timeout=30)
+
         # Get the result
         result = inference_results_Q.get(timeout=30)
+
+        # Wait for the engine to finish processing
+        ray.get(process_future)
 
         # Verify we got a GenerationResult
         self.assertIsInstance(result, GenerationResult)
