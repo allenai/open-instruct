@@ -63,9 +63,8 @@ class TestGrpoFastBase(unittest.TestCase):
 
         utils.check_runtime_leaks()
 
-        # Initialize Ray for this test if not already initialized
-        if not ray.is_initialized():
-            ray.init(include_dashboard=False)
+        # Initialize Ray for this test
+        ray.init(include_dashboard=False)
 
     def _cleanup_ray_queues(self):
         """Clean up all Ray queues created during the test."""

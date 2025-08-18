@@ -78,7 +78,6 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     # Update concatenated outputs
     if output.request_id in tracking["concat_outputs"]:
         tracking["concat_outputs"][output.request_id].outputs[0].token_ids.extend(o.token_ids)
-
     else:
         tracking["concat_outputs"][output.request_id] = output
 
@@ -312,9 +311,11 @@ class LLMRayActor:
         results_queue=None,
         eval_results_queue=None,
         actor_manager=None,
-        inference_batch_size: int = 1,
+        inference_batch_size=None,
         **kwargs,
     ):
+        if inference_batch_size is None:
+            raise ValueError("Must specify inference_batch_size for LLMRayActor.")
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
 

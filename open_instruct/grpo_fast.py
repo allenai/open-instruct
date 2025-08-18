@@ -1914,7 +1914,7 @@ def split_and_insert_batch(
         param_prompt_Q.put(
             PromptRequest(
                 prompts=sub_batch.queries,
-                sampling_params=generation_config,
+                generation_config=generation_config,
                 training_step=training_step,
                 dataset_index=sub_batch.indices,
                 is_eval=is_eval,
@@ -2328,11 +2328,7 @@ def cleanup_judge_clients():
 
 
 def check_threads_healthy(
-    futures: list,
-    stop_event: threading.Event,
-    executor: futures.ThreadPoolExecutor,
-    queues: list[ray_queue.Queue],
-    actor_manager: vllm_utils3.ActorManager,
+    futures: list, stop_event: threading.Event, executor: futures.ThreadPoolExecutor, queues: list[ray_queue.Queue]
 ) -> None:
     """Check if any threads have failed and raise their exception if so."""
     for future in futures:
@@ -2342,7 +2338,7 @@ def check_threads_healthy(
             future.result()
         except Exception as e:
             logger.error(f"Thread failed with exception: {e}")
-            cleanup_training_resources(stop_event, executor, queues, actor_manager)
+            cleanup_training_resources(stop_event, executor, queues)
             raise
 
 
@@ -2371,7 +2367,7 @@ def cleanup_training_resources(
     logger.info("Shutting down thread pool executor...")
     executor.shutdown(wait=True)
 
-    # Clean up judge clients, which also shuts down Ray.
+    # Clean up judge clients
     cleanup_judge_clients()
 
     # Clean up distributed process group if it was initialized
