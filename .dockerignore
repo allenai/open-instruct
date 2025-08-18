@@ -1,6 +1,5 @@
 # Git directories (can be large)
 **/.git/
-.git/
 .gitignore
 .github/
 
@@ -14,6 +13,8 @@ __pycache__/
 dist/
 build/
 *.egg
+local_dataset_cache/
+
 
 # Virtual environments
 .venv/

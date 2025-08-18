@@ -74,7 +74,7 @@ ENV UV_COMPILE_BYTECODE=0
 # Copy only dependency-related files first
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies without the project itself
+# Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
