@@ -36,6 +36,7 @@ pack_length=$((max_prompt_token_length + response_length))
 
 gantry run \
        --name open_instruct-benchmark_generators \
+       --description "Benchmarking $model_name with a response length of $response_length." \
        --workspace ai2/oe-eval \
        --weka=oe-eval-default:/weka \
        --gpus 1 \
