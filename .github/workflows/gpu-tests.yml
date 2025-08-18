@@ -58,7 +58,7 @@ jobs:
             budget: ai2/oe-training
             tasks:
               - name: gpu-tests
-                image: ${{ env.BEAKER_WHOAMI }}/open-instruct-latest
+                image: ${{ env.BEAKER_WHOAMI }}/open_instruct_auto
                 context:
                   priority: normal
                   preemptible: true
