@@ -62,11 +62,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
 # Install Beaker Gantry user-wide in an isolated venv
 RUN uv tool install --no-cache-dir beaker-gantry
 
-# Set default cache directory but allow override from environment
-ARG CACHE_DIR=/root/.cache/uv
-ARG UV_CACHE_DIR
-ENV UV_CACHE_DIR=${UV_CACHE_DIR:-$CACHE_DIR}
-RUN echo "UV_CACHE_DIR: ${UV_CACHE_DIR}"
+ENV UV_CACHE_DIR=/root/.cache/uv
 
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
