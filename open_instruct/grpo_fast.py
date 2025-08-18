@@ -2322,11 +2322,8 @@ def check_threads_healthy(futures: list) -> None:
     for future in futures:
         if not future.done():
             continue
-        try:
-            future.result()
-        except Exception as e:
-            logger.error(f"Thread failed with exception: {e}")
-            raise
+        # This will raise the exception if the thread failed
+        future.result()
 
 
 def cleanup_training_resources(
@@ -2376,6 +2373,11 @@ def run_training(
     generate_metrics_Q,
 ):
     """Run the main training loop with worker threads."""
+    # Check that vLLM engines are ready
+    ray_get_with_progress(
+        [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
+    )
+
     logger.info("======== ✅ data preparation thread starts =========")
     packing_future = executor.submit(
         data_preparation_thread,
@@ -2545,10 +2547,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="grpo")
 
     try:
-        ray_get_with_progress(
-            [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
-        )
-
         episode = run_training(
             args,
             tokenizer,
@@ -2574,7 +2572,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             generate_metrics_Q,
         )
     finally:
-        logger.info("Cleaning up training resources...")
         cleanup_training_resources(
             stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q]
         )
