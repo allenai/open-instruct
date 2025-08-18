@@ -1834,7 +1834,7 @@ def create_model_and_optimizer(
         actor_manager=actor_manager,
     )
 
-    resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0]
+    resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     logger.info("======== ✅ all models and vLLM engines initialized =========")
 
