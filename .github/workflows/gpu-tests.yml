@@ -68,12 +68,10 @@ jobs:
                 timeout: 10m
                 constraints:
                   cluster:
-                    # H100 clusters
-                    - ai2/jupiter-cirrascale-2
-                    - ai2/augusta-google-1
-                    - ai2/ceres-cirrascale
-                    # A100 clusters
-                    - ai2/saturn-cirrascale
+                    # A6000 cluster
+                    - ai2/prior-elanding
+                    # L40 cluster
+                    - ai2/neptune-cirrascale
                 command:
                   - "bash"
                   - "-c"
