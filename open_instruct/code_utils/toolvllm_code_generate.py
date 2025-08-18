@@ -14,17 +14,13 @@ python open_instruct/code_utils/toolvllm_code_generate.py \
 import argparse
 import json
 import os
-import re
-import time
-import signal
-from tqdm import tqdm
 
 import ray
-from datasets import Dataset, load_dataset
+from datasets import Dataset
 from transformers import AutoTokenizer
 from vllm import SamplingParams
 
-from open_instruct.tool_utils.tool_vllm import ToolUseLLM, CodeViewTool
+from open_instruct.tool_utils.tool_vllm import CodeViewTool, ToolUseLLM
 
 SYSTEM_PROMPT = """You are a helpful assistant that can interact with a computer to analyze code.
 
@@ -46,9 +42,7 @@ For each function call, return a json object with function name and arguments wi
 def main():
     try:
         parser = argparse.ArgumentParser(description="Evaluate code understanding tasks using CodeViewTool.")
-        parser.add_argument(
-            "--json_path", type=str, help="Path to the json file with code tasks."
-        )
+        parser.add_argument("--json_path", type=str, help="Path to the json file with code tasks.")
         parser.add_argument("--model_path", type=str, help="Path to the model.")
         parser.add_argument("--model_revision", type=str, default="main", help="Model revision.")
         parser.add_argument("--tokenizer_revision", type=str, default="main", help="Tokenizer revision.")
@@ -72,7 +66,7 @@ def main():
             dataset = json.load(f)
 
         original_dataset = dataset
-        
+
         # Handle different question key formats
         if "query" in dataset[0]:
             question_key = "query"
@@ -87,11 +81,7 @@ def main():
             raise ValueError(f"Question key not found in dataset: {dataset[0]}")
 
         # Initialize the CodeViewTool
-        tool = CodeViewTool(
-            start_str="<tool_call>",
-            end_str="</tool_call>",
-            api_endpoint=args.code_view_api_endpoint,
-        )
+        tool = CodeViewTool(start_str="<tool_call>", end_str="</tool_call>", api_endpoint=args.code_view_api_endpoint)
 
         # Format dataset
         if not args.dont_use_system_prompt:
@@ -100,16 +90,20 @@ def main():
             initial_message = []
 
         if question_key:
-            ds = [{"messages": initial_message + [{"role": "user", "content": data[question_key]}]} for data in dataset]
+            ds = [
+                {"messages": initial_message + [{"role": "user", "content": data[question_key]}]} for data in dataset
+            ]
         else:
             # Messages already formatted
             ds = [{"messages": initial_message + data["messages"]} for data in dataset]
-            
+
         ds = Dataset.from_list(ds)
 
         if args.max_eval_samples > -1 and args.max_eval_samples < len(ds):
             ds = ds.select(range(args.offset, min(args.offset + args.max_eval_samples, len(ds))))
-            original_dataset = original_dataset[args.offset:min(args.offset + args.max_eval_samples, len(original_dataset))]
+            original_dataset = original_dataset[
+                args.offset : min(args.offset + args.max_eval_samples, len(original_dataset))
+            ]
 
         prompt_token_ids = [tokenizer.apply_chat_template(data["messages"], add_generation_prompt=True) for data in ds]
 
@@ -122,7 +116,7 @@ def main():
             max_tool_calls=args.max_tool_calls,
             max_model_len=args.model_len,
         )
-        
+
         # Use greedy decoding
         sampling_params = SamplingParams(
             temperature=0.0,
@@ -132,17 +126,14 @@ def main():
             n=1,
             stop=[tool.end_str, "</answer>", "</solution>"],
         )
-        
+
         # Generate output using the actor
-        result = actor.generate(
-            sampling_params=sampling_params,
-            prompt_token_ids=prompt_token_ids,
-        )
-        
+        result = actor.generate(sampling_params=sampling_params, prompt_token_ids=prompt_token_ids)
+
         # Grab text answers - for tool vllm, we have to decode the output ids
         generations = [x.outputs[0].token_ids for x in result]
         generations = [tokenizer.decode(x, skip_special_tokens=True) for x in generations]
-        
+
         # Parse out answer/solution
         predictions = []
         for gen in generations:
@@ -157,16 +148,14 @@ def main():
         # Save predictions with sample data
         with open(f"{args.output_dir}/predictions.jsonl", "w") as f:
             for sample, prediction, generation, original_sample in zip(ds, predictions, generations, original_dataset):
-                f.write(json.dumps({
-                    **sample, 
-                    **original_sample, 
-                    "prediction": prediction, 
-                    "generation": generation
-                }) + "\n")
-                
+                f.write(
+                    json.dumps({**sample, **original_sample, "prediction": prediction, "generation": generation})
+                    + "\n"
+                )
+
         print(f"Completed generation for {len(predictions)} samples")
         print(f"Results saved to {args.output_dir}/predictions.jsonl")
-        
+
     except Exception as e:
         print(f"Error: {e}")
         ray.shutdown()
