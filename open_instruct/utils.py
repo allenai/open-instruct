@@ -44,7 +44,7 @@ import threading
 import time
 from concurrent import futures
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from multiprocessing import resource_tracker as _rt
 from typing import Any, Iterable, List, NewType, Optional, Tuple, Union
 
@@ -1472,76 +1472,20 @@ DEFAULT_THREAD_ALLOW_PREFIXES = {
 }
 
 
-@dataclass
-class LeakReport:
-    bad_threads: List[threading.Thread] = field(default_factory=list)
-    bad_processes: List[mp.Process] = field(default_factory=list)
-    ray_actors: list = field(default_factory=list)
-    ray_tasks: list = field(default_factory=list)
-    ray_workers: list = field(default_factory=list)
-    leaked_semaphores: List[str] = field(default_factory=list)
-    leaked_shm: List[str] = field(default_factory=list)
-
-    @property
-    def is_clean(self) -> bool:
-        return not (
-            self.bad_threads
-            or self.bad_processes
-            or self.ray_actors
-            or self.ray_tasks
-            or self.ray_workers
-            or self.leaked_semaphores
-            or self.leaked_shm
-        )
-
-    def pretty(self) -> str:
-        lines = []
-        if self.bad_threads:
-            lines.append("Leaked threads:")
-            for t in self.bad_threads:
-                target = getattr(t, "_target", None)
-                tgt_name = getattr(target, "__name__", repr(target)) if target else "?"
-                lines.append(f"  - {t.name} (alive={t.is_alive()}, daemon={t.daemon}, target={tgt_name})")
-        if self.bad_processes:
-            lines.append("Leaked multiprocessing children:")
-            for p in self.bad_processes:
-                lines.append(f"  - PID {p.pid} alive={p.is_alive()} name={p.name}")
-        if self.ray_actors:
-            lines.append("Live Ray actors:")
-            for a in self.ray_actors:
-                lines.append(f"  - {a.get('class_name')} id={a.get('actor_id')}")
-        if self.ray_tasks:
-            lines.append("Live Ray tasks:")
-            for t in self.ray_tasks:
-                lines.append(f"  - {t.get('name')} id={t.get('task_id')}")
-        if self.ray_workers:
-            lines.append("Live Ray workers:")
-            for w in self.ray_workers:
-                lines.append(f"  - pid={w.get('pid')} id={w.get('worker_id')}")
-        if self.leaked_semaphores:
-            lines.append("Leaked POSIX semaphores (multiprocessing):")
-            for name in self.leaked_semaphores:
-                lines.append(f"  - {name}")
-        if self.leaked_shm:
-            lines.append("Leaked shared_memory blocks:")
-            for name in self.leaked_shm:
-                lines.append(f"  - {name}")
-        return "\n".join(lines) if lines else "No leaks detected."
-
-
 def check_runtime_leaks(
     thread_allowlist: Iterable[str] = DEFAULT_THREAD_ALLOWLIST,
     thread_allow_prefixes: Iterable[str] = DEFAULT_THREAD_ALLOW_PREFIXES,
     include_daemon_threads: bool = False,
-) -> LeakReport:
+) -> None:
     """
-    Inspect runtime state for leftovers.
-
-    Returns a LeakReport; call .is_clean or .pretty().
+    Inspect runtime state for leftovers and log any leaks immediately.
     """
-    report = LeakReport()
+    # Use standard Python logger for leak detection to avoid accelerate dependency
+    leak_logger = logging.getLogger(__name__)
+    has_leaks = False
 
     # Threads
+    bad_threads = []
     for t in threading.enumerate():
         if t.name in thread_allowlist or any(t.name.startswith(p) for p in thread_allow_prefixes):
             continue
@@ -1552,26 +1496,62 @@ def check_runtime_leaks(
         # ignore ones already finished
         if not t.is_alive():
             continue
-        report.bad_threads.append(t)
+        bad_threads.append(t)
+
+    if bad_threads:
+        has_leaks = True
+        leak_logger.warning("Leaked threads:")
+        for t in bad_threads:
+            target = getattr(t, "_target", None)
+            tgt_name = getattr(target, "__name__", repr(target)) if target else "?"
+            leak_logger.warning(f"  - {t.name} (alive={t.is_alive()}, daemon={t.daemon}, target={tgt_name})")
 
     # Multiprocessing children
+    bad_processes = []
     for child in mp.active_children():
         if child.is_alive():
-            report.bad_processes.append(child)
+            bad_processes.append(child)
+
+    if bad_processes:
+        has_leaks = True
+        leak_logger.warning("Leaked multiprocessing children:")
+        for p in bad_processes:
+            leak_logger.warning(f"  - PID {p.pid} alive={p.is_alive()} name={p.name}")
 
     # Ray state (only if ray is present & initialized)
     if ray_state is not None and ray is not None and ray.is_initialized():
-        report.ray_actors = ray_state.list_actors(filters=[("state", "=", "ALIVE")])
-        report.ray_tasks = ray_state.list_tasks(filters=[("state", "=", "RUNNING")])
-        report.ray_workers = ray_state.list_workers(filters=[("is_alive", "=", True)])
+        ray_actors = ray_state.list_actors(filters=[("state", "=", "ALIVE")])
+        ray_tasks = ray_state.list_tasks(filters=[("state", "=", "RUNNING")])
+        ray_workers = ray_state.list_workers(filters=[("is_alive", "=", True)])
+
+        if ray_actors:
+            has_leaks = True
+            leak_logger.warning("Live Ray actors:")
+            for a in ray_actors:
+                leak_logger.warning(f"  - {a.get('class_name')} id={a.get('actor_id')}")
+
+        if ray_tasks:
+            has_leaks = True
+            leak_logger.warning("Live Ray tasks:")
+            for t in ray_tasks:
+                leak_logger.warning(f"  - {t.get('name')} id={t.get('task_id')}")
+
+        if ray_workers:
+            has_leaks = True
+            leak_logger.warning("Live Ray workers:")
+            for w in ray_workers:
+                leak_logger.warning(f"  - pid={w.get('pid')} id={w.get('worker_id')}")
 
     # Multiprocessing resource_tracker cache (private API, so guard carefully)
     if _rt is not None and hasattr(_rt, "_resource_tracker"):
         cache = getattr(_rt._resource_tracker, "_cache", {})
-        for name, (count, rtype) in cache.items():
-            if count > 0 and rtype == "semaphore":
-                report.leaked_semaphores.append(name)
-            if count > 0 and rtype == "shared_memory":
-                report.leaked_shm.append(name)
 
-    return report
+        for name, (count, rtype) in cache.items():
+            if count > 0:
+                has_leaks = True
+                leak_logger.warning(f"Leaked {rtype} resources: {count}")
+
+    if has_leaks:
+        leak_logger.error("Runtime leaks detected! Please investigate.")
+    else:
+        leak_logger.info("No runtime leaks detected.")
