@@ -1,8 +1,6 @@
 # Ignore oe-eval-internal/.git, which is really big.
 */.git
 
-local_dataset_cache/
-
 # Ignore the main .git directory
 .git
 

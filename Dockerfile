@@ -1,5 +1,13 @@
 FROM ghcr.io/allenai/cuda:12.8-dev-ubuntu22.04-torch2.7.0-v1.2.170
 
+# Add build arguments for git information
+ARG GIT_COMMIT=""
+ARG GIT_BRANCH=""
+
+# Set them as environment variables
+ENV GIT_COMMIT=${GIT_COMMIT}
+ENV GIT_BRANCH=${GIT_BRANCH}
+
 COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
 
 # Set default cache directory but allow override from environment
@@ -20,6 +28,9 @@ ENV UV_COMPILE_BYTECODE=0
 # Copy only dependency-related files first
 COPY pyproject.toml uv.lock ./
 
+# Annoyingly, we need this before `uv run`, or it complains.
+COPY open_instruct open_instruct
+
 # Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
@@ -36,15 +47,6 @@ COPY configs configs
 COPY scripts scripts
 COPY oe-eval-internal oe-eval-internal
 COPY mason.py mason.py
-COPY open_instruct open_instruct
 
 # Set up the environment
 ENV PATH=/stage/.venv/bin:$PATH
-
-# Add build arguments for git information (at the end to avoid cache invalidation)
-ARG GIT_COMMIT=""
-ARG GIT_BRANCH=""
-
-# Set them as environment variables
-ENV GIT_COMMIT=${GIT_COMMIT}
-ENV GIT_BRANCH=${GIT_BRANCH}
