@@ -371,7 +371,7 @@ class LLMRayActor:
         """
         active_requests = {}
         num_processed = 0
-        
+
         # Initially fill with inference_batch_size prompts
         for _ in range(self.inference_batch_size):
             try:
@@ -379,7 +379,7 @@ class LLMRayActor:
                 _start_request(self.llm_engine, request, active_requests)
             except queue.Empty:
                 break
-        
+
         # Main processing loop
         while active_requests:
             # Check for stop signal
@@ -388,13 +388,13 @@ class LLMRayActor:
             if ready_refs and ray.get(ready_refs[0]):
                 self.logger.info(f"[LLMRayActor] Actor manager signaled to stop. Processed {num_processed} requests.")
                 return num_processed
-            
+
             # Process engine steps
             for output in self.llm_engine.step():
                 if output.finished:
                     # Pop the request and create single-prompt result
                     request = active_requests.pop(output.request_id)
-                    
+
                     # Create GenerationResult for single prompt
                     result = GenerationResult(
                         responses=[list(out.token_ids) for out in output.outputs],
@@ -409,9 +409,9 @@ class LLMRayActor:
                             tool_calleds=[False] * len(output.outputs),
                         ),
                         dataset_index=[request.dataset_index],
-                        training_step=request.training_step
+                        training_step=request.training_step,
                     )
-                    
+
                     # Push to appropriate queue
                     try:
                         if request.is_eval:
@@ -421,14 +421,14 @@ class LLMRayActor:
                         num_processed += 1
                     except queue.Full:
                         self.logger.warning("Results queue is full, discarding result.")
-                    
+
                     # Try to enqueue new prompt to maintain batch size
                     try:
                         new_request = self.prompt_queue.get_nowait()
                         _start_request(self.llm_engine, new_request, active_requests)
                     except queue.Empty:
                         pass
-        
+
         return num_processed
 
     def _process_request(self, request):

@@ -1251,13 +1251,13 @@ def accumulate_inference_batches(
     # Each prompt generates generation_config.n responses
     total_prompts = args.num_unique_prompts_rollout
     total_results = total_prompts * generation_config.n
-    
+
     # Collect individual results
     results = []
     all_queries = []
     all_ground_truths = []
     all_datasets = []
-    
+
     for i in tqdm(
         range(total_results),
         total=total_results,
@@ -1269,10 +1269,10 @@ def accumulate_inference_batches(
 
         if isinstance(result, ShutdownSentinel):
             return result, None
-            
+
         # Each result now contains a single dataset_index
         dataset_index = result.dataset_index[0] if result.dataset_index else None
-        
+
         if dataset_index is None:
             raise RuntimeError(f"Dataset index is None for result {i}")
 
@@ -1889,10 +1889,8 @@ def split_and_insert_batch(
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
     # Store all prompts in the map first
-    pending_queries_map.insert_many(
-        batch.indices, batch.queries, batch.ground_truths, batch.datasets
-    )
-    
+    pending_queries_map.insert_many(batch.indices, batch.queries, batch.ground_truths, batch.datasets)
+
     # Push individual prompts to the queue
     for i, prompt in enumerate(batch.queries):
         param_prompt_Q.put(
