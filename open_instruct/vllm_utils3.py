@@ -78,7 +78,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     # Update concatenated outputs
     if output.request_id in tracking["concat_outputs"]:
         tracking["concat_outputs"][output.request_id].outputs[0].token_ids.extend(o.token_ids)
-        
+
     else:
         tracking["concat_outputs"][output.request_id] = output
 
@@ -518,14 +518,6 @@ class LLMRayActor:
 
         for req_id in dict_keys_to_delete:
             tracking["pending_tool_futures"].pop(req_id, None)
-
-        # Debug logging
-        self.logger.info(
-            f"[_process_outputs] Returning GenerationResult with {len(result.responses)} responses "
-            f"for {len(dataset_index) if dataset_index else 0} dataset indices"
-        )
-
-        return result
 
     def init_process_group(
         self,

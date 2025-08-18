@@ -2332,7 +2332,7 @@ def check_threads_healthy(
     stop_event: threading.Event,
     executor: futures.ThreadPoolExecutor,
     queues: list[ray_queue.Queue],
-    actor_manager: ActorManager,
+    actor_manager: vllm_utils3.ActorManager,
 ) -> None:
     """Check if any threads have failed and raise their exception if so."""
     for future in futures:
@@ -2586,10 +2586,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     from open_instruct import utils
 
     utils.check_runtime_leaks()
-
-    # Raise error if one occurred during training
-    if error_occurred:
-        raise RuntimeError("Training stopped due to error in worker thread")
 
 
 if __name__ == "__main__":
