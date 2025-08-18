@@ -721,7 +721,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     world_size,
                     "openrlhf",
                     backend=backend,
-                    timeout_seconds=self.args.backend_timeout,
+                    timeout_minutes=self.args.backend_timeout,
                 )
                 for i, engine in enumerate(vllm_engines)
             ]
