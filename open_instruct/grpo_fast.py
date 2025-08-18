@@ -43,6 +43,9 @@ try:
     # https://github.com/deepspeedai/DeepSpeed/issues/7028
 except Exception:
     pass
+
+from open_instruct import utils
+
 # isort: on
 import asyncio
 import json
@@ -2317,15 +2320,6 @@ def cleanup_judge_clients():
     ray.shutdown()
 
 
-def check_threads_healthy(futures: list) -> None:
-    """Check if any threads have failed and raise their exception if so."""
-    for future in futures:
-        if not future.done():
-            continue
-        # This will raise the exception if the thread failed
-        future.result()
-
-
 def cleanup_training_resources(
     stop_event: threading.Event, executor: futures.ThreadPoolExecutor, queues: list[ray_queue.Queue]
 ) -> None:
@@ -2417,7 +2411,9 @@ def run_training(
     num_total_tokens = 0
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
-        check_threads_healthy([packing_future, generation_future])
+
+        # Check if any of the threads have raised an exception.
+        [f.result() for f in [packing_future, generation_future] if f.done()]
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         batch = sync_weights_and_prepare_prompts(
@@ -2489,7 +2485,6 @@ def run_training(
         )
 
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
-    return episode  # Return episode for later use
 
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_samples: int = 32):
@@ -2593,15 +2588,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         logger.info("Pushing model to hub")
         push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
 
-    # Check for runtime leaks before exiting
-    logger.info("Checking for runtime leaks...")
-    from open_instruct import utils
-
     leak_report = utils.check_runtime_leaks()
-    if not leak_report.is_clean:
-        logger.warning("Runtime leaks detected:\n" + leak_report.pretty())
-    else:
+    if leak_report.is_clean:
         logger.info("No runtime leaks detected.")
+    else:
+        logger.warning("Runtime leaks detected:\n" + leak_report.pretty())
 
 
 if __name__ == "__main__":
