@@ -169,6 +169,14 @@ def _process_outputs_with_tools(
     return result
 
 
+def _start_request(llm_engine, request, active_requests):
+    """Add a request to the vLLM engine and track it."""
+    request_id = f"{request.training_step}_{request.dataset_index}"
+    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt)
+    llm_engine.add_request(request_id, tokens_prompt, request.generation_config)
+    active_requests[request_id] = request
+
+
 def _finalize_outputs(outputs, tracking, dataset_index, tools):
     """Prepare final outputs based on whether tools were used."""
     if not tools:
@@ -356,35 +364,72 @@ class LLMRayActor:
         self.inference_batch_size = inference_batch_size
 
     def process_from_queue(self, timeout: float = 60.0):
-        """Run generation loop using LLMEngine directly, with optional tool support.
+        """Run generation loop maintaining inference_batch_size active prompts.
 
         Returns:
-            int: Number of requests processed (0 or 1)
+            int: Number of requests processed
         """
-        while True:
-            # Non-blocking check for should_stop using ray.wait
+        active_requests = {}
+        num_processed = 0
+        
+        # Initially fill with inference_batch_size prompts
+        for _ in range(self.inference_batch_size):
+            try:
+                request = self.prompt_queue.get_nowait()
+                _start_request(self.llm_engine, request, active_requests)
+            except queue.Empty:
+                break
+        
+        # Main processing loop
+        while active_requests:
+            # Check for stop signal
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
             if ready_refs and ray.get(ready_refs[0]):
-                self.logger.info("[LLMRayActor] Actor manager signaled to stop. Exiting generation loop.")
-                return 0
-
-            try:
-                request = self.prompt_queue.get(timeout=timeout)
-            except queue.Empty:
-                return 0
-
-            result = self._process_request(request)
-
-            try:
-                if request.is_eval:
-                    self.eval_results_queue.put(result, timeout=10)
-                else:
-                    self.results_queue.put(result, timeout=10)
-                return 1  # Successfully processed one request
-            except queue.Full:
-                self.logger.warning("Results queue is full, discarding result.")
-                return 0
+                self.logger.info(f"[LLMRayActor] Actor manager signaled to stop. Processed {num_processed} requests.")
+                return num_processed
+            
+            # Process engine steps
+            for output in self.llm_engine.step():
+                if output.finished:
+                    # Pop the request and create single-prompt result
+                    request = active_requests.pop(output.request_id)
+                    
+                    # Create GenerationResult for single prompt
+                    result = GenerationResult(
+                        responses=[list(out.token_ids) for out in output.outputs],
+                        finish_reasons=[out.finish_reason for out in output.outputs],
+                        masks=[[1] * len(out.token_ids) for out in output.outputs],
+                        request_info=RequestInfo(
+                            num_calls=[0] * len(output.outputs),
+                            timeouts=[0] * len(output.outputs),
+                            tool_errors=[""] * len(output.outputs),
+                            tool_outputs=[""] * len(output.outputs),
+                            tool_runtimes=[0] * len(output.outputs),
+                            tool_calleds=[False] * len(output.outputs),
+                        ),
+                        dataset_index=[request.dataset_index],
+                        training_step=request.training_step
+                    )
+                    
+                    # Push to appropriate queue
+                    try:
+                        if request.is_eval:
+                            self.eval_results_queue.put(result, timeout=10)
+                        else:
+                            self.results_queue.put(result, timeout=10)
+                        num_processed += 1
+                    except queue.Full:
+                        self.logger.warning("Results queue is full, discarding result.")
+                    
+                    # Try to enqueue new prompt to maintain batch size
+                    try:
+                        new_request = self.prompt_queue.get_nowait()
+                        _start_request(self.llm_engine, new_request, active_requests)
+                    except queue.Empty:
+                        pass
+        
+        return num_processed
 
     def _process_request(self, request):
         """Unified processing for both tool and non-tool generation."""

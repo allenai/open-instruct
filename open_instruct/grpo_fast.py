@@ -1234,9 +1234,9 @@ def accumulate_inference_batches(
     """Accumulate multiple inference results into a single training batch.
 
     Args:
-        inference_results_Q: Queue containing GenerationResult objects
+        inference_results_Q: Queue containing individual GenerationResult objects (one per prompt)
         pending_queries_map: PendingQueriesMap instance for thread-safe query tracking
-        args: Arguments containing vllm_num_engines
+        args: Arguments containing vllm_num_engines and batch size info
         training_step: Current training step for error reporting
         generation_config: Generation config containing n (number of samples per prompt)
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
@@ -1247,15 +1247,21 @@ def accumulate_inference_batches(
     Returns:
         Tuple of (combined_result, Batch with queries, ground_truths, datasets) or (ShutdownSentinel, None) if shutdown signal received
     """
-    # Collect results from all engines with non-blocking progress bar
+    # Calculate total number of results to collect
+    # Each prompt generates generation_config.n responses
+    total_prompts = args.num_unique_prompts_rollout
+    total_results = total_prompts * generation_config.n
+    
+    # Collect individual results
     results = []
     all_queries = []
     all_ground_truths = []
     all_datasets = []
+    
     for i in tqdm(
-        range(args.vllm_num_engines),
-        total=args.vllm_num_engines,
-        desc=f"Accumulating results from {args.vllm_num_engines} engines",
+        range(total_results),
+        total=total_results,
+        desc=f"Accumulating {total_results} individual results",
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     ):
@@ -1263,37 +1269,22 @@ def accumulate_inference_batches(
 
         if isinstance(result, ShutdownSentinel):
             return result, None
-        dataset_indices = result.dataset_index
+            
+        # Each result now contains a single dataset_index
+        dataset_index = result.dataset_index[0] if result.dataset_index else None
+        
+        if dataset_index is None:
+            raise RuntimeError(f"Dataset index is None for result {i}")
 
-        if dataset_indices is None:
-            raise RuntimeError(f"Dataset indices is None for result {i}")
-
-        # When generation_config.n > 1, vLLM generates multiple responses per prompt
-        # but dataset_indices only contains the unique indices (not replicated)
-        # So we expect: len(responses) == len(dataset_indices) * generation_config.n
-        expected_responses = len(dataset_indices) * generation_config.n
-        assert len(result.responses) == expected_responses, (
-            f"Mismatch: number of responses ({len(result.responses)}) "
-            f"doesn't match expected ({expected_responses}) for result {i}"
-            f". {generation_config.n=}"
-            f", {len(dataset_indices)=}"
-        )
-
-        # Get corresponding queries, ground_truths, datasets for each individual prompt
-        batch_queries = []
-        batch_ground_truths = []
-        batch_datasets = []
-
-        for dataset_idx in dataset_indices:
-            query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
-            batch_queries.append(query)
-            batch_ground_truths.append(ground_truth)
-            batch_datasets.append(dataset)
+        # For the first response of each prompt, get the query data
+        # (we only pop once per unique prompt, not per response)
+        if i % generation_config.n == 0:
+            query, ground_truth, dataset = pending_queries_map.pop(dataset_index)
+            all_queries.append(query)
+            all_ground_truths.append(ground_truth)
+            all_datasets.append(dataset)
 
         results.append(result)
-        all_queries.extend(batch_queries)
-        all_ground_truths.extend(batch_ground_truths)
-        all_datasets.extend(batch_datasets)
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1897,26 +1888,19 @@ def split_and_insert_batch(
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    # Split the batch over the VLLM engines.
-    inference_batch_size = len(batch.queries) // vllm_num_engines
-    for batch_idx in range(vllm_num_engines):
-        start_idx = batch_idx * inference_batch_size
-        end_idx = start_idx + inference_batch_size if batch_idx < vllm_num_engines - 1 else len(batch.queries)
-
-        sub_batch = batch[start_idx:end_idx]
-
-        # Store prompts in the map using thread-safe insert_many
-        pending_queries_map.insert_many(
-            sub_batch.indices, sub_batch.queries, sub_batch.ground_truths, sub_batch.datasets
-        )
-
-        # Use PromptRequest for Ray queue with batch-specific dataset_index list
+    # Store all prompts in the map first
+    pending_queries_map.insert_many(
+        batch.indices, batch.queries, batch.ground_truths, batch.datasets
+    )
+    
+    # Push individual prompts to the queue
+    for i, prompt in enumerate(batch.queries):
         param_prompt_Q.put(
             PromptRequest(
-                prompts=sub_batch.queries,
+                prompt=prompt,
                 generation_config=generation_config,
                 training_step=training_step,
-                dataset_index=sub_batch.indices,
+                dataset_index=batch.indices[i],
                 is_eval=is_eval,
             )
         )
@@ -2392,7 +2376,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     ray.init(dashboard_host="0.0.0.0")
 
     # Create Ray queues.
-    queue_size = (args.async_steps + 1) * args.vllm_num_engines
+    queue_size = (args.async_steps + 1) * args.vllm_num_engines * args.num_unique_prompts_rollout
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
     evaluation_inference_results_Q = ray_queue.Queue(maxsize=args.vllm_num_engines)

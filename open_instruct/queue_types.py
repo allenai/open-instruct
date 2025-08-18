@@ -35,8 +35,8 @@ class PromptRequest:
     `_QueueActor`.
     """
 
-    prompts: List[List[int]]
+    prompt: List[int]
     generation_config: Any
     training_step: Optional[int] = None
-    dataset_index: Optional[List[int]] = None
+    dataset_index: Optional[int] = None
     is_eval: bool = False
