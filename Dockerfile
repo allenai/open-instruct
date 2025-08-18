@@ -41,7 +41,8 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.c
         | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - \
     && apt-get update -y && apt-get install google-cloud-sdk -y \
     && rm -rf /var/lib/apt/lists/*
-
+# Taken from https://beaker.org/api/v3/release (add | jq -r '.version' if you want it programmatically).
+ENV BEAKER_VERSION=v1.5.235
 RUN curl --silent \
     --connect-timeout 5 \
     --max-time 10 \
