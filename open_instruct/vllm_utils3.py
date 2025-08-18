@@ -243,11 +243,11 @@ class LLMRayActor:
         )
 
     def init_process_group(
-        self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False, timeout=120
+        self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False, timeout_seconds=120
     ):
         return self.llm.collective_rpc(
             "init_process_group",
-            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout),
+            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_seconds),
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
