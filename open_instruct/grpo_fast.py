@@ -2317,9 +2317,7 @@ def cleanup_judge_clients():
     ray.shutdown()
 
 
-def check_threads_healthy(
-    futures: list, stop_event: threading.Event, executor: futures.ThreadPoolExecutor, queues: list[ray_queue.Queue]
-) -> None:
+def check_threads_healthy(futures: list) -> None:
     """Check if any threads have failed and raise their exception if so."""
     for future in futures:
         if not future.done():
@@ -2328,7 +2326,6 @@ def check_threads_healthy(
             future.result()
         except Exception as e:
             logger.error(f"Thread failed with exception: {e}")
-            cleanup_training_resources(stop_event, executor, queues)
             raise
 
 
@@ -2418,12 +2415,7 @@ def run_training(
     num_total_tokens = 0
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
-        check_threads_healthy(
-            [packing_future, generation_future],
-            stop_event,
-            executor,
-            [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
-        )
+        check_threads_healthy([packing_future, generation_future])
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         batch = sync_weights_and_prepare_prompts(
@@ -2549,20 +2541,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         eval_batch = next_batch(eval_dataset_indices, eval_dataset)
     reward_fn = make_reward_fn(args)
 
-    try:
-        ray_get_with_progress(
-            [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
-        )
-    except TimeoutError as e:
-        logger.error(f"vLLM engines failed to initialize within timeout: {e}")
-        # Clean up using existing cleanup function
-        cleanup_judge_clients()  # This calls ray.shutdown()
-        raise RuntimeError("vLLM engine initialization timed out")
-
     stop_event = threading.Event()
     executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="grpo")
 
     try:
+        ray_get_with_progress(
+            [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
+        )
+
         episode = run_training(
             args,
             tokenizer,
@@ -2587,11 +2573,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             eval_pending_queries_map,
             generate_metrics_Q,
         )
-    except Exception as e:
-        logger.error(f"Training failed with error: {e}")
-        raise
     finally:
-        # Clean up resources - this will happen whether the code succeeds or fails
         logger.info("Cleaning up training resources...")
         cleanup_training_resources(
             stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q]
