@@ -1988,11 +1988,12 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
             num_processed = sum(int(result) for result in processed_results)
             # Suppress timing output if nothing was processed
             if num_processed == 0:
-                timer.noop = 1
-        try:
-            generate_metrics_Q.put_nowait({"time/generation": timer.duration})
-        except Full:
-            logger.warning("[Generate Thread] generate metrics queue full, skipping metric")
+                timer.noop = True
+        if num_processed > 0:
+            try:
+                generate_metrics_Q.put_nowait({"time/generation": timer.duration})
+            except Full:
+                logger.warning("[Generate Thread] generate metrics queue full, skipping metric")
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
