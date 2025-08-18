@@ -2560,11 +2560,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     logger.info("Checking for runtime leaks...")
     from open_instruct import utils
 
-    leak_report = utils.check_runtime_leaks()
-    if not leak_report.is_clean:
-        logger.warning("Runtime leaks detected:\n" + leak_report.pretty())
-    else:
-        logger.info("No runtime leaks detected.")
+    utils.check_runtime_leaks()
 
 
 if __name__ == "__main__":
