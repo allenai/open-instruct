@@ -2588,7 +2588,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     # Check for runtime leaks before exiting
     logger.info("Checking for runtime leaks...")
-    from open_instruct import utils
 
     leak_report = utils.check_runtime_leaks()
     if not leak_report.is_clean:
