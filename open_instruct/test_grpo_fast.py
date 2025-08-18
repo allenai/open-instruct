@@ -202,8 +202,6 @@ class TestGrpoFastBase(unittest.TestCase):
 
 
 class TestGrpoFastVLLM(TestGrpoFastBase):
-    # GPU test (test_vllm_queue_system_single_prompt) has been moved to test_grpo_fast_gpu.py
-
     @parameterized.expand([(1, 16), (2, 32), (4, 64), (8, 128)])
     def test_batch_splitting_and_engine_configurations(self, vllm_num_engines: int, num_unique_prompts_rollout: int):
         """Test batch splitting and accumulation with various engine configurations."""

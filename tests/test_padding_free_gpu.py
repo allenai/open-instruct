@@ -75,7 +75,7 @@ MODEL_KWARGS = {
 }
 
 
-class TestPaddingFreeGPU:
+class TestPaddingFree:
     seqlen = 128
     batch_size = 2
     dtype = torch.bfloat16
