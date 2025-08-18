@@ -2560,7 +2560,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     logger.info("Checking for runtime leaks...")
     from open_instruct import utils
 
-    # Call check_runtime_leaks which logs errors immediately
     utils.check_runtime_leaks()
 
 

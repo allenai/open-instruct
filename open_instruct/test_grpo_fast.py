@@ -61,8 +61,6 @@ class TestGrpoFastBase(unittest.TestCase):
         # Track Ray queues for cleanup
         self._ray_queues = []
 
-        # Check for leaks after Ray init
-        # This will log any leaks immediately
         utils.check_runtime_leaks()
 
         # Initialize Ray for this test
@@ -100,8 +98,6 @@ class TestGrpoFastBase(unittest.TestCase):
             if new_names:
                 new_resources[rtype] = new_names
 
-        # Check for leaks before shutdown
-        # This will log any leaks immediately
         utils.check_runtime_leaks()
 
         # Check for semaphore leaks

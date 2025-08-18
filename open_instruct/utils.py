@@ -1480,78 +1480,70 @@ def check_runtime_leaks(
     """
     Inspect runtime state for leftovers and log any leaks immediately.
     """
-    # Use standard Python logger for leak detection to avoid accelerate dependency
     leak_logger = logging.getLogger(__name__)
-    has_leaks = False
+    leaks = []
 
-    # Threads
-    bad_threads = []
-    for t in threading.enumerate():
-        if t.name in thread_allowlist or any(t.name.startswith(p) for p in thread_allow_prefixes):
-            continue
-        if not include_daemon_threads and t.daemon:
-            continue
-        if t is threading.main_thread():
-            continue
-        # ignore ones already finished
-        if not t.is_alive():
-            continue
-        bad_threads.append(t)
+    # Check threads
+    def is_allowed_thread(t):
+        return (
+            t.name in thread_allowlist
+            or any(t.name.startswith(p) for p in thread_allow_prefixes)
+            or t is threading.main_thread()
+            or (not include_daemon_threads and t.daemon)
+            or not t.is_alive()
+        )
 
+    bad_threads = [t for t in threading.enumerate() if not is_allowed_thread(t)]
     if bad_threads:
-        has_leaks = True
-        leak_logger.warning("Leaked threads:")
+        leaks.append("Leaked threads:")
         for t in bad_threads:
             target = getattr(t, "_target", None)
             tgt_name = getattr(target, "__name__", repr(target)) if target else "?"
-            leak_logger.warning(f"  - {t.name} (alive={t.is_alive()}, daemon={t.daemon}, target={tgt_name})")
+            leaks.append(f"  - {t.name} (alive={t.is_alive()}, daemon={t.daemon}, target={tgt_name})")
 
-    # Multiprocessing children
-    bad_processes = []
-    for child in mp.active_children():
-        if child.is_alive():
-            bad_processes.append(child)
-
+    # Check multiprocessing children
+    bad_processes = [p for p in mp.active_children() if p.is_alive()]
     if bad_processes:
-        has_leaks = True
-        leak_logger.warning("Leaked multiprocessing children:")
+        leaks.append("Leaked multiprocessing children:")
         for p in bad_processes:
-            leak_logger.warning(f"  - PID {p.pid} alive={p.is_alive()} name={p.name}")
+            leaks.append(f"  - PID {p.pid} alive={p.is_alive()} name={p.name}")
 
-    # Ray state (only if ray is present & initialized)
-    if ray_state is not None and ray is not None and ray.is_initialized():
-        ray_actors = ray_state.list_actors(filters=[("state", "=", "ALIVE")])
-        ray_tasks = ray_state.list_tasks(filters=[("state", "=", "RUNNING")])
-        ray_workers = ray_state.list_workers(filters=[("is_alive", "=", True)])
+    # Check Ray state
+    if ray_state and ray and ray.is_initialized():
+        ray_checks = [
+            (
+                "Live Ray actors:",
+                ray_state.list_actors(filters=[("state", "=", "ALIVE")]),
+                lambda a: f"  - {a.get('class_name')} id={a.get('actor_id')}",
+            ),
+            (
+                "Live Ray tasks:",
+                ray_state.list_tasks(filters=[("state", "=", "RUNNING")]),
+                lambda t: f"  - {t.get('name')} id={t.get('task_id')}",
+            ),
+            (
+                "Live Ray workers:",
+                ray_state.list_workers(filters=[("is_alive", "=", True)]),
+                lambda w: f"  - pid={w.get('pid')} id={w.get('worker_id')}",
+            ),
+        ]
 
-        if ray_actors:
-            has_leaks = True
-            leak_logger.warning("Live Ray actors:")
-            for a in ray_actors:
-                leak_logger.warning(f"  - {a.get('class_name')} id={a.get('actor_id')}")
+        for header, items, formatter in ray_checks:
+            if items:
+                leaks.append(header)
+                leaks.extend(formatter(item) for item in items)
 
-        if ray_tasks:
-            has_leaks = True
-            leak_logger.warning("Live Ray tasks:")
-            for t in ray_tasks:
-                leak_logger.warning(f"  - {t.get('name')} id={t.get('task_id')}")
-
-        if ray_workers:
-            has_leaks = True
-            leak_logger.warning("Live Ray workers:")
-            for w in ray_workers:
-                leak_logger.warning(f"  - pid={w.get('pid')} id={w.get('worker_id')}")
-
-    # Multiprocessing resource_tracker cache (private API, so guard carefully)
-    if _rt is not None and hasattr(_rt, "_resource_tracker"):
+    # Check resource tracker cache
+    if _rt and hasattr(_rt, "_resource_tracker"):
         cache = getattr(_rt._resource_tracker, "_cache", {})
-
         for name, (count, rtype) in cache.items():
             if count > 0:
-                has_leaks = True
-                leak_logger.warning(f"Leaked {rtype} resources: {count}")
+                leaks.append(f"Leaked {rtype} resources: {count}")
 
-    if has_leaks:
+    # Log results
+    if leaks:
+        for leak in leaks:
+            leak_logger.warning(leak)
         leak_logger.error("Runtime leaks detected! Please investigate.")
     else:
         leak_logger.info("No runtime leaks detected.")
