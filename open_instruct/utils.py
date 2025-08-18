@@ -1481,9 +1481,7 @@ def check_runtime_leaks(
     Inspect runtime state for leftovers and log any leaks immediately.
     """
     leak_logger = logging.getLogger(__name__)
-    leaks = []
 
-    # Check threads
     def is_allowed_thread(t):
         return (
             t.name in thread_allowlist
@@ -1495,20 +1493,18 @@ def check_runtime_leaks(
 
     bad_threads = [t for t in threading.enumerate() if not is_allowed_thread(t)]
     if bad_threads:
-        leaks.append("Leaked threads:")
+        leak_logger.warning("Leaked threads:")
         for t in bad_threads:
             target = getattr(t, "_target", None)
             tgt_name = getattr(target, "__name__", repr(target)) if target else "?"
-            leaks.append(f"  - {t.name} (alive={t.is_alive()}, daemon={t.daemon}, target={tgt_name})")
+            leak_logger.warning(f"  - {t.name} (alive={t.is_alive()}, daemon={t.daemon}, target={tgt_name})")
 
-    # Check multiprocessing children
     bad_processes = [p for p in mp.active_children() if p.is_alive()]
     if bad_processes:
-        leaks.append("Leaked multiprocessing children:")
+        leak_logger.warning("Leaked multiprocessing children:")
         for p in bad_processes:
-            leaks.append(f"  - PID {p.pid} alive={p.is_alive()} name={p.name}")
+            leak_logger.warning(f"  - PID {p.pid} alive={p.is_alive()} name={p.name}")
 
-    # Check Ray state
     if ray_state and ray and ray.is_initialized():
         ray_checks = [
             (
@@ -1530,20 +1526,12 @@ def check_runtime_leaks(
 
         for header, items, formatter in ray_checks:
             if items:
-                leaks.append(header)
-                leaks.extend(formatter(item) for item in items)
+                leak_logger.warning(header)
+                for item in items:
+                    leak_logger.warning(formatter(item))
 
-    # Check resource tracker cache
     if _rt and hasattr(_rt, "_resource_tracker"):
         cache = getattr(_rt._resource_tracker, "_cache", {})
         for name, (count, rtype) in cache.items():
             if count > 0:
-                leaks.append(f"Leaked {rtype} resources: {count}")
-
-    # Log results
-    if leaks:
-        for leak in leaks:
-            leak_logger.warning(leak)
-        leak_logger.error("Runtime leaks detected! Please investigate.")
-    else:
-        leak_logger.info("No runtime leaks detected.")
+                leak_logger.warning(f"Leaked {rtype} resources: {count}")
