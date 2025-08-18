@@ -193,7 +193,7 @@ class TestGrpoFastVLLMGPU(TestGrpoFastGPUBase):
 
         # Create a PromptRequest
         request = PromptRequest(
-            prompt_token_ids=prompt_token_ids, generation_config=generation_config, dataset_index=[0], training_step=0
+            prompts=[prompt_token_ids], generation_config=generation_config, dataset_index=[0], training_step=0
         )
 
         # Send the request
