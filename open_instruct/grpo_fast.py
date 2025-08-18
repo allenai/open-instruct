@@ -69,7 +69,6 @@ import torch.distributed as dist
 import torch.utils
 import torch.utils.data
 import vllm
-import wandb
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util import queue as ray_queue
@@ -80,6 +79,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
+import wandb
 from open_instruct import vllm_utils3
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
