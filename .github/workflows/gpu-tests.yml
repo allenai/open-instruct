@@ -65,7 +65,7 @@ jobs:
                   preemptible: true
                 resources:
                   gpuCount: 1
-                timeout: 10m
+                timeout: 20m
                 constraints:
                   cluster:
                     # A6000 cluster
