@@ -2367,7 +2367,6 @@ def run_training(
     generate_metrics_Q,
 ):
     """Run the main training loop with worker threads."""
-    # Check that vLLM engines are ready
     ray_get_with_progress(
         [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
     )
@@ -2519,7 +2518,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         evaluation_inference_results_Q,
     )
 
-    # Setup training
     generation_configs = create_generation_configs(args)
 
     train_dataset_idxs = np.arange(len(train_dataset))
@@ -2588,11 +2586,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         logger.info("Pushing model to hub")
         push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
 
+    # Check for runtime leaks before exiting
+    logger.info("Checking for runtime leaks...")
+    from open_instruct import utils
+
     leak_report = utils.check_runtime_leaks()
-    if leak_report.is_clean:
-        logger.info("No runtime leaks detected.")
-    else:
+    if not leak_report.is_clean:
         logger.warning("Runtime leaks detected:\n" + leak_report.pretty())
+    else:
+        logger.info("No runtime leaks detected.")
 
 
 if __name__ == "__main__":
