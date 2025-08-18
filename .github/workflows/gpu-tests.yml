@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - v*-release
   pull_request:
     branches:
       - main
@@ -14,27 +13,69 @@ on:
 jobs:
   gpu-tests:
     name: Run GPU tests
-    runs-on: [self-hosted, gpu]  # Requires a GPU-enabled runner
+    runs-on: ubuntu-latest
+    env:
+      BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          version: "0.8.6"
+          python-version: '3.11'
       
-      - name: Set up Python environment
-        run: uv sync
-      
-      - name: Verify CUDA availability
+      - name: Determine current commit SHA (pull request)
+        if: github.event_name == 'pull_request'
         run: |
-          uv run python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}'); print(f'CUDA devices: {torch.cuda.device_count()}')"
+          echo "COMMIT_SHA=${{ github.event.pull_request.head.sha }}" >> $GITHUB_ENV
       
-      - name: Run GPU tests
+      - name: Determine current commit SHA (push)
+        if: github.event_name != 'pull_request'
         run: |
-          # Run all GPU test files
-          uv run pytest -xvs tests/*_gpu.py open_instruct/*_gpu.py
-        env:
-          CUDA_VISIBLE_DEVICES: 0  # Use first GPU
-          NCCL_CUMEM_ENABLE: 0
+          echo "COMMIT_SHA=$GITHUB_SHA" >> $GITHUB_ENV
+      
+      - name: Setup Beaker
+        if: env.BEAKER_TOKEN != ''
+        uses: allenai/setup-beaker@v2
+        with:
+          token: ${{ env.BEAKER_TOKEN }}
+          workspace: ai2/tulu-thinker
+      
+      - name: Run GPU tests on Beaker
+        if: env.BEAKER_TOKEN != ''
+        uses: allenai/beaker-run-action@v1.2
+        with:
+          spec: |
+            version: v2
+            description: Open-Instruct GPU Tests
+            budget: ai2/oe-training
+            tasks:
+              - name: gpu-tests
+                context:
+                  priority: normal
+                  preemptible: true
+                resources:
+                  gpuCount: 1
+                timeout: 10m
+                constraints:
+                  cluster:
+                    # H100 clusters
+                    - ai2/jupiter-cirrascale-2
+                    - ai2/augusta-google-1
+                    - ai2/ceres-cirrascale
+                    # A100 clusters
+                    - ai2/saturn-cirrascale
+                command:
+                  - "bash"
+                  - "-c"
+                  - |
+                    git clone https://github.com/${{ github.repository }}.git /workspace && 
+                    cd /workspace && 
+                    git checkout ${{ env.COMMIT_SHA }} && 
+                    pip install uv && 
+                    uv run --frozen pytest -xvs tests/*_gpu.py open_instruct/*_gpu.py
+                result:
+                  path: /unused
+          token: ${{ env.BEAKER_TOKEN }}
+          workspace: ai2/tulu-thinker
