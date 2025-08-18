@@ -8,7 +8,7 @@ dependencies = [
     "accelerate>=1.1.1",
     "antlr4-python3-runtime==4.11",
     "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
-    "datasets>=3.1.0",
+    "datasets>=4.0.0",
     "debugpy>=1.8.13",
     "deepspeed==0.15.4", # 0.16.0 bugs out https://github.com/microsoft/DeepSpeed/issues/6793
     "hf-transfer>=0.1.8",
@@ -22,8 +22,8 @@ dependencies = [
     "ray[default]>=2.44.1",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
-    "torch==2.7.0",
-    "transformers>=4.52.4",
+    "torch>=2.7.0,<2.8",
+    "transformers>=4.52.4,<4.54.0", # see https://github.com/vllm-project/vllm-ascend/issues/2046
     "vllm==0.9.1",    
     "wandb==0.18.1",
     "langdetect==1.0.9",
@@ -31,7 +31,7 @@ dependencies = [
     "pytest-xdist==3.8.0",
     "flash-attn>=2.8.0.post2; platform_system != 'Darwin'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
-    "flashinfer-python==0.2.8; platform_system != 'Darwin'",
+    "flashinfer-python==0.2.8; platform_system == 'Linux' and platform_machine == 'x86_64'",
 ]
 
 [build-system]
@@ -68,7 +68,6 @@ code = [
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0", 
     "pydantic>=2.0.0",
-    "datasets>=3.1.0",
     "requests>=2.28.0",
 ]
 
@@ -78,11 +77,7 @@ python-preference = "only-managed"
 
 [dependency-groups]
 dev = [
-    "autoflake>=2.3.1",
     "beaker-py>=1.32.2,<2.0",
-    "black>=24.10.0",
-    "flake8>=7.1.1",
-    "isort>=5.13.2",
     "mkdocs-material>=9.6.8",
     "markdown-include>=0.8.1",
     "pytest>=8.3.4",
@@ -122,7 +117,7 @@ skip-magic-trailing-comma = true
 docstring-code-format = false
 
 [tool.ruff.lint]
-# Enable rules equivalent to your autoflake and flake8:
+# Enable rules equivalent to previous autoflake and flake8 configs:
 # F = Pyflakes (covers autoflake functionality)
 # E = pycodestyle errors (flake8)
 # W = pycodestyle warnings (flake8)

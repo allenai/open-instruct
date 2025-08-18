@@ -56,7 +56,10 @@ We use [uv](https://docs.astral.sh/uv/) for installation and running code. You c
 * **Docker installation**: You can also use the Dockerfile to build a Docker image. You can build the image with the following command:
 
 ```bash
-docker build . -t open_instruct_dev
+docker build . \
+    --build-arg GIT_COMMIT=$(git rev-parse --short HEAD) \
+	--build-arg GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD) \
+	-t open_instruct_dev
 
 # if you are internally at AI2, you can create a beaker image like this:
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')

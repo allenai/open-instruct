@@ -87,6 +87,6 @@ jobs:
         with:
           version: "0.8.6"
       - name: Set up Python
-        run: uv sync
+        run: uv sync --frozen
       - name: Run unit tests
-        run: uv run pytest -n auto
+        run: uv run --frozen pytest -n auto
