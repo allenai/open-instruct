@@ -65,8 +65,10 @@ import numpy as np
 import pandas as pd
 import ray
 import torch
+import torch.distributed as dist
 import torch.utils
 import torch.utils.data
+import vllm
 import wandb
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
@@ -77,8 +79,8 @@ from rich.pretty import pprint
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
-from vllm import SamplingParams
 
+from open_instruct import vllm_utils3
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -130,7 +132,6 @@ from open_instruct.utils import (
     repeat_each,
     sync_gs_bucket,
 )
-from open_instruct.vllm_utils3 import LLMRayActor, create_vllm_engines, init_process_group
 
 # Setup logging with filename and line number format
 logging.basicConfig(
@@ -725,7 +726,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
                 for i, engine in enumerate(vllm_engines)
             ]
-            self.model_update_group = init_process_group(
+            self.model_update_group = vllm_utils3.init_process_group(
                 backend=backend,
                 init_method=f"tcp://{master_address}:{master_port}",
                 world_size=world_size,
@@ -1325,7 +1326,6 @@ def accumulate_inference_batches(
         masks=combined_masks,
         request_info=combined_request_info,
         dataset_index=None,  # Not meaningful for combined result
-        training_step=training_step,
     )
 
     # Note: We don't have dataset_indices here, but they're not needed for the returned batch
@@ -1769,7 +1769,7 @@ def create_model_and_optimizer(
     inference_results_Q: ray_queue.Queue,
     param_prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q: ray_queue.Queue,
-) -> tuple[ModelGroup, list[LLMRayActor], dict, int, int]:
+) -> tuple[ModelGroup, list[vllm_utils3.LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -1810,8 +1810,10 @@ def create_model_and_optimizer(
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 
+    actor_manager = vllm_utils3.ActorManager.remote()
+
     # Create vLLM engines with queues
-    vllm_engines = create_vllm_engines(
+    vllm_engines = vllm_utils3.create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
         args.vllm_enforce_eager,
@@ -1829,6 +1831,7 @@ def create_model_and_optimizer(
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
+        actor_manager=actor_manager,
     )
 
     resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
@@ -1850,12 +1853,12 @@ def create_model_and_optimizer(
                 enable=args.verbose,
             )
 
-    return policy_group, vllm_engines, tool_objects, resume_training_step, episode
+    return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager
 
 
 def create_generation_configs(args: Args):
     """Create generation configs for training and evaluation."""
-    generation_config = SamplingParams(
+    generation_config = vllm.SamplingParams(
         temperature=args.temperature,
         top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
@@ -1863,6 +1866,11 @@ def create_generation_configs(args: Args):
         skip_special_tokens=False,
         n=args.num_samples_per_prompt_rollout,
         stop=args.stop_strings,
+        # IMPORTANT: Set output_kind to FINAL_ONLY to ensure vLLM V1 properly handles n>1
+        # With the default CUMULATIVE mode, vLLM V1 returns separate outputs for each
+        # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode
+        # ensures all n completions are returned together in a single output.
+        output_kind=vllm.sampling_params.RequestOutputKind.FINAL_ONLY,
     )
     eval_generation_config = generation_config.clone()
     eval_generation_config.temperature = 0.0
@@ -1913,7 +1921,8 @@ def sync_weights_and_prepare_prompts(
     policy_group: ModelGroup,
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q: ray_queue.Queue,
-    generation_configs: Dict[str, SamplingParams],
+    generation_configs: Dict[str, vllm.SamplingParams],
+    actor_manager: vllm_utils3.ActorManager,
 ) -> Batch:
     """Sync weights and send the next batch of prompts to vLLM."""
     dataset_indices = next(iter_dataloader)
@@ -1923,12 +1932,17 @@ def sync_weights_and_prepare_prompts(
         if args.async_steps > 0
         else "🔄 Loading weights using shared memory"
     ):
-        ray_refs = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+        ray.get(actor_manager.set_should_stop.remote(True))
+        logger.debug(f"[Main Thread] Set should_stop to True for weight sync at step {training_step}")
+
         ray_get_with_progress(
-            ray_refs,
-            desc=f"[Main Thread] Broadcasting weights to vLLM engines at training step {training_step}",
+            [m.broadcast_to_vllm.remote() for m in policy_group.models],
+            desc=f"[Main thread] Broadcasting weights to vLLM engines at training step {training_step}",
             enable=args.verbose,
         )
+
+        ray.get(actor_manager.set_should_stop.remote(False))
+        logger.debug(f"[Main Thread] Set should_stop to False after weight sync at step {training_step}")
 
     split_and_insert_batch(
         batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]
@@ -1937,10 +1951,13 @@ def sync_weights_and_prepare_prompts(
     return batch
 
 
-def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
+def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event):
     """Get the packed sequences with advantages from the packing thread."""
     with Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
         while True:
+            if stop_event.is_set():
+                logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
+                return None, {}, num_total_tokens
             try:
                 packed_data = packed_sequences_Q.get(timeout=30.0)
                 break
@@ -1958,42 +1975,25 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
     return collated_data, data_thread_metrics, num_total_tokens
 
 
-def generate_thread(
-    vllm_engines, local_eval_every, num_training_steps, resume_training_step, stop_event, generate_metrics_Q
-):
+def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
-
     while not stop_event.is_set():
         with Timer("🔥 Generation time") as timer:
-            engine_refs = [
-                engine.process_from_queue.remote(num_training_steps, resume_training_step, timeout=0.1)
-                for engine in vllm_engines
-            ]
-            engine_futures = [ref.future() for ref in engine_refs]
-            processed_results = []
-            with tqdm(
-                total=len(vllm_engines),
-                desc="[Generate Thread] Waiting for vLLM engines to return",
-                bar_format="{l_bar}{bar}{r_bar}\n",
-                disable=not args.verbose,
-            ) as pbar:
-                for future in futures.as_completed(engine_futures):
-                    processed_results.append(future.result())
-                    pbar.update(1)
+            processed_results = ray_get_with_progress(
+                [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
+                desc="[Generate Thread] Waiting for vLLM engines to process",
+                enable=args.verbose,
+            )
             num_processed = sum(int(result) for result in processed_results)
             # Suppress timing output if nothing was processed
             if num_processed == 0:
-                timer.noop = 1
-        if num_processed == 0:
-            # If no batches were processed, sleep for a short time to avoid busy waiting
-            time.sleep(1)
-        else:
+                timer.noop = True
+        if num_processed > 0:
             try:
                 generate_metrics_Q.put_nowait({"time/generation": timer.duration})
             except Full:
-                logging.warning("[Generate Thread] generate metrics queue full, skipping metric")
-
+                logger.warning("[Generate Thread] generate metrics queue full, skipping metric")
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
@@ -2315,6 +2315,7 @@ def cleanup_judge_clients():
     asyncio.run(cleanup_all_llm_judge_clients())
     logger.info("✅ LLM judge clients cleaned up")
     ray.shutdown()
+    logger.info("✅ Ray shut down")
 
 
 def check_threads_healthy(
@@ -2333,25 +2334,38 @@ def check_threads_healthy(
 
 
 def cleanup_training_resources(
-    stop_event: threading.Event, executor: futures.ThreadPoolExecutor, queues: list[ray_queue.Queue]
+    stop_event: threading.Event,
+    executor: futures.ThreadPoolExecutor,
+    queues: list[ray_queue.Queue],
+    actor_manager: vllm_utils3.ActorManager,
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
     # Signal generate_thread to stop
     stop_event.set()
 
-    # Push sentinel to signal data_preparation_thread to stop
+    logger.info("Signaling all actors to stop...")
+    ray.get(actor_manager.set_should_stop.remote(True))
+    logger.info("✅ Signaled all actors to stop")
+
     logger.info("Pushing shutdown sentinel to queues...")
+    # Push sentinel to the first queue (inference_results_Q)
     if queues and len(queues) > 0:
-        # Push sentinel to the first queue (inference_results_Q)
         queues[0].put(ShutdownSentinel(), timeout=1)
 
     logger.info("Shutting down Ray queues...")
-    [queue.shutdown() for queue in queues]
+    if queues and len(queues) > 0:
+        [queue.shutdown() for queue in queues]
     logger.info("Shutting down thread pool executor...")
     executor.shutdown(wait=True)
 
     # Clean up judge clients
     cleanup_judge_clients()
+
+    # Clean up distributed process group if it was initialized
+    if dist.is_initialized():
+        logger.info("Destroying process group...")
+        dist.destroy_process_group()
+        logger.info("✅ Process group destroyed")
 
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_samples: int = 32):
@@ -2374,16 +2388,18 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
     evaluation_inference_results_Q = ray_queue.Queue(maxsize=args.vllm_num_engines)
 
-    policy_group, vllm_engines, tool_objects, resume_training_step, episode = create_model_and_optimizer(
-        args,
-        tc,
-        model_config,
-        beaker_config,
-        wandb_url,
-        tokenizer,
-        inference_results_Q,
-        param_prompt_Q,
-        evaluation_inference_results_Q,
+    policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
+        create_model_and_optimizer(
+            args,
+            tc,
+            model_config,
+            beaker_config,
+            wandb_url,
+            tokenizer,
+            inference_results_Q,
+            param_prompt_Q,
+            evaluation_inference_results_Q,
+        )
     )
 
     # Setup training
@@ -2432,13 +2448,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     logger.info("======== ✅ generation thread starts =========")
     generation_future = executor.submit(
-        generate_thread,
-        vllm_engines,
-        args.local_eval_every,
-        args.num_training_steps,
-        resume_training_step,
-        stop_event,
-        generate_metrics_Q,
+        generate_thread, args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q
     )
 
     # Send initial data to ensure we have a N-step offset.
@@ -2473,6 +2483,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             pending_queries_map,
             param_prompt_Q,
             generation_configs,
+            actor_manager,
         )
         if (
             training_step % args.local_eval_every == 0
@@ -2491,7 +2502,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
         # The generate_thread is now handling vLLM processing asynchronously
         collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
-            packed_sequences_Q, num_total_tokens
+            packed_sequences_Q, num_total_tokens, stop_event
         )
         if collated_data is None:
             continue
@@ -2500,7 +2511,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         try:
             generate_metrics = generate_metrics_Q.get_nowait()
         except Empty:
-            logging.info("[Main Thread] didn't get generation metrics")
+            logger.info("[Main Thread] didn't get generation metrics")
 
         data_thread_metrics = {**data_thread_metrics, **generate_metrics}
 
@@ -2536,7 +2547,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     # Clean up resources
     cleanup_training_resources(
-        stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q]
+        stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q], actor_manager
     )
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we

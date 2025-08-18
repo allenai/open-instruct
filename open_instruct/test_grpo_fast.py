@@ -150,7 +150,6 @@ class TestGrpoFastBase(unittest.TestCase):
                 tool_calleds=[False] * total_responses,
             ),
             dataset_index=dataset_indices,
-            training_step=training_step,
         )
 
     def setup_and_split_batch(self, queries, ground_truths, datasets, indices, num_engines, training_step=1):
@@ -228,7 +227,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
 
         # Put the test prompt in the queue using PromptRequest
         param_prompt_Q.put(
-            PromptRequest(prompts=[prompt_token_ids], dataset_index=0, generation_config=generation_config)
+            PromptRequest(prompts=[prompt_token_ids], dataset_index=0, sampling_params=generation_config)
         )
 
         # Get the result
@@ -319,7 +318,6 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
                 tool_calleds=[False] * len(combined_responses),
             ),
             dataset_index=None,
-            training_step=1,
         )
 
         # Verify that the combined results match the original input
@@ -443,7 +441,6 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
                 tool_calleds=[False] * len(combined_responses),
             ),
             dataset_index=None,
-            training_step=1,
         )
 
         # Verify results - streaming accumulation should NOT replicate
