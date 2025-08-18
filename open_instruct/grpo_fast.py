@@ -1989,11 +1989,10 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
             # Suppress timing output if nothing was processed
             if num_processed == 0:
                 timer.noop = 1
-            else:
-                try:
-                    generate_metrics_Q.put_nowait({"time/generation": timer.duration})
-                except Full:
-                    logging.warning("[Generate Thread] generate metrics queue full, skipping metric")
+        try:
+            generate_metrics_Q.put_nowait({"time/generation": timer.duration})
+        except Full:
+            logger.warning("[Generate Thread] generate metrics queue full, skipping metric")
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
@@ -2136,7 +2135,7 @@ def maybe_evaluate(
         try:
             eval_generate_metrics = generate_metrics_Q.get_nowait()
         except Empty:
-            logging.info("[Main Thread] didn't get eval generation metrics")
+            logger.info("[Main Thread] didn't get eval generation metrics")
 
         eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
         eval_decoded_responses = tokenizer.batch_decode(eval_result.responses, skip_special_tokens=True)
@@ -2511,7 +2510,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         try:
             generate_metrics = generate_metrics_Q.get_nowait()
         except Empty:
-            logging.info("[Main Thread] didn't get generation metrics")
+            logger.info("[Main Thread] didn't get generation metrics")
 
         data_thread_metrics = {**data_thread_metrics, **generate_metrics}
 

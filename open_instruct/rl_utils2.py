@@ -8,7 +8,13 @@ import torch
 from rich.pretty import pprint
 
 T = TypeVar("T")
-# torch.set_printoptions(precision=2, sci_mode=False)
+# Setup logging with filename and line number format
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 
 class Timer:
@@ -23,11 +29,10 @@ class Timer:
         return self
 
     def __exit__(self, type, value, traceback):
-        if self.noop:
-            return
         self.end_time = time.perf_counter()
         self.duration = self.end_time - self.start_time
-        print(f"{self.description}: {self.duration:.3f} seconds")
+        if noop == 0:
+            logger.info(f"{self.description}: {self.duration:.3f} seconds")
 
 
 @dataclass
