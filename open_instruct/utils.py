@@ -932,8 +932,18 @@ def maybe_update_beaker_description_with_wandb_url(wandb_url: str) -> None:
     try:
         spec = client.experiment.get(os.environ["BEAKER_WORKLOAD_ID"])
     except beaker.exceptions.ExperimentNotFound:
-        logger.warning(f"Failed to update Beaker experiment description with wandb URL: {wandb_url}")
-        logger.warning("This might be fine if you are e.g. running in an interactive job.")
+        # Avoid Accelerate logger dependency before Accelerator/PartialState is initialized
+        try:
+            logger.warning(
+                f"Failed to update Beaker experiment description with wandb URL: {wandb_url}"
+            )
+            logger.warning("This might be fine if you are e.g. running in an interactive job.")
+        except Exception:
+            std_logger = logging.getLogger(__name__)
+            std_logger.warning(
+                f"Failed to update Beaker experiment description with wandb URL: {wandb_url}"
+            )
+            std_logger.warning("This might be fine if you are e.g. running in an interactive job.")
         return
     current_description = spec.description or ""
     client.experiment.set_description(os.environ["BEAKER_WORKLOAD_ID"], f"{current_description}\n{wandb_url}")

@@ -1347,8 +1347,9 @@ def data_preparation_thread(
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
     generation_config,
+    resume_training_step: int,
 ):
-    for training_step in range(1, num_training_steps + 1):
+    for training_step in range(resume_training_step, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
             result, batch = accumulate_inference_batches(
@@ -2444,6 +2445,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         tokenizer,
         args.num_training_steps,
         generation_configs["train"],
+        resume_training_step,
     )
 
     logger.info("======== ✅ generation thread starts =========")
@@ -2457,13 +2459,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         batch = next_batch(dataset_indices, train_dataset)
         split_and_insert_batch(
             batch,
-            1,  # training_step
+            resume_training_step,  # training_step
             args.vllm_num_engines,
             pending_queries_map,
             param_prompt_Q,
             generation_configs["train"],
         )
     num_total_tokens = 0
+    last_completed_step = resume_training_step - 1
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
         check_threads_healthy(
@@ -2529,6 +2532,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             wandb_url,
             tc.chat_template_name,
         )
+        last_completed_step = training_step
 
         maybe_evaluate(
             args,
@@ -2543,7 +2547,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             generate_metrics_Q,
         )
 
-    save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
+    save_final_model(args, policy_group, tokenizer, last_completed_step, wandb_url, tc.chat_template_name)
 
     # Clean up resources
     cleanup_training_resources(
