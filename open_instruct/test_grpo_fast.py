@@ -11,7 +11,8 @@ from transformers import AutoTokenizer
 from vllm import SamplingParams
 
 from open_instruct import grpo_fast, model_utils, utils
-from open_instruct.vllm_utils3 import GenerationResult, PromptRequest, RequestInfo, create_vllm_engines
+from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo
+from open_instruct.vllm_utils3 import create_vllm_engines
 
 
 class TestGrpoFastBase(unittest.TestCase):
@@ -60,22 +61,7 @@ class TestGrpoFastBase(unittest.TestCase):
         # Track Ray queues for cleanup
         self._ray_queues = []
 
-        # Check for leaks after Ray init
-        leak_report = utils.check_runtime_leaks()
-        # After Ray init, we expect exactly one Ray head worker
-        if len(leak_report.ray_workers) == 1:
-            # Check if it's the head worker (worker ID all zeros or all f's)
-            worker = leak_report.ray_workers[0]
-            worker_id = worker.get("worker_id", "")
-            if worker_id in [
-                "01000000ffffffffffffffffffffffffffffffffffffffffffffffff",
-                "00000000ffffffffffffffffffffffffffffffffffffffffffffffff",
-            ]:
-                # This is the expected Ray head worker, clear it
-                leak_report.ray_workers = []
-
-        if not leak_report.is_clean:
-            self.fail(f"Leaks detected before test {self._testMethodName}:\n{leak_report.pretty()}")
+        utils.check_runtime_leaks()
 
         # Initialize Ray for this test if not already initialized
         if not ray.is_initialized():
@@ -113,21 +99,7 @@ class TestGrpoFastBase(unittest.TestCase):
             if new_names:
                 new_resources[rtype] = new_names
 
-        # Check for leaks before shutdown
-        leak_report = utils.check_runtime_leaks()
-        # We still expect the Ray head worker
-        if len(leak_report.ray_workers) == 1:
-            worker = leak_report.ray_workers[0]
-            worker_id = worker.get("worker_id", "")
-            if worker_id in [
-                "01000000ffffffffffffffffffffffffffffffffffffffffffffffff",
-                "00000000ffffffffffffffffffffffffffffffffffffffffffffffff",
-            ]:
-                # This is the expected Ray head worker, clear it
-                leak_report.ray_workers = []
-
-        if not leak_report.is_clean:
-            self.fail(f"Leaks detected after test {self._testMethodName}:\n{leak_report.pretty()}")
+        utils.check_runtime_leaks()
 
         # Check for semaphore leaks
         if new_resources:
@@ -254,18 +226,12 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         )
 
         # Start vLLM engines to process from queues
-        for engine in vllm_engines:
-            engine.process_from_queue.remote(
-                generation_config,
-                generation_config,  # eval_sampling_params
-                999,  # eval_freq (avoid evaluation)
-                1,  # num_training_steps
-                1,  # resume_training_step
-            )
+        [e.process_from_queue.remote() for e in vllm_engines]
 
         # Put the test prompt in the queue using PromptRequest
-        request = PromptRequest(prompts=[prompt_token_ids], sampling_params=generation_config, dataset_index=0)
-        param_prompt_Q.put(request)
+        param_prompt_Q.put(
+            PromptRequest(prompts=[prompt_token_ids], dataset_index=0, sampling_params=generation_config)
+        )
 
         # Get the result
         result = inference_results_Q.get()

@@ -56,7 +56,8 @@ import time
 from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
-from queue import Empty, Queue
+from datetime import timedelta
+from queue import Empty, Full, Queue
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
 
 import datasets
@@ -64,6 +65,7 @@ import numpy as np
 import pandas as pd
 import ray
 import torch
+import torch.distributed as dist
 import torch.utils
 import torch.utils.data
 import vllm
@@ -74,11 +76,11 @@ from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
-from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
+from open_instruct import vllm_utils3
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -104,6 +106,7 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
+from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo
 from open_instruct.rl_utils2 import Timer, pack_sequences
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -122,20 +125,12 @@ from open_instruct.utils import (
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
+    maybe_update_beaker_description_with_wandb_url,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
     repeat_each,
     sync_gs_bucket,
-)
-from open_instruct.vllm_utils3 import (
-    ActorManager,
-    GenerationResult,
-    LLMRayActor,
-    PromptRequest,
-    RequestInfo,
-    create_vllm_engines,
-    init_process_group,
 )
 
 # Setup logging with filename and line number format
@@ -148,6 +143,10 @@ logger = logging.getLogger(__name__)
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
+
+
+class ShutdownSentinel:
+    """Sentinel value to signal thread shutdown via queue."""
 
 
 @dataclass
@@ -215,14 +214,14 @@ class Args:
     """RUNTIME VALUE: The number of processes (GPUs) to use"""
     num_training_steps: Optional[int] = None
     """RUNTIME VALUE: The number of training_steps to train"""
-    num_evals: int = 10
-    """this sets how many in-loop evals we do during training. in-loop evals reuse the generation/reward verifier setup."""
-    local_eval_freq: Optional[int] = None
-    """this controls the number of in-loop evals, which reuses the generation/reward verifier setup. don't set this directly, but set via num_evals."""
+    local_eval_every: int = 100
+    """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup. Set to -1 to disable."""
     save_freq: int = 200
     """How many train steps to save the model"""
     allow_world_padding: bool = False
     """Whether to allow world padding. This is useful for model sweeps, but wastes compute."""
+    backend_timeout: int = 120
+    """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
 
     # Generation
     response_length: int = 256
@@ -269,6 +268,10 @@ class Args:
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
     mask_truncated_completions: bool = False
     """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
+
+    fill_completions: bool = False
+    """Whether to refill the batchsize with after filtering."""
+
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
 
@@ -389,8 +392,14 @@ class Args:
     """The beaker evaluation tasks to launch"""
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
+    oe_eval_beaker_image: Optional[str] = None
+    """the docker image for evaluation for oe-eval"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
+
+    # Evaluation behavior
+    eval_on_step_0: bool = False
+    """Whether to run local evaluation at training step 0. Defaults to False."""
 
     # Tool settings
     tools: Optional[List[str]] = None
@@ -566,7 +575,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.wandb_url = wandb_url
         torch.cuda.set_device(self.local_rank)
         self.device = torch.device(self.local_rank)
-        deepspeed.init_distributed()
+        deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
         ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
@@ -721,15 +730,17 @@ class PolicyTrainerRayProcess(RayProcess):
                     world_size,
                     "openrlhf",
                     backend=backend,
+                    timeout_minutes=self.args.backend_timeout,
                 )
                 for i, engine in enumerate(vllm_engines)
             ]
-            self.model_update_group = init_process_group(
+            self.model_update_group = vllm_utils3.init_process_group(
                 backend=backend,
                 init_method=f"tcp://{master_address}:{master_port}",
                 world_size=world_size,
                 rank=0,
                 group_name="openrlhf",
+                timeout=timedelta(minutes=self.args.backend_timeout),
             )
             ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=60)
         torch.distributed.barrier()
@@ -1087,6 +1098,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 args.stop_strings,
                 args.gs_bucket_path,
                 args.eval_priority,
+                args.oe_eval_beaker_image,
             )
 
 
@@ -1233,21 +1245,24 @@ def accumulate_inference_batches(
         queue.Empty: If timeout is specified and no data is available within timeout.
 
     Returns:
-        Tuple of (combined_result, Batch with queries, ground_truths, datasets)
+        Tuple of (combined_result, Batch with queries, ground_truths, datasets) or (ShutdownSentinel, None) if shutdown signal received
     """
     # Collect results from all engines with non-blocking progress bar
     results = []
     all_queries = []
     all_ground_truths = []
     all_datasets = []
-
     for i in tqdm(
         range(args.vllm_num_engines),
         total=args.vllm_num_engines,
-        desc=f"Accumulating results from {args.vllm_num_engines} engines ({timeout=})",
+        desc=f"Accumulating results from {args.vllm_num_engines} engines",
         bar_format="{l_bar}{bar}{r_bar}\n",
+        disable=not args.verbose,
     ):
         result = inference_results_Q.get(timeout=timeout)
+
+        if isinstance(result, ShutdownSentinel):
+            return result, None
         dataset_indices = result.dataset_index
 
         if dataset_indices is None:
@@ -1339,26 +1354,19 @@ def data_preparation_thread(
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
-    stop_event: threading.Event,
     generation_config,
 ):
     for training_step in range(1, num_training_steps + 1):
-        if stop_event.is_set():
-            logger.info("[Data Preparation Thread] Shutting down")
-            return
         # Streaming accumulation: collect results as they arrive
-        with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            while True:
-                if stop_event.is_set():
-                    logger.info("[Data Preparation Thread] Shutting down due to stop event")
-                    return  # Simply return to exit the thread cleanly
-                try:
-                    result, batch = accumulate_inference_batches(
-                        inference_results_Q, pending_queries_map, args, training_step, generation_config, timeout=1.0
-                    )
-                    break  # Successfully got results, exit retry loop
-                except Empty:
-                    continue  # Timeout occurred, loop back to check stop_event
+        with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
+            result, batch = accumulate_inference_batches(
+                inference_results_Q, pending_queries_map, args, training_step, generation_config
+            )
+            if isinstance(result, ShutdownSentinel):
+                logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
+                return
+
+        getting_response_time = timer.duration
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -1433,6 +1441,7 @@ def data_preparation_thread(
             expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
             non_zero_gradient_index = np.where(expanded_mask)[0]
             advantages = advantages[non_zero_gradient_index]
+            original_batch_size = len(scores)
             scores = scores[non_zero_gradient_index]
             responses = [result.responses[i] for i in non_zero_gradient_index]
             masks = [result.masks[i] for i in non_zero_gradient_index]
@@ -1446,6 +1455,48 @@ def data_preparation_thread(
                 masks = [masks[i] for i in stop_idxes]
                 batch = batch[stop_idxes.tolist()]
                 finish_reasons = [finish_reasons[i] for i in stop_idxes]
+
+            if args.fill_completions:
+                with Timer("⏱ [Data Preparation Thread] Refill completions"):
+                    current_batch_size = len(scores)
+                    original_prompt_cnt = original_batch_size // args.num_samples_per_prompt_rollout
+                    current_prompt_cnt = current_batch_size // args.num_samples_per_prompt_rollout
+                    need_to_fill_prompt = original_prompt_cnt - current_prompt_cnt
+                    k = args.num_samples_per_prompt_rollout
+
+                    if need_to_fill_prompt > 0 and current_prompt_cnt > 0:
+                        scores_matrix = scores.reshape(current_prompt_cnt, k)
+                        stds = scores_matrix.std(axis=1) + 1e-8
+                        probs = stds / stds.sum()
+
+                        sampled_prompt_ids = np.random.choice(
+                            current_prompt_cnt, size=need_to_fill_prompt, replace=True, p=probs
+                        )
+
+                        sampled_indices = []
+                        for pid in sampled_prompt_ids:
+                            start = pid * k
+                            sampled_indices.extend(range(start, start + k))
+
+                        advantages = np.concatenate([advantages, advantages[sampled_indices]])
+                        scores = np.concatenate([scores, scores[sampled_indices]])
+                        responses += [responses[i] for i in sampled_indices]
+                        masks += [masks[i] for i in sampled_indices]
+
+                        sampled_batch = batch[sampled_indices]
+
+                        batch = Batch(
+                            queries=batch.queries + sampled_batch.queries,
+                            ground_truths=batch.ground_truths + sampled_batch.ground_truths,
+                            datasets=batch.datasets + sampled_batch.datasets,
+                            indices=batch.indices + sampled_batch.indices if batch.indices is not None else None,
+                        )
+
+                        finish_reasons += [finish_reasons[i] for i in sampled_indices]
+
+                        print(
+                            f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses"
+                        )
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
@@ -1585,6 +1636,7 @@ def data_preparation_thread(
                 "val/good_outputs_rate": np.array(good_outputs).mean(),
                 "val/tool_runtimes_rate": np.array(result.request_info.tool_runtimes).mean(),
                 "val/tool_calleds_rate": np.array(result.request_info.tool_calleds).mean(),
+                "time/getting_response": getting_response_time,
                 **reward_metrics,
             }
 
@@ -1629,9 +1681,6 @@ def setup_runtime_variables(args: Args) -> Args:
     args.num_training_steps = args.total_episodes // (
         args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     )
-    if args.local_eval_freq is not None:
-        raise ValueError("local_eval_freq should not be set manually; it will be computed automatically")
-    args.local_eval_freq = max(1, args.num_training_steps // args.num_evals)
     args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
@@ -1665,21 +1714,15 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
         wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
-            sync_tensorboard=True,
             config=all_configs,
             name=args.run_name,
             save_code=True,
             tags=[args.exp_name] + get_wandb_tags(),
         )
         wandb_url = wandb.run.get_url()
+        maybe_update_beaker_description_with_wandb_url(wandb_url)
 
-    writer = SummaryWriter(f"runs/{args.run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
-
-    return beaker_config, writer, wandb_url
+    return beaker_config, wandb_url
 
 
 def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer):
@@ -1734,7 +1777,7 @@ def create_model_and_optimizer(
     inference_results_Q: ray_queue.Queue,
     param_prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q: ray_queue.Queue,
-) -> tuple[ModelGroup, list[LLMRayActor], dict, int, int]:
+) -> tuple[ModelGroup, list[vllm_utils3.LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -1775,11 +1818,10 @@ def create_model_and_optimizer(
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 
-    # Create ActorManager to coordinate weight updates
-    actor_manager = ActorManager.remote()
+    actor_manager = vllm_utils3.ActorManager.remote()
 
     # Create vLLM engines with queues
-    vllm_engines = create_vllm_engines(
+    vllm_engines = vllm_utils3.create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
         args.vllm_enforce_eager,
@@ -1889,7 +1931,7 @@ def sync_weights_and_prepare_prompts(
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q: ray_queue.Queue,
     generation_configs: Dict[str, vllm.SamplingParams],
-    actor_manager: ActorManager,
+    actor_manager: vllm_utils3.ActorManager,
 ) -> Batch:
     """Sync weights and send the next batch of prompts to vLLM."""
     dataset_indices = next(iter_dataloader)
@@ -1899,20 +1941,17 @@ def sync_weights_and_prepare_prompts(
         if args.async_steps > 0
         else "🔄 Loading weights using shared memory"
     ):
-        # Signal actors to stop for weight sync
         ray.get(actor_manager.set_should_stop.remote(True))
-        logger.info(f"[Main Thread] Set should_stop to True for weight sync at step {training_step}")
+        logger.debug(f"[Main Thread] Set should_stop to True for weight sync at step {training_step}")
 
-        # Sync weights to vLLM
         ray_get_with_progress(
             [m.broadcast_to_vllm.remote() for m in policy_group.models],
-            desc=f"🔄 Broadcasting weights to vLLM at step {training_step}",
+            desc=f"[Main Thread] Broadcasting weights to vLLM engines at training step {training_step}",
             enable=args.verbose,
         )
 
-        # Signal actors to resume
         ray.get(actor_manager.set_should_stop.remote(False))
-        logger.info(f"[Main Thread] Set should_stop to False after weight sync at step {training_step}")
+        logger.debug(f"[Main Thread] Set should_stop to False after weight sync at step {training_step}")
 
     split_and_insert_batch(
         batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]
@@ -1923,7 +1962,7 @@ def sync_weights_and_prepare_prompts(
 
 def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event):
     """Get the packed sequences with advantages from the packing thread."""
-    with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
+    with Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
         while True:
             if stop_event.is_set():
                 logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
@@ -1937,31 +1976,33 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
         B = packed_data["B"]
         collated_data = packed_data["collated_data"]
         num_total_tokens += packed_data["num_new_tokens"]
-        if B == 0:
-            logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-            return None, data_thread_metrics, num_total_tokens
-        return collated_data, data_thread_metrics, num_total_tokens
+
+    data_thread_metrics["time/trainer_idling"] = timer.duration
+    if B == 0:
+        logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
+        return None, data_thread_metrics, num_total_tokens
+    return collated_data, data_thread_metrics, num_total_tokens
 
 
-def generate_thread(
-    vllm_engines,
-    train_generation_config,
-    eval_generation_config,
-    local_eval_freq,
-    num_training_steps,
-    resume_training_step,
-    stop_event,
-):
+def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
-
     while not stop_event.is_set():
-        with Timer("🔥 Generation time"):
-            ray_get_with_progress(
+        with Timer("🔥 Generation time") as timer:
+            processed_results = ray_get_with_progress(
                 [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
                 desc="[Generate Thread] Waiting for vLLM engines to process",
+                enable=args.verbose,
             )
-
+            num_processed = sum(int(result) for result in processed_results)
+            # Suppress timing output if nothing was processed
+            if num_processed == 0:
+                timer.noop = True
+        if num_processed > 0:
+            try:
+                generate_metrics_Q.put_nowait({"time/generation": timer.duration})
+            except Full:
+                logger.warning("[Generate Thread] generate metrics queue full, skipping metric")
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
@@ -1971,19 +2012,17 @@ def one_training_step(
     collated_data,
     tokenizer,
     data_thread_metrics,
-    average_metrics,
     episode,
     training_step,
     num_total_tokens,
     start_time,
     train_dataset,
-    writer,
     wandb_url,
     chat_template_name,
 ):
     """Train the model for one step."""
     update_ref_policy_future = []
-    with Timer("[Main Thread] 🗡️ Training"):
+    with Timer("[Main Thread] 🗡️ Training") as train_timer:
         metrics_list: List[dict[str, float]] = ray_get_with_progress(
             [
                 policy_group.models[i].train.remote(
@@ -2002,65 +2041,74 @@ def one_training_step(
                 [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
             )
 
-        average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
-        metrics = {
-            "episode": episode,
-            "training_step": training_step,
-            "val/num_total_tokens": num_total_tokens,
-            "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
-            "tokens_per_second": num_total_tokens / (time.time() - start_time),
-            **data_thread_metrics,
-            **average_metrics,
-        }
-        scalar_metrics = {}
-        for key, value in metrics.items():
-            if isinstance(value, float) or isinstance(value, int):
-                writer.add_scalar(key, value, episode)
-                scalar_metrics[key] = value
-            if isinstance(value, np.ndarray) or isinstance(value, list):
-                if len(value) > 0:
-                    writer.add_histogram(key, value, episode)
-        print_rich_single_line_metrics(scalar_metrics)
+    save_time = 0
+    if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
+        with Timer("[Main Thread] 🗡️ Saving model") as timer:
+            checkpoint_dir = f"{args.output_dir}_checkpoints"
+            step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
+            logger.info(f"Saving model at step {training_step} to {step_dir}")
+            ray_get_with_progress(
+                [
+                    policy_group.models[i].save_model.remote(step_dir, chat_template_name, tokenizer)
+                    for i in range(args.world_size)
+                ],
+                desc=f"Saving model at step {training_step}",
+            )
+            if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
+                leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
+                for i in range(args.world_size):
+                    policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                        step_dir, leaderboard_name, wandb_url, training_step
+                    )
+        save_time += timer.duration
 
-        if args.save_freq > 0 and training_step % args.save_freq == 0:
-            with Timer("[Main Thread] 🗡️ Saving model"):
-                checkpoint_dir = f"{args.output_dir}_checkpoints"
-                step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-                logger.info(f"Saving model at step {training_step} to {step_dir}")
-                ray_get_with_progress(
-                    [
-                        policy_group.models[i].save_model.remote(step_dir, chat_template_name, tokenizer)
-                        for i in range(args.world_size)
-                    ],
-                    desc=f"Saving model at step {training_step}",
-                )
-                if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
-                    leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
-                    for i in range(args.world_size):
-                        policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                            step_dir, leaderboard_name, wandb_url, training_step
-                        )
-        if (
-            args.checkpoint_state_freq > 0
-            and training_step % args.checkpoint_state_freq == 0
-            and args.checkpoint_state_dir is not None
-        ):
-            with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
-                client_state = {"training_step": training_step}
-                ray_get_with_progress(
-                    [
-                        policy_group.models[i].save_checkpoint_state.remote(args.checkpoint_state_dir, client_state)
-                        for i in range(args.world_size)
-                    ],
-                    desc=f"Saving checkpoint state at step {training_step}",
-                )
-                logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
+    if (
+        args.checkpoint_state_freq > 0
+        and training_step % args.checkpoint_state_freq == 0
+        and args.checkpoint_state_dir is not None
+    ):
+        with Timer("[Main Thread] 🗡️ Saving checkpoint state") as timer:
+            client_state = {"training_step": training_step}
+            ray_get_with_progress(
+                [
+                    policy_group.models[i].save_checkpoint_state.remote(args.checkpoint_state_dir, client_state)
+                    for i in range(args.world_size)
+                ],
+                desc=f"Saving checkpoint state at step {training_step}",
+            )
+            logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
+        save_time += timer.duration
 
     if len(update_ref_policy_future) > 0:
         with Timer("[Main Thread] 🔃 Updating reference policy"):
             ray_get_with_progress(update_ref_policy_future, desc="Updating reference policy")
 
-    return average_metrics
+    average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
+    total_time = time.perf_counter() - start_time
+    metrics = {
+        "episode": episode,
+        "global_step": episode,
+        "training_step": training_step,
+        "val/num_total_tokens": num_total_tokens,
+        "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
+        "tokens_per_second": num_total_tokens / total_time,
+        "time/total": total_time,
+        "time/training": train_timer.duration,
+        "time/saving": save_time,
+        **data_thread_metrics,
+        **average_metrics,
+    }
+    # Print only scalar metrics
+    scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (float, int))}
+    print_rich_single_line_metrics(scalar_metrics)
+
+    if args.with_tracking:
+        # Convert array/list metrics to wandb histograms for logging
+        for key, value in metrics.items():
+            if isinstance(value, np.ndarray) or isinstance(value, list):
+                if len(value) > 0:
+                    metrics[key] = wandb.Histogram(value)
+        wandb.log(metrics, step=episode)
 
 
 def maybe_evaluate(
@@ -2071,15 +2119,15 @@ def maybe_evaluate(
     eval_batch: Optional[Batch],
     reward_fn,
     episode,
-    writer,
     eval_pending_queries_map: PendingQueriesMap,
     eval_generation_config,
+    generate_metrics_Q: Queue,
 ):
     """Optionally evaluate the model."""
     try:
         # timeout 0.01 if this is the last training step or we're not evaluating
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
-        timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_freq < 0) else 100
+        timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_every < 0) else 100
 
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch = accumulate_inference_batches(
@@ -2092,6 +2140,12 @@ def maybe_evaluate(
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
+
+        eval_generate_metrics = {}
+        try:
+            eval_generate_metrics = generate_metrics_Q.get_nowait()
+        except Empty:
+            logger.info("[Main Thread] didn't get eval generation metrics")
 
         eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
         eval_decoded_responses = tokenizer.batch_decode(eval_result.responses, skip_special_tokens=True)
@@ -2118,9 +2172,10 @@ def maybe_evaluate(
             "eval/stop_rate": eval_stop_rate,
             **eval_reward_metrics,
         }
+        if "time/generation" in eval_generate_metrics:
+            eval_metrics["eval/generation_time"] = eval_generate_metrics["time/generation"]
         print_rich_single_line_metrics(eval_metrics)
-        for key, value in eval_metrics.items():
-            writer.add_scalar(key, value, episode)
+
         table = {}
         table["prompt"] = tokenizer.batch_decode(eval_batch.queries if eval_batch else [])
         table["response"] = eval_decoded_responses
@@ -2128,10 +2183,10 @@ def maybe_evaluate(
         table["scores"] = eval_scores
         table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
         df = pd.DataFrame(table)
-        if args.with_tracking:
-            import wandb
 
-            wandb.log({"sample_completions": wandb.Table(dataframe=df)})
+        if args.with_tracking:
+            eval_metrics["sample_completions"] = wandb.Table(dataframe=df)
+            wandb.log(eval_metrics, step=episode)
         else:
             print_rich_table(df.iloc[:1])
         del table
@@ -2266,13 +2321,8 @@ def make_reward_fn(args: Args) -> Callable:
 
 def cleanup_judge_clients():
     """Cleans up all LLM judge clients and shutdown Ray."""
-    try:
-        asyncio.run(cleanup_all_llm_judge_clients())
-        logger.info("✅ LLM judge clients cleaned up")
-    except Exception as cleanup_error:
-        logger.warning(f"Error during LLM judge cleanup: {cleanup_error}")
-
-    logger.info("Shutting down Ray...")
+    asyncio.run(cleanup_all_llm_judge_clients())
+    logger.info("✅ LLM judge clients cleaned up")
     ray.shutdown()
     logger.info("✅ Ray shut down")
 
@@ -2300,36 +2350,41 @@ def cleanup_training_resources(
     stop_event: threading.Event,
     executor: futures.ThreadPoolExecutor,
     queues: list[ray_queue.Queue],
-    actor_manager: ActorManager,
+    actor_manager: vllm_utils3.ActorManager,
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
-    # Signal threads to stop
+    # Signal generate_thread to stop
     stop_event.set()
 
-    # Signal all actors to stop
     logger.info("Signaling all actors to stop...")
     ray.get(actor_manager.set_should_stop.remote(True))
     logger.info("✅ Signaled all actors to stop")
 
-    # Shutdown Ray queues to prevent semaphore leaks
+    logger.info("Pushing shutdown sentinel to queues...")
+    # Push sentinel to the first queue (inference_results_Q)
+    if queues and len(queues) > 0:
+        queues[0].put(ShutdownSentinel(), timeout=1)
+
+    logger.info("Shutting down Ray queues...")
+    if queues and len(queues) > 0:
+        [queue.shutdown() for queue in queues]
     logger.info("Shutting down thread pool executor...")
     executor.shutdown(wait=True)
 
-    logger.info("Shutting down Ray queues...")
-    for queue in queues:
-        try:
-            queue.shutdown()
-        except Exception as e:
-            logger.warning(f"Error shutting down Ray queue: {e}")
-
     # Clean up judge clients, which also shuts down Ray.
     cleanup_judge_clients()
+
+    # Clean up distributed process group if it was initialized
+    if dist.is_initialized():
+        logger.info("Destroying process group...")
+        dist.destroy_process_group()
+        logger.info("✅ Process group destroyed")
 
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_samples: int = 32):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
-    beaker_config, writer, wandb_url = setup_experiment_tracking(args, tc, model_config)
+    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
     if args.cache_dataset_only:
@@ -2370,6 +2425,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     packed_sequences_Q = Queue(maxsize=args.async_steps)
     pending_queries_map = PendingQueriesMap()
     eval_pending_queries_map = PendingQueriesMap()
+    generate_metrics_Q = Queue(maxsize=args.async_steps)
 
     if eval_dataset is None:
         eval_batch = None
@@ -2400,20 +2456,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         args,
         tokenizer,
         args.num_training_steps,
-        stop_event,
         generation_configs["train"],
     )
 
     logger.info("======== ✅ generation thread starts =========")
     generation_future = executor.submit(
-        generate_thread,
-        vllm_engines,
-        generation_configs["train"],
-        generation_configs["eval"],
-        args.local_eval_freq,
-        args.num_training_steps,
-        resume_training_step,
-        stop_event,
+        generate_thread, args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q
     )
 
     # Send initial data to ensure we have a N-step offset.
@@ -2429,12 +2477,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             generation_configs["train"],
         )
     num_total_tokens = 0
-    start_time = time.time()
-    error_occurred = False
     for training_step in range(resume_training_step, args.num_training_steps + 1):
-        if stop_event.is_set():
-            logger.warning("⚠️ Stop event detected, breaking out of training loop")
-            break
+        start_time = time.perf_counter()
         check_threads_healthy(
             [packing_future, generation_future],
             stop_event,
@@ -2455,7 +2499,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             generation_configs,
             actor_manager,
         )
-        if training_step % args.local_eval_freq == 0 and eval_batch is not None:
+        if (
+            training_step % args.local_eval_every == 0
+            and eval_batch is not None
+            and (args.eval_on_step_0 or training_step > 1)
+        ):
             split_and_insert_batch(
                 eval_batch,
                 training_step,
@@ -2473,19 +2521,25 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         if collated_data is None:
             continue
 
+        generate_metrics = {}
+        try:
+            generate_metrics = generate_metrics_Q.get_nowait()
+        except Empty:
+            logger.info("[Main Thread] didn't get generation metrics")
+
+        data_thread_metrics = {**data_thread_metrics, **generate_metrics}
+
         one_training_step(
             args,
             policy_group,
             collated_data,
             tokenizer,
             data_thread_metrics,
-            {},
             episode,
             training_step,
             num_total_tokens,
             start_time,
             train_dataset,
-            writer,
             wandb_url,
             tc.chat_template_name,
         )
@@ -2498,9 +2552,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             eval_batch,
             reward_fn,
             episode,
-            writer,
             eval_pending_queries_map,
             generation_configs["eval"],
+            generate_metrics_Q,
         )
 
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
@@ -2531,11 +2585,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     logger.info("Checking for runtime leaks...")
     from open_instruct import utils
 
-    leak_report = utils.check_runtime_leaks()
-    if not leak_report.is_clean:
-        logger.warning("Runtime leaks detected:\n" + leak_report.pretty())
-    else:
-        logger.info("No runtime leaks detected.")
+    utils.check_runtime_leaks()
 
     # Raise error if one occurred during training
     if error_occurred:
