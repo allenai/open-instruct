@@ -1,5 +1,6 @@
 # Git directories (can be large)
 **/.git/
+.git/
 .gitignore
 .github/
 

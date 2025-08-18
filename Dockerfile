@@ -3,7 +3,7 @@ FROM nvidia/cuda:12.8.0-devel-ubuntu22.04
 ARG DEBIAN_FRONTEND="noninteractive"
 ENV TZ="America/Los_Angeles"
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     wget \
@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     make \
     sudo \
     nginx \
+    && apt-get autoremove -y \
     && mkdir -p /etc/nginx/conf.d \
     && rm -rf /var/lib/apt/lists/*
 
@@ -31,7 +32,8 @@ ENV DOFED_VER=2.10.0
 ENV OS_VER=ubuntu2204
 RUN wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOFED_VER}/host/doca-host_${DOFED_VER}-093000-25.01-${OS_VER}_amd64.deb && \
     dpkg -i doca-host_${DOFED_VER}-093000-25.01-${OS_VER}_amd64.deb && \
-    apt-get update && apt-get -y install doca-ofed-userspace && \
+    apt-get update && apt-get -y install --no-install-recommends doca-ofed-userspace && \
+    apt-get autoremove -y && \
     rm doca-host_${DOFED_VER}-093000-25.01-${OS_VER}_amd64.deb
 
 # Install Google Cloud CLI
@@ -39,7 +41,8 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.c
         | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list \
     && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg \
         | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - \
-    && apt-get update -y && apt-get install google-cloud-sdk -y \
+    && apt-get update -y && apt-get install -y --no-install-recommends google-cloud-sdk \
+    && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 # Taken from https://beaker.org/api/v3/release (add | jq -r '.version' if you want it programmatically).
 ENV BEAKER_VERSION=v1.5.235
@@ -65,9 +68,6 @@ ARG UV_CACHE_DIR
 ENV UV_CACHE_DIR=${UV_CACHE_DIR:-$CACHE_DIR}
 RUN echo "UV_CACHE_DIR: ${UV_CACHE_DIR}"
 
-# setup files
-WORKDIR /stage/
-
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
 
@@ -84,6 +84,14 @@ RUN uv run -m nltk.downloader punkt punkt_tab
 
 WORKDIR /stage/
 
+# Copy all application code at the end
+COPY eval eval
+COPY configs configs
+COPY scripts scripts
+COPY mason.py mason.py
+COPY oe-eval-internal oe-eval-internal
+COPY open_instruct open_instruct
+
 # Add build arguments for git information
 ARG GIT_COMMIT=""
 ARG GIT_BRANCH=""
@@ -91,14 +99,6 @@ ARG GIT_BRANCH=""
 # Set them as environment variables
 ENV GIT_COMMIT=${GIT_COMMIT}
 ENV GIT_BRANCH=${GIT_BRANCH}
-
-# Copy all application code at the end
-COPY open_instruct open_instruct
-COPY eval eval
-COPY configs configs
-COPY scripts scripts
-COPY oe-eval-internal oe-eval-internal
-COPY mason.py mason.py
 
 # Set up the environment
 ENV PATH=/stage/.venv/bin:$PATH
