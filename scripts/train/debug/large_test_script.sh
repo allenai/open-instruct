@@ -42,7 +42,7 @@ uv run python mason.py \
         --temperature 1.0 \
         --ground_truths_key ground_truth \
         --sft_messages_key messages \
-        --total_episodes 10_0 \
+        --total_episodes 10_000 \
         --deepspeed_stage 2 \
         --num_learners_per_node 8 \
         --vllm_num_engines 8 \
