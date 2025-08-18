@@ -8,7 +8,7 @@ class WorkerWrap:
         group_name,
         backend="nccl",
         use_ray=False,
-        timeout=120,
+        timeout_minutes=120,
     ):
         """Init torch process group for model weights update"""
         from datetime import timedelta
@@ -35,7 +35,7 @@ class WorkerWrap:
                 world_size=world_size,
                 rank=rank,
                 group_name=group_name,
-                timeout=timedelta(minutes=timeout),
+                timeout=timedelta(minutes=timeout_minutes),
             )
         self._model_update_with_ray = use_ray
         print(
