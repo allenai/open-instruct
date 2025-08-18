@@ -2458,7 +2458,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         batch = next_batch(dataset_indices, train_dataset)
         split_and_insert_batch(
             batch,
-            resume_training_step,  # training_step
+            resume_training_step,
             args.vllm_num_engines,
             pending_queries_map,
             param_prompt_Q,
