@@ -929,7 +929,12 @@ def maybe_update_beaker_description_with_wandb_url(wandb_url: str) -> None:
         return
 
     client = beaker.Beaker.from_env()
-    spec = client.experiment.get(os.environ["BEAKER_WORKLOAD_ID"])
+    try:
+        spec = client.experiment.get(os.environ["BEAKER_WORKLOAD_ID"])
+    except beaker.exceptions.ExperimentNotFound:
+        logger.warning(f"Failed to update Beaker experiment description with wandb URL: {wandb_url}")
+        logger.warning("This might be fine if you are e.g. running in an interactive job.")
+        return
     current_description = spec.description or ""
     client.experiment.set_description(os.environ["BEAKER_WORKLOAD_ID"], f"{current_description}\n{wandb_url}")
 
@@ -1045,6 +1050,7 @@ def launch_ai2_evals_on_weka(
     stop_strings: Optional[List[str]] = None,
     gs_bucket_path: Optional[str] = None,
     eval_priority: Optional[str] = "normal",
+    beaker_image: Optional[str] = None,
 ) -> None:
     weka_cluster = "ai2/saturn-cirrascale ai2/neptune-cirrascale"
     gcp_cluster = "ai2/augusta-google-1"
@@ -1096,6 +1102,8 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
     if stop_strings is not None:
         command += f" --oe_eval_stop_sequences '{','.join(stop_strings)}'"
+    if beaker_image is not None:
+        command += f" --beaker_image {beaker_image}"
     print(f"Launching eval jobs with command: {command}")
     process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
