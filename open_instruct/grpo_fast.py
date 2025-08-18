@@ -2379,6 +2379,7 @@ def run_training(
     pending_queries_map,
     eval_pending_queries_map,
     generate_metrics_Q,
+    actor_manager: vllm_utils3.ActorManager,
 ):
     """Run the main training loop with worker threads."""
     ray_get_with_progress(
@@ -2515,16 +2516,18 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
     evaluation_inference_results_Q = ray_queue.Queue(maxsize=args.vllm_num_engines)
 
-    policy_group, vllm_engines, tool_objects, resume_training_step, episode = create_model_and_optimizer(
-        args,
-        tc,
-        model_config,
-        beaker_config,
-        wandb_url,
-        tokenizer,
-        inference_results_Q,
-        param_prompt_Q,
-        evaluation_inference_results_Q,
+    policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
+        create_model_and_optimizer(
+            args,
+            tc,
+            model_config,
+            beaker_config,
+            wandb_url,
+            tokenizer,
+            inference_results_Q,
+            param_prompt_Q,
+            evaluation_inference_results_Q,
+        )
     )
 
     generation_configs = create_generation_configs(args)
@@ -2572,6 +2575,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             pending_queries_map,
             eval_pending_queries_map,
             generate_metrics_Q,
+            actor_manager,
         )
     finally:
         cleanup_training_resources(
