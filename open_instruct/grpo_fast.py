@@ -56,6 +56,7 @@ import time
 from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
+from datetime import timedelta
 from queue import Empty, Full, Queue
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
 
@@ -219,6 +220,8 @@ class Args:
     """How many train steps to save the model"""
     allow_world_padding: bool = False
     """Whether to allow world padding. This is useful for model sweeps, but wastes compute."""
+    backend_timeout: int = 120
+    """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
 
     # Generation
     response_length: int = 256
@@ -564,7 +567,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.wandb_url = wandb_url
         torch.cuda.set_device(self.local_rank)
         self.device = torch.device(self.local_rank)
-        deepspeed.init_distributed()
+        deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
         ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
@@ -719,6 +722,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     world_size,
                     "openrlhf",
                     backend=backend,
+                    timeout_minutes=self.args.backend_timeout,
                 )
                 for i, engine in enumerate(vllm_engines)
             ]
@@ -728,6 +732,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 world_size=world_size,
                 rank=0,
                 group_name="openrlhf",
+                timeout=timedelta(minutes=self.args.backend_timeout),
             )
             ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=60)
         torch.distributed.barrier()
@@ -2127,6 +2132,7 @@ def maybe_evaluate(
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
 
+        eval_generate_metrics = {}
         try:
             eval_generate_metrics = generate_metrics_Q.get_nowait()
         except Empty:
@@ -2155,9 +2161,10 @@ def maybe_evaluate(
             "eval/sequence_lengths_min": eval_sequence_lengths.min(),
             "eval/sequence_lengths_max": eval_sequence_lengths.max(),
             "eval/stop_rate": eval_stop_rate,
-            "eval/generation_time": eval_generate_metrics["time/generation"],
             **eval_reward_metrics,
         }
+        if "time/generation" in eval_generate_metrics:
+            eval_metrics["eval/generation_time"] = eval_generate_metrics["time/generation"]
         print_rich_single_line_metrics(eval_metrics)
 
         table = {}
