@@ -42,6 +42,12 @@ jobs:
           token: ${{ env.BEAKER_TOKEN }}
           workspace: ai2/tulu-thinker
       
+      - name: Get Beaker whoami
+        if: env.BEAKER_TOKEN != ''
+        run: |
+          BEAKER_WHOAMI=$(beaker account whoami --format json | jq -r '.[0].name')
+          echo "BEAKER_WHOAMI=$BEAKER_WHOAMI" >> $GITHUB_ENV
+      
       - name: Run GPU tests on Beaker
         if: env.BEAKER_TOKEN != ''
         uses: allenai/beaker-run-action@v1.2
@@ -52,6 +58,7 @@ jobs:
             budget: ai2/oe-training
             tasks:
               - name: gpu-tests
+                image: ${{ env.BEAKER_WHOAMI }}/open-instruct-latest
                 context:
                   priority: normal
                   preemptible: true
