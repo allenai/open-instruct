@@ -58,7 +58,7 @@ We use [uv](https://docs.astral.sh/uv/) for installation and running code. You c
 ```bash
 docker build . \
     --build-arg GIT_COMMIT=$(git rev-parse --short HEAD) \
-	--build-arg GIT_BRANCH=$(git rev-parse abbrev-ref HEAD) \
+	--build-arg GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD) \
 	-t open_instruct_dev
 
 # if you are internally at AI2, you can create a beaker image like this:
