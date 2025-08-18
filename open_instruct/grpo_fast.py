@@ -1836,7 +1836,6 @@ def create_model_and_optimizer(
 
     resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0]
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-
     logger.info("======== ✅ all models and vLLM engines initialized =========")
 
     ray_get_with_progress(
@@ -2465,7 +2464,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             generation_configs["train"],
         )
     num_total_tokens = 0
-
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
         check_threads_healthy(
