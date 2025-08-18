@@ -1,5 +1,4 @@
 import gc
-import os
 import unittest
 
 import ray
@@ -32,10 +31,10 @@ class TestGrpoFastGPUBase(unittest.TestCase):
 
 
 class TestGrpoFastVLLMGPU(TestGrpoFastGPUBase):
-    
     def test_vllm_queue_system_single_prompt(self):
         """Test the new queue-based vLLM system with a single prompt."""
-        tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
+        tokenizer_name = "EleutherAI/pythia-14m"
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         test_prompt = "What is the capital of France?"
         prompt_token_ids = tokenizer.encode(test_prompt, return_tensors="pt").tolist()[0]
         param_prompt_Q = ray_queue.Queue(maxsize=1)
@@ -59,9 +58,11 @@ class TestGrpoFastVLLMGPU(TestGrpoFastGPUBase):
 
         generation_config = SamplingParams(temperature=0.0, top_p=1.0, max_tokens=5, n=1)
 
-        param_prompt_Q.put(PromptRequest(
-            prompts=[prompt_token_ids], generation_config=generation_config, dataset_index=[0], training_step=0
-        )))
+        param_prompt_Q.put(
+            PromptRequest(
+                prompts=[prompt_token_ids], generation_config=generation_config, dataset_index=[0], training_step=0
+            )
+        )
 
         ray.get(vllm_engines[0].process_from_queue.remote(timeout=30))
         result = inference_results_Q.get_nowait()

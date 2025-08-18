@@ -173,8 +173,7 @@ class TestGrpoFastBase(unittest.TestCase):
 
 
 class TestGrpoFastVLLM(TestGrpoFastBase):
-
-  @parameterized.expand([(1, 16), (2, 32), (4, 64), (8, 128)])
+    @parameterized.expand([(1, 16), (2, 32), (4, 64), (8, 128)])
     def test_batch_splitting_and_engine_configurations(self, vllm_num_engines: int, num_unique_prompts_rollout: int):
         """Test batch splitting and accumulation with various engine configurations."""
         # Create test data
