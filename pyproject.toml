@@ -91,7 +91,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "--ignore=oe-eval-internal/"
+addopts = "--ignore=oe-eval-internal/ --ignore-glob='**/*_gpu.py'"
 
 
 [tool.black]
