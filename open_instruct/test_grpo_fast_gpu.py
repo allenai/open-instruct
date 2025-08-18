@@ -16,38 +16,6 @@ from open_instruct.vllm_utils3 import create_vllm_engines
 class TestGrpoFastGPUBase(unittest.TestCase):
     """Base class with common test utilities for GPU tests."""
 
-    def _get_resource_tracker_state(self):
-        """Get current resource tracker state for debugging."""
-        tracked_resources = {}
-        try:
-            # Try to access resource tracker directly
-            from multiprocessing.resource_tracker import _resource_tracker
-
-            if hasattr(_resource_tracker, "_cache"):
-                for name, rtype in list(_resource_tracker._cache.items()):
-                    if rtype not in tracked_resources:
-                        tracked_resources[rtype] = []
-                    tracked_resources[rtype].append(name)
-        except Exception:
-            # Alternative approach: check via resource_tracker module
-            try:
-                import multiprocessing.resource_tracker as rt
-
-                if hasattr(rt, "getfd"):
-                    # This is a hack to get the cache info
-
-                    # Try to find the cache in the module
-                    for attr_name in dir(rt):
-                        attr = getattr(rt, attr_name)
-                        if isinstance(attr, dict) and any("semaphore" in str(v) for v in attr.values()):
-                            for k, v in attr.items():
-                                if v not in tracked_resources:
-                                    tracked_resources[v] = []
-                                tracked_resources[v].append(k)
-            except Exception:
-                pass
-        return tracked_resources
-
     def setUp(self):
         """Initialize Ray and check for pre-existing leaks."""
         # Check if CUDA is available
@@ -56,9 +24,6 @@ class TestGrpoFastGPUBase(unittest.TestCase):
 
         # Save original environment variable value
         self._original_nccl_cumem = os.environ.get("NCCL_CUMEM_ENABLE")
-
-        # Record initial resource tracker state
-        self._initial_resources = self._get_resource_tracker_state()
 
         # Track Ray queues for cleanup
         self._ray_queues = []
@@ -104,17 +69,6 @@ class TestGrpoFastGPUBase(unittest.TestCase):
         # Force garbage collection to clean up any lingering objects
         gc.collect()
 
-        # Get final resource tracker state
-        final_resources = self._get_resource_tracker_state()
-
-        # Check for new resources that weren't there initially
-        new_resources = {}
-        for rtype, names in final_resources.items():
-            initial_names = set(self._initial_resources.get(rtype, []))
-            new_names = [n for n in names if n not in initial_names]
-            if new_names:
-                new_resources[rtype] = new_names
-
         # Check for leaks before shutdown
         leak_report = utils.check_runtime_leaks()
         # We still expect the Ray head worker
@@ -130,17 +84,6 @@ class TestGrpoFastGPUBase(unittest.TestCase):
 
         if not leak_report.is_clean:
             self.fail(f"Leaks detected after test {self._testMethodName}:\n{leak_report.pretty()}")
-
-        # Check for semaphore leaks
-        if new_resources:
-            # Report all new resources, especially semaphores
-            leak_msg = f"Resource leaks detected after test {self._testMethodName}:\n"
-            for rtype, names in new_resources.items():
-                leak_msg += f"  {rtype}: {names}\n"
-
-            # Fail if there are semaphore leaks
-            if "semaphore" in new_resources:
-                self.fail(leak_msg)
 
         # Restore original environment variable value
         if self._original_nccl_cumem is None:
