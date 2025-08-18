@@ -2136,7 +2136,7 @@ def maybe_evaluate(
         try:
             eval_generate_metrics = generate_metrics_Q.get_nowait()
         except Empty:
-            logging.info("[Main Thread] didn't get eval generation metrics")
+            logger.info("[Main Thread] didn't get eval generation metrics")
 
         eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
         eval_decoded_responses = tokenizer.batch_decode(eval_result.responses, skip_special_tokens=True)
