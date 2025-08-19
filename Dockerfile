@@ -61,12 +61,12 @@ COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
 
 WORKDIR /stage/
 
-# Copy only dependency-related files first
-COPY pyproject.toml uv.lock ./
-
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
         
+# Copy only dependency-related files first
+COPY pyproject.toml uv.lock ./
+
 RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-install-project --no-cache --link-mode=hardlink
