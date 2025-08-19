@@ -46,8 +46,6 @@ jobs:
     if: (github.event_name != 'workflow_run') || (github.event.workflow_run.conclusion == 'success')
     steps:
       - uses: actions/checkout@v3
-
-      - uses: actions/checkout@v3
         with:
           repository: allenai/oe-eval-internal
           path: './oe-eval-internal'
@@ -67,7 +65,7 @@ jobs:
 
       - name: Check remaining disk space
         run: df -h
-  
+
       - name: Build image
         run: |
           docker build --platform=linux/amd64 \
