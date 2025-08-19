@@ -1251,21 +1251,20 @@ def accumulate_inference_batches(
         Tuple of (combined_result, Batch with queries, ground_truths, datasets) or (ShutdownSentinel, None) if shutdown signal received
     """
     # Calculate total number of results to collect
-    # Each prompt generates generation_config.n responses
+    # Each result contains generation_config.n responses
     total_prompts = args.num_unique_prompts_rollout
-    total_results = total_prompts * generation_config.n
+    total_results = total_prompts  # Each result contains n completions
 
     # Collect individual results
     results = []
     all_queries = []
     all_ground_truths = []
     all_datasets = []
-    seen_dataset_indices = set()  # Track which indices we've already popped
 
     for i in tqdm(
         range(total_results),
         total=total_results,
-        desc=f"Accumulating {total_results} individual results",
+        desc=f"Accumulating {total_results} results (each with {generation_config.n} completions)",
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     ):
@@ -1274,19 +1273,22 @@ def accumulate_inference_batches(
         if isinstance(result, ShutdownSentinel):
             return result, None
 
-        # Each result now contains a single dataset_index
+        # Each result contains one dataset_index (for the prompt) with n responses
         dataset_index = result.dataset_index[0] if result.dataset_index else None
 
         if dataset_index is None:
             raise RuntimeError(f"Dataset index is None for result {i}")
 
-        # Pop query data only once per unique dataset_index
-        if dataset_index not in seen_dataset_indices:
-            query, ground_truth, dataset = pending_queries_map.pop(dataset_index)
-            all_queries.append(query)
-            all_ground_truths.append(ground_truth)
-            all_datasets.append(dataset)
-            seen_dataset_indices.add(dataset_index)
+        # Verify that each result contains the expected number of responses
+        assert len(result.responses) == generation_config.n, (
+            f"Result {i} has {len(result.responses)} responses, expected {generation_config.n}"
+        )
+
+        # Pop query data for this prompt
+        query, ground_truth, dataset = pending_queries_map.pop(dataset_index)
+        all_queries.append(query)
+        all_ground_truths.append(ground_truth)
+        all_datasets.append(dataset)
 
         results.append(result)
 

@@ -492,25 +492,18 @@ class LLMRayActor:
                 dataset_index = request_metadata[base_request_id]["dataset_index"]
 
                 if not self.tools:
-                    # When not using tools, split the output into individual results
-                    # Each output contains n completions that need to be sent as separate results
-                    for i, completion in enumerate(output.outputs):
-                        num_processed += 1
-                        # Create a new output with just this one completion
-                        single_output = copy.copy(output)
-                        single_output.outputs = [completion]
+                    # Process complete output with all N completions
+                    num_processed += 1
+                    result = _process_outputs(
+                        [output], dataset_index=[dataset_index] if dataset_index is not None else None
+                    )
 
-                        # Create result from single completion
-                        result = _process_outputs(
-                            [single_output], dataset_index=[dataset_index] if dataset_index is not None else None
-                        )
-
-                        # Put result in appropriate queue
-                        try:
-                            queue_to_use = self.eval_results_queue if is_eval else self.results_queue
-                            queue_to_use.put(result, timeout=10)
-                        except queue.Full:
-                            self.logger.warning("Results queue is full, discarding result.")
+                    # Put result in appropriate queue
+                    try:
+                        queue_to_use = self.eval_results_queue if is_eval else self.results_queue
+                        queue_to_use.put(result, timeout=10)
+                    except queue.Full:
+                        self.logger.warning("Results queue is full, discarding result.")
                 else:
                     # Tool mode - process as before
                     num_processed += 1
