@@ -69,8 +69,6 @@ ENV UV_CACHE_DIR=/root/.cache/uv
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
 
-WORKDIR /stage/
-
 # Copy only dependency-related files first
 COPY pyproject.toml uv.lock ./
 
