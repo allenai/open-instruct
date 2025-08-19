@@ -41,6 +41,12 @@ jobs:
     name: Launch Beaker Experiment
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    # Prevent duplicate runs when using merge queue:
+    # - When a PR is merged via merge queue, GitHub triggers both 'push' and 'merge_group' events
+    # - The merge queue creates temporary branches like 'refs/heads/gh-readonly-queue/main/pr-123-abc123'
+    # - This condition skips the 'push' trigger for merge queue branches (identified by the gh-readonly-queue prefix)
+    # - The 'merge_group' trigger will handle these instead, preventing duplicate runs
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/heads/gh-readonly-queue/')
 
     steps:
       - name: Checkout repository
