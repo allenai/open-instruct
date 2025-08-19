@@ -43,8 +43,12 @@ jobs:
     name: open_instruct
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    # Skip push events from merge queue (they'll be handled by merge_group trigger)
-    if: (github.event_name != 'push' || !startsWith(github.ref, 'refs/heads/gh-readonly-queue/')) && ((github.event_name != 'workflow_run') || (github.event.workflow_run.conclusion == 'success'))
+    # Prevent duplicate runs when using merge queue:
+    # - When a PR is merged via merge queue, GitHub triggers both 'push' and 'merge_group' events
+    # - The merge queue creates temporary branches like 'refs/heads/gh-readonly-queue/main/pr-123-abc123'
+    # - This condition skips the 'push' trigger for merge queue branches (identified by the gh-readonly-queue prefix)
+    # - The 'merge_group' trigger will handle these instead, preventing duplicate runs
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/heads/gh-readonly-queue/')
     steps:
       - uses: actions/checkout@v3
 
