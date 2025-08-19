@@ -80,7 +80,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 # cluster/weka mount logic: default true (to use non-augusta)
-# if model starts with gs://, set evaluate_on_weka to false. if model starts with /weka/, set evaluate_on_weka to true.
+# if model starts with gs://, set evaluate_on_weka to false.
 # All the logic is now handled internally, the flag is useless but keeping for backwards compatibility since people have scripts with it
 EVALUATE_ON_WEKA="true"
 if [[ "$MODEL_LOCATION" == gs://* ]]; then
