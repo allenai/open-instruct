@@ -67,9 +67,13 @@ jobs:
 
       - name: Check remaining disk space
         run: df -h
-  
+
       - name: Build image
-        run: docker build -t open_instruct              
+        run: |
+          docker build --platform=linux/amd64 \
+            --build-arg GIT_COMMIT="$(git rev-parse --short HEAD)" \
+            --build-arg GIT_BRANCH="${GITHUB_REF#refs/heads/}" \
+            -t open_instruct .
 
       - name: Check image
         run: docker run --rm open_instruct
