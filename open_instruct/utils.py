@@ -1541,14 +1541,8 @@ def check_runtime_leaks(
     if _rt and hasattr(_rt, "_resource_tracker"):
         cache = getattr(_rt._resource_tracker, "_cache", {})
         for name, (count, rtype) in cache.items():
-            if count > 0 and rtype == "semaphore":
-                report.leaked_semaphores.append(name)
-            if count > 0 and rtype == "shared_memory":
-                report.leaked_shm.append(name)
             if count > 0:
                 leak_logger.warning(f"Leaked {rtype} resources: {count}")
-
-    return report
 
 
 class UlyssesSPSplitter:
