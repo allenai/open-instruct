@@ -945,7 +945,7 @@ def maybe_update_beaker_description_with_wandb_url(wandb_url: Optional[str]) -> 
         f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}\n"
         f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}\n"
     )
-    client.experiment.set_description(os.environ["BEAKER_WORKLOAD_ID"], f"{current_description}\n{wandb_url}")
+    client.experiment.set_description(os.environ["BEAKER_WORKLOAD_ID"], new_description)
 
 
 def live_subprocess_output(cmd: List[str]) -> str:
