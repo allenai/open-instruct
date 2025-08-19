@@ -1896,7 +1896,9 @@ def split_and_insert_batch(
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    inference_batch_size = max(1, len(batch.queries) // vllm_num_engines)
+    import math
+
+    inference_batch_size = max(1, math.ceil(len(batch.queries) / vllm_num_engines))
 
     for batch_idx in range(vllm_num_engines):
         start_idx = batch_idx * inference_batch_size
