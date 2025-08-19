@@ -43,7 +43,8 @@ jobs:
     name: open_instruct
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    if: (github.event_name != 'workflow_run') || (github.event.workflow_run.conclusion == 'success')
+    # Skip push events from merge queue (they'll be handled by merge_group trigger)
+    if: (github.event_name != 'push' || !startsWith(github.ref, 'refs/heads/gh-readonly-queue/')) && ((github.event_name != 'workflow_run') || (github.event.workflow_run.conclusion == 'success'))
     steps:
       - uses: actions/checkout@v3
 

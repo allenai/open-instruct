@@ -41,6 +41,8 @@ jobs:
     name: Launch Beaker Experiment
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    # Skip push events from merge queue (they'll be handled by merge_group trigger)
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/heads/gh-readonly-queue/')
 
     steps:
       - name: Checkout repository
