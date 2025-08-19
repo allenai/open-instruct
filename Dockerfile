@@ -64,13 +64,12 @@ WORKDIR /stage/
 # Copy only dependency-related files first
 COPY pyproject.toml uv.lock ./
 
-ENV UV_LINK_MODE=hardlink \
-    UV_COMPILE_BYTECODE=0 \
-    HF_HUB_ENABLE_HF_TRANSFER=1
-    
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
+ENV UV_COMPILE_BYTECODE=0
+        
 RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --no-cache
+    uv sync --frozen --no-install-project --no-cache --link-mode=hardlink
 
 RUN uv run -m nltk.downloader punkt punkt_tab
 
