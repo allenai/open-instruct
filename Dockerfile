@@ -69,8 +69,6 @@ ENV UV_CACHE_DIR=/root/.cache/uv
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
 
-WORKDIR /stage/
-
 # Copy only dependency-related files first
 COPY pyproject.toml uv.lock ./
 
@@ -81,7 +79,7 @@ RUN git clone -b shanea/olmo2-retrofit https://github.com/2015aroras/vllm.git vl
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --link-mode=copy
+    uv sync --frozen --no-install-project --no-cache
 
 RUN uv run -m nltk.downloader punkt punkt_tab
 
