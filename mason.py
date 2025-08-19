@@ -157,7 +157,7 @@ def get_args():
         "--no_mount_nfs", action="store_true", help="Getting deprecated; it does nothing"
     )
     parser.add_argument(
-        "--resumable", action="store_true", help="If given, make the job resumable"
+        "--non_resumable", action="store_true", help="If given, disable resumable mode"
     )
     parser.add_argument(
         "--no_auto_dataset_cache", action="store_true", help="If given, don't cache the dataset automatically"
@@ -206,6 +206,18 @@ def get_args():
     # Split up the mason args from the Python args.
     mason_args, command_args = parser.parse_known_args()
     commands = parse_commands(command_args)
+
+    def _commands_include_resumable_target(cmds: List[List[str]]) -> bool:
+        for cmd in cmds:
+            for target in OPEN_INSTRUCT_RESUMABLES:
+                if target in cmd:
+                    return True
+        return False
+
+    # can resume if the command is in OPEN_INSTRUCT_RESUMABLES and --non_resumable is not set
+    is_resumable = _commands_include_resumable_target(commands) and not mason_args.non_resumable
+    setattr(mason_args, "resumable", is_resumable)
+
     return mason_args, commands
 
 
