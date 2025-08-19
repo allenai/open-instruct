@@ -6,7 +6,7 @@ dataset_mix="hamishivi/rlvr_orz_math_57k_collected 56878"
 # all evals
 # evals="minerva_math::hamish_zs_reasoning,gsm8k::zs_cot_latex,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,ifeval::hamish_zs_reasoning,popqa::hamish_zs_reasoning,mmlu:cot::hamish_zs_reasoning,alpaca_eval_v3::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,mbppplus:0-shot-chat::tulu-thinker,codex_humanevalplus:0-shot-chat-v1::tulu-thinker"
 # math evals
-evals="minerva_math::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,aime::hamish_zs_reasoning"
+evals="minerva_math::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,aime:zs_cot_r1::pass_at_32_2024_temp1,aime:zs_cot_r1::pass_at_32_2025_temp1"
 
 # all I've changed with the checkpoints is the config.json, model_type=olmo3 and architectures is OLMo3ForCausalLM 
 model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round5-100B-olmo25_7b-anneal-2T-f07e3111/step47684-hf"
@@ -54,7 +54,7 @@ python open_instruct/grpo_fast.py \
     --kl_estimator kl3 \
     --dataset_mixer_list ${dataset_mix} \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list allenai/tulu_3_rewritten_100k 32 \
+    --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k 32 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 8192 \
     --max_prompt_token_length 2048 \
@@ -72,9 +72,9 @@ python open_instruct/grpo_fast.py \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --local_eval_every 100 \
-    --save_freq 100 \
-    --checkpoint_state_freq 50 \
+    --local_eval_every 25 \
+    --save_freq 25 \
+    --checkpoint_state_freq 25 \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \
