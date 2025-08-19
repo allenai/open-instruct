@@ -48,7 +48,7 @@ set -ex
 # Function to print usage
 usage() {
     echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--task-suite TASK_SUITE] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>] [--process-output <process_output>]"
-    echo "TASK_SUITE should be one of: NEXT_MODEL_DEV, NEXT_MODEL_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN (default: NEXT_MODEL_DEV)"
+    echo "TASK_SUITE should be one of: NEXT_MODEL_DEV, NEXT_MODEL_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN, SAFETY_EVAL, SAFETY_EVAL_REASONING (default: NEXT_MODEL_DEV)"
     echo "TASKS should be a comma-separated list of task specifications (e.g., 'gsm8k::tulu,bbh:cot::tulu')"
     echo "STOP_SEQUENCES should be a comma-separated list of strings to stop generation at (e.g., '</answer>,\\n\\n')"
     echo "PROCESS_OUTPUT should be a string specifying how to process the model output (e.g., 'r1_style')"
@@ -215,6 +215,14 @@ NEXT_MODEL_UNSEEN=(
     "ifbench::tulu"
 )
 
+SAFETY_EVAL=(
+    "safety_eval"
+)
+
+SAFETY_EVAL_REASONING=(
+    "safety_eval_reasoning"
+)
+
 # If custom tasks provided, convert comma-separated string to array
 if [[ -n "$CUSTOM_TASKS" ]]; then
     IFS=',' read -ra TASKS <<< "$CUSTOM_TASKS"
@@ -232,6 +240,12 @@ else
             ;;
         TULU_3_UNSEEN)
             TASKS=("${TULU_3_UNSEEN[@]}")
+            ;;
+        SAFETY_EVAL)
+            TASKS=("${SAFETY_EVAL[@]}")
+            ;;
+        SAFETY_EVAL_REASONING)
+            TASKS=("${SAFETY_EVAL_REASONING[@]}")
             ;;
         *)
             echo "Error: Unknown task suite '$TASK_SUITE'"
@@ -305,7 +319,7 @@ for TASK in "${TASKS[@]}"; do
     # NOTE: For gantry args here and below, random numbers like #42 are added to the env variables because they need to be unique names. The numbers are ignored.
     # Build gantry args
     if [ "$EVALUATE_ON_WEKA" == "true" ]; then
-        GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"weka\": \"oe-adapt-default:/weka/oe-adapt-default\", \"weka#44\": \"oe-training-default:/weka/oe-training-default\", \"env#132\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#42\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\"${MAX_TOKENS_ARG}}"
+        GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"weka\": \"oe-adapt-default:/weka/oe-adapt-default\", \"weka#44\": \"oe-training-default:/weka/oe-training-default\", \"env#132\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#42\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\"${MAX_TOKENS_ARG}, \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\"}"
     else
         GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env-secret#43\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"${MAX_TOKENS_ARG}}"
     fi
@@ -330,7 +344,7 @@ for TASK in "${TASKS[@]}"; do
             --beaker-image "$BEAKER_IMAGE" \
             --beaker-priority "$PRIORITY" \
             --push-datalake \
-            --datalake-tags "$DATALAKE_ARGS"
+            --datalake-tags "$DATALAKE_ARGS" 
     else
         python oe-eval-internal/oe_eval/launch.py \
         --model "$MODEL_NAME" \
