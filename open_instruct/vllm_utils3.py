@@ -299,11 +299,11 @@ class ActorManager:
 
 
 def add_request(
-    queue: queue.Queue, llm_engine: vllm.LLMEngine, tools, timeout: float = 60.0, request_metadata: dict = None
+    prompt_queue: queue.Queue, llm_engine: vllm.LLMEngine, tools, timeout: float = 60.0, request_metadata: dict = None
 ):
     """Get a request from the queue and add it to the LLM engine."""
     try:
-        request = queue.get(timeout=timeout)
+        request = prompt_queue.get(timeout=timeout)
     except queue.Empty:
         return
 

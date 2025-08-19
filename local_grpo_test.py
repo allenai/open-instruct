@@ -64,30 +64,14 @@ logger = logging.getLogger(__name__)
 def local_generate_thread(vllm_actors, stop_event):
     """Thread function that repeatedly calls process_from_queue on local vLLM actors."""
     logger.info("[Generate Thread] 🚀 Starting local generation thread")
-    iteration = 0
     while not stop_event.is_set():
-        iteration += 1
-        logger.info(f"[Generate Thread] Iteration {iteration} starting")
-        with Timer("🔥 Generation time") as _gen_timer:
-            # Call process_from_queue directly on local actors
-            processed_results = []
-            for i, actor in enumerate(vllm_actors):
-                try:
-                    logger.info(f"[Generate Thread] Calling process_from_queue on actor {i}")
-                    result = actor.process_from_queue(timeout=20)
-                    logger.info(f"[Generate Thread] Actor {i} returned: {result}")
-                    processed_results.append(result)
-                except Exception as e:
-                    logger.warning(f"[Generate Thread] Error processing actor {i}: {e}")
-                    import traceback
-                    logger.warning(traceback.format_exc())
-                    processed_results.append(0)
-            
+        with Timer("🔥 Generation time") as timer:
+            # Use list comprehension like grpo_fast.py
+            processed_results = [actor.process_from_queue(timeout=20) for actor in vllm_actors]
             num_processed = sum(int(result) for result in processed_results)
-            logger.info(f"[Generate Thread] Processed {num_processed} requests in iteration {iteration}")
             # Suppress timing output if nothing was processed
             if num_processed == 0:
-                _gen_timer.noop = 1
+                timer.noop = True
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
@@ -174,6 +158,14 @@ def main(args: grpo_fast.Args, tc: TokenizerConfig, model_config: ModelConfig):
     else:
         max_tool_calls_dict = {}
     
+    # Calculate inference_batch_size (same as grpo_fast.py)
+    if args.inference_batch_size is None:
+        args.inference_batch_size = args.num_unique_prompts_rollout // args.vllm_num_engines
+        logger.info(
+            f"Setting inference_batch_size to {args.inference_batch_size} "
+            f"(num_unique_prompts_rollout={args.num_unique_prompts_rollout} // vllm_num_engines={args.vllm_num_engines})"
+        )
+    
     # Initialize local LLMRayActor instances (not as ray.remote)
     logger.info(f"Initializing {args.vllm_num_engines} local LLMRayActor instances...")
     vllm_actors = []
@@ -202,6 +194,7 @@ def main(args: grpo_fast.Args, tc: TokenizerConfig, model_config: ModelConfig):
             actor_manager=actor_manager,
             tools=tool_objects,  # Use the tool objects we created
             max_tool_calls=max_tool_calls_dict,  # Use the converted dictionary
+            inference_batch_size=args.inference_batch_size,  # Add the missing parameter
         )
         vllm_actors.append(llm_actor)
         logger.info(f"LLMRayActor {i} created successfully")
@@ -225,117 +218,130 @@ def main(args: grpo_fast.Args, tc: TokenizerConfig, model_config: ModelConfig):
     # Create reward function
     reward_fn = grpo_fast.make_reward_fn(args)
     
-    # Start threads
+    # Start threads with proper error handling
     stop_event = threading.Event()
     executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="grpo")
     
-    logger.info("======== ✅ data preparation thread starts =========")
-    packing_future = executor.submit(
-        grpo_fast.data_preparation_thread,
-        reward_fn,
-        inference_results_Q,
-        packed_sequences_Q,
-        pending_queries_map,
-        args,
-        tokenizer,
-        args.num_training_steps,
-        generation_configs["train"],
-    )
-    
-    logger.info("======== ✅ generation thread starts =========")
-    generation_future = executor.submit(
-        local_generate_thread, vllm_actors, stop_event
-    )
-    
-    # Send initial data to ensure we have a N-step offset
-    for _ in range(args.async_steps):
-        dataset_indices = next(iter_dataloader)
-        batch = grpo_fast.next_batch(dataset_indices, train_dataset)
-        grpo_fast.split_and_insert_batch(
-            batch,
-            1,  # All initial batches labeled as step 1
-            args.vllm_num_engines,
+    try:
+        logger.info("======== ✅ data preparation thread starts =========")
+        packing_future = executor.submit(
+            grpo_fast.data_preparation_thread,
+            reward_fn,
+            inference_results_Q,
+            packed_sequences_Q,
             pending_queries_map,
-            param_prompt_Q,
-            generation_configs["train"],
-        )
-    
-    # Token counting and main loop
-    num_total_tokens = 0
-    start_time = time.time()
-    
-    # Progress bar for token counting
-    pbar = tqdm(total=args.num_training_steps, desc="Training steps")
-    
-    for training_step in range(1, args.num_training_steps + 1):
-        # Check thread health
-        grpo_fast.check_threads_healthy(
-            [packing_future, generation_future],
-            stop_event,
-            executor,
-            [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
-        )
-        
-        # Prepare next batch of prompts (no weight sync needed in local mode)
-        dataset_indices = next(iter_dataloader)
-        batch = grpo_fast.next_batch(dataset_indices, train_dataset)
-        grpo_fast.split_and_insert_batch(
-            batch,
-            training_step,  # Current training step, not future
-            args.vllm_num_engines,
-            pending_queries_map,
-            param_prompt_Q,
+            args,
+            tokenizer,
+            args.num_training_steps,
             generation_configs["train"],
         )
         
-        # Get packed data from packing thread
-        collated_data, data_thread_metrics, num_total_tokens = grpo_fast.load_data_from_packing_thread(
-            packed_sequences_Q, num_total_tokens, stop_event
+        logger.info("======== ✅ generation thread starts =========")
+        generation_future = executor.submit(
+            local_generate_thread, vllm_actors, stop_event
         )
         
-        if collated_data is None:
-            continue
-        
-        # Update progress bar with token counts
-        elapsed_time = time.time() - start_time
-        tokens_per_sec = num_total_tokens / elapsed_time if elapsed_time > 0 else 0
-        
-        pbar.set_postfix({
-            "Total tokens": num_total_tokens,
-            "Tokens/sec": f"{tokens_per_sec:.1f}",
-            "Batch score": f"{data_thread_metrics.get('scores', 0):.3f}",
-        })
-        pbar.update(1)
-        
-        # Log statistics periodically
-        if training_step % 5 == 0:
-            logger.info(
-                f"Step {training_step}: "
-                f"Total tokens: {num_total_tokens}, "
-                f"Tokens/sec: {tokens_per_sec:.1f}, "
-                f"Scores: {data_thread_metrics.get('scores', 0):.3f}"
+        # Send initial data to ensure we have a N-step offset
+        for _ in range(args.async_steps):
+            dataset_indices = next(iter_dataloader)
+            batch = grpo_fast.next_batch(dataset_indices, train_dataset)
+            grpo_fast.split_and_insert_batch(
+                batch,
+                1,  # All initial batches labeled as step 1
+                args.vllm_num_engines,
+                pending_queries_map,
+                param_prompt_Q,
+                generation_configs["train"],
             )
+        
+        # Token counting and main loop
+        num_total_tokens = 0
+        start_time = time.time()
+        
+        # Progress bar for token counting
+        pbar = tqdm(total=args.num_training_steps, desc="Training steps")
+        
+        for training_step in range(1, args.num_training_steps + 1):
+            # Check thread health by checking if they're still running
+            if packing_future.done():
+                # Thread died, check if it raised an exception
+                try:
+                    packing_future.result(timeout=0.1)
+                except Exception as e:
+                    logger.error(f"Data preparation thread died with error: {e}")
+                    stop_event.set()
+                    raise RuntimeError(f"Data preparation thread failed: {e}") from e
+            
+            if generation_future.done():
+                # Thread died, check if it raised an exception
+                try:
+                    generation_future.result(timeout=0.1)
+                except Exception as e:
+                    logger.error(f"Generation thread died with error: {e}")
+                    stop_event.set()
+                    raise RuntimeError(f"Generation thread failed: {e}") from e
+            
+            # Prepare next batch of prompts (no weight sync needed in local mode)
+            dataset_indices = next(iter_dataloader)
+            batch = grpo_fast.next_batch(dataset_indices, train_dataset)
+            grpo_fast.split_and_insert_batch(
+                batch,
+                training_step,  # Current training step, not future
+                args.vllm_num_engines,
+                pending_queries_map,
+                param_prompt_Q,
+                generation_configs["train"],
+            )
+            
+            # Get packed data from packing thread
+            collated_data, data_thread_metrics, num_total_tokens = grpo_fast.load_data_from_packing_thread(
+                packed_sequences_Q, num_total_tokens, stop_event
+            )
+            
+            if collated_data is None:
+                continue
+            
+            # Update progress bar with token counts
+            elapsed_time = time.time() - start_time
+            tokens_per_sec = num_total_tokens / elapsed_time if elapsed_time > 0 else 0
+            
+            pbar.set_postfix({
+                "Total tokens": num_total_tokens,
+                "Tokens/sec": f"{tokens_per_sec:.1f}",
+                "Batch score": f"{data_thread_metrics.get('scores', 0):.3f}",
+            })
+            pbar.update(1)
+            
+            # Log statistics periodically
+            if training_step % 5 == 0:
+                logger.info(
+                    f"Step {training_step}: "
+                    f"Total tokens: {num_total_tokens}, "
+                    f"Tokens/sec: {tokens_per_sec:.1f}, "
+                    f"Scores: {data_thread_metrics.get('scores', 0):.3f}"
+                )
+        
+        pbar.close()
+        
+        # Final statistics
+        total_time = time.time() - start_time
+        logger.info("=" * 50)
+        logger.info("Final Statistics:")
+        logger.info(f"Total training steps: {args.num_training_steps}")
+        logger.info(f"Total tokens generated: {num_total_tokens}")
+        logger.info(f"Total time: {total_time:.2f} seconds")
+        logger.info(f"Average tokens/sec: {num_total_tokens / total_time:.1f}")
+        logger.info("=" * 50)
     
-    pbar.close()
-    
-    # Final statistics
-    total_time = time.time() - start_time
-    logger.info("=" * 50)
-    logger.info("Final Statistics:")
-    logger.info(f"Total training steps: {args.num_training_steps}")
-    logger.info(f"Total tokens generated: {num_total_tokens}")
-    logger.info(f"Total time: {total_time:.2f} seconds")
-    logger.info(f"Average tokens/sec: {num_total_tokens / total_time:.1f}")
-    logger.info("=" * 50)
-    
-    # Clean up using the same cleanup function as grpo_fast.py
-    logger.info("Cleaning up...")
-    queues = [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q]
-    grpo_fast.cleanup_training_resources(stop_event, executor, queues, actor_manager)
-    
-    # Shutdown Ray
-    ray.shutdown()
-    logger.info("Cleanup complete")
+    finally:
+        # Clean up using the same cleanup function as grpo_fast.py
+        logger.info("Cleaning up...")
+        queues = [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q]
+        grpo_fast.cleanup_training_resources(stop_event, executor, queues, actor_manager)
+        
+        # Shutdown Ray
+        ray.shutdown()
+        logger.info("Cleanup complete")
 
 
 if __name__ == "__main__":
