@@ -6,15 +6,22 @@ from typing import Generic, List, Optional, TypeVar
 import numpy as np
 import torch
 from rich.pretty import pprint
+import logging
+
 
 T = TypeVar("T")
-# torch.set_printoptions(precision=2, sci_mode=False)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 
 class Timer:
     """A context manager for timing code blocks"""
 
-    def __init__(self, description: str, noop: int = 0):
+    def __init__(self, description: str, noop: bool = False):
         self.description = description
         self.noop = noop
 
@@ -23,11 +30,10 @@ class Timer:
         return self
 
     def __exit__(self, type, value, traceback):
-        if self.noop:
-            return
         self.end_time = time.perf_counter()
         self.duration = self.end_time - self.start_time
-        print(f"{self.description}: {self.duration:.3f} seconds")
+        if not self.noop:
+            logger.info(f"{self.description}: {self.duration:.3f} seconds")
 
 
 @dataclass

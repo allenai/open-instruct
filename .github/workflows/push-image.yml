@@ -67,7 +67,7 @@ jobs:
 
       - name: Check remaining disk space
         run: df -h
-  
+
       - name: Build image
         run: |
           docker build --platform=linux/amd64 \
