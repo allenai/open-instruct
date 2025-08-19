@@ -74,6 +74,7 @@ code = [
 [tool.uv]
 preview = true
 python-preference = "only-managed"
+link-mode = "hardlink"
 
 [dependency-groups]
 dev = [
