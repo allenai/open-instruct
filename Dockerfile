@@ -63,7 +63,7 @@ WORKDIR /stage/
 
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
-        
+
 # Copy only dependency-related files first
 COPY pyproject.toml uv.lock ./
 
