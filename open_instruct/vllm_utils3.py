@@ -625,6 +625,7 @@ def create_vllm_engines(
     max_model_len: int,
     vllm_gpu_memory_utilization: float = 0.9,
     single_gpu_mode: bool = False,
+    inference_batch_size: Optional[int] = None,
     pg: Optional[ray.util.placement_group] = None,
     vllm_enable_sleep=False,
     tools: Optional[Dict[str, Tool]] = None,
@@ -711,6 +712,7 @@ def create_vllm_engines(
                 actor_manager=actor_manager,
                 tools=tools,
                 max_tool_calls=max_tool_calls_dict,
+                inference_batch_size=inference_batch_size,
             )
         )
 
