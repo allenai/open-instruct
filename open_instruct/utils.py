@@ -53,7 +53,6 @@ import numpy as np
 import ray
 import requests
 import torch
-from accelerate.logging import get_logger
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
@@ -66,7 +65,7 @@ from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
 
@@ -932,14 +931,8 @@ def maybe_update_beaker_description_with_wandb_url(wandb_url: str) -> None:
     try:
         spec = client.experiment.get(os.environ["BEAKER_WORKLOAD_ID"])
     except beaker.exceptions.ExperimentNotFound:
-        # Avoid Accelerate logger dependency before Accelerator/PartialState is initialized
-        try:
-            logger.warning(f"Failed to update Beaker experiment description with wandb URL: {wandb_url}")
-            logger.warning("This might be fine if you are e.g. running in an interactive job.")
-        except Exception:
-            std_logger = logging.getLogger(__name__)
-            std_logger.warning(f"Failed to update Beaker experiment description with wandb URL: {wandb_url}")
-            std_logger.warning("This might be fine if you are e.g. running in an interactive job.")
+        logger.warning(f"Failed to update Beaker experiment description with wandb URL: {wandb_url}")
+        logger.warning("This might be fine if you are e.g. running in an interactive job.")
         return
     current_description = spec.description or ""
     client.experiment.set_description(os.environ["BEAKER_WORKLOAD_ID"], f"{current_description}\n{wandb_url}")

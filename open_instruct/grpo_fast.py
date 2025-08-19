@@ -2418,7 +2418,6 @@ def run_training(
             generation_configs["train"],
         )
     num_total_tokens = 0
-    last_completed_step = resume_training_step - 1
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
@@ -2481,7 +2480,6 @@ def run_training(
             wandb_url,
             tc.chat_template_name,
         )
-        last_completed_step = training_step
 
         maybe_evaluate(
             args,
@@ -2496,7 +2494,10 @@ def run_training(
             generate_metrics_Q,
         )
 
-    save_final_model(args, policy_group, tokenizer, last_completed_step, wandb_url, tc.chat_template_name)
+    if resume_training_step > args.num_training_steps:
+        raise ValueError(f"Training didn't run since {resume_training_step=} > {args.num_training_steps=}")
+
+    save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_samples: int = 32):
