@@ -1897,30 +1897,15 @@ def split_and_insert_batch(
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    # Handle case where we have fewer queries than engines
-    if len(batch.queries) < vllm_num_engines:
-        logging.warning(
-            f"Number of queries ({len(batch.queries)}) is less than number of engines ({vllm_num_engines}). "
-            f"Will distribute single prompts to first {len(batch.queries)} engines."
-        )
-        inference_batch_size = 1
-    else:
-        # Normal case: distribute evenly
-        inference_batch_size = len(batch.queries) // vllm_num_engines
+    # Calculate batch size, ensuring it's at least 1
+    inference_batch_size = max(1, len(batch.queries) // vllm_num_engines)
 
     for batch_idx in range(vllm_num_engines):
         start_idx = batch_idx * inference_batch_size
+        end_idx = min(start_idx + inference_batch_size, len(batch.queries))
 
-        # For the last engine, take all remaining queries (if any)
-        # For small batches, stop when we run out of queries
-        if batch_idx == vllm_num_engines - 1:
-            end_idx = len(batch.queries)
-        else:
-            end_idx = min(start_idx + inference_batch_size, len(batch.queries))
-
-        # Check for empty batch - this happens when we have fewer queries than engines
-        if start_idx >= end_idx:
-            # No more queries to distribute, skip remaining engines
+        # Stop if we've distributed all queries
+        if start_idx >= len(batch.queries):
             break
 
         sub_batch = batch[start_idx:end_idx]
