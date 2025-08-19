@@ -72,6 +72,41 @@ jobs:
             echo "trigger_info=Scheduled run" >> $GITHUB_OUTPUT
           fi
 
+      - name: Delete huge unnecessary tools folder
+        run: |
+          echo "Disk space before cleanup:"
+          df -h /
+
+          # Remove unnecessary directories
+          DIRS_TO_REMOVE=(
+            "/opt/hostedtoolcache"
+            "/usr/share/dotnet"
+            "$AGENT_TOOLSDIRECTORY"
+            "/usr/local/lib/android"
+            "/usr/local/share/boost"
+          )
+
+          for dir in "${DIRS_TO_REMOVE[@]}"; do
+            [ -d "$dir" ] && sudo rm -rf "$dir" && echo "Removed: $dir"
+          done
+
+          # Remove unnecessary packages
+          PACKAGES_TO_REMOVE=(
+            '^aspnetcore-.*' '^dotnet-.*' '^llvm-.*' 'php.*'
+            '^mongodb-.*' '^mysql-.*' azure-cli google-chrome-stable
+            firefox powershell mono-devel
+          )
+
+          sudo apt-get remove -y "${PACKAGES_TO_REMOVE[@]}" 2>/dev/null || true
+          sudo apt-get autoremove -y
+          sudo apt-get clean
+
+          # Clean up Docker
+          docker system prune -af --volumes
+
+          echo "Disk space after cleanup:"
+          df -h /
+
       - name: Setup Python environment
         uses: actions/setup-python@v5
         with:
@@ -114,45 +149,12 @@ jobs:
           echo "Disk space after CUDA install and cleanup:"
           df -h
 
-      - name: Delete huge unnecessary tools folder
-        run: |
-          echo "Disk space before cleanup:"
-          df -h /
-
-          # Remove unnecessary directories
-          DIRS_TO_REMOVE=(
-            "/opt/hostedtoolcache"
-            "/usr/share/dotnet"
-            "$AGENT_TOOLSDIRECTORY"
-            "/usr/local/lib/android"
-            "/usr/local/share/boost"
-          )
-
-          for dir in "${DIRS_TO_REMOVE[@]}"; do
-            [ -d "$dir" ] && sudo rm -rf "$dir" && echo "Removed: $dir"
-          done
-
-          # Remove unnecessary packages
-          PACKAGES_TO_REMOVE=(
-            '^aspnetcore-.*' '^dotnet-.*' '^llvm-.*' 'php.*'
-            '^mongodb-.*' '^mysql-.*' azure-cli google-chrome-stable
-            firefox powershell mono-devel
-          )
-
-          sudo apt-get remove -y "${PACKAGES_TO_REMOVE[@]}" 2>/dev/null || true
-          sudo apt-get autoremove -y
-          sudo apt-get clean
-
-          # Clean up Docker
-          docker system prune -af --volumes
-
-          echo "Disk space after cleanup:"
-          df -h /
-
       - name: Install dependencies
         run: |
           # Install development dependencies needed for mason.py
           uv sync --frozen
+          echo "Disk space after install:"
+          df -h /
 
       - name: Build image and launch experiment
         id: launch
