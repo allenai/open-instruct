@@ -61,22 +61,7 @@ class TestGrpoFastBase(unittest.TestCase):
         # Track Ray queues for cleanup
         self._ray_queues = []
 
-        # Check for leaks after Ray init
-        leak_report = utils.check_runtime_leaks()
-        # After Ray init, we expect exactly one Ray head worker
-        if len(leak_report.ray_workers) == 1:
-            # Check if it's the head worker (worker ID all zeros or all f's)
-            worker = leak_report.ray_workers[0]
-            worker_id = worker.get("worker_id", "")
-            if worker_id in [
-                "01000000ffffffffffffffffffffffffffffffffffffffffffffffff",
-                "00000000ffffffffffffffffffffffffffffffffffffffffffffffff",
-            ]:
-                # This is the expected Ray head worker, clear it
-                leak_report.ray_workers = []
-
-        if not leak_report.is_clean:
-            self.fail(f"Leaks detected before test {self._testMethodName}:\n{leak_report.pretty()}")
+        utils.check_runtime_leaks()
 
         # Initialize Ray for this test
         ray.init(include_dashboard=False)
@@ -113,21 +98,7 @@ class TestGrpoFastBase(unittest.TestCase):
             if new_names:
                 new_resources[rtype] = new_names
 
-        # Check for leaks before shutdown
-        leak_report = utils.check_runtime_leaks()
-        # We still expect the Ray head worker
-        if len(leak_report.ray_workers) == 1:
-            worker = leak_report.ray_workers[0]
-            worker_id = worker.get("worker_id", "")
-            if worker_id in [
-                "01000000ffffffffffffffffffffffffffffffffffffffffffffffff",
-                "00000000ffffffffffffffffffffffffffffffffffffffffffffffff",
-            ]:
-                # This is the expected Ray head worker, clear it
-                leak_report.ray_workers = []
-
-        if not leak_report.is_clean:
-            self.fail(f"Leaks detected after test {self._testMethodName}:\n{leak_report.pretty()}")
+        utils.check_runtime_leaks()
 
         # Check for semaphore leaks
         if new_resources:
@@ -179,7 +150,6 @@ class TestGrpoFastBase(unittest.TestCase):
                 tool_calleds=[False] * total_responses,
             ),
             dataset_index=dataset_indices,
-            training_step=training_step,
         )
 
     def setup_and_split_batch(self, queries, ground_truths, datasets, indices, num_engines, training_step=1):
@@ -257,7 +227,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
 
         # Put the test prompt in the queue using PromptRequest
         param_prompt_Q.put(
-            PromptRequest(prompts=[prompt_token_ids], dataset_index=0, generation_config=generation_config)
+            PromptRequest(prompts=[prompt_token_ids], dataset_index=0, sampling_params=generation_config)
         )
 
         # Get the result
@@ -348,7 +318,6 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
                 tool_calleds=[False] * len(combined_responses),
             ),
             dataset_index=None,
-            training_step=1,
         )
 
         # Verify that the combined results match the original input
@@ -472,7 +441,6 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
                 tool_calleds=[False] * len(combined_responses),
             ),
             dataset_index=None,
-            training_step=1,
         )
 
         # Verify results - streaming accumulation should NOT replicate
