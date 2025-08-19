@@ -59,19 +59,18 @@ RUN curl --silent \
 
 COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
 
-ENV HF_HUB_ENABLE_HF_TRANSFER=1
-ENV UV_COMPILE_BYTECODE=0
+WORKDIR /stage/
 
 # Copy only dependency-related files first
 COPY pyproject.toml uv.lock ./
 
-# Must be before the uv command so that we have .venv in the right place.
-WORKDIR /stage/
-
-# Install dependencies
+ENV UV_LINK_MODE=hardlink \
+    UV_COMPILE_BYTECODE=0 \
+    HF_HUB_ENABLE_HF_TRANSFER=1
+    
 RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --no-cache --link-mode=hardlink
+    uv sync --frozen --no-install-project --no-cache
 
 RUN uv run -m nltk.downloader punkt punkt_tab
 
