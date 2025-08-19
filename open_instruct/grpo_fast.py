@@ -653,6 +653,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     f"Skipping loading checkpoint state from {args.checkpoint_state_dir} because it does not exist!"
                 )
             else:
+                old_mpu = None
+                if self.mpu is not None:
+                    old_mpu = self.mpu
+                    self.model.mpu = None
                 path, states = self.model.load_checkpoint(
                     args.checkpoint_state_dir,
                     load_module_strict=True,
@@ -660,6 +664,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     load_lr_scheduler_states=True,
                     load_module_only=False,
                 )
+                if old_mpu is not None:
+                    self.model.mpu = old_mpu
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
                 optimization_steps_done = states["training_step"]
