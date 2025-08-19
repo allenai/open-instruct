@@ -430,8 +430,7 @@ class Args:
         # Ensure we have enough prompts for all VLLM engines
         if self.num_unique_prompts_rollout < self.vllm_num_engines:
             raise ValueError(
-                f"num_unique_prompts_rollout ({self.num_unique_prompts_rollout}) must be >= "
-                f"vllm_num_engines ({self.vllm_num_engines}) to avoid empty batches."
+                f"{self.num_unique_prompts_rollout=} must be >= {self.vllm_num_engines=} to avoid empty batches."
             )
         # Initialize stop_strings if None
         if self.stop_strings is None:
@@ -1897,7 +1896,6 @@ def split_and_insert_batch(
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    # Calculate batch size, ensuring it's at least 1
     inference_batch_size = max(1, len(batch.queries) // vllm_num_engines)
 
     for batch_idx in range(vllm_num_engines):
