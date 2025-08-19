@@ -21,12 +21,11 @@ uv run python mason.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 16 \
-        --num_unique_prompts_rollout 128 \
+        --num_unique_prompts_rollout 32 \
         --num_mini_batches 1 \
         --num_epochs 1 \
         --learning_rate 5e-7 \
         --per_device_train_batch_size 1 \
-        --output_dir /output \
         --kl_estimator kl3 \
         --dataset_mixer_list saurabh5/rlvr_acecoder_filtered ${num_prompts} saurabh5/open-code-reasoning-rlvr-stdio ${num_prompts} \
         --dataset_mixer_list_splits train \
@@ -59,4 +58,5 @@ uv run python mason.py \
         --vllm_enable_prefix_caching \
         --oe_eval_max_length 32768 \
         --oe_eval_tasks "codex_humanevalplus:0-shot-chat-v1::tulu-thinker,mbppplus:0-shot-chat::tulu-thinker,livecodebench_codegeneration::tulu-thinker" \
-        --dataset_skip_cache True
+        --dataset_skip_cache True \
+	--push_to_hub False
