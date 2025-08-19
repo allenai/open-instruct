@@ -457,7 +457,8 @@ class LLMRayActor:
         self.logger.info("[LLMRayActor.process_from_queue] === MAIN LOOP STARTING ===")
         while True:
             iteration += 1
-            self.logger.info(f"[LLMRayActor.process_from_queue] >>> ITERATION {iteration} START")
+            if iteration % 100 == 0:
+                self.logger.info(f"[LLMRayActor.process_from_queue] >>> ITERATION {iteration} START")
 
             # Non-blocking check for should_stop using ray.wait
             self.logger.debug(
@@ -475,11 +476,13 @@ class LLMRayActor:
             )
 
             # Process a step and get completed outputs
-            self.logger.info(f"[LLMRayActor.process_from_queue] Iteration {iteration}: About to call _step_engine")
+            if iteration % 100 == 0:
+                self.logger.info(f"[LLMRayActor.process_from_queue] Iteration {iteration}: About to call _step_engine")
             outputs = self._step_engine(tracking, sampling_params, tokenizer)
-            self.logger.info(
-                f"[LLMRayActor.process_from_queue] Iteration {iteration}: _step_engine returned {len(outputs)} outputs"
-            )
+            if iteration % 100 == 0:
+                self.logger.info(
+                    f"[LLMRayActor.process_from_queue] Iteration {iteration}: _step_engine returned {len(outputs)} outputs"
+                )
 
             # Process completed outputs
             for output in outputs:
@@ -552,6 +555,11 @@ class LLMRayActor:
         outputs = []
         if self.llm_engine.has_unfinished_requests():
             step_outputs = list(self.llm_engine.step())
+            if step_outputs:
+                outputs_per_request = [len(o.outputs) for o in step_outputs]
+                self.logger.info(
+                    f"[LLMRayActor._step_engine] engine.step() returned {len(step_outputs)} step_outputs, outputs per request: {outputs_per_request}"
+                )
 
             for output in step_outputs:
                 if output.finished:
