@@ -86,9 +86,6 @@ EVALUATE_ON_WEKA="true"
 if [[ "$MODEL_LOCATION" == gs://* ]]; then
     EVALUATE_ON_WEKA="false"
 fi
-if [[ "$MODEL_LOCATION" == /weka/* ]]; then
-    EVALUATE_ON_WEKA="true"
-fi
 
 # Optional: Default number of GPUs if not specified
 NUM_GPUS="${NUM_GPUS:-1}"
