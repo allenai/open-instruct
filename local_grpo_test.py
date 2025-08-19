@@ -4,6 +4,7 @@ Local GRPO runner - runs GRPO fast implementation locally without Ray for LLMRay
 Directly instantiates LLMRayActor locally and reports token counts instead of learning.
 """
 
+import asyncio
 import logging
 import os
 
@@ -31,30 +32,9 @@ from open_instruct.utils import ArgumentParserPlus
 from open_instruct.vllm_utils3 import ActorManager, LLMRayActor
 
 
-class MockQueue:
-    """Mock queue that works like a Ray queue but uses Python Queue internally."""
-    def __init__(self, maxsize=0):
-        self._queue = Queue(maxsize=maxsize)
-    
-    def put(self, item, timeout=None):
-        """Put item in queue, compatible with Ray queue interface."""
-        self._queue.put(item, timeout=timeout)
-    
-    def get(self, timeout=None):
-        """Get item from queue, compatible with Ray queue interface."""
-        return self._queue.get(timeout=timeout)
-    
-    def empty(self):
-        """Check if queue is empty."""
-        return self._queue.empty()
-    
-    def qsize(self):
-        """Get queue size."""
-        return self._queue.qsize()
-
 # Setup logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
@@ -64,11 +44,16 @@ logger = logging.getLogger(__name__)
 def local_generate_thread(vllm_actors, stop_event):
     """Thread function that repeatedly calls process_from_queue on local vLLM actors."""
     logger.info("[Generate Thread] 🚀 Starting local generation thread")
+    iteration = 0
     while not stop_event.is_set():
+        iteration += 1
+        logger.debug(f"[Generate Thread] Starting iteration {iteration}")
         with Timer("🔥 Generation time") as timer:
             # Use list comprehension like grpo_fast.py
+            logger.debug(f"[Generate Thread] Calling process_from_queue on {len(vllm_actors)} actors")
             processed_results = [actor.process_from_queue(timeout=20) for actor in vllm_actors]
             num_processed = sum(int(result) for result in processed_results)
+            logger.debug(f"[Generate Thread] Processed {num_processed} requests in iteration {iteration}")
             # Suppress timing output if nothing was processed
             if num_processed == 0:
                 timer.noop = True
@@ -129,24 +114,42 @@ def main(args: grpo_fast.Args, tc: TokenizerConfig, model_config: ModelConfig):
     max_model_len = args.max_token_length
     
     # Initialize Ray before creating Ray objects (same as grpo_fast.py)
+    logger.info(">>> Step 1: Initializing Ray...")
     ray.init(dashboard_host="0.0.0.0")
+    logger.info(">>> Step 1 COMPLETE: Ray initialized")
     
     # Create Ray queues for vLLM communication
-    queue_size = (args.async_steps + 1) * args.vllm_num_engines
+    logger.info(">>> Step 2: Creating Ray queues...")
+    # Since we're inserting individual prompts, multiply by num_unique_prompts_rollout
+    queue_size = (args.async_steps + 1) * args.vllm_num_engines * args.num_unique_prompts_rollout
+    logger.info(f">>> Queue size calculation: (async_steps={args.async_steps} + 1) * vllm_num_engines={args.vllm_num_engines} * num_unique_prompts_rollout={args.num_unique_prompts_rollout} = {queue_size}")
+    logger.info(f">>> Creating inference_results_Q with size {queue_size}")
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
+    logger.info(f">>> Creating param_prompt_Q with size {queue_size}")
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
-    evaluation_inference_results_Q = ray_queue.Queue(maxsize=args.vllm_num_engines)
+    # Evaluation queue can be smaller since we have fewer eval samples
+    eval_queue_size = args.vllm_num_engines * 32  # 32 is the max eval samples we use
+    logger.info(f">>> Creating evaluation_inference_results_Q with size {eval_queue_size}")
+    evaluation_inference_results_Q = ray_queue.Queue(maxsize=eval_queue_size)
+    logger.info(">>> Step 2 COMPLETE: All Ray queues created")
     
     # Create Python queue for packed sequences
+    logger.info(">>> Step 3: Creating Python queue for packed sequences...")
     packed_sequences_Q = Queue(maxsize=args.async_steps)
+    logger.info(">>> Step 3 COMPLETE: Python queue created")
     
     # Create ActorManager as a Ray actor
+    logger.info(">>> Step 4: Creating ActorManager as Ray actor...")
     actor_manager = ActorManager.remote()
+    logger.info(">>> Step 4 COMPLETE: ActorManager created")
     
     # Create generation configs
+    logger.info(">>> Step 5: Creating generation configs...")
     generation_configs = grpo_fast.create_generation_configs(args)
+    logger.info(">>> Step 5 COMPLETE: Generation configs created")
     
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
+    logger.info(">>> Step 6: Processing tool configurations...")
     if tool_objects:
         assert len(args.max_tool_calls) == 1 or len(args.max_tool_calls) == len(tool_objects), (
             "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
@@ -157,20 +160,26 @@ def main(args: grpo_fast.Args, tc: TokenizerConfig, model_config: ModelConfig):
             max_tool_calls_dict = {end_str: limit for end_str, limit in zip(tool_objects.keys(), args.max_tool_calls)}
     else:
         max_tool_calls_dict = {}
+    logger.info(">>> Step 6 COMPLETE: Tool configurations processed")
     
     # Calculate inference_batch_size (same as grpo_fast.py)
+    logger.info(">>> Step 7: Calculating inference batch size...")
     if args.inference_batch_size is None:
         args.inference_batch_size = args.num_unique_prompts_rollout // args.vllm_num_engines
         logger.info(
             f"Setting inference_batch_size to {args.inference_batch_size} "
             f"(num_unique_prompts_rollout={args.num_unique_prompts_rollout} // vllm_num_engines={args.vllm_num_engines})"
         )
+    logger.info(">>> Step 7 COMPLETE: Inference batch size calculated")
     
     # Initialize local LLMRayActor instances (not as ray.remote)
-    logger.info(f"Initializing {args.vllm_num_engines} local LLMRayActor instances...")
+    logger.info(f">>> Step 8: Initializing {args.vllm_num_engines} local LLMRayActor instances...")
     vllm_actors = []
     for i in range(args.vllm_num_engines):
-        logger.info(f"Creating LLMRayActor {i}...")
+        logger.info(f">>> Step 8.{i+1}: Creating LLMRayActor {i}...")
+        logger.debug(f"LLMRayActor {i} parameters: model={model_config.model_name_or_path}, "
+                    f"max_model_len={max_model_len}, inference_batch_size={args.inference_batch_size}")
+        logger.info(f">>> About to call LLMRayActor constructor for actor {i}")
         llm_actor = LLMRayActor(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
@@ -196,27 +205,43 @@ def main(args: grpo_fast.Args, tc: TokenizerConfig, model_config: ModelConfig):
             max_tool_calls=max_tool_calls_dict,  # Use the converted dictionary
             inference_batch_size=args.inference_batch_size,  # Add the missing parameter
         )
+        logger.info(f">>> LLMRayActor constructor returned for actor {i}")
         vllm_actors.append(llm_actor)
-        logger.info(f"LLMRayActor {i} created successfully")
-    logger.info("All LLMRayActor instances initialized successfully")
+        logger.info(f">>> Step 8.{i+1} COMPLETE: LLMRayActor {i} created, llm_engine initialized: {llm_actor.llm_engine is not None}")
+    logger.info(">>> Step 8 COMPLETE: All LLMRayActor instances initialized successfully")
     
     # Setup training data iterator
+    logger.info(">>> Step 9: Setting up training data iterator...")
     train_dataset_idxs = np.arange(len(train_dataset))
     iter_dataloader = grpo_fast.ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
+    logger.info(">>> Step 9 COMPLETE: Training data iterator created")
     
     # Create pending queries maps
+    logger.info(">>> Step 10: Creating pending queries maps...")
     pending_queries_map = grpo_fast.PendingQueriesMap()
     eval_pending_queries_map = grpo_fast.PendingQueriesMap()
+    logger.info(">>> Step 10 COMPLETE: Pending queries maps created")
     
     # Prepare eval batch if needed
+    logger.info(">>> Step 11: Preparing evaluation batch...")
     if eval_dataset is None:
+        logger.info(">>> No evaluation dataset available")
         eval_batch = None
     else:
         eval_dataset_indices = list(range(min(32, len(eval_dataset))))  # Use 32 eval samples
+        logger.info(f">>> Creating eval batch with {len(eval_dataset_indices)} samples")
         eval_batch = grpo_fast.next_batch(eval_dataset_indices, eval_dataset)
+        logger.info(f">>> Eval batch created with {len(eval_batch.queries)} queries")
+        
+        # Don't insert evaluation prompts here - they'll be inserted during the main loop
+        # when we're ready to process them
+        logger.info(">>> Eval batch prepared, will be used during periodic evaluation")
+    logger.info(">>> Step 11 COMPLETE: Evaluation batch preparation done")
     
     # Create reward function
+    logger.info(">>> Step 12: Creating reward function...")
     reward_fn = grpo_fast.make_reward_fn(args)
+    logger.info(">>> Step 12 COMPLETE: Reward function created")
     
     # Start threads with proper error handling
     stop_event = threading.Event()
@@ -311,6 +336,68 @@ def main(args: grpo_fast.Args, tc: TokenizerConfig, model_config: ModelConfig):
                 "Batch score": f"{data_thread_metrics.get('scores', 0):.3f}",
             })
             pbar.update(1)
+            
+            # Process evaluation results if available (check for periodic evaluation)
+            if (
+                eval_batch is not None
+                and args.local_eval_every > 0
+                and training_step % args.local_eval_every == 0
+            ):
+                # Send new evaluation batch
+                logger.info(f"Step {training_step}: Sending evaluation batch")
+                grpo_fast.split_and_insert_batch(
+                    eval_batch,
+                    training_step,
+                    args.vllm_num_engines,
+                    eval_pending_queries_map,
+                    param_prompt_Q,
+                    generation_configs["eval"],
+                    is_eval=True,
+                )
+                
+                # Try to get evaluation results (non-blocking check)
+                try:
+                    timeout = 0.01 if training_step < args.num_training_steps else 100
+                    eval_result, processed_eval_batch = grpo_fast.accumulate_inference_batches(
+                        evaluation_inference_results_Q,
+                        eval_pending_queries_map,
+                        args,
+                        training_step,
+                        generation_configs["eval"],
+                        timeout=timeout,
+                    )
+                    
+                    if eval_result is not None:
+                        # Process evaluation metrics
+                        eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
+                        eval_decoded_responses = tokenizer.batch_decode(eval_result.responses, skip_special_tokens=True)
+                        eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_result.finish_reasons) / len(
+                            eval_result.finish_reasons
+                        )
+                        
+                        # Calculate rewards
+                        eval_scores, eval_reward_metrics = asyncio.run(
+                            reward_fn(
+                                eval_result.responses,
+                                eval_decoded_responses,
+                                processed_eval_batch if processed_eval_batch else grpo_fast.Batch(queries=[], ground_truths=[], datasets=[], indices=None),
+                                eval_result.finish_reasons,
+                                eval_result.request_info,
+                            )
+                        )
+                        
+                        # Log evaluation metrics
+                        logger.info(
+                            f"Eval at step {training_step}: "
+                            f"Score: {np.array(eval_scores).mean():.3f}, "
+                            f"Seq length: {eval_sequence_lengths.mean():.1f}, "
+                            f"Stop rate: {eval_stop_rate:.2%}"
+                        )
+                        for key, val in eval_reward_metrics.items():
+                            logger.info(f"  eval/{key}: {val}")
+                            
+                except Empty:
+                    logger.debug(f"No evaluation results available at step {training_step}")
             
             # Log statistics periodically
             if training_step % 5 == 0:

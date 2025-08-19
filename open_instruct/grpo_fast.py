@@ -1891,11 +1891,20 @@ def split_and_insert_batch(
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.debug(f"[split_and_insert_batch] Starting with {len(batch.queries)} queries, is_eval={is_eval}")
+
     # Store all prompts in the map first
+    logger.debug(f"[split_and_insert_batch] Inserting {len(batch.queries)} prompts into pending_queries_map")
     pending_queries_map.insert_many(batch.indices, batch.queries, batch.ground_truths, batch.datasets)
+    logger.debug(f"[split_and_insert_batch] Prompts inserted into map")
 
     # Push individual prompts to the queue
+    logger.debug(f"[split_and_insert_batch] Pushing {len(batch.queries)} prompts to queue")
     for i, prompt in enumerate(batch.queries):
+        logger.debug(f"[split_and_insert_batch] Putting prompt {i + 1}/{len(batch.queries)} into queue")
         param_prompt_Q.put(
             PromptRequest(
                 prompt=prompt,
@@ -1905,6 +1914,8 @@ def split_and_insert_batch(
                 is_eval=is_eval,
             )
         )
+        logger.debug(f"[split_and_insert_batch] Prompt {i + 1} put into queue successfully")
+    logger.debug(f"[split_and_insert_batch] All {len(batch.queries)} prompts pushed to queue")
 
 
 def sync_weights_and_prepare_prompts(
