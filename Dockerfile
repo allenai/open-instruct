@@ -59,26 +59,21 @@ RUN curl --silent \
 
 COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
 
-# Install Beaker Gantry user-wide in an isolated venv
-RUN uv tool install --no-cache-dir beaker-gantry
-
-ENV UV_CACHE_DIR=/root/.cache/uv
-
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
 
 # Copy only dependency-related files first
 COPY pyproject.toml uv.lock ./
 
+# Must be before the uv command so that we have .venv in the right place.
+WORKDIR /stage/
+
 # Install dependencies
-RUN --mount=type=cache,target=${UV_CACHE_DIR} \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
+RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --link-mode=hardlink
+    uv sync --frozen --no-install-project --no-cache --link-mode=hardlink
 
 RUN uv run -m nltk.downloader punkt punkt_tab
-
-WORKDIR /stage/
 
 # Copy all application code at the end
 COPY eval eval
