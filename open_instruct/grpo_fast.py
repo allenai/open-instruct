@@ -602,7 +602,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if args.sequence_parallel_size > 1:
             self.mpu = UlyssesSPAttentionHF.register_with_transformers(
                 model_name_or_path=model_config.model_name_or_path,
-                core_attn_implementation="sdpa",
+                core_attn_implementation="flash_attention_2",
                 sequence_parallel_size=args.sequence_parallel_size,
                 max_length=args.max_token_length,
                 micro_batch_size=args.per_device_train_batch_size,
@@ -613,7 +613,7 @@ class PolicyTrainerRayProcess(RayProcess):
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             torch_dtype=torch.bfloat16,
-            attn_implementation="sdpa",
+            attn_implementation="flash_attention_2",
             use_cache=False,
         )
         disable_dropout_in_model(self.policy)
@@ -693,7 +693,7 @@ class PolicyTrainerRayProcess(RayProcess):
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             torch_dtype=torch.bfloat16,
-            attn_implementation="sdpa",
+            attn_implementation="flash_attention_2",
             use_cache=False,
         )
         disable_dropout_in_model(self.ref_policy)
