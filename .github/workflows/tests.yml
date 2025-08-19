@@ -71,6 +71,10 @@ jobs:
           sudo apt-get clean
           sudo rm -rf /var/lib/apt/lists/*
           
+          # Clean up apt cache to save disk space
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          
           # Create symlink so nvcc is available
           ln -s /usr/local/cuda-12.6/bin/nvcc /usr/bin/nvcc || true
           
