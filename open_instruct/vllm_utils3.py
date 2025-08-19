@@ -483,22 +483,40 @@ class LLMRayActor:
 
             # Process completed outputs
             for output in outputs:
-                num_processed += 1
-
                 # Get request metadata
                 base_request_id = output.request_id.split("-")[0] if "-" in output.request_id else output.request_id
-                is_eval = request_metadata.get(base_request_id, {}).get("is_eval", False)
+                is_eval = request_metadata[base_request_id]["is_eval"]
+                dataset_index = request_metadata[base_request_id]["dataset_index"]
 
-                # Create result from output
-                result = _finalize_outputs([output], tracking, None, self.tools)
-
-                try:
-                    if is_eval:
-                        self.eval_results_queue.put(result, timeout=10)
-                    else:
-                        self.results_queue.put(result, timeout=10)
-                except queue.Full:
-                    self.logger.warning("Results queue is full, discarding result.")
+                if not self.tools:
+                    # When not using tools, split the output into individual results
+                    # Each output contains n completions that need to be sent as separate results
+                    for i, completion in enumerate(output.outputs):
+                        num_processed += 1
+                        # Create a new output with just this one completion
+                        single_output = copy.copy(output)
+                        single_output.outputs = [completion]
+                        
+                        # Create result from single completion
+                        result = _process_outputs([single_output], dataset_index=[dataset_index] if dataset_index is not None else None)
+                        
+                        # Put result in appropriate queue
+                        try:
+                            queue_to_use = self.eval_results_queue if is_eval else self.results_queue
+                            queue_to_use.put(result, timeout=10)
+                        except queue.Full:
+                            self.logger.warning("Results queue is full, discarding result.")
+                else:
+                    # Tool mode - process as before
+                    num_processed += 1
+                    result = _finalize_outputs([output], tracking, None, self.tools)
+                    
+                    # Put result in appropriate queue
+                    try:
+                        queue_to_use = self.eval_results_queue if is_eval else self.results_queue
+                        queue_to_use.put(result, timeout=10)
+                    except queue.Full:
+                        self.logger.warning("Results queue is full, discarding result.")
 
                 # Clean up metadata for completed request
                 if base_request_id in request_metadata:
