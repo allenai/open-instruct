@@ -69,7 +69,7 @@ ENV UV_COMPILE_BYTECODE=0 \
 
 RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --no-cache --link-mode=hardlink
+    uv sync --frozen --no-install-project --no-cache
 
 RUN uv run -m nltk.downloader punkt punkt_tab
 
