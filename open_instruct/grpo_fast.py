@@ -427,6 +427,12 @@ class Args:
         assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
             "At least one reward must be applied!"
         )
+        # Ensure we have enough prompts for all VLLM engines
+        if self.num_unique_prompts_rollout < self.vllm_num_engines:
+            raise ValueError(
+                f"num_unique_prompts_rollout ({self.num_unique_prompts_rollout}) must be >= "
+                f"vllm_num_engines ({self.vllm_num_engines}) to avoid empty batches."
+            )
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
@@ -1891,11 +1897,31 @@ def split_and_insert_batch(
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    # Split the batch over the VLLM engines.
-    inference_batch_size = len(batch.queries) // vllm_num_engines
+    # Handle case where we have fewer queries than engines
+    if len(batch.queries) < vllm_num_engines:
+        logging.warning(
+            f"Number of queries ({len(batch.queries)}) is less than number of engines ({vllm_num_engines}). "
+            f"Will distribute single prompts to first {len(batch.queries)} engines."
+        )
+        inference_batch_size = 1
+    else:
+        # Normal case: distribute evenly
+        inference_batch_size = len(batch.queries) // vllm_num_engines
+
     for batch_idx in range(vllm_num_engines):
         start_idx = batch_idx * inference_batch_size
-        end_idx = start_idx + inference_batch_size if batch_idx < vllm_num_engines - 1 else len(batch.queries)
+
+        # For the last engine, take all remaining queries (if any)
+        # For small batches, stop when we run out of queries
+        if batch_idx == vllm_num_engines - 1:
+            end_idx = len(batch.queries)
+        else:
+            end_idx = min(start_idx + inference_batch_size, len(batch.queries))
+
+        # Check for empty batch - this happens when we have fewer queries than engines
+        if start_idx >= end_idx:
+            # No more queries to distribute, skip remaining engines
+            break
 
         sub_batch = batch[start_idx:end_idx]
 
