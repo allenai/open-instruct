@@ -328,7 +328,7 @@ class IFEvalVerifierOld(VerifierFunction):
         func = IF_FUNCTIONS_MAP[func_name]
         non_none_args = {k: v for k, v in constraint.items() if v is not None}
         if not constraint:
-            return VerificationResult(score=float(func(prediction)))
+            return VerificationResult(score=float(func(answer)))
         return VerificationResult(score=float(func(answer, **non_none_args)))
 
 
