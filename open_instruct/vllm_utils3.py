@@ -341,7 +341,7 @@ def add_request(
             llm_engine.add_request(request_id, tokens_prompt, sampling_params)
     else:
         # Standard request format for non-tool mode
-        request_id = f"batch_{training_step}_{dataset_index}"
+        request_id = f"{training_step}_{dataset_index}"
         tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
         llm_engine.add_request(request_id, tokens_prompt, sampling_params)
 
@@ -438,7 +438,7 @@ class LLMRayActor:
             tracking = None
             sampling_params = None
             tokenizer = None
-        self.logger.info(f"[LLMRayActor.process_from_queue] Tool tracking initialized")
+        self.logger.info("[LLMRayActor.process_from_queue] Tool tracking initialized")
 
         # Pre-fill with initial requests
         self.logger.info(
@@ -452,7 +452,7 @@ class LLMRayActor:
                 self.prompt_queue, self.llm_engine, self.tools, timeout=timeout, request_metadata=request_metadata
             )
             self.logger.info(f"[LLMRayActor.process_from_queue] Pre-fill: add_request {i + 1} returned")
-        self.logger.info(f"[LLMRayActor.process_from_queue] === PRE-FILLING COMPLETE ===")
+        self.logger.info("[LLMRayActor.process_from_queue] === PRE-FILLING COMPLETE ===")
 
         self.logger.info("[LLMRayActor.process_from_queue] === MAIN LOOP STARTING ===")
         while True:
@@ -496,10 +496,12 @@ class LLMRayActor:
                         # Create a new output with just this one completion
                         single_output = copy.copy(output)
                         single_output.outputs = [completion]
-                        
+
                         # Create result from single completion
-                        result = _process_outputs([single_output], dataset_index=[dataset_index] if dataset_index is not None else None)
-                        
+                        result = _process_outputs(
+                            [single_output], dataset_index=[dataset_index] if dataset_index is not None else None
+                        )
+
                         # Put result in appropriate queue
                         try:
                             queue_to_use = self.eval_results_queue if is_eval else self.results_queue
@@ -510,7 +512,7 @@ class LLMRayActor:
                     # Tool mode - process as before
                     num_processed += 1
                     result = _finalize_outputs([output], tracking, None, self.tools)
-                    
+
                     # Put result in appropriate queue
                     try:
                         queue_to_use = self.eval_results_queue if is_eval else self.results_queue

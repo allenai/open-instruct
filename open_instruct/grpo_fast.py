@@ -1260,6 +1260,7 @@ def accumulate_inference_batches(
     all_queries = []
     all_ground_truths = []
     all_datasets = []
+    seen_dataset_indices = set()  # Track which indices we've already popped
 
     for i in tqdm(
         range(total_results),
@@ -1279,13 +1280,13 @@ def accumulate_inference_batches(
         if dataset_index is None:
             raise RuntimeError(f"Dataset index is None for result {i}")
 
-        # For the first response of each prompt, get the query data
-        # (we only pop once per unique prompt, not per response)
-        if i % generation_config.n == 0:
+        # Pop query data only once per unique dataset_index
+        if dataset_index not in seen_dataset_indices:
             query, ground_truth, dataset = pending_queries_map.pop(dataset_index)
             all_queries.append(query)
             all_ground_truths.append(ground_truth)
             all_datasets.append(dataset)
+            seen_dataset_indices.add(dataset_index)
 
         results.append(result)
 
@@ -1899,7 +1900,7 @@ def split_and_insert_batch(
     # Store all prompts in the map first
     logger.debug(f"[split_and_insert_batch] Inserting {len(batch.queries)} prompts into pending_queries_map")
     pending_queries_map.insert_many(batch.indices, batch.queries, batch.ground_truths, batch.datasets)
-    logger.debug(f"[split_and_insert_batch] Prompts inserted into map")
+    logger.debug("[split_and_insert_batch] Prompts inserted into map")
 
     # Push individual prompts to the queue
     logger.debug(f"[split_and_insert_batch] Pushing {len(batch.queries)} prompts to queue")
@@ -2513,7 +2514,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     ray.init(dashboard_host="0.0.0.0")
 
     # Create Ray queues.
-    queue_size = (args.async_steps + 1) * args.vllm_num_engines
+    queue_size = (args.async_steps + 1) * args.num_unique_prompts_rollout
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
     evaluation_inference_results_Q = ray_queue.Queue(maxsize=args.vllm_num_engines)
