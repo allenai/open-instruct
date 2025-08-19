@@ -26,9 +26,5 @@ if ! command -v uv &> /dev/null; then
     export PATH="$HOME/.cargo/bin:$PATH"
 fi
 
-# Install Python dependencies
-echo "Installing dependencies with uv..."
-uv sync
-
 # Run the provided script
 bash "$1" "$beaker_user/$image_name"

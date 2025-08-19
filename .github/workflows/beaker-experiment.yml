@@ -35,6 +35,7 @@ concurrency:
 
 env:
   DOCKER_BUILDKIT: "1"
+  UV_LINK_MODE: "hardlink"
 
 jobs:
   launch-experiment:
@@ -114,11 +115,6 @@ jobs:
           echo "Disk space after CUDA install and cleanup:"
           df -h
           
-      - name: Install dependencies
-        run: |
-          # Install development dependencies needed for mason.py
-          uv sync --frozen --no-install-project
-
       - name: Delete huge unnecessary tools folder
         run: |
           echo "Disk space before cleanup:"
