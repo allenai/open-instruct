@@ -57,6 +57,6 @@ uv run python mason.py \
         --with_tracking \
         --vllm_enable_prefix_caching \
         --oe_eval_max_length 32768 \
-        --oe_eval_tasks "codex_humanevalplus:0-shot-chat-v1::tulu-thinker,mbppplus:0-shot-chat::tulu-thinker,livecodebench_codegeneration::tulu-thinker" \
+        --oe_eval_tasks "codex_humanevalplus:0-shot-chat::tulu-thinker,mbppplus:0-shot-chat::tulu-thinker,livecodebench_codegeneration::tulu-thinker" \
         --dataset_skip_cache True \
 	--push_to_hub False
