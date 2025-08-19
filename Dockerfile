@@ -59,8 +59,10 @@ RUN curl --silent \
 
 COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
 
+WORKDIR /stage/
+
 # Install Beaker Gantry user-wide in an isolated venv
-RUN uv tool install --no-cache-dir beaker-gantry
+RUN uv tool install --no-cache-dir beaker-gantry==3.0.0
 
 ENV UV_CACHE_DIR=/root/.cache/uv
 
@@ -77,8 +79,6 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     uv sync --frozen --no-install-project --link-mode=copy
 
 RUN uv run -m nltk.downloader punkt punkt_tab
-
-WORKDIR /stage/
 
 # Copy all application code at the end
 COPY eval eval
