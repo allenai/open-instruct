@@ -1,10 +1,6 @@
 name: Quality
 
 on:
-  push:
-    branches:
-      - main
-      - v*-release
   pull_request:
     branches:
       - main
