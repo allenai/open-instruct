@@ -1,10 +1,6 @@
 name: Tests
 
 on:
-  push:
-    branches:
-      - main
-      - v*-release
   pull_request:
     branches:
       - main
@@ -15,7 +11,6 @@ jobs:
   unit-tests:
     name: Run unit tests
     runs-on: ubuntu-latest
-    if: github.event_name != 'push' || github.ref != 'refs/heads/main'
     steps:
     
       - name: Delete huge unnecessary tools folder

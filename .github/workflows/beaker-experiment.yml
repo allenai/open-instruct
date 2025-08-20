@@ -1,21 +1,6 @@
 name: Beaker Experiment Launch
 
 on:
-  push:
-    # Run this workflow anytime a push updates one of the files in the image's directory
-    # (other than the README), and anytime there's a new release tag for this image.
-    paths:
-      - 'mason.py'
-      - 'open_instruct/**'
-      - '!open_instruct/README.md'
-      - 'requirements.txt'
-      - 'Dockerfile'
-      - '.github/workflows/push-image.yml'
-      # Note, add .olmo dockerfile + requirements if adding auto build to those.
-
-    # But only on pushes to main.
-    branches: [main]
-
   merge_group:
 
   # Adding a comment to trigger a run.
@@ -41,12 +26,6 @@ jobs:
     name: Launch Beaker Experiment
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    # Prevent duplicate runs when using merge queue:
-    # - When a PR is merged via merge queue, GitHub triggers both 'push' and 'merge_group' events
-    # - This condition skips the 'push' trigger for the main branch (since merge_group already validated)
-    # - Push events to other branches still run normally
-    # - The 'merge_group' trigger handles pre-merge validation
-    if: github.event_name != 'push' || github.ref != 'refs/heads/main'
 
     steps:
       - name: Checkout repository
