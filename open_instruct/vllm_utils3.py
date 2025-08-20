@@ -446,9 +446,9 @@ class LLMRayActor:
             tokenizer = None
         self.logger.info("[LLMRayActor.process_from_queue] Tool tracking initialized")
 
-        # Pre-fill with initial requests
+        # Pre-fill with initial requests using a short timeout to avoid blocking
         self.logger.info(
-            f"[LLMRayActor.process_from_queue] === PRE-FILLING === with {self.inference_batch_size} initial requests"
+            f"[LLMRayActor.process_from_queue] === PRE-FILLING === with up to {self.inference_batch_size} initial requests"
         )
         prefill_pbar = tqdm(
             range(self.inference_batch_size),
@@ -456,17 +456,27 @@ class LLMRayActor:
             total=self.inference_batch_size,
             leave=False,
         )
+        prefilled_count = 0
         for i in prefill_pbar:
             self.logger.info(
                 f"[LLMRayActor.process_from_queue] Pre-fill: Calling add_request {i + 1}/{self.inference_batch_size}"
             )
-            add_request(
-                self.prompt_queue, self.llm_engine, self.tools, timeout=timeout, request_metadata=request_metadata
-            )
+            # Use a short timeout for pre-fill to avoid blocking
+            add_request(self.prompt_queue, self.llm_engine, self.tools, timeout=0.1, request_metadata=request_metadata)
+            if self.llm_engine.has_unfinished_requests():
+                prefilled_count += 1
             self.logger.info(f"[LLMRayActor.process_from_queue] Pre-fill: add_request {i + 1} returned")
-            prefill_pbar.set_postfix({"loaded": i + 1})
+            prefill_pbar.set_postfix({"loaded": prefilled_count})
+            # If we couldn't get a request quickly, start processing with what we have
+            if prefilled_count > 0 and prefilled_count < (i + 1):
+                self.logger.info(
+                    f"[LLMRayActor.process_from_queue] Pre-fill: Only got {prefilled_count} requests, starting processing"
+                )
+                break
         prefill_pbar.close()
-        self.logger.info("[LLMRayActor.process_from_queue] === PRE-FILLING COMPLETE ===")
+        self.logger.info(
+            f"[LLMRayActor.process_from_queue] === PRE-FILLING COMPLETE with {prefilled_count} requests ==="
+        )
 
         self.logger.info("[LLMRayActor.process_from_queue] === MAIN LOOP STARTING ===")
         while True:

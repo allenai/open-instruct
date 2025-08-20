@@ -1377,6 +1377,7 @@ def data_preparation_thread(
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
+        # Expand batch to match the number of responses (each prompt generated n completions)
         if args.num_samples_per_prompt_rollout > 1:
             batch = Batch(
                 queries=repeat_each(batch.queries, args.num_samples_per_prompt_rollout),
