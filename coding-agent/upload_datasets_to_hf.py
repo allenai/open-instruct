@@ -205,7 +205,9 @@ def create_multi_step_dataset(entries: List[Dict[str, Any]], yaml_ground_truth: 
         # Filter out training flags while preserving order
         conversation = []
         for msg in messages:
-            if not msg.get("train", True):  # Include if train is False or not present
+            # Include the message if it's not marked as a training-only message.
+            # If the 'train' flag is absent, treat it as False (i.e., include).
+            if not msg.get("train", False):  # Include if train is False or not present
                 conversation.append({
                     "role": msg["role"],
                     "content": msg["content"]

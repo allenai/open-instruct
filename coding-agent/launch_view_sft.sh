@@ -1,9 +1,10 @@
 exp_name=rlvr_code_view_tool_sft
     python mason.py \
         --cluster ai2/jupiter-cirrascale-2 \
-        --image saurabhs/open-coding-agent  \
+        --resumable \
+        --image nathanl/open_instruct_auto  \
         --workspace ai2/open-coding-agent-dev \
-        --priority high \
+        --priority urgent \
         --preemptible \
         --num_nodes 4 \
         --gs_model_name saurabhs/ethans-Qwen3-8B-nothink \
@@ -15,21 +16,21 @@ exp_name=rlvr_code_view_tool_sft
         --exp_name ${exp_name} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 4 \
-        --num_unique_prompts_rollout 16 \
-        --num_mini_batches 1 \
+        --num_unique_prompts_rollout 4 \
+        --num_mini_batches 4 \
         --num_epochs 1 \
-        --learning_rate 5e-7 \
+        --learning_rate 1e-6 \
         --per_device_train_batch_size 1 \
         --output_dir /output \
         --kl_estimator kl3 \
-        --dataset_mixer_list saurabh5/rlvr-code-view-tool 1.0 \
+        --dataset_mixer_list saurabh5/rlvr-code-view-tool-new 1.0 \
         --dataset_mixer_list_splits train \
-        --dataset_mixer_eval_list saurabh5/rlvr-code-view-tool 16 \
+        --dataset_mixer_eval_list saurabh5/rlvr-code-view-tool-new 8 \
         --dataset_mixer_eval_list_splits train \
-        --max_token_length 16384 \
-        --max_prompt_token_length 16384 \
-        --response_length 16384 \
-        --pack_length 32768 \
+        --max_token_length 4096 \
+        --max_prompt_token_length 4096 \
+        --response_length 8192 \
+        --pack_length 12288 \
         --model_name_or_path  /weka/oe-adapt-default/ethans/llm-weights/Qwen3.2-8B-nothink \
         --chat_template_name chatml \
         --non_stop_penalty False \
@@ -39,8 +40,9 @@ exp_name=rlvr_code_view_tool_sft
         --total_episodes 10000000 \
         --deepspeed_stage 3 \
         --num_learners_per_node 8 8 \
-        --vllm_num_engines 16 \
-        --vllm_tensor_parallel_size 1 \
+        --vllm_num_engines 8 \
+        --vllm_tensor_parallel_size 2 \
+        --backend_timeout 180 \
         --lr_scheduler_type constant \
         --apply_verifiable_reward true \
         --code_api_url \$CODE_API_URL/test_program \
@@ -52,5 +54,6 @@ exp_name=rlvr_code_view_tool_sft
         --with_tracking \
         --oe_eval_max_length 16384 \
         --tools code_view \
+        --vllm_enable_prefix_caching \
         --max_tool_calls 15 \
         --vllm_top_p 0.95 

@@ -336,9 +336,9 @@ class Args:
     """whether to enforce eager mode for vLLM -- slow inference but needed for multi-node"""
     vllm_sync_backend: str = "nccl"
     """DeepSpeed -> vLLM weight sync backend"""
-    vllm_gpu_memory_utilization: float = 0.9
+    vllm_gpu_memory_utilization: float = 0.7
     """vLLM GPU memory utilization"""
-    vllm_enable_prefix_caching: bool = False
+    vllm_enable_prefix_caching: bool = True
     """whether to enable prefix caching"""
     vllm_top_p: float = 1.0
     """vLLM top p for nucleus sampling"""
@@ -1250,6 +1250,9 @@ def accumulate_inference_batches(
     all_queries = []
     all_ground_truths = []
     all_datasets = []
+    successful_engines = 0
+    failed_engines = []
+
     for i in tqdm(
         range(args.vllm_num_engines),
         total=args.vllm_num_engines,
@@ -1257,7 +1260,23 @@ def accumulate_inference_batches(
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     ):
-        result = inference_results_Q.get(timeout=timeout)
+        try:
+            # Use per-engine timeout that scales with number of engines
+            per_engine_timeout = (timeout or 60.0) / max(1, args.vllm_num_engines // 4)
+            result = inference_results_Q.get(timeout=per_engine_timeout)
+            successful_engines += 1
+        except Empty:
+            logger.warning(
+                f"[Data Preparation Thread] Timeout waiting for inference results from engine {i} after {per_engine_timeout}s"
+            )
+            failed_engines.append(i)
+            # If too many engines fail, raise immediately
+            if len(failed_engines) > args.vllm_num_engines // 2:
+                logger.error(
+                    f"[Data Preparation Thread] Too many engines failed ({len(failed_engines)}/{args.vllm_num_engines}), aborting"
+                )
+                raise
+            continue  # Try to collect from other engines
 
         if isinstance(result, ShutdownSentinel):
             return result, None
@@ -1292,6 +1311,16 @@ def accumulate_inference_batches(
         all_queries.extend(batch_queries)
         all_ground_truths.extend(batch_ground_truths)
         all_datasets.extend(batch_datasets)
+
+    # Check if we got enough results to proceed
+    if not results:
+        logger.error("[Data Preparation Thread] No results collected from any engine")
+        raise Empty("No results from any engine")
+
+    if failed_engines:
+        logger.warning(
+            f"[Data Preparation Thread] Successfully collected from {successful_engines}/{args.vllm_num_engines} engines. Failed engines: {failed_engines}"
+        )
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1358,12 +1387,53 @@ def data_preparation_thread(
     for training_step in range(resume_training_step, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
-            result, batch = accumulate_inference_batches(
-                inference_results_Q, pending_queries_map, args, training_step, generation_config
-            )
-            if isinstance(result, ShutdownSentinel):
-                logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
-                return
+            # Calculate timeout based on tool usage configuration
+            # With tools, inference can take much longer
+            base_timeout = 90.0
+            if hasattr(args, "tools") and args.tools:
+                # Increase timeout based on max_tool_calls
+                max_tool_calls = getattr(args, "max_tool_calls", [5])
+                # Get the maximum value from the list (could be per-tool or single value)
+                max_calls_value = max(max_tool_calls) if max_tool_calls else 5
+                # Each tool call can take ~10-20 seconds, so scale timeout appropriately
+                tool_timeout_factor = min(max_calls_value * 15, 300)  # Cap at 5 minutes extra
+                timeout = base_timeout + tool_timeout_factor
+                logger.info(
+                    f"[Data Preparation Thread] Using extended timeout of {timeout}s for tool-based inference (max_tool_calls={max_calls_value})"
+                )
+            else:
+                timeout = base_timeout
+
+            try:
+                result, batch = accumulate_inference_batches(
+                    inference_results_Q, pending_queries_map, args, training_step, generation_config, timeout=timeout
+                )
+                if isinstance(result, ShutdownSentinel):
+                    logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
+                    return
+            except Empty:
+                logger.error(
+                    f"[Data Preparation Thread] Failed to get inference results for step {training_step} - engines may be stuck"
+                )
+                # Try one more time with even longer timeout before giving up
+                logger.warning(f"[Data Preparation Thread] Retrying with extended timeout of {timeout * 2}s")
+                try:
+                    result, batch = accumulate_inference_batches(
+                        inference_results_Q,
+                        pending_queries_map,
+                        args,
+                        training_step,
+                        generation_config,
+                        timeout=timeout * 2,
+                    )
+                    if isinstance(result, ShutdownSentinel):
+                        logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
+                        return
+                except Empty:
+                    logger.error(
+                        f"[Data Preparation Thread] Second attempt failed for step {training_step} - skipping this batch"
+                    )
+                    continue
 
         getting_response_time = timer.duration
 
@@ -2013,7 +2083,7 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
                 logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
                 return None, {}, num_total_tokens
             try:
-                packed_data = packed_sequences_Q.get(timeout=30.0)
+                packed_data = packed_sequences_Q.get(timeout=120.0)
                 break
             except Empty:
                 logger.warning("[Main Thread] Timeout waiting for packed sequences. Retrying...")
@@ -2032,10 +2102,25 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
 def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
+
+    # Calculate timeout based on tool configuration
+    base_process_timeout = 180
+    if hasattr(args, "tools") and args.tools:
+        max_tool_calls = getattr(args, "max_tool_calls", [5])
+        # Get the maximum value from the list (could be per-tool or single value)
+        max_calls_value = max(max_tool_calls) if max_tool_calls else 5
+        # Tool processing can take significantly longer
+        process_timeout = base_process_timeout + (max_calls_value * 20)  # Add 20s per max tool call
+        logger.info(
+            f"[Generate Thread] Using extended process timeout of {process_timeout}s for tool-based generation"
+        )
+    else:
+        process_timeout = base_process_timeout
+
     while not stop_event.is_set():
         with Timer("🔥 Generation time") as timer:
             processed_results = ray_get_with_progress(
-                [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
+                [engine.process_from_queue.remote(timeout=process_timeout) for engine in vllm_engines],
                 desc="[Generate Thread] Waiting for vLLM engines to process",
                 enable=args.verbose,
             )

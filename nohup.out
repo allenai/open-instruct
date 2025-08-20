@@ -356,3 +356,13 @@ INFO:     127.0.0.1:53832 - "POST /view_file HTTP/1.1" 200 OK
 HEAD is now at db5063c Bump the python-packages group with 5 updates (#2779)
 	Set cwd to /weka/oe-adapt-default/saurabhs/repos/open-instruct-3/open_instruct/code/repos/starlette and checked out db5063c2...
 INFO:     127.0.0.1:53844 - "POST /view_file HTTP/1.1" 200 OK
+INFO:     Started server process [280915]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:1234 (Press CTRL+C to quit)
+INFO:     Started server process [883898]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:1234 (Press CTRL+C to quit)
+INFO:     127.0.0.1:48576 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57314 - "GET /health HTTP/1.1" 200 OK

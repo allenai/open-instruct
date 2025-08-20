@@ -14,7 +14,13 @@
       "Bash(uv pip show:*)",
       "Bash(uv sync:*)",
       "Bash(uv pip uninstall:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(grep:*)",
+      "Bash(bash:*)",
+      "Bash(sed:*)",
+      "Bash(awk:*)",
+      "WebSearch",
+      "WebFetch(domain:docs.ray.io)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"
