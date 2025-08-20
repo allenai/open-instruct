@@ -1400,11 +1400,17 @@ def data_preparation_thread(
                     result.masks[i].append(1)  # never mask the eos token for now?
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
+            logger.info(
+                f"[Data Preparation Thread] Step {training_step}: Decoding {len(result.responses)} responses and queries"
+            )
             decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
             decoded_queries = tokenizer.batch_decode(batch.queries, skip_special_tokens=True)
             decoded_queries = [extract_user_query(query) for query in decoded_queries]
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
                 result.finish_reasons
+            )
+            logger.info(
+                f"[Data Preparation Thread] Step {training_step}: Decoding complete - stop_rate: {stop_rate:.2%}"
             )
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
@@ -1488,6 +1494,12 @@ def data_preparation_thread(
                     need_to_fill_prompt = original_prompt_cnt - current_prompt_cnt
                     k = args.num_samples_per_prompt_rollout
 
+                    logger.info(
+                        f"[Data Preparation Thread] Step {training_step}: Fill completions - "
+                        f"original_prompts: {original_prompt_cnt}, current_prompts: {current_prompt_cnt}, "
+                        f"need_to_fill: {need_to_fill_prompt}"
+                    )
+
                     if need_to_fill_prompt > 0 and current_prompt_cnt > 0:
                         scores_matrix = scores.reshape(current_prompt_cnt, k)
                         stds = scores_matrix.std(axis=1) + 1e-8
@@ -1518,17 +1530,25 @@ def data_preparation_thread(
 
                         finish_reasons += [finish_reasons[i] for i in sampled_indices]
 
-                        print(
-                            f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses"
+                        logger.info(
+                            f"[Data Preparation Thread] Step {training_step}: Filled {len(sampled_indices)} sequences "
+                            f"(sampled from {need_to_fill_prompt} prompts)"
                         )
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
+            logger.info(
+                f"[Data Preparation Thread] Step {training_step}: Packing {len(responses)} sequences "
+                f"with pack_length={args.pack_length}"
+            )
             packed_sequences = pack_sequences(
                 queries=batch.queries,
                 responses=responses,
                 masks=masks,
                 pack_length=args.pack_length,
                 pad_token_id=tokenizer.pad_token_id,
+            )
+            logger.info(
+                f"[Data Preparation Thread] Step {training_step}: Packed into {len(packed_sequences.query_responses)} sequences"
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
             # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
@@ -1548,7 +1568,8 @@ def data_preparation_thread(
                 shortfall = args.world_size - len(packed_sequences.query_responses)
                 if shortfall > 0:
                     logger.warning(
-                        f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this."
+                        f"[Data Preparation Thread] Step {training_step}: Padding {shortfall} sequences for world size. "
+                        f"In future, you should adjust your compute this."
                     )
                     # construct "dummy" sequences for padding out the world size
                     dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
@@ -1570,6 +1591,10 @@ def data_preparation_thread(
             B = (
                 len(packed_sequences.query_responses) // args.world_size
             )  # essentially doing `drop_last=True`, which is fine.
+            logger.info(
+                f"[Data Preparation Thread] Step {training_step}: Preparing collated data for {args.world_size} workers, "
+                f"batch_size_per_worker: {B}"
+            )
             collated_data = []
             for i in range(args.world_size):
                 per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
@@ -1700,6 +1725,10 @@ def data_preparation_thread(
             )
 
         # Put the packed sequences and metrics into the output queue
+        logger.info(
+            f"[Data Preparation Thread] Step {training_step}: Putting data into queue - "
+            f"responses: {len(responses)}, new_tokens: {num_new_tokens}, batch_size_per_worker: {B}"
+        )
         packed_sequences_Q.put(
             {
                 "packed_sequences": packed_sequences,  # for debugging purposes
@@ -1710,6 +1739,7 @@ def data_preparation_thread(
                 "B": B,
             }
         )
+        logger.info(f"[Data Preparation Thread] Step {training_step}: Successfully queued data for training")
 
 
 def setup_runtime_variables(args: Args) -> Args:

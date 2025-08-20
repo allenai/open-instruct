@@ -60,6 +60,7 @@ def _init_tool_tracking():
         "concat_outputs": {},
         "masks": defaultdict(list),
         "pending_tool_futures": {},
+        "sampling_params": {},  # Store sampling params per request
     }
 
 
@@ -318,11 +319,16 @@ def add_request(
     if tools:
         # Need n=1 for individual tool tracking.
         sampling_params = copy.deepcopy(request.generation_config)
+        original_n = request.generation_config.n  # Store original n value
         sampling_params.n = 1
-        for j in range(request.generation_config.n)
-            llm_engine.add_request(f"{request_id-{j}", tokens_prompt, sampling_params)
+        for j in range(original_n):
+            llm_engine.add_request(f"{request_id}-{j}", tokens_prompt, sampling_params)
+        # Store original_n in sampling_params for tracking
+        sampling_params.original_n = original_n
+        return request_id, sampling_params  # Return for tracking
     else:
         llm_engine.add_request(request_id, tokens_prompt, request.generation_config)
+        return request_id, request.generation_config  # Return for tracking
 
 
 class LLMRayActor:
@@ -381,7 +387,6 @@ class LLMRayActor:
             raise ValueError("inference_batch_size must be specified.")
         self.inference_batch_size = inference_batch_size
         self.request_metadata = {}  # Track request metadata by ID
-        self.sampling_params = None  # Will be set from first request
 
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
@@ -393,6 +398,7 @@ class LLMRayActor:
         num_processed = 0
 
         tracking = _init_tool_tracking() if self.tools else None
+        tokenizer = self.llm_engine.get_tokenizer() if self.tools else None
 
         prefilled_count = 0
         for i in tqdm(
@@ -401,7 +407,19 @@ class LLMRayActor:
             total=self.inference_batch_size,
             leave=False,
         ):
-            add_request(self.prompt_queue, self.llm_engine, self.tools, timeout=0.1, request_metadata=request_metadata)
+            result = add_request(
+                self.prompt_queue, self.llm_engine, self.tools, timeout=0.1, request_metadata=self.request_metadata
+            )
+            if result and tracking:
+                request_id, sampling_params = result
+                # Store sampling params for all sub-requests if using tools
+                if self.tools:
+                    # Store for each sub-request created (with -0, -1, etc. suffix)
+                    original_n = getattr(sampling_params, "original_n", 1)
+                    for j in range(original_n):
+                        tracking["sampling_params"][f"{request_id}-{j}"] = sampling_params
+                elif tracking:  # Non-tool mode but still need tracking
+                    tracking["sampling_params"][request_id] = sampling_params
             if self.llm_engine.has_unfinished_requests():
                 prefilled_count += 1
             # If we couldn't get a request quickly, start processing with what we have
@@ -418,12 +436,12 @@ class LLMRayActor:
             if should_stop and self.inflight_updates:
                 return num_processed
 
-            outputs = self._step_engine(tracking, sampling_params, tokenizer)
+            outputs = self._step_engine(tracking, tokenizer)
 
             for output in outputs:
                 base_request_id = output.request_id.split("-")[0] if "-" in output.request_id else output.request_id
-                is_eval = request_metadata[base_request_id]["is_eval"]
-                dataset_index = request_metadata[base_request_id]["dataset_index"]
+                is_eval = self.request_metadata[base_request_id]["is_eval"]
+                dataset_index = self.request_metadata[base_request_id]["dataset_index"]
                 num_processed += 1
                 result = _finalize_outputs([output], tracking, dataset_index, self.tools)
 
@@ -433,13 +451,27 @@ class LLMRayActor:
                 except queue.Full:
                     self.logger.warning("Results queue is full, discarding result.")
 
-                request_metadata.pop(base_request_id, None)
+                self.request_metadata.pop(base_request_id, None)
 
                 # Only add new requests if not in "stop adding" mode
                 if not should_stop:
-                    add_request(
-                        self.prompt_queue, self.llm_engine, self.tools, timeout=0.1, request_metadata=request_metadata
+                    result = add_request(
+                        self.prompt_queue,
+                        self.llm_engine,
+                        self.tools,
+                        timeout=0.1,
+                        request_metadata=self.request_metadata,
                     )
+                    if result and tracking:
+                        request_id, sampling_params = result
+                        # Store sampling params for all sub-requests if using tools
+                        if self.tools:
+                            # Store for each sub-request created (with -0, -1, etc. suffix)
+                            original_n = getattr(sampling_params, "original_n", 1)
+                            for j in range(original_n):
+                                tracking["sampling_params"][f"{request_id}-{j}"] = sampling_params
+                        elif tracking:  # Non-tool mode but still need tracking
+                            tracking["sampling_params"][request_id] = sampling_params
 
             if should_stop and not self.inflight_updates:
                 pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
@@ -452,14 +484,14 @@ class LLMRayActor:
         self.logger.info(f"[LLMRayActor] process_from_queue exiting, processed {num_processed} requests")
         return num_processed
 
-    def _step_engine(self, tracking, sampling_params, tokenizer):
+    def _step_engine(self, tracking, tokenizer):
         """Unified processing for both tool and non-tool generation.
 
         Returns:
             List of completed outputs.
         """
         if tracking and tracking.get("pending_tool_futures"):
-            self._poll_tool_futures(tracking, sampling_params, tokenizer)
+            self._poll_tool_futures(tracking, tokenizer)
 
         outputs = []
         if self.llm_engine.has_unfinished_requests():
@@ -467,6 +499,8 @@ class LLMRayActor:
 
             for output in step_outputs:
                 if output.finished:
+                    # Get sampling params for this request from tracking
+                    sampling_params = tracking["sampling_params"].get(output.request_id) if tracking else None
                     result = _handle_output(
                         output, self.tools, tracking, sampling_params, self.max_tool_calls, self.executor
                     )
@@ -475,7 +509,7 @@ class LLMRayActor:
 
         return outputs
 
-    def _poll_tool_futures(self, tracking, sampling_params, tokenizer):
+    def _poll_tool_futures(self, tracking, tokenizer):
         """Poll and handle completed tool executions."""
         if not self.tools or not tracking["pending_tool_futures"]:
             return
@@ -511,19 +545,27 @@ class LLMRayActor:
                 can_make_new_request = True
 
             # Edge case 2: clip against per-request max_tokens
-            remaining = sampling_params.max_tokens - len(tracking["masks"][req_id])
-            if remaining <= 0:
-                tool_output_token_ids = []
-            elif len(tool_output_token_ids) > remaining:
-                tool_output_token_ids = tool_output_token_ids[:remaining]
+            # Get sampling params for this request
+            req_sampling_params = tracking["sampling_params"].get(req_id)
+            if req_sampling_params:
+                remaining = req_sampling_params.max_tokens - len(tracking["masks"][req_id])
+                if remaining <= 0:
+                    tool_output_token_ids = []
+                elif len(tool_output_token_ids) > remaining:
+                    tool_output_token_ids = tool_output_token_ids[:remaining]
 
             tracking["concat_outputs"][req_id].outputs[0].token_ids.extend(tool_output_token_ids)
             tracking["masks"][req_id].extend([0] * len(tool_output_token_ids))
-            new_sample_tokens = sampling_params.max_tokens - len(tracking["masks"][req_id])
-            can_make_new_request = can_make_new_request and new_sample_tokens > 0
+
+            if req_sampling_params:
+                new_sample_tokens = req_sampling_params.max_tokens - len(tracking["masks"][req_id])
+                can_make_new_request = can_make_new_request and new_sample_tokens > 0
+            else:
+                new_sample_tokens = 0
+                can_make_new_request = False
 
             if can_make_new_request:
-                new_sampling_params = copy.deepcopy(sampling_params)
+                new_sampling_params = copy.deepcopy(req_sampling_params)
                 new_sampling_params.max_tokens = new_sample_tokens
 
                 try:
