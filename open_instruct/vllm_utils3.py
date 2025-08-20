@@ -298,14 +298,9 @@ class ActorManager:
 
 
 def add_request(
-    prompt_queue: queue.Queue, llm_engine: vllm.LLMEngine, tools, timeout: float = 60.0, request_metadata: dict = None
+    request, llm_engine: vllm.LLMEngine, tools, request_metadata: dict = None
 ):
-    """Get a request from the queue and add it to the LLM engine."""
-    try:
-        request = prompt_queue.get(timeout=timeout)
-    except queue.Empty:
-        return
-
+    """Add a request to the LLM engine."""
     prefix = "eval" if request.is_eval else "train"
     request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
     base_metadata = {
@@ -399,21 +394,20 @@ class LLMRayActor:
         tracking = _init_tool_tracking() if self.tools else None
         tokenizer = self.llm_engine.get_tokenizer() if self.tools else None
 
-        prefilled_count = 0
         for i in tqdm(
             range(self.inference_batch_size),
             desc="[vLLM] Pre-filling requests",
             total=self.inference_batch_size,
             leave=False,
         ):
-            add_request(
-                self.prompt_queue, self.llm_engine, self.tools, timeout=0.1, request_metadata=self.request_metadata
-            )
-            if self.llm_engine.has_unfinished_requests():
-                prefilled_count += 1
-            # If we couldn't get a request quickly, start processing with what we have
-            if prefilled_count > 0 and prefilled_count < (i + 1):
-                break
+            try:
+                request = self.prompt_queue.get(timeout=0.1)
+                add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
+            except queue.Empty:
+                # If we couldn't get a request quickly and have some requests, start processing
+                if self.llm_engine.has_unfinished_requests():
+                    break
+                # Otherwise continue trying to get more requests
 
         while True:
             should_stop_ref = self.actor_manager.should_stop.remote()
@@ -442,15 +436,12 @@ class LLMRayActor:
 
                 self.request_metadata.pop(base_request_id, None)
 
-                # Only add new requests if not in "stop adding" mode
                 if not should_stop:
-                    add_request(
-                        self.prompt_queue,
-                        self.llm_engine,
-                        self.tools,
-                        timeout=0.1,
-                        request_metadata=self.request_metadata,
-                    )
+                    try:
+                        request = self.prompt_queue.get(timeout=0.1)
+                        add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
+                    except queue.Empty:
+                        pass  # No new request available, continue processing
 
             if should_stop and not self.inflight_updates:
                 pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
@@ -478,13 +469,11 @@ class LLMRayActor:
 
             for output in step_outputs:
                 if output.finished:
-                    # Get sampling params for this request from metadata
-                    sampling_params = self.request_metadata.get(output.request_id, {}).get("sampling_params")
+                    sampling_params = self.request_metadata[output.request_id]["sampling_params"]
                     result = _handle_output(
                         output, self.tools, tracking, sampling_params, self.max_tool_calls, self.executor
                     )
-                    if result is not None:
-                        outputs.append(result)
+                    outputs.append(result)
 
         return outputs
 
@@ -524,8 +513,7 @@ class LLMRayActor:
                 can_make_new_request = True
 
             # Edge case 2: clip against per-request max_tokens
-            # Get sampling params for this request from metadata
-            req_sampling_params = self.request_metadata.get(req_id, {}).get("sampling_params")
+            req_sampling_params = self.request_metadata[req_id]["sampling_params"]
             if req_sampling_params:
                 remaining = req_sampling_params.max_tokens - len(tracking["masks"][req_id])
                 if remaining <= 0:
