@@ -463,10 +463,10 @@ class LLMRayActor:
                     self.prompt_queue, self.llm_engine, self.tools, timeout=0.1, request_metadata=request_metadata
                 )
 
-            pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
-            if not self.llm_engine.has_unfinished_requests() and pending_count == 0:
-                break
+            # Continue processing - don't exit when no unfinished requests
+            # Only exit when explicitly told to stop via actor_manager
 
+        self.logger.info(f"[LLMRayActor] process_from_queue exiting, processed {num_processed} requests")
         return num_processed
 
     def _step_engine(self, tracking, sampling_params, tokenizer):

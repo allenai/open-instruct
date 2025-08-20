@@ -1973,6 +1973,7 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
                 enable=args.verbose,
             )
             num_processed = sum(int(result) for result in processed_results)
+            logger.info(f"[Generate Thread] vLLM engines returned, processed {num_processed} total requests")
             # Suppress timing output if nothing was processed
             if num_processed == 0:
                 timer.noop = True
