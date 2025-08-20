@@ -349,12 +349,14 @@ class LLMRayActor:
         eval_results_queue=None,
         actor_manager=None,
         inference_batch_size: Optional[int] = None,
+        inflight_updates: bool = False,
         **kwargs,
     ):
         self.logger = logging.getLogger(self.__class__.__name__)
 
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
+        self.inflight_updates = inflight_updates
 
         if self.tools:
             self.executor = ThreadPoolExecutor(max_workers=20)
@@ -410,6 +412,7 @@ class LLMRayActor:
             tokenizer = None
 
         prefilled_count = 0
+        stop_adding_requests = False
         for i in tqdm(
             range(self.inference_batch_size),
             desc="[vLLM] Pre-filling requests",
@@ -422,6 +425,11 @@ class LLMRayActor:
             # If we couldn't get a request quickly, start processing with what we have
             if prefilled_count > 0 and prefilled_count < (i + 1):
                 break
+
+        # If inflight_updates is True, return immediately
+        if self.inflight_updates:
+            return num_processed
+
         while True:
             iteration += 1
 
@@ -459,12 +467,19 @@ class LLMRayActor:
                 if base_request_id in request_metadata:
                     del request_metadata[base_request_id]
 
-                add_request(
-                    self.prompt_queue, self.llm_engine, self.tools, timeout=0.1, request_metadata=request_metadata
-                )
+                # Only add new requests if not in "stop adding" mode
+                if not stop_adding_requests:
+                    add_request(
+                        self.prompt_queue, self.llm_engine, self.tools, timeout=0.1, request_metadata=request_metadata
+                    )
 
-            # Continue processing - don't exit when no unfinished requests
-            # Only exit when explicitly told to stop via actor_manager
+            # When inflight_updates is False, stop adding new requests but wait for completion
+            if not self.inflight_updates:
+                stop_adding_requests = True
+                # Check if we can exit: no unfinished requests and no pending tool futures
+                pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
+                if not self.llm_engine.has_unfinished_requests() and pending_count == 0:
+                    break
 
         self.logger.info(f"[LLMRayActor] process_from_queue exiting, processed {num_processed} requests")
         return num_processed
@@ -632,6 +647,7 @@ def create_vllm_engines(
     results_queue=None,
     eval_results_queue=None,
     actor_manager=None,
+    inflight_updates: bool = False,
 ) -> list[LLMRayActor]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
@@ -711,6 +727,7 @@ def create_vllm_engines(
                 tools=tools,
                 max_tool_calls=max_tool_calls_dict,
                 inference_batch_size=inference_batch_size,
+                inflight_updates=inflight_updates,
             )
         )
 

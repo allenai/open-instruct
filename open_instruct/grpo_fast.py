@@ -330,6 +330,8 @@ class Args:
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
     vllm_num_engines: int = 1
     """number of vLLM Engines, set to 0 to disable vLLM"""
+    inflight_updates: bool = False
+    """If True, return immediately even with pending work. If False, wait for all work to complete before exiting."""
     vllm_tensor_parallel_size: int = 1
     """tensor parallel size of vLLM Engine for multi-GPU inference"""
     vllm_enforce_eager: bool = False
@@ -1831,6 +1833,7 @@ def create_model_and_optimizer(
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
+        inflight_updates=args.inflight_updates,
     )
 
     resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
