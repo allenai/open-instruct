@@ -415,6 +415,9 @@ class LLMRayActor:
             else:
                 should_stop = False
             if should_stop and self.inflight_updates:
+                self.logger.info(
+                    f"[LLMRayActor] Returning early due to should_stop={should_stop} and inflight_updates={self.inflight_updates}, processed {num_processed} requests"
+                )
                 return num_processed
 
             outputs = self._step_engine(tracking, tokenizer)
@@ -449,7 +452,7 @@ class LLMRayActor:
                     )
                     break
 
-        self.logger.info(f"[LLMRayActor] process_from_queue exiting, processed {num_processed} requests")
+        self.logger.info(f"[LLMRayActor] Returning from main loop completion, processed {num_processed} requests")
         return num_processed
 
     def _step_engine(self, tracking, tokenizer):
