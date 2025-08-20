@@ -1,14 +1,3 @@
-"""
-Output format design.
-
-Paper search related outputs:
-- Use <S2>pes2o_id</S2> to include the search results from S2 search.
-
-Example:
-
-
-"""
-
 import logging
 import re
 from typing import Any, Dict
@@ -56,8 +45,8 @@ def compute_paper_reward(response: str, test_case: Dict[str, Any]) -> Dict[str, 
 
     try:
         # Step 1: Extract answer and citations from the response
-        extracted_context, extracted_answer, extracted_citations = extract_answer_context_citations(response, result)
-        if extracted_context is None:
+        extracted_context, extracted_answer, extracted_citations = extract_answer_context_citations(response)
+        if extracted_answer is None:
             result["error"] = "Failed to extract answer from response - no <answer></answer> tags found"
             return result
         

@@ -51,8 +51,8 @@ def compute_hle_reward(response: str, correct_answer: str, question: str, no_rea
     }
     
     # Step 1: Extract answer and citations from the responsez
-    extracted_context, extracted_answer, extracted_citations = extract_answer_context_citations(response, result)
-    if extracted_context is None:
+    extracted_context, extracted_answer, extracted_citations = extract_answer_context_citations(response)
+    if extracted_answer is None:
         result["error"] = "Failed to extract answer from response - no <answer></answer> tags found"
         return result
     

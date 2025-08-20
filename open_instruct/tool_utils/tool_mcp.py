@@ -55,12 +55,14 @@ class SemanticScholarSnippetSearchTool(MCPTool):
     def __init__(self, start_str: str, end_str: str, *args, **kwargs):
         self.mcp_tool_name = "semantic_scholar_snippet_search"
         self.number_documents_to_search = kwargs.pop("number_documents_to_search", 3)
+        print(f"SemanticScholarSnippetSearchTool initialized with mcp_tool_name: {self.mcp_tool_name}, number_documents_to_search: {self.number_documents_to_search}")
         super().__init__(start_str, end_str, *args, **kwargs)
 
     def __call__(self, prompt: str) -> ToolOutput:
         print(f"SemanticScholarSnippetSearchTool called with prompt: {prompt}")
         mcp_client = self.init_mcp_client()
         query_blocks = self._find_query_blocks(prompt)
+        print(f"Query blocks: {query_blocks}")
 
         if len(query_blocks) == 0:
             return ToolOutput(

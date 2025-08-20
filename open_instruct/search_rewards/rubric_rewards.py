@@ -47,6 +47,38 @@ Return a score on a scale of 0 to 2 indicating how appropriate the response is b
 
     return obj["score"] / 2.0
 
+
+def _score_rubric(response: str, ground_truth: Dict[str, Any]) -> Dict[str, float]:
+    """
+    Score the response against all rubrics in the ground truth.
+    
+    Args:
+        response: The extracted answer text to be scored
+        ground_truth: Dictionary containing the question and rubrics
+        
+    Returns:
+        Dictionary mapping rubric handles to their scores (0.0 to 1.0)
+    """
+    question = ground_truth["Question"] if "Question" in ground_truth else ground_truth["query"]
+    
+    rubric_scores = {}
+    if "rubric" in ground_truth:
+        for rubric in ground_truth["rubric"]:
+            handle = rubric.get("type")
+            rubric_text = rubric["rubric_item"]
+            score = _score_property(response, question, rubric_text)
+            rubric_scores[handle] = score
+    elif "Answer Critical" in ground_truth:
+        for rubric in ground_truth["Answer Critical"]:
+            handle = rubric.get("Handle")
+            rubric_text = rubric["Ingredient"]
+            score = _score_property(response, question, rubric_text)
+            rubric_scores[handle] = score
+    else:
+        raise ValueError(f"Unsupported rubric format found in ground truth: {ground_truth}")
+    
+    return rubric_scores
+
 def compute_rubric_reward(response: str, ground_truth: Dict[str, Any]) -> Dict[str, Any]:
     """
     Compute a reward score for a response based on a test case.
@@ -59,12 +91,12 @@ def compute_rubric_reward(response: str, ground_truth: Dict[str, Any]) -> Dict[s
     }
 
     # Extract answer from the response
-    extracted_context, extracted_answer, extracted_citations = extract_answer_context_citations(response, result)
+    extracted_context, extracted_answer, extracted_citations = extract_answer_context_citations(response)
     
     # Reward number of search turns
     in_context_search_turns_reward, num_search_turns = score_num_in_context_search_turns(extracted_context)
 
-    if not result.get("extraction_success"):
+    if extracted_answer is None:
         result["error"] = "Failed to extract answer from response"
         result["reward"] = 0.0
         result["log_values"] = {
@@ -74,23 +106,8 @@ def compute_rubric_reward(response: str, ground_truth: Dict[str, Any]) -> Dict[s
         }
         return result
 
-    question = ground_truth["Question"] if "Question" in ground_truth else ground_truth["query"]
-    
-    rubric_scores = {}
-    if "rubric" in ground_truth:
-        for rubric in ground_truth["rubric"]:
-            handle = rubric.get("type")
-            rubric_text = rubric["rubric_item"]
-            score = _score_property(extracted_answer, question, rubric_text)
-            rubric_scores[handle] = score
-    elif "Answer Critical" in ground_truth:
-        for rubric in ground_truth["Answer Critical"]:
-            handle = rubric.get("Handle")
-            rubric_text = rubric["Ingredient"]
-            score = _score_property(extracted_answer, question, rubric_text)
-            rubric_scores[handle] = score
-    else:
-        raise ValueError(f"Unsupported rubric format found in ground truth: {ground_truth}")
+    # Score the rubrics using the extracted function
+    rubric_scores = _score_rubric(extracted_answer, ground_truth)
                     
     result["rubric_scores"] = rubric_scores
     result["reward"] = 0.8 * sum(rubric_scores.values()) / len(rubric_scores) \

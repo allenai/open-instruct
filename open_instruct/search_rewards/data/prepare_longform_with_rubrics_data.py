@@ -120,7 +120,7 @@ def upload_longform_sqa_train_data(use_system_prompt: bool = True) -> List[Dict[
     return formatted_data
 
 
-def upload_longform_surveyqa_validation_data(use_system_prompt: bool = True) -> List[Dict[str, Any]]:
+def upload_longform_surveyqa_validation_data(use_system_prompt: bool = True, reward_type: str = "rubrics_only") -> List[Dict[str, Any]]:
     dataset = load_dataset("realliyifei/ResearchQA", split="validation")
 
     formatted_data = []
@@ -133,16 +133,25 @@ def upload_longform_surveyqa_validation_data(use_system_prompt: bool = True) -> 
         else:
             messages = [{"content": ex["query"], "role": "user"}]
         ground_truth = json.dumps(ex, default=str)
-        dataset = "rl_rag_longform_rubrics_only"
+        if reward_type == "rubrics_only":
+            dataset = "rl_rag_longform_rubrics_only"
+        elif reward_type == "averaged_outcome":
+            dataset = "rl_rag_longform_averaged_outcome"
         formatted_example = {"messages": messages, "ground_truth": ground_truth, "dataset": dataset}
         formatted_data.append(formatted_example)
     
     # push to huggingface
     dataset = Dataset.from_list(formatted_data)
     if use_system_prompt:
-        dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_rubrics_only_with_system_prompt")
+        if reward_type == "rubrics_only":
+            dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_rubrics_only_with_system_prompt")
+        elif reward_type == "averaged_outcome":
+            dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_averaged_outcome_with_system_prompt")
     else:
-        dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_rubrics_only_no_system_prompt")
+        if reward_type == "rubrics_only":
+            dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_rubrics_only_no_system_prompt")
+        elif reward_type == "averaged_outcome":
+            dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_averaged_outcome_no_system_prompt")
     
     return formatted_data
 
@@ -150,4 +159,4 @@ def upload_longform_surveyqa_validation_data(use_system_prompt: bool = True) -> 
 if __name__ == "__main__":
     # data = upload_scholarqabench_data(use_system_prompt=True)
     # data = upload_longform_sqa_train_data(use_system_prompt=True)
-    data = upload_longform_surveyqa_validation_data(use_system_prompt=True)
+    data = upload_longform_surveyqa_validation_data(use_system_prompt=True, reward_type="averaged_outcome")

@@ -44,9 +44,8 @@ In summary, while dropout is a powerful tool for improving the generalization of
 
 if __name__ == "__main__":
     # Use the function the user wants to debug.
-    # The function signature is (response: str, result: Dict[str, Any]), but `result` seems unused.
-    # We pass an empty dict for it. The function returns three values.
-    context, final_answer, citations = extract_answer_context_citations(full_response, {})
+    # The function signature is now (response: str), returning three values.
+    context, final_answer, citations = extract_answer_context_citations(full_response)
 
     # Calculate the citation score
     # Note: This test requires API keys for the LLM call in score_in_context_citations.

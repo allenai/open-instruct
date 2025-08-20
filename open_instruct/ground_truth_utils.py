@@ -40,6 +40,7 @@ from open_instruct.search_rewards.openscholar_rewards import compute_paper_rewar
 from open_instruct.search_rewards.reasoning_model_rewards import compute_hle_reward
 from open_instruct.search_rewards.rubric_rewards import compute_rubric_reward
 from open_instruct.search_rewards.finegrained_rewards import compute_finegrained_reward
+from open_instruct.search_rewards.longform_averaged_outcome_rewards import compute_longform_averaged_outcome_reward
 from open_instruct.utils import extract_final_answer
 from open_instruct.IFEvalG import instructions_registry
 
@@ -914,7 +915,25 @@ class RLRAGLongFormRubricsOnlyVerifier(VerifierFunction):
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> VerificationResult:
         test_case = json.loads(label)
-        result = compute_rubric_reward(prediction, test_case)
+        # result = compute_rubric_reward(prediction, test_case)
+        result = compute_longform_averaged_outcome_reward(prediction, test_case, query)
+        score = result["reward"]
+        return VerificationResult(score=score, log_values=result["log_values"])
+
+
+class RLRAGLongFormAveragedOutcomeVerifier(VerifierFunction):
+    """
+    Verifier that computes the RL-RAG (long form) score between the prediction and the label.
+    """
+
+    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+        super().__init__("rl_rag_longform_averaged_outcome", verifier_config=verifier_config, weight=1.0)
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
+        test_case = json.loads(label)
+        result = compute_longform_averaged_outcome_reward(prediction, test_case, query)
         score = result["reward"]
         return VerificationResult(score=score, log_values=result["log_values"])
 
