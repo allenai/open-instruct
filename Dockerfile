@@ -70,7 +70,7 @@ ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
 
 # Copy only dependency-related files first
-COPY pyproject.toml ./
+COPY pyproject.toml uv.lock ./
 
 # Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
@@ -78,7 +78,7 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-install-project --no-cache
 
-RUN uv run --no-sync -m nltk.downloader punkt punkt_tab
+RUN uv run -m nltk.downloader punkt punkt_tab
 
 # Copy all application code at the end
 COPY eval eval
