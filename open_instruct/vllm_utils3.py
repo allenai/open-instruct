@@ -306,33 +306,23 @@ def add_request(
     except queue.Empty:
         return
 
-    sampling_params = request.generation_config
-    training_step = request.training_step if request.training_step is not None else 0
-    dataset_index = request.dataset_index if request.dataset_index is not None else 0
-
     prefix = "eval" if request.is_eval else "train"
-    base_request_id = f"{prefix}_{training_step}_{dataset_index}"
-    request_metadata[base_request_id] = {
+    request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
+    request_metadata[request_id] = {
         "is_eval": request.is_eval,
-        "dataset_index": dataset_index,
-        "training_step": training_step,
+        "dataset_index": request.dataset_index,
+        "training_step": request.training_step,
     }
 
+    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt)
     if tools:
-        # Need n=1 for individual tool tracking
-        original_n = sampling_params.n
-        sampling_params = copy.deepcopy(sampling_params)
+        # Need n=1 for individual tool tracking.
+        sampling_params = copy.deepcopy(request.generation_config)
         sampling_params.n = 1
-        # Create individual requests for each sample when using tools
-        for j in range(original_n):
-            request_id = f"{base_request_id}-{j}"
-            tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt)
-            llm_engine.add_request(request_id, tokens_prompt, sampling_params)
+        for j in range(request.generation_config.n)
+            llm_engine.add_request(f"{request_id-{j}", tokens_prompt, sampling_params)
     else:
-        # Standard request format for non-tool mode
-        request_id = base_request_id
-        tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt)
-        llm_engine.add_request(request_id, tokens_prompt, sampling_params)
+        llm_engine.add_request(request_id, tokens_prompt, request.generation_config)
 
 
 class LLMRayActor:

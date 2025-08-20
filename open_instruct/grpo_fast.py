@@ -1349,6 +1349,13 @@ def data_preparation_thread(
     resume_training_step: int,
 ):
     for training_step in range(resume_training_step, num_training_steps + 1):
+        # Log progress at the start of each step
+        progress_pct = ((training_step - resume_training_step) / (num_training_steps - resume_training_step + 1)) * 100
+        logger.info(
+            f"[Data Preparation Thread] Starting step {training_step}/{num_training_steps} "
+            f"({progress_pct:.1f}% complete)"
+        )
+
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
             result, batch = accumulate_inference_batches(
@@ -1359,6 +1366,12 @@ def data_preparation_thread(
                 return
 
         getting_response_time = timer.duration
+
+        # Log accumulation results
+        logger.info(
+            f"[Data Preparation Thread] Step {training_step}: Accumulated {len(result.responses)} responses "
+            f"in {getting_response_time:.2f}s"
+        )
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -1395,6 +1408,9 @@ def data_preparation_thread(
             )
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
+            logger.info(
+                f"[Data Preparation Thread] Step {training_step}: Calculating rewards for {len(result.responses)} responses"
+            )
             scores, reward_metrics = asyncio.run(
                 reward_fn(
                     result.responses,
@@ -1418,6 +1434,14 @@ def data_preparation_thread(
             else:
                 raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
+            # Log reward statistics
+            logger.info(
+                f"[Data Preparation Thread] Step {training_step}: Rewards - "
+                f"mean: {scores.mean():.3f}, std: {scores.std():.3f}, "
+                f"min: {scores.min():.3f}, max: {scores.max():.3f}, "
+                f"stop_rate: {stop_rate:.2%}"
+            )
+
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved
             max_possible_score = 0
@@ -1439,6 +1463,14 @@ def data_preparation_thread(
             masks = [result.masks[i] for i in non_zero_gradient_index]
             batch = batch[non_zero_gradient_index.tolist()]
             finish_reasons = [result.finish_reasons[i] for i in non_zero_gradient_index]
+
+            # Log filtering results
+            logger.info(
+                f"[Data Preparation Thread] Step {training_step}: Filtered sequences - "
+                f"before: {original_batch_size}, after: {len(scores)}, "
+                f"unsolved_ratio: {unsolved_batch_size_ratio:.2%}, "
+                f"real_batch_ratio: {real_batch_size_ratio:.2%}"
+            )
             if args.mask_truncated_completions:
                 stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
                 scores = scores[stop_idxes]
@@ -1648,6 +1680,24 @@ def data_preparation_thread(
 
         if len(responses) == 0:
             logger.warning(f"No responses in batch {training_step}.")
+
+        # Log before putting data in queue
+        logger.info(
+            f"[Data Preparation Thread] Step {training_step}: Sending {len(responses)} responses "
+            f"({num_new_tokens} tokens) to training queue"
+        )
+
+        # Log summary every 10 steps
+        if training_step % 10 == 0:
+            logger.info(
+                f"[Data Preparation Thread] === Summary at step {training_step} ==="
+                f"\n  - Total responses processed: {len(responses)}"
+                f"\n  - Average score: {scores.mean():.3f}"
+                if len(responses) > 0
+                else ""
+                f"\n  - Packed sequences: {len(packed_sequences.query_responses)}"
+                f"\n  - Progress: {progress_pct:.1f}%"
+            )
 
         # Put the packed sequences and metrics into the output queue
         packed_sequences_Q.put(
