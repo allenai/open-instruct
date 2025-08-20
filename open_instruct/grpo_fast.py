@@ -1391,13 +1391,14 @@ def data_preparation_thread(
         )
 
 
-def launch_mcp_subprocess(use_mcp_tools: bool, run_mcp_command: str) -> Optional[subprocess.Popen]:
+def launch_mcp_subprocess(use_mcp_tools: bool, run_mcp_command: str, output_dir: str) -> Optional[subprocess.Popen]:
     """
     Launch MCP server subprocess if use_mcp_tools is enabled.
     
     Args:
         use_mcp_tools: Whether to launch MCP server
         run_mcp_command: Command to run MCP server
+        output_dir: Base output directory for logs
         
     Returns:
         Popen object if launched, None otherwise
@@ -1407,10 +1408,25 @@ def launch_mcp_subprocess(use_mcp_tools: bool, run_mcp_command: str) -> Optional
         
     print(f"🚀 Launching MCP server subprocess: {run_mcp_command}")
     
+    # Debug: Check if fastmcp command exists
+    try:
+        import shutil
+        fastmcp_path = shutil.which("fastmcp")
+        if fastmcp_path:
+            print(f"✅ Found fastmcp at: {fastmcp_path}")
+        else:
+            print("⚠️  Warning: fastmcp command not found in PATH")
+    except Exception as e:
+        print(f"⚠️  Warning: Could not check for fastmcp: {e}")
+    
+    # Debug: Show current working directory
+    print(f"📁 Current working directory: {os.getcwd()}")
+    
     # Create log files for MCP server output
-    os.makedirs("/output/mcp_logs", exist_ok=True)
-    mcp_stdout = open("/output/mcp_logs/mcp_server_stdout.log", "w")
-    mcp_stderr = open("/output/mcp_logs/mcp_server_stderr.log", "w")
+    mcp_logs_dir = os.path.join(output_dir, "mcp_logs")
+    os.makedirs(mcp_logs_dir, exist_ok=True)
+    mcp_stdout = open(os.path.join(mcp_logs_dir, "mcp_server_stdout.log"), "w")
+    mcp_stderr = open(os.path.join(mcp_logs_dir, "mcp_server_stderr.log"), "w")
     
     mcp_process = subprocess.Popen(
         [run_mcp_command],
@@ -1428,7 +1444,7 @@ def launch_mcp_subprocess(use_mcp_tools: bool, run_mcp_command: str) -> Optional
         # Check if process is still running
         if mcp_process.poll() is None:
             print(f"✅ MCP server started successfully (PID: {mcp_process.pid})")
-            print(f"📋 MCP server logs: mcp_logs/mcp_server_stdout.log, mcp_logs/mcp_server_stderr.log")
+            print(f"📋 MCP server logs: {os.path.relpath(mcp_logs_dir)}/mcp_server_stdout.log, {os.path.relpath(mcp_logs_dir)}/mcp_server_stderr.log")
             
             # Register cleanup function
             def cleanup_mcp():
@@ -1450,8 +1466,20 @@ def launch_mcp_subprocess(use_mcp_tools: bool, run_mcp_command: str) -> Optional
             
         else:
             print(f"❌ MCP server failed to start (exit code: {mcp_process.returncode})")
-            mcp_stdout.close()
+            # Read any error output
             mcp_stderr.close()
+            mcp_stdout.close()
+            try:
+                with open(os.path.join(mcp_logs_dir, "mcp_server_stderr.log"), "r") as f:
+                    stderr_content = f.read().strip()
+                    if stderr_content:
+                        print(f"📋 MCP server stderr: {stderr_content}")
+                with open(os.path.join(mcp_logs_dir, "mcp_server_stdout.log"), "r") as f:
+                    stdout_content = f.read().strip()
+                    if stdout_content:
+                        print(f"📋 MCP server stdout: {stdout_content}")
+            except Exception as e:
+                print(f"⚠️  Could not read MCP server logs: {e}")
             return None
             
     except Exception as e:
@@ -1588,7 +1616,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         if args.mcp_server_command is None:
             print("mcp_server_command is not provided when use_mcp_tools is True; please make sure to launch the MCP server manually.")
         else:
-            mcp_process = launch_mcp_subprocess(args.use_mcp_tools, args.mcp_server_command)
+            mcp_process = launch_mcp_subprocess(args.use_mcp_tools, args.mcp_server_command, args.output_dir)
             if mcp_process is None:
                 raise RuntimeError("Failed to launch MCP server subprocess")
 
