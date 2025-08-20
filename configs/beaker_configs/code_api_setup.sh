@@ -83,7 +83,7 @@ start_uvicorn_servers() {
         cd "$REPO_PATH"
         
         # Start uvicorn with better error handling
-        taskset -c $CPU_ID nohup uvicorn open_instruct.code.api:app --host 0.0.0.0 --port $PORT > api_logs/api_server_$PORT.log 2>&1 &
+        taskset -c $CPU_ID nohup uvicorn open_instruct.code_utils.api:app --host 0.0.0.0 --port $PORT > api_logs/api_server_$PORT.log 2>&1 &
         SERVER_PID=$!
         echo "API server started on port $PORT with PID $SERVER_PID"
         
