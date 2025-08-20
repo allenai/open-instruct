@@ -13,10 +13,10 @@ LOGGER = logging.getLogger(__name__)
 
 
 REWARD_WEIGHTS = {
-    "rubric": 0.5,
-    "citation": 0.2,
-    "format": 0.2,
-    "num_search_turns": 0.1,
+    "rubric_reward": 0.5,
+    "citation_reward": 0.2,
+    "format_reward": 0.2,
+    "num_search_turns_reward": 0.1,
 }
 
 
@@ -52,16 +52,16 @@ def compute_format_reward(response: str) -> Dict[str, Any]:
 def compute_longform_averaged_outcome_reward(response: str, ground_truth: Dict[str, Any], question: str) -> Dict[str, Any]:
     extracted_context, extracted_answer, extracted_citations = extract_answer_context_citations(response)
     result = {
-        "num_search_turns_reward": None,
-        "rubric_scores": None,
-        "citation_score": None,
-        "format_score": None,
-        "reward": None,
+        "num_search_turns_reward": 0.0,
+        "rubric_reward": 0.0,
+        "citation_reward": 0.0,
+        "format_reward": 0.0,
+        "reward": 0.0,
     }
     
     # score format
-    format_score = compute_format_reward(response)
-    result["format_score"] = format_score
+    format_reward = compute_format_reward(response)
+    result["format_reward"] = format_reward
     
     # score num search turns
     num_search_turns, num_search_turns_reward = score_num_in_context_search_turns(extracted_context)
@@ -73,11 +73,12 @@ def compute_longform_averaged_outcome_reward(response: str, ground_truth: Dict[s
     
     # score rubric
     rubric_scores = _score_rubric(extracted_answer, ground_truth)
-    result["rubric_scores"] = rubric_scores
+    rubric_reward = sum(rubric_scores.values()) / len(rubric_scores)
+    result["rubric_reward"] = rubric_reward
     
     # score citation (include 0.1 weighted citation format reward)
-    citation_score = score_in_context_citations(question, response, extracted_citations)
-    result["citation_score"] = citation_score
+    citation_reward = score_in_context_citations(question, response, extracted_citations)
+    result["citation_reward"] = citation_reward
     
     # compute reward
     reward = 0.0

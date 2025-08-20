@@ -1,5 +1,6 @@
 import asyncio
 import re
+import os
 from typing import Dict, List
 
 # Handle imports for both direct execution and module import
@@ -158,7 +159,7 @@ def score_with_citation_recall(question: str, claim: str, concatenated_citations
         question=question, statement=claim, concatenated_cited_snippets=concatenated_citations
     )
     response = run_litellm(
-        model_name="gpt-4o-mini",
+        model_name=os.environ.get("CITATION_JUDGE_MODEL", "gpt-4o-mini"),
         system_prompt=None,
         user_prompt=user_prompt,
         max_tokens=800,
@@ -174,7 +175,7 @@ def score_no_citation_recall(question: str, claim: str, full_response: str) -> f
         question=question, statement=claim, full_response=full_response
     )
     response = run_litellm(
-        model_name="gpt-4o-mini",
+        model_name=os.environ.get("CITATION_JUDGE_MODEL", "gpt-4o-mini"),
         system_prompt=None,
         user_prompt=user_prompt,
         max_tokens=800,
@@ -193,7 +194,7 @@ def score_citation_precision(question: str, claim: str, concatenated_citations: 
         question=question, statement=claim, concatenated_cited_snippets=concatenated_citations
     )
     response = run_litellm(
-        model_name="gpt-4o-mini",
+        model_name=os.environ.get("CITATION_JUDGE_MODEL", "gpt-4o-mini"),
         system_prompt=None,
         user_prompt=user_prompt,
         max_tokens=800,
@@ -300,7 +301,7 @@ async def score_with_citation_recall_async(question: str, claim: str, concatenat
         question=question, statement=claim, concatenated_cited_snippets=concatenated_citations
     )
     response = await run_litellm_async(
-        model_name="gpt-4o-mini",
+        model_name=os.environ.get("CITATION_JUDGE_MODEL", "gpt-4o-mini"),
         system_prompt=None,
         user_prompt=user_prompt,
         max_tokens=800,
@@ -316,7 +317,7 @@ async def score_no_citation_recall_async(question: str, claim: str, full_respons
         question=question, statement=claim, full_response=full_response
     )
     response = await run_litellm_async(
-        model_name="gpt-4o-mini",
+        model_name=os.environ.get("CITATION_JUDGE_MODEL", "gpt-4o-mini"),
         system_prompt=None,
         user_prompt=user_prompt,
         max_tokens=800,
@@ -335,7 +336,7 @@ async def score_citation_precision_async(question: str, claim: str, concatenated
         question=question, statement=claim, concatenated_cited_snippets=concatenated_citations
     )
     response = await run_litellm_async(
-        model_name="gpt-4o-mini",
+        model_name=os.environ.get("CITATION_JUDGE_MODEL", "gpt-4o-mini"),
         system_prompt=None,
         user_prompt=user_prompt,
         max_tokens=800,
