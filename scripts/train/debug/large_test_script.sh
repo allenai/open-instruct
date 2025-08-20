@@ -20,6 +20,7 @@ uv run python mason.py \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
+	--verbose True \
         --num_samples_per_prompt_rollout 16 \
         --num_unique_prompts_rollout 32 \
         --num_mini_batches 1 \
