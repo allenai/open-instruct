@@ -73,12 +73,11 @@ WORKDIR /stage/
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --no-cache
+    uv sync --frozen --no-cache
 
 RUN uv run --no-sync -m nltk.downloader punkt punkt_tab
 
 # Copy all application code at the end
-COPY pyproject.toml ./
 COPY eval eval
 COPY configs configs
 COPY scripts scripts
