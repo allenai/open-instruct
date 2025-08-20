@@ -59,15 +59,11 @@ RUN curl --silent \
 
 COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
 
-# Install Beaker Gantry user-wide in an isolated venv
-RUN uv tool install --no-cache-dir beaker-gantry==3.0.0
+WORKDIR /stage/
 
 ENV UV_CACHE_DIR=/root/.cache/uv
-
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
-
-WORKDIR /stage/
 
 # Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
