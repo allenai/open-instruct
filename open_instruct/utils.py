@@ -1050,6 +1050,7 @@ def launch_ai2_evals_on_weka(
     gs_bucket_path: Optional[str] = None,
     eval_priority: Optional[str] = "normal",
     beaker_image: Optional[str] = None,
+    log_eval_to_wandb: bool = False,
 ) -> None:
     weka_cluster = "ai2/saturn-cirrascale ai2/neptune-cirrascale"
     gcp_cluster = "ai2/augusta-google-1"
@@ -1091,6 +1092,9 @@ python scripts/submit_eval_jobs.py \
 --skip_oi_evals"""
     if wandb_url is not None:
         command += f" --run_id {wandb_url}"
+        if log_eval_to_wandb:
+            wandb_run_path = wandb_url_to_run_path(wandb_url)
+            command += f" --wandb_run_path {wandb_run_path}"
     if oe_eval_max_length is not None:
         command += f" --oe_eval_max_length {oe_eval_max_length}"
     if training_step is not None:
@@ -1109,6 +1113,27 @@ python scripts/submit_eval_jobs.py \
     print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
     print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
     print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+
+
+def wandb_url_to_run_path(url):
+    """
+    Convert a wandb URL to a wandb run path.
+
+    Args:
+        url (str): wandb URL in format https://wandb.ai/entity/project/runs/run_id
+
+    Returns:
+        str: wandb run path in format entity/project/run_id
+    """
+    # Remove the base URL and split by '/'
+    path_parts = url.replace("https://wandb.ai/", "").split("/")
+
+    # Extract entity, project, and run_id
+    entity = path_parts[0]
+    project = path_parts[1]
+    run_id = path_parts[3]  # Skip 'runs' at index 2
+
+    return f"{entity}/{project}/{run_id}"
 
 
 # ----------------------------------------------------------------------------
