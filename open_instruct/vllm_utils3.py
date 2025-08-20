@@ -390,6 +390,8 @@ class LLMRayActor:
         if inference_batch_size is None:
             raise ValueError("inference_batch_size must be specified.")
         self.inference_batch_size = inference_batch_size
+        self.request_metadata = {}  # Track request metadata by ID
+        self.sampling_params = None  # Will be set from first request
 
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
@@ -399,20 +401,10 @@ class LLMRayActor:
         """
 
         num_processed = 0
-        iteration = 0
-        request_metadata = {}  # Track request metadata by ID
 
-        if self.tools:
-            tracking = _init_tool_tracking()
-            sampling_params = None  # Will be set from first request
-            tokenizer = self.llm_engine.tokenizer
-        else:
-            tracking = None
-            sampling_params = None
-            tokenizer = None
+        tracking = _init_tool_tracking() if self.tools else None
 
         prefilled_count = 0
-        stop_adding_requests = False
         for i in tqdm(
             range(self.inference_batch_size),
             desc="[vLLM] Pre-filling requests",
@@ -426,16 +418,14 @@ class LLMRayActor:
             if prefilled_count > 0 and prefilled_count < (i + 1):
                 break
 
-        # If inflight_updates is True, return immediately
-        if self.inflight_updates:
-            return num_processed
-
         while True:
-            iteration += 1
-
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
             if ready_refs and ray.get(ready_refs[0]):
+                should_stop = True
+            else:
+                should_stop = False
+            if should_stop and self.inflight_updates:
                 return num_processed
 
             outputs = self._step_engine(tracking, sampling_params, tokenizer)
@@ -444,41 +434,29 @@ class LLMRayActor:
                 base_request_id = output.request_id.split("-")[0] if "-" in output.request_id else output.request_id
                 is_eval = request_metadata[base_request_id]["is_eval"]
                 dataset_index = request_metadata[base_request_id]["dataset_index"]
+                num_processed += 1
+                result = _finalize_outputs([output], tracking, dataset_index, self.tools)
 
-                if not self.tools:
-                    num_processed += 1
-                    result = _process_outputs([output], dataset_index=dataset_index)
+                try:
+                    results_queue = self.eval_results_queue if is_eval else self.results_queue
+                    results_queue.put(result, timeout=10)
+                except queue.Full:
+                    self.logger.warning("Results queue is full, discarding result.")
 
-                    try:
-                        queue_to_use = self.eval_results_queue if is_eval else self.results_queue
-                        queue_to_use.put(result, timeout=10)
-                    except queue.Full:
-                        self.logger.warning("Results queue is full, discarding result.")
-                else:
-                    num_processed += 1
-                    result = _finalize_outputs([output], tracking, None, self.tools)
-
-                    try:
-                        queue_to_use = self.eval_results_queue if is_eval else self.results_queue
-                        queue_to_use.put(result, timeout=10)
-                    except queue.Full:
-                        self.logger.warning("Results queue is full, discarding result.")
-
-                if base_request_id in request_metadata:
-                    del request_metadata[base_request_id]
+                request_metadata.pop(base_request_id, None)
 
                 # Only add new requests if not in "stop adding" mode
-                if not stop_adding_requests:
+                if not should_stop:
                     add_request(
                         self.prompt_queue, self.llm_engine, self.tools, timeout=0.1, request_metadata=request_metadata
                     )
 
-            # When inflight_updates is False, stop adding new requests but wait for completion
-            if not self.inflight_updates:
-                stop_adding_requests = True
-                # Check if we can exit: no unfinished requests and no pending tool futures
+            if should_stop and not self.inflight_updates:
                 pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
                 if not self.llm_engine.has_unfinished_requests() and pending_count == 0:
+                    self.logger.info(
+                        f"[LLMRayActor] No more requests to process, exiting after processing {num_processed} requests"
+                    )
                     break
 
         self.logger.info(f"[LLMRayActor] process_from_queue exiting, processed {num_processed} requests")
