@@ -51,7 +51,6 @@ import asyncio
 import json
 import logging
 import math
-import os
 import shutil
 import socket
 import threading
@@ -1362,8 +1361,9 @@ def data_preparation_thread(
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
     generation_config,
+    resume_training_step: int,
 ):
-    for training_step in range(1, num_training_steps + 1):
+    for training_step in range(resume_training_step, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
             result, batch = accumulate_inference_batches(
@@ -2418,6 +2418,7 @@ def run_training(
         tokenizer,
         args.num_training_steps,
         generation_configs["train"],
+        resume_training_step,
     )
 
     logger.info("======== ✅ generation thread starts =========")
@@ -2431,7 +2432,7 @@ def run_training(
         batch = next_batch(dataset_indices, train_dataset)
         split_and_insert_batch(
             batch,
-            1,  # training_step
+            resume_training_step,
             args.vllm_num_engines,
             pending_queries_map,
             param_prompt_Q,
@@ -2513,6 +2514,9 @@ def run_training(
             generation_configs["eval"],
             generate_metrics_Q,
         )
+
+    if resume_training_step > args.num_training_steps:
+        raise ValueError(f"Training didn't run since {resume_training_step=} > {args.num_training_steps=}")
 
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 

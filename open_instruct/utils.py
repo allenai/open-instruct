@@ -53,7 +53,6 @@ import numpy as np
 import ray
 import requests
 import torch
-from accelerate.logging import get_logger
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
@@ -66,7 +65,7 @@ from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
 
