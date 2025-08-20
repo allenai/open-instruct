@@ -297,16 +297,15 @@ class ActorManager:
         return self._should_stop
 
 
-def add_request(
-    request, llm_engine: vllm.LLMEngine, tools, request_metadata: dict = None
-):
+def add_request(request, llm_engine: vllm.LLMEngine, tools, request_metadata: dict = None):
     """Add a request to the LLM engine."""
     prefix = "eval" if request.is_eval else "train"
     request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
-    base_metadata = {
+    metadata = {
         "is_eval": request.is_eval,
         "dataset_index": request.dataset_index,
         "training_step": request.training_step,
+        "sampling_params": request.generation_config,
     }
 
     tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt)
@@ -314,15 +313,14 @@ def add_request(
         # Need n=1 for individual tool tracking.
         sampling_params = copy.deepcopy(request.generation_config)
         sampling_params.n = 1
+        metadata["sampling_params"] = sampling_params
         for j in range(request.generation_config.n):
             sub_request_id = f"{request_id}-{j}"
             llm_engine.add_request(sub_request_id, tokens_prompt, sampling_params)
-            # Store metadata and sampling params for each sub-request
-            request_metadata[sub_request_id] = {**base_metadata, "sampling_params": sampling_params}
+            request_metadata[sub_request_id] = metadata
     else:
         llm_engine.add_request(request_id, tokens_prompt, request.generation_config)
-        # Store metadata and sampling params for the request
-        request_metadata[request_id] = {**base_metadata, "sampling_params": request.generation_config}
+        request_metadata[request_id] = metadata
 
 
 class LLMRayActor:
@@ -545,12 +543,10 @@ class LLMRayActor:
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
                     self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
-
             dict_keys_to_delete.append(req_id)
 
         for req_id in dict_keys_to_delete:
-            if req_id in tracking["pending_tool_futures"]:
-                del tracking["pending_tool_futures"][req_id]
+            tracking["pending_tool_futures"].pop(req_id, None)
 
     def init_process_group(
         self,
