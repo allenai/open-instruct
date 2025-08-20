@@ -60,7 +60,6 @@ def _init_tool_tracking():
         "concat_outputs": {},
         "masks": defaultdict(list),
         "pending_tool_futures": {},
-        "sampling_params": {},  # Store sampling params per request
     }
 
 
@@ -309,7 +308,7 @@ def add_request(
 
     prefix = "eval" if request.is_eval else "train"
     request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
-    request_metadata[request_id] = {
+    base_metadata = {
         "is_eval": request.is_eval,
         "dataset_index": request.dataset_index,
         "training_step": request.training_step,
@@ -319,16 +318,16 @@ def add_request(
     if tools:
         # Need n=1 for individual tool tracking.
         sampling_params = copy.deepcopy(request.generation_config)
-        original_n = request.generation_config.n  # Store original n value
         sampling_params.n = 1
-        for j in range(original_n):
-            llm_engine.add_request(f"{request_id}-{j}", tokens_prompt, sampling_params)
-        # Store original_n in sampling_params for tracking
-        sampling_params.original_n = original_n
-        return request_id, sampling_params  # Return for tracking
+        for j in range(request.generation_config.n):
+            sub_request_id = f"{request_id}-{j}"
+            llm_engine.add_request(sub_request_id, tokens_prompt, sampling_params)
+            # Store metadata and sampling params for each sub-request
+            request_metadata[sub_request_id] = {**base_metadata, "sampling_params": sampling_params}
     else:
         llm_engine.add_request(request_id, tokens_prompt, request.generation_config)
-        return request_id, request.generation_config  # Return for tracking
+        # Store metadata and sampling params for the request
+        request_metadata[request_id] = {**base_metadata, "sampling_params": request.generation_config}
 
 
 class LLMRayActor:
@@ -407,19 +406,9 @@ class LLMRayActor:
             total=self.inference_batch_size,
             leave=False,
         ):
-            result = add_request(
+            add_request(
                 self.prompt_queue, self.llm_engine, self.tools, timeout=0.1, request_metadata=self.request_metadata
             )
-            if result and tracking:
-                request_id, sampling_params = result
-                # Store sampling params for all sub-requests if using tools
-                if self.tools:
-                    # Store for each sub-request created (with -0, -1, etc. suffix)
-                    original_n = getattr(sampling_params, "original_n", 1)
-                    for j in range(original_n):
-                        tracking["sampling_params"][f"{request_id}-{j}"] = sampling_params
-                elif tracking:  # Non-tool mode but still need tracking
-                    tracking["sampling_params"][request_id] = sampling_params
             if self.llm_engine.has_unfinished_requests():
                 prefilled_count += 1
             # If we couldn't get a request quickly, start processing with what we have
@@ -455,23 +444,13 @@ class LLMRayActor:
 
                 # Only add new requests if not in "stop adding" mode
                 if not should_stop:
-                    result = add_request(
+                    add_request(
                         self.prompt_queue,
                         self.llm_engine,
                         self.tools,
                         timeout=0.1,
                         request_metadata=self.request_metadata,
                     )
-                    if result and tracking:
-                        request_id, sampling_params = result
-                        # Store sampling params for all sub-requests if using tools
-                        if self.tools:
-                            # Store for each sub-request created (with -0, -1, etc. suffix)
-                            original_n = getattr(sampling_params, "original_n", 1)
-                            for j in range(original_n):
-                                tracking["sampling_params"][f"{request_id}-{j}"] = sampling_params
-                        elif tracking:  # Non-tool mode but still need tracking
-                            tracking["sampling_params"][request_id] = sampling_params
 
             if should_stop and not self.inflight_updates:
                 pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
@@ -499,8 +478,8 @@ class LLMRayActor:
 
             for output in step_outputs:
                 if output.finished:
-                    # Get sampling params for this request from tracking
-                    sampling_params = tracking["sampling_params"].get(output.request_id) if tracking else None
+                    # Get sampling params for this request from metadata
+                    sampling_params = self.request_metadata.get(output.request_id, {}).get("sampling_params")
                     result = _handle_output(
                         output, self.tools, tracking, sampling_params, self.max_tool_calls, self.executor
                     )
@@ -545,8 +524,8 @@ class LLMRayActor:
                 can_make_new_request = True
 
             # Edge case 2: clip against per-request max_tokens
-            # Get sampling params for this request
-            req_sampling_params = tracking["sampling_params"].get(req_id)
+            # Get sampling params for this request from metadata
+            req_sampling_params = self.request_metadata.get(req_id, {}).get("sampling_params")
             if req_sampling_params:
                 remaining = req_sampling_params.max_tokens - len(tracking["masks"][req_id])
                 if remaining <= 0:
@@ -572,6 +551,9 @@ class LLMRayActor:
                     self.llm_engine.add_request(
                         req_id, vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token), new_sampling_params
                     )
+                    # Update the sampling params in request_metadata for the restarted request
+                    if req_id in self.request_metadata:
+                        self.request_metadata[req_id]["sampling_params"] = new_sampling_params
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
                     self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
