@@ -341,7 +341,7 @@ class LLMRayActor:
         inflight_updates: bool = False,
         **kwargs,
     ):
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger = vllm.logger.init_logger(__name__)
 
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
@@ -478,7 +478,8 @@ class LLMRayActor:
                     result = _handle_output(
                         output, self.tools, tracking, sampling_params, self.max_tool_calls, self.executor
                     )
-                    outputs.append(result)
+                    if result is not None:
+                        outputs.append(result)
 
         return outputs
 
