@@ -427,6 +427,11 @@ class Args:
         assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
             "At least one reward must be applied!"
         )
+        # Ensure we have enough prompts for all VLLM engines
+        if self.num_unique_prompts_rollout < self.vllm_num_engines:
+            raise ValueError(
+                f"{self.num_unique_prompts_rollout=} must be >= {self.vllm_num_engines=} to avoid empty batches."
+            )
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
@@ -1891,11 +1896,17 @@ def split_and_insert_batch(
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    # Split the batch over the VLLM engines.
-    inference_batch_size = len(batch.queries) // vllm_num_engines
+    import math
+
+    inference_batch_size = max(1, math.ceil(len(batch.queries) / vllm_num_engines))
+
     for batch_idx in range(vllm_num_engines):
         start_idx = batch_idx * inference_batch_size
-        end_idx = start_idx + inference_batch_size if batch_idx < vllm_num_engines - 1 else len(batch.queries)
+        end_idx = min(start_idx + inference_batch_size, len(batch.queries))
+
+        # Stop if we've distributed all queries
+        if start_idx >= len(batch.queries):
+            break
 
         sub_batch = batch[start_idx:end_idx]
 
