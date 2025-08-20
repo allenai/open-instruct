@@ -1249,26 +1249,20 @@ def accumulate_inference_batches(
     Returns:
         Tuple of (combined_result, Batch with queries, ground_truths, datasets) or (ShutdownSentinel, None) if shutdown signal received
     """
-    # Calculate total number of results to collect
-    # Each result contains generation_config.n responses
-    total_prompts = args.num_unique_prompts_rollout
-    total_results = total_prompts  # Each result contains n completions
-
     # Collect individual results
+    # Each result contains generation_config.n responses
     results = []
     all_queries = []
     all_ground_truths = []
     all_datasets = []
 
-    pbar = tqdm(
-        range(total_results),
-        total=total_results,
-        desc=f"Accumulating {total_results} results (each with {generation_config.n} completions)",
+    for i in tqdm(
+        range(args.num_unique_prompts_rollout),
+        total=args.num_unique_prompts_rollout,
+        desc=f"Accumulating {args.num_unique_prompts_rollout} results (each with {generation_config.n} completions)",
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
-    )
-
-    for i in pbar:
+    ):
         result = inference_results_Q.get(timeout=timeout)
 
         if isinstance(result, ShutdownSentinel):
@@ -1290,8 +1284,6 @@ def accumulate_inference_batches(
         all_queries.append(query)
         all_ground_truths.append(ground_truth)
         all_datasets.append(dataset)
-
-        pbar.set_postfix({"dataset_idx": dataset_index, "responses": len(result.responses)})
 
         results.append(result)
 
