@@ -39,6 +39,7 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+from tqdm import tqdm
 
 from open_instruct.queue_types import GenerationResult, RequestInfo
 from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
@@ -308,8 +309,9 @@ def add_request(
     logger.debug(f"[add_request] Attempting to get request from queue with timeout={timeout}")
     try:
         request = prompt_queue.get(timeout=timeout)
-        logger.debug(
-            f"[add_request] Got request from queue: training_step={request.training_step}, is_eval={request.is_eval}"
+        logger.info(
+            f"[add_request] Got request from queue: training_step={request.training_step}, "
+            f"dataset_index={request.dataset_index}, is_eval={request.is_eval}"
         )
     except queue.Empty:
         logger.debug(f"[add_request] Queue empty after timeout={timeout}")
@@ -320,8 +322,12 @@ def add_request(
     training_step = request.training_step if request.training_step is not None else 0
     dataset_index = request.dataset_index if request.dataset_index is not None else 0
 
+    logger.info(f"[add_request] Processing prompt with dataset_index={dataset_index}, n={sampling_params.n}")
+
     # Store metadata if provided
-    base_request_id = f"{training_step}_{dataset_index}"
+    # Add prefix to prevent collision between train and eval requests with same dataset_index
+    prefix = "eval" if request.is_eval else "train"
+    base_request_id = f"{prefix}_{training_step}_{dataset_index}"
     if request_metadata is not None:
         request_metadata[base_request_id] = {
             "is_eval": request.is_eval,
@@ -336,12 +342,12 @@ def add_request(
         sampling_params.n = 1
         # Create individual requests for each sample when using tools
         for j in range(original_n):
-            request_id = f"{training_step}_{dataset_index}-{j}"
+            request_id = f"{base_request_id}-{j}"
             tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
             llm_engine.add_request(request_id, tokens_prompt, sampling_params)
     else:
         # Standard request format for non-tool mode
-        request_id = f"{training_step}_{dataset_index}"
+        request_id = base_request_id
         tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
         llm_engine.add_request(request_id, tokens_prompt, sampling_params)
 
@@ -444,7 +450,13 @@ class LLMRayActor:
         self.logger.info(
             f"[LLMRayActor.process_from_queue] === PRE-FILLING === with {self.inference_batch_size} initial requests"
         )
-        for i in range(self.inference_batch_size):
+        prefill_pbar = tqdm(
+            range(self.inference_batch_size),
+            desc="[vLLM] Pre-filling requests",
+            total=self.inference_batch_size,
+            leave=False,
+        )
+        for i in prefill_pbar:
             self.logger.info(
                 f"[LLMRayActor.process_from_queue] Pre-fill: Calling add_request {i + 1}/{self.inference_batch_size}"
             )
@@ -452,6 +464,8 @@ class LLMRayActor:
                 self.prompt_queue, self.llm_engine, self.tools, timeout=timeout, request_metadata=request_metadata
             )
             self.logger.info(f"[LLMRayActor.process_from_queue] Pre-fill: add_request {i + 1} returned")
+            prefill_pbar.set_postfix({"loaded": i + 1})
+        prefill_pbar.close()
         self.logger.info("[LLMRayActor.process_from_queue] === PRE-FILLING COMPLETE ===")
 
         self.logger.info("[LLMRayActor.process_from_queue] === MAIN LOOP STARTING ===")
@@ -498,10 +512,16 @@ class LLMRayActor:
                         [output], dataset_index=[dataset_index] if dataset_index is not None else None
                     )
 
+                    self.logger.info(
+                        f"[vLLM] Processed prompt #{num_processed}, dataset_index={dataset_index}, "
+                        f"n_completions={len(output.outputs)}, is_eval={is_eval}"
+                    )
+
                     # Put result in appropriate queue
                     try:
                         queue_to_use = self.eval_results_queue if is_eval else self.results_queue
                         queue_to_use.put(result, timeout=10)
+                        self.logger.info(f"[vLLM] Result for dataset_index={dataset_index} put in queue")
                     except queue.Full:
                         self.logger.warning("Results queue is full, discarding result.")
                 else:
@@ -509,10 +529,15 @@ class LLMRayActor:
                     num_processed += 1
                     result = _finalize_outputs([output], tracking, None, self.tools)
 
+                    self.logger.info(
+                        f"[vLLM] Processed prompt #{num_processed} with tools, dataset_index={dataset_index}, is_eval={is_eval}"
+                    )
+
                     # Put result in appropriate queue
                     try:
                         queue_to_use = self.eval_results_queue if is_eval else self.results_queue
                         queue_to_use.put(result, timeout=10)
+                        self.logger.info(f"[vLLM] Result for dataset_index={dataset_index} put in queue")
                     except queue.Full:
                         self.logger.warning("Results queue is full, discarding result.")
 

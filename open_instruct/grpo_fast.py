@@ -1261,14 +1261,18 @@ def accumulate_inference_batches(
     all_ground_truths = []
     all_datasets = []
 
-    for i in tqdm(
+    pbar = tqdm(
         range(total_results),
         total=total_results,
         desc=f"Accumulating {total_results} results (each with {generation_config.n} completions)",
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
-    ):
+    )
+
+    for i in pbar:
+        logger.info(f"[Accumulate] Waiting for result {i + 1}/{total_results}...")
         result = inference_results_Q.get(timeout=timeout)
+        logger.info(f"[Accumulate] Got result {i + 1}/{total_results}")
 
         if isinstance(result, ShutdownSentinel):
             return result, None
@@ -1278,6 +1282,10 @@ def accumulate_inference_batches(
 
         if dataset_index is None:
             raise RuntimeError(f"Dataset index is None for result {i}")
+
+        logger.info(
+            f"[Accumulate] Result {i + 1} has dataset_index={dataset_index}, n_responses={len(result.responses)}"
+        )
 
         # Verify that each result contains the expected number of responses
         assert len(result.responses) == generation_config.n, (
@@ -1289,6 +1297,8 @@ def accumulate_inference_batches(
         all_queries.append(query)
         all_ground_truths.append(ground_truth)
         all_datasets.append(dataset)
+
+        pbar.set_postfix({"dataset_idx": dataset_index, "responses": len(result.responses)})
 
         results.append(result)
 
@@ -1906,8 +1916,11 @@ def split_and_insert_batch(
 
     # Push individual prompts to the queue
     logger.debug(f"[split_and_insert_batch] Pushing {len(batch.queries)} prompts to queue")
+    queue_size_before = param_prompt_Q.qsize()
     for i, prompt in enumerate(batch.queries):
-        logger.debug(f"[split_and_insert_batch] Putting prompt {i + 1}/{len(batch.queries)} into queue")
+        logger.debug(
+            f"[split_and_insert_batch] Putting prompt {i + 1}/{len(batch.queries)} (idx={batch.indices[i]}) into queue"
+        )
         param_prompt_Q.put(
             PromptRequest(
                 prompt=prompt,
@@ -1918,7 +1931,10 @@ def split_and_insert_batch(
             )
         )
         logger.debug(f"[split_and_insert_batch] Prompt {i + 1} put into queue successfully")
-    logger.debug(f"[split_and_insert_batch] All {len(batch.queries)} prompts pushed to queue")
+    queue_size_after = param_prompt_Q.qsize()
+    logger.info(
+        f"[split_and_insert_batch] All {len(batch.queries)} prompts pushed. Queue size: {queue_size_before} → {queue_size_after}"
+    )
 
 
 def sync_weights_and_prepare_prompts(

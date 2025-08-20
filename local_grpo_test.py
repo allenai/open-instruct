@@ -45,6 +45,7 @@ def local_generate_thread(vllm_actors, stop_event):
     """Thread function that repeatedly calls process_from_queue on local vLLM actors."""
     logger.info("[Generate Thread] 🚀 Starting local generation thread")
     iteration = 0
+    total_processed = 0
     while not stop_event.is_set():
         iteration += 1
         logger.debug(f"[Generate Thread] Starting iteration {iteration}")
@@ -53,11 +54,12 @@ def local_generate_thread(vllm_actors, stop_event):
             logger.debug(f"[Generate Thread] Calling process_from_queue on {len(vllm_actors)} actors")
             processed_results = [actor.process_from_queue(timeout=20) for actor in vllm_actors]
             num_processed = sum(int(result) for result in processed_results)
-            logger.debug(f"[Generate Thread] Processed {num_processed} requests in iteration {iteration}")
+            total_processed += num_processed
+            logger.info(f"[Generate Thread] Iteration {iteration}: Processed {num_processed} new requests, total: {total_processed}")
             # Suppress timing output if nothing was processed
             if num_processed == 0:
                 timer.noop = True
-    logger.info("[Generate Thread] 🛑 Stopping generation thread")
+    logger.info(f"[Generate Thread] 🛑 Stopping generation thread. Total processed: {total_processed}")
 
 
 def main(args: grpo_fast.Args, tc: TokenizerConfig, model_config: ModelConfig):
@@ -267,9 +269,11 @@ def main(args: grpo_fast.Args, tc: TokenizerConfig, model_config: ModelConfig):
         )
         
         # Send initial data to ensure we have a N-step offset
-        for _ in range(args.async_steps):
+        logger.info(f">>> Inserting {args.async_steps} initial batches for async processing")
+        for step_idx in tqdm(range(args.async_steps), desc="Inserting initial batches"):
             dataset_indices = next(iter_dataloader)
             batch = grpo_fast.next_batch(dataset_indices, train_dataset)
+            logger.info(f">>> Initial batch {step_idx + 1}: inserting {len(batch.queries)} prompts")
             grpo_fast.split_and_insert_batch(
                 batch,
                 1,  # All initial batches labeled as step 1
@@ -278,6 +282,7 @@ def main(args: grpo_fast.Args, tc: TokenizerConfig, model_config: ModelConfig):
                 param_prompt_Q,
                 generation_configs["train"],
             )
+            logger.info(f">>> Initial batch {step_idx + 1}: insertion complete")
         
         # Token counting and main loop
         num_total_tokens = 0
@@ -309,6 +314,7 @@ def main(args: grpo_fast.Args, tc: TokenizerConfig, model_config: ModelConfig):
             # Prepare next batch of prompts (no weight sync needed in local mode)
             dataset_indices = next(iter_dataloader)
             batch = grpo_fast.next_batch(dataset_indices, train_dataset)
+            logger.info(f"[Main] Step {training_step}: Inserting {len(batch.queries)} prompts with indices {batch.indices[:3]}...")
             grpo_fast.split_and_insert_batch(
                 batch,
                 training_step,  # Current training step, not future
@@ -317,6 +323,7 @@ def main(args: grpo_fast.Args, tc: TokenizerConfig, model_config: ModelConfig):
                 param_prompt_Q,
                 generation_configs["train"],
             )
+            logger.info(f"[Main] Step {training_step}: Insertion complete")
             
             # Get packed data from packing thread
             collated_data, data_thread_metrics, num_total_tokens = grpo_fast.load_data_from_packing_thread(
