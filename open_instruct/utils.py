@@ -922,7 +922,7 @@ def maybe_get_beaker_config():
     )
 
 
-def maybe_update_beaker_description_with_wandb_url(wandb_url: str) -> None:
+def maybe_update_beaker_description_with_wandb_url(wandb_url: Optional[str]) -> None:
     """Update Beaker experiment description with wandb URL if running on Beaker."""
     if not is_beaker_job() or wandb_url is None:
         return
@@ -935,7 +935,16 @@ def maybe_update_beaker_description_with_wandb_url(wandb_url: str) -> None:
         logger.warning("This might be fine if you are e.g. running in an interactive job.")
         return
     current_description = spec.description or ""
-    client.experiment.set_description(os.environ["BEAKER_WORKLOAD_ID"], f"{current_description}\n{wandb_url}")
+    if "wandb.ai" in current_description:
+        # If wandb URL already exists, do not add it again
+        return
+    new_description = (
+        f"{current_description}\n"
+        f"{wandb_url}\n"
+        f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}\n"
+        f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}\n"
+    )
+    client.experiment.set_description(os.environ["BEAKER_WORKLOAD_ID"], new_description)
 
 
 def live_subprocess_output(cmd: List[str]) -> str:
