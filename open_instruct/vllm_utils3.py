@@ -301,26 +301,15 @@ def add_request(
     prompt_queue: queue.Queue, llm_engine: vllm.LLMEngine, tools, timeout: float = 60.0, request_metadata: dict = None
 ):
     """Get a request from the queue and add it to the LLM engine."""
-    import logging
-
-    logger = logging.getLogger(__name__)
-    logger.debug(f"[add_request] Attempting to get request from queue with timeout={timeout}")
     try:
         request = prompt_queue.get(timeout=timeout)
-        logger.info(
-            f"[add_request] Got request from queue: training_step={request.training_step}, "
-            f"dataset_index={request.dataset_index}, is_eval={request.is_eval}"
-        )
     except queue.Empty:
-        logger.debug(f"[add_request] Queue empty after timeout={timeout}")
         return
 
     prompt = request.prompt  # Single prompt from PromptRequest
     sampling_params = request.generation_config
     training_step = request.training_step if request.training_step is not None else 0
     dataset_index = request.dataset_index if request.dataset_index is not None else 0
-
-    logger.info(f"[add_request] Processing prompt with dataset_index={dataset_index}, n={sampling_params.n}")
 
     # Store metadata if provided
     # Add prefix to prevent collision between train and eval requests with same dataset_index
@@ -369,18 +358,14 @@ class LLMRayActor:
         import logging
 
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.logger.info("[LLMRayActor.__init__] Starting initialization")
 
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
-        self.logger.info(f"[LLMRayActor.__init__] Tools configured: {len(self.tools)} tools")
 
         if self.tools:
             self.executor = ThreadPoolExecutor(max_workers=20)
         else:
             self.executor = None
-
-        self.logger.info("[LLMRayActor.__init__] Processing noset_visible_devices")
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
@@ -400,11 +385,7 @@ class LLMRayActor:
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             print(f"creating LLM with bundle_indices={bundle_indices}")
 
-        self.logger.info("[LLMRayActor.__init__] About to create LLM engine from args")
         self.llm_engine = vllm.LLMEngine.from_engine_args(vllm.EngineArgs(*args, **kwargs))
-        self.logger.info("[LLMRayActor.__init__] LLM engine created successfully")
-
-        self.logger.info("[LLMRayActor.__init__] Setting up queues and other attributes")
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
@@ -413,7 +394,6 @@ class LLMRayActor:
         if inference_batch_size is None:
             raise ValueError("inference_batch_size must be specified.")
         self.inference_batch_size = inference_batch_size
-        self.logger.info(f"[LLMRayActor.__init__] Initialization complete, batch_size={self.inference_batch_size}")
 
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
@@ -421,19 +401,12 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed.
         """
-        self.logger.info(
-            f"[LLMRayActor.process_from_queue] === STARTING === timeout={timeout}, batch_size={self.inference_batch_size}"
-        )
-        self.logger.info(
-            f"[LLMRayActor.process_from_queue] Queue types: prompt_queue={type(self.prompt_queue)}, results_queue={type(self.results_queue)}"
-        )
 
         num_processed = 0
         iteration = 0
         request_metadata = {}  # Track request metadata by ID
 
         # Initialize tracking for tools if needed
-        self.logger.info(f"[LLMRayActor.process_from_queue] Initializing tool tracking, tools={len(self.tools)} tools")
         if self.tools:
             tracking = _init_tool_tracking()
             sampling_params = None  # Will be set from first request
@@ -442,12 +415,8 @@ class LLMRayActor:
             tracking = None
             sampling_params = None
             tokenizer = None
-        self.logger.info("[LLMRayActor.process_from_queue] Tool tracking initialized")
 
         # Pre-fill with initial requests using a short timeout to avoid blocking
-        self.logger.info(
-            f"[LLMRayActor.process_from_queue] === PRE-FILLING === with up to {self.inference_batch_size} initial requests"
-        )
         prefill_pbar = tqdm(
             range(self.inference_batch_size),
             desc="[vLLM] Pre-filling requests",
@@ -456,55 +425,26 @@ class LLMRayActor:
         )
         prefilled_count = 0
         for i in prefill_pbar:
-            self.logger.info(
-                f"[LLMRayActor.process_from_queue] Pre-fill: Calling add_request {i + 1}/{self.inference_batch_size}"
-            )
             # Use a short timeout for pre-fill to avoid blocking
             add_request(self.prompt_queue, self.llm_engine, self.tools, timeout=0.1, request_metadata=request_metadata)
             if self.llm_engine.has_unfinished_requests():
                 prefilled_count += 1
-            self.logger.info(f"[LLMRayActor.process_from_queue] Pre-fill: add_request {i + 1} returned")
             prefill_pbar.set_postfix({"loaded": prefilled_count})
             # If we couldn't get a request quickly, start processing with what we have
             if prefilled_count > 0 and prefilled_count < (i + 1):
-                self.logger.info(
-                    f"[LLMRayActor.process_from_queue] Pre-fill: Only got {prefilled_count} requests, starting processing"
-                )
                 break
         prefill_pbar.close()
-        self.logger.info(
-            f"[LLMRayActor.process_from_queue] === PRE-FILLING COMPLETE with {prefilled_count} requests ==="
-        )
-
-        self.logger.info("[LLMRayActor.process_from_queue] === MAIN LOOP STARTING ===")
         while True:
             iteration += 1
-            if iteration % 100 == 0:
-                self.logger.info(f"[LLMRayActor.process_from_queue] >>> ITERATION {iteration} START")
 
             # Non-blocking check for should_stop using ray.wait
-            self.logger.debug(
-                f"[LLMRayActor.process_from_queue] Iteration {iteration}: Checking actor_manager.should_stop"
-            )
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
             if ready_refs and ray.get(ready_refs[0]):
-                self.logger.info(
-                    "[LLMRayActor.process_from_queue] Actor manager signaled to stop. Exiting generation loop."
-                )
                 return num_processed
-            self.logger.debug(
-                f"[LLMRayActor.process_from_queue] Iteration {iteration}: should_stop check complete, continuing"
-            )
 
             # Process a step and get completed outputs
-            if iteration % 100 == 0:
-                self.logger.info(f"[LLMRayActor.process_from_queue] Iteration {iteration}: About to call _step_engine")
             outputs = self._step_engine(tracking, sampling_params, tokenizer)
-            if iteration % 100 == 0:
-                self.logger.info(
-                    f"[LLMRayActor.process_from_queue] Iteration {iteration}: _step_engine returned {len(outputs)} outputs"
-                )
 
             # Process completed outputs
             for output in outputs:
@@ -518,16 +458,10 @@ class LLMRayActor:
                     num_processed += 1
                     result = _process_outputs([output], dataset_index=dataset_index)
 
-                    self.logger.info(
-                        f"[vLLM] Processed prompt #{num_processed}, dataset_index={dataset_index}, "
-                        f"n_completions={len(output.outputs)}, is_eval={is_eval}"
-                    )
-
                     # Put result in appropriate queue
                     try:
                         queue_to_use = self.eval_results_queue if is_eval else self.results_queue
                         queue_to_use.put(result, timeout=10)
-                        self.logger.info(f"[vLLM] Result for dataset_index={dataset_index} put in queue")
                     except queue.Full:
                         self.logger.warning("Results queue is full, discarding result.")
                 else:
@@ -535,15 +469,10 @@ class LLMRayActor:
                     num_processed += 1
                     result = _finalize_outputs([output], tracking, None, self.tools)
 
-                    self.logger.info(
-                        f"[vLLM] Processed prompt #{num_processed} with tools, dataset_index={dataset_index}, is_eval={is_eval}"
-                    )
-
                     # Put result in appropriate queue
                     try:
                         queue_to_use = self.eval_results_queue if is_eval else self.results_queue
                         queue_to_use.put(result, timeout=10)
-                        self.logger.info(f"[vLLM] Result for dataset_index={dataset_index} put in queue")
                     except queue.Full:
                         self.logger.warning("Results queue is full, discarding result.")
 
@@ -559,9 +488,6 @@ class LLMRayActor:
             # Check termination condition
             pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
             if not self.llm_engine.has_unfinished_requests() and pending_count == 0:
-                self.logger.info(
-                    f"[LLMRayActor] Terminating after {iteration} iterations, processed {num_processed} requests"
-                )
                 break
 
         return num_processed
@@ -579,11 +505,6 @@ class LLMRayActor:
         outputs = []
         if self.llm_engine.has_unfinished_requests():
             step_outputs = list(self.llm_engine.step())
-            if step_outputs:
-                outputs_per_request = [len(o.outputs) for o in step_outputs]
-                self.logger.info(
-                    f"[LLMRayActor._step_engine] engine.step() returned {len(step_outputs)} step_outputs, outputs per request: {outputs_per_request}"
-                )
 
             for output in step_outputs:
                 if output.finished:
@@ -592,7 +513,6 @@ class LLMRayActor:
                     )
                     if result is not None:
                         outputs.append(result)
-                        self.logger.info(f"[LLMRayActor] Added output {output.request_id} to results")
 
         return outputs
 
