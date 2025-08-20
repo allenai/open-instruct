@@ -39,6 +39,7 @@ python mason.py \
     --gs_model_name $gs_model_name \
     --gpus ${NUM_GPUS} \
     --budget ai2/oe-adapt \
+    --resumable \
     -- \
 source configs/beaker_configs/ray_node_setup.sh \&\& \
 source configs/beaker_configs/code_api_setup.sh \&\& \
