@@ -432,7 +432,6 @@ class Args:
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
-        # Set default inference_batch_size if not provided
         if self.inference_batch_size is None:
             self.inference_batch_size = self.num_unique_prompts_rollout // self.vllm_num_engines
             logger.info(
@@ -1249,8 +1248,6 @@ def accumulate_inference_batches(
     Returns:
         Tuple of (combined_result, Batch with queries, ground_truths, datasets) or (ShutdownSentinel, None) if shutdown signal received
     """
-    # Collect individual results
-    # Each result contains generation_config.n responses
     results = []
     all_queries = []
     all_ground_truths = []
@@ -1268,18 +1265,13 @@ def accumulate_inference_batches(
         if isinstance(result, ShutdownSentinel):
             return result, None
 
-        # Each result contains one dataset_index (for the prompt) with n responses
-        dataset_index = result.dataset_index[0] if result.dataset_index else None
+        dataset_index = result.dataset_index
+        assert dataset_index is not None, f"Dataset index is None for result {i}"
 
-        if dataset_index is None:
-            raise RuntimeError(f"Dataset index is None for result {i}")
-
-        # Verify that each result contains the expected number of responses
         assert len(result.responses) == generation_config.n, (
             f"Result {i} has {len(result.responses)} responses, expected {generation_config.n}"
         )
 
-        # Pop query data for this prompt
         query, ground_truth, dataset = pending_queries_map.pop(dataset_index)
         all_queries.append(query)
         all_ground_truths.append(ground_truth)
@@ -1363,7 +1355,6 @@ def data_preparation_thread(
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
-        # Expand batch to match the number of responses (each prompt generated n completions)
         if args.num_samples_per_prompt_rollout > 1:
             batch = Batch(
                 queries=repeat_each(batch.queries, args.num_samples_per_prompt_rollout),
@@ -1891,10 +1882,8 @@ def split_and_insert_batch(
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    # Store all prompts in the map first
     pending_queries_map.insert_many(batch.indices, batch.queries, batch.ground_truths, batch.datasets)
 
-    # Push individual prompts to the queue
     for i, prompt in enumerate(batch.queries):
         param_prompt_Q.put(
             PromptRequest(

@@ -22,7 +22,7 @@ class GenerationResult:
     finish_reasons: List[str]
     masks: List[List[int]]
     request_info: RequestInfo
-    dataset_index: Optional[List[int]] = None
+    dataset_index: Optional[int] = None
     training_step: Optional[int] = None
 
 

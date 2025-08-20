@@ -100,9 +100,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     return output
 
 
-def _process_outputs(
-    outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None
-) -> "GenerationResult":
+def _process_outputs(outputs: List[vllm.RequestOutput], dataset_index: Optional[int] = None) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
     finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
@@ -518,9 +516,7 @@ class LLMRayActor:
                 if not self.tools:
                     # Process complete output with all N completions
                     num_processed += 1
-                    result = _process_outputs(
-                        [output], dataset_index=[dataset_index] if dataset_index is not None else None
-                    )
+                    result = _process_outputs([output], dataset_index=dataset_index)
 
                     self.logger.info(
                         f"[vLLM] Processed prompt #{num_processed}, dataset_index={dataset_index}, "
