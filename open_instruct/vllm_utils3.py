@@ -19,6 +19,7 @@ import copy
 import logging
 import os
 import queue
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -408,16 +409,19 @@ class LLMRayActor:
                 # Otherwise continue trying to get more requests
 
         while True:
+            self.logger.info("Entering main loop.")
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
             if ready_refs and ray.get(ready_refs[0]):
                 should_stop = True
             else:
                 should_stop = False
+            self.logger.info(f"[LLMRayActor] should_stop={should_stop}")
             if should_stop and self.inflight_updates:
                 self.logger.info(
                     f"[LLMRayActor] Returning early due to should_stop={should_stop} and inflight_updates={self.inflight_updates}, processed {num_processed} requests"
                 )
+                time.sleep(5)
                 return num_processed
 
             outputs = self._step_engine(tracking, tokenizer)
