@@ -12,17 +12,6 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  push:
-    # Run this workflow anytime a push updates one of the files in the image's directory
-    # (other than the README), and anytime there's a new release tag for this image.
-    paths:
-      - 'open_instruct/**'
-      - '!open_instruct/README.md'
-      - 'requirements.txt'
-      - 'Dockerfile'
-      - '.github/workflows/push-image.yml'
-      # Note, add .olmo dockerfile + requirements if adding auto build to those
-    branches: [main]
   # pull_request: # note, comment this out for running on every push
   #   # Also run on PRs that update the files in the image's directory (other than README).
   #   branches: [main]
@@ -43,12 +32,6 @@ jobs:
     name: open_instruct
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    # Prevent duplicate runs when using merge queue:
-    # - When a PR is merged via merge queue, GitHub triggers both 'push' and 'merge_group' events
-    # - The merge queue creates temporary branches like 'refs/heads/gh-readonly-queue/main/pr-123-abc123'
-    # - This condition skips the 'push' trigger for merge queue branches (identified by the gh-readonly-queue prefix)
-    # - The 'merge_group' trigger will handle these instead, preventing duplicate runs
-    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/heads/gh-readonly-queue/')
     steps:
       - uses: actions/checkout@v3
 
