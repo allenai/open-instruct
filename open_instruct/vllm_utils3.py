@@ -306,21 +306,17 @@ def add_request(
     except queue.Empty:
         return
 
-    prompt = request.prompt  # Single prompt from PromptRequest
     sampling_params = request.generation_config
     training_step = request.training_step if request.training_step is not None else 0
     dataset_index = request.dataset_index if request.dataset_index is not None else 0
 
-    # Store metadata if provided
-    # Add prefix to prevent collision between train and eval requests with same dataset_index
     prefix = "eval" if request.is_eval else "train"
     base_request_id = f"{prefix}_{training_step}_{dataset_index}"
-    if request_metadata is not None:
-        request_metadata[base_request_id] = {
-            "is_eval": request.is_eval,
-            "dataset_index": dataset_index,
-            "training_step": training_step,
-        }
+    request_metadata[base_request_id] = {
+        "is_eval": request.is_eval,
+        "dataset_index": dataset_index,
+        "training_step": training_step,
+    }
 
     if tools:
         # Need n=1 for individual tool tracking
@@ -330,12 +326,12 @@ def add_request(
         # Create individual requests for each sample when using tools
         for j in range(original_n):
             request_id = f"{base_request_id}-{j}"
-            tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
+            tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt)
             llm_engine.add_request(request_id, tokens_prompt, sampling_params)
     else:
         # Standard request format for non-tool mode
         request_id = base_request_id
-        tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
+        tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt)
         llm_engine.add_request(request_id, tokens_prompt, sampling_params)
 
 
@@ -355,8 +351,6 @@ class LLMRayActor:
         inference_batch_size: Optional[int] = None,
         **kwargs,
     ):
-        import logging
-
         self.logger = logging.getLogger(self.__class__.__name__)
 
         self.tools = tools or {}
@@ -406,7 +400,6 @@ class LLMRayActor:
         iteration = 0
         request_metadata = {}  # Track request metadata by ID
 
-        # Initialize tracking for tools if needed
         if self.tools:
             tracking = _init_tool_tracking()
             sampling_params = None  # Will be set from first request
@@ -416,76 +409,60 @@ class LLMRayActor:
             sampling_params = None
             tokenizer = None
 
-        # Pre-fill with initial requests using a short timeout to avoid blocking
-        prefill_pbar = tqdm(
+        prefilled_count = 0
+        for i in tqdm(
             range(self.inference_batch_size),
             desc="[vLLM] Pre-filling requests",
             total=self.inference_batch_size,
             leave=False,
-        )
-        prefilled_count = 0
-        for i in prefill_pbar:
-            # Use a short timeout for pre-fill to avoid blocking
+        ):
             add_request(self.prompt_queue, self.llm_engine, self.tools, timeout=0.1, request_metadata=request_metadata)
             if self.llm_engine.has_unfinished_requests():
                 prefilled_count += 1
-            prefill_pbar.set_postfix({"loaded": prefilled_count})
             # If we couldn't get a request quickly, start processing with what we have
             if prefilled_count > 0 and prefilled_count < (i + 1):
                 break
-        prefill_pbar.close()
         while True:
             iteration += 1
 
-            # Non-blocking check for should_stop using ray.wait
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
             if ready_refs and ray.get(ready_refs[0]):
                 return num_processed
 
-            # Process a step and get completed outputs
             outputs = self._step_engine(tracking, sampling_params, tokenizer)
 
-            # Process completed outputs
             for output in outputs:
-                # Get request metadata
                 base_request_id = output.request_id.split("-")[0] if "-" in output.request_id else output.request_id
                 is_eval = request_metadata[base_request_id]["is_eval"]
                 dataset_index = request_metadata[base_request_id]["dataset_index"]
 
                 if not self.tools:
-                    # Process complete output with all N completions
                     num_processed += 1
                     result = _process_outputs([output], dataset_index=dataset_index)
 
-                    # Put result in appropriate queue
                     try:
                         queue_to_use = self.eval_results_queue if is_eval else self.results_queue
                         queue_to_use.put(result, timeout=10)
                     except queue.Full:
                         self.logger.warning("Results queue is full, discarding result.")
                 else:
-                    # Tool mode - process as before
                     num_processed += 1
                     result = _finalize_outputs([output], tracking, None, self.tools)
 
-                    # Put result in appropriate queue
                     try:
                         queue_to_use = self.eval_results_queue if is_eval else self.results_queue
                         queue_to_use.put(result, timeout=10)
                     except queue.Full:
                         self.logger.warning("Results queue is full, discarding result.")
 
-                # Clean up metadata for completed request
                 if base_request_id in request_metadata:
                     del request_metadata[base_request_id]
 
-                # Add new request to replace completed one
                 add_request(
                     self.prompt_queue, self.llm_engine, self.tools, timeout=0.1, request_metadata=request_metadata
                 )
 
-            # Check termination condition
             pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
             if not self.llm_engine.has_unfinished_requests() and pending_count == 0:
                 break
@@ -501,7 +478,6 @@ class LLMRayActor:
         if tracking and tracking.get("pending_tool_futures"):
             self._poll_tool_futures(tracking, sampling_params, tokenizer)
 
-        # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
         outputs = []
         if self.llm_engine.has_unfinished_requests():
             step_outputs = list(self.llm_engine.step())
