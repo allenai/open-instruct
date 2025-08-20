@@ -429,6 +429,11 @@ class Args:
         assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
             "At least one reward must be applied!"
         )
+        # Ensure we have enough prompts for all VLLM engines
+        if self.num_unique_prompts_rollout < self.vllm_num_engines:
+            raise ValueError(
+                f"{self.num_unique_prompts_rollout=} must be >= {self.vllm_num_engines=} to avoid empty batches."
+            )
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
@@ -1883,7 +1888,6 @@ def split_and_insert_batch(
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
     pending_queries_map.insert_many(batch.indices, batch.queries, batch.ground_truths, batch.datasets)
-
     for i, prompt in enumerate(batch.queries):
         param_prompt_Q.put(
             PromptRequest(
