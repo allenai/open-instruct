@@ -88,7 +88,9 @@ from huggingface_hub import HfApi, HfFolder, create_repo  # For Hub upload
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+from open_instruct.utils import setup_logger
+
+logger = setup_logger(__name__)
 
 MODEL_NAME = "allenai/Llama-3.1-Tulu-3-8B-SFT"
 
@@ -101,7 +103,7 @@ def check_seq_len_batch(batch, tokenizer, column_name, max_seq_len):
     """
     if column_name not in batch:
         if not hasattr(check_seq_len_batch, "warned_missing_col"):
-            logging.warning(f"Column '{column_name}' not found in a batch. Excluding rows in this batch.")
+            logger.warning(f"Column '{column_name}' not found in a batch. Excluding rows in this batch.")
             check_seq_len_batch.warned_missing_col = True
         # Get number of items in batch from another column
         example_key = next(iter(batch.keys()))
@@ -115,35 +117,35 @@ def check_seq_len_batch(batch, tokenizer, column_name, max_seq_len):
         lengths = [len(ids) for ids in tokenized_outputs["input_ids"]]
         return {"keep": [length <= max_seq_len for length in lengths]}
     except Exception as e:
-        logging.error(f"Error during tokenization/length check in batch: {e}. Excluding rows in this batch.")
+        logger.error(f"Error during tokenization/length check in batch: {e}. Excluding rows in this batch.")
         num_items = len(outputs)
         return {"keep": [False] * num_items} # Exclude all items on error
 
 # --- Main Function ---
 def main(args):
     """Loads dataset, filters by sequence length, and saves the result."""
-    logging.info(f"Loading tokenizer: {MODEL_NAME}")
+    logger.info(f"Loading tokenizer: {MODEL_NAME}")
     try:
         tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, use_fast=True)
     except Exception as e:
-        logging.error(f"Failed to load tokenizer {MODEL_NAME}: {e}")
+        logger.error(f"Failed to load tokenizer {MODEL_NAME}: {e}")
         sys.exit(1)
 
-    logging.info(f"Loading dataset: {args.dataset_name}, split: {args.split}, streaming={args.streaming}")
+    logger.info(f"Loading dataset: {args.dataset_name}, split: {args.split}, streaming={args.streaming}")
     try:
         dataset = datasets.load_dataset(args.dataset_name, split=args.split, streaming=args.streaming)
     except FileNotFoundError:
-        logging.error(f"Dataset '{args.dataset_name}' not found.")
+        logger.error(f"Dataset '{args.dataset_name}' not found.")
         sys.exit(1)
     except ValueError as e:
-         logging.error(f"Invalid split '{args.split}' or dataset configuration error for '{args.dataset_name}': {e}")
+         logger.error(f"Invalid split '{args.split}' or dataset configuration error for '{args.dataset_name}': {e}")
          sys.exit(1)
     except Exception as e:
-        logging.error(f"Failed to load dataset '{args.dataset_name}' split '{args.split}': {e}")
+        logger.error(f"Failed to load dataset '{args.dataset_name}' split '{args.split}': {e}")
         sys.exit(1)
 
     # --- Filtering --- #
-    logging.info(f"Filtering dataset by max sequence length ({args.max_seq_len}) for column '{args.column_name}'...")
+    logger.info(f"Filtering dataset by max sequence length ({args.max_seq_len}) for column '{args.column_name}'...")
 
     # Reset warning flag for the helper function
     if hasattr(check_seq_len_batch, "warned_missing_col"):
@@ -162,7 +164,7 @@ def main(args):
             batch_size=args.batch_size
         )
     except Exception as e:
-        logging.error(f"Error during the mapping phase for length checking: {e}")
+        logger.error(f"Error during the mapping phase for length checking: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
@@ -174,33 +176,33 @@ def main(args):
 
     # For non-streaming: filter directly on the mapped dataset
     if not args.streaming:
-        logging.info("Applying filter to non-streaming dataset...")
+        logger.info("Applying filter to non-streaming dataset...")
         try:
             filtered_dataset = dataset_with_keep_flag.filter(lambda example: example['keep'])
             # Remove the temporary 'keep' column
             filtered_dataset = filtered_dataset.remove_columns(["keep"])
         except Exception as e:
-            logging.error(f"Error applying filter or removing column: {e}")
+            logger.error(f"Error applying filter or removing column: {e}")
             sys.exit(1)
 
-        logging.info(f"Original dataset size: {len(dataset_with_keep_flag)}") # Original might be different if map failed batches
-        logging.info(f"Filtered dataset size: {len(filtered_dataset)}")
+        logger.info(f"Original dataset size: {len(dataset_with_keep_flag)}") # Original might be different if map failed batches
+        logger.info(f"Filtered dataset size: {len(filtered_dataset)}")
 
         # --- Uploading --- #
         if args.hub_repo_id:
             # --- Uploading to Hub --- #
-            logging.info("Attempting to upload to Hugging Face Hub...")
+            logger.info("Attempting to upload to Hugging Face Hub...")
             hf_token = HfFolder.get_token()
             if not hf_token:
-                logging.error("Hugging Face Hub token not found. Please login using `huggingface-cli login`.")
+                logger.error("Hugging Face Hub token not found. Please login using `huggingface-cli login`.")
                 sys.exit(1)
 
             # Ensure the repo exists, create if it doesn't (private by default)
             try:
                 create_repo(args.hub_repo_id, repo_type="dataset", exist_ok=True, token=hf_token)
-                logging.info(f"Ensured repository '{args.hub_repo_id}' exists on the Hub.")
+                logger.info(f"Ensured repository '{args.hub_repo_id}' exists on the Hub.")
             except Exception as e:
-                logging.error(f"Failed to create or access Hub repo '{args.hub_repo_id}': {e}")
+                logger.error(f"Failed to create or access Hub repo '{args.hub_repo_id}': {e}")
                 sys.exit(1)
 
             api = HfApi()
@@ -214,14 +216,14 @@ def main(args):
                     token=hf_token,
                     exist_ok=True # Don't fail if branch already exists
                 )
-                logging.info(f"Ensured branch '{args.new_branch_name}' exists in repo '{args.hub_repo_id}'.")
+                logger.info(f"Ensured branch '{args.new_branch_name}' exists in repo '{args.hub_repo_id}'.")
             except Exception as e:
-                logging.error(f"Failed to create branch '{args.new_branch_name}' in repo '{args.hub_repo_id}': {e}")
+                logger.error(f"Failed to create branch '{args.new_branch_name}' in repo '{args.hub_repo_id}': {e}")
                 sys.exit(1)
 
             if not args.streaming:
                 # --- Non-Streaming Upload ---
-                logging.info(f"Uploading filtered non-streaming dataset to '{args.hub_repo_id}' branch '{args.new_branch_name}' split '{args.split}'...")
+                logger.info(f"Uploading filtered non-streaming dataset to '{args.hub_repo_id}' branch '{args.new_branch_name}' split '{args.split}'...")
                 try:
                     filtered_dataset.push_to_hub(
                         args.hub_repo_id,
@@ -229,17 +231,17 @@ def main(args):
                         token=hf_token,
                         revision=args.new_branch_name # Target the new branch
                     )
-                    logging.info("Dataset uploaded successfully to the Hub branch.")
+                    logger.info("Dataset uploaded successfully to the Hub branch.")
                 except Exception as e:
-                    logging.error(f"Failed to upload non-streaming dataset to Hub branch '{args.new_branch_name}': {e}")
+                    logger.error(f"Failed to upload non-streaming dataset to Hub branch '{args.new_branch_name}': {e}")
                     sys.exit(1)
             else:
                 # --- Streaming Upload ---
-                logging.info(f"Processing stream and uploading to '{args.hub_repo_id}' branch '{args.new_branch_name}' split '{args.split}'...")
+                logger.info(f"Processing stream and uploading to '{args.hub_repo_id}' branch '{args.new_branch_name}' split '{args.split}'...")
                 # Write to a temporary JSONL file first
                 with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as temp_f:
                     temp_filename = temp_f.name
-                    logging.info(f"Writing filtered stream to temporary file: {temp_filename}")
+                    logger.info(f"Writing filtered stream to temporary file: {temp_filename}")
                     written_count = 0
                     original_count = 0
                     try:
@@ -249,17 +251,17 @@ def main(args):
                                 example.pop('keep', None)
                                 temp_f.write(json.dumps(example) + '\n')
                                 written_count += 1
-                        logging.info(f"Processed approximately {original_count} records.")
-                        logging.info(f"Wrote {written_count} filtered records to temporary file.")
+                        logger.info(f"Processed approximately {original_count} records.")
+                        logger.info(f"Wrote {written_count} filtered records to temporary file.")
                     except Exception as e:
-                        logging.error(f"Failed during streaming filtering to temporary file: {e}")
+                        logger.error(f"Failed during streaming filtering to temporary file: {e}")
                         os.remove(temp_filename) # Clean up temp file on error
                         sys.exit(1)
 
                     # Upload the temporary file
                     if written_count > 0:
                         upload_path_in_repo = f"data/{args.split}.jsonl" # Standard location
-                        logging.info(f"Uploading temporary file {temp_filename} to {args.hub_repo_id} at '{upload_path_in_repo}' on branch '{args.new_branch_name}'...")
+                        logger.info(f"Uploading temporary file {temp_filename} to {args.hub_repo_id} at '{upload_path_in_repo}' on branch '{args.new_branch_name}'...")
                         try:
                             api.upload_file(
                                 path_or_fileobj=temp_filename,
@@ -270,18 +272,18 @@ def main(args):
                                 revision=args.new_branch_name, # Target the new branch
                                 commit_message=f"Add filtered {args.split} split to branch {args.new_branch_name} (max_len={args.max_seq_len}, col={args.column_name})"
                             )
-                            logging.info(f"Successfully uploaded {upload_path_in_repo} to the Hub branch '{args.new_branch_name}'.")
+                            logger.info(f"Successfully uploaded {upload_path_in_repo} to the Hub branch '{args.new_branch_name}'.")
                         except Exception as e:
-                            logging.error(f"Failed to upload temporary file to Hub branch '{args.new_branch_name}': {e}")
+                            logger.error(f"Failed to upload temporary file to Hub branch '{args.new_branch_name}': {e}")
                         finally:
-                            logging.info(f"Cleaning up temporary file: {temp_filename}")
+                            logger.info(f"Cleaning up temporary file: {temp_filename}")
                             os.remove(temp_filename)
                     else:
-                        logging.warning("No records were filtered to be kept. Nothing uploaded.")
+                        logger.warning("No records were filtered to be kept. Nothing uploaded.")
                         os.remove(temp_filename) # Still clean up empty temp file
         else:
              # This case should no longer be reachable since hub_repo_id is required
-             logging.error("No output method specified (this should not happen).")
+             logger.error("No output method specified (this should not happen).")
              sys.exit(1)
 
 # --- Argument Parsing and Execution ---
@@ -300,7 +302,7 @@ if __name__ == "__main__":
 
     # Simple validation
     if "/" not in args.hub_repo_id:
-        logging.error("Invalid --hub_repo_id format. Should be 'namespace/repository_name'.")
+        logger.error("Invalid --hub_repo_id format. Should be 'namespace/repository_name'.")
         sys.exit(1)
 
     main(args)

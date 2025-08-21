@@ -30,7 +30,6 @@ except Exception:
     pass
 # isort: on
 import json
-import logging
 import math
 import os
 import shutil
@@ -73,6 +72,7 @@ from open_instruct.utils import (
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
+    setup_logger,
 )
 
 logger = get_logger(__name__)
@@ -464,9 +464,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         pprint([args, tc])
 
     # Make one log on every process with the configuration for debugging.
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
-    )
+    setup_logger()
     logger.info(accelerator.state, main_process_only=False)
     if accelerator.is_local_main_process:
         datasets.utils.logging.set_verbosity_warning()

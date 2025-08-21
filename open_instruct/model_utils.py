@@ -15,7 +15,6 @@
 
 
 import itertools
-import logging
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -42,9 +41,9 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from open_instruct.ground_truth_utils import VerifierFunction
-from open_instruct.utils import retry_on_exception
+from open_instruct.utils import retry_on_exception, setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 @dataclass

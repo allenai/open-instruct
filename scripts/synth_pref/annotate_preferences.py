@@ -14,13 +14,9 @@ from tqdm import tqdm
 
 from scripts.synth_pref.utils.openai_api import format_for_openai_batch
 from scripts.synth_pref.utils.ultrafeedback_template import system_prompt
+from open_instruct.utils import setup_logger
 
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[logging.StreamHandler(sys.stdout)],
-    level=logging.INFO,
-)
+logger = setup_logger(__name__)
 
 load_dotenv()
 
@@ -65,7 +61,7 @@ def main():
     api_key: str = os.getenv("OPENAI_API_KEY", default=None)
     if not api_key:
         msg = f"API key not found! Please set it in {env_name}."
-        logging.error(msg)
+        logger.error(msg)
         raise ValueError(msg)
     client = OpenAI(api_key=api_key)
 
@@ -89,7 +85,7 @@ def main():
         for idx, hdf in enumerate(hdfs):
             output_path = output_dir / f"{args.prefix}-shard-{str(idx).zfill(6)}.jsonl"
             hdf.to_json(output_path, lines=True, orient="records")
-        logging.info(f"Saved shards to {output_dir}")
+        logger.info(f"Saved shards to {output_dir}")
 
     if args.command == "upload":
         input_dir = Path(args.input_dir)
@@ -112,7 +108,7 @@ def main():
             )
 
             batch_input_file_id = batch_input_file.id
-            logging.info(f"File: {file} ID: {batch_input_file_id}")
+            logger.info(f"File: {file} ID: {batch_input_file_id}")
 
             # Keep trying to create batch until it succeeds
             batch = None
@@ -132,16 +128,16 @@ def main():
 
                 except Exception as e:
                     if "pending" in str(e).lower():
-                        logging.info("Batch creation pending, retrying in 10s")
+                        logger.info("Batch creation pending, retrying in 10s")
                         time.sleep(10)
                         continue
                     if "running" in str(e).lower():
-                        logging.info("Batch creation running, retrying in 10s")
+                        logger.info("Batch creation running, retrying in 10s")
                         time.sleep(10)
                         continue
                     else:
                         # For non-pending errors, log warning and add to retry file
-                        logging.warning(f"Please retry: {file} | ERROR: {str(e)}")
+                        logger.warning(f"Please retry: {file} | ERROR: {str(e)}")
                         row = {
                             "local_filepath": str(file),
                             "shard": file.stem.removesuffix("-full"),
@@ -162,7 +158,7 @@ def main():
                 pd.DataFrame([row]).to_csv(
                     file_path, mode="a", header=False, index=False
                 )
-        logging.info(
+        logger.info(
             "Created a batch report as a CSV file. Please keep this as you'll use this to retrieve the results later on!"
         )
 
@@ -175,7 +171,7 @@ def main():
 
         df = pd.read_csv(args.batch_report)
         batch_ids = df["id"].to_list()
-        logging.info(f"Checking status of {len(batch_ids)} batch IDs")
+        logger.info(f"Checking status of {len(batch_ids)} batch IDs")
         for batch_id in batch_ids:
             status = "validating"
             while status not in ("completed", "failed", "canceled"):
@@ -188,13 +184,13 @@ def main():
                 if status == "completed" and output_dir:
                     file_id = batch_response.output_file_id
                     output_path = output_dir / f"{batch_id}.jsonl"
-                    logging.info(f"Retrieving responses for batch id {batch_id}")
+                    logger.info(f"Retrieving responses for batch id {batch_id}")
                     file_response = client.files.content(file_id)
                     raw_responses = file_response.text.strip().split("\n")
                     json_responses = [
                         json.loads(response) for response in raw_responses
                     ]
-                    logging.info(f"Saving file {file_id} to {output_path}")
+                    logger.info(f"Saving file {file_id} to {output_path}")
                     resp_df = pd.DataFrame(json_responses)
                     resp_df.to_json(output_path, lines=True, orient="records")
 

@@ -23,16 +23,10 @@ import time
 from tqdm.asyncio import tqdm_asyncio
 import logging
 
+from open_instruct.utils import setup_logger
+
 # Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("verification.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 CONCURRENCY_LIMIT = 256
 SOURCE_DATASET = "saurabh5/correct-python-sft-187k-x16-thoughts"

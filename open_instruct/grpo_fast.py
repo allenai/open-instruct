@@ -49,7 +49,6 @@ from open_instruct import utils
 # isort: on
 import asyncio
 import json
-import logging
 import math
 import shutil
 import socket
@@ -132,16 +131,11 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
     repeat_each,
+    setup_logger,
     sync_gs_bucket,
 )
 
-# Setup logging with filename and line number format
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 api = HfApi()
 INVALID_LOGPROB = 1.0

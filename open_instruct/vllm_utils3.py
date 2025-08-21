@@ -16,7 +16,6 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 import copy
-import logging
 import os
 import queue
 from collections import defaultdict
@@ -42,9 +41,9 @@ from torch.distributed.distributed_c10d import (
 
 from open_instruct.queue_types import GenerationResult, RequestInfo
 from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
-from open_instruct.utils import ray_get_with_progress
+from open_instruct.utils import ray_get_with_progress, setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 def _init_tool_tracking():
@@ -345,7 +344,7 @@ class LLMRayActor:
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
-        self.logger = logging.getLogger(__name__)
+        self.logger = setup_logger(__name__)
         self.actor_manager = actor_manager
 
     def process_from_queue(self, timeout: float = 60.0):

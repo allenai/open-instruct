@@ -5,6 +5,8 @@ from functools import partial
 from datasets import DatasetDict, load_dataset
 from huggingface_hub import HfApi
 
+from open_instruct.utils import setup_logger
+
 """
 Script to build hardcoded data for Ai2's models, so 
   the models know who they are and why they're trained.
@@ -64,10 +66,7 @@ ARG_TO_PLACEHOLDER_MAP = {
 VALID_FILTER_TAGS = ["olmo", "tulu", "date-cutoff", "no-tools", "english-only", "license", "availability"]
 
 # --- Logging Setup ---
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logger = setup_logger(__name__)
 
 # --- Argument Parsing ---
 def parse_arguments():
@@ -200,7 +199,7 @@ def process_example(example, replacements, formatted_system_prompt=None):
                 "content": processed_content
             })
         else:
-            logging.warning(f"Skipping malformed message in example ID {example.get('id', 'N/A')}: {message}")
+            logger.warning(f"Skipping malformed message in example ID {example.get('id', 'N/A')}: {message}")
 
     # Update the example with the new messages list
     example['messages'] = processed_messages
@@ -239,7 +238,7 @@ def main():
 
     # --- Prepare Replacements: Start with defaults, then override ---
     replacements = DEFAULT_PLACEHOLDERS.copy()
-    logging.info(f"Loaded default placeholders: {replacements}")
+    logger.info(f"Loaded default placeholders: {replacements}")
 
     overrides_applied = {}
     for arg_name, placeholder_key in ARG_TO_PLACEHOLDER_MAP.items():
@@ -249,11 +248,11 @@ def main():
             overrides_applied[placeholder_key] = arg_value
 
     if overrides_applied:
-        logging.info(f"Applied overrides from arguments: {overrides_applied}")
+        logger.info(f"Applied overrides from arguments: {overrides_applied}")
     else:
-        logging.info("No placeholder overrides provided via arguments, using defaults.")
+        logger.info("No placeholder overrides provided via arguments, using defaults.")
 
-    logging.info(f"Final replacements to be used: {replacements}")
+    logger.info(f"Final replacements to be used: {replacements}")
 
     # --- Determine Full Target Repo ID ---
     target_repo_name = args.target_repo_name
@@ -262,7 +261,7 @@ def main():
         final_model_name = replacements["<|MODEL_NAME|>"]
         sanitized_model_name = final_model_name.lower().replace(" ", "-").replace("/", "_").replace("<|", "").replace("|>", "")
         target_repo_name = f"hardcoded-{sanitized_model_name}"
-        logging.info(f"Target repository name automatically set to: {target_repo_name}")
+        logger.info(f"Target repository name automatically set to: {target_repo_name}")
 
     target_repo_full_id = f"{args.target_namespace}/{target_repo_name}"
 
@@ -271,26 +270,26 @@ def main():
         api = HfApi()
         try:
             repo_info = api.repo_info(repo_id=target_repo_full_id, repo_type="dataset")
-            logging.info(f"Target repository '{target_repo_full_id}' exists.")
+            logger.info(f"Target repository '{target_repo_full_id}' exists.")
         except Exception:
-            logging.info(f"Target repository '{target_repo_full_id}' not found or inaccessible. It will be created during push.")
+            logger.info(f"Target repository '{target_repo_full_id}' not found or inaccessible. It will be created during push.")
     except Exception as e:
-        logging.error(f"Error accessing Hugging Face Hub: {e}")
-        logging.error("Ensure you are logged in with 'huggingface-cli login' before running this script.")
+        logger.error(f"Error accessing Hugging Face Hub: {e}")
+        logger.error("Ensure you are logged in with 'huggingface-cli login' before running this script.")
         return
 
     # --- Load Source Dataset ---
     try:
-        logging.info(f"Loading source dataset '{args.source_repo}'...")
+        logger.info(f"Loading source dataset '{args.source_repo}'...")
         original_dataset = load_dataset(args.source_repo)
-        logging.info(f"Dataset loaded successfully. Splits: {list(original_dataset.keys())}")
+        logger.info(f"Dataset loaded successfully. Splits: {list(original_dataset.keys())}")
     except Exception as e:
-        logging.error(f"Failed to load source dataset '{args.source_repo}': {e}")
+        logger.error(f"Failed to load source dataset '{args.source_repo}': {e}")
         return
 
     # --- Apply Tag Filtering if Specified ---
     if args.filter_tags:
-        logging.info(f"Filtering out examples with tags: {args.filter_tags}")
+        logger.info(f"Filtering out examples with tags: {args.filter_tags}")
         filtered_dataset = DatasetDict()
 
         for split_name, split_dataset in original_dataset.items():
@@ -300,7 +299,7 @@ def main():
             )
             filtered_dataset[split_name] = filtered_split
 
-            logging.info(f"Split '{split_name}': Kept {len(filtered_split)}/{len(split_dataset)} examples after filtering")
+            logger.info(f"Split '{split_name}': Kept {len(filtered_split)}/{len(split_dataset)} examples after filtering")
 
         original_dataset = filtered_dataset
 
@@ -309,12 +308,12 @@ def main():
     if args.system_prompt_template:
         # Use the final 'replacements' dict here too
         formatted_system_prompt = format_content(args.system_prompt_template, replacements)
-        logging.info(f"Formatted system prompt: '{formatted_system_prompt}'")
+        logger.info(f"Formatted system prompt: '{formatted_system_prompt}'")
     else:
-        logging.info("No system prompt template provided.")
+        logger.info("No system prompt template provided.")
 
     # --- Process Dataset Splits ---
-    logging.info("Processing dataset splits...")
+    logger.info("Processing dataset splits...")
     processing_func = partial(
         process_example,
         replacements=replacements, # Pass the final replacements dict
@@ -326,32 +325,32 @@ def main():
         batched=False,
         desc="Applying replacements and system prompt"
     )
-    logging.info("Dataset processing complete.")
+    logger.info("Dataset processing complete.")
 
     # --- Display Sample ---
     try:
         first_split_name = next(iter(processed_dataset.keys()))
-        logging.info(f"\n--- Sample Processed Example (from split '{first_split_name}') ---")
+        logger.info(f"\n--- Sample Processed Example (from split '{first_split_name}') ---")
         # Pretty print the dictionary for better readability
         import json
         print(json.dumps(processed_dataset[first_split_name][0], indent=2))
-        logging.info("--- End Sample ---")
+        logger.info("--- End Sample ---")
     except Exception as e:
-        logging.warning(f"Could not display sample processed data: {e}")
+        logger.warning(f"Could not display sample processed data: {e}")
 
     # --- Push to Hub ---
     try:
-        logging.info(f"Pushing processed dataset to '{target_repo_full_id}'...")
+        logger.info(f"Pushing processed dataset to '{target_repo_full_id}'...")
         processed_dataset.push_to_hub(
             repo_id=target_repo_full_id.replace(" ", "-").replace("ü","u"), # Replace spaces with hyphens
             private=True
         )
-        logging.info(f"Dataset successfully pushed to: https://huggingface.co/datasets/{target_repo_full_id}")
+        logger.info(f"Dataset successfully pushed to: https://huggingface.co/datasets/{target_repo_full_id}")
     except Exception as e:
-        logging.error(f"Failed to push dataset to '{target_repo_full_id}': {e}")
-        logging.error("Check that you're logged in with 'huggingface-cli login' and have the necessary permissions.")
+        logger.error(f"Failed to push dataset to '{target_repo_full_id}': {e}")
+        logger.error("Check that you're logged in with 'huggingface-cli login' and have the necessary permissions.")
     else:
-        logging.info("Processing complete. Dataset pushed to Hub successfully.")
+        logger.info("Processing complete. Dataset pushed to Hub successfully.")
 
 
 if __name__ == "__main__":

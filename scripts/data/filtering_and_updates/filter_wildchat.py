@@ -19,35 +19,37 @@ import logging
 import os
 from datasets import load_dataset
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+from open_instruct.utils import setup_logger
+
+logger = setup_logger(__name__)
 
 def filter_toxic(ds):
     """Filter out rows where `toxic` is True."""
-    logging.info("Filtering out toxic examples…")
+    logger.info("Filtering out toxic examples…")
     initial_count = ds.num_rows
     ds_filtered = ds.filter(lambda ex: not ex.get("toxic", False))
     filtered_out = initial_count - ds_filtered.num_rows
-    logging.info("Filtered out %d toxic examples (%d remaining, %.2f%%).", 
+    logger.info("Filtered out %d toxic examples (%d remaining, %.2f%%).", 
                  filtered_out, ds_filtered.num_rows, 100 * ds_filtered.num_rows / initial_count)
     return ds_filtered
 
 def filter_redacted(ds):
     """Filter out rows where `redacted` is True."""
-    logging.info("Filtering out redacted examples…")
+    logger.info("Filtering out redacted examples…")
     initial_count = ds.num_rows
     ds_filtered = ds.filter(lambda ex: not ex.get("redacted", False))
     filtered_out = initial_count - ds_filtered.num_rows
-    logging.info("Filtered out %d redacted examples (%d remaining, %.2f%%).", 
+    logger.info("Filtered out %d redacted examples (%d remaining, %.2f%%).", 
                  filtered_out, ds_filtered.num_rows, 100 * ds_filtered.num_rows / initial_count)
     return ds_filtered
 
 def filter_language(ds, lang="english"):
     """Return only rows whose `language` matches `lang` (case‑insensitive)."""
-    logging.info("Filtering for language='%s' (case‑insensitive)…", lang)
+    logger.info("Filtering for language='%s' (case‑insensitive)…", lang)
     initial_count = ds.num_rows
     ds_filtered = ds.filter(lambda ex: ex.get("language", "").lower() == lang.lower())
     filtered_out = initial_count - ds_filtered.num_rows
-    logging.info("Filtered out %d non-English examples (%d remaining, %.2f%%).", 
+    logger.info("Filtered out %d non-English examples (%d remaining, %.2f%%).", 
                  filtered_out, ds_filtered.num_rows, 100 * ds_filtered.num_rows / initial_count)
     return ds_filtered
 
@@ -57,9 +59,9 @@ def main():
     parser.add_argument("--output-dataset", help="Output dataset name/path")
     args = parser.parse_args()
 
-    logging.info("Loading dataset %s…", args.input_dataset)
+    logger.info("Loading dataset %s…", args.input_dataset)
     ds = load_dataset(args.input_dataset, split="train")
-    logging.info("Loaded dataset with %d examples.", ds.num_rows)
+    logger.info("Loaded dataset with %d examples.", ds.num_rows)
 
     # 1) Filter out toxic examples
     ds = filter_toxic(ds)
@@ -71,13 +73,13 @@ def main():
     ds = filter_language(ds, "english")
 
     # 4) Push filtered dataset
-    logging.info("Pushing filtered dataset to %s…", args.output_dataset)
+    logger.info("Pushing filtered dataset to %s…", args.output_dataset)
     ds.push_to_hub(args.output_dataset, private=False)
 
-    logging.info("All done!")
+    logger.info("All done!")
 
 if __name__ == "__main__":
     if os.environ.get("HF_TOKEN") is None:
-        logging.warning("HF_TOKEN environment variable not set. "
+        logger.warning("HF_TOKEN environment variable not set. "
                         "Run 'huggingface-cli login' or set HF_TOKEN to authenticate.")
     main()

@@ -9,13 +9,9 @@ import pandas as pd
 from tqdm import tqdm
 
 from scripts.synth_pref.utils.ultrafeedback_template import parser
+from open_instruct.utils import setup_logger
 
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[logging.StreamHandler(sys.stdout)],
-    level=logging.INFO,
-)
+logger = setup_logger(__name__)
 
 aspects = ["helpfulness", "honesty", "instruction_following", "truthfulness"]
 
@@ -39,7 +35,7 @@ def main():
     if args.command == "openai":
         # Read all JSONL files in a single dataframe
         input_dir = Path(args.input_dir)
-        logging.info(f"Reading all files from {input_dir}")
+        logger.info(f"Reading all files from {input_dir}")
         _dfs = []
         for f in tqdm(list(input_dir.glob("*jsonl"))):
             _df = pd.read_json(f, lines=True)
@@ -55,7 +51,7 @@ def main():
         )
 
     pref_df.to_json(args.output_path, lines=True, orient="records")
-    logging.info(f"Saved file ({len(pref_df)} instances) to {args.output_path}")
+    logger.info(f"Saved file ({len(pref_df)} instances) to {args.output_path}")
 
 
 def parse_openai(
@@ -82,14 +78,14 @@ def parse_openai(
         return message.get("content", "")
 
     # Preprocess the files and compute the ratings
-    logging.info("openai: Preprocessing files...")
+    logger.info("openai: Preprocessing files...")
     df["aspect"] = df["_custom_id"].apply(lambda x: aspects_map.get(x.split("_")[1]))
     df["custom_id"] = df["_custom_id"].apply(lambda x: x.split("_")[0])
     if df.aspect.value_counts().nunique() != 1:
-        logging.info("Possible missing files")
+        logger.info("Possible missing files")
         print(df.aspect.value_counts())
     if df.custom_id.value_counts().nunique() != 1:
-        logging.info("Possible duplicate files")
+        logger.info("Possible duplicate files")
         print(df.custom_id.value_counts())
 
     df["output"] = df["response"].apply(lambda x: get_resp(x))
@@ -102,7 +98,7 @@ def parse_openai(
     )
 
     # Parse the responses
-    logging.info("openai: Parsing responses...")
+    logger.info("openai: Parsing responses...")
     for aspect in aspects:
         df[f"{aspect}_responses"] = df[aspect].apply(lambda x: parser(x, aspect=aspect))
         df[f"{aspect}_ratings"] = df[f"{aspect}_responses"].apply(
@@ -111,7 +107,7 @@ def parse_openai(
 
     # Compute the mean ratings and get the chosen and rejected response
     # For Ultrafeedback, we get the chosen as the highest score, and rejected as the remaining three.
-    logging.info("openai: Computing ratings for binarization...")
+    logger.info("openai: Computing ratings for binarization...")
     df["mean_ratings"] = df.apply(lambda row: compute_mean_rating(row), axis=1)
 
     ref_df = ref_df.reset_index()
@@ -126,7 +122,7 @@ def parse_openai(
 
     combined = df[["id", "mean_ratings"]].merge(ref_df, on="id", how="left")
 
-    logging.info("openai: Binarizing preferences...")
+    logger.info("openai: Binarizing preferences...")
     binarized = combined.apply(binarize_pref, axis=1)
     binarized = binarized.dropna().reset_index(drop=True)
     pref_df = pd.concat([combined, binarized], axis=1)
@@ -203,7 +199,7 @@ def binarize_pref(row):
     ratings = row["mean_ratings"][:4]
     chosen_idx = int(np.argmax(ratings))
     if len(ratings) == 1:
-        logging.warning(f"Potential parse error for instance id: {row['id']}")
+        logger.warning(f"Potential parse error for instance id: {row['id']}")
         rejected_idx = chosen_idx
     else:
         rejected_idx = int(

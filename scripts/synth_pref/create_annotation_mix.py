@@ -11,13 +11,9 @@ from jinja2 import BaseLoader, Environment
 from tqdm import tqdm
 
 from scripts.synth_pref.utils.ultrafeedback_template import user_prompts
+from open_instruct.utils import setup_logger
 
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[logging.StreamHandler(sys.stdout)],
-    level=logging.INFO,
-)
+logger = setup_logger(__name__)
 
 
 def get_args():
@@ -45,7 +41,7 @@ def main():
         include_models=args.include_model,
         ignore_models=args.ignore_model,
     )
-    logging.info(f"Using the {len(model_paths)} models")
+    logger.info(f"Using the {len(model_paths)} models")
     df = sample_responses(
         model_paths,
         source_dir=input_dir,
@@ -53,7 +49,7 @@ def main():
         one_side_model=args.one_side_model,
     )
 
-    logging.info(f"*** Applying the prompt template '{args.prompt_template}' ***")
+    logger.info(f"*** Applying the prompt template '{args.prompt_template}' ***")
     aspect_dfs = {}
     for aspect, prompt in user_prompts.items():
         id_col = "prompt_hash" if "prompt_hash" in df.columns else "id"
@@ -75,7 +71,7 @@ def main():
     full_output_dir = Path(args.output_dir) / "full"
     full_output_dir.mkdir(parents=True, exist_ok=True)
     rows_per_shard = 250
-    logging.info(f"*** Saving shards for each aspect in {parent_output_dir} ***")
+    logger.info(f"*** Saving shards for each aspect in {parent_output_dir} ***")
     for aspect, aspect_df in aspect_dfs.items():
         output_dir = parent_output_dir / aspect
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -86,7 +82,7 @@ def main():
             orient="records",
         )
 
-        logging.debug(f"Saving shards in {output_dir}")
+        logger.debug(f"Saving shards in {output_dir}")
         for idx, shard in enumerate(range(0, len(df), rows_per_shard)):
             shard_df = aspect_df.iloc[shard : shard + rows_per_shard]
             shard_df = shard_df.reset_index()
@@ -112,7 +108,7 @@ def sample_responses(
         common_ids = common_ids[common_ids == len(dfs)].index
         return {key: df[df[unique_key].isin(common_ids)] for key, df in dfs.items()}
 
-    logging.debug(f"Reading JSONL files from cache {source_dir}")
+    logger.debug(f"Reading JSONL files from cache {source_dir}")
     model_dfs: dict[str, pd.DataFrame] = {}
     for model, path in tqdm(model_paths.items()):
         model_df = pd.concat(
@@ -141,7 +137,7 @@ def sample_responses(
     model_dfs = _filter_common_rows(model_dfs, id_col)
     if one_side_model:
         assert one_side_model in model_dfs, f"Unknown model: {one_side_model}"
-        logging.info(f"Value passed to --one_side_model: '{one_side_model}'")
+        logger.info(f"Value passed to --one_side_model: '{one_side_model}'")
         cols = ["prompt_hash", "response", "model_name"]
         one_side_df = model_dfs.pop(one_side_model)[cols].rename(columns={id_col: "id"})
         combined_df = pd.concat(model_dfs.values()).reset_index(drop=True)
@@ -188,7 +184,7 @@ def sample_responses(
         result_df["models"] = result_df.apply(lambda row: [row["all_models"][idx] for idx in row["sampled_idxs"]], axis=1)
         # fmt: on
 
-    logging.debug(f"Compiled dataframe has {len(result_df)} instances")
+    logger.debug(f"Compiled dataframe has {len(result_df)} instances")
     return result_df
 
 

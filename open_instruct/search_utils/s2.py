@@ -5,8 +5,9 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-logging.basicConfig(level=logging.DEBUG)
-logging.getLogger("urllib3").setLevel(logging.DEBUG)
+from open_instruct.utils import setup_logger
+
+setup_logger("urllib3").setLevel(logging.DEBUG)
 
 
 def create_session_with_retries(

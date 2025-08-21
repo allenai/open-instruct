@@ -12,7 +12,6 @@ import csv
 import dataclasses
 import gc
 import json
-import logging
 import pathlib
 import time
 from typing import Any
@@ -28,6 +27,7 @@ from ray.util import queue as ray_queue
 
 from open_instruct import dataset_transformation, grpo_fast, model_utils, utils, vllm_utils3
 from open_instruct.queue_types import PromptRequest
+from open_instruct.utils import setup_logger
 
 # For FLOPS, we assume bf16 and ignore sparsity.
 GPU_SPECS = {
@@ -39,7 +39,7 @@ GPU_SPECS = {
 }
 
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 # Determine data directory

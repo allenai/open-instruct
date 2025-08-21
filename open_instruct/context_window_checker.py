@@ -19,10 +19,11 @@ Usage:
         pass
 """
 
-import logging
 from typing import Dict, List
 
-logger = logging.getLogger(__name__)
+from open_instruct.utils import setup_logger
+
+logger = setup_logger(__name__)
 
 # Try to import tiktoken, but provide fallback if not available
 try:

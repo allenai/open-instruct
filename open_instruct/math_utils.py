@@ -1,4 +1,3 @@
-import logging
 import re
 import signal
 from typing import Optional
@@ -6,7 +5,9 @@ from typing import Optional
 import sympy
 from sympy.parsing.latex import parse_latex
 
-eval_logger = logging.getLogger("math_utils")
+from open_instruct.utils import setup_logger
+
+eval_logger = setup_logger("math_utils")
 
 
 # from https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/minerva_math/utils.py#L187
