@@ -412,7 +412,7 @@ class LLMRayActor:
         num_processed = 0
 
         tracking = _init_tool_tracking() if self.tools else None
-        tokenizer = self.llm_engine.get_tokenizer() if self.tools else None
+        tokenizer = self.llm_engine.tokenizer if self.tools else None
 
         # Track collected outputs for tool mode to batch them properly
         collected_outputs = {} if self.tools else None
