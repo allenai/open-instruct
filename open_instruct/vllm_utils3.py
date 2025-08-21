@@ -456,6 +456,7 @@ class LLMRayActor:
                 f"[LLMRayActor] Early return before pre-filling: should_stop={self._should_stop()}, "
                 f"inflight_updates={self.inflight_updates}, processed {num_processed} requests"
             )
+            time.sleep(1)  # Add backoff to reduce excessive polling
             return num_processed
 
         for i in tqdm(
