@@ -359,7 +359,6 @@ class LLMRayActor:
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
             if ready_refs and ray.get(ready_refs[0]):
-                self.logger.info("[LLMRayActor] Actor manager signaled to stop. Exiting generation loop.")
                 return 0
 
             try:
