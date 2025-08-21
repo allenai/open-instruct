@@ -2002,8 +2002,12 @@ def sync_weights_and_prepare_prompts(
         if args.async_steps > 0
         else "🔄 Loading weights using shared memory"
     ):
+        logger.info(
+            f"[Main Thread] Setting should_stop=True for weight sync at step {training_step}, "
+            f"inflight_updates={args.inflight_updates}, time={time.time()}"
+        )
         ray.get(actor_manager.set_should_stop.remote(True))
-        logger.debug(f"[Main Thread] Set should_stop to True for weight sync at step {training_step}")
+        logger.info(f"[Main Thread] Successfully set should_stop=True at step {training_step}")
 
         ray_get_with_progress(
             [m.broadcast_to_vllm.remote() for m in policy_group.models],
@@ -2011,8 +2015,12 @@ def sync_weights_and_prepare_prompts(
             enable=args.verbose,
         )
 
+        logger.info(
+            f"[Main Thread] Weight broadcast complete, setting should_stop=False at step {training_step}, "
+            f"time={time.time()}"
+        )
         ray.get(actor_manager.set_should_stop.remote(False))
-        logger.debug(f"[Main Thread] Set should_stop to False after weight sync at step {training_step}")
+        logger.info(f"[Main Thread] Successfully set should_stop=False at step {training_step}")
 
     split_and_insert_batch(
         batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]
@@ -2399,9 +2407,9 @@ def cleanup_training_resources(
     # Signal generate_thread to stop
     stop_event.set()
 
-    logger.info("Signaling all actors to stop...")
+    logger.info(f"Signaling all actors to stop at time={time.time()}...")
     ray.get(actor_manager.set_should_stop.remote(True))
-    logger.info("✅ Signaled all actors to stop")
+    logger.info(f"✅ Signaled all actors to stop (should_stop=True) at time={time.time()}")
 
     logger.info("Pushing shutdown sentinel to queues...")
     # Push sentinel to the first queue (inference_results_Q)

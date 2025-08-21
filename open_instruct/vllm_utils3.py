@@ -287,10 +287,14 @@ class ActorManager:
     """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
 
     def __init__(self):
+        import vllm.logger
+
+        self.logger = vllm.logger.init_logger(__name__)
         self._should_stop = False
 
     def set_should_stop(self, should_stop: bool):
         """Set whether actors should stop processing."""
+        self.logger.info(f"[ActorManager] Setting should_stop from {self._should_stop} to {should_stop}")
         self._should_stop = should_stop
 
     def should_stop(self) -> bool:
@@ -341,8 +345,9 @@ class LLMRayActor:
         inflight_updates: bool = False,
         **kwargs,
     ):
+        # Configure logging for this actor process
+        logging.basicConfig(level=logging.INFO, force=True)
         self.logger = vllm.logger.init_logger(__name__)
-
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inflight_updates = inflight_updates
@@ -374,12 +379,29 @@ class LLMRayActor:
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
-        self.logger = logging.getLogger(__name__)
         self.actor_manager = actor_manager
         if inference_batch_size is None:
             raise ValueError("inference_batch_size must be specified.")
         self.inference_batch_size = inference_batch_size
         self.request_metadata = {}  # Track request metadata by ID
+        self._last_should_stop_update = None
+        self._should_stop_value = None
+        self._should_stop_timeout_s = 5
+
+    def _should_stop(self) -> bool:
+        last_update = self._last_should_stop_update
+        if last_update is None or (time.time() - last_update) > self._should_stop_timeout_s:
+            should_stop_ref = self.actor_manager.should_stop.remote()
+            ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
+            if ready_refs:
+                should_stop = ray.get(ready_refs[0])
+                self.logger.info(f"[LLMRayActor] Got should_stop={should_stop} from ActorManager (in main loop)")
+            else:
+                should_stop = False
+                self.logger.info("[LLMRayActor] Timeout waiting for should_stop, defaulting to False (in main loop)")
+            self._should_stop_update = time.time()
+            self._should_stop_value = should_stop
+        return self._should_stop_value
 
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
@@ -392,6 +414,13 @@ class LLMRayActor:
 
         tracking = _init_tool_tracking() if self.tools else None
         tokenizer = self.llm_engine.get_tokenizer() if self.tools else None
+
+        if self._should_stop():
+            self.logger.info(
+                f"[LLMRayActor] Early return before pre-filling: should_stop={self._should_stop()}, "
+                f"inflight_updates={self.inflight_updates}, processed {num_processed} requests"
+            )
+            return num_processed
 
         for i in tqdm(
             range(self.inference_batch_size),
@@ -407,21 +436,15 @@ class LLMRayActor:
                 if self.llm_engine.has_unfinished_requests():
                     break
                 # Otherwise continue trying to get more requests
-
+        iteration = 0
         while True:
-            self.logger.info("Entering main loop.")
-            should_stop_ref = self.actor_manager.should_stop.remote()
-            ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
-            if ready_refs and ray.get(ready_refs[0]):
-                should_stop = True
-            else:
-                should_stop = False
-            self.logger.info(f"[LLMRayActor] should_stop={should_stop}")
-            if should_stop and self.inflight_updates:
+            if iteration == 0:
+                self.logger.info("Entering main loop.")
+            iteration += 1
+            if self._should_stop() and self.inflight_updates:
                 self.logger.info(
-                    f"[LLMRayActor] Returning early due to should_stop={should_stop} and inflight_updates={self.inflight_updates}, processed {num_processed} requests"
+                    f"[LLMRayActor] Returning early due to should_stop={self._should_stop()} and inflight_updates={self.inflight_updates}, processed {num_processed} requests"
                 )
-                time.sleep(5)
                 return num_processed
 
             outputs = self._step_engine(tracking, tokenizer)
@@ -441,14 +464,14 @@ class LLMRayActor:
 
                 self.request_metadata.pop(base_request_id, None)
 
-                if not should_stop:
+                if not self._should_stop():
                     try:
                         request = self.prompt_queue.get(timeout=0.1)
                         add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
                     except queue.Empty:
                         pass  # No new request available, continue processing
 
-            if should_stop and not self.inflight_updates:
+            if self._should_stop() and not self.inflight_updates:
                 pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
                 if not self.llm_engine.has_unfinished_requests() and pending_count == 0:
                     self.logger.info(
