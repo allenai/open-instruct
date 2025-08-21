@@ -543,6 +543,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
             mock_args,
             training_step=1,
             generation_config=mock_generation_config,
+            num_prompts=num_prompts,
         )
 
         # Verify results work correctly even with out-of-order processing
@@ -637,6 +638,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                     mock_args,
                     training_step=1,
                     generation_config=mock_generation_config,
+                    num_prompts=num_prompts,
                 )
                 completed.set()
             except Exception:
@@ -698,19 +700,19 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         while not param_prompt_Q.empty():
             request = param_prompt_Q.get()
             self.assertIsInstance(request, PromptRequest)
-            self.assertEqual(len(request.prompts), 1, "Each batch should have exactly 1 prompt")
-            batch_sizes.append(len(request.prompts))
+            self.assertIsNotNone(request.prompt, "Each request should have a prompt")
+            batch_sizes.append(1)  # Each PromptRequest contains exactly 1 prompt
 
         # All queries should be in the pending map
         self.assertEqual(len(pending_queries_map), num_queries)
 
     def test_uneven_distribution_no_empty_batches(self):
-        """Test that uneven query distribution doesn't create empty batches."""
+        """Test that split_and_insert_batch creates one PromptRequest per query."""
         num_engines = 3
-        num_queries = 7  # 7/3 = ceil(2.33) = 3, so distribution should be [3, 3, 1]
+        num_queries = 7
 
         queries, ground_truths, datasets, indices = self.create_test_data(num_queries)
-        param_prompt_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        param_prompt_Q = ray_queue.Queue(maxsize=num_queries * 2)
         pending_queries_map = grpo_fast.PendingQueriesMap()
 
         # Track queue for cleanup
@@ -733,24 +735,15 @@ class TestStreamingAccumulation(TestGrpoFastBase):
             generation_config=mock_generation_config,
         )
 
-        # Verify all batches have content and check distribution
-        batch_sizes = []
+        # Verify we get one PromptRequest per query
+        request_count = 0
         while not param_prompt_Q.empty():
             request = param_prompt_Q.get()
-            self.assertGreater(len(request.prompts), 0, "Found empty batch in queue!")
-            batch_sizes.append(len(request.prompts))
+            self.assertIsNotNone(request.prompt, "Each request should have a prompt")
+            request_count += 1
 
-        # Check the expected distribution
-        self.assertEqual(sum(batch_sizes), num_queries, "Total queries should match")
-        self.assertEqual(len(batch_sizes), num_engines, "Should have one batch per engine")
-
-        # The distribution should be [3, 3, 1] for 7 queries across 3 engines with ceiling division
-        expected_distribution = [3, 3, 1]
-        self.assertEqual(
-            sorted(batch_sizes, reverse=True),
-            expected_distribution,
-            f"Expected distribution {expected_distribution}, got {sorted(batch_sizes, reverse=True)}",
-        )
+        # Should have exactly num_queries PromptRequests
+        self.assertEqual(request_count, num_queries, f"Should have {num_queries} PromptRequests")
 
     def test_streaming_accumulation_basic(self):
         """Test basic streaming accumulation with in-order results."""
