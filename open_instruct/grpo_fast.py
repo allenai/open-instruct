@@ -1705,7 +1705,6 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
     """Setup experiment tracking and seeds."""
     all_configs = {}
     beaker_config = None
-
     if is_beaker_job():
         beaker_config = maybe_get_beaker_config()
         all_configs.update(vars(beaker_config))
@@ -2432,16 +2431,10 @@ def run_training(
         )
     num_total_tokens = 0
     training_start_time = time.time()  # Track overall training start time
-
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
-        # Update Beaker progress every 10 steps or on first/last step
-        if (
-            training_step == resume_training_step
-            or training_step % 10 == 0
-            or training_step == args.num_training_steps
-        ):
+        if training_step == resume_training_step or training_step % 10 == 0:
             update_beaker_progress(training_step, args.num_training_steps, training_start_time, wandb_url)
 
         # Check if any of the threads have raised an exception.
