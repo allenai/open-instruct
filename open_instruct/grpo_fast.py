@@ -126,7 +126,7 @@ from open_instruct.utils import (
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
-    maybe_update_beaker_description_with_wandb_url,
+    maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
@@ -1713,7 +1713,8 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
             tags=[args.exp_name] + get_wandb_tags(),
         )
         wandb_url = wandb.run.get_url()
-        maybe_update_beaker_description_with_wandb_url(wandb_url)
+        logger.info(f"Initial Beaker description update with wandb_url: {wandb_url}")
+        maybe_update_beaker_description(wandb_url=wandb_url)
 
     return beaker_config, wandb_url
 
@@ -2422,8 +2423,22 @@ def run_training(
             generation_configs["train"],
         )
     num_total_tokens = 0
+    training_start_time = time.time()  # Track overall training start time
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
+
+        if (
+            training_step == resume_training_step
+            or training_step % 10 == 0
+            or training_step == args.num_training_steps
+        ):
+            logger.info(f"Progress update for Beaker description: step {training_step}/{args.num_training_steps}")
+            maybe_update_beaker_description(
+                current_step=training_step,
+                total_steps=args.num_training_steps,
+                start_time=training_start_time,
+                wandb_url=wandb_url,
+            )
 
         # Check if any of the threads have raised an exception.
         [f.result() for f in [packing_future, generation_future] if f.done()]
