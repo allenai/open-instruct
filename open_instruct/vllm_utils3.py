@@ -354,30 +354,34 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed (0 or 1)
         """
-        while True:
-            # Non-blocking check for should_stop using ray.wait
-            should_stop_ref = self.actor_manager.should_stop.remote()
-            ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
-            if ready_refs and ray.get(ready_refs[0]):
-                self.logger.info("[LLMRayActor] Actor manager signaled to stop. Exiting generation loop.")
-                return 0
+        try:
+            while True:
+                # Non-blocking check for should_stop using ray.wait
+                should_stop_ref = self.actor_manager.should_stop.remote()
+                ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
+                if ready_refs and ray.get(ready_refs[0]):
+                    self.logger.info("[LLMRayActor] Actor manager signaled to stop. Exiting generation loop.")
+                    return 0
 
-            try:
-                request = self.prompt_queue.get(timeout=timeout)
-            except queue.Empty:
-                return 0
+                try:
+                    request = self.prompt_queue.get(timeout=timeout)
+                except queue.Empty:
+                    return 0
 
-            result = self._process_request(request)
+                result = self._process_request(request)
 
-            try:
-                if request.is_eval:
-                    self.eval_results_queue.put(result, timeout=10)
-                else:
-                    self.results_queue.put(result, timeout=10)
-                return 1  # Successfully processed one request
-            except queue.Full:
-                self.logger.warning("Results queue is full, discarding result.")
-                return 0
+                try:
+                    if request.is_eval:
+                        self.eval_results_queue.put(result, timeout=10)
+                    else:
+                        self.results_queue.put(result, timeout=10)
+                    return 1  # Successfully processed one request
+                except queue.Full:
+                    self.logger.warning("Results queue is full, discarding result.")
+                    return 0
+        except Exception as e:
+            self.logger.error(f"Error processing request: {e}")
+            return 0
 
     def _process_request(self, request):
         """Unified processing for both tool and non-tool generation."""
@@ -589,105 +593,100 @@ def create_vllm_engines(
     eval_results_queue=None,
     actor_manager=None,
 ) -> list[LLMRayActor]:
-    try:
-        # Convert max_tool_calls to a dict mapping tool end strings to their limits
-        if tools:
-            assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
-                "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
-            )
-            # tool key is the end_str
-            if len(max_tool_calls) == 1:
-                max_tool_calls_dict = {end_str: max_tool_calls[0] for end_str in tools.keys()}
-            else:
-                max_tool_calls_dict = {end_str: limit for end_str, limit in zip(tools.keys(), max_tool_calls)}
+    # Convert max_tool_calls to a dict mapping tool end strings to their limits
+    if tools:
+        assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
+            "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
+        )
+        # tool key is the end_str
+        if len(max_tool_calls) == 1:
+            max_tool_calls_dict = {end_str: max_tool_calls[0] for end_str in tools.keys()}
         else:
-            max_tool_calls_dict = {}
+            max_tool_calls_dict = {end_str: limit for end_str, limit in zip(tools.keys(), max_tool_calls)}
+    else:
+        max_tool_calls_dict = {}
 
-        vllm_engines = []
-        distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "ray"
-        use_hybrid_engine = pg is not None
-        num_gpus = int(tensor_parallel_size == 1)
-        if use_hybrid_engine and tensor_parallel_size == 1 and single_gpu_mode:
-            # every worker will use 0.5 GPU, so that we can schedule
-            # 2 instances on the same GPUs.
-            num_gpus = 0.5
+    vllm_engines = []
+    distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "ray"
+    use_hybrid_engine = pg is not None
+    num_gpus = int(tensor_parallel_size == 1)
+    if use_hybrid_engine and tensor_parallel_size == 1 and single_gpu_mode:
+        # every worker will use 0.5 GPU, so that we can schedule
+        # 2 instances on the same GPUs.
+        num_gpus = 0.5
 
-        print(f"num_gpus: {num_gpus}")
+    print(f"num_gpus: {num_gpus}")
 
-        if not use_hybrid_engine:
-            # Create a big placement group to ensure that all engines are packed
-            bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size)]
-            pg = placement_group(bundles, strategy="PACK")
-            ray.get(pg.ready())
+    if not use_hybrid_engine:
+        # Create a big placement group to ensure that all engines are packed
+        bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size)]
+        pg = placement_group(bundles, strategy="PACK")
+        ray.get(pg.ready())
 
-        for i in range(num_engines):
-            bundle_indices = None
-            if tensor_parallel_size > 1:
-                bundle_indices = list(range(i * tensor_parallel_size, (i + 1) * tensor_parallel_size))
+    for i in range(num_engines):
+        bundle_indices = None
+        if tensor_parallel_size > 1:
+            bundle_indices = list(range(i * tensor_parallel_size, (i + 1) * tensor_parallel_size))
 
-            scheduling_strategy = PlacementGroupSchedulingStrategy(
-                placement_group=pg,
-                placement_group_capture_child_tasks=True,
-                placement_group_bundle_index=i * tensor_parallel_size,
+        scheduling_strategy = PlacementGroupSchedulingStrategy(
+            placement_group=pg,
+            placement_group_capture_child_tasks=True,
+            placement_group_bundle_index=i * tensor_parallel_size,
+        )
+
+        vllm_engines.append(
+            ray.remote(LLMRayActor)
+            .options(
+                num_cpus=num_gpus,
+                num_gpus=num_gpus,
+                scheduling_strategy=scheduling_strategy,
+                # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
+                runtime_env=ray.runtime_env.RuntimeEnv(
+                    env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
+                ),
             )
-
-            vllm_engines.append(
-                ray.remote(LLMRayActor)
-                .options(
-                    num_cpus=num_gpus,
-                    num_gpus=num_gpus,
-                    scheduling_strategy=scheduling_strategy,
-                    # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
-                    runtime_env=ray.runtime_env.RuntimeEnv(
-                        env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
-                    ),
-                )
-                .remote(
-                    model=pretrain,
-                    revision=revision,
-                    tokenizer=tokenizer_name_or_path,
-                    tokenizer_revision=revision,
-                    trust_remote_code=True,
-                    worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
-                    tensor_parallel_size=tensor_parallel_size,
-                    enforce_eager=enforce_eager,
-                    dtype="bfloat16",
-                    seed=seed + i,
-                    distributed_executor_backend=distributed_executor_backend,
-                    enable_prefix_caching=enable_prefix_caching,
-                    max_model_len=max_model_len,
-                    gpu_memory_utilization=vllm_gpu_memory_utilization,
-                    bundle_indices=bundle_indices,
-                    num_gpus=0.2 if use_hybrid_engine else 1,
-                    enable_sleep_mode=vllm_enable_sleep,
-                    noset_visible_devices=ray_noset_visible_devices(),
-                    prompt_queue=prompt_queue,
-                    results_queue=results_queue,
-                    eval_results_queue=eval_results_queue,
-                    actor_manager=actor_manager,
-                    tools=tools,
-                    max_tool_calls=max_tool_calls_dict,
-                )
+            .remote(
+                model=pretrain,
+                revision=revision,
+                tokenizer=tokenizer_name_or_path,
+                tokenizer_revision=revision,
+                trust_remote_code=True,
+                worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
+                tensor_parallel_size=tensor_parallel_size,
+                enforce_eager=enforce_eager,
+                dtype="bfloat16",
+                seed=seed + i,
+                distributed_executor_backend=distributed_executor_backend,
+                enable_prefix_caching=enable_prefix_caching,
+                max_model_len=max_model_len,
+                gpu_memory_utilization=vllm_gpu_memory_utilization,
+                bundle_indices=bundle_indices,
+                num_gpus=0.2 if use_hybrid_engine else 1,
+                enable_sleep_mode=vllm_enable_sleep,
+                noset_visible_devices=ray_noset_visible_devices(),
+                prompt_queue=prompt_queue,
+                results_queue=results_queue,
+                eval_results_queue=eval_results_queue,
+                actor_manager=actor_manager,
+                tools=tools,
+                max_tool_calls=max_tool_calls_dict,
             )
+        )
 
-        # Verify engines initialized successfully
-        try:
-            ray_get_with_progress(
-                [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300
-            )
-        except TimeoutError as e:
-            logger.error(f"vLLM engines failed to initialize: {e}")
-            # Kill partially initialized actors before raising
-            for engine in vllm_engines:
-                ray.kill(engine)
-            raise RuntimeError(f"vLLM engine initialization timed out: {e}")
+    # Verify engines initialized successfully
+    try:
+        ray_get_with_progress(
+            [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300
+        )
+    except TimeoutError as e:
+        logger.error(f"vLLM engines failed to initialize: {e}")
+        # Kill partially initialized actors before raising
+        for engine in vllm_engines:
+            ray.kill(engine)
+        raise RuntimeError(f"vLLM engine initialization timed out: {e}")
 
-        if vllm_enable_sleep:
-            batch_vllm_engine_call(vllm_engines, "sleep", rank_0_only=False)
-    except Exception as e:
-        # just to try and see it.
-        logger.error(f"Error creating vLLM engines: {e}")
-        raise e
+    if vllm_enable_sleep:
+        batch_vllm_engine_call(vllm_engines, "sleep", rank_0_only=False)
 
     return vllm_engines
 
