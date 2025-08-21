@@ -287,56 +287,17 @@ class ActorManager:
     """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
 
     def __init__(self):
-        import vllm.logger
-
-        self.logger = vllm.logger.init_logger(__name__)
+        self.logger = logging.getLogger(__name__)
         self._should_stop = False
-        self._last_change_time = time.time()
-        self._time_in_state = {True: 0.0, False: 0.0}  # Track cumulative time in each state
 
     def set_should_stop(self, should_stop: bool):
         """Set whether actors should stop processing."""
-        current_time = time.time()
-        duration = current_time - self._last_change_time
-
-        # Update cumulative time for the previous state
-        self._time_in_state[self._should_stop] += duration
-
-        # Log the duration of the previous state
-        self.logger.info(
-            f"[ActorManager] should_stop was {self._should_stop} for {duration:.2f} seconds "
-            f"(cumulative: {self._time_in_state[self._should_stop]:.2f}s)"
-        )
         self.logger.info(f"[ActorManager] Setting should_stop from {self._should_stop} to {should_stop}")
-
-        # Update state and timing
         self._should_stop = should_stop
-        self._last_change_time = current_time
 
     def should_stop(self) -> bool:
         """Check if actors should stop processing."""
         return self._should_stop
-
-    def get_final_timing(self) -> str:
-        """Get final timing information for logging during cleanup."""
-        current_time = time.time()
-        final_duration = current_time - self._last_change_time
-
-        # Update cumulative time for the current (final) state
-        self._time_in_state[self._should_stop] += final_duration
-
-        # Create summary message
-        total_time = self._time_in_state[True] + self._time_in_state[False]
-        msg = (
-            f"[ActorManager] Final timing summary:\n"
-            f"  - Final state: should_stop={self._should_stop} for {final_duration:.2f}s\n"
-            f"  - Total time with should_stop=True: {self._time_in_state[True]:.2f}s "
-            f"({self._time_in_state[True] / total_time * 100:.1f}%)\n"
-            f"  - Total time with should_stop=False: {self._time_in_state[False]:.2f}s "
-            f"({self._time_in_state[False] / total_time * 100:.1f}%)\n"
-            f"  - Total runtime: {total_time:.2f}s"
-        )
-        return msg
 
 
 def add_request(request, llm_engine: vllm.LLMEngine, tools, request_metadata: dict = None):

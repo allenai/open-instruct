@@ -1272,12 +1272,9 @@ def accumulate_inference_batches(
             return result, None
 
         dataset_index = result.dataset_index
-        assert dataset_index is not None, f"Dataset index is None for result {i}"
-
         assert len(result.responses) == generation_config.n, (
             f"Result {i} has {len(result.responses)} responses, expected {generation_config.n}"
         )
-
         query, ground_truth, dataset = pending_queries_map.pop(dataset_index)
         all_queries.append(query)
         all_ground_truths.append(ground_truth)
@@ -1443,7 +1440,6 @@ def data_preparation_thread(
             masks = [result.masks[i] for i in non_zero_gradient_index]
             batch = batch[non_zero_gradient_index.tolist()]
             finish_reasons = [result.finish_reasons[i] for i in non_zero_gradient_index]
-
             if args.mask_truncated_completions:
                 stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
                 scores = scores[stop_idxes]
@@ -1474,6 +1470,10 @@ def data_preparation_thread(
                         for pid in sampled_prompt_ids:
                             start = pid * k
                             sampled_indices.extend(range(start, start + k))
+
+                        logger.info(
+                            f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses"
+                        )
 
                         advantages = np.concatenate([advantages, advantages[sampled_indices]])
                         scores = np.concatenate([scores, scores[sampled_indices]])
@@ -1924,12 +1924,7 @@ def sync_weights_and_prepare_prompts(
         if args.async_steps > 0
         else "🔄 Loading weights using shared memory"
     ):
-        logger.info(
-            f"[Main Thread] Setting should_stop=True for weight sync at step {training_step}, "
-            f"inflight_updates={args.inflight_updates}, time={time.time()}"
-        )
         ray.get(actor_manager.set_should_stop.remote(True))
-        logger.info(f"[Main Thread] Successfully set should_stop=True at step {training_step}")
 
         ray_get_with_progress(
             [m.broadcast_to_vllm.remote() for m in policy_group.models],
@@ -1937,12 +1932,7 @@ def sync_weights_and_prepare_prompts(
             enable=args.verbose,
         )
 
-        logger.info(
-            f"[Main Thread] Weight broadcast complete, setting should_stop=False at step {training_step}, "
-            f"time={time.time()}"
-        )
         ray.get(actor_manager.set_should_stop.remote(False))
-        logger.info(f"[Main Thread] Successfully set should_stop=False at step {training_step}")
 
     split_and_insert_batch(
         batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]
@@ -2337,9 +2327,8 @@ def cleanup_training_resources(
     final_timing = ray.get(actor_manager.get_final_timing.remote())
     logger.info(final_timing)
 
-    logger.info(f"Signaling all actors to stop at time={time.time()}...")
     ray.get(actor_manager.set_should_stop.remote(True))
-    logger.info(f"✅ Signaled all actors to stop (should_stop=True) at time={time.time()}")
+    logger.info("✅ Signaled all actors to stop")
 
     logger.info("Pushing shutdown sentinel to queues...")
     # Push sentinel to the first queue (inference_results_Q)
