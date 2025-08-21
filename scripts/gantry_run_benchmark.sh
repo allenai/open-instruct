@@ -18,6 +18,7 @@ gantry run \
        --workspace ai2/oe-eval \
        --weka=oe-eval-default:/weka \
        --gpus 1 \
+       --beaker-image nathanl/open_instruct_auto \
        --cluster ai2/jupiter-cirrascale-2 \
        --budget ai2/oe-eval \
        --install 'uv sync' \
