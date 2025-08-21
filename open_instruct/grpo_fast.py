@@ -1234,6 +1234,7 @@ def accumulate_inference_batches(
     args: Args,
     training_step: int,
     generation_config,
+    num_prompts: int,
     timeout: Optional[float] = None,
 ) -> tuple[GenerationResult, Batch]:
     """Accumulate multiple inference results into a single training batch.
@@ -1244,6 +1245,7 @@ def accumulate_inference_batches(
         args: Arguments containing vllm_num_engines and batch size info
         training_step: Current training step for error reporting
         generation_config: Generation config containing n (number of samples per prompt)
+        num_prompts: Number of prompts to accumulate
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
 
     Raises:
@@ -1258,9 +1260,9 @@ def accumulate_inference_batches(
     all_datasets = []
 
     for i in tqdm(
-        range(args.num_unique_prompts_rollout),
-        total=args.num_unique_prompts_rollout,
-        desc=f"Accumulating {args.num_unique_prompts_rollout} results (each with {generation_config.n} completions)",
+        range(num_prompts),
+        total=num_prompts,
+        desc=f"Accumulating {num_prompts} results (each with {generation_config.n} completions)",
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     ):
@@ -1349,7 +1351,8 @@ def data_preparation_thread(
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
             result, batch = accumulate_inference_batches(
-                inference_results_Q, pending_queries_map, args, training_step, generation_config
+                inference_results_Q, pending_queries_map, args, training_step, generation_config,
+                num_prompts=args.num_unique_prompts_rollout
             )
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
@@ -2109,6 +2112,7 @@ def maybe_evaluate(
     eval_pending_queries_map: PendingQueriesMap,
     eval_generation_config,
     generate_metrics_Q: Queue,
+    num_eval_prompts: int,
 ):
     """Optionally evaluate the model."""
     try:
@@ -2123,6 +2127,7 @@ def maybe_evaluate(
             args,
             training_step,
             eval_generation_config,
+            num_prompts=num_eval_prompts,
             timeout=timeout,
         )
 
@@ -2358,6 +2363,7 @@ def run_training(
     tokenizer,
     train_dataset,
     eval_batch,
+    num_eval_prompts,
     policy_group,
     vllm_engines,
     generation_configs,
@@ -2489,6 +2495,7 @@ def run_training(
             eval_pending_queries_map,
             generation_configs["eval"],
             generate_metrics_Q,
+            num_eval_prompts,
         )
 
     if resume_training_step > args.num_training_steps:
@@ -2515,7 +2522,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     queue_size = (args.async_steps + 1) * args.num_unique_prompts_rollout
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
-    evaluation_inference_results_Q = ray_queue.Queue(maxsize=args.vllm_num_engines)
+    # Size eval queue based on actual eval samples (num_eval_samples) with 2x overhead for buffering
+    evaluation_inference_results_Q = ray_queue.Queue(maxsize=num_eval_samples * 2)
 
     policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
         create_model_and_optimizer(
@@ -2544,9 +2552,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     if eval_dataset is None:
         eval_batch = None
+        num_eval_prompts = 0
     else:
         eval_dataset_indices = list(range(min(num_eval_samples, len(eval_dataset))))
         eval_batch = next_batch(eval_dataset_indices, eval_dataset)
+        num_eval_prompts = len(eval_dataset_indices)
     reward_fn = make_reward_fn(args)
 
     stop_event = threading.Event()
@@ -2558,6 +2568,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             tokenizer,
             train_dataset,
             eval_batch,
+            num_eval_prompts,
             policy_group,
             vllm_engines,
             generation_configs,
