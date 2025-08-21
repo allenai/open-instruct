@@ -64,7 +64,7 @@ def compute_longform_averaged_outcome_reward(response: str, ground_truth: Dict[s
     result["format_reward"] = format_reward
     
     # score num search turns
-    num_search_turns, num_search_turns_reward = score_num_in_context_search_turns(extracted_context)
+    num_search_turns_reward, num_search_turns  = score_num_in_context_search_turns(extracted_context)
     result["num_search_turns_reward"] = num_search_turns_reward
     
     if extracted_answer is None:  # exit early if no answer is extracted
