@@ -937,20 +937,21 @@ def format_eta(seconds: float) -> str:
         return f"{minutes}m"
 
 
-def update_beaker_progress(
-    current_step: int,
-    total_steps: int,
-    start_time: float,
+def maybe_update_beaker_description(
+    current_step: Optional[int] = None,
+    total_steps: Optional[int] = None,
+    start_time: Optional[float] = None,
     wandb_url: Optional[str] = None,
     original_descriptions: dict[str, str] = {},
 ) -> None:
-    """Update Beaker experiment description with training progress.
+    """Update Beaker experiment description with training progress and/or wandb URL.
 
     Args:
-        current_step: Current training step
-        total_steps: Total number of training steps
-        start_time: Training start time (from time.time())
+        current_step: Current training step (for progress tracking)
+        total_steps: Total number of training steps (for progress tracking)
+        start_time: Training start time (from time.time()) (for progress tracking)
         wandb_url: Optional wandb URL to include
+        original_descriptions: Cache of original descriptions for progress updates
     """
     if not is_beaker_job():
         return
@@ -962,73 +963,83 @@ def update_beaker_progress(
     client = beaker.Beaker.from_env()
 
     try:
-        if experiment_id not in original_descriptions:
-            spec = client.experiment.get(experiment_id)
-            original_descriptions[experiment_id] = spec.description or ""
+        spec = client.experiment.get(experiment_id)
+        current_description = spec.description or ""
     except beaker.exceptions.ExperimentNotFound:
+        if wandb_url:
+            logger.warning(f"Failed to update Beaker experiment description with wandb URL: {wandb_url}")
+            logger.warning("This might be fine if you are e.g. running in an interactive job.")
         return
 
-    original_description = original_descriptions[experiment_id]
+    # For initial wandb URL update (no progress tracking)
+    if wandb_url and current_step is None:
+        if "wandb.ai" in current_description:
+            # If wandb URL already exists, do not add it again
+            return
+        
+        new_description = (
+            f"{current_description}\n"
+            f"{wandb_url}\n"
+            f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}\n"
+            f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}\n"
+        )
+        client.experiment.set_description(experiment_id, new_description)
+        return
 
-    progress_pct = (current_step / total_steps) * 100
+    # For progress updates
+    if current_step is not None and total_steps is not None and start_time is not None:
+        # Cache the original description (without progress bar)
+        if experiment_id not in original_descriptions:
+            original_descriptions[experiment_id] = current_description
 
-    elapsed_time = time.time() - start_time
-    if current_step > 0:
-        time_per_step = elapsed_time / current_step
-        remaining_steps = total_steps - current_step
-        eta_seconds = time_per_step * remaining_steps
-        eta_str = format_eta(eta_seconds)
-    else:
-        eta_str = "calculating..."
+        original_description = original_descriptions[experiment_id]
 
-    progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), eta {eta_str}]"
+        progress_pct = (current_step / total_steps) * 100
 
-    new_description = " ".join(
-        [
-            original_description,
-            progress_bar,
-            wandb_url,
-            f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}",
-            f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}",
-        ]
+        elapsed_time = time.time() - start_time
+        if current_step > 0:
+            time_per_step = elapsed_time / current_step
+            remaining_steps = total_steps - current_step
+            eta_seconds = time_per_step * remaining_steps
+            eta_str = format_eta(eta_seconds)
+        else:
+            eta_str = "calculating..."
+
+        progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), eta {eta_str}]"
+
+        new_description = " ".join(
+            [
+                original_description,
+                progress_bar,
+                wandb_url if wandb_url else "",
+                f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}",
+                f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}",
+            ]
+        )
+        client.experiment.set_description(experiment_id, new_description)
+
+
+# Backwards compatibility functions
+def update_beaker_progress(
+    current_step: int,
+    total_steps: int,
+    start_time: float,
+    wandb_url: Optional[str] = None,
+    original_descriptions: dict[str, str] = {},
+) -> None:
+    """Backwards compatibility wrapper for maybe_update_beaker_description."""
+    maybe_update_beaker_description(
+        current_step=current_step,
+        total_steps=total_steps,
+        start_time=start_time,
+        wandb_url=wandb_url,
+        original_descriptions=original_descriptions,
     )
-    client.experiment.set_description(experiment_id, new_description)
 
 
 def maybe_update_beaker_description_with_wandb_url(wandb_url: Optional[str]) -> None:
-    """Update Beaker experiment description with wandb URL if running on Beaker.
-
-    Args:
-        wandb_url: The wandb URL to add to the description
-    """
-    if not is_beaker_job() or wandb_url is None:
-        return
-
-    experiment_id = os.environ.get("BEAKER_WORKLOAD_ID")
-    if not experiment_id:
-        return
-
-    client = beaker.Beaker.from_env()
-    try:
-        spec = client.experiment.get(experiment_id)
-    except beaker.exceptions.ExperimentNotFound:
-        logger.warning(f"Failed to update Beaker experiment description with wandb URL: {wandb_url}")
-        logger.warning("This might be fine if you are e.g. running in an interactive job.")
-        return
-
-    current_description = spec.description or ""
-
-    if "wandb.ai" in current_description:
-        # If wandb URL already exists, do not add it again
-        return
-
-    new_description = (
-        f"{current_description}\n"
-        f"{wandb_url}\n"
-        f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}\n"
-        f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}\n"
-    )
-    client.experiment.set_description(experiment_id, new_description)
+    """Backwards compatibility wrapper for maybe_update_beaker_description."""
+    maybe_update_beaker_description(wandb_url=wandb_url)
 
 
 def live_subprocess_output(cmd: List[str]) -> str:

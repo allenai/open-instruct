@@ -384,8 +384,6 @@ class LLMRayActor:
         prompts = request.prompts
         sampling_params = request.generation_config
 
-        self.logger.info(f"[LLMRayActor] Processing request with {len(prompts)} prompts, tools={bool(self.tools)}")
-
         if self.tools:
             # Need n=1 for individual tool tracking
             sampling_params = copy.deepcopy(sampling_params)
@@ -410,12 +408,8 @@ class LLMRayActor:
             if tracking and tracking.get("pending_tool_futures"):
                 self._poll_tool_futures(tracking, sampling_params, tokenizer)
 
-            # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
             if self.llm_engine.has_unfinished_requests():
                 step_outputs = list(self.llm_engine.step())
-                if iteration % 100 == 1 and step_outputs:
-                    self.logger.info(f"[LLMRayActor] Got {len(step_outputs)} outputs from engine.step()")
-
                 for output in step_outputs:
                     if output.finished:
                         result = _handle_output(
@@ -423,9 +417,7 @@ class LLMRayActor:
                         )
                         if result is not None:
                             outputs.append(result)
-                            self.logger.info(f"[LLMRayActor] Added output {output.request_id} to results")
 
-            # Check termination condition (matching ToolUseLLM exactly)
             pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
             if not self.llm_engine.has_unfinished_requests() and pending_count == 0:
                 self.logger.info(f"[LLMRayActor] Terminating after {iteration} iterations with {len(outputs)} outputs")
@@ -444,7 +436,6 @@ class LLMRayActor:
                     tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
                     self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
             else:
-                # Standard request format for non-tool mode
                 request_id = f"batch_{training_step}_{i}"
                 tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
                 self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
