@@ -352,13 +352,20 @@ def get_batch_data(
 def generate_thread(
     vllm_engines: list[ray.actor.ActorHandle], stop_event: threading.Event, error_queue: Queue
 ) -> None:
-    """Thread that monitors vLLM engines for errors."""
-    logger.info("[Generate Thread] Starting generation monitoring thread")
+    """Thread that repeatedly calls process_from_queue on vllm engines."""
+    logger.info("[Generate Thread] Starting generation thread")
     try:
         while not stop_event.is_set():
-            # Just sleep and let the engines process
-            # Errors will be caught when we try to get results
-            time.sleep(1)
+            # Call process_from_queue on all engines
+            # Each call processes one request and returns
+            processed_results = ray.get([engine.process_from_queue.remote(timeout=20) for engine in vllm_engines])
+            num_processed = sum(int(result) for result in processed_results)
+
+            # If nothing was processed, sleep briefly before trying again
+            if num_processed == 0:
+                time.sleep(0.1)
+            else:
+                logger.debug(f"[Generate Thread] Processed {num_processed} requests")
     except Exception as e:
         logger.error(f"[Generate Thread] Error in generation thread: {e}")
         error_queue.put(e)
@@ -416,14 +423,8 @@ def run_benchmark(
     error_queue = Queue()
     executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="benchmark")
 
-    # Start vLLM engines to process from queues
-    for engine in vllm_engines:
-        engine.process_from_queue.remote()
-
-    # Wait for engines to be ready
-    time.sleep(0.1)
-
     # Start monitoring thread for vLLM engines
+    # The generate_thread will continuously call process_from_queue on all engines
     generation_future = executor.submit(generate_thread, vllm_engines, stop_event, error_queue)
 
     results = []
@@ -466,12 +467,8 @@ def run_benchmark(
                         logger.error(f"Thread {name} failed: {e}")
                         raise
 
-            # Get result with timeout to prevent hanging
-            try:
-                result = inference_results_Q.get(timeout=60)
-            except ray_queue.Empty:
-                logger.error("Timeout waiting for inference results")
-                raise TimeoutError("No response from vLLM engines after 60 seconds")
+            # Get result - wait indefinitely for the engines to respond
+            result = inference_results_Q.get()
 
             completion_time = time.time()
             batch_generation_time = completion_time - last_completion_time
@@ -502,9 +499,6 @@ def run_benchmark(
             )
 
         total_time = time.time() - total_start_time
-
-        # Send stop signal
-        param_prompt_Q.put(None)
 
         print_summary(results, total_time, args, model_config)
         save_benchmark_results_to_csv(results, total_time, args, model_config)
@@ -615,7 +609,7 @@ def cleanup(vllm_engines: list[ray.actor.ActorHandle], actor_manager: Optional[r
     # Signal actor manager to stop all engines
     if actor_manager:
         try:
-            ray.get(actor_manager.stop_all.remote())
+            ray.get(actor_manager.set_should_stop.remote(True))
             logger.info("Signaled all engines to stop via actor manager")
         except Exception as e:
             logger.warning(f"Error signaling actor manager: {e}")
