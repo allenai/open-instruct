@@ -822,7 +822,11 @@ class BeakerRuntimeConfig:
 
 
 def is_beaker_job() -> bool:
-    return "BEAKER_JOB_ID" in os.environ
+    has_beaker_job = "BEAKER_JOB_ID" in os.environ
+    logger.info(f"is_beaker_job: BEAKER_JOB_ID present: {has_beaker_job}")
+    if has_beaker_job:
+        logger.info(f"is_beaker_job: BEAKER_JOB_ID value: {os.environ.get('BEAKER_JOB_ID')}")
+    return has_beaker_job
 
 
 def get_beaker_experiment_info(experiment_id: str) -> Optional[dict]:
@@ -954,23 +958,36 @@ def maybe_update_beaker_description(
         wandb_url: Optional wandb URL to include
         original_descriptions: Cache of original descriptions for progress updates
     """
+    logger.info(
+        f"maybe_update_beaker_description called with: current_step={current_step}, total_steps={total_steps}, wandb_url={wandb_url}"
+    )
+
     if not is_beaker_job():
+        logger.info("Not a Beaker job, returning early")
         return
 
     experiment_id = os.environ.get("BEAKER_WORKLOAD_ID")
     if not experiment_id:
+        logger.warning(
+            f"BEAKER_WORKLOAD_ID not found in environment. Available env vars: {', '.join(sorted([k for k in os.environ.keys() if 'BEAKER' in k]))}"
+        )
         return
+
+    logger.info(f"BEAKER_WORKLOAD_ID: {experiment_id}")
 
     client = beaker.Beaker.from_env()
 
     try:
         spec = client.experiment.get(experiment_id)
         current_description = spec.description or ""
+        logger.info(
+            f"Current Beaker description: {current_description[:100]}..."
+            if len(current_description) > 100
+            else f"Current Beaker description: {current_description}"
+        )
     except beaker.exceptions.ExperimentNotFound:
-        logger.warning("Failed to update Beaker experiment description")
+        logger.warning(f"Failed to get Beaker experiment with ID: {experiment_id}")
         logger.warning("This might be fine if you are e.g. running in an interactive job.")
-        return
-    if "wandb.ai" in current_description:
         return
 
     description_components = [
@@ -1007,7 +1024,13 @@ def maybe_update_beaker_description(
             progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), eta {eta_str}]"
         description_components.append(progress_bar)
     new_description = " ".join(description_components)
+    logger.info(
+        f"Setting new Beaker description: {new_description[:200]}..."
+        if len(new_description) > 200
+        else f"Setting new Beaker description: {new_description}"
+    )
     client.experiment.set_description(experiment_id, new_description)
+    logger.info("Successfully updated Beaker description")
 
 
 def live_subprocess_output(cmd: List[str]) -> str:
