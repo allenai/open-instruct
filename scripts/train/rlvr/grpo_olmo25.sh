@@ -39,7 +39,6 @@ python mason.py \
     --gs_model_name $gs_model_name \
     --gpus ${NUM_GPUS} \
     --budget ai2/oe-adapt \
-    --resumable \
     -- \
 source configs/beaker_configs/ray_node_setup.sh \&\& \
 source configs/beaker_configs/code_api_setup.sh \&\& \
@@ -70,6 +69,7 @@ python open_instruct/grpo_fast.py \
     --deepspeed_stage 2 \
     --num_learners_per_node 8 \
     --vllm_num_engines 24 \
+    --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
