@@ -10,7 +10,7 @@ import time
 import zlib
 from typing import Any, Dict, List, Optional, Tuple
 
-from open_instruct import logging as oi_logging
+from open_instruct import logger_utils as oi_logging
 
 from .testing_util import grade_stdio
 

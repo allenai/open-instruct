@@ -81,7 +81,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
-from open_instruct import logging as oi_logging
+from open_instruct import logger_utils as oi_logging
 from open_instruct import vllm_utils3
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,

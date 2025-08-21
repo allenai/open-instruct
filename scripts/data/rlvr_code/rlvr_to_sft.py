@@ -3,7 +3,7 @@ import logging
 import datasets
 from tqdm import tqdm
 
-from open_instruct import logging as oi_logging
+from open_instruct import logger_utils as oi_logging
 
 """
 Converts a RLVR dataset into a SFT dataset.

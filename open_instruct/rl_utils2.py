@@ -8,7 +8,7 @@ import torch
 from rich.pretty import pprint
 import logging
 
-from open_instruct import logging as oi_logging
+from open_instruct import logger_utils as oi_logging
 
 T = TypeVar("T")
 logger = oi_logging.setup_logger(__name__)

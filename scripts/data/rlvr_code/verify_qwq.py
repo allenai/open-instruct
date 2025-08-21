@@ -23,7 +23,7 @@ import time
 from tqdm.asyncio import tqdm_asyncio
 import logging
 
-from open_instruct import logging as oi_logging
+from open_instruct import logger_utils as oi_logging
 
 # Set up logging
 logger = oi_logging.setup_logger(__name__)

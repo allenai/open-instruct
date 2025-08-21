@@ -9,7 +9,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from scripts.synth_pref.utils.ultrafeedback_template import parser
-from open_instruct import logging as oi_logging
+from open_instruct import logger_utils as oi_logging
 
 logger = oi_logging.setup_logger(__name__)
 

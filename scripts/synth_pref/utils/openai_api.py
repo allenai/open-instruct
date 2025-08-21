@@ -8,7 +8,7 @@ from typing import Optional
 
 import pandas as pd
 
-from open_instruct import logging as oi_logging
+from open_instruct import logger_utils as oi_logging
 
 logger = oi_logging.setup_logger(__name__)
 
