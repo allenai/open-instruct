@@ -396,7 +396,7 @@ class LLMRayActor:
             if ready_refs:
                 should_stop = ray.get(ready_refs[0])
             else:
-                ray.cancel(should_stop_ref, force=True)
+                ray.cancel(should_stop_ref)
                 should_stop = False
             self._last_should_stop_update = time.time()
             self._should_stop_value = should_stop
