@@ -218,6 +218,7 @@ async def apply_verifiable_reward(
     datasets: List[Union[str, List[str]]],
     reward_mult: int = 10,
     queries: Optional[List[str]] = None,
+    overwrite_reward_fn_tag: Optional[str] = None,
 ):
     if queries is None:
         queries = [None] * len(responses)
@@ -244,9 +245,14 @@ async def apply_verifiable_reward(
 
         # Create async tasks for each ground truth/dataset pair
         for gt, ds in zip(ground_truth_list, dataset_list):
-            reward_func = reward_fn_mapping.get(ds.lower())
+            # Use override tag if provided, otherwise use dataset name
+            reward_key = overwrite_reward_fn_tag.lower() if overwrite_reward_fn_tag else ds.lower()
+            reward_func = reward_fn_mapping.get(reward_key)
             if reward_func is None:
-                logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
+                if overwrite_reward_fn_tag:
+                    logger.warning("No reward function found for override tag %s. Skipping reward.", overwrite_reward_fn_tag)
+                else:
+                    logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
                 continue
 
             # Create async task

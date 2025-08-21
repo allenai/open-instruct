@@ -384,9 +384,15 @@ class Args:
     """The maximum number of documents to retrieve for each query."""
     search_api_endpoint: Optional[str] = None
     """The API endpoint for the search engine."""
+    use_massive_ds: bool = False
+    """Whether to use massive ds for search."""
 
     # code-tool specific settings
     code_tool_api_endpoint: Optional[str] = None
+
+    # Reward function override
+    overwrite_reward_fn_tag: Optional[str] = None
+    """If set, force all datasets to use this specific reward function type instead of dataset-based selection"""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
@@ -1133,6 +1139,11 @@ def data_preparation_thread(
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
 ):
+    # FGRPO validation: ensure finegrained rewards are used
+    if args.advantage_normalization_type != "finegrained":
+        raise ValueError(f"FGRPO requires advantage_normalization_type='finegrained', but got '{args.advantage_normalization_type}'. "
+                       f"Please set --advantage_normalization_type finegrained in your training script.")
+    
     for training_step in range(1, num_training_steps + 1):
         # Get next batch of prompts and responses
         items = queries_prompt_Q.get()
@@ -1402,6 +1413,11 @@ def data_preparation_thread(
                     advantages_list.append(np.array(grouped_advantages[group_id]))
                     advantages_mask_list.append(grouped_masks[group_id])
 
+            
+            else:
+                # FGRPO should always use finegrained rewards
+                raise ValueError(f"FGRPO requires advantage_normalization_type='finegrained', but got '{args.advantage_normalization_type}'. "
+                               f"Please set --advantage_normalization_type finegrained in your training script.")
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved
             max_possible_score = 0
@@ -1760,13 +1776,14 @@ def data_preparation_thread(
         )
 
 
-def launch_mcp_subprocess(use_mcp_tools: bool, run_mcp_command: str) -> Optional[subprocess.Popen]:
+def launch_mcp_subprocess(use_mcp_tools: bool, run_mcp_command: str, output_dir: str) -> Optional[subprocess.Popen]:
     """
     Launch MCP server subprocess if use_mcp_tools is enabled.
     
     Args:
         use_mcp_tools: Whether to launch MCP server
         run_mcp_command: Command to run MCP server
+        output_dir: Base output directory for logs
         
     Returns:
         Popen object if launched, None otherwise
@@ -1776,10 +1793,25 @@ def launch_mcp_subprocess(use_mcp_tools: bool, run_mcp_command: str) -> Optional
         
     print(f"🚀 Launching MCP server subprocess: {run_mcp_command}")
     
+    # Debug: Check if fastmcp command exists
+    try:
+        import shutil
+        fastmcp_path = shutil.which("fastmcp")
+        if fastmcp_path:
+            print(f"✅ Found fastmcp at: {fastmcp_path}")
+        else:
+            print("⚠️  Warning: fastmcp command not found in PATH")
+    except Exception as e:
+        print(f"⚠️  Warning: Could not check for fastmcp: {e}")
+    
+    # Debug: Show current working directory
+    print(f"📁 Current working directory: {os.getcwd()}")
+    
     # Create log files for MCP server output
-    os.makedirs("/output/mcp_logs", exist_ok=True)
-    mcp_stdout = open("/output/mcp_logs/mcp_server_stdout.log", "w")
-    mcp_stderr = open("/output/mcp_logs/mcp_server_stderr.log", "w")
+    mcp_logs_dir = os.path.join(output_dir, "mcp_logs")
+    os.makedirs(mcp_logs_dir, exist_ok=True)
+    mcp_stdout = open(os.path.join(mcp_logs_dir, "mcp_server_stdout.log"), "w")
+    mcp_stderr = open(os.path.join(mcp_logs_dir, "mcp_server_stderr.log"), "w")
     
     mcp_process = subprocess.Popen(
         [run_mcp_command],
@@ -1797,7 +1829,7 @@ def launch_mcp_subprocess(use_mcp_tools: bool, run_mcp_command: str) -> Optional
         # Check if process is still running
         if mcp_process.poll() is None:
             print(f"✅ MCP server started successfully (PID: {mcp_process.pid})")
-            print(f"📋 MCP server logs: mcp_logs/mcp_server_stdout.log, mcp_logs/mcp_server_stderr.log")
+            print(f"📋 MCP server logs: {os.path.relpath(mcp_logs_dir)}/mcp_server_stdout.log, {os.path.relpath(mcp_logs_dir)}/mcp_server_stderr.log")
             
             # Register cleanup function
             def cleanup_mcp():
@@ -1819,8 +1851,20 @@ def launch_mcp_subprocess(use_mcp_tools: bool, run_mcp_command: str) -> Optional
             
         else:
             print(f"❌ MCP server failed to start (exit code: {mcp_process.returncode})")
-            mcp_stdout.close()
+            # Read any error output
             mcp_stderr.close()
+            mcp_stdout.close()
+            try:
+                with open(os.path.join(mcp_logs_dir, "mcp_server_stderr.log"), "r") as f:
+                    stderr_content = f.read().strip()
+                    if stderr_content:
+                        print(f"📋 MCP server stderr: {stderr_content}")
+                with open(os.path.join(mcp_logs_dir, "mcp_server_stdout.log"), "r") as f:
+                    stdout_content = f.read().strip()
+                    if stdout_content:
+                        print(f"📋 MCP server stdout: {stdout_content}")
+            except Exception as e:
+                print(f"⚠️  Could not read MCP server logs: {e}")
             return None
             
     except Exception as e:
@@ -1957,7 +2001,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         if args.mcp_server_command is None:
             print("mcp_server_command is not provided when use_mcp_tools is True; please make sure to launch the MCP server manually.")
         else:
-            mcp_process = launch_mcp_subprocess(args.use_mcp_tools, args.mcp_server_command)
+            mcp_process = launch_mcp_subprocess(args.use_mcp_tools, args.mcp_server_command, args.output_dir)
             if mcp_process is None:
                 raise RuntimeError("Failed to launch MCP server subprocess")
 
@@ -2005,6 +2049,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     tool = SearchTool(
                         start_str="<search>",
                         end_str="</search>",
+                        use_massive_ds=args.use_massive_ds,
                         api_endpoint=args.search_api_endpoint,
                         number_documents_to_search=args.number_documents_to_search,
                     )
@@ -2429,6 +2474,7 @@ if __name__ == "__main__":
                     datasets,
                     reward_mult=args.verification_reward,
                     queries=queries,
+                    overwrite_reward_fn_tag=args.overwrite_reward_fn_tag,
                 )
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")

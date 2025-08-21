@@ -378,7 +378,6 @@ class Args:
     mcp_server_command: Optional[str] = None
     """Command to run MCP server subprocess when use_mcp_tools is enabled. Example: 'fastmcp run rag_mcp/main.py:mcp --transport streamable-http --port 8000'"""
 
-
     # rl-rag specific settngs
     number_documents_to_search: int = 3
     """The maximum number of documents to retrieve for each query."""
@@ -388,6 +387,10 @@ class Args:
     """Whether to use massive ds for search."""
     # code-tool specific settings
     code_tool_api_endpoint: Optional[str] = None
+
+    # Reward function override
+    overwrite_reward_fn_tag: Optional[str] = None
+    """If set, force all datasets to use this specific reward function type instead of dataset-based selection"""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
@@ -2089,6 +2092,7 @@ if __name__ == "__main__":
                     datasets,
                     reward_mult=args.verification_reward,
                     queries=queries,
+                    overwrite_reward_fn_tag=args.overwrite_reward_fn_tag,
                 )
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")

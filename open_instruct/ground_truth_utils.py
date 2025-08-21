@@ -41,6 +41,7 @@ from open_instruct.search_rewards.reasoning_model_rewards import compute_hle_rew
 from open_instruct.search_rewards.rubric_rewards import compute_rubric_reward
 from open_instruct.search_rewards.finegrained_rewards import compute_finegrained_reward
 from open_instruct.search_rewards.longform_averaged_outcome_rewards import compute_longform_averaged_outcome_reward
+from open_instruct.search_rewards.longform_finegrained_rewards_v1 import compute_longform_finegrained_reward
 from open_instruct.utils import extract_final_answer
 from open_instruct.IFEvalG import instructions_registry
 
@@ -915,8 +916,7 @@ class RLRAGLongFormRubricsOnlyVerifier(VerifierFunction):
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> VerificationResult:
         test_case = json.loads(label)
-        # result = compute_rubric_reward(prediction, test_case)
-        result = compute_longform_averaged_outcome_reward(prediction, test_case, query)
+        result = compute_rubric_reward(prediction, test_case)
         score = result["reward"]
         return VerificationResult(score=score, log_values=result)
 
@@ -965,7 +965,8 @@ class RLRAGLongFormFinegrainedVerifier(VerifierFunction):
     def __call__(
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> FinegrainedRewardOutput:
-        result = compute_finegrained_reward(prediction, label, query)
+        # result = compute_finegrained_reward(prediction, label, query)
+        result = compute_longform_finegrained_reward(prediction, label, query)
         return FinegrainedRewardOutput(
             finegrained_scores=result["finegrained_scores"],
             log_values=result["log_values"],

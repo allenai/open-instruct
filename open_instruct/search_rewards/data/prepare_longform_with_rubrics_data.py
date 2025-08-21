@@ -137,6 +137,8 @@ def upload_longform_surveyqa_validation_data(use_system_prompt: bool = True, rew
             dataset = "rl_rag_longform_rubrics_only"
         elif reward_type == "averaged_outcome":
             dataset = "rl_rag_longform_averaged_outcome"
+        elif reward_type == "finegrained":
+            dataset = "rl_rag_longform_finegrained"
         formatted_example = {"messages": messages, "ground_truth": ground_truth, "dataset": dataset}
         formatted_data.append(formatted_example)
     
@@ -147,16 +149,19 @@ def upload_longform_surveyqa_validation_data(use_system_prompt: bool = True, rew
             dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_rubrics_only_with_system_prompt")
         elif reward_type == "averaged_outcome":
             dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_averaged_outcome_with_system_prompt")
+        elif reward_type == "finegrained":
+            dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_finegrained_with_system_prompt")
     else:
         if reward_type == "rubrics_only":
             dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_rubrics_only_no_system_prompt")
         elif reward_type == "averaged_outcome":
             dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_averaged_outcome_no_system_prompt")
-    
+        elif reward_type == "finegrained":
+            dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_finegrained_no_system_prompt")
     return formatted_data
 
 
 if __name__ == "__main__":
     # data = upload_scholarqabench_data(use_system_prompt=True)
     # data = upload_longform_sqa_train_data(use_system_prompt=True)
-    data = upload_longform_surveyqa_validation_data(use_system_prompt=True, reward_type="averaged_outcome")
+    data = upload_longform_surveyqa_validation_data(use_system_prompt=True, reward_type="finegrained")
