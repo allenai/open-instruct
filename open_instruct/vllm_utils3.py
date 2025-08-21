@@ -352,6 +352,7 @@ class LLMRayActor:
             self.executor = ThreadPoolExecutor(max_workers=20)
         else:
             self.executor = None
+
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
@@ -372,6 +373,7 @@ class LLMRayActor:
             print(f"creating LLM with bundle_indices={bundle_indices}")
 
         self.llm_engine = vllm.LLMEngine.from_engine_args(vllm.EngineArgs(*args, **kwargs))
+
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
@@ -380,6 +382,8 @@ class LLMRayActor:
             raise ValueError("inference_batch_size must be specified.")
         self.inference_batch_size = inference_batch_size
         self.request_metadata = {}  # Track request metadata by ID
+
+        # For caching should_stop status.
         self._last_should_stop_update = None
         self._should_stop_value = None
         self._should_stop_timeout_s = 5
@@ -392,7 +396,6 @@ class LLMRayActor:
             if ready_refs:
                 should_stop = ray.get(ready_refs[0])
             else:
-                # Cancel the pending ref to avoid resource leak
                 ray.cancel(should_stop_ref, force=True)
                 should_stop = False
             self._last_should_stop_update = time.time()
@@ -412,7 +415,6 @@ class LLMRayActor:
         tokenizer = self.llm_engine.get_tokenizer() if self.tools else None
 
         if self._should_stop():
-            time.sleep(1)  # Add backoff to reduce excessive polling
             return num_processed
 
         for i in tqdm(
