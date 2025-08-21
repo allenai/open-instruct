@@ -414,6 +414,9 @@ class LLMRayActor:
         tracking = _init_tool_tracking() if self.tools else None
         tokenizer = self.llm_engine.get_tokenizer() if self.tools else None
 
+        # Track collected outputs for tool mode to batch them properly
+        collected_outputs = {} if self.tools else None
+
         if self._should_stop():
             return num_processed
 
@@ -440,27 +443,75 @@ class LLMRayActor:
             outputs = self._step_engine(tracking, tokenizer)
 
             for output in outputs:
-                base_request_id = output.request_id.split("-")[0] if "-" in output.request_id else output.request_id
-                is_eval = self.request_metadata[base_request_id]["is_eval"]
-                dataset_index = self.request_metadata[base_request_id]["dataset_index"]
-                num_processed += 1
-                result = _finalize_outputs([output], tracking, dataset_index, self.tools)
+                if self.tools:
+                    # Extract base request ID for tool mode
+                    base_request_id = output.request_id.split("-")[0]
 
-                try:
-                    results_queue = self.eval_results_queue if is_eval else self.results_queue
-                    results_queue.put(result, timeout=10)
-                except queue.Full:
-                    queue_name = "eval" if is_eval else "train"
-                    self.logger.warning(f"{queue_name} results queue is full, discarding result.")
+                    # Collect outputs for the same base request
+                    if base_request_id not in collected_outputs:
+                        collected_outputs[base_request_id] = []
+                    collected_outputs[base_request_id].append(output)
 
-                self.request_metadata.pop(base_request_id, None)
+                    # Get metadata and expected n from the base request
+                    metadata = self.request_metadata[base_request_id]
+                    expected_n = metadata["generation_config"].n
 
-                if not self._should_stop():
+                    if len(collected_outputs[base_request_id]) == expected_n:
+                        # We have all outputs, now finalize and send them together
+                        is_eval = metadata["is_eval"]
+                        dataset_index = metadata["dataset_index"]
+                        num_processed += 1
+
+                        # Finalize all outputs together
+                        result = _finalize_outputs(
+                            collected_outputs[base_request_id], tracking, dataset_index, self.tools
+                        )
+
+                        try:
+                            results_queue = self.eval_results_queue if is_eval else self.results_queue
+                            results_queue.put(result, timeout=10)
+                        except queue.Full:
+                            queue_name = "eval" if is_eval else "train"
+                            self.logger.warning(f"{queue_name} results queue is full, discarding result.")
+
+                        # Clean up collected outputs and metadata
+                        del collected_outputs[base_request_id]
+                        self.request_metadata.pop(base_request_id, None)
+                        # Also clean up sub-request metadata
+                        for i in range(expected_n):
+                            self.request_metadata.pop(f"{base_request_id}-{i}", None)
+
+                        if not self._should_stop():
+                            try:
+                                request = self.prompt_queue.get(timeout=0.1)
+                                add_request(
+                                    request, self.llm_engine, self.tools, request_metadata=self.request_metadata
+                                )
+                            except queue.Empty:
+                                pass  # No new request available, continue processing
+                else:
+                    # Non-tool mode: process as before
+                    base_request_id = output.request_id
+                    is_eval = self.request_metadata[base_request_id]["is_eval"]
+                    dataset_index = self.request_metadata[base_request_id]["dataset_index"]
+                    num_processed += 1
+                    result = _finalize_outputs([output], tracking, dataset_index, self.tools)
+
                     try:
-                        request = self.prompt_queue.get(timeout=0.1)
-                        add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
-                    except queue.Empty:
-                        pass  # No new request available, continue processing
+                        results_queue = self.eval_results_queue if is_eval else self.results_queue
+                        results_queue.put(result, timeout=10)
+                    except queue.Full:
+                        queue_name = "eval" if is_eval else "train"
+                        self.logger.warning(f"{queue_name} results queue is full, discarding result.")
+
+                    self.request_metadata.pop(base_request_id, None)
+
+                    if not self._should_stop():
+                        try:
+                            request = self.prompt_queue.get(timeout=0.1)
+                            add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
+                        except queue.Empty:
+                            pass  # No new request available, continue processing
 
             if self._should_stop() and not self.inflight_updates:
                 pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
