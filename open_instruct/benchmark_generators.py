@@ -282,7 +282,7 @@ def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation
 
 
 def setup_vllm_engines(
-    args: grpo_fast.Args, model_config: model_utils.ModelConfig, max_model_len: int = 20480
+    args: grpo_fast.Args, model_config: model_utils.ModelConfig, max_model_len: int = 20480, num_batches: int = 5
 ) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue]:
     """Set up vLLM engines and queues."""
     logger.info("Setting up vLLM engines...")
@@ -296,8 +296,14 @@ def setup_vllm_engines(
     pg = ray.util.placement_group(bundles, strategy="PACK")
     ray.get(pg.ready())
 
-    param_prompt_Q = ray_queue.Queue(maxsize=10)
-    inference_results_Q = ray_queue.Queue(maxsize=10)
+    # Queue size needs to accommodate all individual prompts across all batches
+    # Total prompts = num_unique_prompts_rollout * num_batches
+    queue_size = args.num_unique_prompts_rollout * num_batches
+    param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
+    inference_results_Q = ray_queue.Queue(maxsize=queue_size)
+
+    # Create ActorManager for coordination
+    actor_manager = vllm_utils3.ActorManager.remote()
 
     vllm_engines = vllm_utils3.create_vllm_engines(
         num_engines=args.vllm_num_engines,
@@ -311,11 +317,13 @@ def setup_vllm_engines(
         max_model_len=max_model_len,
         vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
         single_gpu_mode=False,
+        inference_batch_size=args.inference_batch_size,
         pg=pg,
         tools={},
         max_tool_calls=[0],
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
+        actor_manager=actor_manager,
     )
 
     logger.info("vLLM engines ready")
@@ -357,17 +365,9 @@ def run_benchmark(
         n=args.num_samples_per_prompt_rollout,
     )
 
-    eval_generation_config = vllm.SamplingParams(temperature=0.0, max_tokens=args.response_length, n=1)
-
     # Start vLLM engines to process from queues
     for engine in vllm_engines:
-        engine.process_from_queue.remote(
-            generation_config,
-            eval_generation_config,
-            num_batches + 1,  # eval_freq (avoid evaluation)
-            num_batches,  # num_training_steps
-            1,  # resume_training_step
-        )
+        engine.process_from_queue.remote(timeout=60.0)
 
     # Wait for engines to be ready
     time.sleep(0.1)
@@ -377,48 +377,123 @@ def run_benchmark(
     device_name = get_device_name(torch.cuda.get_device_name(0))
     device_flops = GPU_SPECS[device_name]["flops"]
 
-    # Submit all batches at once and track submission times
-    logger.info(f"Submitting all {num_batches} batches to the queue...")
+    # Prepare all batch data
     all_prompts = [
         get_batch_data(dataset, args.num_unique_prompts_rollout, batch_idx) for batch_idx in range(num_batches)
     ]
-    submission_start_time = time.time()
-    for batch_idx in range(num_batches):
-        param_prompt_Q.put(PromptRequest(prompts=all_prompts[batch_idx], dataset_index=batch_idx))
-    submission_time = time.time() - submission_start_time
-    logger.info(f"All batches submitted in {submission_time:.2f}s")
 
-    # Receive results and measure time for each batch
-    last_completion_time = submission_start_time
-    for batch_idx in range(num_batches):
+    # Submit and process warmup batch (batch 0) without timing
+    logger.info("Running warmup batch...")
+    warmup_batch = all_prompts[0]
+    for prompt_idx, prompt in enumerate(warmup_batch):
+        param_prompt_Q.put(PromptRequest(prompt=prompt, generation_config=generation_config, dataset_index=prompt_idx))
+
+    # Wait for warmup batch to complete
+    warmup_results = []
+    for _ in range(len(warmup_batch)):
         result = inference_results_Q.get()
-        completion_time = time.time()
-        batch_generation_time = completion_time - last_completion_time
-        last_completion_time = completion_time
+        warmup_results.append(result)
 
-        # Process result
-        new_tokens = sum(len(response) for response in result.responses)
-        tokens_per_second = new_tokens / batch_generation_time
+    # Process warmup results (for logging/saving but not timing)
+    all_responses = []
+    all_finish_reasons = []
+    for r in warmup_results:
+        all_responses.extend(r.responses)
+        all_finish_reasons.extend(r.finish_reasons)
+
+    warmup_dict = {
+        "tokens_per_second": 0,  # Not measured for warmup
+        "generation_time": 0,  # Not measured for warmup
+        "num_new_tokens": sum(len(response) for response in all_responses),
+        "finish_reasons": collections.Counter(all_finish_reasons),
+        "response_lengths": [len(response) for response in all_responses],
+        "batch_idx": 0,
+    }
+    warmup_dict["mfu"] = 0  # Not measured for warmup
+    save_completion_lengths([warmup_dict], timestamp, 0)
+    results.append(warmup_dict)
+    logger.info("Warmup batch completed")
+
+    # Now submit remaining 4 batches and start timing
+    logger.info(f"Submitting {num_batches - 1} timed batches...")
+
+    # Start overall timer
+    overall_start_time = time.time()
+
+    # Submit all remaining batches
+    for batch_idx in range(1, num_batches):
+        batch_prompts = all_prompts[batch_idx]
+        for prompt_idx, prompt in enumerate(batch_prompts):
+            param_prompt_Q.put(
+                PromptRequest(
+                    prompt=prompt,
+                    generation_config=generation_config,
+                    dataset_index=batch_idx * args.num_unique_prompts_rollout + prompt_idx,
+                )
+            )
+
+    # Collect all results for timed batches
+    total_timed_prompts = sum(len(all_prompts[i]) for i in range(1, num_batches))
+    timed_results = []
+    for _ in range(total_timed_prompts):
+        result = inference_results_Q.get()
+        timed_results.append(result)
+
+    # Stop overall timer
+    overall_generation_time = time.time() - overall_start_time
+
+    # Process results by batch for statistics
+    batch_results = collections.defaultdict(list)
+    for result in timed_results:
+        batch_idx = result.dataset_index // args.num_unique_prompts_rollout
+        batch_results[batch_idx].append(result)
+
+    # Calculate metrics for each timed batch
+    total_new_tokens = 0
+    for batch_idx in range(1, num_batches):
+        batch_result_list = batch_results[batch_idx]
+
+        # Aggregate batch results
+        all_responses = []
+        all_finish_reasons = []
+        for r in batch_result_list:
+            all_responses.extend(r.responses)
+            all_finish_reasons.extend(r.finish_reasons)
+
+        # Process aggregated result
+        new_tokens = sum(len(response) for response in all_responses)
+        total_new_tokens += new_tokens
+
+        # Calculate per-batch metrics using overall time divided by number of batches
+        batch_generation_time = overall_generation_time / (num_batches - 1)
+        tokens_per_second = new_tokens / batch_generation_time if batch_generation_time > 0 else 0
 
         result_dict = {
             "tokens_per_second": tokens_per_second,
             "generation_time": batch_generation_time,
             "num_new_tokens": new_tokens,
-            "finish_reasons": collections.Counter(result.finish_reasons),
-            "response_lengths": [len(response) for response in result.responses],
-            "batch_idx": result.dataset_index,
+            "finish_reasons": collections.Counter(all_finish_reasons),
+            "response_lengths": [len(response) for response in all_responses],
+            "batch_idx": batch_idx,
         }
         result_dict["mfu"] = 100 * result_dict["tokens_per_second"] * flops_per_token / device_flops
 
-        # We incrementally save completion lengths so even if the job dies, we still have data.
-        save_completion_lengths([result_dict], timestamp, result.dataset_index)
+        save_completion_lengths([result_dict], timestamp, batch_idx)
         results.append(result_dict)
         logger.info(
-            f"Batch {result.dataset_index + 1}: "
+            f"Batch {batch_idx + 1}: "
             f"{result_dict['tokens_per_second']:.2f} new tokens/sec, "
             f"MFU: {result_dict['mfu']:.2f}%, "
             f"generation time: {batch_generation_time:.2f}s"
         )
+
+    # Log overall statistics
+    overall_tokens_per_second = total_new_tokens / overall_generation_time if overall_generation_time > 0 else 0
+    logger.info(
+        f"Overall for timed batches: {overall_tokens_per_second:.2f} tokens/sec, "
+        f"total time: {overall_generation_time:.2f}s, "
+        f"total tokens: {total_new_tokens}"
+    )
 
     total_time = time.time() - total_start_time
 
