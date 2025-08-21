@@ -989,7 +989,7 @@ def maybe_update_beaker_description(
             original_descriptions[experiment_id] = base_description
 
         base_description = original_descriptions[experiment_id]
-        description_components.append(base_description)
+        description_components[0] = base_description
 
         progress_pct = (current_step / total_steps) * 100
 
