@@ -976,7 +976,7 @@ def maybe_update_beaker_description(
         if "wandb.ai" in current_description:
             # If wandb URL already exists, do not add it again
             return
-        
+
         new_description = (
             f"{current_description}\n"
             f"{wandb_url}\n"
@@ -1017,29 +1017,6 @@ def maybe_update_beaker_description(
             ]
         )
         client.experiment.set_description(experiment_id, new_description)
-
-
-# Backwards compatibility functions
-def update_beaker_progress(
-    current_step: int,
-    total_steps: int,
-    start_time: float,
-    wandb_url: Optional[str] = None,
-    original_descriptions: dict[str, str] = {},
-) -> None:
-    """Backwards compatibility wrapper for maybe_update_beaker_description."""
-    maybe_update_beaker_description(
-        current_step=current_step,
-        total_steps=total_steps,
-        start_time=start_time,
-        wandb_url=wandb_url,
-        original_descriptions=original_descriptions,
-    )
-
-
-def maybe_update_beaker_description_with_wandb_url(wandb_url: Optional[str]) -> None:
-    """Backwards compatibility wrapper for maybe_update_beaker_description."""
-    maybe_update_beaker_description(wandb_url=wandb_url)
 
 
 def live_subprocess_output(cmd: List[str]) -> str:

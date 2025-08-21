@@ -1789,7 +1789,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     inits = []
     policy_group = ModelGroup(pg, PolicyTrainerRayProcess, args.actor_num_gpus_per_node, args.single_gpu_mode)
     wandb_url = wandb.run.get_url() if args.with_tracking else None
-    maybe_update_beaker_description_with_wandb_url(wandb_url)
+    maybe_update_beaker_description(wandb_url=wandb_url)
     inits.extend(
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url) for model in policy_group.models
     )
@@ -1838,7 +1838,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         # Update Beaker progress every 10 steps or on first/last step
         if training_step == resume_training_step or training_step % 10 == 0:
-            update_beaker_progress(training_step, args.num_training_steps, training_start_time, wandb_url)
+            maybe_update_beaker_description(
+                current_step=training_step,
+                total_steps=args.num_training_steps,
+                start_time=training_start_time,
+                wandb_url=wandb_url,
+            )
 
         result = metrics_queue.get()
         metrics, episode, df = result

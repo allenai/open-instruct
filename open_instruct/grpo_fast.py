@@ -127,13 +127,12 @@ from open_instruct.utils import (
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
-    maybe_update_beaker_description_with_wandb_url,
+    maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
     repeat_each,
     sync_gs_bucket,
-    update_beaker_progress,
 )
 
 # Setup logging with filename and line number format
@@ -1721,7 +1720,7 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
             tags=[args.exp_name] + get_wandb_tags(),
         )
         wandb_url = wandb.run.get_url()
-        maybe_update_beaker_description_with_wandb_url(wandb_url)
+        maybe_update_beaker_description(wandb_url=wandb_url)
 
     return beaker_config, wandb_url
 
@@ -2435,7 +2434,12 @@ def run_training(
         start_time = time.perf_counter()
 
         if training_step == resume_training_step or training_step % 10 == 0:
-            update_beaker_progress(training_step, args.num_training_steps, training_start_time, wandb_url)
+            maybe_update_beaker_description(
+                current_step=training_step,
+                total_steps=args.num_training_steps,
+                start_time=training_start_time,
+                wandb_url=wandb_url,
+            )
 
         # Check if any of the threads have raised an exception.
         [f.result() for f in [packing_future, generation_future] if f.done()]
