@@ -918,7 +918,7 @@ class RLRAGLongFormRubricsOnlyVerifier(VerifierFunction):
         test_case = json.loads(label)
         result = compute_rubric_reward(prediction, test_case)
         score = result["reward"]
-        return VerificationResult(score=score, log_values=result)
+        return VerificationResult(score=score, log_values=result["log_values"])
 
 
 class RLRAGLongFormAveragedOutcomeVerifier(VerifierFunction):
@@ -935,7 +935,7 @@ class RLRAGLongFormAveragedOutcomeVerifier(VerifierFunction):
         test_case = json.loads(label)
         result = compute_longform_averaged_outcome_reward(prediction, test_case, query)
         score = result["reward"]
-        return VerificationResult(score=score, log_values=result["log_values"])
+        return VerificationResult(score=score, log_values=result)
 
 
 class RLRAGLongFormReasoningJudgeVerifier(VerifierFunction):
