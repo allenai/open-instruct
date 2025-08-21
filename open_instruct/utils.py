@@ -967,42 +967,33 @@ def maybe_update_beaker_description(
         spec = client.experiment.get(experiment_id)
         current_description = spec.description or ""
     except beaker.exceptions.ExperimentNotFound:
-        if wandb_url:
-            logger.warning(f"Failed to update Beaker experiment description with wandb URL: {wandb_url}")
-            logger.warning("This might be fine if you are e.g. running in an interactive job.")
+        logger.warning("Failed to update Beaker experiment description")
+        logger.warning("This might be fine if you are e.g. running in an interactive job.")
         return
 
-    # For initial wandb URL update (no progress tracking)
+    description_components = []
+
     if wandb_url and current_step is None:
         if "wandb.ai" in current_description:
-            # If wandb URL already exists, do not add it again
             return
 
-        new_description = (
-            f"{current_description}\n"
-            f"{wandb_url}\n"
-            f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}\n"
-            f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}\n"
-        )
-        client.experiment.set_description(experiment_id, new_description)
-        return
-
-    # For progress updates
-    if current_step is not None and total_steps is not None and start_time is not None:
-        # Extract the base description (without progress bar)
-        # Look for existing progress bar pattern and remove it
+        description_components.append(current_description)
+        description_components.append(wandb_url)
+        description_components.append(f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}")
+        description_components.append(f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}")
+        new_description = "\n".join(filter(None, description_components))
+    elif current_step is not None and total_steps is not None and start_time is not None:
         progress_pattern = r"\[[\d.]+% complete \(step \d+/\d+\), (?:eta [^\]]+|finished)\]"
         base_description = re.sub(progress_pattern, "", current_description).strip()
 
-        # Cache the base description
         if experiment_id not in original_descriptions:
             original_descriptions[experiment_id] = base_description
 
         base_description = original_descriptions[experiment_id]
+        description_components.append(base_description)
 
         progress_pct = (current_step / total_steps) * 100
 
-        # Check if we're done
         if current_step >= total_steps:
             progress_bar = f"[100% complete (step {total_steps}/{total_steps}), finished]"
         else:
@@ -1016,9 +1007,12 @@ def maybe_update_beaker_description(
                 eta_str = "calculating..."
             progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), eta {eta_str}]"
 
-        # Build new description - base already includes wandb URL and git info if they were added
-        new_description = f"{base_description} {progress_bar}"
-        client.experiment.set_description(experiment_id, new_description)
+        description_components.append(progress_bar)
+        new_description = " ".join(description_components)
+    else:
+        return
+
+    client.experiment.set_description(experiment_id, new_description)
 
 
 def live_subprocess_output(cmd: List[str]) -> str:
