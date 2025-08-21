@@ -21,7 +21,7 @@ gantry run \
        --cluster ai2/jupiter-cirrascale-2 \
        --budget ai2/oe-eval \
        --install 'uv sync' \
-       -- python -m open_instruct.benchmark_generators \
+       -- uv run python -m open_instruct.benchmark_generators \
     --model_name_or_path "hamishivi/qwen2_5_openthoughts2" \
     --tokenizer_name_or_path "hamishivi/qwen2_5_openthoughts2" \
     --dataset_mixer_list "hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2" "1.0" \
