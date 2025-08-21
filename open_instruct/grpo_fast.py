@@ -2407,6 +2407,10 @@ def cleanup_training_resources(
     # Signal generate_thread to stop
     stop_event.set()
 
+    # Get and log final timing before setting should_stop to True
+    final_timing = ray.get(actor_manager.get_final_timing.remote())
+    logger.info(final_timing)
+
     logger.info(f"Signaling all actors to stop at time={time.time()}...")
     ray.get(actor_manager.set_should_stop.remote(True))
     logger.info(f"✅ Signaled all actors to stop (should_stop=True) at time={time.time()}")
