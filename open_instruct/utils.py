@@ -970,19 +970,18 @@ def maybe_update_beaker_description(
         logger.warning("Failed to update Beaker experiment description")
         logger.warning("This might be fine if you are e.g. running in an interactive job.")
         return
+    if "wandb.ai" in current_description:
+        return
 
-    description_components = []
+    description_components = [
+        current_description,
+        f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}",
+        f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}",
+    ]
 
-    if wandb_url and current_step is None:
-        if "wandb.ai" in current_description:
-            return
-
-        description_components.append(current_description)
+    if wandb_url:
         description_components.append(wandb_url)
-        description_components.append(f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}")
-        description_components.append(f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}")
-        new_description = "\n".join(filter(None, description_components))
-    elif current_step is not None and total_steps is not None and start_time is not None:
+    if current_step is not None:
         progress_pattern = r"\[[\d.]+% complete \(step \d+/\d+\), (?:eta [^\]]+|finished)\]"
         base_description = re.sub(progress_pattern, "", current_description).strip()
 
@@ -1006,12 +1005,8 @@ def maybe_update_beaker_description(
             else:
                 eta_str = "calculating..."
             progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), eta {eta_str}]"
-
         description_components.append(progress_bar)
-        new_description = " ".join(description_components)
-    else:
-        return
-
+    new_description = " ".join(description_components)
     client.experiment.set_description(experiment_id, new_description)
 
 
