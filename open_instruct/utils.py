@@ -29,7 +29,6 @@ except Exception:
     pass
 # isort: on
 import dataclasses
-import datetime
 import functools
 import json
 import logging
@@ -923,6 +922,21 @@ def maybe_get_beaker_config():
     )
 
 
+def format_eta(seconds: float) -> str:
+    """Format ETA in a human-readable format."""
+    seconds = int(seconds)
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    minutes = (seconds % 3600) // 60
+
+    if days > 0:
+        return f"{days}d {hours}h {minutes}m"
+    elif hours > 0:
+        return f"{hours}h {minutes}m"
+    else:
+        return f"{minutes}m"
+
+
 def update_beaker_progress(
     current_step: int,
     total_steps: int,
@@ -963,19 +977,7 @@ def update_beaker_progress(
         time_per_step = elapsed_time / current_step
         remaining_steps = total_steps - current_step
         eta_seconds = time_per_step * remaining_steps
-        if eta_seconds < 0:
-            eta_str = "unknown"
-        else:
-            td = datetime.timedelta(seconds=int(eta_seconds))
-            days = td.days
-            hours = int((td.total_seconds() % 86400) // 3600)
-            minutes = int((td.total_seconds() % 3600) // 60)
-            if days > 0:
-                eta_str = f"{days}d {hours}h {minutes}m"
-            elif hours > 0:
-                eta_str = f"{hours}h {minutes}m"
-            else:
-                eta_str = f"{minutes}m"
+        eta_str = format_eta(eta_seconds)
     else:
         eta_str = "calculating..."
 
