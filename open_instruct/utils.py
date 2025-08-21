@@ -1422,25 +1422,37 @@ class RayProcess:
 
 
 def extract_user_query(conversation: str, chat_template_name: str = None) -> str:
-    # Define the regex pattern
-    # if chat_template_name == "tulu_thinker":
-    #     pattern = r"<answer>.*?</answer>\.\n\nUser: (.*?)\nAssistant: <think>"
-    # elif chat_template_name == "tulu_thinker_r1_style":
-    #     pattern = r"<answer>.*?</answer>\.\n\nUser: (.*?)\n<|assistant|>\n<think>"
-    # else:
-    #     # runtime error, the template is not supported
-    #     raise ValueError(f"Can not extract user query for template {chat_template_name}.")
-
     # only works for tulu_thinker_r1_style
     # pattern = r"\n\n<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
 
     # works for tulu_thinker_r1_style and tulu_thinker
-    # TODO: implement a better logic to get queries before creating the chat template
-    pattern = r"<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
+    # pattern = r"<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
 
-    match = re.search(pattern, conversation, re.DOTALL)
-    # Return the captured group if found, else return None
-    return match.group(1).strip() if match else None
+    # match = re.search(pattern, conversation, re.DOTALL)
+    # # Return the captured group if found, else return None
+    # return match.group(1).strip() if match else None
+
+    # works for olmo too:
+    # TODO: implement a better logic to get queries before creating the chat template
+    pattern = re.compile(
+        r"(?:"
+        r"<\|user\|\>\n(?P<simple>.*?)\n<\|assistant\|\>\n<think>"  # template 0 (your original)
+        r"|"
+        r"<\|im_start\|\>user\n(?P<im>.*?)(?:\n<functions>.*?</functions>)?<\|im_end\|\>\n"  # templates 1 & 2
+        r"(?=[\s\S]*?<\|im_start\|\>assistant\n<think>)"  # ensure it's the turn before <think>
+        r")",
+        re.DOTALL,
+    )
+
+    # Get the last user query matched (most recent user turn before assistant <think>)
+    matches = list(pattern.finditer(conversation))
+    if matches:
+        m = matches[-1]
+        user_query = (m.group("simple") or m.group("im")).strip()
+    else:
+        user_query = None
+
+    return user_query
 
 
 def extract_final_answer(prediction: str) -> str:
