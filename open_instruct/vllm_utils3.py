@@ -402,6 +402,24 @@ class LLMRayActor:
             self._should_stop_value = should_stop
         return self._should_stop_value
 
+    def _insert_result_to_queue(self, result, is_eval: bool):
+        """Insert result into the appropriate queue with error handling."""
+        try:
+            results_queue = self.eval_results_queue if is_eval else self.results_queue
+            results_queue.put(result, timeout=10)
+        except queue.Full:
+            queue_name = "eval" if is_eval else "train"
+            self.logger.warning(f"{queue_name} results queue is full, discarding result.")
+
+    def _try_add_new_request(self):
+        """Try to add a new request from the prompt queue if not stopping."""
+        if not self._should_stop():
+            try:
+                request = self.prompt_queue.get(timeout=0.1)
+                add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
+            except queue.Empty:
+                pass  # No new request available, continue processing
+
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
@@ -443,75 +461,57 @@ class LLMRayActor:
             outputs = self._step_engine(tracking, tokenizer)
 
             for output in outputs:
-                if self.tools:
-                    # Extract base request ID for tool mode
-                    base_request_id = output.request_id.split("-")[0]
+                # Extract base request ID
+                base_request_id = output.request_id.split("-")[0] if self.tools else output.request_id
 
+                # Determine if we should process this output
+                should_process = False
+                outputs_to_finalize = None
+
+                if self.tools:
                     # Collect outputs for the same base request
                     if base_request_id not in collected_outputs:
                         collected_outputs[base_request_id] = []
                     collected_outputs[base_request_id].append(output)
 
-                    # Get metadata and expected n from the base request
+                    # Check if we have all outputs for this request
                     metadata = self.request_metadata[base_request_id]
                     expected_n = metadata["generation_config"].n
 
                     if len(collected_outputs[base_request_id]) == expected_n:
-                        # We have all outputs, now finalize and send them together
-                        is_eval = metadata["is_eval"]
-                        dataset_index = metadata["dataset_index"]
-                        num_processed += 1
+                        should_process = True
+                        outputs_to_finalize = collected_outputs[base_request_id]
+                else:
+                    # Non-tool mode: process immediately
+                    should_process = True
+                    outputs_to_finalize = [output]
 
-                        # Finalize all outputs together
-                        result = _finalize_outputs(
-                            collected_outputs[base_request_id], tracking, dataset_index, self.tools
-                        )
+                if should_process:
+                    # Get metadata (same for both paths)
+                    metadata = self.request_metadata[base_request_id]
+                    is_eval = metadata["is_eval"]
+                    dataset_index = metadata["dataset_index"]
+                    num_processed += 1
 
-                        try:
-                            results_queue = self.eval_results_queue if is_eval else self.results_queue
-                            results_queue.put(result, timeout=10)
-                        except queue.Full:
-                            queue_name = "eval" if is_eval else "train"
-                            self.logger.warning(f"{queue_name} results queue is full, discarding result.")
+                    # Finalize outputs and insert into queue
+                    result = _finalize_outputs(outputs_to_finalize, tracking, dataset_index, self.tools)
+                    self._insert_result_to_queue(result, is_eval)
 
-                        # Clean up collected outputs and metadata
+                    # Clean up metadata
+                    if self.tools:
+                        # Clean up collected outputs and metadata for tool mode
                         del collected_outputs[base_request_id]
                         self.request_metadata.pop(base_request_id, None)
                         # Also clean up sub-request metadata
+                        expected_n = metadata["generation_config"].n
                         for i in range(expected_n):
                             self.request_metadata.pop(f"{base_request_id}-{i}", None)
+                    else:
+                        # Clean up metadata for non-tool mode
+                        self.request_metadata.pop(base_request_id, None)
 
-                        if not self._should_stop():
-                            try:
-                                request = self.prompt_queue.get(timeout=0.1)
-                                add_request(
-                                    request, self.llm_engine, self.tools, request_metadata=self.request_metadata
-                                )
-                            except queue.Empty:
-                                pass  # No new request available, continue processing
-                else:
-                    # Non-tool mode: process as before
-                    base_request_id = output.request_id
-                    is_eval = self.request_metadata[base_request_id]["is_eval"]
-                    dataset_index = self.request_metadata[base_request_id]["dataset_index"]
-                    num_processed += 1
-                    result = _finalize_outputs([output], tracking, dataset_index, self.tools)
-
-                    try:
-                        results_queue = self.eval_results_queue if is_eval else self.results_queue
-                        results_queue.put(result, timeout=10)
-                    except queue.Full:
-                        queue_name = "eval" if is_eval else "train"
-                        self.logger.warning(f"{queue_name} results queue is full, discarding result.")
-
-                    self.request_metadata.pop(base_request_id, None)
-
-                    if not self._should_stop():
-                        try:
-                            request = self.prompt_queue.get(timeout=0.1)
-                            add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
-                        except queue.Empty:
-                            pass  # No new request available, continue processing
+                    # Try to add a new request
+                    self._try_add_new_request()
 
             if self._should_stop() and not self.inflight_updates:
                 pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
