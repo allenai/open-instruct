@@ -29,6 +29,7 @@ except Exception:
     pass
 # isort: on
 import dataclasses
+import datetime
 import functools
 import json
 import logging
@@ -922,20 +923,6 @@ def maybe_get_beaker_config():
     )
 
 
-def format_eta(seconds: float) -> str:
-    """Format ETA in a human-readable format."""
-    if seconds < 0:
-        return "unknown"
-
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-
-    if hours > 0:
-        return f"{hours}h {minutes}m"
-    else:
-        return f"{minutes}m"
-
-
 def update_beaker_progress(
     current_step: int,
     total_steps: int,
@@ -959,42 +946,51 @@ def update_beaker_progress(
         return
 
     client = beaker.Beaker.from_env()
+
     try:
         if experiment_id not in original_descriptions:
             spec = client.experiment.get(experiment_id)
             original_descriptions[experiment_id] = spec.description or ""
-
-        original_description = original_descriptions[experiment_id]
-
-        # Calculate progress
-        progress_pct = (current_step / total_steps) * 100
-
-        # Calculate ETA
-        elapsed_time = time.time() - start_time
-        if current_step > 0:
-            time_per_step = elapsed_time / current_step
-            remaining_steps = total_steps - current_step
-            eta_seconds = time_per_step * remaining_steps
-            eta_str = format_eta(eta_seconds)
-        else:
-            eta_str = "calculating..."
-
-        # Format progress bar
-        progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), eta {eta_str}]"
-
-        new_description = " ".join(
-            [
-                original_description,
-                progress_bar,
-                wandb_url,
-                f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}",
-                f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}",
-            ]
-        )
-        client.experiment.set_description(experiment_id, new_description)
-
     except beaker.exceptions.ExperimentNotFound:
-        pass
+        return
+
+    original_description = original_descriptions[experiment_id]
+
+    progress_pct = (current_step / total_steps) * 100
+
+    elapsed_time = time.time() - start_time
+    if current_step > 0:
+        time_per_step = elapsed_time / current_step
+        remaining_steps = total_steps - current_step
+        eta_seconds = time_per_step * remaining_steps
+        if eta_seconds < 0:
+            eta_str = "unknown"
+        else:
+            td = datetime.timedelta(seconds=int(eta_seconds))
+            days = td.days
+            hours = int((td.total_seconds() % 86400) // 3600)
+            minutes = int((td.total_seconds() % 3600) // 60)
+            if days > 0:
+                eta_str = f"{days}d {hours}h {minutes}m"
+            elif hours > 0:
+                eta_str = f"{hours}h {minutes}m"
+            else:
+                eta_str = f"{minutes}m"
+    else:
+        eta_str = "calculating..."
+
+    progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), eta {eta_str}]"
+
+    new_description = " ".join(
+        [
+            original_description,
+            progress_bar,
+            wandb_url,
+            f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}",
+            f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}",
+        ]
+    )
+    client.experiment.set_description(experiment_id, new_description)
 
 
 def maybe_update_beaker_description_with_wandb_url(wandb_url: Optional[str]) -> None:
