@@ -1421,7 +1421,6 @@ class RayProcess:
 
 
 def extract_user_query(conversation: str, chat_template_name: str = None) -> str:
-
     # only works for tulu_thinker_r1_style
     # pattern = r"\n\n<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
 
@@ -1436,12 +1435,12 @@ def extract_user_query(conversation: str, chat_template_name: str = None) -> str
     # TODO: implement a better logic to get queries before creating the chat template
     pattern = re.compile(
         r"(?:"
-        r"<\|user\|\>\n(?P<simple>.*?)\n<\|assistant\|\>\n<think>"                           # template 0 (your original)
+        r"<\|user\|\>\n(?P<simple>.*?)\n<\|assistant\|\>\n<think>"  # template 0 (your original)
         r"|"
         r"<\|im_start\|\>user\n(?P<im>.*?)(?:\n<functions>.*?</functions>)?<\|im_end\|\>\n"  # templates 1 & 2
-        r"(?=[\s\S]*?<\|im_start\|\>assistant\n<think>)"                                     # ensure it's the turn before <think>
+        r"(?=[\s\S]*?<\|im_start\|\>assistant\n<think>)"  # ensure it's the turn before <think>
         r")",
-        re.DOTALL
+        re.DOTALL,
     )
 
     # Get the last user query matched (most recent user turn before assistant <think>)
