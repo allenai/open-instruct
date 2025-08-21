@@ -12,12 +12,12 @@ jobs:
     name: Run unit tests
     runs-on: ubuntu-latest
     steps:
-    
+
       - name: Delete huge unnecessary tools folder
         run: |
           echo "Disk space before cleanup:"
           df -h /
-          
+
           # Remove unnecessary directories
           DIRS_TO_REMOVE=(
             "/opt/hostedtoolcache"
@@ -26,25 +26,25 @@ jobs:
             "/usr/local/lib/android"
             "/usr/local/share/boost"
           )
-          
+
           for dir in "${DIRS_TO_REMOVE[@]}"; do
             [ -d "$dir" ] && sudo rm -rf "$dir" && echo "Removed: $dir"
           done
-          
+
           # Remove unnecessary packages
           PACKAGES_TO_REMOVE=(
             '^aspnetcore-.*' '^dotnet-.*' '^llvm-.*' 'php.*'
             '^mongodb-.*' '^mysql-.*' azure-cli google-chrome-stable
             firefox powershell mono-devel
           )
-          
+
           sudo apt-get remove -y "${PACKAGES_TO_REMOVE[@]}" 2>/dev/null || true
           sudo apt-get autoremove -y
           sudo apt-get clean
-          
+
           # Clean up Docker
           docker system prune -af --volumes
-          
+
           echo "Disk space after cleanup:"
           df -h /
 
@@ -53,33 +53,33 @@ jobs:
           # Install only the minimal CUDA toolkit needed for nvcc
           sudo apt-get update
           sudo apt-get install -y wget software-properties-common
-          
+
           # Add NVIDIA package repositories
           wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
           sudo dpkg -i cuda-keyring_1.1-1_all.deb
           rm cuda-keyring_1.1-1_all.deb
-          
+
           # Install only cuda-nvcc package (much smaller than full toolkit)
           sudo apt-get update
           sudo apt-get install -y cuda-nvcc-12-6
-          
+
           # Clean up apt cache to save disk space
           sudo apt-get clean
           sudo rm -rf /var/lib/apt/lists/*
-          
+
           # Clean up apt cache to save disk space
           sudo apt-get clean
           sudo rm -rf /var/lib/apt/lists/*
-          
+
           # Create symlink so nvcc is available
           ln -s /usr/local/cuda-12.6/bin/nvcc /usr/bin/nvcc || true
-          
+
           echo "nvcc installed, checking version:"
           nvcc --version || echo "nvcc not found"
-          
+
           echo "Disk space after CUDA install and cleanup:"
           df -h
-          
+
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Install uv

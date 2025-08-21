@@ -71,6 +71,38 @@ jobs:
           token: ${{ secrets.BEAKER_TOKEN }}
           workspace: ai2/tulu-thinker
 
+      - name: Install minimal CUDA toolkit for nvcc
+        run: |
+          # Install only the minimal CUDA toolkit needed for nvcc
+          sudo apt-get update
+          sudo apt-get install -y wget software-properties-common
+
+          # Add NVIDIA package repositories
+          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          rm cuda-keyring_1.1-1_all.deb
+
+          # Install only cuda-nvcc package (much smaller than full toolkit)
+          sudo apt-get update
+          sudo apt-get install -y cuda-nvcc-12-6
+
+          # Clean up apt cache to save disk space
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+
+          # Clean up apt cache to save disk space
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+
+          # Create symlink so nvcc is available
+          ln -s /usr/local/cuda-12.6/bin/nvcc /usr/bin/nvcc || true
+
+          echo "nvcc installed, checking version:"
+          nvcc --version || echo "nvcc not found"
+
+          echo "Disk space after CUDA install and cleanup:"
+          df -h
+
       - name: Install dependencies
         run: |
           # Install development dependencies needed for mason.py
