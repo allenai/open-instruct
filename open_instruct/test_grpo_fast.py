@@ -645,6 +645,100 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 class TestStreamingAccumulation(TestGrpoFastBase):
     """Test the new streaming accumulation functionality."""
 
+    def test_more_engines_than_queries(self):
+        """Test that split_and_insert_batch handles gracefully when engines > queries."""
+        # More engines than queries - should handle gracefully with single-prompt batches
+        num_engines = 8
+        num_queries = 4
+
+        queries, ground_truths, datasets, indices = self.create_test_data(num_queries)
+        param_prompt_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        pending_queries_map = grpo_fast.PendingQueriesMap()
+
+        # Track queue for cleanup
+        self._ray_queues.append(param_prompt_Q)
+
+        batch = model_utils.Batch(queries=queries, ground_truths=ground_truths, datasets=datasets, indices=indices)
+
+        # Create a mock generation_config
+        from unittest.mock import MagicMock
+
+        mock_generation_config = MagicMock()
+        mock_generation_config.n = 1
+
+        grpo_fast.split_and_insert_batch(
+            batch,
+            training_step=1,
+            vllm_num_engines=num_engines,
+            pending_queries_map=pending_queries_map,
+            param_prompt_Q=param_prompt_Q,
+            generation_config=mock_generation_config,
+        )
+
+        # Should have 4 batches (one for each query)
+        self.assertEqual(
+            param_prompt_Q.qsize(), num_queries, f"Should have {num_queries} batches for {num_queries} queries"
+        )
+
+        # Each batch should have exactly 1 prompt
+        batch_sizes = []
+        while not param_prompt_Q.empty():
+            request = param_prompt_Q.get()
+            self.assertIsInstance(request, PromptRequest)
+            self.assertEqual(len(request.prompts), 1, "Each batch should have exactly 1 prompt")
+            batch_sizes.append(len(request.prompts))
+
+        # All queries should be in the pending map
+        self.assertEqual(len(pending_queries_map), num_queries)
+
+    def test_uneven_distribution_no_empty_batches(self):
+        """Test that uneven query distribution doesn't create empty batches."""
+        num_engines = 3
+        num_queries = 7  # 7/3 = ceil(2.33) = 3, so distribution should be [3, 3, 1]
+
+        queries, ground_truths, datasets, indices = self.create_test_data(num_queries)
+        param_prompt_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        pending_queries_map = grpo_fast.PendingQueriesMap()
+
+        # Track queue for cleanup
+        self._ray_queues.append(param_prompt_Q)
+
+        batch = model_utils.Batch(queries=queries, ground_truths=ground_truths, datasets=datasets, indices=indices)
+
+        # Create a mock generation_config
+        from unittest.mock import MagicMock
+
+        mock_generation_config = MagicMock()
+        mock_generation_config.n = 1
+
+        grpo_fast.split_and_insert_batch(
+            batch,
+            training_step=1,
+            vllm_num_engines=num_engines,
+            pending_queries_map=pending_queries_map,
+            param_prompt_Q=param_prompt_Q,
+            generation_config=mock_generation_config,
+        )
+
+        # Verify all batches have content and check distribution
+        batch_sizes = []
+        while not param_prompt_Q.empty():
+            request = param_prompt_Q.get()
+            self.assertGreater(len(request.prompts), 0, "Found empty batch in queue!")
+            batch_sizes.append(len(request.prompts))
+
+        # Check the expected distribution
+        self.assertEqual(sum(batch_sizes), num_queries, "Total queries should match")
+        self.assertEqual(len(batch_sizes), num_engines, "Should have one batch per engine")
+
+        # The distribution should be [3, 3, 1] for 7 queries across 3 engines with ceiling division
+        expected_distribution = [3, 3, 1]
+        self.assertEqual(
+            sorted(batch_sizes, reverse=True),
+            expected_distribution,
+            f"Expected distribution {expected_distribution}, got {sorted(batch_sizes, reverse=True)}",
+        )
+
     def test_streaming_accumulation_basic(self):
         """Test basic streaming accumulation with in-order results."""
         num_engines = 2

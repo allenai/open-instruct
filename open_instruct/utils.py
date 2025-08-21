@@ -664,6 +664,7 @@ def get_wandb_tags() -> List[str]:
                 tags.append(f"pr: {pr['number']}")
     if "GIT_BRANCH" in os.environ:
         tags.append(f"branch: {os.environ['GIT_BRANCH']}")
+    tags = [tag[:64] for tag in tags if len(tag) > 64]
     return tags
 
 
@@ -922,7 +923,7 @@ def maybe_get_beaker_config():
     )
 
 
-def maybe_update_beaker_description_with_wandb_url(wandb_url: str) -> None:
+def maybe_update_beaker_description_with_wandb_url(wandb_url: Optional[str]) -> None:
     """Update Beaker experiment description with wandb URL if running on Beaker."""
     if not is_beaker_job() or wandb_url is None:
         return
@@ -935,7 +936,16 @@ def maybe_update_beaker_description_with_wandb_url(wandb_url: str) -> None:
         logger.warning("This might be fine if you are e.g. running in an interactive job.")
         return
     current_description = spec.description or ""
-    client.experiment.set_description(os.environ["BEAKER_WORKLOAD_ID"], f"{current_description}\n{wandb_url}")
+    if "wandb.ai" in current_description:
+        # If wandb URL already exists, do not add it again
+        return
+    new_description = (
+        f"{current_description}\n"
+        f"{wandb_url}\n"
+        f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}\n"
+        f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}\n"
+    )
+    client.experiment.set_description(os.environ["BEAKER_WORKLOAD_ID"], new_description)
 
 
 def live_subprocess_output(cmd: List[str]) -> str:
@@ -1419,7 +1429,13 @@ def extract_user_query(conversation: str, chat_template_name: str = None) -> str
     # else:
     #     # runtime error, the template is not supported
     #     raise ValueError(f"Can not extract user query for template {chat_template_name}.")
-    pattern = r"\n\n<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
+
+    # only works for tulu_thinker_r1_style
+    # pattern = r"\n\n<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
+
+    # works for tulu_thinker_r1_style and tulu_thinker
+    # TODO: implement a better logic to get queries before creating the chat template
+    pattern = r"<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
 
     match = re.search(pattern, conversation, re.DOTALL)
     # Return the captured group if found, else return None
