@@ -438,8 +438,8 @@ class LLMRayActor:
                 # Otherwise continue trying to get more requests
         iteration = 0
         while True:
-            if iteration == 0:
-                self.logger.info("Entering main loop.")
+            if iteration % 100 == 0:
+                self.logger.info(f"Starting iteration {iteration} of main loop.")
             iteration += 1
             if self._should_stop() and self.inflight_updates:
                 self.logger.info(
