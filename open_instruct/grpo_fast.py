@@ -1351,8 +1351,12 @@ def data_preparation_thread(
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
             result, batch = accumulate_inference_batches(
-                inference_results_Q, pending_queries_map, args, training_step, generation_config,
-                num_prompts=args.num_unique_prompts_rollout
+                inference_results_Q,
+                pending_queries_map,
+                args,
+                training_step,
+                generation_config,
+                num_prompts=args.num_unique_prompts_rollout,
             )
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
