@@ -8,14 +8,10 @@ import torch
 from rich.pretty import pprint
 import logging
 
+from open_instruct import logger_utils
 
 T = TypeVar("T")
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
 class Timer:

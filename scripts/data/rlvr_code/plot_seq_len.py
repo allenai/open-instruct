@@ -50,7 +50,9 @@ import numpy as np
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+from open_instruct import logger_utils
+
+logger = logger_utils.setup_logger(__name__)
 
 MODEL_NAME = "allenai/Llama-3.1-Tulu-3-8B-SFT"
 
@@ -59,7 +61,7 @@ def get_sequence_lengths(batch, tokenizer, column_name):
     """Tokenizes the specified column and returns sequence lengths."""
     if column_name not in batch:
         if not hasattr(get_sequence_lengths, "warned"):
-             logging.warning(f"Column '{column_name}' not found in at least one batch. Skipping.")
+             logger.warning(f"Column '{column_name}' not found in at least one batch. Skipping.")
              get_sequence_lengths.warned = True
         return {"seq_len": []}
 
@@ -68,46 +70,46 @@ def get_sequence_lengths(batch, tokenizer, column_name):
         tokenized_outputs = tokenizer(outputs, truncation=False, padding=False)
         return {"seq_len": [len(ids) for ids in tokenized_outputs["input_ids"]]}
     except Exception as e:
-        logging.error(f"Error during tokenization: {e}")
+        logger.error(f"Error during tokenization: {e}")
         return {"seq_len": [0] * len(outputs)}
 
 # --- Main Function ---
 def main(args):
     """Loads dataset, calculates lengths, and plots distribution."""
-    logging.info(f"Loading tokenizer: {MODEL_NAME}")
+    logger.info(f"Loading tokenizer: {MODEL_NAME}")
     try:
         tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, use_fast=True)
     except Exception as e:
-        logging.error(f"Failed to load tokenizer {MODEL_NAME}: {e}")
+        logger.error(f"Failed to load tokenizer {MODEL_NAME}: {e}")
         sys.exit(1)
 
-    logging.info(f"Loading dataset: {args.dataset_name}, split: {args.split}")
+    logger.info(f"Loading dataset: {args.dataset_name}, split: {args.split}")
     dataset = None
     try:
         dataset = datasets.load_dataset(args.dataset_name, split=args.split, streaming=args.streaming)
         if args.streaming:
-            logging.info("Processing in streaming mode.")
+            logger.info("Processing in streaming mode.")
             if args.max_samples_streaming > 0:
-                logging.info(f"Taking first {args.max_samples_streaming} samples.")
+                logger.info(f"Taking first {args.max_samples_streaming} samples.")
                 dataset = dataset.take(args.max_samples_streaming)
 
     except FileNotFoundError:
-        logging.error(f"Dataset '{args.dataset_name}' not found.")
+        logger.error(f"Dataset '{args.dataset_name}' not found.")
         sys.exit(1)
     except ValueError as e:
-         logging.error(f"Invalid split '{args.split}' or dataset config error for '{args.dataset_name}': {e}")
+         logger.error(f"Invalid split '{args.split}' or dataset config error for '{args.dataset_name}': {e}")
          sys.exit(1)
     except Exception as e:
-        logging.error(f"Failed to load dataset '{args.dataset_name}' split '{args.split}': {e}")
+        logger.error(f"Failed to load dataset '{args.dataset_name}' split '{args.split}': {e}")
         sys.exit(1)
 
     if not args.streaming and dataset:
          if args.column_name not in dataset.column_names:
-             logging.error(f"Column '{args.column_name}' not found in dataset '{args.dataset_name}' split '{args.split}'.")
-             logging.info(f"Available columns: {dataset.column_names}")
+             logger.error(f"Column '{args.column_name}' not found in dataset '{args.dataset_name}' split '{args.split}'.")
+             logger.info(f"Available columns: {dataset.column_names}")
              sys.exit(1)
 
-    logging.info(f"Calculating sequence lengths for column '{args.column_name}'...")
+    logger.info(f"Calculating sequence lengths for column '{args.column_name}'...")
     sequence_lengths = []
     try:
         if hasattr(get_sequence_lengths, "warned"):
@@ -120,7 +122,7 @@ def main(args):
             batch_size=args.batch_size
         )
 
-        logging.info("Collecting sequence lengths...")
+        logger.info("Collecting sequence lengths...")
         if args.streaming:
              temp_lengths = []
              # Correctly iterate over batches in streaming mode
@@ -135,40 +137,40 @@ def main(args):
                           temp_lengths.append(batch_lengths)
                  else:
                       # This might happen if get_sequence_lengths returned empty due to missing column
-                      logging.debug("'seq_len' key missing in a batch.")
+                      logger.debug("'seq_len' key missing in a batch.")
 
              sequence_lengths = temp_lengths
         else:
             sequence_lengths = mapped_dataset["seq_len"]
 
     except KeyError:
-        logging.error(f"Column '{args.column_name}' caused a KeyError during processing.")
+        logger.error(f"Column '{args.column_name}' caused a KeyError during processing.")
         try:
             if not args.streaming and dataset:
-                 logging.info(f"Available columns: {dataset.column_names}")
+                 logger.info(f"Available columns: {dataset.column_names}")
             else:
-                 logging.info("Cannot list columns for streaming dataset easily after error.")
+                 logger.info("Cannot list columns for streaming dataset easily after error.")
         except Exception as e_inner:
-            logging.warning(f"Could not retrieve column names: {e_inner}")
+            logger.warning(f"Could not retrieve column names: {e_inner}")
         sys.exit(1)
     except Exception as e:
-        logging.error(f"Error calculating sequence lengths: {e}")
+        logger.error(f"Error calculating sequence lengths: {e}")
         import traceback
         traceback.print_exc() # Print stack trace for debugging
         sys.exit(1)
 
     if not sequence_lengths:
-        logging.warning("No sequence lengths were calculated. Check dataset, column name, and potential errors.")
+        logger.warning("No sequence lengths were calculated. Check dataset, column name, and potential errors.")
         sys.exit(1)
 
-    logging.info(f"Successfully calculated {len(sequence_lengths)} sequence lengths.")
+    logger.info(f"Successfully calculated {len(sequence_lengths)} sequence lengths.")
     min_len = np.min(sequence_lengths)
     max_len = np.max(sequence_lengths)
     avg_len = np.mean(sequence_lengths)
     median_len = np.median(sequence_lengths)
-    logging.info(f"Min length: {min_len}, Max length: {max_len}, Avg length: {avg_len:.2f}, Median length: {median_len}")
+    logger.info(f"Min length: {min_len}, Max length: {max_len}, Avg length: {avg_len:.2f}, Median length: {median_len}")
 
-    logging.info("Plotting histogram...")
+    logger.info("Plotting histogram...")
     plt.figure(figsize=(12, 7))
     num_bins = min(args.num_bins, int(max_len / 10) if max_len > 10 else args.num_bins) # Adjust bin calculation
     if num_bins <= 0: num_bins = 10
@@ -177,7 +179,7 @@ def main(args):
     # --- Add Percentile Lines ---
     percentiles = np.arange(10, 100, 10) # 10, 20, ..., 90
     percentile_values = np.percentile(sequence_lengths, percentiles)
-    logging.info(f"Percentile values (10th-90th): {dict(zip(percentiles, np.round(percentile_values, 2)))}")
+    logger.info(f"Percentile values (10th-90th): {dict(zip(percentiles, np.round(percentile_values, 2)))}")
 
     # Determine a good y-position for labels (e.g., 95% of max y-axis height)
     y_max = plt.gca().get_ylim()[1]
@@ -201,12 +203,12 @@ def main(args):
     plot_filename = args.plot_filename or f"{args.dataset_name.replace('/', '_')}_{args.split}_{args.column_name}_seq_len_dist.png"
     try:
         plt.savefig(plot_filename)
-        logging.info(f"Histogram saved to {plot_filename}")
+        logger.info(f"Histogram saved to {plot_filename}")
     except Exception as e:
-        logging.error(f"Failed to save plot to {plot_filename}: {e}")
+        logger.error(f"Failed to save plot to {plot_filename}: {e}")
 
     if args.show_plot:
-        logging.info("Displaying plot...")
+        logger.info("Displaying plot...")
         plt.show()
 
 # --- Argument Parsing and Execution ---
@@ -225,10 +227,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.streaming and args.max_samples_streaming < 0:
-        logging.error("--max_samples_streaming cannot be negative.")
+        logger.error("--max_samples_streaming cannot be negative.")
         sys.exit(1)
     elif not args.streaming and args.max_samples_streaming != 0:
-        logging.warning("--max_samples_streaming is ignored when --streaming is not used.")
+        logger.warning("--max_samples_streaming is ignored when --streaming is not used.")
 
     main(args)
 

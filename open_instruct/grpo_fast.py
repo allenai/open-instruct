@@ -49,7 +49,6 @@ from open_instruct import utils
 # isort: on
 import asyncio
 import json
-import logging
 import math
 import shutil
 import socket
@@ -82,7 +81,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
-from open_instruct import vllm_utils3
+from open_instruct import logger_utils, vllm_utils3
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -135,13 +134,7 @@ from open_instruct.utils import (
     sync_gs_bucket,
 )
 
-# Setup logging with filename and line number format
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
