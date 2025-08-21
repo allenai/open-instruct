@@ -664,6 +664,7 @@ def get_wandb_tags() -> List[str]:
                 tags.append(f"pr: {pr['number']}")
     if "GIT_BRANCH" in os.environ:
         tags.append(f"branch: {os.environ['GIT_BRANCH']}")
+    tags = [tag[:64] for tag in tags if len(tag) > 64]
     return tags
 
 
@@ -1428,7 +1429,13 @@ def extract_user_query(conversation: str, chat_template_name: str = None) -> str
     # else:
     #     # runtime error, the template is not supported
     #     raise ValueError(f"Can not extract user query for template {chat_template_name}.")
-    pattern = r"\n\n<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
+
+    # only works for tulu_thinker_r1_style
+    # pattern = r"\n\n<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
+
+    # works for tulu_thinker_r1_style and tulu_thinker
+    # TODO: implement a better logic to get queries before creating the chat template
+    pattern = r"<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
 
     match = re.search(pattern, conversation, re.DOTALL)
     # Return the captured group if found, else return None
