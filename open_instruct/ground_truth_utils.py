@@ -966,7 +966,8 @@ class RLRAGLongFormFinegrainedVerifier(VerifierFunction):
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> FinegrainedRewardOutput:
         # result = compute_finegrained_reward(prediction, label, query)
-        result = compute_longform_finegrained_reward(prediction, label, query)
+        test_case = json.loads(label)
+        result = compute_longform_finegrained_reward(prediction, test_case, query)
         return FinegrainedRewardOutput(
             finegrained_scores=result["finegrained_scores"],
             log_values=result["log_values"],
