@@ -16,7 +16,6 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 import copy
-import logging
 import os
 import queue
 import time
@@ -42,11 +41,12 @@ from torch.distributed.distributed_c10d import (
 )
 from tqdm import tqdm
 
+from open_instruct import logger_utils
 from open_instruct.queue_types import GenerationResult, RequestInfo
 from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
 def _init_tool_tracking():
@@ -358,7 +358,7 @@ class LLMRayActor:
         inflight_updates: bool = False,
         **kwargs,
     ):
-        self.logger = logging.getLogger(__name__)
+        self.logger = logger_utils.setup_logger(__name__)
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inflight_updates = inflight_updates
@@ -385,7 +385,7 @@ class LLMRayActor:
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
-            print(f"creating LLM with bundle_indices={bundle_indices}")
+            self.logger.info(f"creating LLM with bundle_indices={bundle_indices}")
 
         self.llm_engine = vllm.LLMEngine.from_engine_args(vllm.EngineArgs(*args, **kwargs))
 
@@ -727,7 +727,9 @@ def get_cuda_arch_list() -> str:
     # Remove duplicates and sort
     cuda_capabilities = sorted(set(cuda_capabilities))
     cuda_arch_list = ";".join(cuda_capabilities)
-    print(f"Detected CUDA compute capabilities: {cuda_capabilities}, setting TORCH_CUDA_ARCH_LIST={cuda_arch_list}")
+    logger.info(
+        f"Detected CUDA compute capabilities: {cuda_capabilities}, setting TORCH_CUDA_ARCH_LIST={cuda_arch_list}"
+    )
     return cuda_arch_list
 
 
@@ -776,7 +778,7 @@ def create_vllm_engines(
         # 2 instances on the same GPUs.
         num_gpus = 0.5
 
-    print(f"num_gpus: {num_gpus}")
+    logger.info(f"num_gpus: {num_gpus}")
 
     if not use_hybrid_engine:
         # Create a big placement group to ensure that all engines are packed
@@ -915,4 +917,4 @@ if __name__ == "__main__":
     )
     ray.get(refs)
     output = ray.get(llm.generate.remote("San Franciso is a"))
-    print(f"output: {output}")
+    logger.info(f"output: {output}")

@@ -1,13 +1,14 @@
 """Integration test for the /test_program endpoint."""
 
-import logging
 import subprocess
 import time
 import unittest
 
 import requests
 
-logger = logging.getLogger(__name__)
+from open_instruct import logger_utils
+
+logger = logger_utils.setup_logger(__name__)
 
 
 class APITestServer:
