@@ -1414,10 +1414,6 @@ def data_preparation_thread(
                     advantages_mask_list.append(grouped_masks[group_id])
 
             
-            else:
-                # FGRPO should always use finegrained rewards
-                raise ValueError(f"FGRPO requires advantage_normalization_type='finegrained', but got '{args.advantage_normalization_type}'. "
-                               f"Please set --advantage_normalization_type finegrained in your training script.")
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved
             max_possible_score = 0
