@@ -411,7 +411,7 @@ class LLMRayActor:
             queue_name = "eval" if is_eval else "train"
             self.logger.warning(f"{queue_name} results queue is full, discarding result.")
 
-    def _try_add_new_request(self):
+    def _maybe_add_new_request(self):
         """Try to add a new request from the prompt queue if not stopping."""
         if not self._should_stop():
             try:
@@ -486,32 +486,34 @@ class LLMRayActor:
                     should_process = True
                     outputs_to_finalize = [output]
 
-                if should_process:
-                    # Get metadata (same for both paths)
-                    metadata = self.request_metadata[base_request_id]
-                    is_eval = metadata["is_eval"]
-                    dataset_index = metadata["dataset_index"]
-                    num_processed += 1
+                if not should_process:
+                    continue
 
-                    # Finalize outputs and insert into queue
-                    result = _finalize_outputs(outputs_to_finalize, tracking, dataset_index, self.tools)
-                    self._insert_result_to_queue(result, is_eval)
+                # Get metadata (same for both paths)
+                metadata = self.request_metadata[base_request_id]
+                is_eval = metadata["is_eval"]
+                dataset_index = metadata["dataset_index"]
+                num_processed += 1
 
-                    # Clean up metadata
-                    if self.tools:
-                        # Clean up collected outputs and metadata for tool mode
-                        del collected_outputs[base_request_id]
-                        self.request_metadata.pop(base_request_id, None)
-                        # Also clean up sub-request metadata
-                        expected_n = metadata["generation_config"].n
-                        for i in range(expected_n):
-                            self.request_metadata.pop(f"{base_request_id}-{i}", None)
-                    else:
-                        # Clean up metadata for non-tool mode
-                        self.request_metadata.pop(base_request_id, None)
+                # Finalize outputs and insert into queue
+                result = _finalize_outputs(outputs_to_finalize, tracking, dataset_index, self.tools)
+                self._insert_result_to_queue(result, is_eval)
 
-                    # Try to add a new request
-                    self._try_add_new_request()
+                # Clean up metadata
+                if self.tools:
+                    # Clean up collected outputs and metadata for tool mode
+                    del collected_outputs[base_request_id]
+                    self.request_metadata.pop(base_request_id, None)
+                    # Also clean up sub-request metadata
+                    expected_n = metadata["generation_config"].n
+                    for i in range(expected_n):
+                        self.request_metadata.pop(f"{base_request_id}-{i}", None)
+                else:
+                    # Clean up metadata for non-tool mode
+                    self.request_metadata.pop(base_request_id, None)
+
+                # Try to add a new request
+                self._maybe_add_new_request()
 
             if self._should_stop() and not self.inflight_updates:
                 pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
