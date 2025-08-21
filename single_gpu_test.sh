@@ -1,9 +1,6 @@
 #!/bin/bash
 
-# Run local_grpo_test.py with the same arguments as single_gpu_integration_test.sh
-# but without the Beaker/mason.py infrastructure
-
-uv run python local_grpo_test.py \
+uv run python open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
@@ -26,6 +23,7 @@ uv run python local_grpo_test.py \
     --learning_rate 3e-7 \
     --total_episodes 200 \
     --deepspeed_stage 2 \
+    --with_tracking \
     --num_epochs 1 \
     --num_learners_per_node 1 \
     --vllm_tensor_parallel_size 1 \
