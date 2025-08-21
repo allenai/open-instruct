@@ -62,13 +62,13 @@ from rich.pretty import pprint
 from tqdm import tqdm
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
-from open_instruct import logger_utils as oi_logging
+from open_instruct import logger_utils
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
 
-logger = oi_logging.setup_logger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
 
@@ -1312,7 +1312,7 @@ _SET_AFFINITY = False
 
 class RayProcess:
     def __init__(self, world_size, rank, local_rank, master_addr, master_port):
-        oi_logging.setup_logger()
+        logger_utils.setup_logger()
         self.world_size = world_size
         self.rank = rank
         self.local_rank = local_rank

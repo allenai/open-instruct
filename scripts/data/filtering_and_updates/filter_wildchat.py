@@ -19,9 +19,9 @@ import logging
 import os
 from datasets import load_dataset
 
-from open_instruct import logger_utils as oi_logging
+from open_instruct import logger_utils
 
-logger = oi_logging.setup_logger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 def filter_toxic(ds):
     """Filter out rows where `toxic` is True."""

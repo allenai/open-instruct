@@ -25,8 +25,7 @@ import transformers
 import vllm
 from ray.util import queue as ray_queue
 
-from open_instruct import dataset_transformation, grpo_fast, model_utils, utils, vllm_utils3
-from open_instruct import logger_utils as oi_logging
+from open_instruct import dataset_transformation, grpo_fast, logger_utils, model_utils, utils, vllm_utils3
 from open_instruct.queue_types import PromptRequest
 
 # For FLOPS, we assume bf16 and ignore sparsity.
@@ -39,7 +38,7 @@ GPU_SPECS = {
 }
 
 
-logger = oi_logging.setup_logger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
 # Determine data directory

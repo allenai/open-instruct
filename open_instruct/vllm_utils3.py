@@ -39,12 +39,12 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
-from open_instruct import logger_utils as oi_logging
+from open_instruct import logger_utils
 from open_instruct.queue_types import GenerationResult, RequestInfo
 from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
-logger = oi_logging.setup_logger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
 def _init_tool_tracking():
@@ -313,7 +313,7 @@ class LLMRayActor:
         actor_manager=None,
         **kwargs,
     ):
-        self.logger = oi_logging.setup_logger(__name__)
+        self.logger = logger_utils.setup_logger(__name__)
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
 

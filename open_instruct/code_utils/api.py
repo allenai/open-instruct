@@ -28,12 +28,12 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from open_instruct import logger_utils as oi_logging
+from open_instruct import logger_utils
 from open_instruct.code_utils.code_utils import decode_tests, get_successful_tests_fast, get_successful_tests_stdio
 
 app = FastAPI()
 
-logger = oi_logging.setup_logger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
 class TestRequest(BaseModel):

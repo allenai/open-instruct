@@ -9,9 +9,9 @@ import pandas as pd
 from tqdm import tqdm
 
 from scripts.synth_pref.utils.ultrafeedback_template import parser
-from open_instruct import logger_utils as oi_logging
+from open_instruct import logger_utils
 
-logger = oi_logging.setup_logger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 aspects = ["helpfulness", "honesty", "instruction_following", "truthfulness"]
 

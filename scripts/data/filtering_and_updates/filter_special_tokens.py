@@ -3,7 +3,7 @@ import logging
 from datasets import Dataset, load_dataset
 from huggingface_hub import HfApi
 
-from open_instruct import logger_utils as oi_logging
+from open_instruct import logger_utils
 
 """
 Used for stripping special tokens from text fields in a dataset.
@@ -29,7 +29,7 @@ uv run python scripts/data/filtering_and_updates/filter_special_tokens.py --data
 """
 
 # Set up logging
-logger = oi_logging.setup_logger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 # Dictionary mapping special tokens to their replacements
 SPECIAL_TOKEN_MAP = {

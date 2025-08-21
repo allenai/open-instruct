@@ -8,10 +8,10 @@ import torch
 from rich.pretty import pprint
 import logging
 
-from open_instruct import logger_utils as oi_logging
+from open_instruct import logger_utils
 
 T = TypeVar("T")
-logger = oi_logging.setup_logger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
 class Timer:

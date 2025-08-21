@@ -88,9 +88,9 @@ from huggingface_hub import HfApi, HfFolder, create_repo  # For Hub upload
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
-from open_instruct import logger_utils as oi_logging
+from open_instruct import logger_utils
 
-logger = oi_logging.setup_logger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 MODEL_NAME = "allenai/Llama-3.1-Tulu-3-8B-SFT"
 
