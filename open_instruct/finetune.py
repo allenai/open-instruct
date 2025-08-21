@@ -53,6 +53,7 @@ from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, DataCollatorForSeq2Seq, get_scheduler
 from transformers.training_args import _convert_str_dict
 
+from open_instruct import logger_utils
 from open_instruct.dataset_transformation import (
     INPUT_IDS_KEY,
     TOKENIZED_SFT_DATASET_KEYS,
@@ -62,7 +63,6 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
-from open_instruct import logger_utils
 from open_instruct.utils import (
     ArgumentParserPlus,
     clean_last_n_checkpoints,
