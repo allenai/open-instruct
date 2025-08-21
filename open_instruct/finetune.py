@@ -62,6 +62,7 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
+from open_instruct import logger_utils
 from open_instruct.utils import (
     ArgumentParserPlus,
     clean_last_n_checkpoints,
@@ -72,7 +73,6 @@ from open_instruct.utils import (
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
-    setup_logger,
 )
 
 logger = get_logger(__name__)
@@ -464,7 +464,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         pprint([args, tc])
 
     # Make one log on every process with the configuration for debugging.
-    setup_logger()
+    logger_utils.setup_logger()
     logger.info(accelerator.state, main_process_only=False)
     if accelerator.is_local_main_process:
         datasets.utils.logging.set_verbosity_warning()

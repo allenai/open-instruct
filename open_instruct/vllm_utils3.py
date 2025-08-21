@@ -412,9 +412,6 @@ class LLMRayActor:
             # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
             if self.llm_engine.has_unfinished_requests():
                 step_outputs = list(self.llm_engine.step())
-                if iteration % 100 == 1 and step_outputs:
-                    self.logger.info(f"[LLMRayActor] Got {len(step_outputs)} outputs from engine.step()")
-
                 for output in step_outputs:
                     if output.finished:
                         result = _handle_output(
@@ -422,7 +419,6 @@ class LLMRayActor:
                         )
                         if result is not None:
                             outputs.append(result)
-                            self.logger.info(f"[LLMRayActor] Added output {output.request_id} to results")
 
             # Check termination condition (matching ToolUseLLM exactly)
             pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
