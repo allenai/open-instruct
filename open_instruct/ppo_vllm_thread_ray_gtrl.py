@@ -1837,7 +1837,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         # Update Beaker progress every 10 steps or on first/last step
-        if training_step == resume_training_step or training_step % 10 == 0:
+        if (
+            training_step == resume_training_step
+            or training_step % 10 == 0
+            or training_step == args.num_training_steps
+        ):
             maybe_update_beaker_description(
                 current_step=training_step,
                 total_steps=args.num_training_steps,

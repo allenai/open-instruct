@@ -988,34 +988,35 @@ def maybe_update_beaker_description(
 
     # For progress updates
     if current_step is not None and total_steps is not None and start_time is not None:
-        # Cache the original description (without progress bar)
-        if experiment_id not in original_descriptions:
-            original_descriptions[experiment_id] = current_description
+        # Extract the base description (without progress bar)
+        # Look for existing progress bar pattern and remove it
+        progress_pattern = r"\[[\d.]+% complete \(step \d+/\d+\), (?:eta [^\]]+|finished)\]"
+        base_description = re.sub(progress_pattern, "", current_description).strip()
 
-        original_description = original_descriptions[experiment_id]
+        # Cache the base description
+        if experiment_id not in original_descriptions:
+            original_descriptions[experiment_id] = base_description
+
+        base_description = original_descriptions[experiment_id]
 
         progress_pct = (current_step / total_steps) * 100
 
-        elapsed_time = time.time() - start_time
-        if current_step > 0:
-            time_per_step = elapsed_time / current_step
-            remaining_steps = total_steps - current_step
-            eta_seconds = time_per_step * remaining_steps
-            eta_str = format_eta(eta_seconds)
+        # Check if we're done
+        if current_step >= total_steps:
+            progress_bar = f"[100% complete (step {total_steps}/{total_steps}), finished]"
         else:
-            eta_str = "calculating..."
+            elapsed_time = time.time() - start_time
+            if current_step > 0:
+                time_per_step = elapsed_time / current_step
+                remaining_steps = total_steps - current_step
+                eta_seconds = time_per_step * remaining_steps
+                eta_str = format_eta(eta_seconds)
+            else:
+                eta_str = "calculating..."
+            progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), eta {eta_str}]"
 
-        progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), eta {eta_str}]"
-
-        new_description = " ".join(
-            [
-                original_description,
-                progress_bar,
-                wandb_url if wandb_url else "",
-                f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}",
-                f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}",
-            ]
-        )
+        # Build new description - base already includes wandb URL and git info if they were added
+        new_description = f"{base_description} {progress_bar}"
         client.experiment.set_description(experiment_id, new_description)
 
 
