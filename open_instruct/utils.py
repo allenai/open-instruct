@@ -941,7 +941,7 @@ def update_beaker_progress(
     total_steps: int,
     start_time: float,
     wandb_url: Optional[str] = None,
-    beaker_descriptions: dict[str, str] = {},
+    original_descriptions: dict[str, str] = {},
 ) -> None:
     """Update Beaker experiment description with training progress.
 
@@ -950,7 +950,6 @@ def update_beaker_progress(
         total_steps: Total number of training steps
         start_time: Training start time (from time.time())
         wandb_url: Optional wandb URL to include
-        beaker_descriptions: Dictionary to cache original descriptions keyed by experiment ID
     """
     if not is_beaker_job():
         return
@@ -961,12 +960,11 @@ def update_beaker_progress(
 
     client = beaker.Beaker.from_env()
     try:
-        # Get the original description if we haven't stored it yet
-        if experiment_id not in beaker_descriptions:
+        if experiment_id not in original_descriptions:
             spec = client.experiment.get(experiment_id)
-            beaker_descriptions[experiment_id] = spec.description or ""
+            original_descriptions[experiment_id] = spec.description or ""
 
-        original_description = beaker_descriptions[experiment_id]
+        original_description = original_descriptions[experiment_id]
 
         # Calculate progress
         progress_pct = (current_step / total_steps) * 100
@@ -984,44 +982,26 @@ def update_beaker_progress(
         # Format progress bar
         progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), eta {eta_str}]"
 
-        # Build the full description
-        description_parts = []
-
-        # Use original description
-        if original_description:
-            description_parts.append(original_description)
-
-        # Add progress bar
-        description_parts.append(progress_bar)
-
-        # Add wandb URL if provided
-        if wandb_url:
-            description_parts.append(wandb_url)
-
-        # Add git info
-        description_parts.append(f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}")
-        description_parts.append(f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}")
-
-        new_description = " ".join(description_parts)
-
+        new_description = " ".join(
+            [
+                original_description,
+                progress_bar,
+                wandb_url,
+                f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}",
+                f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}",
+            ]
+        )
         client.experiment.set_description(experiment_id, new_description)
 
     except beaker.exceptions.ExperimentNotFound:
-        # Silently fail for interactive jobs
         pass
-    except Exception as e:
-        # Log but don't fail training
-        logger.debug(f"Failed to update Beaker progress: {e}")
 
 
-def maybe_update_beaker_description_with_wandb_url(
-    wandb_url: Optional[str], beaker_descriptions: dict[str, str] = {}
-) -> None:
+def maybe_update_beaker_description_with_wandb_url(wandb_url: Optional[str]) -> None:
     """Update Beaker experiment description with wandb URL if running on Beaker.
 
     Args:
         wandb_url: The wandb URL to add to the description
-        beaker_descriptions: Dictionary to cache original descriptions keyed by experiment ID
     """
     if not is_beaker_job() or wandb_url is None:
         return
@@ -1039,10 +1019,6 @@ def maybe_update_beaker_description_with_wandb_url(
         return
 
     current_description = spec.description or ""
-
-    # Store the original description for later use
-    if experiment_id not in beaker_descriptions:
-        beaker_descriptions[experiment_id] = current_description
 
     if "wandb.ai" in current_description:
         # If wandb URL already exists, do not add it again

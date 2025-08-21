@@ -1705,7 +1705,6 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
     """Setup experiment tracking and seeds."""
     all_configs = {}
     beaker_config = None
-    beaker_descriptions = {}  # Dictionary to cache original beaker descriptions
 
     if is_beaker_job():
         beaker_config = maybe_get_beaker_config()
@@ -1723,9 +1722,9 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
             tags=[args.exp_name] + get_wandb_tags(),
         )
         wandb_url = wandb.run.get_url()
-        maybe_update_beaker_description_with_wandb_url(wandb_url, beaker_descriptions)
+        maybe_update_beaker_description_with_wandb_url(wandb_url)
 
-    return beaker_config, wandb_url, beaker_descriptions
+    return beaker_config, wandb_url
 
 
 def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer):
@@ -2394,7 +2393,6 @@ def run_training(
     eval_pending_queries_map,
     generate_metrics_Q,
     actor_manager: vllm_utils3.ActorManager,
-    beaker_descriptions: dict[str, str],
 ):
     """Run the main training loop with worker threads."""
     ray_get_with_progress(
@@ -2444,9 +2442,7 @@ def run_training(
             or training_step % 10 == 0
             or training_step == args.num_training_steps
         ):
-            update_beaker_progress(
-                training_step, args.num_training_steps, training_start_time, wandb_url, beaker_descriptions
-            )
+            update_beaker_progress(training_step, args.num_training_steps, training_start_time, wandb_url)
 
         # Check if any of the threads have raised an exception.
         [f.result() for f in [packing_future, generation_future] if f.done()]
@@ -2530,7 +2526,7 @@ def run_training(
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_samples: int = 32):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
-    beaker_config, wandb_url, beaker_descriptions = setup_experiment_tracking(args, tc, model_config)
+    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
     if args.cache_dataset_only:
@@ -2607,7 +2603,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             eval_pending_queries_map,
             generate_metrics_Q,
             actor_manager,
-            beaker_descriptions,
         )
     finally:
         cleanup_training_resources(
