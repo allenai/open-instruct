@@ -667,6 +667,7 @@ def get_wandb_tags() -> List[str]:
                 tags.append(f"pr: {pr['number']}")
     if "GIT_BRANCH" in os.environ:
         tags.append(f"branch: {os.environ['GIT_BRANCH']}")
+    tags = [tag[:64] for tag in tags if len(tag) > 64]
     return tags
 
 
