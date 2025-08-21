@@ -5,7 +5,7 @@ from typing import Optional
 import sympy
 from sympy.parsing.latex import parse_latex
 
-from open_instruct import logging_utils as oi_logging
+from open_instruct import logging as oi_logging
 
 eval_logger = oi_logging.setup_logger("math_utils")
 

@@ -5,7 +5,7 @@ from functools import partial
 from datasets import DatasetDict, load_dataset
 from huggingface_hub import HfApi
 
-from open_instruct import logging_utils as oi_logging
+from open_instruct import logging as oi_logging
 
 """
 Script to build hardcoded data for Ai2's models, so 

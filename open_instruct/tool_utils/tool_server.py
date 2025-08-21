@@ -83,7 +83,7 @@ from typing import Optional
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from open_instruct import logging_utils as oi_logging
+from open_instruct import logging as oi_logging
 
 ###############################################################################
 # Configure logging (Cloud Run uses stdout/stderr)

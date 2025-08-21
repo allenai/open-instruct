@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from tqdm import tqdm
 
 from scripts.synth_pref.utils.model_configs import MODELS
-from open_instruct import logging_utils as oi_logging
+from open_instruct import logging as oi_logging
 
 logger = oi_logging.setup_logger(__name__)
 

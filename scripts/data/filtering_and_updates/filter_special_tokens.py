@@ -3,7 +3,7 @@ import logging
 from datasets import Dataset, load_dataset
 from huggingface_hub import HfApi
 
-from open_instruct import logging_utils as oi_logging
+from open_instruct import logging as oi_logging
 
 """
 Used for stripping special tokens from text fields in a dataset.

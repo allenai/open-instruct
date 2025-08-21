@@ -16,7 +16,6 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 import copy
-import logging
 import os
 import queue
 from collections import defaultdict
@@ -40,7 +39,7 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
-from open_instruct import logging_utils as oi_logging
+from open_instruct import logging as oi_logging
 from open_instruct.queue_types import GenerationResult, RequestInfo
 from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
@@ -314,17 +313,11 @@ class LLMRayActor:
         actor_manager=None,
         **kwargs,
     ):
-        self.logger = oi_logging.setup_logger(__name__)
-        self.logger.setLevel(logging.INFO)
-        self.logger.info("Initializing LLMRayActor")
-
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
-        self.logger.info(f"Tools configured: {list(self.tools.keys()) if self.tools else 'None'}")
 
         if self.tools:
             self.executor = ThreadPoolExecutor(max_workers=20)
-            self.logger.info("ThreadPoolExecutor created with max_workers=20")
         else:
             self.executor = None
 
@@ -335,30 +328,25 @@ class LLMRayActor:
             # at the top-level when the distributed_executor_backend is ray.
             os.environ.pop("CUDA_VISIBLE_DEVICES", None)
             os.environ.pop("ROCR_VISIBLE_DEVICES", None)
-            self.logger.info("Ray distributed executor backend: cleared CUDA/ROCR_VISIBLE_DEVICES")
         elif noset_visible_devices:
             # We need to set CUDA_VISIBLE_DEVICES to the ray assigned GPU
             # when the distributed_executor_backend is not ray and
             # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
-            gpu_id = str(ray.get_gpu_ids()[0])
-            os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id
-            self.logger.info(f"Set CUDA_VISIBLE_DEVICES={gpu_id}")
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
 
         num_gpus = kwargs.pop("num_gpus")
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
-            self.logger.info(f"Creating LLM with bundle_indices={bundle_indices}, num_gpus={num_gpus}")
+            print(f"creating LLM with bundle_indices={bundle_indices}")
 
-        self.logger.info("Creating vLLM engine...")
         self.llm_engine = vllm.LLMEngine.from_engine_args(vllm.EngineArgs(*args, **kwargs))
-        self.logger.info("vLLM engine created successfully")
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
+        self.logger = oi_logging.setup_logger(__name__)
         self.actor_manager = actor_manager
-        self.logger.info("LLMRayActor initialization complete")
 
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
@@ -537,38 +525,26 @@ class LLMRayActor:
         use_ray=False,
         timeout_minutes=120,
     ):
-        self.logger.info(
-            f"Initializing process group: backend={backend}, world_size={world_size}, group_name={group_name}"
-        )
-        result = self.llm_engine.collective_rpc(
+        return self.llm_engine.collective_rpc(
             "init_process_group",
             args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
         )
-        self.logger.info("Process group initialized successfully")
-        return result
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        self.logger.info(f"Updating weight: {name}, dtype={dtype}, shape={shape}, empty_cache={empty_cache}")
         return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        self.logger.info(
-            f"Updating weight via CUDA IPC: {name}, dtype={dtype}, shape={shape}, empty_cache={empty_cache}"
-        )
         return self.llm_engine.collective_rpc(
             "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
 
     def reset_prefix_cache(self):
-        self.logger.info("Resetting prefix cache")
         self.llm_engine.reset_prefix_cache()
 
     def sleep(self, level=1):
-        self.logger.info(f"Putting engine to sleep with level={level}")
         self.llm_engine.sleep(level=level)
 
     def wake_up(self, tags: Optional[list[str]] = None):
-        self.logger.info(f"Waking up engine with tags={tags}")
         self.llm_engine.wake_up(tags)
 
     def ready(self):

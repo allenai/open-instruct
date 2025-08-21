@@ -26,7 +26,7 @@ import vllm
 from ray.util import queue as ray_queue
 
 from open_instruct import dataset_transformation, grpo_fast, model_utils, utils, vllm_utils3
-from open_instruct import logging_utils as oi_logging
+from open_instruct import logging as oi_logging
 from open_instruct.queue_types import PromptRequest
 
 # For FLOPS, we assume bf16 and ignore sparsity.
