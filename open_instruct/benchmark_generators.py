@@ -14,8 +14,11 @@ import gc
 import json
 import logging
 import pathlib
+import threading
 import time
-from typing import Any
+from concurrent import futures
+from queue import Queue
+from typing import Any, Optional
 
 import datasets
 import numpy as np
@@ -241,12 +244,19 @@ def calculate_model_usage_per_token(model_path: str) -> int:
 
 
 def get_device_name(device_name: str) -> str:
-    processed_device_name = [
-        val for val in device_name.lower().split(" ") if val not in ["nvidia", "80gb", "hbm3", "rtx"]
-    ]
-    if len(processed_device_name) != 1 or processed_device_name[0] not in GPU_SPECS:
-        raise ValueError(f"Unsupported device name: {device_name}.")
-    return processed_device_name[0]
+    # Convert to lowercase and split by both spaces and hyphens
+    tokens = device_name.lower().replace("-", " ").split()
+
+    # Filter out common non-model tokens
+    filtered = [val for val in tokens if val not in ["nvidia", "80gb", "40gb", "48gb", "hbm3", "rtx", "sxm4", "pcie"]]
+
+    # Look for known GPU models in the filtered tokens
+    for token in filtered:
+        if token in GPU_SPECS:
+            return token
+
+    # If no match found, raise error
+    raise ValueError(f"Unsupported device name: {device_name}. Expected one of: {list(GPU_SPECS.keys())}")
 
 
 def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation.TokenizerConfig) -> datasets.Dataset:
@@ -299,6 +309,9 @@ def setup_vllm_engines(
     param_prompt_Q = ray_queue.Queue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
 
+    # Create actor manager for coordinating vLLM engines
+    actor_manager = vllm_utils3.ActorManager.remote()
+
     vllm_engines = vllm_utils3.create_vllm_engines(
         num_engines=args.vllm_num_engines,
         tensor_parallel_size=args.vllm_tensor_parallel_size,
@@ -316,11 +329,12 @@ def setup_vllm_engines(
         max_tool_calls=[0],
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
+        actor_manager=actor_manager,
     )
 
     logger.info("vLLM engines ready")
 
-    return vllm_engines, param_prompt_Q, inference_results_Q
+    return vllm_engines, param_prompt_Q, inference_results_Q, actor_manager
 
 
 def get_batch_data(
@@ -333,6 +347,46 @@ def get_batch_data(
     batch_data = dataset[start_idx:end_idx]
     prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
     return prompts
+
+
+def generate_thread(
+    vllm_engines: list[ray.actor.ActorHandle], stop_event: threading.Event, error_queue: Queue
+) -> None:
+    """Thread that monitors vLLM engines for errors."""
+    logger.info("[Generate Thread] Starting generation monitoring thread")
+    try:
+        while not stop_event.is_set():
+            # Just sleep and let the engines process
+            # Errors will be caught when we try to get results
+            time.sleep(1)
+    except Exception as e:
+        logger.error(f"[Generate Thread] Error in generation thread: {e}")
+        error_queue.put(e)
+        stop_event.set()
+
+
+def submission_thread(
+    param_prompt_Q: ray_queue.Queue,
+    all_prompts: list,
+    generation_config: vllm.SamplingParams,
+    stop_event: threading.Event,
+    error_queue: Queue,
+) -> None:
+    """Thread that submits prompts to the queue."""
+    logger.info("[Submission Thread] Starting prompt submission")
+    try:
+        for batch_idx, prompts in enumerate(all_prompts):
+            if stop_event.is_set():
+                logger.info("[Submission Thread] Stopped due to stop event")
+                break
+            param_prompt_Q.put(
+                PromptRequest(prompts=prompts, dataset_index=batch_idx, generation_config=generation_config)
+            )
+        logger.info(f"[Submission Thread] All {len(all_prompts)} prompts submitted")
+    except Exception as e:
+        logger.error(f"[Submission Thread] Error: {e}")
+        error_queue.put(e)
+        stop_event.set()
 
 
 def run_benchmark(
@@ -357,76 +411,113 @@ def run_benchmark(
         n=args.num_samples_per_prompt_rollout,
     )
 
-    eval_generation_config = vllm.SamplingParams(temperature=0.0, max_tokens=args.response_length, n=1)
+    # Set up threading infrastructure
+    stop_event = threading.Event()
+    error_queue = Queue()
+    executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="benchmark")
 
     # Start vLLM engines to process from queues
     for engine in vllm_engines:
-        engine.process_from_queue.remote(
-            generation_config,
-            eval_generation_config,
-            num_batches + 1,  # eval_freq (avoid evaluation)
-            num_batches,  # num_training_steps
-            1,  # resume_training_step
-        )
+        engine.process_from_queue.remote()
 
     # Wait for engines to be ready
     time.sleep(0.1)
+
+    # Start monitoring thread for vLLM engines
+    generation_future = executor.submit(generate_thread, vllm_engines, stop_event, error_queue)
 
     results = []
     total_start_time = time.time()
     device_name = get_device_name(torch.cuda.get_device_name(0))
     device_flops = GPU_SPECS[device_name]["flops"]
 
-    # Submit all batches at once and track submission times
-    logger.info(f"Submitting all {num_batches} batches to the queue...")
+    # Prepare all prompts
+    logger.info(f"Preparing {num_batches} batches...")
     all_prompts = [
         get_batch_data(dataset, args.num_unique_prompts_rollout, batch_idx) for batch_idx in range(num_batches)
     ]
+
+    # Start submission thread
     submission_start_time = time.time()
-    for batch_idx in range(num_batches):
-        param_prompt_Q.put(PromptRequest(prompts=all_prompts[batch_idx], dataset_index=batch_idx))
-    submission_time = time.time() - submission_start_time
-    logger.info(f"All batches submitted in {submission_time:.2f}s")
+    submission_future = executor.submit(
+        submission_thread, param_prompt_Q, all_prompts, generation_config, stop_event, error_queue
+    )
 
     # Receive results and measure time for each batch
     last_completion_time = submission_start_time
-    for batch_idx in range(num_batches):
-        result = inference_results_Q.get()
-        completion_time = time.time()
-        batch_generation_time = completion_time - last_completion_time
-        last_completion_time = completion_time
 
-        # Process result
-        new_tokens = sum(len(response) for response in result.responses)
-        tokens_per_second = new_tokens / batch_generation_time
+    try:
+        for batch_idx in range(num_batches):
+            # Check for thread errors
+            if not error_queue.empty():
+                error = error_queue.get()
+                logger.error(f"Thread error detected: {error}")
+                raise error
 
-        result_dict = {
-            "tokens_per_second": tokens_per_second,
-            "generation_time": batch_generation_time,
-            "num_new_tokens": new_tokens,
-            "finish_reasons": collections.Counter(result.finish_reasons),
-            "response_lengths": [len(response) for response in result.responses],
-            "batch_idx": result.dataset_index,
-        }
-        result_dict["mfu"] = 100 * result_dict["tokens_per_second"] * flops_per_token / device_flops
+            # Check if any thread has died unexpectedly
+            for future, name in [(submission_future, "submission"), (generation_future, "generation")]:
+                if future.done():
+                    # If thread is done early, check for exception
+                    try:
+                        future.result(timeout=0)  # This will raise if thread had exception
+                    except futures.TimeoutError:
+                        pass  # This is fine, thread is still running
+                    except Exception as e:
+                        logger.error(f"Thread {name} failed: {e}")
+                        raise
 
-        # We incrementally save completion lengths so even if the job dies, we still have data.
-        save_completion_lengths([result_dict], timestamp, result.dataset_index)
-        results.append(result_dict)
-        logger.info(
-            f"Batch {result.dataset_index + 1}: "
-            f"{result_dict['tokens_per_second']:.2f} new tokens/sec, "
-            f"MFU: {result_dict['mfu']:.2f}%, "
-            f"generation time: {batch_generation_time:.2f}s"
-        )
+            # Get result with timeout to prevent hanging
+            try:
+                result = inference_results_Q.get(timeout=60)
+            except ray_queue.Empty:
+                logger.error("Timeout waiting for inference results")
+                raise TimeoutError("No response from vLLM engines after 60 seconds")
 
-    total_time = time.time() - total_start_time
+            completion_time = time.time()
+            batch_generation_time = completion_time - last_completion_time
+            last_completion_time = completion_time
 
-    # Send stop signal
-    param_prompt_Q.put(None)
+            # Process result
+            new_tokens = sum(len(response) for response in result.responses)
+            tokens_per_second = new_tokens / batch_generation_time if batch_generation_time > 0 else 0
 
-    print_summary(results, total_time, args, model_config)
-    save_benchmark_results_to_csv(results, total_time, args, model_config)
+            result_dict = {
+                "tokens_per_second": tokens_per_second,
+                "generation_time": batch_generation_time,
+                "num_new_tokens": new_tokens,
+                "finish_reasons": collections.Counter(result.finish_reasons),
+                "response_lengths": [len(response) for response in result.responses],
+                "batch_idx": result.dataset_index,
+            }
+            result_dict["mfu"] = 100 * result_dict["tokens_per_second"] * flops_per_token / device_flops
+
+            # We incrementally save completion lengths so even if the job dies, we still have data.
+            save_completion_lengths([result_dict], timestamp, result.dataset_index)
+            results.append(result_dict)
+            logger.info(
+                f"Batch {result.dataset_index + 1}: "
+                f"{result_dict['tokens_per_second']:.2f} new tokens/sec, "
+                f"MFU: {result_dict['mfu']:.2f}%, "
+                f"generation time: {batch_generation_time:.2f}s"
+            )
+
+        total_time = time.time() - total_start_time
+
+        # Send stop signal
+        param_prompt_Q.put(None)
+
+        print_summary(results, total_time, args, model_config)
+        save_benchmark_results_to_csv(results, total_time, args, model_config)
+
+    except Exception as e:
+        logger.error(f"Error during benchmark: {e}")
+        stop_event.set()
+        raise
+    finally:
+        # Clean up threads
+        stop_event.set()
+        executor.shutdown(wait=True)
+        logger.info("Threads cleaned up")
 
 
 def average_results(results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -519,10 +610,23 @@ def print_summary(
     print("=" * 60)
 
 
-def cleanup(vllm_engines: list[ray.actor.ActorHandle]) -> None:
+def cleanup(vllm_engines: list[ray.actor.ActorHandle], actor_manager: Optional[ray.actor.ActorHandle] = None) -> None:
     """Clean up resources."""
+    # Signal actor manager to stop all engines
+    if actor_manager:
+        try:
+            ray.get(actor_manager.stop_all.remote())
+            logger.info("Signaled all engines to stop via actor manager")
+        except Exception as e:
+            logger.warning(f"Error signaling actor manager: {e}")
+
+    # Kill engines
     for engine in vllm_engines:
-        ray.kill(engine)
+        try:
+            ray.kill(engine)
+        except Exception as e:
+            logger.warning(f"Error killing engine: {e}")
+
     if ray.is_initialized():
         ray.shutdown()
 
@@ -549,7 +653,7 @@ def main() -> None:
     free_all_gpu_memory()
 
     dataset = setup_dataset(args, tokenizer_config)
-    vllm_engines, param_prompt_Q, inference_results_Q = setup_vllm_engines(args, model_config)
+    vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(args, model_config)
 
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
@@ -558,7 +662,7 @@ def main() -> None:
         dataset, vllm_engines, param_prompt_Q, inference_results_Q, args, model_config, timestamp, flops_per_token
     )
 
-    cleanup(vllm_engines)
+    cleanup(vllm_engines, actor_manager)
 
 
 if __name__ == "__main__":
