@@ -1,7 +1,7 @@
 """
 can launch local server with:
 ```
-uv run nohup uvicorn open_instruct.code.api:app --host 0.0.0.0 --port 1234 &
+uv run nohup uvicorn open_instruct.code_utils.api:app --host 0.0.0.0 --port 1234 &
 ```
 
 or launch the server in a docker container:
@@ -29,7 +29,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from open_instruct.code.code_utils import decode_tests, get_successful_tests_fast, get_successful_tests_stdio
+from open_instruct.code_utils.code_utils import decode_tests, get_successful_tests_fast, get_successful_tests_stdio
 
 app = FastAPI()
 
