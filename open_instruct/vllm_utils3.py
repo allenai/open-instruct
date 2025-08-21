@@ -382,9 +382,7 @@ class LLMRayActor:
         inflight_updates: bool = False,
         **kwargs,
     ):
-        # Configure logging for this actor process
-        logging.basicConfig(level=logging.INFO, force=True)
-        self.logger = vllm.logger.init_logger(__name__)
+        self.logger = logging.getLogger(__name__)
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inflight_updates = inflight_updates
@@ -420,7 +418,6 @@ class LLMRayActor:
         if inference_batch_size is None:
             raise ValueError("inference_batch_size must be specified.")
         self.inference_batch_size = inference_batch_size
-        self.logger.info(f"[LLMRayActor] Initialized with inference_batch_size={self.inference_batch_size}")
         self.request_metadata = {}  # Track request metadata by ID
         self._last_should_stop_update = None
         self._should_stop_value = None
@@ -434,6 +431,8 @@ class LLMRayActor:
             if ready_refs:
                 should_stop = ray.get(ready_refs[0])
             else:
+                # Cancel the pending ref to avoid resource leak
+                ray.cancel(should_stop_ref, force=True)
                 should_stop = False
             self._last_should_stop_update = time.time()
             self._should_stop_value = should_stop
@@ -452,10 +451,6 @@ class LLMRayActor:
         tokenizer = self.llm_engine.get_tokenizer() if self.tools else None
 
         if self._should_stop():
-            self.logger.info(
-                f"[LLMRayActor] Early return before pre-filling: should_stop={self._should_stop()}, "
-                f"inflight_updates={self.inflight_updates}, processed {num_processed} requests"
-            )
             time.sleep(1)  # Add backoff to reduce excessive polling
             return num_processed
 
@@ -475,13 +470,8 @@ class LLMRayActor:
                 # Otherwise continue trying to get more requests
         iteration = 0
         while True:
-            if iteration % 100 == 0:
-                self.logger.info(f"Starting iteration {iteration} of main loop.")
             iteration += 1
             if self._should_stop() and self.inflight_updates:
-                self.logger.info(
-                    f"[LLMRayActor] Returning early due to should_stop={self._should_stop()} and inflight_updates={self.inflight_updates}, processed {num_processed} requests"
-                )
                 return num_processed
 
             outputs = self._step_engine(tracking, tokenizer)
@@ -497,7 +487,8 @@ class LLMRayActor:
                     results_queue = self.eval_results_queue if is_eval else self.results_queue
                     results_queue.put(result, timeout=10)
                 except queue.Full:
-                    self.logger.warning("Results queue is full, discarding result.")
+                    queue_name = "eval" if is_eval else "train"
+                    self.logger.warning(f"{queue_name} results queue is full, discarding result.")
 
                 self.request_metadata.pop(base_request_id, None)
 
@@ -511,12 +502,8 @@ class LLMRayActor:
             if self._should_stop() and not self.inflight_updates:
                 pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
                 if not self.llm_engine.has_unfinished_requests() and pending_count == 0:
-                    self.logger.info(
-                        f"[LLMRayActor] No more requests to process, exiting after processing {num_processed} requests"
-                    )
                     break
 
-        self.logger.info(f"[LLMRayActor] Returning from main loop completion, processed {num_processed} requests")
         return num_processed
 
     def _step_engine(self, tracking, tokenizer):
