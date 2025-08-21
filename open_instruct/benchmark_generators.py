@@ -415,7 +415,7 @@ def run_benchmark(
     logger.info("Warmup batch completed")
 
     # Now submit remaining 4 batches and start timing
-    logger.info(f"Submitting {num_batches - 1} timed batches...")
+    logger.info(f"Submitting {num_batches - 1} timed batches for parallel processing...")
 
     # Start overall timer
     overall_start_time = time.time()
@@ -465,6 +465,7 @@ def run_benchmark(
         total_new_tokens += new_tokens
 
         # Calculate per-batch metrics using overall time divided by number of batches
+        # Note: Since batches are processed in parallel, we average the time across all batches
         batch_generation_time = overall_generation_time / (num_batches - 1)
         tokens_per_second = new_tokens / batch_generation_time if batch_generation_time > 0 else 0
 
@@ -482,15 +483,16 @@ def run_benchmark(
         results.append(result_dict)
         logger.info(
             f"Batch {batch_idx + 1}: "
-            f"{result_dict['tokens_per_second']:.2f} new tokens/sec, "
+            f"{result_dict['tokens_per_second']:.2f} new tokens/sec (averaged), "
             f"MFU: {result_dict['mfu']:.2f}%, "
-            f"generation time: {batch_generation_time:.2f}s"
+            f"avg generation time: {batch_generation_time:.2f}s"
         )
 
     # Log overall statistics
     overall_tokens_per_second = total_new_tokens / overall_generation_time if overall_generation_time > 0 else 0
     logger.info(
-        f"Overall for timed batches: {overall_tokens_per_second:.2f} tokens/sec, "
+        f"Overall for {num_batches - 1} timed batches (processed in parallel): "
+        f"{overall_tokens_per_second:.2f} tokens/sec, "
         f"total time: {overall_generation_time:.2f}s, "
         f"total tokens: {total_new_tokens}"
     )
