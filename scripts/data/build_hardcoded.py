@@ -5,7 +5,7 @@ from functools import partial
 from datasets import DatasetDict, load_dataset
 from huggingface_hub import HfApi
 
-from open_instruct.utils import setup_logger
+from open_instruct import logging_utils as oi_logging
 
 """
 Script to build hardcoded data for Ai2's models, so 
@@ -66,7 +66,7 @@ ARG_TO_PLACEHOLDER_MAP = {
 VALID_FILTER_TAGS = ["olmo", "tulu", "date-cutoff", "no-tools", "english-only", "license", "availability"]
 
 # --- Logging Setup ---
-logger = setup_logger(__name__)
+logger = oi_logging.setup_logger(__name__)
 
 # --- Argument Parsing ---
 def parse_arguments():

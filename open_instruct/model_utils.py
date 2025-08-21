@@ -40,10 +40,11 @@ from rich.table import Table
 from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
+from open_instruct import logging_utils as oi_logging
 from open_instruct.ground_truth_utils import VerifierFunction
-from open_instruct.utils import retry_on_exception, setup_logger
+from open_instruct.utils import retry_on_exception
 
-logger = setup_logger(__name__)
+logger = oi_logging.setup_logger(__name__)
 
 
 @dataclass

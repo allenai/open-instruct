@@ -14,9 +14,9 @@ from tqdm import tqdm
 
 from scripts.synth_pref.utils.openai_api import format_for_openai_batch
 from scripts.synth_pref.utils.ultrafeedback_template import system_prompt
-from open_instruct.utils import setup_logger
+from open_instruct import logging_utils as oi_logging
 
-logger = setup_logger(__name__)
+logger = oi_logging.setup_logger(__name__)
 
 load_dotenv()
 

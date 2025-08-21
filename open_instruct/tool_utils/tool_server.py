@@ -83,12 +83,12 @@ from typing import Optional
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from open_instruct.utils import setup_logger
+from open_instruct import logging_utils as oi_logging
 
 ###############################################################################
 # Configure logging (Cloud Run uses stdout/stderr)
 ###############################################################################
-logger = setup_logger(__name__)
+logger = oi_logging.setup_logger(__name__)
 
 ###############################################################################
 # Pre‑import heavy libraries *before* the fork so children share memory

@@ -50,9 +50,9 @@ import numpy as np
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
-from open_instruct.utils import setup_logger
+from open_instruct import logging_utils as oi_logging
 
-logger = setup_logger(__name__)
+logger = oi_logging.setup_logger(__name__)
 
 MODEL_NAME = "allenai/Llama-3.1-Tulu-3-8B-SFT"
 

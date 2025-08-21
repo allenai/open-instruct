@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Union
 import requests
 from litellm import acompletion
 
+from open_instruct import logging_utils as oi_logging
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.IFEvalG import instructions_registry
 from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_TOKEN, build_messages
@@ -33,9 +34,9 @@ from open_instruct.math_utils import (
     normalize_final_answer,
     remove_boxed,
 )
-from open_instruct.utils import extract_final_answer, setup_logger
+from open_instruct.utils import extract_final_answer
 
-logger = setup_logger(__name__)
+logger = oi_logging.setup_logger(__name__)
 
 
 @dataclass

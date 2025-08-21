@@ -11,9 +11,9 @@ from jinja2 import BaseLoader, Environment
 from tqdm import tqdm
 
 from scripts.synth_pref.utils.ultrafeedback_template import user_prompts
-from open_instruct.utils import setup_logger
+from open_instruct import logging_utils as oi_logging
 
-logger = setup_logger(__name__)
+logger = oi_logging.setup_logger(__name__)
 
 
 def get_args():

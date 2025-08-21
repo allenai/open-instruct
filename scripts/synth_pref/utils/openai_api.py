@@ -8,9 +8,9 @@ from typing import Optional
 
 import pandas as pd
 
-from open_instruct.utils import setup_logger
+from open_instruct import logging_utils as oi_logging
 
-logger = setup_logger(__name__)
+logger = oi_logging.setup_logger(__name__)
 
 
 def create_openai_chat_fmt(

@@ -10,7 +10,7 @@ import time
 import zlib
 from typing import Any, Dict, List, Optional, Tuple
 
-from open_instruct.utils import setup_logger
+from open_instruct import logging_utils as oi_logging
 
 from .testing_util import grade_stdio
 
@@ -30,7 +30,7 @@ tmp_print = print
 tmp_rm_tree = shutil.rmtree
 tmp_unlink = os.unlink
 
-logger = setup_logger(__name__)
+logger = oi_logging.setup_logger(__name__)
 
 
 # -------------------------------------------------------------

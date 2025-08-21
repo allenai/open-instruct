@@ -81,6 +81,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
+from open_instruct import logging_utils as oi_logging
 from open_instruct import vllm_utils3
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
@@ -131,11 +132,10 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
     repeat_each,
-    setup_logger,
     sync_gs_bucket,
 )
 
-logger = setup_logger(__name__)
+logger = oi_logging.setup_logger(__name__)
 
 api = HfApi()
 INVALID_LOGPROB = 1.0

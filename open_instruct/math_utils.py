@@ -5,9 +5,9 @@ from typing import Optional
 import sympy
 from sympy.parsing.latex import parse_latex
 
-from open_instruct.utils import setup_logger
+from open_instruct import logging_utils as oi_logging
 
-eval_logger = setup_logger("math_utils")
+eval_logger = oi_logging.setup_logger("math_utils")
 
 
 # from https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/minerva_math/utils.py#L187

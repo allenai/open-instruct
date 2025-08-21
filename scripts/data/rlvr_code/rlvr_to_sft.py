@@ -3,7 +3,7 @@ import logging
 import datasets
 from tqdm import tqdm
 
-from open_instruct.utils import setup_logger
+from open_instruct import logging_utils as oi_logging
 
 """
 Converts a RLVR dataset into a SFT dataset.
@@ -28,7 +28,7 @@ The output dataset has the following columns:
 """
 
 # Set up logging
-logger = setup_logger(__name__)
+logger = oi_logging.setup_logger(__name__)
 
 INPUT_HF_DATASET = "saurabh5/open-code-reasoning-rlvr-stdio"
 OUTPUT_HF_DATASET = "saurabh5/open-code-reasoning-rlvr-sft-stdio"
