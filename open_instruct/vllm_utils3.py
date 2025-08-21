@@ -325,11 +325,11 @@ def add_request(request, llm_engine: vllm.LLMEngine, tools, request_metadata: di
         metadata["sampling_params"] = sampling_params
         metadata["original_n"] = original_n  # Store original n for later use
         metadata["generation_config"] = request.generation_config  # Store original config
-        
+
         # Store metadata under base request ID for collection phase
         request_metadata[request_id] = metadata
         logger.info(f"[add_request] Stored metadata for base request {request_id}")
-        
+
         for j in range(original_n):
             sub_request_id = f"{request_id}-{j}"
             logger.info(f"[add_request] Adding sub-request {sub_request_id}")
@@ -453,7 +453,9 @@ class LLMRayActor:
         if self._should_stop():
             return num_processed
 
-        self.logger.info(f"[process_from_queue] Starting, tools={bool(self.tools)}, batch_size={self.inference_batch_size}")
+        self.logger.info(
+            f"[process_from_queue] Starting, tools={bool(self.tools)}, batch_size={self.inference_batch_size}"
+        )
         for i in tqdm(
             range(self.inference_batch_size),
             desc="[vLLM] Pre-filling requests",
@@ -468,8 +470,8 @@ class LLMRayActor:
                 if self.llm_engine.has_unfinished_requests():
                     break
                 # Otherwise continue trying to get more requests
-        
-        self.logger.info(f"[process_from_queue] Pre-fill complete, entering main loop")
+
+        self.logger.info("[process_from_queue] Pre-fill complete, entering main loop")
         iteration = 0
         while True:
             iteration += 1
@@ -482,7 +484,9 @@ class LLMRayActor:
             for output in outputs:
                 # Extract base request ID
                 base_request_id = output.request_id.split("-")[0] if self.tools else output.request_id
-                self.logger.info(f"[process_from_queue] Processing output for request_id={output.request_id}, base_id={base_request_id}")
+                self.logger.info(
+                    f"[process_from_queue] Processing output for request_id={output.request_id}, base_id={base_request_id}"
+                )
 
                 # Determine if we should process this output
                 should_process = False
@@ -493,18 +497,26 @@ class LLMRayActor:
                     if base_request_id not in collected_outputs:
                         collected_outputs[base_request_id] = []
                     collected_outputs[base_request_id].append(output)
-                    self.logger.info(f"[process_from_queue] Collected {len(collected_outputs[base_request_id])} outputs for base_id={base_request_id}")
+                    self.logger.info(
+                        f"[process_from_queue] Collected {len(collected_outputs[base_request_id])} outputs for base_id={base_request_id}"
+                    )
 
                     # Check if we have all outputs for this request
-                    self.logger.info(f"[process_from_queue] Looking up metadata for base_id={base_request_id}, available keys: {list(self.request_metadata.keys())[:10]}")
+                    self.logger.info(
+                        f"[process_from_queue] Looking up metadata for base_id={base_request_id}, available keys: {list(self.request_metadata.keys())[:10]}"
+                    )
                     metadata = self.request_metadata[base_request_id]
                     expected_n = metadata["generation_config"].n
-                    self.logger.info(f"[process_from_queue] Expected n={expected_n}, collected={len(collected_outputs[base_request_id])}")
+                    self.logger.info(
+                        f"[process_from_queue] Expected n={expected_n}, collected={len(collected_outputs[base_request_id])}"
+                    )
 
                     if len(collected_outputs[base_request_id]) == expected_n:
                         should_process = True
                         outputs_to_finalize = collected_outputs[base_request_id]
-                        self.logger.info(f"[process_from_queue] All outputs collected for {base_request_id}, processing...")
+                        self.logger.info(
+                            f"[process_from_queue] All outputs collected for {base_request_id}, processing..."
+                        )
                 else:
                     # Non-tool mode: process immediately
                     should_process = True
@@ -519,7 +531,9 @@ class LLMRayActor:
                 is_eval = metadata["is_eval"]
                 dataset_index = metadata["dataset_index"]
                 num_processed += 1
-                self.logger.info(f"[process_from_queue] Processing request {base_request_id}: is_eval={is_eval}, dataset_index={dataset_index}")
+                self.logger.info(
+                    f"[process_from_queue] Processing request {base_request_id}: is_eval={is_eval}, dataset_index={dataset_index}"
+                )
 
                 # Finalize outputs and insert into queue
                 result = _finalize_outputs(outputs_to_finalize, tracking, dataset_index, self.tools)
@@ -531,8 +545,10 @@ class LLMRayActor:
                     del collected_outputs[base_request_id]
                     # Use original_n if available, else fall back to generation_config.n
                     original_n = metadata.get("original_n", metadata["generation_config"].n)
-                    self.logger.info(f"[process_from_queue] Cleaning up metadata for {base_request_id} and {original_n} sub-requests")
-                    
+                    self.logger.info(
+                        f"[process_from_queue] Cleaning up metadata for {base_request_id} and {original_n} sub-requests"
+                    )
+
                     # Clean up base request metadata
                     self.request_metadata.pop(base_request_id, None)
                     # Also clean up sub-request metadata
@@ -566,7 +582,7 @@ class LLMRayActor:
 
         outputs = []
         if self.llm_engine.has_unfinished_requests():
-            self.logger.info(f"[_step_engine] Stepping engine, has unfinished requests")
+            self.logger.info("[_step_engine] Stepping engine, has unfinished requests")
             step_outputs = list(self.llm_engine.step())
             self.logger.info(f"[_step_engine] Got {len(step_outputs)} step outputs")
 
@@ -584,7 +600,7 @@ class LLMRayActor:
                     else:
                         self.logger.info(f"[_step_engine] Output {output.request_id} held for tool processing")
         else:
-            self.logger.info(f"[_step_engine] No unfinished requests")
+            self.logger.info("[_step_engine] No unfinished requests")
 
         return outputs
 
