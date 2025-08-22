@@ -15,20 +15,21 @@ fi
 
 git_hash=$(git rev-parse --short HEAD)
 git_branch=$(git rev-parse --abbrev-ref HEAD)
+model_name_or_path="hamishivi/qwen2_5_openthoughts2" \
 
 gantry run \
        --name open_instruct-benchmark_generators \
        --workspace ai2/tulu-thinker \
        --weka=oe-eval-default:/weka \
        --gpus 1 \
-       --description "Running benchmark with response length of $response_length at commit $git_hash on branch $git_branch." \
+       --description "Running benchmark with response length of $response_length at commit $git_hash on branch $git_branch with model $model_name_or_path." \
        --beaker-image nathanl/open_instruct_auto \
        --cluster ai2/jupiter-cirrascale-2 \
        --budget ai2/oe-adapt \
        --install 'uv sync' \
        -- uv run python -m open_instruct.benchmark_generators \
-    --model_name_or_path "hamishivi/qwen2_5_openthoughts2" \
-    --tokenizer_name_or_path "hamishivi/qwen2_5_openthoughts2" \
+    --model_name_or_path "$mmodel_name_or_path" \
+    --tokenizer_name_or_path "$mmodel_name_or_path" \
     --dataset_mixer_list "hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2" "1.0" \
     --dataset_mixer_list_splits "train" \
     --max_token_length 10240 \
