@@ -179,19 +179,20 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools):
     # Tool mode: add metadata and merge completions
     for output in outputs:
         req_id = output.request_id
-        if req_id in tracking["masks"]:
-            # This output went through tool processing
-            assert req_id in tracking["concat_outputs"], f"req_id {req_id} not in concat_outputs!"
-            tool_output = tracking["concat_outputs"][req_id].outputs[0]
-            setattr(tool_output, "mask", tracking["masks"][req_id])
-            setattr(tool_output, "num_calls", tracking["num_calls"][req_id])
-            setattr(tool_output, "timeout", tracking["timeout"][req_id])
-            setattr(tool_output, "tool_error", tracking["tool_error"][req_id])
-            setattr(tool_output, "tool_output", tracking["tool_output"][req_id])
-            setattr(tool_output, "tool_runtime", tracking["tool_runtime"][req_id])
-            setattr(tool_output, "tool_called", tracking["tool_called"][req_id])
-            # Replace the output with the tool-processed one
-            output.outputs[0] = tool_output
+        if req_id not in tracking["masks"]:
+            # If the request ID is not in masks, it means it didn't go through tool processing.
+            continue
+        assert req_id in tracking["concat_outputs"], f"req_id {req_id} not in concat_outputs!"
+        tool_output = tracking["concat_outputs"][req_id].outputs[0]
+        setattr(tool_output, "mask", tracking["masks"][req_id])
+        setattr(tool_output, "num_calls", tracking["num_calls"][req_id])
+        setattr(tool_output, "timeout", tracking["timeout"][req_id])
+        setattr(tool_output, "tool_error", tracking["tool_error"][req_id])
+        setattr(tool_output, "tool_output", tracking["tool_output"][req_id])
+        setattr(tool_output, "tool_runtime", tracking["tool_runtime"][req_id])
+        setattr(tool_output, "tool_called", tracking["tool_called"][req_id])
+        # Replace the output with the tool-processed one
+        output.outputs[0] = tool_output
 
     # Since we're using manual duplication, outputs are already in the right format
     # Just need to ensure they're properly sorted
