@@ -12,6 +12,7 @@ if [[ "$1" =~ ^[0-9]+$ ]]; then
   response_length="$1"
   shift
 fi
+
 git_hash=$(git rev-parse --short HEAD)
 git_branch=$(git rev-parse --abbrev-ref HEAD)
 
