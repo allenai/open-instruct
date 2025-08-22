@@ -8,8 +8,9 @@ from openai import OpenAI
 
 from eval.truthfulqa.utilities import format_end2end_prompt
 from eval.utils import score_completions
+from open_instruct import logger_utils
 
-logger = logging.getLogger()
+logger = logger_utils.setup_logger()
 logger.setLevel(logging.CRITICAL)
 
 
