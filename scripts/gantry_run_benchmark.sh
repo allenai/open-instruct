@@ -27,8 +27,8 @@ gantry run \
        --budget ai2/oe-adapt \
        --install 'uv sync' \
        -- uv run python -m open_instruct.benchmark_generators \
-    --model_name_or_path "$mmodel_name_or_path" \
-    --tokenizer_name_or_path "$mmodel_name_or_path" \
+    --model_name_or_path "$model_name_or_path" \
+    --tokenizer_name_or_path "$model_name_or_path" \
     --dataset_mixer_list "hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2" "1.0" \
     --dataset_mixer_list_splits "train" \
     --max_token_length 10240 \
