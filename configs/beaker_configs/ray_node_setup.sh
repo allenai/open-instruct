@@ -19,8 +19,8 @@ ray stop --force
 
 if [ "$BEAKER_REPLICA_RANK" == "0" ]; then
     echo "Starting Ray head node"
-    ray start --head --port=$RAY_NODE_PORT
+    ray start --head --port=$RAY_NODE_PORT --dashboard-host=0.0.0.0
 else
     echo "Starting Ray worker node $BEAKER_REPLICA_RANK"
-    ray start --address="${BEAKER_LEADER_REPLICA_IP}:${RAY_NODE_PORT}" --block --dashboard-host 0.0.0.0
+    ray start --address="${BEAKER_LEADER_REPLICA_IP}:${RAY_NODE_PORT}" --block --dashboard-host=0.0.0.0
 fi
