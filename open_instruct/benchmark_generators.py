@@ -352,9 +352,8 @@ def generate_thread(
     while not stop_event.is_set():
         processed_results = ray.get([engine.process_from_queue.remote(timeout=20) for engine in vllm_engines])
         num_processed = sum(int(result) for result in processed_results)
-
         if num_processed == 0:
-            time.sleep(0.1)
+            time.sleep(1)
         else:
             logger.debug(f"[Generate Thread] Processed {num_processed} requests")
 
