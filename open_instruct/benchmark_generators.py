@@ -399,6 +399,11 @@ def run_benchmark(
         max_tokens=args.response_length,
         top_p=args.vllm_top_p,
         n=args.num_samples_per_prompt_rollout,
+        # IMPORTANT: Set output_kind to FINAL_ONLY to ensure vLLM V1 properly handles n>1
+        # With the default CUMULATIVE mode, vLLM V1 returns separate outputs for each
+        # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode
+        # ensures all n completions are returned together in a single output.
+        output_kind=vllm.sampling_params.RequestOutputKind.FINAL_ONLY,
     )
 
     stop_event = threading.Event()
@@ -449,7 +454,7 @@ def run_benchmark(
                 f"Batch {batch_idx}: Got {num_responses} responses, expected {expected_responses} "
                 f"({args.num_unique_prompts_rollout} prompts × {args.num_samples_per_prompt_rollout} rollouts)"
             )
-            
+
             new_tokens = sum(len(response) for response in result.responses)
             tokens_per_second = new_tokens / batch_generation_time if batch_generation_time > 0 else 0
 
