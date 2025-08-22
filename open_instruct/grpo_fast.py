@@ -601,10 +601,6 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.cuda.set_device(self.local_rank)
         self.device = torch.device(self.local_rank)
 
-        # Set deterministic mode for reproducibility
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-
         # Set seeds for this worker (different per rank to avoid correlation)
         worker_seed = args.seed + self.local_rank
         torch.manual_seed(worker_seed)
