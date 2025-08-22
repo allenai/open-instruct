@@ -780,10 +780,14 @@ class PolicyTrainerRayProcess(RayProcess):
                 with deepspeed.zero.GatheredParameters([param], enabled=self.args.deepspeed_stage == 3):
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+
+        # Return futures instead of blocking - let caller handle completion
+        all_refs = []
         if torch.distributed.get_rank() == 0:
-            ray_get_with_progress(refss, desc="Broadcasting weights to vLLM", enable=self.args.verbose)
-        if self.args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
-            ray_get_with_progress(cache_reset_refs, desc="Resetting vLLM prefix cache", enable=self.args.verbose)
+            all_refs.extend(refss)
+            if self.args.vllm_enable_prefix_caching:
+                all_refs.extend(cache_reset_refs)
+        return all_refs
 
     def update_ref_policy(self):
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
@@ -1931,6 +1935,7 @@ def sync_weights_and_prepare_prompts(
     param_prompt_Q: ray_queue.Queue,
     generation_configs: Dict[str, vllm.SamplingParams],
     actor_manager: vllm_utils3.ActorManager,
+    weight_sync_queue: Queue,
 ) -> Batch:
     """Sync weights and send the next batch of prompts to vLLM."""
     dataset_indices = next(iter_dataloader)
@@ -1943,11 +1948,12 @@ def sync_weights_and_prepare_prompts(
         ray.get(actor_manager.set_should_stop.remote(True))
         logger.debug(f"[Main Thread] Set should_stop to True for weight sync at step {training_step}")
 
-        ray_get_with_progress(
+        weight_sync_futures = ray_get_with_progress(
             [m.broadcast_to_vllm.remote() for m in policy_group.models],
             desc=f"[Main thread] Broadcasting weights to vLLM engines at training step {training_step}",
             enable=args.verbose,
         )
+        weight_sync_queue.put(weight_sync_futures)
 
         ray.get(actor_manager.set_should_stop.remote(False))
         logger.debug(f"[Main Thread] Set should_stop to False after weight sync at step {training_step}")
@@ -1983,10 +1989,23 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
     return collated_data, data_thread_metrics, num_total_tokens
 
 
-def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q):
+def generate_thread(
+    args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q, weight_sync_queue, actor_manager
+):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
     while not stop_event.is_set():
+        # Check for new weight sync requests
+        # and pause until they're done
+        try:
+            weight_sync_futures = weight_sync_queue.get_nowait()
+        except Empty:
+            pass
+        else:
+            with Timer("Weight Sync"):
+                ray.get(weight_sync_futures)
+                ray.get(actor_manager.set_should_stop.remote(False))
+
         with Timer("🔥 Generation time") as timer:
             processed_results = ray_get_with_progress(
                 [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
@@ -2406,8 +2425,16 @@ def run_training(
     )
 
     logger.info("======== ✅ generation thread starts =========")
+    weight_sync_queue = Queue()
     generation_future = executor.submit(
-        generate_thread, args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q
+        generate_thread,
+        args,
+        vllm_engines,
+        resume_training_step,
+        stop_event,
+        generate_metrics_Q,
+        weight_sync_queue,
+        actor_manager,
     )
 
     # Send initial data to ensure we have a N-step offset.
@@ -2444,7 +2471,7 @@ def run_training(
         [f.result() for f in [packing_future, generation_future] if f.done()]
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-        batch = sync_weights_and_prepare_prompts(
+        sync_weights_and_prepare_prompts(
             training_step,
             args,
             train_dataset,
@@ -2454,6 +2481,7 @@ def run_training(
             param_prompt_Q,
             generation_configs,
             actor_manager,
+            weight_sync_queue,
         )
         if (
             training_step % args.local_eval_every == 0
