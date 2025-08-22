@@ -98,6 +98,7 @@ from open_instruct.ground_truth_utils import (
 from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
+    apply_finegrained_reward,
     disable_dropout_in_model,
     log_softmax_and_gather,
     print_rich_single_line_metrics,
@@ -247,7 +248,7 @@ class Args:
     """
     ref_policy_update_freq: Optional[int] = None
     """How many training steps to take before updating the reference policy."""
-    advantage_normalization_type: Literal["standard", "centered", "finegrained"] = "standard"
+    advantage_normalization_type: Literal["standard", "centered", "finegrained"] = "finegrained"
     """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
     divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
@@ -264,8 +265,12 @@ class Args:
     """whether to add the format reward to the final reward"""
 
     # -- verifiable reward
-    apply_verifiable_reward: bool = True
+    apply_verifiable_reward: bool = False
     """whether to apply verifiable reward"""
+    apply_finegrained_reward: bool = True
+    """whether to apply finegrained reward"""
+    finegrained_reward: float = 10.0
+    """the reward value for finegrained reward"""
     verification_reward: float = 10.0
     """the reward value for verifiable responses"""
 
@@ -399,7 +404,7 @@ class Args:
         if self.num_samples_per_prompt_rollout == 1:
             print("WARNING: num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE. ")
         assert (
-            self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
+            self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty or self.apply_finegrained_reward
         ), "At least one reward must be applied!"
         assert (
             self.pack_length >= self.max_prompt_token_length + self.response_length
@@ -1139,11 +1144,6 @@ def data_preparation_thread(
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
 ):
-    # FGRPO validation: ensure finegrained rewards are used
-    if args.advantage_normalization_type != "finegrained":
-        raise ValueError(f"FGRPO requires advantage_normalization_type='finegrained', but got '{args.advantage_normalization_type}'. "
-                       f"Please set --advantage_normalization_type finegrained in your training script.")
-    
     for training_step in range(1, num_training_steps + 1):
         # Get next batch of prompts and responses
         items = queries_prompt_Q.get()
@@ -1179,288 +1179,131 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
-            if args.advantage_normalization_type == "finegrained":
-                # fine-grained rewards are a list of [score, effective_span, reward_group_id] of length num responses
-                # effective_span is now a tuple (start, end, total_length) for memory efficiency
-                # we need to normalize the advantages over each reward group but not average them
-                finegrained_scores, reward_metrics = asyncio.run(
-                    reward_fn(
-                        responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries
-                    )
+            # fine-grained rewards are a list of FinegrainedScore objects of length num responses
+            # each finegrained_score is a FinegrainedScore object including attributes: score, effective_spans, reward_group_id, query_idx, advantage
+            finegrained_scores, reward_metrics = asyncio.run(
+                reward_fn(
+                    responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries
+                )
+            )
+            
+        with Timer("🔄 [Data Preparation Thread] Converting string spans to token spans"):
+            def convert_string_span_to_token_span(effective_spans, decoded_resp, token_resp, tokenizer):
+                """
+                Convert character spans to token spans and create a mask for training.
+                
+                Args:
+                    effective_spans: List of tuples (start_char, end_char) in decoded response
+                    decoded_resp: Decoded string response
+                    token_resp: Tokenized response (list of token IDs)
+                    tokenizer: Tokenizer used to decode the responses
+                
+                Returns:
+                    List of integers where 1 means the token should be trained on, 0 means masked
+                """
+                if not effective_spans or len(token_resp) == 0:
+                    # If no effective spans or no tokens, mask everything except last EOS
+                    mask = [0] * len(token_resp)
+                    if len(token_resp) > 0 and token_resp[-1] == tokenizer.eos_token_id:
+                        mask[-1] = 1
+                    return mask
+                
+                # Build character-to-token mapping by decoding each token
+                char_to_token = {}
+                current_pos = 0
+                
+                for token_idx, token_id in enumerate(token_resp):
+                    # Decode individual token
+                    token_text = tokenizer.decode([token_id], skip_special_tokens=True)
+                    
+                    if token_text:
+                        # Find where this token appears in the decoded response
+                        token_start = decoded_resp.find(token_text, current_pos)
+                        if token_start != -1:
+                            token_end = token_start + len(token_text)
+                            # Map all characters in this token to the token index
+                            for char_idx in range(token_start, token_end):
+                                if char_idx < len(decoded_resp):
+                                    char_to_token[char_idx] = token_idx
+                            current_pos = token_end
+                        else:
+                            # Token not found at expected position, map current position
+                            if current_pos < len(decoded_resp):
+                                char_to_token[current_pos] = token_idx
+                                current_pos += 1
+                    else:
+                        # Empty token text, map current position if valid
+                        if current_pos < len(decoded_resp):
+                            char_to_token[current_pos] = token_idx
+                            current_pos += 1
+                
+                # Fill any remaining unmapped characters with the last token
+                if len(token_resp) > 0:
+                    for char_idx in range(current_pos, len(decoded_resp)):
+                        char_to_token[char_idx] = len(token_resp) - 1
+                
+                # Initialize mask - everything masked by default
+                mask = [0] * len(token_resp)
+                
+                # Unmask tokens that fall within effective spans
+                for start_char, end_char in effective_spans:
+                    # Clamp character indices to valid range
+                    start_char = max(0, min(start_char, len(decoded_resp)))
+                    end_char = max(start_char, min(end_char, len(decoded_resp)))
+                    
+                    # Find token boundaries for this character span
+                    if start_char < len(decoded_resp) and start_char in char_to_token:
+                        token_start = char_to_token[start_char]
+                    else:
+                        token_start = 0
+                    
+                    if end_char > 0 and (end_char - 1) in char_to_token:
+                        token_end = char_to_token[end_char - 1] + 1
+                    else:
+                        token_end = token_start
+                    
+                    # Clamp to valid token range
+                    token_start = max(0, min(token_start, len(token_resp)))
+                    token_end = max(token_start, min(token_end, len(token_resp)))
+                    
+                    # Unmask tokens in this span
+                    for token_idx in range(token_start, token_end):
+                        mask[token_idx] = 1
+                
+                # Always keep the last EOS token unmasked if it exists
+                if len(token_resp) > 0 and token_resp[-1] == tokenizer.eos_token_id:
+                    mask[-1] = 1
+                
+                return mask
+            
+            scores = [item.score for item in finegrained_scores]
+            effective_spans = [item.effective_spans for item in finegrained_scores]
+            reward_group_ids = [item.reward_group_id for item in finegrained_scores]
+            query_indices = [item.query_idx for item in finegrained_scores]
+            advantages = [item.advantage for item in finegrained_scores]
+
+            # Update span masks using query indices (no filtering has been done yet)
+            for i, (effective_spans_per_response, decoded_resp) in enumerate(zip(effective_spans, decoded_responses)):
+                token_resp = responses[i]
+                
+                # Use the convert function to get the mask directly
+                span_mask = convert_string_span_to_token_span(
+                    effective_spans_per_response, decoded_resp, token_resp, tokenizer
                 )
                 
-                def convert_string_span_to_token_span(effective_span, decoded_responses, responses, tokenizer):
-                    """
-                    Optimized character-to-token span conversion with multiple acceleration strategies.
-                    
-                    Args:
-                        effective_span: Tuple of (start_char, end_char) in decoded response
-                        decoded_responses: List of decoded string responses
-                        responses: List of tokenized responses (list of token IDs)
-                        tokenizer: Tokenizer used to decode the responses
-                    
-                    Returns:
-                        List of tuples (token_start, token_end) for each response
-                    """
-                    start_char, end_char = effective_span
-                    token_spans = []
-                    
-                    for resp_idx, (decoded_resp, token_resp) in enumerate(zip(decoded_responses, responses)):
-                        # Handle edge cases
-                        if start_char >= len(decoded_resp):
-                            token_spans.append((len(token_resp), len(token_resp)))
-                            continue
-                        if end_char <= 0:
-                            token_spans.append((0, 0))
-                            continue
-                        
-                        # Clamp character indices to valid range
-                        start_char_clamped = max(0, min(start_char, len(decoded_resp)))
-                        end_char_clamped = max(start_char_clamped, min(end_char, len(decoded_resp)))
-                        
-                        # Strategy 1: Try offset mapping (fastest when available)
-                        char_to_token = None
-                        try:
-                            encoding = tokenizer(decoded_resp, return_offsets_mapping=True, add_special_tokens=False)
-                            if hasattr(encoding, 'offset_mapping') and encoding.offset_mapping is not None:
-                                # Build character-to-token mapping from offsets
-                                char_to_token = {}
-                                for token_idx, (offset_start, offset_end) in enumerate(encoding.offset_mapping):
-                                    for char_idx in range(offset_start, offset_end):
-                                        char_to_token[char_idx] = token_idx
-                        except Exception:
-                            pass  # Fall back to boundary detection
-                        
-                        # Strategy 2: Boundary detection (fallback, works with any tokenizer)
-                        if char_to_token is None:
-                            char_to_token = {}
-                            current_pos = 0
-                            
-                            # Decode individual tokens and find their positions in the full text
-                            for token_idx, token_id in enumerate(token_resp):
-                                token_text = tokenizer.decode([token_id], skip_special_tokens=True)
-                                if not token_text:
-                                    continue
-                                
-                                # Find where this token appears starting from current position
-                                token_start = decoded_resp.find(token_text, current_pos)
-                                if token_start != -1:
-                                    token_end = token_start + len(token_text)
-                                    # Map characters to this token
-                                    for char_idx in range(token_start, token_end):
-                                        char_to_token[char_idx] = token_idx
-                                    current_pos = token_end
-                                else:
-                                    # Handle tokenizer quirks
-                                    if current_pos < len(decoded_resp):
-                                        char_to_token[current_pos] = token_idx
-                                        current_pos += 1
-                            
-                            # Fill any remaining characters
-                            for char_idx in range(current_pos, len(decoded_resp)):
-                                char_to_token[char_idx] = len(token_resp) - 1
-                        
-                        # Find token boundaries for the character span
-                        token_start = char_to_token.get(start_char_clamped, 0)
-                        
-                        # For end position, find the token containing end_char_clamped - 1
-                        if end_char_clamped > 0:
-                            token_end = char_to_token.get(end_char_clamped - 1, len(token_resp) - 1) + 1
-                        else:
-                            token_end = token_start
-                        
-                        # Clamp to valid token range
-                        token_start = max(0, min(token_start, len(token_resp)))
-                        token_end = max(token_start, min(token_end, len(token_resp)))
-                        
-                        token_spans.append((token_start, token_end))
-                    
-                    return token_spans
-                
-                def gather_mean_and_std_from_the_same_reward_group(finegrained_scores, reward_group_id):
-                    scores = [score for score, effective_span, group_id in finegrained_scores if group_id == reward_group_id]
-                    return np.mean(scores), np.std(scores) + 1e-8
-                
-                # Extract components from finegrained_scores
-                # Support both formats:
-                # - 3-tuple: (score, effective_span, reward_group_id) - implicit response mapping
-                # - 4-tuple: (score, effective_span, reward_group_id, response_idx) - explicit response mapping
-                scores = []
-                effective_spans = []
-                reward_group_ids = []
-                response_indices = []
-                
-                for i, item in enumerate(finegrained_scores):
-                    if len(item) == 3:
-                        # Old format: (score, effective_span, reward_group_id)
-                        score, effective_span, reward_group_id = item
-                        # Implicit mapping: assume scores are grouped by response then by reward group
-                        response_idx = i // len(set([gid for _, _, gid in finegrained_scores]))
-                    elif len(item) == 4:
-                        # New format: (score, effective_span, reward_group_id, response_idx)
-                        score, effective_span, reward_group_id, response_idx = item
-                    else:
-                        raise ValueError(f"Invalid finegrained_scores format: each item should be 3-tuple or 4-tuple, got {len(item)}-tuple")
-                    
-                    scores.append(score)
-                    effective_spans.append(effective_span)
-                    reward_group_ids.append(reward_group_id)
-                    response_indices.append(response_idx)
-                
-                scores = np.array(scores)
-                
-                # Validate response indices
-                max_response_idx = max(response_indices) if response_indices else -1
-                if max_response_idx >= len(responses):
-                    raise ValueError(f"Invalid response_idx {max_response_idx} in finegrained_scores: only {len(responses)} responses available")
-                
-                print(f"Debug: Processing {len(finegrained_scores)} finegrained scores for {len(responses)} responses")
-                print(f"Debug: Response indices range: {min(response_indices) if response_indices else 'N/A'} to {max_response_idx}")
-                print(f"Debug: Reward groups: {sorted(set(reward_group_ids))}")
-                
-                # Get unique reward groups and normalize advantages per group
-                unique_groups = list(set(reward_group_ids))
-                advantages = np.zeros_like(scores, dtype=np.float32)
-                
-                # Normalize advantages per group
-                for group_id in unique_groups:
-                    group_indices = [i for i, gid in enumerate(reward_group_ids) if gid == group_id]
-                    group_scores = scores[group_indices]
-                    
-                    # Calculate group statistics
-                    group_mean = np.mean(group_scores)
-                    group_std = np.std(group_scores) + 1e-8
-                    
-                    finegrained_normalization_type = getattr(args, "finegrained_normalization_type", "standard")
-                    if finegrained_normalization_type == "standard":
-                        group_advantages = (group_scores - group_mean) / group_std
-                    elif finegrained_normalization_type == "centered":
-                        group_advantages = group_scores - group_mean
-                    elif finegrained_normalization_type == "none":
-                        group_advantages = group_scores
-                    else:
-                        raise ValueError(f"Invalid finegrained normalization type: {finegrained_normalization_type}")
-                    
-                    # Assign normalized advantages back to the main array
-                    for idx, group_idx in enumerate(group_indices):
-                        advantages[group_idx] = group_advantages[idx]
-
-                # Create span masks using explicit response indices
-                span_masks = []
-                
-                for i, (effective_span, response_idx) in enumerate(zip(effective_spans, response_indices)):
-                    if isinstance(effective_span, (tuple, list)) and len(effective_span) == 2:
-                        # New format: (start_char, end_char) - convert to token spans
-                        start_char, end_char = effective_span
-                        decoded_resp = decoded_responses[response_idx]
-                        token_resp = responses[response_idx]
-                        
-                        # Convert single response span
-                        token_spans = convert_string_span_to_token_span(
-                            effective_span, [decoded_resp], [token_resp], tokenizer
-                        )
-                        token_start, token_end = token_spans[0]
-                        
-                        # Create span mask
-                        response_length = len(token_resp)
-                        span_mask = np.zeros(response_length, dtype=bool)
-                        token_start = max(0, min(token_start, response_length))
-                        token_end = max(token_start, min(token_end, response_length))
-                        span_mask[token_start:token_end] = True
-                        span_masks.append(span_mask)
-                        
-                    elif isinstance(effective_span, (tuple, list)) and len(effective_span) == 3:
-                        # Old format: (start_token, end_token, total_length) - use directly
-                        start_token, end_token, total_length = effective_span
-                        response_length = len(responses[response_idx])
-                        
-                        if total_length != response_length:
-                            print(f"Warning: effective_span total_length ({total_length}) doesn't match response length ({response_length}) for response {response_idx}")
-                        
-                        # Create boolean mask from token span
-                        span_mask = np.zeros(response_length, dtype=bool)
-                        start_token = max(0, min(start_token, response_length))
-                        end_token = max(start_token, min(end_token, response_length))
-                        span_mask[start_token:end_token] = True
-                        span_masks.append(span_mask)
-                        
-                    elif isinstance(effective_span, (list, np.ndarray)):
-                        # Fallback: handle old boolean array format for backward compatibility
-                        span_mask = np.array(effective_span, dtype=bool)
-                        span_masks.append(span_mask)
-                    else:
-                        # Default: apply to all tokens if format is unrecognized
-                        response_length = len(responses[response_idx])
-                        span_mask = np.ones(response_length, dtype=bool)
-                        span_masks.append(span_mask)
-
-                # Group advantages and masks by reward group for the training loop
-                grouped_advantages = {}
-                grouped_masks = {}
-                
-                for i, group_id in enumerate(reward_group_ids):
-                    if group_id not in grouped_advantages:
-                        grouped_advantages[group_id] = []
-                        grouped_masks[group_id] = []
-                    grouped_advantages[group_id].append(advantages[i])
-                    grouped_masks[group_id].append(span_masks[i])
-                
-                # Convert to the format expected by the training loop
-                advantages_list = []
-                advantages_mask_list = []
-                
-                for group_id in sorted(unique_groups):
-                    advantages_list.append(np.array(grouped_advantages[group_id]))
-                    advantages_mask_list.append(grouped_masks[group_id])
+                # If no valid spans were found (all False except possibly EOS), default to original mask
+                # Otherwise, use the span mask
+                if np.array(span_mask, dtype=bool).any():
+                    masks[i] = span_mask
 
             
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
-            # Here we get the max possible score for each prompt, and see how many prompts are unsolved
-            max_possible_score = 0
-            if args.apply_verifiable_reward:
-                max_possible_score += args.verification_reward
-            if args.apply_r1_style_format_reward and args.additive_format_reward:
-                max_possible_score += args.r1_style_format_reward
-            unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
-            
-            if args.advantage_normalization_type == "finegrained":
-                # For finegrained, we need to filter based on whether any group has non-zero std
-                # Check if any reward group has non-zero std
-                non_zero_std_groups = set()
-                for group_id in unique_groups:
-                    group_indices = [i for i, gid in enumerate(reward_group_ids) if gid == group_id]
-                    group_scores = scores[group_indices]
-                    if len(group_scores) > 1 and np.std(group_scores) != 0:
-                        non_zero_std_groups.add(group_id)
-                
-                # Filter to keep only responses from groups with non-zero std
-                non_zero_gradient_index = [i for i, gid in enumerate(reward_group_ids) if gid in non_zero_std_groups]
-                real_batch_size_ratio = len(non_zero_gradient_index) / len(scores)
-                
-                # Filter all the data
-                filtered_advantages_list = []
-                filtered_advantages_mask_list = []
-                for group_idx, group_id in enumerate(sorted(unique_groups)):
-                    if group_id in non_zero_std_groups:
-                        # Keep advantages and masks for this group
-                        group_indices_in_filtered = [i for i, orig_idx in enumerate(non_zero_gradient_index) 
-                                                   if reward_group_ids[orig_idx] == group_id]
-                        filtered_advantages_list.append(advantages_list[group_idx][group_indices_in_filtered])
-                        filtered_advantages_mask_list.append([advantages_mask_list[group_idx][i] for i in group_indices_in_filtered])
-                
-                advantages_list = filtered_advantages_list
-                advantages_mask_list = filtered_advantages_mask_list
-                
-            else:
-                # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
-                # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
-                scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
-                non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
-                real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
-                expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
-                non_zero_gradient_index = np.where(expanded_mask)[0]
-                advantages = advantages[non_zero_gradient_index]
-            
+            # Filter to keep only finegrained scores from groups with non-zero std
+            non_zero_gradient_index = [i for i, advantage in enumerate(advantages) if advantage != -100]
+            real_batch_size_ratio = non_zero_gradient_index.sum() * args.num_samples_per_prompt_rollout / len(scores)
+            expanded_mask = np.repeat(non_zero_gradient_index, args.num_samples_per_prompt_rollout)
+            non_zero_gradient_index = np.where(expanded_mask)[0]
+            advantages = advantages[non_zero_gradient_index]
             scores = scores[non_zero_gradient_index]
             responses = [responses[i] for i in non_zero_gradient_index]
             masks = [masks[i] for i in non_zero_gradient_index]
@@ -1468,38 +1311,16 @@ def data_preparation_thread(
             ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
             datasets = [datasets[i] for i in non_zero_gradient_index]
             finish_reasons = [finish_reasons[i] for i in non_zero_gradient_index]
-            
-            if args.advantage_normalization_type == "finegrained":
-                # Also filter the group IDs and spans
-                reward_group_ids = [reward_group_ids[i] for i in non_zero_gradient_index]
-                effective_spans = [effective_spans[i] for i in non_zero_gradient_index]
-            
             if args.mask_truncated_completions:
                 stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
                 scores = scores[stop_idxes]
+                advantages = advantages[stop_idxes]
                 responses = [responses[i] for i in stop_idxes]
                 masks = [masks[i] for i in stop_idxes]
                 queries = [queries[i] for i in stop_idxes]
                 ground_truths = [ground_truths[i] for i in stop_idxes]
                 datasets = [datasets[i] for i in stop_idxes]
                 finish_reasons = [finish_reasons[i] for i in stop_idxes]
-                
-                if args.advantage_normalization_type == "finegrained":
-                    # Also filter finegrained data
-                    reward_group_ids = [reward_group_ids[i] for i in stop_idxes]
-                    effective_spans = [effective_spans[i] for i in stop_idxes]
-                    # Filter advantages_list and advantages_mask_list
-                    filtered_advantages_list = []
-                    filtered_advantages_mask_list = []
-                    for group_idx, group_id in enumerate(sorted(non_zero_std_groups)):
-                        group_stop_indices = [i for i, stop_idx in enumerate(stop_idxes) 
-                                            if reward_group_ids[stop_idx] == group_id]
-                        filtered_advantages_list.append(advantages_list[group_idx][group_stop_indices])
-                        filtered_advantages_mask_list.append([advantages_mask_list[group_idx][i] for i in group_stop_indices])
-                    advantages_list = filtered_advantages_list
-                    advantages_mask_list = filtered_advantages_mask_list
-                else:
-                    advantages = advantages[stop_idxes]
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
@@ -1510,57 +1331,15 @@ def data_preparation_thread(
                 pad_token_id=tokenizer.pad_token_id,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
-            
-            if args.advantage_normalization_type == "finegrained":
-                # For finegrained, we need to create multiple advantage arrays and masks
-                # Each corresponds to a different reward group/segment
-                packed_advantages_list = []
-                packed_advantages_mask_list = []
-                
-                for group_idx, group_id in enumerate(sorted(non_zero_std_groups)):
-                    # Create lookup for this group's advantages
-                    group_advantages = advantages_list[group_idx]
-                    lookup_advantages = np.zeros(len(group_advantages) + 1, dtype=np.float32)
-                    lookup_advantages[1:] = group_advantages
-                    
-                    # Pack advantages for this group
-                    packed_advantages = [
-                        torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
-                        for packed_mask in packed_sequences.response_masks
-                    ]
-                    packed_advantages_list.append(packed_advantages)
-                    
-                    # Create span masks for this group
-                    group_spans = advantages_mask_list[group_idx]
-                    packed_span_masks = []
-                    for i, packed_mask in enumerate(packed_sequences.response_masks):
-                        # Create span mask based on effective_spans
-                        span_mask = torch.zeros_like(packed_mask, dtype=torch.bool)
-                        # Map the effective spans to the packed format
-                        # This is a simplified version - you may need to adjust based on your exact span format
-                        for j, mask_val in enumerate(packed_mask):
-                            if mask_val > 0:  # This is a response token
-                                response_idx = mask_val - 1  # Convert to 0-indexed
-                                if response_idx < len(group_spans):
-                                    # Use the span mask for this response
-                                    span_mask[j] = True if j < len(group_spans[response_idx]) else False
-                        packed_span_masks.append(span_mask)
-                    packed_advantages_mask_list.append(packed_span_masks)
-                
-                # Store as tuples of (advantages_list, mask_list) for each packed sequence
-                packed_sequences.advantages = [(packed_advantages_list, packed_advantages_mask_list)]
-                
-            else:
-                # Original advantage packing for non-finegrained case
-                # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
-                # and each value is the corresponding advantage score: index 0 is set to 0 since response masks start from 1 (1-indexed)
-                lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
-                lookup_advantages[1:] = advantages
-                packed_advantages = [
-                    torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
-                    for packed_mask in packed_sequences.response_masks
-                ]
-                packed_sequences.advantages = packed_advantages
+            # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
+            # and each value is the corresponding advantage score: index 0 is set to 0 since response masks start from 1 (1-indexed)
+            lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
+            lookup_advantages[1:] = advantages
+            packed_advantages = [
+                torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
+                for packed_mask in packed_sequences.response_masks
+            ]
+            packed_sequences.advantages = packed_advantages
 
         # if we have less batches than world size, we need to pad out so each world is fine
         # ideally, you should avoid this since its wasting computation.
@@ -1585,17 +1364,7 @@ def data_preparation_thread(
                         packed_sequences.attention_masks.append(dummy_attention)
                         packed_sequences.position_ids.append(dummy_position_ids)
                         packed_sequences.response_masks.append(dummy_response_mask)
-                        if args.advantage_normalization_type == "finegrained":
-                            # For finegrained, advantages is a list of tuples, so we need to handle it differently
-                            # The structure is [(packed_advantages_list, packed_advantages_mask_list)]
-                            # We need to pad each group's advantages
-                            if len(packed_sequences.advantages) > 0:
-                                packed_advantages_list, packed_advantages_mask_list = packed_sequences.advantages[0]
-                                for group_idx in range(len(packed_advantages_list)):
-                                    packed_advantages_list[group_idx].append(dummy_advantage)
-                                    packed_advantages_mask_list[group_idx].append(torch.zeros_like(dummy_qr, dtype=torch.bool))
-                        else:
-                            packed_sequences.advantages.append(dummy_advantage)
+                        packed_sequences.advantages.append(dummy_advantage)
 
         with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
             B = (
@@ -1607,25 +1376,7 @@ def data_preparation_thread(
                 per_device_packed_tool_masks = packed_sequences.tool_masks[B * i : B * (i + 1)]
                 per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
                 per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
-                if args.advantage_normalization_type == "finegrained":
-                    # For finegrained, advantages is stored as [(packed_advantages_list, packed_advantages_mask_list)]
-                    # We need to slice each group's advantages
-                    if len(packed_sequences.advantages) > 0:
-                        packed_advantages_list, packed_advantages_mask_list = packed_sequences.advantages[0]
-                        per_device_packed_advantages_list = []
-                        per_device_packed_advantages_mask_list = []
-                        for group_idx in range(len(packed_advantages_list)):
-                            per_device_packed_advantages_list.append(
-                                packed_advantages_list[group_idx][B * i : B * (i + 1)]
-                            )
-                            per_device_packed_advantages_mask_list.append(
-                                packed_advantages_mask_list[group_idx][B * i : B * (i + 1)]
-                            )
-                        per_device_packed_advantages = (per_device_packed_advantages_list, per_device_packed_advantages_mask_list)
-                    else:
-                        per_device_packed_advantages = ([], [])
-                else:
-                    per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
+                per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
                 per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
 
                 # Shuffle the batch and collate the data
@@ -1655,43 +1406,9 @@ def data_preparation_thread(
                     collated_response_masks.append(
                         collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0)
                     )
-                    
-                    if args.advantage_normalization_type == "finegrained":
-                        # For finegrained, we need to handle the special structure
-                        # per_device_packed_advantages contains the structure from packed_sequences.advantages
-                        # which is [(packed_advantages_list, packed_advantages_mask_list)]
-                        if len(per_device_packed_advantages) > 0:
-                            packed_advantages_list, packed_advantages_mask_list = per_device_packed_advantages
-                            
-                            # Collate advantages for each group
-                            collated_advantages_list = []
-                            collated_advantages_mask_list = []
-                            
-                            for group_idx in range(len(packed_advantages_list)):
-                                # Collate advantages for this group
-                                group_advantages = [
-                                    packed_advantages_list[group_idx][idx] for idx in micro_range
-                                ]
-                                collated_group_advantages = collate_fn(group_advantages, 0)
-                                collated_advantages_list.append(collated_group_advantages)
-                                
-                                # Collate masks for this group
-                                group_masks = [
-                                    packed_advantages_mask_list[group_idx][idx] for idx in micro_range
-                                ]
-                                collated_group_masks = collate_fn([mask.float() for mask in group_masks], 0).bool()
-                                collated_advantages_mask_list.append(collated_group_masks)
-                            
-                            # Store as the expected format for the training loop
-                            collated_advantages.append((collated_advantages_list, collated_advantages_mask_list))
-                        else:
-                            # Handle empty case
-                            collated_advantages.append(([], []))
-                    else:
-                        # Original advantage collation for non-finegrained case
-                        collated_advantages.append(
-                            collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0)
-                        )
+                    collated_advantages.append(
+                        collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0)
+                    )
                 collated_data.append(
                     {
                         "collated_query_responses": collated_query_responses,
@@ -2425,6 +2142,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         )
 
 
+
 if __name__ == "__main__":
     parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
@@ -2442,72 +2160,56 @@ if __name__ == "__main__":
         finish_reasons: List[str],
         infos: List[List[int]],
         queries: Optional[List[str]] = None,
-    ) -> List[float]:
+    ):
         num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
         good_outputs = [
-            len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
+            len(tool_outputs[i]) > 0 and tool_calleds[i]
             for i in range(len(tool_outputs))
         ]
-        scores = [0] * len(decoded_responses)
+        
+        # Check if we need finegrained rewards
+        assert args.apply_finegrained_reward, "Finegrained rewards are not applied"
+        # For finegrained rewards, we need to return (finegrained_scores, metrics)
+        finegrained_scores = []
         metrics = {}
-
-        if args.apply_r1_style_format_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
-                format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
-                if len(format_scores) != len(scores):
-                    raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
-                for i in range(len(format_scores)):
-                    scores[i] = format_scores[i] + scores[i]
-                metrics["val/format_scores"] = np.array(format_scores).mean()
-
-        if args.apply_verifiable_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
-                verifiable_rewards, per_func_rewards, log_values = await apply_verifiable_reward(
-                    reward_fn_mapping,
-                    responses,
-                    decoded_responses,
-                    ground_truths,
-                    datasets,
-                    reward_mult=args.verification_reward,
-                    queries=queries,
-                    overwrite_reward_fn_tag=args.overwrite_reward_fn_tag,
-                )
-                if len(verifiable_rewards) != len(scores):
-                    raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
-                # slightly complex combo of good outputs and additive format reward
-                for i in range(len(verifiable_rewards)):
-                    if not args.only_reward_good_outputs or (good_outputs[i] and args.only_reward_good_outputs):
-                        if args.apply_r1_style_format_reward and args.additive_format_reward:
-                            scores[i] = verifiable_rewards[i] + scores[i]
-                        elif args.apply_r1_style_format_reward and not args.additive_format_reward:
-                            scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
-                        else:
-                            scores[i] = verifiable_rewards[i]
-                np_verifiable_rewards = np.array(verifiable_rewards)
-                metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
-                metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
-                # log anything additional
-                for key, value in log_values.items():
-                    metrics[f"objective/reward_log_values/{key}"] = np.array(value).mean()
-                # reshuffle around per_func rewards
-                per_func_lists = defaultdict(list)
-                for reward_dict in per_func_rewards:
-                    for key, value in reward_dict.items():
-                        per_func_lists[key].append(value)
-                # log per function rewards
-                for key, value in per_func_lists.items():
-                    np_value = np.array(value)
-                    metrics[f"objective/{key}_reward"] = np_value.mean()
-                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
-
-        # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
-        if args.non_stop_penalty:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty"):
-                assert len(finish_reasons) == len(scores)
-                for i in range(len(finish_reasons)):
-                    if finish_reasons[i] != "stop":
-                        scores[i] = args.non_stop_penalty_value
-
-        return scores, metrics
+        
+        with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying finegrained reward"):
+            finegrained_scores, log_values = await apply_finegrained_reward(
+                reward_fn_mapping,
+                responses,
+                decoded_responses,
+                ground_truths,
+                datasets,
+                reward_mult=args.finegrained_reward,
+                queries=queries,
+                overwrite_reward_fn_tag=args.overwrite_reward_fn_tag,
+                num_samples_per_prompt_rollout=args.num_samples_per_prompt_rollout,
+            )
+            
+            # log finegrained reward log values
+            for key, value in log_values.items():
+                metrics[f"objective/finegrained_reward_log_values/{key}"] = value
+            
+            # Directly compute advantages in the reward function
+            scores_by_query_and_reward_group = defaultdict(lambda: defaultdict(list))
+            for score_obj in finegrained_scores:
+                # score_obj is a FinegrainedScore object including attributes: score, effective_spans, reward_group_id, query_idx
+                scores_by_query_and_reward_group[score_obj.query_idx][score_obj.reward_group_id].append(score_obj.score)
+            
+            # Calculate average score per response for metrics
+            reward_stats_by_query_and_reward_group = defaultdict(lambda: defaultdict(float))
+            for query_idx, reward_group_id_to_scores in scores_by_query_and_reward_group.items():
+                for reward_group_id, scores in reward_group_id_to_scores.items():
+                    mean, std = np.mean(scores), np.std(scores) + 1e-8
+                    reward_stats_by_query_and_reward_group[query_idx][reward_group_id] = (mean, std)
+            
+            # Calculate advantages
+            for score_obj in finegrained_scores:
+                mean, std = reward_stats_by_query_and_reward_group[score_obj.query_idx][score_obj.reward_group_id]
+                score_obj.advantage = (score_obj.score - mean) / std
+                if std == 1e-8:
+                    score_obj.advantage = -100  # should be filtered out
+            
+        return finegrained_scores, metrics
 
     main(args, tokenizer_config, model_config, reward_fn)

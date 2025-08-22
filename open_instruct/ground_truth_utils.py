@@ -97,6 +97,16 @@ class VerificationResult:
 
 
 @dataclass
+class FinegrainedScore:
+    score: float
+    effective_spans: List[Tuple[int, int]]
+    reward_group_id: int
+    reward_group_name: str
+    query_idx: Optional[int] = None
+    advantage: Optional[float] = None
+
+
+@dataclass
 class FinegrainedRewardOutput:
     """
     Simple output class for finegrained rewards from reward functions.
@@ -113,7 +123,7 @@ class FinegrainedRewardOutput:
         cost: Cost of computing the rewards (matches VerificationResult)
         reasoning: Optional reasoning text (matches VerificationResult)
     """
-    finegrained_scores: List[Tuple[float, Tuple[int, int], int, int]]  # (score, (start_char, end_char), group_id, response_idx)
+    finegrained_scores: List[FinegrainedScore]
     log_values: Optional[Dict[str, float]] = None
     cost: float = 0.0
     reasoning: Optional[str] = None
@@ -121,20 +131,42 @@ class FinegrainedRewardOutput:
     def __post_init__(self):
         """Basic validation of the finegrained scores."""
         for i, item in enumerate(self.finegrained_scores):
-            if not isinstance(item, tuple) or len(item) != 4:
-                raise ValueError(f"finegrained_scores[{i}] must be a 4-tuple (score, effective_span, reward_group_id, response_idx)")
+            if not isinstance(item, FinegrainedScore):
+                raise ValueError(f"finegrained_scores[{i}] must be a FinegrainedScore object")
             
-            score, effective_span, reward_group_id, response_idx = item
+            if not isinstance(item.effective_spans, list):
+                raise ValueError(f"effective_spans in finegrained_scores[{i}] must be a list of (start_char, end_char) tuples")
             
-            if not isinstance(effective_span, tuple) or len(effective_span) != 2:
-                raise ValueError(f"effective_span in finegrained_scores[{i}] must be a 2-tuple (start_char, end_char)")
+            effective_spans = item.effective_spans
+            for j, effective_span in enumerate(effective_spans):
+                if not isinstance(effective_span, tuple) or len(effective_span) != 2:
+                    raise ValueError(f"effective_spans[{j}] in finegrained_scores[{i}] must be a 2-tuple (start_char, end_char)")
+                
+                start_char, end_char = effective_span
+                if start_char < 0 or end_char < start_char:
+                    raise ValueError(f"Invalid effective_span {effective_span} in finegrained_scores[{i}].effective_spans[{j}]")
             
-            start_char, end_char = effective_span
-            if start_char < 0 or end_char < start_char:
-                raise ValueError(f"Invalid effective_span {effective_span} in finegrained_scores[{i}]")
+            # Check for overlapping spans within this FinegrainedScore
+            # Note: Adjacent spans (where end of one equals start of next) are allowed
+            if len(effective_spans) > 1:
+                # Sort spans by start position for overlap checking
+                sorted_spans = sorted(effective_spans, key=lambda x: x[0])
+                for k in range(len(sorted_spans) - 1):
+                    current_start, current_end = sorted_spans[k]
+                    next_start, next_end = sorted_spans[k + 1]
+                    
+                    # Check if current span overlaps with next span (current_end > next_start means overlap)
+                    if current_end > next_start:
+                        raise ValueError(f"Overlapping spans in finegrained_scores[{i}]: {sorted_spans[k]} and {sorted_spans[k + 1]}")
             
-            if reward_group_id < 0 or response_idx < 0:
-                raise ValueError(f"reward_group_id and response_idx must be >= 0 in finegrained_scores[{i}]")
+            reward_group_id = item.reward_group_id
+            query_idx = item.query_idx
+
+            if reward_group_id < 0:
+                raise ValueError(f"reward_group_id must be >= 0 in finegrained_scores[{i}]")
+            
+            if query_idx is not None and query_idx < 0:
+                raise ValueError(f"query_idx must be >= 0 in finegrained_scores[{i}]")
     
     def unpack_for_fgrpo(self) -> Tuple[List[Tuple[float, Tuple[int, int], int, int]], Dict[str, float]]:
         """
@@ -147,11 +179,11 @@ class FinegrainedRewardOutput:
     
     def get_scores_for_response(self, response_idx: int) -> List[Tuple[float, Tuple[int, int], int, int]]:
         """Get all scores for a specific response."""
-        return [score for score in self.finegrained_scores if score[3] == response_idx]
+        return [score for score in self.finegrained_scores if score.response_idx == response_idx]
     
     def get_scores_for_group(self, reward_group_id: int) -> List[Tuple[float, Tuple[int, int], int, int]]:
         """Get all scores for a specific reward group."""
-        return [score for score in self.finegrained_scores if score[2] == reward_group_id]
+        return [score for score in self.finegrained_scores if score.reward_group_id == reward_group_id]
     
     def __len__(self) -> int:
         return len(self.finegrained_scores)
@@ -965,7 +997,6 @@ class RLRAGLongFormFinegrainedVerifier(VerifierFunction):
     def __call__(
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> FinegrainedRewardOutput:
-        # result = compute_finegrained_reward(prediction, label, query)
         test_case = json.loads(label)
         result = compute_longform_finegrained_reward(prediction, test_case, query)
         return FinegrainedRewardOutput(

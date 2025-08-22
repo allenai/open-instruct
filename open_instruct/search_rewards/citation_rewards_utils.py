@@ -567,7 +567,7 @@ if __name__ == "__main__":
     # example_usage()
 
 
-def score_num_in_context_search_turns(context: str, upper_bound: int = 10) -> float:
+def score_num_in_context_search_turns(context: str, upper_bound: int = 3) -> float:
     """
     Score the number of search turns in the response.
     This function extracts all strings wrapped within <search> and </search> tags,

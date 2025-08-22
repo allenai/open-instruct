@@ -28,6 +28,7 @@ except ImportError:
     pass
 import asyncio
 
+import numpy as np
 import pandas as pd
 import torch
 import transformers
@@ -41,7 +42,7 @@ from rich.table import Table
 from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
-from open_instruct.ground_truth_utils import VerifierFunction
+from open_instruct.ground_truth_utils import VerifierFunction, FinegrainedScore
 from open_instruct.utils import retry_on_exception
 
 logger = logging.getLogger(__name__)
@@ -301,6 +302,123 @@ async def apply_verifiable_reward(
         )
 
     return response_rewards, response_per_func_rewards, reward_log_values
+
+
+async def apply_finegrained_reward(
+    reward_fn_mapping: Dict[str, VerifierFunction],
+    responses: List[torch.Tensor],
+    decoded_responses: List[str],
+    ground_truths: List[str],
+    datasets: List[Union[str, List[str]]],
+    reward_mult: int = 10,
+    queries: Optional[List[str]] = None,
+    overwrite_reward_fn_tag: Optional[str] = None,
+    num_samples_per_prompt_rollout: int = 1,
+) -> Tuple[List[Tuple[float, Tuple[int, int], int, int]], Dict[str, float]]:
+    """
+    Apply finegrained rewards and return the format expected by FGRPO.
+    
+    This function is specifically designed for finegrained reward functions that return
+    FinegrainedRewardOutput objects. It processes multiple responses in parallel and
+    returns the finegrained scores with proper scaling and response indexing.
+    
+    Args:
+        reward_fn_mapping: Dictionary mapping dataset names to verifier functions
+        responses: List of tokenized responses
+        decoded_responses: List of decoded response strings
+        ground_truths: List of ground truth labels/references
+        datasets: List of dataset names (can be nested lists)
+        reward_mult: Multiplier for reward scaling
+        queries: Optional list of queries/questions
+        overwrite_reward_fn_tag: Optional tag to override dataset-based reward function selection
+    
+    Returns:
+        Tuple of (finegrained_scores, aggregated_log_values) where:
+        - finegrained_scores: List of FinegrainedScore objects
+        - aggregated_log_values: Dict of aggregated metrics for logging
+    """
+    if queries is None:
+        queries = [None] * len(responses)
+
+    # Collect all async tasks for parallel execution
+    async_tasks = []
+    task_metadata = []
+
+    for i, (tok_prediction, prediction, ground_truth, dataset, query) in enumerate(
+        zip(responses, decoded_responses, ground_truths, datasets, queries)
+    ):
+        # Handle multiple ground truths and datasets
+        if isinstance(ground_truth, str):
+            ground_truth_list = [ground_truth]
+        else:
+            ground_truth_list = ground_truth
+        if isinstance(dataset, str):
+            dataset_list = [dataset]
+        else:
+            dataset_list = dataset
+        assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
+
+        # Create async tasks for each ground truth/dataset pair
+        for gt, ds in zip(ground_truth_list, dataset_list):
+            # Use override tag if provided, otherwise use dataset name
+            reward_key = overwrite_reward_fn_tag.lower() if overwrite_reward_fn_tag else ds.lower()
+            reward_func = reward_fn_mapping.get(reward_key)
+            if reward_func is None:
+                if overwrite_reward_fn_tag:
+                    logger.warning("No reward function found for override tag %s. Skipping reward.", overwrite_reward_fn_tag)
+                else:
+                    logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
+                continue
+
+            # Create async task
+            task = reward_func.async_call(
+                tokenized_prediction=tok_prediction,
+                prediction=prediction,
+                label=gt,
+                query=query,
+            )
+            async_tasks.append(task)
+            # response filtering happens after reward calculation, so we can directly compute the query_idx here
+            task_metadata.append(
+                {"response_idx": i, "query_idx": i // num_samples_per_prompt_rollout, "dataset": ds, "reward_weight": reward_func.weight, "reward_mult": reward_mult}
+            )
+
+    # Execute all tasks in parallel
+    if async_tasks:
+        reward_results = await asyncio.gather(*async_tasks)
+        logger.info(f"Applied {len(reward_results)} finegrained rewards in parallel 🎯")
+    else:
+        reward_results = []
+
+    # Process finegrained results
+    all_finegrained_scores = []
+    aggregated_log_values = defaultdict(list)
+    
+    for result, metadata in zip(reward_results, task_metadata):
+        query_idx = metadata["query_idx"]
+        reward_mult = metadata["reward_mult"]
+        reward_weight = metadata["reward_weight"]
+        
+        assert hasattr(result, "finegrained_scores"), "Result must be a FinegrainedRewardOutput"
+        # This is a FinegrainedRewardOutput
+        for score_obj in result.finegrained_scores:
+            # Apply scaling and set correct query index
+            scaled_score = reward_mult * score_obj.score * reward_weight
+            score_obj.score = scaled_score
+            score_obj.query_idx = query_idx
+            all_finegrained_scores.append(score_obj)
+        
+        # Collect log values
+        if result.log_values is not None:
+            for key, value in result.log_values.items():
+                aggregated_log_values[key].append(value)
+
+    # Convert aggregated log values to means
+    final_log_values = {}
+    for key, values in aggregated_log_values.items():
+        final_log_values[key] = np.mean(values) if values else 0.0
+
+    return all_finegrained_scores, final_log_values
 
 
 def forward(

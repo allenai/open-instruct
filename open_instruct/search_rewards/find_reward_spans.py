@@ -1,8 +1,9 @@
 import re
 from typing import List, Tuple, Dict, Any
+from open_instruct.ground_truth_utils import FinegrainedScore
 
 
-def find_format_reward_spans(response: str) -> List[Tuple[float, Tuple[int, int], int, int]]:
+def find_format_reward_spans(response: str) -> List[FinegrainedScore]:
     """
     Find spans for format rewards.
     
@@ -10,7 +11,7 @@ def find_format_reward_spans(response: str) -> List[Tuple[float, Tuple[int, int]
     For negative rewards: penalize the whole response
     
     Returns:
-        List of (score, (start_char, end_char), reward_group_id, response_idx) tuples
+        List of FinegrainedScore objects
         reward_group_id: 0=answer_format, 1=citation_format, 2=query_format
     """
     spans = []
@@ -21,11 +22,23 @@ def find_format_reward_spans(response: str) -> List[Tuple[float, Tuple[int, int]
     if answer_match:
         # Positive reward for answer tags
         answer_format_reward = 1.0
-        spans.append((answer_format_reward, answer_match.span(), 0, 0))
+        spans.append(FinegrainedScore(
+            score=answer_format_reward, 
+            effective_span=answer_match.span(), 
+            reward_group_id=0, 
+            reward_group_name="answer_format",
+            response_idx=None
+        ))
     else:
         # Negative reward for whole response
         answer_format_reward = 0.0
-        spans.append((answer_format_reward, (0, len(response)), 0, 0))
+        spans.append(FinegrainedScore(
+            score=answer_format_reward, 
+            effective_span=(0, len(response)), 
+            reward_group_id=0, 
+            reward_group_name="answer_format",
+            response_idx=None
+        ))
     
     # Check citation format - reward group 1
     citation_pattern = r"<cite id=[\"\']?[^\"\'>\s]+[\"\']?[^>]*>[^<]+</cite>"
@@ -34,11 +47,17 @@ def find_format_reward_spans(response: str) -> List[Tuple[float, Tuple[int, int]
         # Positive reward for each citation tag
         citation_format_reward = 1.0
         for match in citation_matches:
-            spans.append((citation_format_reward, match.span(), 1, 0))
+            spans.append(FinegrainedScore(
+                score=citation_format_reward, 
+                effective_span=match.span(), 
+                reward_group_id=1, 
+                reward_group_name="citation_format",
+                response_idx=None
+            ))
     else:
         # Negative reward for whole response
         citation_format_reward = 0.0
-        spans.append((citation_format_reward, (0, len(response)), 1, 0))
+        spans.append(FinegrainedScore(score=citation_format_reward, effective_span=(0, len(response)), reward_group_id=1, response_idx=None))
     
     # Check query format - reward group 2
     query_pattern = r"<query>.*?</query>"
@@ -47,16 +66,28 @@ def find_format_reward_spans(response: str) -> List[Tuple[float, Tuple[int, int]
         # Positive reward for each query tag
         query_format_reward = 1.0
         for match in query_matches:
-            spans.append((query_format_reward, match.span(), 2, 0))
+            spans.append(FinegrainedScore(
+                score=query_format_reward, 
+                effective_span=match.span(), 
+                reward_group_id=2, 
+                reward_group_name="query_format",
+                response_idx=None
+            ))
     else:
         # Negative reward for whole response
         query_format_reward = 0.0
-        spans.append((query_format_reward, (0, len(response)), 2, 0))
+        spans.append(FinegrainedScore(
+            score=query_format_reward, 
+            effective_span=(0, len(response)), 
+            reward_group_id=2, 
+            reward_group_name="query_format",
+            response_idx=None
+        ))
     
     return spans
 
 
-def find_search_turns_reward_spans(response: str, extracted_context: str, num_search_turns_reward: float) -> List[Tuple[float, Tuple[int, int], int, int]]:
+def find_search_turns_reward_spans(response: str, extracted_context: str, num_search_turns_reward: float) -> List[FinegrainedScore]:
     """
     Find spans for search turns rewards.
     
@@ -64,7 +95,7 @@ def find_search_turns_reward_spans(response: str, extracted_context: str, num_se
     For negative rewards: penalize the whole response
     
     Returns:
-        List of (score, (start_char, end_char), reward_group_id, response_idx) tuples
+        List of FinegrainedScore objects
         reward_group_id: 3=search_turns
     """
     spans = []
@@ -79,30 +110,46 @@ def find_search_turns_reward_spans(response: str, extracted_context: str, num_se
                 # Reward the content inside query tags (not the tags themselves)
                 content_start = match.start() + len("<query>")
                 content_end = match.end() - len("</query>")
-                spans.append((num_search_turns_reward, (content_start, content_end), 3, 0))
+                spans.append(FinegrainedScore(
+                    score=num_search_turns_reward, 
+                    effective_span=(content_start, content_end), 
+                    reward_group_id=3, 
+                    reward_group_name="search_turns",
+                    response_idx=None))
         else:
             # If no query tags found but reward > 0, reward whole response
-            spans.append((num_search_turns_reward, (0, len(response)), 3, 0))
+            spans.append(FinegrainedScore(
+                score=num_search_turns_reward, 
+                effective_span=(0, len(response)), 
+                reward_group_id=3, 
+                reward_group_name="search_turns",
+                response_idx=None))
     else:
         # Negative reward for whole response
-        spans.append((num_search_turns_reward, (0, len(response)), 3, 0))
+        spans.append(FinegrainedScore(
+            score=num_search_turns_reward, 
+            effective_span=(0, len(response)), 
+            reward_group_id=3, 
+            reward_group_name="search_turns",
+            response_idx=None
+        ))
     
     return spans
 
 
-def find_rubric_reward_spans(response: str, extracted_answer: str, rubric_reward: float) -> List[Tuple[float, Tuple[int, int], int, int]]:
+def find_rubric_reward_spans(response: str, extracted_answer: str, rubric_reward: float) -> List[FinegrainedScore]:
     """
     Find spans for rubric rewards.
     
     Reward/penalize the string between answer tags.
     
     Returns:
-        List of (score, (start_char, end_char), reward_group_id, response_idx) tuples
+        List of FinegrainedScore objects
         reward_group_id: 4=rubric
     """
     spans = []
     
-    if extracted_answer is not None:
+    if extracted_answer:
         # Find the answer span in the response
         answer_pattern = r"<answer>(.*?)</answer>"
         answer_match = re.search(answer_pattern, response, re.DOTALL)
@@ -111,25 +158,37 @@ def find_rubric_reward_spans(response: str, extracted_answer: str, rubric_reward
             # Reward/penalize the content inside answer tags
             content_start = answer_match.start() + len("<answer>")
             content_end = answer_match.end() - len("</answer>")
-            spans.append((rubric_reward, (content_start, content_end), 4, 0))
+            spans.append(FinegrainedScore(
+                score=rubric_reward, 
+                effective_span=(content_start, content_end), 
+                reward_group_id=4, 
+                reward_group_name="rubric",
+                response_idx=None
+            ))
         else:
             # Fallback: reward/penalize whole response
-            spans.append((rubric_reward, (0, len(response)), 4, 0))
+            spans.append(FinegrainedScore(score=rubric_reward, effective_span=(0, len(response)), reward_group_id=4, reward_group_name="rubric", response_idx=None))
     else:
         # No answer extracted, penalize whole response
-        spans.append((0.0, (0, len(response)), 4, 0))
+        spans.append(FinegrainedScore(
+            score=0.0, 
+            effective_span=(0, len(response)), 
+            reward_group_id=4, 
+            reward_group_name="rubric",
+            response_idx=None
+        ))
     
     return spans
 
 
-def find_citation_reward_spans(response: str, extracted_citations: Dict[str, str], citation_reward: float) -> List[Tuple[float, Tuple[int, int], int, int]]:
+def find_citation_reward_spans(response: str, extracted_citations: Dict[str, str], citation_reward: float) -> List[FinegrainedScore]:
     """
     Find spans for citation rewards.
     
     Reward/penalize the spans between citation tags.
     
     Returns:
-        List of (score, (start_char, end_char), reward_group_id, response_idx) tuples
+        List of FinegrainedScore objects
         reward_group_id: 5=citation
     """
     spans = []
@@ -149,11 +208,23 @@ def find_citation_reward_spans(response: str, extracted_citations: Dict[str, str
             cite_start_tag_end = match.start() + full_match.find('>') + 1
             cite_end_tag_start = match.end() - len("</cite>")
             
-            spans.append((citation_reward, (cite_start_tag_end, cite_end_tag_start), 5, 0))
+            spans.append(FinegrainedScore(
+                score=citation_reward, 
+                effective_span=(cite_start_tag_end, cite_end_tag_start), 
+                reward_group_id=5, 
+                reward_group_name="citation",
+                response_idx=None
+            ))
     else:
         # No citations found, penalize whole response if reward is negative, or no span if positive
         if citation_reward <= 0:
-            spans.append((citation_reward, (0, len(response)), 5, 0))
+            spans.append(FinegrainedScore(
+                score=citation_reward, 
+                effective_span=(0, len(response)), 
+                reward_group_id=5, 
+                reward_group_name="citation",
+                response_idx=None
+            ))
     
     return spans
 
@@ -167,30 +238,30 @@ def combine_all_reward_spans(
     num_search_turns_reward: float,
     rubric_reward: float,
     citation_reward: float
-) -> List[Tuple[float, Tuple[int, int], int, int]]:
+) -> List[FinegrainedScore]:
     """
     Combine all reward spans from different reward types.
     
     Returns:
-        List of (score, (start_char, end_char), reward_group_id, response_idx) tuples
+        List of FinegrainedScore objects
         reward_group_ids: 0-2=format rewards, 3=search_turns, 4=rubric, 5=citation
     """
-    all_spans = []
+    all_rewards_with_spans = []
     
     # Format reward spans (groups 0-2)
     format_spans = find_format_reward_spans(response)
-    all_spans.extend(format_spans)
+    all_rewards_with_spans.extend(format_spans)
     
     # Search turns reward spans (group 3)
     search_spans = find_search_turns_reward_spans(response, extracted_context, num_search_turns_reward)
-    all_spans.extend(search_spans)
+    all_rewards_with_spans.extend(search_spans)
     
     # Rubric reward spans (group 4)
     rubric_spans = find_rubric_reward_spans(response, extracted_answer, rubric_reward)
-    all_spans.extend(rubric_spans)
+    all_rewards_with_spans.extend(rubric_spans)
     
     # Citation reward spans (group 5)
     citation_spans = find_citation_reward_spans(response, extracted_citations, citation_reward)
-    all_spans.extend(citation_spans)
+    all_rewards_with_spans.extend(citation_spans)
     
-    return all_spans 
+    return all_rewards_with_spans
