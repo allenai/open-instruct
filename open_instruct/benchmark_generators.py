@@ -349,19 +349,14 @@ def generate_thread(
 ) -> None:
     """Thread that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] Starting generation thread")
-    try:
-        while not stop_event.is_set():
-            processed_results = ray.get([engine.process_from_queue.remote(timeout=20) for engine in vllm_engines])
-            num_processed = sum(int(result) for result in processed_results)
+    while not stop_event.is_set():
+        processed_results = ray.get([engine.process_from_queue.remote(timeout=20) for engine in vllm_engines])
+        num_processed = sum(int(result) for result in processed_results)
 
-            if num_processed == 0:
-                time.sleep(0.1)
-            else:
-                logger.debug(f"[Generate Thread] Processed {num_processed} requests")
-    except Exception as e:
-        logger.error(f"[Generate Thread] Error in generation thread: {e}")
-        error_queue.put(e)
-        stop_event.set()
+        if num_processed == 0:
+            time.sleep(0.1)
+        else:
+            logger.debug(f"[Generate Thread] Processed {num_processed} requests")
 
 
 def submission_thread(
@@ -373,19 +368,14 @@ def submission_thread(
 ) -> None:
     """Thread that submits prompts to the queue."""
     logger.info("[Submission Thread] Starting prompt submission")
-    try:
-        for batch_idx, prompts in enumerate(all_prompts):
-            if stop_event.is_set():
-                logger.info("[Submission Thread] Stopped due to stop event")
-                break
-            param_prompt_Q.put(
-                PromptRequest(prompts=prompts, dataset_index=batch_idx, generation_config=generation_config)
-            )
-        logger.info(f"[Submission Thread] All {len(all_prompts)} prompts submitted")
-    except Exception as e:
-        logger.error(f"[Submission Thread] Error: {e}")
-        error_queue.put(e)
-        stop_event.set()
+    for batch_idx, prompts in enumerate(all_prompts):
+        if stop_event.is_set():
+            logger.info("[Submission Thread] Stopped due to stop event")
+            break
+        param_prompt_Q.put(
+            PromptRequest(prompts=prompts, dataset_index=batch_idx, generation_config=generation_config)
+        )
+    logger.info(f"[Submission Thread] All {len(all_prompts)} prompts submitted")
 
 
 def run_benchmark(
@@ -432,41 +422,15 @@ def run_benchmark(
     warmup_prompts = all_prompts[0]
     param_prompt_Q.put(PromptRequest(prompts=warmup_prompts, dataset_index=0, generation_config=generation_config))
 
-    submission_start_time = time.time()
-    # Receive results and measure time for each batch
-    last_completion_time = submission_start_time
-
     try:
-        # Wait for warmup batch to complete (no timing)
         logger.info("Running warmup batch...")
 
-        if not error_queue.empty():
-            error = error_queue.get()
-            logger.error(f"Thread error detected: {error}")
-            raise error
-
-        # Check generation thread status
-        if generation_future.done():
-            try:
-                generation_future.result(timeout=0)
-            except futures.TimeoutError:
-                pass
-            except Exception as e:
-                logger.error(f"Generation thread failed: {e}")
-                raise
-
-        # Get warmup batch result but don't time it
         _ = inference_results_Q.get()
         logger.info("Warmup batch completed")
-
-        # Now submit remaining batches
         logger.info(f"Submitting {num_batches - 1} batches for main benchmark...")
-        remaining_prompts = all_prompts[1:]  # Skip the warmup batch
         submission_future = executor.submit(
-            submission_thread, param_prompt_Q, remaining_prompts, generation_config, stop_event, error_queue
+            submission_thread, param_prompt_Q, all_prompts[1:], generation_config, stop_event, error_queue
         )
-
-        # Reset timing after warmup
         last_completion_time = time.time()
 
         # Process remaining batches with timing
@@ -476,16 +440,8 @@ def run_benchmark(
                 logger.error(f"Thread error detected: {error}")
                 raise error
 
-            for future, name in [(submission_future, "submission"), (generation_future, "generation")]:
-                if future.done():
-                    try:
-                        future.result(timeout=0)
-                    except futures.TimeoutError:
-                        pass
-                    except Exception as e:
-                        logger.error(f"Thread {name} failed: {e}")
-                        raise
-
+            # Quick health check!
+            [future.result() for future in [submission_future, generation_future] if future.done()]
             result = inference_results_Q.get()
 
             completion_time = time.time()
@@ -520,10 +476,6 @@ def run_benchmark(
         print_summary(results, main_benchmark_time, args, model_config)
         save_benchmark_results_to_csv(results, main_benchmark_time, args, model_config)
 
-    except Exception as e:
-        logger.error(f"Error during benchmark: {e}")
-        stop_event.set()
-        raise
     finally:
         stop_event.set()
         executor.shutdown(wait=True)
