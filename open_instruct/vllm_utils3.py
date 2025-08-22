@@ -465,7 +465,6 @@ class LLMRayActor:
                 expected_n = metadata["generation_config"].n
 
                 if len(collected_outputs[base_request_id]) != expected_n:
-                    self.logger.info(f"[process_from_queue] Not ready to process {base_request_id} yet, continuing...")
                     continue
 
                 outputs_to_finalize = collected_outputs[base_request_id]
@@ -499,9 +498,7 @@ class LLMRayActor:
             outputs.extend(tool_outputs)
 
         if self.llm_engine.has_unfinished_requests():
-            self.logger.info("[_step_engine] Stepping engine, has unfinished requests")
             step_outputs = list(self.llm_engine.step())
-            self.logger.info(f"[_step_engine] Got {len(step_outputs)} step outputs")
 
             for output in step_outputs:
                 if output.finished:
