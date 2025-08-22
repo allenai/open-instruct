@@ -2316,6 +2316,7 @@ def cleanup_training_resources(
     # Signal generate_thread to stop
     stop_event.set()
 
+    logger.info("Signaling all actors to stop...")
     ray.get(actor_manager.set_should_stop.remote(True))
     logger.info("✅ Signaled all actors to stop")
 
@@ -2518,7 +2519,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     queue_size = (args.async_steps + 1) * args.num_unique_prompts_rollout
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
-    # Size eval queue based on actual eval samples (num_eval_samples) with 2x overhead for buffering
+    # Size eval queue based on actual eval samples (num_eval_samples) with 2x overhead for buffering.
     evaluation_inference_results_Q = ray_queue.Queue(maxsize=num_eval_samples * 2)
 
     policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (

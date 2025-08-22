@@ -42,7 +42,7 @@ from torch.distributed.distributed_c10d import (
 from tqdm import tqdm
 
 from open_instruct import logger_utils
-from open_instruct.queue_types import GenerationResult, RequestInfo
+from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo
 from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
@@ -74,7 +74,6 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     if not tools:
         return output
 
-    logger.info(f"[_handle_output] Processing output {output.request_id} with tools")
     assert len(output.outputs) <= 1  # In tool mode, sampling_params.n == 1
     o = output.outputs[0]
 
@@ -89,7 +88,6 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     # Check for tool calls
     for stop_str in sampling_params.stop:
         if stop_str in tools and o.text.endswith(stop_str):
-            logger.info(f"[_handle_output] Tool call detected for {output.request_id}, stop_str={stop_str}")
             if tracking["num_calls"][output.request_id] < max_tool_calls.get(stop_str, 0):
                 tool = tools[stop_str]
             else:
@@ -97,11 +95,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
             future = executor.submit(tool, o.text)
             tracking["pending_tool_futures"][output.request_id] = (future, o, output)
-            logger.info(f"[_handle_output] Tool execution scheduled for {output.request_id}")
-
             return None  # Output is being held for tool processing
-
-    logger.info(f"[_handle_output] No tool call for {output.request_id}, returning output")
     return output
 
 
@@ -288,12 +282,10 @@ class ActorManager:
     """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
 
     def __init__(self):
-        self.logger = logger_utils.setup_logger(__name__)
         self._should_stop = False
 
     def set_should_stop(self, should_stop: bool):
         """Set whether actors should stop processing."""
-        self.logger.info(f"[ActorManager] Setting should_stop from {self._should_stop} to {should_stop}")
         self._should_stop = should_stop
 
     def should_stop(self) -> bool:
@@ -301,7 +293,7 @@ class ActorManager:
         return self._should_stop
 
 
-def add_request(request, llm_engine: vllm.LLMEngine, tools, request_metadata: dict = None):
+def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, request_metadata: dict = None):
     """Add a request to the LLM engine."""
     prefix = "eval" if request.is_eval else "train"
     request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
@@ -314,26 +306,16 @@ def add_request(request, llm_engine: vllm.LLMEngine, tools, request_metadata: di
 
     tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt)
 
-    # Always manually duplicate requests for a single code path
-    logger.info(f"[add_request] Adding request {request_id}, n={request.generation_config.n}, tools={bool(tools)}")
-
+    # We *have* to manually duplicate requests to properly handle tool tracking,
+    # so we always do it to only have one code path.
     # Create sampling params with n=1 for individual tracking
     sampling_params = copy.deepcopy(request.generation_config)
-    original_n = request.generation_config.n
     sampling_params.n = 1
     metadata["sampling_params"] = sampling_params
-    metadata["original_n"] = original_n  # Store original n for later use
-    metadata["generation_config"] = request.generation_config  # Store original config
-    metadata["has_tools"] = bool(tools)  # Track whether this request uses tools
-
-    # Store metadata under base request ID for collection phase
+    metadata["generation_config"] = request.generation_config
     request_metadata[request_id] = metadata
-    logger.info(f"[add_request] Stored metadata for base request {request_id}")
-
-    # Manually duplicate requests based on original_n
-    for j in range(original_n):
+    for j in range(request.generation_config.n):
         sub_request_id = f"{request_id}-{j}"
-        logger.info(f"[add_request] Adding sub-request {sub_request_id}")
         llm_engine.add_request(sub_request_id, tokens_prompt, sampling_params)
         request_metadata[sub_request_id] = metadata
 
@@ -393,7 +375,7 @@ class LLMRayActor:
         if inference_batch_size is None:
             raise ValueError("inference_batch_size must be specified.")
         self.inference_batch_size = inference_batch_size
-        self.request_metadata = {}  # Track request metadata by ID
+        self.request_metadata = {}
 
         # For caching should_stop status.
         self._last_should_stop_update = None
@@ -450,15 +432,11 @@ class LLMRayActor:
         tracking = _init_tool_tracking() if self.tools else None
         tokenizer = self.llm_engine.tokenizer if self.tools else None
 
-        # Track collected outputs for all requests (unified approach)
         collected_outputs = {}
 
         if self._should_stop():
             return num_processed
 
-        self.logger.info(
-            f"[process_from_queue] Starting, tools={bool(self.tools)}, batch_size={self.inference_batch_size}"
-        )
         for i in tqdm(
             range(self.inference_batch_size),
             desc="[vLLM] Pre-filling requests",
@@ -474,84 +452,32 @@ class LLMRayActor:
                     break
                 # Otherwise continue trying to get more requests
 
-        self.logger.info("[process_from_queue] Pre-fill complete, entering main loop")
-        iteration = 0
         while True:
-            iteration += 1
             if self._should_stop() and self.inflight_updates:
                 return num_processed
-
             outputs = self._step_engine(tracking, tokenizer)
-            if iteration % 100 == 0:
-                pending_tool_futures = len(tracking["pending_tool_futures"]) if self.tools else 0
-                num_unfinished = self.llm_engine.get_num_unfinished_requests()
-                self.logger.info(
-                    f"[process_from_queue] Iteration {iteration}: Got {len(outputs)} outputs, {num_unfinished} unfinished requests, {pending_tool_futures} pending tool futures"
-                )
-
             for output in outputs:
-                # Always extract base request ID (unified approach)
                 base_request_id = output.request_id.split("-")[0]
-                self.logger.info(
-                    f"[process_from_queue] Processing output for request_id={output.request_id}, base_id={base_request_id}"
-                )
 
-                # Collect outputs for the same base request (unified approach)
                 if base_request_id not in collected_outputs:
                     collected_outputs[base_request_id] = []
                 collected_outputs[base_request_id].append(output)
-                self.logger.info(
-                    f"[process_from_queue] Collected {len(collected_outputs[base_request_id])} outputs for base_id={base_request_id}"
-                )
-
-                # Check if we have all outputs for this request
-                self.logger.info(
-                    f"[process_from_queue] Looking up metadata for base_id={base_request_id}, available keys: {list(self.request_metadata.keys())[:10]}"
-                )
                 metadata = self.request_metadata[base_request_id]
-                expected_n = metadata["original_n"]  # Use original_n which is always set
-                self.logger.info(
-                    f"[process_from_queue] Expected n={expected_n}, collected={len(collected_outputs[base_request_id])}"
-                )
+                expected_n = metadata["generation_config"].n
 
-                # Only process when we have all expected outputs
                 if len(collected_outputs[base_request_id]) != expected_n:
                     self.logger.info(f"[process_from_queue] Not ready to process {base_request_id} yet, continuing...")
                     continue
 
-                # All outputs collected, process them
                 outputs_to_finalize = collected_outputs[base_request_id]
-                self.logger.info(f"[process_from_queue] All outputs collected for {base_request_id}, processing...")
 
-                # Get metadata
-                is_eval = metadata["is_eval"]
-                dataset_index = metadata["dataset_index"]
-                has_tools = metadata["has_tools"]
                 num_processed += 1
-                self.logger.info(
-                    f"[process_from_queue] Processing request {base_request_id}: is_eval={is_eval}, dataset_index={dataset_index}, has_tools={has_tools}"
-                )
-
-                # Finalize outputs and insert into queue
-                result = _finalize_outputs(outputs_to_finalize, tracking, dataset_index, self.tools)
-                self._insert_result_to_queue(result, is_eval)
-
-                # Clean up collected outputs and metadata (unified approach)
+                result = _finalize_outputs(outputs_to_finalize, tracking, metadata["dataset_index"], self.tools)
+                self._insert_result_to_queue(result, metadata["is_eval"])
                 del collected_outputs[base_request_id]
-                original_n = metadata["original_n"]
-                self.logger.info(
-                    f"[process_from_queue] Cleaning up metadata for {base_request_id} and {original_n} sub-requests"
-                )
-
-                # Clean up base request metadata
                 self.request_metadata.pop(base_request_id, None)
-                # Also clean up sub-request metadata
-                for i in range(original_n):
-                    sub_id = f"{base_request_id}-{i}"
-                    self.request_metadata.pop(sub_id, None)
-                    self.logger.info(f"[process_from_queue] Cleaned up metadata for {sub_id}")
-
-                # Try to add a new request
+                for i in range(metadata["generation_config"].n):
+                    self.request_metadata.pop(f"{base_request_id}-{i}", None)
                 self._maybe_add_new_request()
 
             if self._should_stop() and not self.inflight_updates:
@@ -579,26 +505,16 @@ class LLMRayActor:
             self.logger.info(f"[_step_engine] Got {len(step_outputs)} step outputs")
 
             for output in step_outputs:
-                self.logger.info(f"[_step_engine] Output {output.request_id}: finished={output.finished}")
                 if output.finished:
-                    self.logger.info(f"[_step_engine] Looking up sampling params for {output.request_id}")
                     sampling_params = self.request_metadata[output.request_id]["sampling_params"]
                     result = _handle_output(
                         output, self.tools, tracking, sampling_params, self.max_tool_calls, self.executor
                     )
                     if result is not None:
                         outputs.append(result)
-                        self.logger.info(f"[_step_engine] Added output for {output.request_id}")
-                    else:
-                        self.logger.info(f"[_step_engine] Output {output.request_id} held for tool processing")
-        else:
-            self.logger.info("[_step_engine] No unfinished requests")
-
-        # Try to keep engine filled up to inference_batch_size
         while self.llm_engine.get_num_unfinished_requests() < self.inference_batch_size:
             if not self._maybe_add_new_request():
                 break
-            self.logger.info("[_step_engine] Added request")
 
         return outputs
 
@@ -618,8 +534,8 @@ class LLMRayActor:
             if not future.done():
                 continue
 
-            # Tool future is done, process it
-            tool_result = future.result()  # Get the tool result
+            # Tool future is done, process it.
+            tool_result = future.result()
 
             last_prompt_token_ids = last_output.prompt_token_ids
             last_token_ids = last_o.token_ids
@@ -672,15 +588,11 @@ class LLMRayActor:
                     # Update the sampling params in request_metadata for the restarted request
                     if req_id in self.request_metadata:
                         self.request_metadata[req_id]["sampling_params"] = new_sampling_params
-                    self.logger.info(
-                        f"[_poll_tool_futures] Restarted request {req_id} with {new_sample_tokens} tokens"
-                    )
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
                     self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
                     completed_outputs.append(tracking["concat_outputs"][req_id])
             else:
-                self.logger.info(f"[_poll_tool_futures] Request {req_id} is complete (no more tokens)")
                 completed_outputs.append(tracking["concat_outputs"][req_id])
 
             dict_keys_to_delete.append(req_id)

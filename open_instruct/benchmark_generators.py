@@ -300,9 +300,9 @@ def setup_vllm_engines(
     pg = ray.util.placement_group(bundles, strategy="PACK")
     ray.get(pg.ready())
 
-    # Queue size needs to accommodate all individual prompts across all batches,
-    # not counting the number of samples per prompt.
-    # Total prompts = num_unique_prompts_rollout * num_batches
+    # Queue size needs to accommodate all individual prompts across all batches.
+    # Each batch has num_unique_prompts_rollout prompts, and we submit them individually.
+    # Total individual prompts = num_unique_prompts_rollout * num_batches
     queue_size = args.num_unique_prompts_rollout * num_batches
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
@@ -365,16 +365,26 @@ def submission_thread(
     generation_config: vllm.SamplingParams,
     stop_event: threading.Event,
 ) -> None:
-    """Thread that submits prompts to the queue."""
+    """Thread that submits individual prompts to the queue."""
     logger.info("[Submission Thread] Starting prompt submission")
+    total_prompts_submitted = 0
     for batch_idx, prompts in enumerate(all_prompts):
         if stop_event.is_set():
             logger.info("[Submission Thread] Stopped due to stop event")
             break
-        param_prompt_Q.put(
-            PromptRequest(prompts=prompts, dataset_index=batch_idx, generation_config=generation_config)
-        )
-    logger.info(f"[Submission Thread] All {len(all_prompts)} prompts submitted")
+        # Submit each prompt individually, matching grpo_fast.py behavior
+        for prompt_idx, prompt in enumerate(prompts):
+            param_prompt_Q.put(
+                PromptRequest(
+                    prompt=prompt,
+                    generation_config=generation_config,
+                    training_step=batch_idx + 1,  # batch_idx + 1 since warmup is batch 0
+                    dataset_index=batch_idx * len(prompts) + prompt_idx,
+                    is_eval=False,
+                )
+            )
+            total_prompts_submitted += 1
+    logger.info(f"[Submission Thread] All {total_prompts_submitted} individual prompts submitted")
 
 
 def run_benchmark(
@@ -415,46 +425,72 @@ def run_benchmark(
         get_batch_data(dataset, args.num_unique_prompts_rollout, batch_idx) for batch_idx in range(num_batches)
     ]
 
-    # Submit warmup batch first
+    # Submit warmup batch first - submit each prompt individually
     logger.info("Submitting warmup batch...")
     warmup_prompts = all_prompts[0]
-    param_prompt_Q.put(PromptRequest(prompts=warmup_prompts, dataset_index=0, generation_config=generation_config))
+    for prompt_idx, prompt in enumerate(warmup_prompts):
+        param_prompt_Q.put(
+            PromptRequest(
+                prompt=prompt,
+                generation_config=generation_config,
+                training_step=0,  # warmup is training step 0
+                dataset_index=prompt_idx,
+                is_eval=False,
+            )
+        )
 
     try:
         logger.info("Running warmup batch...")
 
-        _ = inference_results_Q.get()
+        # Collect results for all warmup prompts
+        warmup_results = []
+        for _ in range(args.num_unique_prompts_rollout):
+            warmup_results.append(inference_results_Q.get())
         logger.info("Warmup batch completed")
         logger.info(f"Submitting {num_batches - 1} batches for main benchmark...")
         submission_future = executor.submit(
             submission_thread, param_prompt_Q, all_prompts[1:], generation_config, stop_event
         )
-        last_completion_time = time.time()
 
         # Process remaining batches with timing
         for batch_idx in range(1, num_batches):
             # Quick health check!
             [future.result() for future in [submission_future, generation_future] if future.done()]
-            result = inference_results_Q.get()
+
+            batch_start_time = time.time()
+            batch_results = []
+
+            # Collect results for all prompts in this batch
+            for _ in range(args.num_unique_prompts_rollout):
+                batch_results.append(inference_results_Q.get())
 
             completion_time = time.time()
-            batch_generation_time = completion_time - last_completion_time
-            last_completion_time = completion_time
+            batch_generation_time = completion_time - batch_start_time
 
-            new_tokens = sum(len(response) for response in result.responses)
-            tokens_per_second = new_tokens / batch_generation_time if batch_generation_time > 0 else 0
+            # Aggregate metrics from all individual results
+            total_new_tokens = 0
+            all_response_lengths = []
+            all_finish_reasons = []
+
+            for result in batch_results:
+                # Each result has n=num_samples_per_prompt_rollout responses
+                total_new_tokens += sum(len(response) for response in result.responses)
+                all_response_lengths.extend([len(response) for response in result.responses])
+                all_finish_reasons.extend(result.finish_reasons)
+
+            tokens_per_second = total_new_tokens / batch_generation_time if batch_generation_time > 0 else 0
 
             result_dict = {
                 "tokens_per_second": tokens_per_second,
                 "generation_time": batch_generation_time,
-                "num_new_tokens": new_tokens,
-                "finish_reasons": collections.Counter(result.finish_reasons),
-                "response_lengths": [len(response) for response in result.responses],
-                "batch_idx": result.dataset_index,
+                "num_new_tokens": total_new_tokens,
+                "finish_reasons": collections.Counter(all_finish_reasons),
+                "response_lengths": all_response_lengths,
+                "batch_idx": batch_idx,
             }
             result_dict["mfu"] = 100 * result_dict["tokens_per_second"] * flops_per_token / device_flops
 
-            save_completion_lengths([result_dict], timestamp, result.dataset_index)
+            save_completion_lengths([result_dict], timestamp, batch_idx)
             results.append(result_dict)
             logger.info(
                 f"Batch {batch_idx}/{num_batches - 1}: "
