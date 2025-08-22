@@ -343,6 +343,7 @@ def get_batch_data(
 
     batch_data = dataset[start_idx:end_idx]
     prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+    logger.info(f"get_batch_data: batch_idx={batch_idx}, returning {len(prompts)} unique prompts")
     return prompts
 
 
@@ -422,8 +423,9 @@ def run_benchmark(
     try:
         logger.info("Running warmup batch...")
 
-        _ = inference_results_Q.get()
-        logger.info("Warmup batch completed")
+        warmup_result = inference_results_Q.get()
+        logger.info(f"Warmup batch completed with {len(warmup_result.responses)} responses")
+        logger.info(f"Expected {args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout} responses")
         logger.info(f"Submitting {num_batches - 1} batches for main benchmark...")
         submission_future = executor.submit(
             submission_thread, param_prompt_Q, all_prompts[1:], generation_config, stop_event
@@ -440,6 +442,14 @@ def run_benchmark(
             batch_generation_time = completion_time - last_completion_time
             last_completion_time = completion_time
 
+            # Debug logging to understand response count
+            num_responses = len(result.responses)
+            expected_responses = args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+            logger.info(
+                f"Batch {batch_idx}: Got {num_responses} responses, expected {expected_responses} "
+                f"({args.num_unique_prompts_rollout} prompts × {args.num_samples_per_prompt_rollout} rollouts)"
+            )
+            
             new_tokens = sum(len(response) for response in result.responses)
             tokens_per_second = new_tokens / batch_generation_time if batch_generation_time > 0 else 0
 
@@ -459,7 +469,8 @@ def run_benchmark(
                 f"Batch {batch_idx}/{num_batches - 1}: "
                 f"{result_dict['tokens_per_second']:.2f} new tokens/sec, "
                 f"MFU: {result_dict['mfu']:.2f}%, "
-                f"generation time: {batch_generation_time:.2f}s"
+                f"generation time: {batch_generation_time:.2f}s, "
+                f"total new tokens: {new_tokens}"
             )
 
         # Calculate total time for main benchmark only
