@@ -133,8 +133,8 @@ def save_benchmark_results_to_csv(
     git_commit = get_git_commit()
     csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
 
-    # Calculate aggregated metrics (excluding first batch)
-    avg_results = average_results(results[1:])
+    # Calculate aggregated metrics for main benchmark batches only
+    avg_results = average_results(results)
     total_tokens = sum(r["num_new_tokens"] for r in results)
     total_generation_time = sum(r["generation_time"] for r in results)
 
@@ -400,7 +400,9 @@ def run_benchmark(
     num_batches: int = 5,
 ) -> list[dict[str, Any]]:
     """Run the full benchmark."""
-    logger.info(f"Starting benchmark with {num_batches} batches of size {args.num_unique_prompts_rollout}")
+    logger.info(
+        f"Starting benchmark with 1 warmup batch + {num_batches - 1} main batches of size {args.num_unique_prompts_rollout}"
+    )
 
     # Create sampling parameters with 'n' for multiple samples per prompt
     generation_config = vllm.SamplingParams(
@@ -417,7 +419,6 @@ def run_benchmark(
     generation_future = executor.submit(generate_thread, vllm_engines, stop_event, error_queue)
 
     results = []
-    total_start_time = time.time()
     device_name = get_device_name(torch.cuda.get_device_name(0))
     device_flops = GPU_SPECS[device_name]["flops"]
 
@@ -426,16 +427,50 @@ def run_benchmark(
         get_batch_data(dataset, args.num_unique_prompts_rollout, batch_idx) for batch_idx in range(num_batches)
     ]
 
-    submission_start_time = time.time()
-    submission_future = executor.submit(
-        submission_thread, param_prompt_Q, all_prompts, generation_config, stop_event, error_queue
-    )
+    # Submit warmup batch first
+    logger.info("Submitting warmup batch...")
+    warmup_prompts = all_prompts[0]
+    param_prompt_Q.put(PromptRequest(prompts=warmup_prompts, dataset_index=0, generation_config=generation_config))
 
+    submission_start_time = time.time()
     # Receive results and measure time for each batch
     last_completion_time = submission_start_time
 
     try:
-        for batch_idx in range(num_batches):
+        # Wait for warmup batch to complete (no timing)
+        logger.info("Running warmup batch...")
+
+        if not error_queue.empty():
+            error = error_queue.get()
+            logger.error(f"Thread error detected: {error}")
+            raise error
+
+        # Check generation thread status
+        if generation_future.done():
+            try:
+                generation_future.result(timeout=0)
+            except futures.TimeoutError:
+                pass
+            except Exception as e:
+                logger.error(f"Generation thread failed: {e}")
+                raise
+
+        # Get warmup batch result but don't time it
+        _ = inference_results_Q.get()
+        logger.info("Warmup batch completed")
+
+        # Now submit remaining batches
+        logger.info(f"Submitting {num_batches - 1} batches for main benchmark...")
+        remaining_prompts = all_prompts[1:]  # Skip the warmup batch
+        submission_future = executor.submit(
+            submission_thread, param_prompt_Q, remaining_prompts, generation_config, stop_event, error_queue
+        )
+
+        # Reset timing after warmup
+        last_completion_time = time.time()
+
+        # Process remaining batches with timing
+        for batch_idx in range(1, num_batches):
             if not error_queue.empty():
                 error = error_queue.get()
                 logger.error(f"Thread error detected: {error}")
@@ -473,16 +508,17 @@ def run_benchmark(
             save_completion_lengths([result_dict], timestamp, result.dataset_index)
             results.append(result_dict)
             logger.info(
-                f"Batch {result.dataset_index + 1}: "
+                f"Batch {batch_idx}/{num_batches - 1}: "
                 f"{result_dict['tokens_per_second']:.2f} new tokens/sec, "
                 f"MFU: {result_dict['mfu']:.2f}%, "
                 f"generation time: {batch_generation_time:.2f}s"
             )
 
-        total_time = time.time() - total_start_time
+        # Calculate total time for main benchmark only
+        main_benchmark_time = sum(r["generation_time"] for r in results)
 
-        print_summary(results, total_time, args, model_config)
-        save_benchmark_results_to_csv(results, total_time, args, model_config)
+        print_summary(results, main_benchmark_time, args, model_config)
+        save_benchmark_results_to_csv(results, main_benchmark_time, args, model_config)
 
     except Exception as e:
         logger.error(f"Error during benchmark: {e}")
@@ -524,28 +560,27 @@ def print_summary(
 ) -> None:
     """Print benchmark summary statistics."""
 
-    # Calculate metrics for all batches
+    # Calculate metrics only for the main benchmark batches (excluding warmup)
     total_tokens = sum(r["num_new_tokens"] for r in results)
     total_generation_time = sum(r["generation_time"] for r in results)
 
-    # Skip the first batch as it's unrepresentative thanks to warmup time.
-    # fields needed:
-    avg_results = average_results(results[1:])
+    # Average over the main benchmark results only
+    avg_results = average_results(results)
 
     print("\n" + "=" * 60)
     print("BENCHMARK SUMMARY")
     print("=" * 60)
     print(f"Model: {model_config.model_name_or_path}")
-    print(f"Total batches: {len(results)}")
+    print(f"Main benchmark batches: {len(results)} (after 1 warmup batch)")
     print(f"Batch size: {args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout}")
     print(f"Unique prompts per batch: {args.num_unique_prompts_rollout}")
     print(f"Num rollouts: {args.num_samples_per_prompt_rollout}")
     print(f"Max tokens: {args.response_length}")
     print("-" * 60)
-    print(f"Total time: {total_time:.2f}s ({total_generation_time / total_time:.4%} generating)")
+    print(f"Total time (main benchmark): {total_generation_time:.2f}s")
     print(f"Total new tokens generated: {total_tokens}")
     print("-" * 60)
-    print("Results (excluding first batch):")
+    print("Average results over 4 main benchmark batches:")
     print(f"Average tokens/second: {avg_results['tokens_per_second']:.2f}")
     print(f"Average MFU: {avg_results['mfu']:.2f}%")
     print(f"Average generation time per batch: {avg_results['generation_time']:.2f}s")
