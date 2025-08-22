@@ -24,7 +24,7 @@ gantry run \
        --gpus 1 \
        --description "Running benchmark with response length of $response_length at commit $git_hash on branch $git_branch with model $model_name_or_path." \
        --beaker-image nathanl/open_instruct_auto \
-       --cluster ai2/saturn-cirrascale \
+       --cluster ai2/prior-elanding \
        --budget ai2/oe-adapt \
        --install 'uv sync' \
        -- uv run python -m open_instruct.benchmark_generators \
