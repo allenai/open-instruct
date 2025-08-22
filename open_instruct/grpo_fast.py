@@ -1955,8 +1955,9 @@ def sync_weights_and_prepare_prompts(
         )
         weight_sync_queue.put(weight_sync_futures)
 
-        ray.get(actor_manager.set_should_stop.remote(False))
-        logger.debug(f"[Main Thread] Set should_stop to False after weight sync at step {training_step}")
+        logger.debug(
+            f"[Main Thread] Queued weight sync futures for step {training_step}, weight sync thread will handle completion"
+        )
 
     split_and_insert_batch(
         batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]
@@ -1989,23 +1990,31 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
     return collated_data, data_thread_metrics, num_total_tokens
 
 
-def generate_thread(
-    args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q, weight_sync_queue, actor_manager
-):
+def weight_sync_thread(stop_event, weight_sync_queue, actor_manager, weight_sync_metrics_Q):
+    """Thread function that handles weight sync operations and actor manager coordination."""
+    logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
+    while not stop_event.is_set():
+        try:
+            weight_sync_futures = weight_sync_queue.get(timeout=1.0)
+        except Empty:
+            continue
+
+        with Timer("Weight Sync") as timer:
+            ray.get(weight_sync_futures)
+            ray.get(actor_manager.set_should_stop.remote(False))
+
+        try:
+            weight_sync_metrics_Q.put_nowait({"time/weight_sync": timer.duration})
+        except Full:
+            logger.warning("[Weight Sync Thread] metrics queue full, skipping metric")
+
+    logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
+
+
+def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
     while not stop_event.is_set():
-        # Check for new weight sync requests
-        # and pause until they're done
-        try:
-            weight_sync_futures = weight_sync_queue.get_nowait()
-        except Empty:
-            pass
-        else:
-            with Timer("Weight Sync"):
-                ray.get(weight_sync_futures)
-                ray.get(actor_manager.set_should_stop.remote(False))
-
         with Timer("🔥 Generation time") as timer:
             processed_results = ray_get_with_progress(
                 [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
@@ -2403,6 +2412,7 @@ def run_training(
     pending_queries_map,
     eval_pending_queries_map,
     generate_metrics_Q,
+    weight_sync_metrics_Q,
     actor_manager: vllm_utils3.ActorManager,
 ):
     """Run the main training loop with worker threads."""
@@ -2427,14 +2437,12 @@ def run_training(
     logger.info("======== ✅ generation thread starts =========")
     weight_sync_queue = Queue()
     generation_future = executor.submit(
-        generate_thread,
-        args,
-        vllm_engines,
-        resume_training_step,
-        stop_event,
-        generate_metrics_Q,
-        weight_sync_queue,
-        actor_manager,
+        generate_thread, args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q
+    )
+
+    logger.info("======== ✅ weight sync thread starts =========")
+    weight_sync_future = executor.submit(
+        weight_sync_thread, stop_event, weight_sync_queue, actor_manager, weight_sync_metrics_Q
     )
 
     # Send initial data to ensure we have a N-step offset.
@@ -2468,7 +2476,7 @@ def run_training(
             )
 
         # Check if any of the threads have raised an exception.
-        [f.result() for f in [packing_future, generation_future] if f.done()]
+        [f.result() for f in [packing_future, generation_future, weight_sync_future] if f.done()]
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         sync_weights_and_prepare_prompts(
@@ -2505,13 +2513,13 @@ def run_training(
         if collated_data is None:
             continue
 
-        generate_metrics = {}
-        try:
-            generate_metrics = generate_metrics_Q.get_nowait()
-        except Empty:
-            logger.info("[Main Thread] didn't get generation metrics")
+        for metrics_Q in [generate_metrics_Q, weight_sync_metrics_Q]:
+            try:
+                metrics = metrics_Q.get_nowait()
+            except Empty:
+                logger.info("[Main Thread] didn't get generation metrics")
 
-        data_thread_metrics = {**data_thread_metrics, **generate_metrics}
+            data_thread_metrics = {**data_thread_metrics, **metrics}
 
         one_training_step(
             args,
@@ -2591,6 +2599,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     pending_queries_map = PendingQueriesMap()
     eval_pending_queries_map = PendingQueriesMap()
     generate_metrics_Q = Queue(maxsize=args.async_steps)
+    weight_sync_metrics_Q = Queue(maxsize=args.async_steps)
 
     if eval_dataset is None:
         eval_batch = None
@@ -2600,7 +2609,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     reward_fn = make_reward_fn(args)
 
     stop_event = threading.Event()
-    executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="grpo")
+    executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo")
 
     try:
         episode = run_training(
@@ -2626,6 +2635,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             pending_queries_map,
             eval_pending_queries_map,
             generate_metrics_Q,
+            weight_sync_metrics_Q,
             actor_manager,
         )
     finally:
