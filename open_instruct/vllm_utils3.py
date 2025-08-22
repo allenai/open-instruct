@@ -424,13 +424,19 @@ class LLMRayActor:
             self.logger.warning(f"{queue_name} results queue is full, discarding result.")
 
     def _maybe_add_new_request(self):
-        """Try to add a new request from the prompt queue if not stopping."""
+        """Try to add a new request from the prompt queue if not stopping.
+        
+        Returns:
+            bool: True if a request was added, False otherwise.
+        """
         if not self._should_stop():
             try:
                 request = self.prompt_queue.get(timeout=0.1)
                 add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
+                return True
             except queue.Empty:
                 pass  # No new request available, continue processing
+        return False
 
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
@@ -476,7 +482,10 @@ class LLMRayActor:
                 return num_processed
 
             outputs = self._step_engine(tracking, tokenizer)
-            self.logger.info(f"[process_from_queue] Iteration {iteration}: Got {len(outputs)} outputs")
+            if iteration % 100 == 0:
+                pending_tool_futures = len(tracking["pending_tool_futures"]) if self.tools else 0
+                num_unfinished = self.llm_engine.get_num_unfinished_requests()
+                self.logger.info(f"[process_from_queue] Iteration {iteration}: Got {len(outputs)} outputs, {num_unfinished} unfinished requests, {pending_tool_futures} pending tool futures")
 
             for output in outputs:
                 # Always extract base request ID (unified approach)
@@ -544,8 +553,8 @@ class LLMRayActor:
                 self._maybe_add_new_request()
 
             if self._should_stop() and not self.inflight_updates:
-                pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
-                if not self.llm_engine.has_unfinished_requests() and pending_count == 0:
+                pending_tool_futures = tracking["pending_tool_futures"] if self.tools else {}
+                if not self.llm_engine.has_unfinished_requests() and not pending_tool_futures:
                     break
 
         return num_processed
@@ -556,10 +565,12 @@ class LLMRayActor:
         Returns:
             List of completed outputs.
         """
-        if tracking and tracking.get("pending_tool_futures"):
-            self._poll_tool_futures(tracking, tokenizer)
-
         outputs = []
+        
+        if self.tools and tracking["pending_tool_futures"]:
+            tool_outputs = self._poll_tool_futures(tracking, tokenizer)
+            outputs.extend(tool_outputs)
+
         if self.llm_engine.has_unfinished_requests():
             self.logger.info("[_step_engine] Stepping engine, has unfinished requests")
             step_outputs = list(self.llm_engine.step())
@@ -581,14 +592,25 @@ class LLMRayActor:
         else:
             self.logger.info("[_step_engine] No unfinished requests")
 
+        # Try to keep engine filled up to inference_batch_size
+        while self.llm_engine.get_num_unfinished_requests() < self.inference_batch_size:
+            if not self._maybe_add_new_request():
+                break
+            self.logger.info("[_step_engine] Added request")
+
         return outputs
 
     def _poll_tool_futures(self, tracking, tokenizer):
-        """Poll and handle completed tool executions."""
+        """Poll and handle completed tool executions.
+        
+        Returns:
+            List of completed outputs that can't continue generation.
+        """
         if not self.tools or not tracking["pending_tool_futures"]:
-            return
+            return []
 
         dict_keys_to_delete = []
+        completed_outputs = []
 
         for req_id, (future, last_o, last_output) in tracking["pending_tool_futures"].items():
             if not future.done():
@@ -648,13 +670,21 @@ class LLMRayActor:
                     # Update the sampling params in request_metadata for the restarted request
                     if req_id in self.request_metadata:
                         self.request_metadata[req_id]["sampling_params"] = new_sampling_params
+                    self.logger.info(f"[_poll_tool_futures] Restarted request {req_id} with {new_sample_tokens} tokens")
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
                     self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
+                    completed_outputs.append(tracking["concat_outputs"][req_id])
+            else:
+                self.logger.info(f"[_poll_tool_futures] Request {req_id} is complete (no more tokens)")
+                completed_outputs.append(tracking["concat_outputs"][req_id])
+                
             dict_keys_to_delete.append(req_id)
 
         for req_id in dict_keys_to_delete:
             tracking["pending_tool_futures"].pop(req_id, None)
+            
+        return completed_outputs
 
     def init_process_group(
         self,
