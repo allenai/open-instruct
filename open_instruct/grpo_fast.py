@@ -194,7 +194,7 @@ class Args:
     warmup_ratio: float = 0.0
     """Ratio of warmup steps to total steps (takes precedence over `warm_up_steps`)"""
     weight_decay: float = 0.0
-    """Weight decay for AdamW if we apply some."""
+    """Weight decay for AdamW."""
     set_weight_decay_on_bias_and_norm: bool = True
     """Whether to set weight decay on bias and norm layers"""
     fused_optimizer: bool = False
