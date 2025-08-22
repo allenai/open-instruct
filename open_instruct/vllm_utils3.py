@@ -174,37 +174,34 @@ def _process_outputs_with_tools(
 
 
 def _finalize_outputs(outputs, tracking, dataset_index, tools):
-    """Prepare final outputs based on whether tools were used."""
+    """Prepare final outputs with unified approach for all requests."""
+    # Sort outputs by their sub-request ID
+    outputs.sort(key=lambda x: (x.request_id.split("-")[0], int(x.request_id.split("-")[1])))
+
     if not tools:
-        outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
+        # Non-tool mode: directly process outputs
         return _process_outputs(outputs, dataset_index=dataset_index)
 
     # Tool mode: add metadata and merge completions
-    for req_id in tracking["masks"]:
-        assert req_id in tracking["concat_outputs"], f"req_id {req_id} not in concat_outputs!"
-        output = tracking["concat_outputs"][req_id].outputs[0]
-        setattr(output, "mask", tracking["masks"][req_id])
-        setattr(output, "num_calls", tracking["num_calls"][req_id])
-        setattr(output, "timeout", tracking["timeout"][req_id])
-        setattr(output, "tool_error", tracking["tool_error"][req_id])
-        setattr(output, "tool_output", tracking["tool_output"][req_id])
-        setattr(output, "tool_runtime", tracking["tool_runtime"][req_id])
-        setattr(output, "tool_called", tracking["tool_called"][req_id])
+    for output in outputs:
+        req_id = output.request_id
+        if req_id in tracking["masks"]:
+            # This output went through tool processing
+            assert req_id in tracking["concat_outputs"], f"req_id {req_id} not in concat_outputs!"
+            tool_output = tracking["concat_outputs"][req_id].outputs[0]
+            setattr(tool_output, "mask", tracking["masks"][req_id])
+            setattr(tool_output, "num_calls", tracking["num_calls"][req_id])
+            setattr(tool_output, "timeout", tracking["timeout"][req_id])
+            setattr(tool_output, "tool_error", tracking["tool_error"][req_id])
+            setattr(tool_output, "tool_output", tracking["tool_output"][req_id])
+            setattr(tool_output, "tool_runtime", tracking["tool_runtime"][req_id])
+            setattr(tool_output, "tool_called", tracking["tool_called"][req_id])
+            # Replace the output with the tool-processed one
+            output.outputs[0] = tool_output
 
-    # Merge n completions into the same outputs
-    merged_outputs = {}
-    for req_id in tracking["concat_outputs"]:
-        real_req_id, _ = req_id.split("-")
-        if real_req_id not in merged_outputs:
-            merged_outputs[real_req_id] = tracking["concat_outputs"][req_id]
-        else:
-            merged_outputs[real_req_id].outputs.append(tracking["concat_outputs"][req_id].outputs[0])
-
-    final_outputs = sorted(
-        merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1]))
-    )
-
-    return _process_outputs_with_tools(final_outputs, dataset_index=dataset_index)
+    # Since we're using manual duplication, outputs are already in the right format
+    # Just need to ensure they're properly sorted
+    return _process_outputs_with_tools(outputs, dataset_index=dataset_index)
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -316,29 +313,29 @@ def add_request(request, llm_engine: vllm.LLMEngine, tools, request_metadata: di
     }
 
     tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt)
-    if tools:
-        logger.info(f"[add_request] Adding request {request_id} with tools, n={request.generation_config.n}")
-        # Need n=1 for individual tool tracking.
-        sampling_params = copy.deepcopy(request.generation_config)
-        original_n = request.generation_config.n
-        sampling_params.n = 1
-        metadata["sampling_params"] = sampling_params
-        metadata["original_n"] = original_n  # Store original n for later use
-        metadata["generation_config"] = request.generation_config  # Store original config
 
-        # Store metadata under base request ID for collection phase
-        request_metadata[request_id] = metadata
-        logger.info(f"[add_request] Stored metadata for base request {request_id}")
+    # Always manually duplicate requests for a single code path
+    logger.info(f"[add_request] Adding request {request_id}, n={request.generation_config.n}, tools={bool(tools)}")
 
-        for j in range(original_n):
-            sub_request_id = f"{request_id}-{j}"
-            logger.info(f"[add_request] Adding sub-request {sub_request_id}")
-            llm_engine.add_request(sub_request_id, tokens_prompt, sampling_params)
-            request_metadata[sub_request_id] = metadata
-    else:
-        logger.info(f"[add_request] Adding request {request_id} without tools, n={request.generation_config.n}")
-        llm_engine.add_request(request_id, tokens_prompt, request.generation_config)
-        request_metadata[request_id] = metadata
+    # Create sampling params with n=1 for individual tracking
+    sampling_params = copy.deepcopy(request.generation_config)
+    original_n = request.generation_config.n
+    sampling_params.n = 1
+    metadata["sampling_params"] = sampling_params
+    metadata["original_n"] = original_n  # Store original n for later use
+    metadata["generation_config"] = request.generation_config  # Store original config
+    metadata["has_tools"] = bool(tools)  # Track whether this request uses tools
+
+    # Store metadata under base request ID for collection phase
+    request_metadata[request_id] = metadata
+    logger.info(f"[add_request] Stored metadata for base request {request_id}")
+
+    # Manually duplicate requests based on original_n
+    for j in range(original_n):
+        sub_request_id = f"{request_id}-{j}"
+        logger.info(f"[add_request] Adding sub-request {sub_request_id}")
+        llm_engine.add_request(sub_request_id, tokens_prompt, sampling_params)
+        request_metadata[sub_request_id] = metadata
 
 
 class LLMRayActor:
@@ -447,8 +444,8 @@ class LLMRayActor:
         tracking = _init_tool_tracking() if self.tools else None
         tokenizer = self.llm_engine.tokenizer if self.tools else None
 
-        # Track collected outputs for tool mode to batch them properly
-        collected_outputs = {} if self.tools else None
+        # Track collected outputs for all requests (unified approach)
+        collected_outputs = {}
 
         if self._should_stop():
             return num_processed
@@ -482,84 +479,66 @@ class LLMRayActor:
             self.logger.info(f"[process_from_queue] Iteration {iteration}: Got {len(outputs)} outputs")
 
             for output in outputs:
-                # Extract base request ID
-                base_request_id = output.request_id.split("-")[0] if self.tools else output.request_id
+                # Always extract base request ID (unified approach)
+                base_request_id = output.request_id.split("-")[0]
                 self.logger.info(
                     f"[process_from_queue] Processing output for request_id={output.request_id}, base_id={base_request_id}"
                 )
 
-                # Determine if we should process this output
-                should_process = False
-                outputs_to_finalize = None
+                # Collect outputs for the same base request (unified approach)
+                if base_request_id not in collected_outputs:
+                    collected_outputs[base_request_id] = []
+                collected_outputs[base_request_id].append(output)
+                self.logger.info(
+                    f"[process_from_queue] Collected {len(collected_outputs[base_request_id])} outputs for base_id={base_request_id}"
+                )
 
-                if self.tools:
-                    # Collect outputs for the same base request
-                    if base_request_id not in collected_outputs:
-                        collected_outputs[base_request_id] = []
-                    collected_outputs[base_request_id].append(output)
-                    self.logger.info(
-                        f"[process_from_queue] Collected {len(collected_outputs[base_request_id])} outputs for base_id={base_request_id}"
-                    )
+                # Check if we have all outputs for this request
+                self.logger.info(
+                    f"[process_from_queue] Looking up metadata for base_id={base_request_id}, available keys: {list(self.request_metadata.keys())[:10]}"
+                )
+                metadata = self.request_metadata[base_request_id]
+                expected_n = metadata["original_n"]  # Use original_n which is always set
+                self.logger.info(
+                    f"[process_from_queue] Expected n={expected_n}, collected={len(collected_outputs[base_request_id])}"
+                )
 
-                    # Check if we have all outputs for this request
-                    self.logger.info(
-                        f"[process_from_queue] Looking up metadata for base_id={base_request_id}, available keys: {list(self.request_metadata.keys())[:10]}"
-                    )
-                    metadata = self.request_metadata[base_request_id]
-                    expected_n = metadata["generation_config"].n
-                    self.logger.info(
-                        f"[process_from_queue] Expected n={expected_n}, collected={len(collected_outputs[base_request_id])}"
-                    )
-
-                    if len(collected_outputs[base_request_id]) == expected_n:
-                        should_process = True
-                        outputs_to_finalize = collected_outputs[base_request_id]
-                        self.logger.info(
-                            f"[process_from_queue] All outputs collected for {base_request_id}, processing..."
-                        )
-                else:
-                    # Non-tool mode: process immediately
-                    should_process = True
-                    outputs_to_finalize = [output]
-
-                if not should_process:
+                # Only process when we have all expected outputs
+                if len(collected_outputs[base_request_id]) != expected_n:
                     self.logger.info(f"[process_from_queue] Not ready to process {base_request_id} yet, continuing...")
                     continue
 
-                # Get metadata (same for both paths)
-                metadata = self.request_metadata[base_request_id]
+                # All outputs collected, process them
+                outputs_to_finalize = collected_outputs[base_request_id]
+                self.logger.info(f"[process_from_queue] All outputs collected for {base_request_id}, processing...")
+
+                # Get metadata
                 is_eval = metadata["is_eval"]
                 dataset_index = metadata["dataset_index"]
+                has_tools = metadata["has_tools"]
                 num_processed += 1
                 self.logger.info(
-                    f"[process_from_queue] Processing request {base_request_id}: is_eval={is_eval}, dataset_index={dataset_index}"
+                    f"[process_from_queue] Processing request {base_request_id}: is_eval={is_eval}, dataset_index={dataset_index}, has_tools={has_tools}"
                 )
 
                 # Finalize outputs and insert into queue
                 result = _finalize_outputs(outputs_to_finalize, tracking, dataset_index, self.tools)
                 self._insert_result_to_queue(result, is_eval)
 
-                # Clean up metadata
-                if self.tools:
-                    # Clean up collected outputs and metadata for tool mode
-                    del collected_outputs[base_request_id]
-                    # Use original_n if available, else fall back to generation_config.n
-                    original_n = metadata.get("original_n", metadata["generation_config"].n)
-                    self.logger.info(
-                        f"[process_from_queue] Cleaning up metadata for {base_request_id} and {original_n} sub-requests"
-                    )
+                # Clean up collected outputs and metadata (unified approach)
+                del collected_outputs[base_request_id]
+                original_n = metadata["original_n"]
+                self.logger.info(
+                    f"[process_from_queue] Cleaning up metadata for {base_request_id} and {original_n} sub-requests"
+                )
 
-                    # Clean up base request metadata
-                    self.request_metadata.pop(base_request_id, None)
-                    # Also clean up sub-request metadata
-                    for i in range(original_n):
-                        sub_id = f"{base_request_id}-{i}"
-                        self.request_metadata.pop(sub_id, None)
-                        self.logger.info(f"[process_from_queue] Cleaned up metadata for {sub_id}")
-                else:
-                    # Clean up metadata for non-tool mode
-                    self.request_metadata.pop(base_request_id, None)
-                    self.logger.info(f"[process_from_queue] Cleaned up metadata for {base_request_id}")
+                # Clean up base request metadata
+                self.request_metadata.pop(base_request_id, None)
+                # Also clean up sub-request metadata
+                for i in range(original_n):
+                    sub_id = f"{base_request_id}-{i}"
+                    self.request_metadata.pop(sub_id, None)
+                    self.logger.info(f"[process_from_queue] Cleaned up metadata for {sub_id}")
 
                 # Try to add a new request
                 self._maybe_add_new_request()
