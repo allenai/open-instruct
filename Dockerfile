@@ -73,6 +73,8 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
 
 RUN uv run --no-sync -m nltk.downloader punkt punkt_tab
 
+RUN uv pip install py-spy
+
 # Copy all application code at the end
 COPY eval eval
 COPY configs configs
