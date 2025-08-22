@@ -18,9 +18,10 @@
 import copy
 import os
 import queue
+import threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Union
 
 import ray
@@ -288,10 +289,173 @@ class ActorManager:
 
     def __init__(self):
         self._should_stop = False
+        self._last_updated = datetime.now()
+        self._dashboard_port = int(os.environ.get("DASHBOARD_PORT", 8080))
+        self._start_dashboard()
+
+    def _start_dashboard(self):
+        """Start the FastAPI dashboard server in a background thread."""
+        import socket
+
+        import uvicorn
+        from fastapi import FastAPI
+        from fastapi.responses import HTMLResponse
+
+        app = FastAPI(title="ActorManager Dashboard")
+
+        @app.get("/", response_class=HTMLResponse)
+        async def dashboard():
+            """Serve the HTML dashboard."""
+            html_content = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>ActorManager Dashboard</title>
+                <style>
+                    body {
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        max-width: 800px;
+                        margin: 50px auto;
+                        padding: 20px;
+                        background: #f5f5f5;
+                    }
+                    .container {
+                        background: white;
+                        border-radius: 8px;
+                        padding: 30px;
+                        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                    }
+                    h1 {
+                        color: #333;
+                        margin-bottom: 30px;
+                    }
+                    .status-card {
+                        background: #f8f9fa;
+                        border-radius: 6px;
+                        padding: 20px;
+                        margin: 20px 0;
+                        border-left: 4px solid #ccc;
+                    }
+                    .status-card.active {
+                        border-left-color: #dc3545;
+                        background: #fff5f5;
+                    }
+                    .status-card.inactive {
+                        border-left-color: #28a745;
+                        background: #f5fff5;
+                    }
+                    .status-label {
+                        font-size: 14px;
+                        color: #666;
+                        text-transform: uppercase;
+                        letter-spacing: 1px;
+                        margin-bottom: 10px;
+                    }
+                    .status-value {
+                        font-size: 24px;
+                        font-weight: bold;
+                        margin: 10px 0;
+                    }
+                    .status-value.active {
+                        color: #dc3545;
+                    }
+                    .status-value.inactive {
+                        color: #28a745;
+                    }
+                    .timestamp {
+                        font-size: 14px;
+                        color: #999;
+                        margin-top: 10px;
+                    }
+                    .refresh-indicator {
+                        position: fixed;
+                        top: 20px;
+                        right: 20px;
+                        width: 10px;
+                        height: 10px;
+                        background: #28a745;
+                        border-radius: 50%;
+                        animation: pulse 2s infinite;
+                    }
+                    @keyframes pulse {
+                        0% { opacity: 1; }
+                        50% { opacity: 0.3; }
+                        100% { opacity: 1; }
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="refresh-indicator"></div>
+                <div class="container">
+                    <h1>🎛️ ActorManager Dashboard</h1>
+                    <div id="status-container">
+                        <div class="status-card">
+                            <div class="status-label">Loading...</div>
+                        </div>
+                    </div>
+                </div>
+                <script>
+                    async function updateStatus() {
+                        const response = await fetch('/api/status');
+                        const data = await response.json();
+
+                        const statusClass = data.should_stop ? 'active' : 'inactive';
+                        const statusText = data.should_stop ? 'STOPPED' : 'RUNNING';
+
+                        document.getElementById('status-container').innerHTML = `
+                            <div class="status-card ${statusClass}">
+                                <div class="status-label">Should Stop Status</div>
+                                <div class="status-value ${statusClass}">${statusText}</div>
+                                <div class="timestamp">Last updated: ${data.last_updated}</div>
+                            </div>
+                        `;
+                    }
+
+                    // Update immediately and then every second
+                    updateStatus();
+                    setInterval(updateStatus, 1000);
+                </script>
+            </body>
+            </html>
+            """
+            return html_content
+
+        @app.get("/api/status")
+        async def api_status():
+            """Return the current status as JSON."""
+            return {"should_stop": self._should_stop, "last_updated": self._last_updated.isoformat()}
+
+        # Store app reference for potential cleanup
+        self._app = app
+
+        # Run server in background thread
+        def run_server():
+            uvicorn.run(
+                app,
+                host="0.0.0.0",
+                port=self._dashboard_port,
+                log_level="error",  # Minimize logging
+            )
+
+        self._server_thread = threading.Thread(target=run_server, daemon=True)
+        self._server_thread.start()
+
+        # Get the actual hostname/IP for logging
+        hostname = socket.gethostname()
+        try:
+            # Try to get the actual IP address
+            host_ip = socket.gethostbyname(hostname)
+        except socket.error:
+            # Fallback to localhost if we can't resolve
+            host_ip = "127.0.0.1"
+
+        logger = logger_utils.setup_logger(__name__)
+        logger.info(f"Dashboard server started at http://{host_ip}:{self._dashboard_port} (hostname: {hostname})")
 
     def set_should_stop(self, should_stop: bool):
         """Set whether actors should stop processing."""
         self._should_stop = should_stop
+        self._last_updated = datetime.now()
 
     def should_stop(self) -> bool:
         """Check if actors should stop processing."""
