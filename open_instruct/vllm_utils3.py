@@ -288,7 +288,7 @@ class ActorManager:
     """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
 
     def __init__(self):
-        self.logger = logging.getLogger(__name__)
+        self.logger = logger_utils.setup_logger(__name__)
         self._should_stop = False
 
     def set_should_stop(self, should_stop: bool):
