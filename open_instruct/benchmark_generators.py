@@ -167,6 +167,7 @@ def save_benchmark_results_to_csv(
         "avg_generation_time_per_batch": avg_results["avg_generation_time"],
         "avg_new_tokens_per_sample": total_tokens
         / (len(results) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout),
+        "overall_mfu": overall_mfu,
     }
 
     # Check if file exists to determine if we need to write headers
