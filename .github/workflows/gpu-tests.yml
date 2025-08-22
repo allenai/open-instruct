@@ -1,87 +1,31 @@
 name: GPU Tests
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
+    paths:
+      - 'open_instruct/grpo_fast.py'
+      - 'open_instruct/vllm_utils3.py'
   merge_group:
   workflow_dispatch:
 
 jobs:
   gpu-tests:
     name: Run GPU tests
-    runs-on: ubuntu-latest
-    env:
-      BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+    runs-on: GPU-Enabled-Runner
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: '3.11'
+          version: "0.8.6"
       
-      - name: Determine current commit SHA (pull request)
-        if: github.event_name == 'pull_request'
+      - name: Set up Python
+        run: uv sync --frozen
+      
+      - name: Run GPU tests
         run: |
-          echo "COMMIT_SHA=${{ github.event.pull_request.head.sha }}" >> $GITHUB_ENV
-      
-      - name: Determine current commit SHA (push)
-        if: github.event_name != 'pull_request'
-        run: |
-          echo "COMMIT_SHA=$GITHUB_SHA" >> $GITHUB_ENV
-      
-      - name: Setup Beaker
-        if: env.BEAKER_TOKEN != ''
-        uses: allenai/setup-beaker@v2
-        with:
-          token: ${{ env.BEAKER_TOKEN }}
-          workspace: ai2/tulu-thinker
-      
-      - name: Get Beaker whoami
-        if: env.BEAKER_TOKEN != ''
-        run: |
-          BEAKER_WHOAMI=$(beaker account whoami --format json | jq -r '.[0].name')
-          echo "BEAKER_WHOAMI=$BEAKER_WHOAMI" >> $GITHUB_ENV
-      
-      - name: Run GPU tests on Beaker
-        if: env.BEAKER_TOKEN != ''
-        uses: allenai/beaker-run-action@v1.2
-        with:
-          spec: |
-            version: v2
-            description: Open-Instruct GPU Tests
-            budget: ai2/oe-training
-            tasks:
-              - name: gpu-tests
-                image:
-                  beaker: ${{ env.BEAKER_WHOAMI }}/open_instruct_auto
-                context:
-                  priority: normal
-                  preemptible: true
-                resources:
-                  gpuCount: 1
-                timeout: 20m
-                constraints:
-                  cluster:
-                    # A6000 cluster
-                    - ai2/prior-elanding
-                    # L40 cluster
-                    - ai2/neptune-cirrascale
-                command:
-                  - "bash"
-                  - "-c"
-                  - |
-                    git clone https://github.com/${{ github.repository }}.git /workspace && 
-                    cd /workspace && 
-                    git checkout ${{ env.COMMIT_SHA }} && 
-                    pip install uv && 
-                    uv run --frozen pytest -xvs tests/*_gpu.py open_instruct/*_gpu.py
-                result:
-                  path: /unused
-          token: ${{ env.BEAKER_TOKEN }}
-          workspace: ai2/tulu-thinker
+          uv run --frozen pytest -xvs tests/*_gpu.py open_instruct/*_gpu.py
