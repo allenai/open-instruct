@@ -10,7 +10,7 @@ logging.getLogger("urllib3").setLevel(logging.DEBUG)
 
 
 def create_session_with_retries(
-    retries=3, backoff_factor=0.3, status_forcelist=(500, 502, 504), allowed_methods=("GET", "POST")
+    retries=3, backoff_factor=0.3, status_forcelist=(429, 500, 502, 504), allowed_methods=("GET", "POST")
 ):
     session = requests.Session()
     retry = Retry(
