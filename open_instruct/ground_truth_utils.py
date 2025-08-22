@@ -918,27 +918,9 @@ class CodeSearchVerifier(VerifierFunction):
                 # Log the error for debugging
                 warnings.warn(f"Failed to parse tool call JSON: {e}\nRaw content: {tool_call[:200]}...")
 
-                # Try to fix common JSON issues
-                try:
-                    # Attempt to fix single quotes (common LLM output issue)
-                    fixed_json = tool_call.replace("'", '"')
-                    parsed = json.loads(fixed_json)
-                    parsed_calls.append(parsed)
-                except json.JSONDecodeError:
-                    # If that doesn't work, try regex-based extraction for common format
-                    name_match = re.search(r'"name"\s*:\s*"([^"]+)"', tool_call)
-                    args_match = re.search(r'"arguments"\s*:\s*(\{[^}]*\})', tool_call)
-
-                    if name_match:
-                        # Create a minimal valid tool call
-                        parsed = {"name": name_match.group(1), "arguments": {}}
-                        if args_match:
-                            try:
-                                parsed["arguments"] = json.loads(args_match.group(1))
-                            except json.JSONDecodeError:
-                                pass  # Keep empty arguments if parsing fails
-                        parsed_calls.append(parsed)
-                    # If we can't parse it at all, skip this tool call
+                # Don't try to fix malformed JSON - only reward correct format
+                # The model should output: {"name": "tool_name", "arguments": {...}}
+                pass  # Skip malformed tool calls
 
         return parsed_calls
 

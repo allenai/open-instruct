@@ -58,7 +58,7 @@ import time
 from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from queue import Empty, Full, Queue
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
 
@@ -149,6 +149,48 @@ INVALID_LOGPROB = 1.0
 
 class ShutdownSentinel:
     """Sentinel value to signal thread shutdown via queue."""
+
+
+def log_rollouts(
+    queries: List[str], 
+    responses: List[str], 
+    training_step: int, 
+    episode: int, 
+    output_dir: str,
+    max_logs: int = 10
+):
+    """Log prompts and completions to a JSON file for debugging and analysis."""
+    from pathlib import Path
+    
+    rollout_log_dir = Path(output_dir) / "rollout_logs"
+    rollout_log_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create filename with timestamp and step info
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = rollout_log_dir / f"rollouts_step_{training_step}_episode_{episode}_{timestamp}.jsonl"
+    
+    # Limit the number of logs to avoid huge files
+    num_to_log = min(len(queries), max_logs)
+    
+    # Prepare data for logging
+    rollout_data = []
+    for i in range(num_to_log):
+        rollout_data.append({
+            "index": i,
+            "training_step": training_step,
+            "episode": episode,
+            "timestamp": timestamp,
+            "query": queries[i],
+            "response": responses[i],
+            "response_length": len(responses[i]),
+        })
+    
+    # Write to file in JSONL format for easy streaming
+    with open(log_file, "w") as f:
+        for entry in rollout_data:
+            f.write(json.dumps(entry) + "\n")
+    
+    logger.info(f"📝 Logged {len(rollout_data)} rollouts to {log_file}")
 
 
 @dataclass
@@ -321,6 +363,12 @@ class Args:
     """whether to penalize responses which did not finish generation"""
     non_stop_penalty_value: float = 0.0
     """the reward value for responses which did not finish generation"""
+    
+    # Logging
+    log_rollouts_to_file: bool = False
+    """whether to log prompts and completions from rollouts to a file"""
+    max_rollout_logs_per_step: int = 10
+    """maximum number of rollout examples to log per step (to avoid huge files)"""
 
     # Ray
     single_gpu_mode: bool = False
@@ -1265,34 +1313,13 @@ def accumulate_inference_batches(
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     ):
-        try:
-            # Use per-engine timeout that scales with number of engines
-            per_engine_timeout = (timeout or 60.0) / max(1, args.vllm_num_engines // 4)
-            result = inference_results_Q.get(timeout=per_engine_timeout)
-            successful_engines += 1
-        except Empty:
-            logger.warning(
-                f"[Data Preparation Thread] Timeout waiting for inference results from engine {i} after {per_engine_timeout}s"
-            )
-            failed_engines.append(i)
-            # If too many engines fail, raise immediately
-            if len(failed_engines) > args.vllm_num_engines // 2:
-                logger.error(
-                    f"[Data Preparation Thread] Too many engines failed ({len(failed_engines)}/{args.vllm_num_engines}), aborting"
-                )
-                raise
-            continue  # Try to collect from other engines
-
+        result = inference_results_Q.get(timeout=timeout)
         if isinstance(result, ShutdownSentinel):
             return result, None
         dataset_indices = result.dataset_index
-
         if dataset_indices is None:
             raise RuntimeError(f"Dataset indices is None for result {i}")
 
-        # When generation_config.n > 1, vLLM generates multiple responses per prompt
-        # but dataset_indices only contains the unique indices (not replicated)
-        # So we expect: len(responses) == len(dataset_indices) * generation_config.n
         expected_responses = len(dataset_indices) * generation_config.n
         assert len(result.responses) == expected_responses, (
             f"Mismatch: number of responses ({len(result.responses)}) "
@@ -1301,11 +1328,9 @@ def accumulate_inference_batches(
             f", {len(dataset_indices)=}"
         )
 
-        # Get corresponding queries, ground_truths, datasets for each individual prompt
         batch_queries = []
         batch_ground_truths = []
         batch_datasets = []
-
         for dataset_idx in dataset_indices:
             query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
             batch_queries.append(query)
@@ -1317,7 +1342,6 @@ def accumulate_inference_batches(
         all_ground_truths.extend(batch_ground_truths)
         all_datasets.extend(batch_datasets)
 
-    # Check if we got enough results to proceed
     if not results:
         logger.error("[Data Preparation Thread] No results collected from any engine")
         raise Empty("No results from any engine")
@@ -1349,7 +1373,6 @@ def accumulate_inference_batches(
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
 
-    # Create combined RequestInfo
     combined_request_info = RequestInfo(
         num_calls=combined_num_calls,
         timeouts=combined_timeouts,
@@ -1359,21 +1382,19 @@ def accumulate_inference_batches(
         tool_calleds=combined_tool_calleds,
     )
 
-    # Create combined GenerationResult
     combined_result = GenerationResult(
         responses=combined_responses,
         finish_reasons=combined_finish_reasons,
         masks=combined_masks,
         request_info=combined_request_info,
-        dataset_index=None,  # Not meaningful for combined result
+        dataset_index=None,
     )
 
-    # Note: We don't have dataset_indices here, but they're not needed for the returned batch
     batch = Batch(
         queries=all_queries,
         ground_truths=all_ground_truths,
         datasets=all_datasets,
-        indices=None,  # Not meaningful for combined results
+        indices=None,
     )
     return combined_result, batch
 
@@ -1392,53 +1413,12 @@ def data_preparation_thread(
     for training_step in range(resume_training_step, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
-            # Calculate timeout based on tool usage configuration
-            # With tools, inference can take much longer
-            base_timeout = 90.0
-            if hasattr(args, "tools") and args.tools:
-                # Increase timeout based on max_tool_calls
-                max_tool_calls = getattr(args, "max_tool_calls", [5])
-                # Get the maximum value from the list (could be per-tool or single value)
-                max_calls_value = max(max_tool_calls) if max_tool_calls else 5
-                # Each tool call can take ~10-20 seconds, so scale timeout appropriately
-                tool_timeout_factor = min(max_calls_value * 15, 300)  # Cap at 5 minutes extra
-                timeout = base_timeout + tool_timeout_factor
-                logger.info(
-                    f"[Data Preparation Thread] Using extended timeout of {timeout}s for tool-based inference (max_tool_calls={max_calls_value})"
-                )
-            else:
-                timeout = base_timeout
-
-            try:
-                result, batch = accumulate_inference_batches(
-                    inference_results_Q, pending_queries_map, args, training_step, generation_config, timeout=timeout
-                )
-                if isinstance(result, ShutdownSentinel):
-                    logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
-                    return
-            except Empty:
-                logger.error(
-                    f"[Data Preparation Thread] Failed to get inference results for step {training_step} - engines may be stuck"
-                )
-                # Try one more time with even longer timeout before giving up
-                logger.warning(f"[Data Preparation Thread] Retrying with extended timeout of {timeout * 2}s")
-                try:
-                    result, batch = accumulate_inference_batches(
-                        inference_results_Q,
-                        pending_queries_map,
-                        args,
-                        training_step,
-                        generation_config,
-                        timeout=timeout * 2,
-                    )
-                    if isinstance(result, ShutdownSentinel):
-                        logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
-                        return
-                except Empty:
-                    logger.error(
-                        f"[Data Preparation Thread] Second attempt failed for step {training_step} - skipping this batch"
-                    )
-                    continue
+            result, batch = accumulate_inference_batches(
+                inference_results_Q, pending_queries_map, args, training_step, generation_config
+            )
+            if isinstance(result, ShutdownSentinel):
+                logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
+                return
 
         getting_response_time = timer.duration
 
@@ -1475,6 +1455,19 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
                 result.finish_reasons
             )
+            
+            # Log prompts and completions to file if enabled
+            if args.log_rollouts_to_file:
+                # Calculate episode based on training step
+                episode = (training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+                log_rollouts(
+                    decoded_queries, 
+                    decoded_responses, 
+                    training_step, 
+                    episode, 
+                    args.output_dir,
+                    max_logs=args.max_rollout_logs_per_step
+                )
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
             scores, reward_metrics = asyncio.run(
@@ -2094,7 +2087,7 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
                 logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
                 return None, {}, num_total_tokens
             try:
-                packed_data = packed_sequences_Q.get(timeout=120.0)
+                packed_data = packed_sequences_Q.get(timeout=30.0)
                 break
             except Empty:
                 logger.warning("[Main Thread] Timeout waiting for packed sequences. Retrying...")
@@ -2114,19 +2107,7 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
 
-    # Calculate timeout based on tool configuration
-    base_process_timeout = 180
-    if hasattr(args, "tools") and args.tools:
-        max_tool_calls = getattr(args, "max_tool_calls", [5])
-        # Get the maximum value from the list (could be per-tool or single value)
-        max_calls_value = max(max_tool_calls) if max_tool_calls else 5
-        # Tool processing can take significantly longer
-        process_timeout = base_process_timeout + (max_calls_value * 20)  # Add 20s per max tool call
-        logger.info(
-            f"[Generate Thread] Using extended process timeout of {process_timeout}s for tool-based generation"
-        )
-    else:
-        process_timeout = base_process_timeout
+    process_timeout = 20
 
     while not stop_event.is_set():
         with Timer("🔥 Generation time") as timer:
@@ -2268,6 +2249,7 @@ def maybe_evaluate(
     try:
         # timeout 0.01 if this is the last training step or we're not evaluating
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
+        # Note: even for skipped evaluations, we need reasonable timeout to avoid spurious failures
         timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_every < 0) else 100
 
         # Accumulate evaluation results from all vLLM engines

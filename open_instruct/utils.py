@@ -663,7 +663,13 @@ def get_wandb_tags() -> List[str]:
                 pr = prs["items"][0]
                 tags.append(f"pr: {pr['number']}")
     if "GIT_BRANCH" in os.environ:
-        tags.append(f"branch: {os.environ['GIT_BRANCH']}")
+        branch_name = os.environ["GIT_BRANCH"]
+        # WandB tags have a 64 character limit, truncate long branch names
+        max_branch_length = 55  # Leave room for "branch: " prefix
+        if len(branch_name) > max_branch_length:
+            # Keep the first part and last part to maintain some context
+            branch_name = branch_name[:25] + "..." + branch_name[-25:]
+        tags.append(f"branch: {branch_name}")
     return tags
 
 
