@@ -16,7 +16,6 @@ import pathlib
 import threading
 import time
 from concurrent import futures
-from queue import Queue
 from typing import Any, Optional
 
 import datasets
@@ -343,9 +342,7 @@ def get_batch_data(
     return prompts
 
 
-def generate_thread(
-    vllm_engines: list[ray.actor.ActorHandle], stop_event: threading.Event, error_queue: Queue
-) -> None:
+def generate_thread(vllm_engines: list[ray.actor.ActorHandle], stop_event: threading.Event) -> None:
     """Thread that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] Starting generation thread")
     while not stop_event.is_set():
@@ -362,7 +359,6 @@ def submission_thread(
     all_prompts: list,
     generation_config: vllm.SamplingParams,
     stop_event: threading.Event,
-    error_queue: Queue,
 ) -> None:
     """Thread that submits prompts to the queue."""
     logger.info("[Submission Thread] Starting prompt submission")
@@ -401,10 +397,9 @@ def run_benchmark(
     )
 
     stop_event = threading.Event()
-    error_queue = Queue()
     executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="benchmark")
 
-    generation_future = executor.submit(generate_thread, vllm_engines, stop_event, error_queue)
+    generation_future = executor.submit(generate_thread, vllm_engines, stop_event)
 
     results = []
     device_name = get_device_name(torch.cuda.get_device_name(0))
@@ -427,17 +422,12 @@ def run_benchmark(
         logger.info("Warmup batch completed")
         logger.info(f"Submitting {num_batches - 1} batches for main benchmark...")
         submission_future = executor.submit(
-            submission_thread, param_prompt_Q, all_prompts[1:], generation_config, stop_event, error_queue
+            submission_thread, param_prompt_Q, all_prompts[1:], generation_config, stop_event
         )
         last_completion_time = time.time()
 
         # Process remaining batches with timing
         for batch_idx in range(1, num_batches):
-            if not error_queue.empty():
-                error = error_queue.get()
-                logger.error(f"Thread error detected: {error}")
-                raise error
-
             # Quick health check!
             [future.result() for future in [submission_future, generation_future] if future.done()]
             result = inference_results_Q.get()
