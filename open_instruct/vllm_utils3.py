@@ -194,8 +194,6 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools):
         # Replace the output with the tool-processed one
         output.outputs[0] = tool_output
 
-    # Since we're using manual duplication, outputs are already in the right format
-    # Just need to ensure they're properly sorted
     return _process_outputs_with_tools(outputs, dataset_index=dataset_index)
 
 
