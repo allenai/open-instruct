@@ -24,7 +24,7 @@ dependencies = [
     "tensorboard>=2.18.0",
     "torch>=2.7.0,<2.8",
     "transformers>=4.52.4,<4.54.0", # see https://github.com/vllm-project/vllm-ascend/issues/2046
-    "vllm==0.9.1",    
+    "vllm==0.9.1",
     "wandb==0.18.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
@@ -66,7 +66,7 @@ explicit = true
 [project.optional-dependencies]
 code = [
     "fastapi>=0.100.0",
-    "uvicorn>=0.20.0", 
+    "uvicorn>=0.20.0",
     "pydantic>=2.0.0",
     "requests>=2.28.0",
 ]
@@ -74,14 +74,11 @@ code = [
 [tool.uv]
 preview = true
 python-preference = "only-managed"
+link-mode = "hardlink"
 
 [dependency-groups]
 dev = [
-    "autoflake>=2.3.1",
     "beaker-py>=1.32.2,<2.0",
-    "black>=24.10.0",
-    "flake8>=7.1.1",
-    "isort>=5.13.2",
     "mkdocs-material>=9.6.8",
     "markdown-include>=0.8.1",
     "pytest>=8.3.4",
@@ -138,4 +135,4 @@ known-first-party = ["open-instruct"]
 # case insensitive to match isort --profile black
 case-sensitive = false
 # Disable split-on-trailing-comma to work with skip-magic-trailing-comma
-split-on-trailing-comma = false      
+split-on-trailing-comma = false

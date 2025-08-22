@@ -1,6 +1,5 @@
 import base64
 import json
-import logging
 import math
 import multiprocessing
 import os
@@ -10,6 +9,8 @@ import sys
 import time
 import zlib
 from typing import Any, Dict, List, Optional, Tuple
+
+from open_instruct import logger_utils
 
 from .testing_util import grade_stdio
 
@@ -29,8 +30,7 @@ tmp_print = print
 tmp_rm_tree = shutil.rmtree
 tmp_unlink = os.unlink
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
 # -------------------------------------------------------------

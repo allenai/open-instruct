@@ -1,10 +1,6 @@
 name: Tests
 
 on:
-  push:
-    branches:
-      - main
-      - v*-release
   pull_request:
     branches:
       - main
@@ -66,6 +62,10 @@ jobs:
           # Install only cuda-nvcc package (much smaller than full toolkit)
           sudo apt-get update
           sudo apt-get install -y cuda-nvcc-12-6
+          
+          # Clean up apt cache to save disk space
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
           
           # Clean up apt cache to save disk space
           sudo apt-get clean

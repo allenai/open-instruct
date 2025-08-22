@@ -71,7 +71,6 @@ import ast
 import asyncio
 import importlib
 import io
-import logging
 import os
 import signal
 import time
@@ -84,13 +83,12 @@ from typing import Optional
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from open_instruct import logger_utils
+
 ###############################################################################
 # Configure logging (Cloud Run uses stdout/stderr)
 ###############################################################################
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s", datefmt="%Y-%m-%dT%H:%M:%S%z"
-)
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 ###############################################################################
 # Pre‑import heavy libraries *before* the fork so children share memory

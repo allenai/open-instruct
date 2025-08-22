@@ -43,12 +43,13 @@ try:
     # https://github.com/deepspeedai/DeepSpeed/issues/7028
 except Exception:
     pass
+
+from open_instruct import utils
+
 # isort: on
 import asyncio
 import json
-import logging
 import math
-import os
 import shutil
 import socket
 import threading
@@ -80,7 +81,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
-from open_instruct import vllm_utils3
+from open_instruct import logger_utils, vllm_utils3
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -125,7 +126,7 @@ from open_instruct.utils import (
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
-    maybe_update_beaker_description_with_wandb_url,
+    maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
@@ -133,13 +134,7 @@ from open_instruct.utils import (
     sync_gs_bucket,
 )
 
-# Setup logging with filename and line number format
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -425,6 +420,11 @@ class Args:
         assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
             "At least one reward must be applied!"
         )
+        # Ensure we have enough prompts for all VLLM engines
+        if self.num_unique_prompts_rollout < self.vllm_num_engines:
+            raise ValueError(
+                f"{self.num_unique_prompts_rollout=} must be >= {self.vllm_num_engines=} to avoid empty batches."
+            )
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
@@ -1347,8 +1347,9 @@ def data_preparation_thread(
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
     generation_config,
+    resume_training_step: int,
 ):
-    for training_step in range(1, num_training_steps + 1):
+    for training_step in range(resume_training_step, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
             result, batch = accumulate_inference_batches(
@@ -1712,7 +1713,8 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
             tags=[args.exp_name] + get_wandb_tags(),
         )
         wandb_url = wandb.run.get_url()
-        maybe_update_beaker_description_with_wandb_url(wandb_url)
+        logger.info(f"Initial Beaker description update with wandb_url: {wandb_url}")
+        maybe_update_beaker_description(wandb_url=wandb_url)
 
     return beaker_config, wandb_url
 
@@ -1888,11 +1890,17 @@ def split_and_insert_batch(
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    # Split the batch over the VLLM engines.
-    inference_batch_size = len(batch.queries) // vllm_num_engines
+    import math
+
+    inference_batch_size = max(1, math.ceil(len(batch.queries) / vllm_num_engines))
+
     for batch_idx in range(vllm_num_engines):
         start_idx = batch_idx * inference_batch_size
-        end_idx = start_idx + inference_batch_size if batch_idx < vllm_num_engines - 1 else len(batch.queries)
+        end_idx = min(start_idx + inference_batch_size, len(batch.queries))
+
+        # Stop if we've distributed all queries
+        if start_idx >= len(batch.queries):
+            break
 
         sub_batch = batch[start_idx:end_idx]
 
@@ -2318,21 +2326,6 @@ def cleanup_judge_clients():
     logger.info("✅ Ray shut down")
 
 
-def check_threads_healthy(
-    futures: list, stop_event: threading.Event, executor: futures.ThreadPoolExecutor, queues: list[ray_queue.Queue]
-) -> None:
-    """Check if any threads have failed and raise their exception if so."""
-    for future in futures:
-        if not future.done():
-            continue
-        try:
-            future.result()
-        except Exception as e:
-            logger.error(f"Thread failed with exception: {e}")
-            cleanup_training_resources(stop_event, executor, queues)
-            raise
-
-
 def cleanup_training_resources(
     stop_event: threading.Event,
     executor: futures.ThreadPoolExecutor,
@@ -2368,71 +2361,36 @@ def cleanup_training_resources(
         logger.info("✅ Process group destroyed")
 
 
-def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_samples: int = 32):
-    tokenizer = make_tokenizer(tc, model_config)
-    args = setup_runtime_variables(args)
-    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
-
-    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
-    if args.cache_dataset_only:
-        return
-
-    pprint([args, model_config])
-
-    # Initialize Ray before creating Ray objects
-    ray.init(dashboard_host="0.0.0.0")
-
-    # Create Ray queues.
-    queue_size = (args.async_steps + 1) * args.vllm_num_engines
-    inference_results_Q = ray_queue.Queue(maxsize=queue_size)
-    param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
-    evaluation_inference_results_Q = ray_queue.Queue(maxsize=args.vllm_num_engines)
-
-    policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
-        create_model_and_optimizer(
-            args,
-            tc,
-            model_config,
-            beaker_config,
-            wandb_url,
-            tokenizer,
-            inference_results_Q,
-            param_prompt_Q,
-            evaluation_inference_results_Q,
-        )
+def run_training(
+    args,
+    tokenizer,
+    train_dataset,
+    eval_batch,
+    policy_group,
+    vllm_engines,
+    generation_configs,
+    iter_dataloader,
+    reward_fn,
+    resume_training_step,
+    episode,
+    wandb_url,
+    tc,
+    stop_event,
+    executor,
+    inference_results_Q,
+    param_prompt_Q,
+    evaluation_inference_results_Q,
+    packed_sequences_Q,
+    pending_queries_map,
+    eval_pending_queries_map,
+    generate_metrics_Q,
+    actor_manager: vllm_utils3.ActorManager,
+):
+    """Run the main training loop with worker threads."""
+    ray_get_with_progress(
+        [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
     )
 
-    # Setup training
-    generation_configs = create_generation_configs(args)
-
-    train_dataset_idxs = np.arange(len(train_dataset))
-    iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
-
-    # Create additional queues (main queues already created above)
-    packed_sequences_Q = Queue(maxsize=args.async_steps)
-    pending_queries_map = PendingQueriesMap()
-    eval_pending_queries_map = PendingQueriesMap()
-    generate_metrics_Q = Queue(maxsize=args.async_steps)
-
-    if eval_dataset is None:
-        eval_batch = None
-    else:
-        eval_dataset_indices = list(range(min(num_eval_samples, len(eval_dataset))))
-        eval_batch = next_batch(eval_dataset_indices, eval_dataset)
-    reward_fn = make_reward_fn(args)
-
-    try:
-        ray_get_with_progress(
-            [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
-        )
-    except TimeoutError as e:
-        logger.error(f"vLLM engines failed to initialize within timeout: {e}")
-        # Clean up using existing cleanup function
-        cleanup_judge_clients()  # This calls ray.shutdown()
-        raise RuntimeError("vLLM engine initialization timed out")
-
-    stop_event = threading.Event()
-    executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="grpo")
     logger.info("======== ✅ data preparation thread starts =========")
     packing_future = executor.submit(
         data_preparation_thread,
@@ -2444,6 +2402,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         tokenizer,
         args.num_training_steps,
         generation_configs["train"],
+        resume_training_step,
     )
 
     logger.info("======== ✅ generation thread starts =========")
@@ -2457,21 +2416,32 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         batch = next_batch(dataset_indices, train_dataset)
         split_and_insert_batch(
             batch,
-            1,  # training_step
+            resume_training_step,
             args.vllm_num_engines,
             pending_queries_map,
             param_prompt_Q,
             generation_configs["train"],
         )
     num_total_tokens = 0
+    training_start_time = time.time()  # Track overall training start time
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
-        check_threads_healthy(
-            [packing_future, generation_future],
-            stop_event,
-            executor,
-            [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q],
-        )
+
+        if (
+            training_step == resume_training_step
+            or training_step % 10 == 0
+            or training_step == args.num_training_steps
+        ):
+            logger.info(f"Progress update for Beaker description: step {training_step}/{args.num_training_steps}")
+            maybe_update_beaker_description(
+                current_step=training_step,
+                total_steps=args.num_training_steps,
+                start_time=training_start_time,
+                wandb_url=wandb_url,
+            )
+
+        # Check if any of the threads have raised an exception.
+        [f.result() for f in [packing_future, generation_future] if f.done()]
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         batch = sync_weights_and_prepare_prompts(
@@ -2543,12 +2513,97 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             generate_metrics_Q,
         )
 
+    if resume_training_step > args.num_training_steps:
+        raise ValueError(f"Training didn't run since {resume_training_step=} > {args.num_training_steps=}")
+
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
-    # Clean up resources
-    cleanup_training_resources(
-        stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q], actor_manager
+
+def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_samples: int = 32):
+    tokenizer = make_tokenizer(tc, model_config)
+    args = setup_runtime_variables(args)
+    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
+
+    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
+    if args.cache_dataset_only:
+        return
+
+    pprint([args, model_config])
+
+    # Initialize Ray before creating Ray objects
+    ray.init(dashboard_host="0.0.0.0")
+
+    # Create Ray queues.
+    queue_size = (args.async_steps + 1) * args.vllm_num_engines
+    inference_results_Q = ray_queue.Queue(maxsize=queue_size)
+    param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
+    evaluation_inference_results_Q = ray_queue.Queue(maxsize=args.vllm_num_engines)
+
+    policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
+        create_model_and_optimizer(
+            args,
+            tc,
+            model_config,
+            beaker_config,
+            wandb_url,
+            tokenizer,
+            inference_results_Q,
+            param_prompt_Q,
+            evaluation_inference_results_Q,
+        )
     )
+
+    generation_configs = create_generation_configs(args)
+
+    train_dataset_idxs = np.arange(len(train_dataset))
+    iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
+
+    # Create additional queues (main queues already created above)
+    packed_sequences_Q = Queue(maxsize=args.async_steps)
+    pending_queries_map = PendingQueriesMap()
+    eval_pending_queries_map = PendingQueriesMap()
+    generate_metrics_Q = Queue(maxsize=args.async_steps)
+
+    if eval_dataset is None:
+        eval_batch = None
+    else:
+        eval_dataset_indices = list(range(min(num_eval_samples, len(eval_dataset))))
+        eval_batch = next_batch(eval_dataset_indices, eval_dataset)
+    reward_fn = make_reward_fn(args)
+
+    stop_event = threading.Event()
+    executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="grpo")
+
+    try:
+        episode = run_training(
+            args,
+            tokenizer,
+            train_dataset,
+            eval_batch,
+            policy_group,
+            vllm_engines,
+            generation_configs,
+            iter_dataloader,
+            reward_fn,
+            resume_training_step,
+            episode,
+            wandb_url,
+            tc,
+            stop_event,
+            executor,
+            inference_results_Q,
+            param_prompt_Q,
+            evaluation_inference_results_Q,
+            packed_sequences_Q,
+            pending_queries_map,
+            eval_pending_queries_map,
+            generate_metrics_Q,
+            actor_manager,
+        )
+    finally:
+        cleanup_training_resources(
+            stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q], actor_manager
+        )
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
     # make a copy of the model to `/output` in the end.
@@ -2569,7 +2624,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     # Check for runtime leaks before exiting
     logger.info("Checking for runtime leaks...")
-    from open_instruct import utils
 
     utils.check_runtime_leaks()
 
