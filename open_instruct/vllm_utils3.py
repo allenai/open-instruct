@@ -95,7 +95,9 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
             future = executor.submit(tool, o.text)
             tracking["pending_tool_futures"][output.request_id] = (future, o, output)
+
             return None  # Output is being held for tool processing
+
     return output
 
 
