@@ -244,18 +244,14 @@ def calculate_model_usage_per_token(model_path: str) -> int:
 
 
 def get_device_name(device_name: str) -> str:
-    # Convert to lowercase and split by both spaces and hyphens
     tokens = device_name.lower().replace("-", " ").split()
 
-    # Filter out common non-model tokens
     filtered = [val for val in tokens if val not in ["nvidia", "80gb", "40gb", "48gb", "hbm3", "rtx", "sxm4", "pcie"]]
 
-    # Look for known GPU models in the filtered tokens
     for token in filtered:
         if token in GPU_SPECS:
             return token
 
-    # If no match found, raise error
     raise ValueError(f"Unsupported device name: {device_name}. Expected one of: {list(GPU_SPECS.keys())}")
 
 
@@ -309,7 +305,6 @@ def setup_vllm_engines(
     param_prompt_Q = ray_queue.Queue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
 
-    # Create actor manager for coordinating vLLM engines
     actor_manager = vllm_utils3.ActorManager.remote()
 
     vllm_engines = vllm_utils3.create_vllm_engines(
@@ -356,12 +351,9 @@ def generate_thread(
     logger.info("[Generate Thread] Starting generation thread")
     try:
         while not stop_event.is_set():
-            # Call process_from_queue on all engines
-            # Each call processes one request and returns
             processed_results = ray.get([engine.process_from_queue.remote(timeout=20) for engine in vllm_engines])
             num_processed = sum(int(result) for result in processed_results)
 
-            # If nothing was processed, sleep briefly before trying again
             if num_processed == 0:
                 time.sleep(0.1)
             else:
@@ -418,13 +410,10 @@ def run_benchmark(
         n=args.num_samples_per_prompt_rollout,
     )
 
-    # Set up threading infrastructure
     stop_event = threading.Event()
     error_queue = Queue()
     executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="benchmark")
 
-    # Start monitoring thread for vLLM engines
-    # The generate_thread will continuously call process_from_queue on all engines
     generation_future = executor.submit(generate_thread, vllm_engines, stop_event, error_queue)
 
     results = []
@@ -432,13 +421,11 @@ def run_benchmark(
     device_name = get_device_name(torch.cuda.get_device_name(0))
     device_flops = GPU_SPECS[device_name]["flops"]
 
-    # Prepare all prompts
     logger.info(f"Preparing {num_batches} batches...")
     all_prompts = [
         get_batch_data(dataset, args.num_unique_prompts_rollout, batch_idx) for batch_idx in range(num_batches)
     ]
 
-    # Start submission thread
     submission_start_time = time.time()
     submission_future = executor.submit(
         submission_thread, param_prompt_Q, all_prompts, generation_config, stop_event, error_queue
@@ -449,32 +436,27 @@ def run_benchmark(
 
     try:
         for batch_idx in range(num_batches):
-            # Check for thread errors
             if not error_queue.empty():
                 error = error_queue.get()
                 logger.error(f"Thread error detected: {error}")
                 raise error
 
-            # Check if any thread has died unexpectedly
             for future, name in [(submission_future, "submission"), (generation_future, "generation")]:
                 if future.done():
-                    # If thread is done early, check for exception
                     try:
-                        future.result(timeout=0)  # This will raise if thread had exception
+                        future.result(timeout=0)
                     except futures.TimeoutError:
-                        pass  # This is fine, thread is still running
+                        pass
                     except Exception as e:
                         logger.error(f"Thread {name} failed: {e}")
                         raise
 
-            # Get result - wait indefinitely for the engines to respond
             result = inference_results_Q.get()
 
             completion_time = time.time()
             batch_generation_time = completion_time - last_completion_time
             last_completion_time = completion_time
 
-            # Process result
             new_tokens = sum(len(response) for response in result.responses)
             tokens_per_second = new_tokens / batch_generation_time if batch_generation_time > 0 else 0
 
@@ -488,7 +470,6 @@ def run_benchmark(
             }
             result_dict["mfu"] = 100 * result_dict["tokens_per_second"] * flops_per_token / device_flops
 
-            # We incrementally save completion lengths so even if the job dies, we still have data.
             save_completion_lengths([result_dict], timestamp, result.dataset_index)
             results.append(result_dict)
             logger.info(
@@ -508,7 +489,6 @@ def run_benchmark(
         stop_event.set()
         raise
     finally:
-        # Clean up threads
         stop_event.set()
         executor.shutdown(wait=True)
         logger.info("Threads cleaned up")
@@ -606,7 +586,6 @@ def print_summary(
 
 def cleanup(vllm_engines: list[ray.actor.ActorHandle], actor_manager: Optional[ray.actor.ActorHandle] = None) -> None:
     """Clean up resources."""
-    # Signal actor manager to stop all engines
     if actor_manager:
         try:
             ray.get(actor_manager.set_should_stop.remote(True))
@@ -614,7 +593,6 @@ def cleanup(vllm_engines: list[ray.actor.ActorHandle], actor_manager: Optional[r
         except Exception as e:
             logger.warning(f"Error signaling actor manager: {e}")
 
-    # Kill engines
     for engine in vllm_engines:
         try:
             ray.kill(engine)
