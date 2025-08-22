@@ -276,7 +276,6 @@ def init_process_group(
     return pg
 
 
-@ray.remote
 class ActorManager:
     """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
 
