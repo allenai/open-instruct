@@ -300,14 +300,12 @@ def setup_vllm_engines(
     pg = ray.util.placement_group(bundles, strategy="PACK")
     ray.get(pg.ready())
 
-    # Queue size needs to accommodate all individual prompts across all batches
+    # Queue size needs to accommodate all individual prompts across all batches,
+    # not counting the number of samples per prompt.
     # Total prompts = num_unique_prompts_rollout * num_batches
     queue_size = args.num_unique_prompts_rollout * num_batches
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
-
-    # Create ActorManager for coordination
-    actor_manager = vllm_utils3.ActorManager.remote()
 
     actor_manager = vllm_utils3.ActorManager.remote()
 

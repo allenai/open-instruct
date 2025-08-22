@@ -1464,10 +1464,6 @@ def data_preparation_thread(
                             start = pid * k
                             sampled_indices.extend(range(start, start + k))
 
-                        logger.info(
-                            f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses"
-                        )
-
                         advantages = np.concatenate([advantages, advantages[sampled_indices]])
                         scores = np.concatenate([scores, scores[sampled_indices]])
                         responses += [responses[i] for i in sampled_indices]
@@ -1483,6 +1479,9 @@ def data_preparation_thread(
                         )
 
                         finish_reasons += [finish_reasons[i] for i in sampled_indices]
+                        logger.info(
+                            f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses"
+                        )
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
