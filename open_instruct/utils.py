@@ -825,7 +825,11 @@ class BeakerRuntimeConfig:
 
 
 def is_beaker_job() -> bool:
-    return "BEAKER_JOB_ID" in os.environ
+    has_beaker_job = "BEAKER_JOB_ID" in os.environ
+    logger.info(f"is_beaker_job: BEAKER_JOB_ID present: {has_beaker_job}")
+    if has_beaker_job:
+        logger.info(f"is_beaker_job: BEAKER_JOB_ID value: {os.environ.get('BEAKER_JOB_ID')}")
+    return has_beaker_job
 
 
 def get_beaker_experiment_info(experiment_id: str) -> Optional[dict]:
@@ -926,29 +930,110 @@ def maybe_get_beaker_config():
     )
 
 
-def maybe_update_beaker_description_with_wandb_url(wandb_url: Optional[str]) -> None:
-    """Update Beaker experiment description with wandb URL if running on Beaker."""
-    if not is_beaker_job() or wandb_url is None:
+def format_eta(seconds: float) -> str:
+    """Format ETA in a human-readable format."""
+    seconds = int(seconds)
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    minutes = (seconds % 3600) // 60
+
+    if days > 0:
+        return f"{days}d {hours}h {minutes}m"
+    elif hours > 0:
+        return f"{hours}h {minutes}m"
+    else:
+        return f"{minutes}m"
+
+
+def maybe_update_beaker_description(
+    current_step: Optional[int] = None,
+    total_steps: Optional[int] = None,
+    start_time: Optional[float] = None,
+    wandb_url: Optional[str] = None,
+    original_descriptions: dict[str, str] = {},
+) -> None:
+    """Update Beaker experiment description with training progress and/or wandb URL.
+
+    Args:
+        current_step: Current training step (for progress tracking)
+        total_steps: Total number of training steps (for progress tracking)
+        start_time: Training start time (from time.time()) (for progress tracking)
+        wandb_url: Optional wandb URL to include
+        original_descriptions: Cache of original descriptions for progress updates
+    """
+    logger.info(
+        f"maybe_update_beaker_description called with: current_step={current_step}, total_steps={total_steps}, wandb_url={wandb_url}"
+    )
+
+    if not is_beaker_job():
+        logger.info("Not a Beaker job, returning early")
         return
 
+    experiment_id = os.environ.get("BEAKER_WORKLOAD_ID")
+    if not experiment_id:
+        logger.warning(
+            f"BEAKER_WORKLOAD_ID not found in environment. Available env vars: {', '.join(sorted([k for k in os.environ.keys() if 'BEAKER' in k]))}"
+        )
+        return
+
+    logger.info(f"BEAKER_WORKLOAD_ID: {experiment_id}")
+
     client = beaker.Beaker.from_env()
+
     try:
-        spec = client.experiment.get(os.environ["BEAKER_WORKLOAD_ID"])
+        spec = client.experiment.get(experiment_id)
+        current_description = spec.description or ""
+        logger.info(
+            f"Current Beaker description: {current_description[:100]}..."
+            if len(current_description) > 100
+            else f"Current Beaker description: {current_description}"
+        )
     except beaker.exceptions.ExperimentNotFound:
-        logger.warning(f"Failed to update Beaker experiment description with wandb URL: {wandb_url}")
+        logger.warning(f"Failed to get Beaker experiment with ID: {experiment_id}")
         logger.warning("This might be fine if you are e.g. running in an interactive job.")
         return
-    current_description = spec.description or ""
-    if "wandb.ai" in current_description:
-        # If wandb URL already exists, do not add it again
-        return
-    new_description = (
-        f"{current_description}\n"
-        f"{wandb_url}\n"
-        f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}\n"
-        f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}\n"
+
+    description_components = [
+        current_description,
+        f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}",
+        f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}",
+    ]
+
+    if wandb_url:
+        description_components.append(wandb_url)
+    if current_step is not None:
+        progress_pattern = r"\[[\d.]+% complete \(step \d+/\d+\), (?:eta [^\]]+|finished)\]"
+        base_description = re.sub(progress_pattern, "", current_description).strip()
+
+        if experiment_id not in original_descriptions:
+            original_descriptions[experiment_id] = base_description
+
+        base_description = original_descriptions[experiment_id]
+        description_components[0] = base_description
+
+        progress_pct = (current_step / total_steps) * 100
+
+        if current_step >= total_steps:
+            progress_bar = f"[100% complete (step {total_steps}/{total_steps}), finished]"
+        else:
+            elapsed_time = time.time() - start_time
+            if current_step > 0:
+                time_per_step = elapsed_time / current_step
+                remaining_steps = total_steps - current_step
+                eta_seconds = time_per_step * remaining_steps
+                eta_str = format_eta(eta_seconds)
+            else:
+                eta_str = "calculating..."
+            progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), eta {eta_str}]"
+        description_components.append(progress_bar)
+    new_description = " ".join(description_components)
+    logger.info(
+        f"Setting new Beaker description: {new_description[:200]}..."
+        if len(new_description) > 200
+        else f"Setting new Beaker description: {new_description}"
     )
-    client.experiment.set_description(os.environ["BEAKER_WORKLOAD_ID"], new_description)
+    client.experiment.set_description(experiment_id, new_description)
+    logger.info("Successfully updated Beaker description")
 
 
 def live_subprocess_output(cmd: List[str]) -> str:
