@@ -1853,11 +1853,12 @@ def create_model_and_optimizer(
     if resume_training_step > 1:
         logger.info(f"Resuming training from step {resume_training_step}... Broadcasting weights to vLLM engines.")
         with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
-            ray_get_with_progress(
+            weight_sync_future = ray_get_with_progress(
                 [m.broadcast_to_vllm.remote() for m in policy_group.models],
                 desc="Broadcasting weights to vLLM engines",
                 enable=args.verbose,
             )
+            ray.get(weight_sync_future)
 
     return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager
 
@@ -1997,12 +1998,14 @@ def weight_sync_thread(
             ray.get(actor_manager.set_should_stop.remote(True))
             logger.debug(f"[Weight Sync Thread] Set should_stop to True for weight sync at step {training_step}")
 
-            # Broadcast weights to vLLM engines
-            ray_get_with_progress(
+            # Start broadcast weights to vLLM engines
+            weight_sync_future = ray_get_with_progress(
                 [m.broadcast_to_vllm.remote() for m in policy_group.models],
                 desc=f"[Weight Sync Thread] Broadcasting weights to vLLM engines at training step {training_step}",
                 enable=args.verbose,
             )
+            # Wait until weight sync is done
+            ray.get(weight_sync_future)
 
             # Allow actors to resume
             ray.get(actor_manager.set_should_stop.remote(False))
@@ -2446,7 +2449,7 @@ def run_training(
 
     logger.info("======== ✅ weight sync thread starts =========")
     weight_sync_trigger_event = threading.Event()
-    weight_sync_future = executor.submit(
+    weight_sync_thread_future = executor.submit(
         weight_sync_thread,
         args,
         stop_event,
@@ -2487,7 +2490,7 @@ def run_training(
             )
 
         # Check if any of the threads have raised an exception.
-        [f.result() for f in [packing_future, generation_future, weight_sync_future] if f.done()]
+        [f.result() for f in [packing_future, generation_future, weight_sync_thread_future] if f.done()]
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         trigger_weight_sync_and_prepare_prompts(
