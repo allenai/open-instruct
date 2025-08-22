@@ -425,7 +425,7 @@ class LLMRayActor:
 
     def _maybe_add_new_request(self):
         """Try to add a new request from the prompt queue if not stopping.
-        
+
         Returns:
             bool: True if a request was added, False otherwise.
         """
@@ -485,7 +485,9 @@ class LLMRayActor:
             if iteration % 100 == 0:
                 pending_tool_futures = len(tracking["pending_tool_futures"]) if self.tools else 0
                 num_unfinished = self.llm_engine.get_num_unfinished_requests()
-                self.logger.info(f"[process_from_queue] Iteration {iteration}: Got {len(outputs)} outputs, {num_unfinished} unfinished requests, {pending_tool_futures} pending tool futures")
+                self.logger.info(
+                    f"[process_from_queue] Iteration {iteration}: Got {len(outputs)} outputs, {num_unfinished} unfinished requests, {pending_tool_futures} pending tool futures"
+                )
 
             for output in outputs:
                 # Always extract base request ID (unified approach)
@@ -566,7 +568,7 @@ class LLMRayActor:
             List of completed outputs.
         """
         outputs = []
-        
+
         if self.tools and tracking["pending_tool_futures"]:
             tool_outputs = self._poll_tool_futures(tracking, tokenizer)
             outputs.extend(tool_outputs)
@@ -602,7 +604,7 @@ class LLMRayActor:
 
     def _poll_tool_futures(self, tracking, tokenizer):
         """Poll and handle completed tool executions.
-        
+
         Returns:
             List of completed outputs that can't continue generation.
         """
@@ -670,7 +672,9 @@ class LLMRayActor:
                     # Update the sampling params in request_metadata for the restarted request
                     if req_id in self.request_metadata:
                         self.request_metadata[req_id]["sampling_params"] = new_sampling_params
-                    self.logger.info(f"[_poll_tool_futures] Restarted request {req_id} with {new_sample_tokens} tokens")
+                    self.logger.info(
+                        f"[_poll_tool_futures] Restarted request {req_id} with {new_sample_tokens} tokens"
+                    )
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
                     self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
@@ -678,12 +682,12 @@ class LLMRayActor:
             else:
                 self.logger.info(f"[_poll_tool_futures] Request {req_id} is complete (no more tokens)")
                 completed_outputs.append(tracking["concat_outputs"][req_id])
-                
+
             dict_keys_to_delete.append(req_id)
 
         for req_id in dict_keys_to_delete:
             tracking["pending_tool_futures"].pop(req_id, None)
-            
+
         return completed_outputs
 
     def init_process_group(

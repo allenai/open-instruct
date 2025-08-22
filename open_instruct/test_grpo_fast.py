@@ -1,5 +1,7 @@
 import gc
 import os
+import queue
+import time
 import unittest
 from unittest.mock import Mock
 
@@ -10,9 +12,8 @@ from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 from vllm import SamplingParams
 
-from open_instruct import grpo_fast, model_utils, utils
+from open_instruct import grpo_fast, model_utils, tool_utils, utils, vllm_utils3
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo
-from open_instruct.vllm_utils3 import create_vllm_engines
 
 
 class TestGrpoFastBase(unittest.TestCase):
@@ -66,19 +67,10 @@ class TestGrpoFastBase(unittest.TestCase):
         # Initialize Ray for this test
         ray.init(include_dashboard=False)
 
-    def _cleanup_ray_queues(self):
-        """Clean up all Ray queues created during the test."""
-        for queue in self._ray_queues:
-            try:
-                queue.shutdown()
-            except Exception as e:
-                print(f"Warning: Failed to shutdown Ray queue: {e}")
-        self._ray_queues.clear()
-
     def tearDown(self):
         """Check for leaks and shutdown Ray."""
         # Clean up Ray queues BEFORE shutting down Ray
-        self._cleanup_ray_queues()
+        [rq.shutdown() for rq in self._ray_queues]
 
         # Shutdown Ray
         if ray.is_initialized():
@@ -202,7 +194,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         self._ray_queues.extend([param_prompt_Q, inference_results_Q])
 
         # Create vLLM engines with queues
-        vllm_engines = create_vllm_engines(
+        vllm_engines = vllm_utils3.create_vllm_engines(
             num_engines=1,
             tensor_parallel_size=1,
             enforce_eager=True,
@@ -851,6 +843,115 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         # Verify total responses
         self.assertEqual(total_responses, num_prompts * num_samples)
         self.assertEqual(len(pending_queries_map), 0)
+
+    def test_vllm_tool_processing_completes(self):
+        """Test that tool processing completes without hanging using actual tool settings."""
+        # Check if CUDA is available
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA is not available, skipping test")
+
+        # Create actual tools matching the script
+        tools = {
+            "</code>": tool_utils.CodeExecutionTool(
+                start_str="<code>",
+                end_str="</code>",
+                api_endpoint="https://open-instruct-tool-server-10554368204.us-central1.run.app/execute",
+            ),
+            "</search>": tool_utils.SearchTool(
+                start_str="<search>",
+                end_str="</search>",
+                api_endpoint="http://saturn-cs-aus-232.reviz.ai2.in:44177/search",
+            ),
+        }
+        max_tool_calls = {"</code>": 5, "</search>": 5}
+
+        # Create actual ActorManager via ray.remote
+        actor_manager = ray.remote(vllm_utils3.ActorManager).remote(should_stop=False)
+
+        # Create queues
+        prompt_queue = queue.Queue()
+        results_queue = queue.Queue()
+        eval_results_queue = queue.Queue()
+
+        # Create LLMRayActor
+        model_name = "EleutherAI/pythia-14m"  # Small model for testing
+        actor = vllm_utils3.LLMRayActor(
+            model_name_or_path=model_name,
+            actor_id=0,
+            prompt_queue=prompt_queue,
+            results_queue=results_queue,
+            eval_results_queue=eval_results_queue,
+            actor_manager=actor_manager,
+            tools=tools,
+            max_tool_calls=max_tool_calls,
+            inference_batch_size=8,
+            vllm_kwargs={"gpu_memory_utilization": 0.3, "max_model_len": 512, "enable_prefix_caching": True},
+        )
+
+        tokenizer = actor.llm_engine.tokenizer
+
+        # Create test prompts that will trigger tools
+        test_prompts = [
+            "Write code to print hello: <code>print('hello')</code>",
+            "Search for Python tutorials: <search>Python tutorial beginner</search>",
+            "Calculate 2+2: <code>print(2+2)</code>",
+            "Find vLLM documentation: <search>vLLM documentation</search>",
+            "Write a simple function: <code>def greet(): return 'hi'</code>",
+            "Search machine learning: <search>machine learning basics</search>",
+            "Debug this code: <code>x = 1; print(x)</code>",
+            "Look up PyTorch: <search>PyTorch tutorial</search>",
+        ]
+
+        # Create sampling params once
+        sampling_params = SamplingParams(
+            temperature=1.0, top_p=1.0, n=1, max_tokens=50, stop=["</code>", "</search>", "</answer>"]
+        )
+
+        # Add all requests to queue
+        for i in range(16):
+            prompt_text = test_prompts[i % len(test_prompts)]
+            prompt_ids = tokenizer.encode(prompt_text, add_special_tokens=True)
+
+            request = PromptRequest(
+                prompt=prompt_ids, generation_config=sampling_params, training_step=0, dataset_index=i, is_eval=False
+            )
+            prompt_queue.put(request)
+
+        # Set a timeout and process
+        start_time = time.time()
+
+        # Process requests - this is what we're testing!
+        num_processed = actor.process_from_queue(timeout=30.0)
+
+        elapsed = time.time() - start_time
+        print(f"Processed {num_processed} requests in {elapsed:.2f} seconds")
+
+        # Check results
+        results_received = []
+        while not results_queue.empty():
+            try:
+                result = results_queue.get_nowait()
+                results_received.append(result)
+            except queue.Empty:
+                break
+
+        print(f"Received {len(results_received)} results")
+
+        # Verify we didn't hang
+        self.assertLess(elapsed, 60, "Should complete in less than 60 seconds")
+
+        # Verify we got results
+        self.assertGreater(num_processed, 0, "Should have processed some requests")
+        self.assertGreater(len(results_received), 0, "Should have received some results")
+
+        # Verify tool processing worked
+        for result in results_received:
+            self.assertIsNotNone(result.responses)
+            self.assertIsNotNone(result.request_info)
+            self.assertIsNotNone(result.request_info.tool_calleds)
+            # Check that at least some tools were called
+            if any(result.request_info.tool_calleds):
+                print(f"Tool was called for result with dataset_index {result.dataset_index}")
 
 
 if __name__ == "__main__":
