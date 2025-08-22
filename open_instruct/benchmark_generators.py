@@ -138,8 +138,11 @@ def save_benchmark_results_to_csv(
 
     # Calculate aggregated metrics for main benchmark batches only
     avg_results = average_results(results)
-    total_tokens = sum(r["num_new_tokens"] for r in results)
-    total_generation_time = sum(r["generation_time"] for r in results)
+    total_tokens = avg_results["total_num_new_tokens"]
+    total_generation_time = avg_results["total_generation_time"]
+
+    # Calculate true average tokens per second
+    true_avg_tokens_per_second = total_tokens / total_generation_time if total_generation_time > 0 else 0
 
     # Calculate overall MFU based on overall tokens/second
     device_name = get_device_name(torch.cuda.get_device_name(0))
@@ -159,12 +162,11 @@ def save_benchmark_results_to_csv(
         "total_generation_time": total_generation_time,
         "generation_time_percentage": (total_generation_time / total_time) * 100,
         "total_tokens": total_tokens,
-        "overall_tokens_per_second": overall_tokens_per_second,
-        "overall_mfu": overall_mfu,
-        "avg_tokens_per_second_per_batch": avg_results["tokens_per_second"],
-        "avg_mfu_per_batch": avg_results["mfu"],
-        "avg_generation_time_per_batch": avg_results["generation_time"],
-        "avg_new_tokens_per_sample": avg_results["num_new_tokens"],
+        "avg_tokens_per_second": true_avg_tokens_per_second,
+        "avg_mfu": avg_results["avg_mfu"],
+        "avg_generation_time_per_batch": avg_results["avg_generation_time"],
+        "avg_new_tokens_per_sample": total_tokens
+        / (len(results) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout),
     }
 
     # Check if file exists to determine if we need to write headers
@@ -584,28 +586,42 @@ def run_benchmark(
 
 
 def average_results(results: list[dict[str, Any]]) -> dict[str, Any]:
-    """Calculate average metrics from results."""
-    averaged_results = {
-        "mfu": 0.0,
-        "tokens_per_second": 0.0,
-        "generation_time": 0.0,
-        "num_new_tokens": 0,
+    """Calculate total and aggregated metrics from results."""
+    aggregated_results = {
+        "total_mfu": 0.0,
+        "total_tokens_per_second": 0.0,
+        "total_generation_time": 0.0,
+        "total_num_new_tokens": 0,
         "finish_reasons": collections.defaultdict(int),
         "response_lengths": [],
         "prompt_lengths": [],
     }
     for result in results:
         for key, value in result.items():
-            if key in ["mfu", "tokens_per_second", "generation_time", "num_new_tokens"]:
-                averaged_results[key] += value
+            if key == "mfu":
+                aggregated_results["total_mfu"] += value
+            elif key == "tokens_per_second":
+                aggregated_results["total_tokens_per_second"] += value
+            elif key == "generation_time":
+                aggregated_results["total_generation_time"] += value
+            elif key == "num_new_tokens":
+                aggregated_results["total_num_new_tokens"] += value
             elif key == "finish_reasons":
                 for reason, count in value.items():
-                    averaged_results["finish_reasons"][reason] += count
+                    aggregated_results["finish_reasons"][reason] += count
             elif key == "response_lengths":
-                averaged_results["response_lengths"].extend(value)
+                aggregated_results["response_lengths"].extend(value)
             elif key == "prompt_lengths":
-                averaged_results["prompt_lengths"].extend(value)
-    return {k: v / len(results) if isinstance(v, (int, float)) else v for k, v in averaged_results.items()}
+                aggregated_results["prompt_lengths"].extend(value)
+
+    # Calculate true averages where needed
+    num_results = len(results)
+    aggregated_results["avg_mfu"] = aggregated_results["total_mfu"] / num_results if num_results > 0 else 0
+    aggregated_results["avg_generation_time"] = (
+        aggregated_results["total_generation_time"] / num_results if num_results > 0 else 0
+    )
+
+    return aggregated_results
 
 
 def print_summary(
@@ -618,10 +634,16 @@ def print_summary(
     """Print benchmark summary statistics."""
 
     # Calculate metrics only for the main benchmark batches (excluding warmup)
-    total_tokens = sum(r["num_new_tokens"] for r in results)
-
-    # Average over the main benchmark results only
     avg_results = average_results(results)
+    total_tokens = avg_results["total_num_new_tokens"]
+    total_generation_time = avg_results["total_generation_time"]
+
+    # Calculate true average tokens per second
+    true_avg_tokens_per_second = total_tokens / total_generation_time if total_generation_time > 0 else 0
+
+    # Calculate average new tokens per sample
+    total_samples = len(results) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+    avg_new_tokens_per_sample = total_tokens / total_samples if total_samples > 0 else 0
 
     print("\n" + "=" * 60)
     print("BENCHMARK SUMMARY")
@@ -637,11 +659,11 @@ def print_summary(
     print(f"Total new tokens generated: {total_tokens}")
     print(f"Overall tokens/second: {overall_tokens_per_second:.2f}")
     print("-" * 60)
-    print("Per-batch statistics (for debugging):")
-    print(f"Average tokens/second per batch: {avg_results['tokens_per_second']:.2f}")
-    print(f"Average MFU per batch: {avg_results['mfu']:.2f}%")
-    print(f"Average generation time per batch: {avg_results['generation_time']:.2f}s")
-    print(f"Average new tokens per sample: {avg_results['num_new_tokens']} tokens")
+    print(f"Average results over {len(results)} main benchmark batches:")
+    print(f"Average tokens/second: {true_avg_tokens_per_second:.2f}")
+    print(f"Average MFU: {avg_results['avg_mfu']:.2f}%")
+    print(f"Average generation time per batch: {avg_results['avg_generation_time']:.2f}s")
+    print(f"Average new tokens per sample: {avg_new_tokens_per_sample:.2f} tokens")
 
     max_length = np.max(avg_results["response_lengths"])
     mean_length = np.mean(avg_results["response_lengths"])
