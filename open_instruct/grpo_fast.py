@@ -49,7 +49,6 @@ from open_instruct import utils
 # isort: on
 import asyncio
 import json
-import logging
 import math
 import shutil
 import socket
@@ -82,7 +81,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
-from open_instruct import vllm_utils3
+from open_instruct import logger_utils, vllm_utils3
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -127,7 +126,7 @@ from open_instruct.utils import (
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
-    maybe_update_beaker_description_with_wandb_url,
+    maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
@@ -135,13 +134,7 @@ from open_instruct.utils import (
     sync_gs_bucket,
 )
 
-# Setup logging with filename and line number format
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -427,6 +420,11 @@ class Args:
         assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
             "At least one reward must be applied!"
         )
+        # Ensure we have enough prompts for all VLLM engines
+        if self.num_unique_prompts_rollout < self.vllm_num_engines:
+            raise ValueError(
+                f"{self.num_unique_prompts_rollout=} must be >= {self.vllm_num_engines=} to avoid empty batches."
+            )
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
@@ -1715,7 +1713,8 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
             tags=[args.exp_name] + get_wandb_tags(),
         )
         wandb_url = wandb.run.get_url()
-        maybe_update_beaker_description_with_wandb_url(wandb_url)
+        logger.info(f"Initial Beaker description update with wandb_url: {wandb_url}")
+        maybe_update_beaker_description(wandb_url=wandb_url)
 
     return beaker_config, wandb_url
 
@@ -1891,11 +1890,17 @@ def split_and_insert_batch(
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    # Split the batch over the VLLM engines.
-    inference_batch_size = len(batch.queries) // vllm_num_engines
+    import math
+
+    inference_batch_size = max(1, math.ceil(len(batch.queries) / vllm_num_engines))
+
     for batch_idx in range(vllm_num_engines):
         start_idx = batch_idx * inference_batch_size
-        end_idx = start_idx + inference_batch_size if batch_idx < vllm_num_engines - 1 else len(batch.queries)
+        end_idx = min(start_idx + inference_batch_size, len(batch.queries))
+
+        # Stop if we've distributed all queries
+        if start_idx >= len(batch.queries):
+            break
 
         sub_batch = batch[start_idx:end_idx]
 
@@ -2418,8 +2423,22 @@ def run_training(
             generation_configs["train"],
         )
     num_total_tokens = 0
+    training_start_time = time.time()  # Track overall training start time
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
+
+        if (
+            training_step == resume_training_step
+            or training_step % 10 == 0
+            or training_step == args.num_training_steps
+        ):
+            logger.info(f"Progress update for Beaker description: step {training_step}/{args.num_training_steps}")
+            maybe_update_beaker_description(
+                current_step=training_step,
+                total_steps=args.num_training_steps,
+                start_time=training_start_time,
+                wandb_url=wandb_url,
+            )
 
         # Check if any of the threads have raised an exception.
         [f.result() for f in [packing_future, generation_future] if f.done()]

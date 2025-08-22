@@ -7,7 +7,7 @@ import unittest
 import datasets
 import parameterized
 
-from open_instruct.code import code_utils
+from open_instruct.code_utils import code_utils
 
 SIMPLE_PROGRAM = "a = 1"
 FAILING_TEST = "assert False"
