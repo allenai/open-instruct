@@ -125,7 +125,12 @@ def get_git_commit() -> str:
 
 
 def save_benchmark_results_to_csv(
-    results: list[dict[str, Any]], total_time: float, args: grpo_fast.Args, model_config: model_utils.ModelConfig
+    results: list[dict[str, Any]],
+    total_time: float,
+    overall_tokens_per_second: float,
+    args: grpo_fast.Args,
+    model_config: model_utils.ModelConfig,
+    flops_per_token: int,
 ) -> None:
     """Save benchmark results to CSV file."""
     git_commit = get_git_commit()
@@ -136,6 +141,11 @@ def save_benchmark_results_to_csv(
     total_tokens = sum(r["num_new_tokens"] for r in results)
     total_generation_time = sum(r["generation_time"] for r in results)
 
+    # Calculate overall MFU based on overall tokens/second
+    device_name = get_device_name(torch.cuda.get_device_name(0))
+    device_flops = GPU_SPECS[device_name]["flops"]
+    overall_mfu = 100 * overall_tokens_per_second * flops_per_token / device_flops
+
     # Prepare row data
     row_data = {
         "git_commit": git_commit,
@@ -145,12 +155,14 @@ def save_benchmark_results_to_csv(
         "num_unique_prompts_rollout": args.num_unique_prompts_rollout,
         "num_samples_per_prompt_rollout": args.num_samples_per_prompt_rollout,
         "response_length": args.response_length,
-        "total_time": total_time,
+        "total_wall_clock_time": total_time,
         "total_generation_time": total_generation_time,
         "generation_time_percentage": (total_generation_time / total_time) * 100,
         "total_tokens": total_tokens,
-        "avg_tokens_per_second": avg_results["tokens_per_second"],
-        "avg_mfu": avg_results["mfu"],
+        "overall_tokens_per_second": overall_tokens_per_second,
+        "overall_mfu": overall_mfu,
+        "avg_tokens_per_second_per_batch": avg_results["tokens_per_second"],
+        "avg_mfu_per_batch": avg_results["mfu"],
         "avg_generation_time_per_batch": avg_results["generation_time"],
         "avg_new_tokens_per_sample": avg_results["num_new_tokens"],
     }
@@ -351,12 +363,40 @@ def generate_thread(vllm_engines: list[ray.actor.ActorHandle], stop_event: threa
     """Thread that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] Starting generation thread")
     while not stop_event.is_set():
-        processed_results = ray.get([engine.process_from_queue.remote(timeout=20) for engine in vllm_engines])
-        num_processed = sum(int(result) for result in processed_results)
-        if num_processed == 0:
-            time.sleep(1)
-        else:
-            logger.debug(f"[Generate Thread] Processed {num_processed} requests")
+        try:
+            # Use ray.wait with a timeout to allow checking stop_event periodically
+            futures = [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines]
+            ready, not_ready = ray.wait(futures, timeout=1.0)  # Check every 1 second
+
+            if not ready and stop_event.is_set():
+                logger.info("[Generate Thread] Stopping due to stop event")
+                break
+
+            # Get all results (this will block if not all are ready)
+            if ready:
+                processed_results = ray.get(ready)
+                # Cancel any not ready futures if stop event is set
+                if not_ready and stop_event.is_set():
+                    break
+                # Wait for remaining if not stopping
+                if not_ready:
+                    remaining = ray.get(not_ready)
+                    processed_results.extend(remaining)
+            else:
+                continue  # No results ready yet, loop again
+
+            num_processed = sum(int(result) for result in processed_results)
+            if num_processed == 0:
+                time.sleep(1)
+            else:
+                logger.debug(f"[Generate Thread] Processed {num_processed} requests")
+        except Exception as e:
+            if stop_event.is_set():
+                logger.info("[Generate Thread] Interrupted while stopping")
+                break
+            logger.error(f"[Generate Thread] Error: {e}")
+            raise
+    logger.info("[Generate Thread] Exiting")
 
 
 def submission_thread(
@@ -415,6 +455,7 @@ def run_benchmark(
     executor = futures.ThreadPoolExecutor(max_workers=len(vllm_engines) + 1, thread_name_prefix="benchmark")
 
     generation_future = executor.submit(generate_thread, vllm_engines, stop_event)
+    submission_future = None  # Initialize to None for access in finally block
 
     results = []
     device_name = get_device_name(torch.cuda.get_device_name(0))
@@ -451,6 +492,9 @@ def run_benchmark(
         submission_future = executor.submit(
             submission_thread, param_prompt_Q, all_prompts[1:], generation_config, stop_event
         )
+
+        # Start overall timing for main benchmark
+        main_benchmark_start_time = time.time()
 
         # Process remaining batches with timing
         for batch_idx in range(1, num_batches):
@@ -499,14 +543,42 @@ def run_benchmark(
                 f"generation time: {batch_generation_time:.2f}s"
             )
 
-        # Calculate total time for main benchmark only
-        main_benchmark_time = sum(r["generation_time"] for r in results)
+        # End overall timing for main benchmark
+        main_benchmark_end_time = time.time()
+        main_benchmark_total_time = main_benchmark_end_time - main_benchmark_start_time
 
-        print_summary(results, main_benchmark_time, args, model_config)
-        save_benchmark_results_to_csv(results, main_benchmark_time, args, model_config)
+        # Calculate total tokens generated in main benchmark
+        total_main_tokens = sum(r["num_new_tokens"] for r in results)
+        overall_tokens_per_second = (
+            total_main_tokens / main_benchmark_total_time if main_benchmark_total_time > 0 else 0
+        )
 
+        logger.info("\nOverall main benchmark performance:")
+        logger.info(f"  Total wall-clock time: {main_benchmark_total_time:.2f}s")
+        logger.info(f"  Total tokens generated: {total_main_tokens}")
+        logger.info(f"  Overall tokens/second: {overall_tokens_per_second:.2f}")
+
+        print_summary(results, main_benchmark_total_time, overall_tokens_per_second, args, model_config)
+        save_benchmark_results_to_csv(
+            results, main_benchmark_total_time, overall_tokens_per_second, args, model_config, flops_per_token
+        )
     finally:
+        logger.info("Starting cleanup...")
         stop_event.set()
+
+        # Wait for threads to finish with a timeout
+        logger.info("Waiting for threads to complete...")
+        try:
+            # Give threads time to notice the stop event
+            if submission_future:
+                submission_future.result(timeout=5)
+            if generation_future:
+                generation_future.result(timeout=10)  # Give more time for generation thread
+        except futures.TimeoutError:
+            logger.warning("Threads did not complete within timeout, forcing shutdown")
+        except Exception as e:
+            logger.warning(f"Error waiting for threads: {e}")
+
         executor.shutdown(wait=True)
         logger.info("Threads cleaned up")
 
@@ -537,13 +609,16 @@ def average_results(results: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def print_summary(
-    results: list[dict[str, Any]], total_time: float, args: grpo_fast.Args, model_config: model_utils.ModelConfig
+    results: list[dict[str, Any]],
+    total_time: float,
+    overall_tokens_per_second: float,
+    args: grpo_fast.Args,
+    model_config: model_utils.ModelConfig,
 ) -> None:
     """Print benchmark summary statistics."""
 
     # Calculate metrics only for the main benchmark batches (excluding warmup)
     total_tokens = sum(r["num_new_tokens"] for r in results)
-    total_generation_time = sum(r["generation_time"] for r in results)
 
     # Average over the main benchmark results only
     avg_results = average_results(results)
@@ -558,12 +633,13 @@ def print_summary(
     print(f"Num rollouts: {args.num_samples_per_prompt_rollout}")
     print(f"Max tokens: {args.response_length}")
     print("-" * 60)
-    print(f"Total time (main benchmark): {total_generation_time:.2f}s")
+    print(f"Total wall-clock time (main benchmark): {total_time:.2f}s")
     print(f"Total new tokens generated: {total_tokens}")
+    print(f"Overall tokens/second: {overall_tokens_per_second:.2f}")
     print("-" * 60)
-    print("Average results over 4 main benchmark batches:")
-    print(f"Average tokens/second: {avg_results['tokens_per_second']:.2f}")
-    print(f"Average MFU: {avg_results['mfu']:.2f}%")
+    print("Per-batch statistics (for debugging):")
+    print(f"Average tokens/second per batch: {avg_results['tokens_per_second']:.2f}")
+    print(f"Average MFU per batch: {avg_results['mfu']:.2f}%")
     print(f"Average generation time per batch: {avg_results['generation_time']:.2f}s")
     print(f"Average new tokens per sample: {avg_results['num_new_tokens']} tokens")
 
