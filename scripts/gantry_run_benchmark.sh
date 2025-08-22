@@ -15,7 +15,7 @@ fi
 
 git_hash=$(git rev-parse --short HEAD)
 git_branch=$(git rev-parse --abbrev-ref HEAD)
-model_name_or_path="hamishivi/qwen2_5_openthoughts2" \
+model_name_or_path="hamishivi/qwen2_5_openthoughts2"
 
 gantry run \
        --name open_instruct-benchmark_generators \

@@ -598,7 +598,7 @@ def main() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     # Calculate flops per token before starting vLLM
-    logger.info("Calculating model FLOPs per token...")
+    logger.info(f"Calculating model FLOPs per token for model {model_config.model_name_or_path}...")
     flops_per_token = calculate_model_usage_per_token(model_config.model_name_or_path)
     logger.info(f"Model FLOPs per token: {flops_per_token:,}")
 
