@@ -169,7 +169,6 @@ def _process_outputs_with_tools(
 
 def _finalize_outputs(outputs, tracking, dataset_index, tools):
     """Prepare final outputs with unified approach for all requests."""
-    # Sort outputs by their sub-request ID
     outputs.sort(key=lambda x: (x.request_id.split("-")[0], int(x.request_id.split("-")[1])))
 
     if not tools:
