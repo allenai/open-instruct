@@ -1,0 +1,50 @@
+{
+  "citation": "",
+  "description": "",
+  "features": {
+    "instance_id": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "messages": {
+      "feature": {
+        "content": {
+          "dtype": "string",
+          "_type": "Value"
+        },
+        "role": {
+          "dtype": "string",
+          "_type": "Value"
+        }
+      },
+      "_type": "List"
+    },
+    "buggy_info": {
+      "buggy_line": {
+        "dtype": "int64",
+        "_type": "Value"
+      },
+      "file_path": {
+        "dtype": "string",
+        "_type": "Value"
+      },
+      "view_range": {
+        "feature": {
+          "dtype": "int64",
+          "_type": "Value"
+        },
+        "_type": "List"
+      }
+    },
+    "num_turns": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
+    "tool_calls_made": {
+      "dtype": "int64",
+      "_type": "Value"
+    }
+  },
+  "homepage": "",
+  "license": ""
+}

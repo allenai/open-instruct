@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import string
+import warnings
 import weakref
 from abc import ABC, abstractmethod
 from collections import Counter
@@ -890,6 +891,82 @@ class CodeVerifier(VerifierFunction):
             type: The VerifierConfig class or its subclass
         """
         return CodeVerifierConfig
+
+
+class CodeSearchVerifier(VerifierFunction):
+    """
+    Simple verifier checks in the model makes a call to the CodeSearchTool in tool_utils.tool_vllm.py
+    Checks that the call looks are the correct file and spans the buggy lines
+    """
+
+    def __init__(self, verifier_config: VerifierConfig) -> None:
+        super().__init__("code_search", verifier_config=verifier_config, weight=1.0)
+
+    def parse_tool_calls(self, prediction: str) -> List[Dict[str, Any]]:
+        """
+        Parse the tool calls from the prediction.
+        """
+        tool_call_pattern = r"<tool_call>\s*(.*?)\s*</tool_call>"
+        tool_calls = re.findall(tool_call_pattern, prediction, re.DOTALL)
+
+        parsed_calls = []
+        for tool_call in tool_calls:
+            try:
+                # Try to parse the JSON directly
+                parsed = json.loads(tool_call)
+                parsed_calls.append(parsed)
+            except json.JSONDecodeError as e:
+                # Log the error for debugging
+                warnings.warn(f"Failed to parse tool call JSON: {e}\nRaw content: {tool_call[:200]}...")
+
+                # Don't try to fix malformed JSON - only reward correct format
+                # The model should output: {"name": "tool_name", "arguments": {...}}
+                pass  # Skip malformed tool calls
+
+        return parsed_calls
+
+    async def async_call(
+        self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
+    ) -> VerificationResult:
+        buggy_info = json.loads(label)
+        bug_fn_file = buggy_info["bug_fn_file"]
+        bug_fn_line_start = buggy_info["line_start"]
+        bug_fn_line_end = buggy_info["line_end"]
+
+        # parse the tool calls
+        tool_calls = self.parse_tool_calls(prediction)
+        score = 0.0
+        for tool_call in tool_calls:
+            # check if any of the tools calls identify the correct file and span the buggy lines
+            if "view_range" not in tool_call["arguments"]:
+                continue
+            tool_file = tool_call["arguments"]["path"]
+            tool_line_start = tool_call["arguments"]["view_range"][0]
+            tool_line_end = tool_call["arguments"]["view_range"][1]
+            if (
+                (tool_file.endswith(bug_fn_file) or bug_fn_file.endswith(tool_file))
+                and tool_line_start <= bug_fn_line_start
+                and tool_line_end >= bug_fn_line_end
+            ):
+                score = 1.0
+        return VerificationResult(score=score)
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
+    ) -> VerificationResult:
+        """
+        Synchronously verify code search operations.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                raise RuntimeError(
+                    "Cannot call synchronous __call__ method from within an async context. Use async_call instead."
+                )
+            else:
+                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+        except RuntimeError:
+            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
 
 
 def build_all_verifiers(args) -> Dict[str, VerifierFunction]:

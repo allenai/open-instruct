@@ -382,8 +382,18 @@ class LLMRayActor:
         """Unified processing for both tool and non-tool generation."""
         prompts = request.prompts
         sampling_params = request.generation_config
+        tool_contexts = getattr(request, "tool_contexts", None)
 
         self.logger.info(f"[LLMRayActor] Processing request with {len(prompts)} prompts, tools={bool(self.tools)}")
+
+        # If tool contexts are provided and tools support them, set before generate
+        if self.tools and tool_contexts is not None:
+            try:
+                for tool in self.tools.values():
+                    if hasattr(tool, "set_tool_contexts"):
+                        tool.set_tool_contexts(tool_contexts)
+            except Exception as e:
+                self.logger.warning(f"Failed to set tool contexts: {e}")
 
         if self.tools:
             # Need n=1 for individual tool tracking
@@ -427,6 +437,64 @@ class LLMRayActor:
                 break
 
         result = _finalize_outputs(outputs, tracking, request.dataset_index, self.tools)
+        return result
+
+    def _generate_batch(
+        self,
+        prompts: List[List[int]],
+        sampling_params,
+        dataset_index: Optional[List[int]] = None,
+        training_step: Optional[int] = None,
+        tool_contexts: Optional[List[Optional[str]]] = None,
+    ) -> GenerationResult:
+        """Generate responses for a batch of prompts."""
+        # If tool contexts are provided and the underlying LLM supports them, set before generate
+        try:
+            if self.tool_use and tool_contexts is not None and hasattr(self.llm, "set_tool_contexts"):
+                # Pass per-request context to the ToolUseLLM so tools can access it
+                self.llm.set_tool_contexts(tool_contexts)
+        except Exception:
+            pass
+
+        outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
+
+        # Process outputs
+        response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
+        finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
+
+        if self.tool_use:
+            masks = [out.mask for output in outputs for out in output.outputs]
+            num_calls = [out.num_calls for output in outputs for out in output.outputs]
+            timeouts = [out.timeout for output in outputs for out in output.outputs]
+            tool_errors = [out.tool_error for output in outputs for out in output.outputs]
+            tool_outputs = [out.tool_output for output in outputs for out in output.outputs]
+            tool_runtimes = [out.tool_runtime for output in outputs for out in output.outputs]
+            tool_calleds = [out.tool_called for output in outputs for out in output.outputs]
+        else:
+            masks = [[1] * len(resp) for resp in response_ids]
+            num_calls = [0] * len(response_ids)
+            timeouts = [0] * len(response_ids)
+            tool_errors = [""] * len(response_ids)
+            tool_outputs = [""] * len(response_ids)
+            tool_runtimes = [0] * len(response_ids)
+            tool_calleds = [False] * len(response_ids)
+
+        request_info = RequestInfo(
+            num_calls=num_calls,
+            timeouts=timeouts,
+            tool_errors=tool_errors,
+            tool_outputs=tool_outputs,
+            tool_runtimes=tool_runtimes,
+            tool_calleds=tool_calleds,
+        )
+
+        result = GenerationResult(
+            responses=response_ids,
+            finish_reasons=finish_reasons,
+            masks=masks,
+            request_info=request_info,
+            dataset_index=dataset_index,
+        )
         return result
 
     def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step):

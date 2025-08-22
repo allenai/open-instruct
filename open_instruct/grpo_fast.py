@@ -57,7 +57,7 @@ import time
 from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from queue import Empty, Full, Queue
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
 
@@ -70,7 +70,6 @@ import torch.distributed as dist
 import torch.utils
 import torch.utils.data
 import vllm
-import wandb
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util import queue as ray_queue
@@ -81,6 +80,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
+import wandb
 from open_instruct import logger_utils, vllm_utils3
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
@@ -142,6 +142,48 @@ INVALID_LOGPROB = 1.0
 
 class ShutdownSentinel:
     """Sentinel value to signal thread shutdown via queue."""
+
+
+def log_rollouts(
+    queries: List[str], 
+    responses: List[str], 
+    training_step: int, 
+    episode: int, 
+    output_dir: str,
+    max_logs: int = 10
+):
+    """Log prompts and completions to a JSON file for debugging and analysis."""
+    from pathlib import Path
+    
+    rollout_log_dir = Path(output_dir) / "rollout_logs"
+    rollout_log_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create filename with timestamp and step info
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = rollout_log_dir / f"rollouts_step_{training_step}_episode_{episode}_{timestamp}.jsonl"
+    
+    # Limit the number of logs to avoid huge files
+    num_to_log = min(len(queries), max_logs)
+    
+    # Prepare data for logging
+    rollout_data = []
+    for i in range(num_to_log):
+        rollout_data.append({
+            "index": i,
+            "training_step": training_step,
+            "episode": episode,
+            "timestamp": timestamp,
+            "query": queries[i],
+            "response": responses[i],
+            "response_length": len(responses[i]),
+        })
+    
+    # Write to file in JSONL format for easy streaming
+    with open(log_file, "w") as f:
+        for entry in rollout_data:
+            f.write(json.dumps(entry) + "\n")
+    
+    logger.info(f"📝 Logged {len(rollout_data)} rollouts to {log_file}")
 
 
 @dataclass
@@ -314,6 +356,12 @@ class Args:
     """whether to penalize responses which did not finish generation"""
     non_stop_penalty_value: float = 0.0
     """the reward value for responses which did not finish generation"""
+    
+    # Logging
+    log_rollouts_to_file: bool = False
+    """whether to log prompts and completions from rollouts to a file"""
+    max_rollout_logs_per_step: int = 10
+    """maximum number of rollout examples to log per step (to avoid huge files)"""
 
     # Ray
     single_gpu_mode: bool = False
@@ -329,9 +377,9 @@ class Args:
     """whether to enforce eager mode for vLLM -- slow inference but needed for multi-node"""
     vllm_sync_backend: str = "nccl"
     """DeepSpeed -> vLLM weight sync backend"""
-    vllm_gpu_memory_utilization: float = 0.9
+    vllm_gpu_memory_utilization: float = 0.7
     """vLLM GPU memory utilization"""
-    vllm_enable_prefix_caching: bool = False
+    vllm_enable_prefix_caching: bool = True
     """whether to enable prefix caching"""
     vllm_top_p: float = 1.0
     """vLLM top p for nucleus sampling"""
@@ -396,8 +444,8 @@ class Args:
 
     # Tool settings
     tools: Optional[List[str]] = None
-    """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
-    max_tool_calls: List[int] = field(default_factory=lambda: [5])
+    """If set, use the tool mapped to the string. Currently supports `search`, `code`, and `code_view`"""
+    max_tool_calls: List[int] = field(default_factory=lambda: [32])
     """Maximum number of tool calls allowed. If a list is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
     mask_tool_use: bool = True
     """Whether to mask the tool output. By default on."""
@@ -412,6 +460,10 @@ class Args:
 
     # code-tool specific settings
     code_tool_api_endpoint: Optional[str] = None
+
+    # code-view-tool specific settings
+    code_view_api_endpoint: Optional[str] = None
+    """The API endpoint for the code view tool (defaults to code_tool_api_endpoint if not set)."""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
@@ -447,7 +499,7 @@ class Args:
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
         if self.tools is not None and len(self.tools) > 0:
             for tool in self.tools:
-                if tool not in ["search", "code"]:
+                if tool not in ["search", "code", "code_view"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
 
@@ -1244,6 +1296,9 @@ def accumulate_inference_batches(
     all_queries = []
     all_ground_truths = []
     all_datasets = []
+    successful_engines = 0
+    failed_engines = []
+
     for i in tqdm(
         range(args.vllm_num_engines),
         total=args.vllm_num_engines,
@@ -1252,17 +1307,12 @@ def accumulate_inference_batches(
         disable=not args.verbose,
     ):
         result = inference_results_Q.get(timeout=timeout)
-
         if isinstance(result, ShutdownSentinel):
             return result, None
         dataset_indices = result.dataset_index
-
         if dataset_indices is None:
             raise RuntimeError(f"Dataset indices is None for result {i}")
 
-        # When generation_config.n > 1, vLLM generates multiple responses per prompt
-        # but dataset_indices only contains the unique indices (not replicated)
-        # So we expect: len(responses) == len(dataset_indices) * generation_config.n
         expected_responses = len(dataset_indices) * generation_config.n
         assert len(result.responses) == expected_responses, (
             f"Mismatch: number of responses ({len(result.responses)}) "
@@ -1271,11 +1321,9 @@ def accumulate_inference_batches(
             f", {len(dataset_indices)=}"
         )
 
-        # Get corresponding queries, ground_truths, datasets for each individual prompt
         batch_queries = []
         batch_ground_truths = []
         batch_datasets = []
-
         for dataset_idx in dataset_indices:
             query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
             batch_queries.append(query)
@@ -1286,6 +1334,15 @@ def accumulate_inference_batches(
         all_queries.extend(batch_queries)
         all_ground_truths.extend(batch_ground_truths)
         all_datasets.extend(batch_datasets)
+
+    if not results:
+        logger.error("[Data Preparation Thread] No results collected from any engine")
+        raise Empty("No results from any engine")
+
+    if failed_engines:
+        logger.warning(
+            f"[Data Preparation Thread] Successfully collected from {successful_engines}/{args.vllm_num_engines} engines. Failed engines: {failed_engines}"
+        )
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1309,7 +1366,6 @@ def accumulate_inference_batches(
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
 
-    # Create combined RequestInfo
     combined_request_info = RequestInfo(
         num_calls=combined_num_calls,
         timeouts=combined_timeouts,
@@ -1319,21 +1375,19 @@ def accumulate_inference_batches(
         tool_calleds=combined_tool_calleds,
     )
 
-    # Create combined GenerationResult
     combined_result = GenerationResult(
         responses=combined_responses,
         finish_reasons=combined_finish_reasons,
         masks=combined_masks,
         request_info=combined_request_info,
-        dataset_index=None,  # Not meaningful for combined result
+        dataset_index=None,
     )
 
-    # Note: We don't have dataset_indices here, but they're not needed for the returned batch
     batch = Batch(
         queries=all_queries,
         ground_truths=all_ground_truths,
         datasets=all_datasets,
-        indices=None,  # Not meaningful for combined results
+        indices=None,
     )
     return combined_result, batch
 
@@ -1394,6 +1448,19 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
                 result.finish_reasons
             )
+            
+            # Log prompts and completions to file if enabled
+            if args.log_rollouts_to_file:
+                # Calculate episode based on training step
+                episode = (training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+                log_rollouts(
+                    decoded_queries, 
+                    decoded_responses, 
+                    training_step, 
+                    episode, 
+                    args.output_dir,
+                    max_logs=args.max_rollout_logs_per_step
+                )
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
             scores, reward_metrics = asyncio.run(
@@ -1809,6 +1876,23 @@ def create_model_and_optimizer(
                 tool_objects[tool.end_str] = tool
                 # Add tool end string to stop_strings
                 args.stop_strings.append(tool.end_str)
+            elif tool.lower() == "code_view":
+                from open_instruct.tool_utils.tool_vllm import CodeViewTool
+
+                # Use code_view_api_endpoint if set, otherwise fall back to code_tool_api_endpoint
+                api_endpoint = args.code_view_api_endpoint
+                if not api_endpoint:
+                    raise ValueError("code_view tool requires --code_view_api_endpoint to be set")
+
+                tool = CodeViewTool(
+                    start_str="<tool_call>",
+                    end_str="</tool_call>",
+                    api_endpoint=api_endpoint,
+                    repo_name=None,  # Repo name will be provided in the tool call by the model
+                )
+                tool_objects[tool.end_str] = tool
+                # Add tool end string to stop_strings
+                args.stop_strings.append(tool.end_str)
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 
@@ -1887,6 +1971,7 @@ def split_and_insert_batch(
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q,
     generation_config,
+    tool_contexts_next=None,
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
@@ -1917,6 +2002,7 @@ def split_and_insert_batch(
                 training_step=training_step,
                 dataset_index=sub_batch.indices,
                 is_eval=is_eval,
+                tool_contexts=(tool_contexts_next[start_idx:end_idx] if tool_contexts_next is not None else None),
             )
         )
 
@@ -1949,11 +2035,39 @@ def sync_weights_and_prepare_prompts(
             enable=args.verbose,
         )
 
-        ray.get(actor_manager.set_should_stop.remote(False))
-        logger.debug(f"[Main Thread] Set should_stop to False after weight sync at step {training_step}")
+    # Prepare per-sample tool contexts if present in dataset items
+    tool_contexts_next = None
+    try:
+        # Build from batch.datasets; each item may be a dict with tool_context/patch_metadata, or a JSON string
+        ctx_list = []
+        for ds_item in batch.datasets or []:
+            ctx = None
+            if isinstance(ds_item, dict):
+                ctx = ds_item.get("tool_context") or ds_item.get("patch_metadata")
+            elif isinstance(ds_item, str):
+                try:
+                    parsed = json.loads(ds_item)
+                    if isinstance(parsed, dict):
+                        ctx = parsed.get("tool_context") or parsed.get("patch_metadata")
+                except Exception:
+                    ctx = None
+            ctx_list.append(ctx)
+        if len(ctx_list) > 0:
+            tool_contexts_next = None if all(c is None for c in ctx_list) else ctx_list
+    except Exception:
+        tool_contexts_next = None
+
+    ray.get(actor_manager.set_should_stop.remote(False))
+    logger.debug(f"[Main Thread] Set should_stop to False after weight sync at step {training_step}")
 
     split_and_insert_batch(
-        batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]
+        batch,
+        training_step,
+        args.vllm_num_engines,
+        pending_queries_map,
+        param_prompt_Q,
+        generation_configs["train"],
+        tool_contexts_next,
     )
 
     return batch
@@ -1986,10 +2100,13 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
 def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
+
+    process_timeout = 20
+
     while not stop_event.is_set():
         with Timer("🔥 Generation time") as timer:
             processed_results = ray_get_with_progress(
-                [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
+                [engine.process_from_queue.remote(timeout=process_timeout) for engine in vllm_engines],
                 desc="[Generate Thread] Waiting for vLLM engines to process",
                 enable=args.verbose,
             )
@@ -2126,6 +2243,7 @@ def maybe_evaluate(
     try:
         # timeout 0.01 if this is the last training step or we're not evaluating
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
+        # Note: even for skipped evaluations, we need reasonable timeout to avoid spurious failures
         timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_every < 0) else 100
 
         # Accumulate evaluation results from all vLLM engines
