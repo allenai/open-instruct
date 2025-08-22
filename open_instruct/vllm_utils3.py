@@ -174,7 +174,6 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools):
     outputs.sort(key=lambda x: (x.request_id.split("-")[0], int(x.request_id.split("-")[1])))
 
     if not tools:
-        # Non-tool mode: directly process outputs
         return _process_outputs(outputs, dataset_index=dataset_index)
 
     # Tool mode: add metadata and merge completions
