@@ -12,15 +12,18 @@ if [[ "$1" =~ ^[0-9]+$ ]]; then
   response_length="$1"
   shift
 fi
+git_hash=$(git rev-parse --short HEAD)
+git_branch=$(git rev-parse --abbrev-ref HEAD)
 
 gantry run \
        --name open_instruct-benchmark_generators \
        --workspace ai2/oe-eval \
        --weka=oe-eval-default:/weka \
        --gpus 1 \
+       --description "Running benchmark with response length of $response_length at commit $git_hash on branch $git_branch." \
        --beaker-image nathanl/open_instruct_auto \
        --cluster ai2/jupiter-cirrascale-2 \
-       --budget ai2/oe-eval \
+       --budget ai2/tulu-thinker \
        --install 'uv sync' \
        -- uv run python -m open_instruct.benchmark_generators \
     --model_name_or_path "hamishivi/qwen2_5_openthoughts2" \
