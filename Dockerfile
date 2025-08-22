@@ -79,7 +79,7 @@ RUN git clone -b shanea/olmo3 https://github.com/2015aroras/vllm.git vllm_olmo3
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --no-cache
+    uv sync --frozen --no-install-project --no-cache --extra vllm
 
 RUN uv run -m nltk.downloader punkt punkt_tab
 

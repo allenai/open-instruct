@@ -24,7 +24,6 @@ dependencies = [
     "tensorboard>=2.18.0",
     "torch>=2.7.0,<2.8",
     "transformers @ git+https://github.com/2015aroras/transformers.git@shanea/olmo3",
-    "vllm",
     "wandb==0.18.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
@@ -71,6 +70,9 @@ code = [
     "uvicorn>=0.20.0",
     "pydantic>=2.0.0",
     "requests>=2.28.0",
+]
+vllm = [
+    "vllm"
 ]
 
 [tool.uv]
