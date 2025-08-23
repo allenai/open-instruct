@@ -1370,7 +1370,7 @@ def get_cached_dataset_tulu(
 
             dataset_config = DatasetConfig(
                 dataset_name=dataset_name,
-                dataset_split=dataset_mixer_list_splits[i],
+                dataset_split=dataset_mixer_list_splits[i // 2],
                 dataset_revision="main",
                 transform_fn=dataset_transform_fn,
                 transform_fn_args=transform_fn_args,
