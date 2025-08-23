@@ -30,12 +30,16 @@
 # isort: off
 import os
 from concurrent import futures
+from datetime import timedelta
 
 # We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
 # https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     import deepspeed
+    from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF
+    from deepspeed.utils import groups
+    from deepspeed.runtime.utils import move_to_device
 
     # @vwxyzjn: when importing on CPU-only machines, we get the following error:
     # RuntimeError: 0 active drivers ([]). There should only be one.
@@ -57,7 +61,6 @@ import time
 from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
-from datetime import timedelta
 from queue import Empty, Full, Queue
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
 
@@ -113,6 +116,7 @@ from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
     RayProcess,
+    UlyssesSPSplitter,
     _z3_params_to_fetch,
     calibrate_checkpoint_state_dir,
     clean_last_n_checkpoints_deepspeed,
@@ -321,6 +325,9 @@ class Args:
     num_learners_per_node: List[int] = field(default_factory=lambda: [1])
     """number of GPU deepspeed learners per node (e.g., --num_learners_per_node 2 4 means 2 learner processes
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
+    sequence_parallel_size: int = 1
+    """sequence parallel size - how many GPUs we will parallelize sequences across during training.
+    Useful for super-long context lengths."""
     vllm_num_engines: int = 1
     """number of vLLM Engines, set to 0 to disable vLLM"""
     vllm_tensor_parallel_size: int = 1
@@ -569,7 +576,13 @@ class PolicyTrainerRayProcess(RayProcess):
         self.device = torch.device(self.local_rank)
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
-        ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
+        ds_config = get_train_ds_config(
+            offload=False,
+            adam_offload=False,
+            stage=args.deepspeed_stage,
+            bf16=True,
+            sequence_parallel_size=args.sequence_parallel_size,
+        )
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
         # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
@@ -581,6 +594,18 @@ class PolicyTrainerRayProcess(RayProcess):
         else:
             dschf = None
         logger.info(f"Deepspeed config: {dschf=}")
+
+        # set sequence parallel
+        self.mpu = None
+        if args.sequence_parallel_size > 1:
+            self.mpu = UlyssesSPAttentionHF.register_with_transformers(
+                model_name_or_path=model_config.model_name_or_path,
+                core_attn_implementation="flash_attention_2",
+                sequence_parallel_size=args.sequence_parallel_size,
+                max_length=args.max_token_length,
+                micro_batch_size=args.per_device_train_batch_size,
+                seq_length_is_variable=True,
+            )
 
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
@@ -614,7 +639,8 @@ class PolicyTrainerRayProcess(RayProcess):
             optimizer=self.optimizer,
             config=ds_config,
             lr_scheduler=scheduler,
-            dist_init_required=True,
+            dist_init_required=False,
+            mpu=self.mpu,
         )
         optimization_steps_done = 0
         if args.checkpoint_state_dir:
@@ -624,6 +650,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     f"Skipping loading checkpoint state from {args.checkpoint_state_dir} because it does not exist!"
                 )
             else:
+                old_mpu = None
+                if self.mpu is not None:
+                    old_mpu = self.mpu
+                    self.model.mpu = None
                 path, states = self.model.load_checkpoint(
                     args.checkpoint_state_dir,
                     load_module_strict=True,
@@ -631,6 +661,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     load_lr_scheduler_states=True,
                     load_module_only=False,
                 )
+                if old_mpu is not None:
+                    self.model.mpu = old_mpu
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
                 optimization_steps_done = states["training_step"]
@@ -663,9 +695,24 @@ class PolicyTrainerRayProcess(RayProcess):
             use_cache=False,
         )
         disable_dropout_in_model(self.ref_policy)
-        self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
+        self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config, mpu=self.mpu)
         self.ref_policy.eval()
         self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
+
+        if self.mpu is not None:
+            self.sp_group = groups._get_sequence_parallel_group()
+            self.sp_world_size = groups._get_sequence_parallel_world_size()
+            self.sp_rank = groups._get_sequence_parallel_rank()
+            self.splitter = UlyssesSPSplitter(
+                sp_rank=self.sp_rank,
+                sp_group=self.sp_group,
+                sp_world_size=self.sp_world_size,
+                device=self.device,
+                pad_token_id=self.tokenizer.pad_token_id,
+            )
+        else:
+            self.splitter = None
+
         return optimization_steps_done
 
     def forward(
@@ -827,6 +874,47 @@ class PolicyTrainerRayProcess(RayProcess):
         # recalculate the "real" number of mini-batches
         num_mini_batches = len(collated_query_responses) // accumulation_steps
 
+        if self.splitter is not None:
+            with Timer("✂️ Splitting batch for SP", noop=self.rank != 0):
+                batch = {
+                    "input_ids": collated_query_responses,
+                    "attention_mask": collated_attention_masks,
+                    "position_ids": collated_position_ids,
+                    "response_masks": collated_response_masks,
+                    "tool_masks": collated_tool_masks,
+                    "advantages": collated_advantages,
+                }
+                # Pad the items in the batch so they are divisible by sp_world_size
+                # where attention mask is 0, we dont end up using anyway.
+                for i in range(len(batch["input_ids"])):
+                    for k in batch.keys():
+                        if torch.is_tensor(batch[k][i]):
+                            seq_length = batch[k][i].shape[1]
+                            if seq_length % self.sp_world_size != 0:
+                                padding_length = self.sp_world_size - (seq_length % self.sp_world_size)
+                                padding = torch.zeros(
+                                    (batch[k][i].shape[0], padding_length),
+                                    dtype=batch[k][i].dtype,
+                                    device=batch[k][i].device,
+                                )
+                                batch[k][i] = torch.cat((batch[k][i], padding), dim=1)
+                sharded_batches = self.splitter.split_batch(batch)
+
+                # take just the sp_rank item.
+                collated_query_responses = sharded_batches[self.sp_rank]["input_ids"]
+                collated_attention_masks = sharded_batches[self.sp_rank]["attention_mask"]
+                collated_position_ids = sharded_batches[self.sp_rank]["position_ids"]
+                collated_response_masks = sharded_batches[self.sp_rank]["response_masks"]
+                collated_tool_masks = sharded_batches[self.sp_rank]["tool_masks"]
+                collated_advantages = sharded_batches[self.sp_rank]["advantages"]
+
+                collated_query_responses = move_to_device(collated_query_responses, self.ref_policy.device)
+                collated_attention_masks = move_to_device(collated_attention_masks, self.ref_policy.device)
+                collated_position_ids = move_to_device(collated_position_ids, self.ref_policy.device)
+                collated_response_masks = move_to_device(collated_response_masks, self.ref_policy.device)
+                collated_tool_masks = move_to_device(collated_tool_masks, self.ref_policy.device)
+                collated_advantages = move_to_device(collated_advantages, self.ref_policy.device)
+
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
         with Timer("Inference Calculation", noop=self.rank != 0):
@@ -956,19 +1044,87 @@ class PolicyTrainerRayProcess(RayProcess):
                     elif args.kl_estimator == "kl4":
                         kl = kl4
 
-                    # grpo change: directly subtract KL in loss (add)
-                    loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
+                    if args.sequence_parallel_size == 1:
+                        # grpo change: directly subtract KL in loss (add)
+                        loss = masked_mean(
+                            pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis
+                        )
+                    else:
+                        # SP: gather loss sums from all ranks, divide by total valid tokens
+                        local_loss_sum = ((pg_loss_max + args.beta * kl) * mb_response_masks_bool.float()).sum()
+                        good_tokens = mb_response_masks_bool.sum()
+                        loss_sums_per_rank = torch.distributed.nn.functional.all_gather(
+                            local_loss_sum, group=self.sp_group
+                        )
+                        good_tokens_per_rank = torch.distributed.nn.functional.all_gather(
+                            good_tokens, group=self.sp_group
+                        )
+                        total_loss_sum = sum(loss_sums_per_rank)
+                        total_good_tokens = sum(good_tokens_per_rank)
+
+                        loss = (
+                            total_loss_sum / total_good_tokens
+                            if total_good_tokens > 0
+                            else torch.tensor(0.0, device=local_loss_sum.device)
+                        )
                     loss = loss / accumulation_steps
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
                         self.model.step()
                     local_step += 1
                     with torch.no_grad():
-                        # NOTE: in packed implementation, kl calculation are averages over response tokens
-                        kl1_stats[i] = masked_mean(kl1, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, args.masked_mean_axis).float()
+                        if args.sequence_parallel_size == 1:
+                            # NOTE: in packed implementation, kl calculation are averages over response tokens
+                            kl1_stats[i] = masked_mean(kl1, mb_response_masks_bool, args.masked_mean_axis).float()
+                            kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, args.masked_mean_axis).float()
+                            kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, args.masked_mean_axis).float()
+                            kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, args.masked_mean_axis).float()
+                            pg_clipfrac_stats[i] = masked_mean(
+                                (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
+                            )
+                            pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
+                            loss_stats[i] = loss
+                            ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
+                            if args.record_entropy:
+                                # Calculate entropy statistics
+                                entropy_stats[i] = masked_mean(
+                                    mb_entropy, mb_response_masks_bool, args.masked_mean_axis
+                                ).float()
+                        else:
+                            # do the rank gather thing like for the main loss.
+                            # this is because we have to pad out to the max length
+                            # for the whole minibatch to get ulysses to work, so
+                            # sometimes in a microbatch we end up with all padding
+                            # on one rank.
+                            def gather_mean_stats(stats_tensor, mask_tensor):
+                                local_stats_sum = (stats_tensor * mask_tensor.float()).sum()
+                                good_tokens = mask_tensor.sum()
+                                loss_sums_per_rank = torch.distributed.nn.functional.all_gather(
+                                    local_stats_sum, group=self.sp_group
+                                )
+                                good_tokens_per_rank = torch.distributed.nn.functional.all_gather(
+                                    good_tokens, group=self.sp_group
+                                )
+                                total_stats_sum = sum(loss_sums_per_rank)
+                                total_good_tokens = sum(good_tokens_per_rank)
+                                if total_good_tokens > 0:
+                                    return total_stats_sum / total_good_tokens
+                                else:
+                                    return torch.tensor(0.0, device=local_stats_sum.device)
+
+                            kl1_stats[i] = gather_mean_stats(kl1, mb_response_masks_bool)
+                            kl2_stats[i] = gather_mean_stats(kl2, mb_response_masks_bool)
+                            kl3_stats[i] = gather_mean_stats(kl3, mb_response_masks_bool)
+                            kl4_stats[i] = gather_mean_stats(kl4, mb_response_masks_bool)
+                            pg_clipfrac_stats[i] = gather_mean_stats(
+                                (pg_losses2 > pg_losses).float(), mb_response_masks_bool
+                            )
+                            pg_loss_stats[i] = gather_mean_stats(pg_loss_max, mb_response_masks_bool)
+                            loss_stats[i] = gather_mean_stats(loss, mb_response_masks_bool)
+                            ratio_stats[i] = gather_mean_stats(ratio, mb_response_masks_bool)
+                            if args.record_entropy:
+                                entropy_stats[i] = gather_mean_stats(mb_entropy, mb_response_masks_bool)
+                        # multiply by beta
                         if args.kl_estimator == "kl1":
                             kl_loss_stats[i] = kl1_stats[i] * args.beta
                         elif args.kl_estimator == "kl2":
@@ -977,17 +1133,6 @@ class PolicyTrainerRayProcess(RayProcess):
                             kl_loss_stats[i] = kl3_stats[i] * args.beta
                         elif args.kl_estimator == "kl4":
                             kl_loss_stats[i] = kl4_stats[i] * args.beta
-                        pg_clipfrac_stats[i] = masked_mean(
-                            (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
-                        )
-                        pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
-                        loss_stats[i] = loss
-                        ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
-                        if args.record_entropy:
-                            # Calculate entropy statistics
-                            entropy_stats[i] = masked_mean(
-                                mb_entropy, mb_response_masks_bool, args.masked_mean_axis
-                            ).float()
 
             with torch.no_grad():
                 self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
@@ -1007,6 +1152,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: Dict[str, str]) -> None:
         args = self.args
+        # mpu is just used for sequence parallel, so we remove it for saving, and then re-add it after.
+        old_mpu = None
+        if self.model.mpu is not None:
+            old_mpu = self.mpu
+            self.model.mpu = None
         self.model.save_checkpoint(checkpoint_state_dir, client_state=client_state)
         # `save_checkpoint` needs to be called on all ranks, only rank 0 will have all the states
         if self.rank == 0:
@@ -1017,6 +1167,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 ray.remote(sync_gs_bucket).options(num_cpus=1).remote(
                     checkpoint_state_dir, args.gs_checkpoint_state_dir
                 )
+        # add back the mpu
+        if old_mpu is not None:
+            self.model.mpu = old_mpu
 
     def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
         model_to_save = self.model
