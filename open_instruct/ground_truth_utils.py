@@ -42,6 +42,7 @@ from open_instruct.search_rewards.rubric_rewards import compute_rubric_reward
 from open_instruct.search_rewards.finegrained_rewards import compute_finegrained_reward
 from open_instruct.search_rewards.longform_averaged_outcome_rewards import compute_longform_averaged_outcome_reward
 from open_instruct.search_rewards.longform_finegrained_rewards_v1 import compute_longform_finegrained_reward
+from open_instruct.search_rewards.find_reward_spans import FinegrainedScore 
 from open_instruct.utils import extract_final_answer
 from open_instruct.IFEvalG import instructions_registry
 
@@ -94,16 +95,6 @@ class VerificationResult:
     cost: float = 0.0
     log_values: Optional[Dict[str, float]] = None
     reasoning: Optional[str] = None
-
-
-@dataclass
-class FinegrainedScore:
-    score: float
-    effective_spans: List[Tuple[int, int]]
-    reward_group_id: int
-    reward_group_name: str
-    query_idx: Optional[int] = None
-    advantage: Optional[float] = None
 
 
 @dataclass

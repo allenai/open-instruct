@@ -1,6 +1,15 @@
 import re
 from typing import List, Tuple, Dict, Any
-from open_instruct.ground_truth_utils import FinegrainedScore
+from dataclasses import dataclass
+
+@dataclass
+class FinegrainedScore:
+    score: float
+    effective_spans: List[Tuple[int, int]]
+    reward_group_id: int
+    reward_group_name: str
+    query_idx: Optional[int] = None
+    advantage: Optional[float] = None
 
 
 def find_format_reward_spans(response: str) -> List[FinegrainedScore]:
