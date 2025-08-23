@@ -1354,7 +1354,8 @@ def get_cached_dataset_tulu(
             print("by default, we will use the same split for all datasets")
             dataset_mixer_list_splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
         else:
-            if len(dataset_mixer_list_splits) != len(dataset_mixer_list):
+            # one split per dataset
+            if len(dataset_mixer_list_splits) != len(dataset_mixer_list) / 2:
                 raise ValueError(
                     f"dataset_mixer_list_splits length must be the same as dataset_mixer_list: {len(dataset_mixer_list_splits)=} != {len(dataset_mixer_list)=}"
                 )
