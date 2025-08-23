@@ -1991,21 +1991,32 @@ def weight_sync_thread(
 
         training_step = getattr(weight_sync_trigger_event, "_training_step", 0)
 
-        with Timer("Weight Sync") as timer:
+        with Timer("[Weight Sync]") as timer:
             logger.debug(f"[Weight Sync Thread] Starting weight sync for step {training_step}")
 
             # Set actors to stop
             ray.get(actor_manager.set_should_stop.remote(True))
             logger.debug(f"[Weight Sync Thread] Set should_stop to True for weight sync at step {training_step}")
 
-            # Start broadcast weights to vLLM engines
-            weight_sync_future = ray_get_with_progress(
+            # Broadcast weights to vLLM engines
+            # First get the futures (which return lists of ObjectRefs)
+            weight_broadcast_futures = ray_get_with_progress(
                 [m.broadcast_to_vllm.remote() for m in policy_group.models],
-                desc=f"[Weight Sync Thread] Broadcasting weights to vLLM engines at training step {training_step}",
+                desc=f"[Weight Sync Thread] Starting weight broadcast to vLLM engines at training step {training_step}",
                 enable=args.verbose,
             )
-            # Wait until weight sync is done
-            ray.get(weight_sync_future)
+
+            # Flatten the list of ObjectRef lists and wait for all weight updates to complete
+            all_weight_refs = []
+            for refs_list in weight_broadcast_futures:
+                all_weight_refs.extend(refs_list)
+
+            if all_weight_refs:
+                ray_get_with_progress(
+                    all_weight_refs,
+                    desc=f"[Weight Sync Thread] Waiting for weight updates to complete at training step {training_step}",
+                    enable=args.verbose,
+                )
 
             # Allow actors to resume
             ray.get(actor_manager.set_should_stop.remote(False))
