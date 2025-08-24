@@ -48,7 +48,7 @@ Return a score on a scale of 0 to 2 indicating how appropriate the response is b
     return obj["score"] / 2.0
 
 
-def _score_rubric(response: str, ground_truth: Dict[str, Any]) -> Dict[str, float]:
+def _score_rubric(response: str, ground_truth: Dict[str, Any], use_general_rubric: bool = False) -> Dict[str, float]:
     """
     Score the response against all rubrics in the ground truth.
     
@@ -62,7 +62,16 @@ def _score_rubric(response: str, ground_truth: Dict[str, Any]) -> Dict[str, floa
     question = ground_truth["Question"] if "Question" in ground_truth else ground_truth["query"]
     
     rubric_scores = {}
-    if "rubric" in ground_truth:
+    
+    if use_general_rubric:
+        general_rubric = """(1) Overall Comprehensiveness: The report should cover content as comprehensively as possible
+(2) Thoroughness of Discussion: Each section should be discussed thoroughly, not just superficially
+(3) Factuality: There should be minimal factual errors
+(4) Coherence: The discussion should stay focused and relevant to the topic"""
+        score = _score_property(response, question, general_rubric)
+        rubric_scores["general"] = score
+        return rubric_scores
+    elif "rubric" in ground_truth:
         for rubric in ground_truth["rubric"]:
             handle = rubric.get("type")
             rubric_text = rubric["rubric_item"]
@@ -79,7 +88,7 @@ def _score_rubric(response: str, ground_truth: Dict[str, Any]) -> Dict[str, floa
     
     return rubric_scores
 
-def compute_rubric_reward(response: str, ground_truth: Dict[str, Any]) -> Dict[str, Any]:
+def compute_rubric_reward(response: str, ground_truth: Dict[str, Any], use_general_rubric: bool = False) -> Dict[str, Any]:
     """
     Compute a reward score for a response based on a test case.
     """
@@ -107,7 +116,7 @@ def compute_rubric_reward(response: str, ground_truth: Dict[str, Any]) -> Dict[s
         return result
 
     # Score the rubrics using the extracted function
-    rubric_scores = _score_rubric(extracted_answer, ground_truth)
+    rubric_scores = _score_rubric(extracted_answer, ground_truth, use_general_rubric=use_general_rubric)
                     
     result["rubric_scores"] = rubric_scores
     result["reward"] = 0.8 * sum(rubric_scores.values()) / len(rubric_scores) \
@@ -126,7 +135,7 @@ if __name__ == '__main__':
     
     response = "<context>Some context here. <search>First search query</search> <search>Second search query</search></context><answer>The Country of Origin Image (COI) significantly impacts the internationalization and survival of Brazilian beachwear companies by leveraging 'Brasilidade' as a key product differentiator. This includes using Brazilian lifestyle elements like colors, national symbols, and natural raw materials. The COI supports international expansion by creating a competitive advantage.</answer>"
     
-    rewards = compute_rubric_reward(response, ground_truth)
+    rewards = compute_rubric_reward(response, ground_truth, use_general_rubric=True)
     
     if rewards.get("error"):
         print(f"An error occurred: {rewards['error']}")

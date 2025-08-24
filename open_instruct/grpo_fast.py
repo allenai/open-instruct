@@ -391,6 +391,8 @@ class Args:
     # Reward function override
     overwrite_reward_fn_tag: Optional[str] = None
     """If set, force all datasets to use this specific reward function type instead of dataset-based selection"""
+    use_general_rubric: bool = False
+    """Whether to use the general rubric for evaluation instead of specific rubrics"""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"

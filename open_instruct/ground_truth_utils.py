@@ -87,6 +87,10 @@ class CodeVerifierConfig(VerifierConfig):
     code_api_url: str
     code_max_execution_time: float
 
+@dataclass
+class RubricVerifierConfig(VerifierConfig):
+    use_general_rubric: bool = False
+    """Whether to use the general rubric for evaluation instead of specific rubrics"""
 
 @dataclass
 class VerificationResult:
@@ -941,14 +945,22 @@ class RLRAGLongFormRubricsOnlyVerifier(VerifierFunction):
     Verifier that computes the RL-RAG (long form) score between the prediction and the label.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: Optional[RubricVerifierConfig] = None) -> None:
         super().__init__("rl_rag_longform_rubrics_only", verifier_config=verifier_config, weight=1.0)
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        """
+        Return the configuration class for this verifier.
+        """
+        return RubricVerifierConfig
 
     def __call__(
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> VerificationResult:
         test_case = json.loads(label)
-        result = compute_rubric_reward(prediction, test_case)
+        use_general_rubric = self.verifier_config.use_general_rubric if self.verifier_config else False
+        result = compute_rubric_reward(prediction, test_case, use_general_rubric=use_general_rubric)
         score = result["reward"]
         return VerificationResult(score=score, log_values=result["log_values"])
 
