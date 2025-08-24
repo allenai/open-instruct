@@ -1,9 +1,8 @@
 import re
 from typing import List, Tuple, Dict, Any
-from open_instruct.ground_truth_utils import FinegrainedScore
 
 
-def find_format_reward_spans(response: str) -> List[FinegrainedScore]:
+def find_format_reward_spans(response: str) -> List["FinegrainedScore"]:
     """
     Find spans for format rewards.
     
@@ -14,6 +13,7 @@ def find_format_reward_spans(response: str) -> List[FinegrainedScore]:
         List of FinegrainedScore objects
         reward_group_id: 0=answer_format, 1=citation_format, 2=query_format
     """
+    from open_instruct.ground_truth_utils import FinegrainedScore
     spans = []
     
     # Check answer format - reward group 0
@@ -87,7 +87,7 @@ def find_format_reward_spans(response: str) -> List[FinegrainedScore]:
     return spans
 
 
-def find_search_turns_reward_spans(response: str, extracted_context: str, num_search_turns_reward: float) -> List[FinegrainedScore]:
+def find_search_turns_reward_spans(response: str, extracted_context: str, num_search_turns_reward: float) -> List["FinegrainedScore"]:
     """
     Find spans for search turns rewards.
     
@@ -98,6 +98,7 @@ def find_search_turns_reward_spans(response: str, extracted_context: str, num_se
         List of FinegrainedScore objects
         reward_group_id: 3=search_turns
     """
+    from open_instruct.ground_truth_utils import FinegrainedScore
     spans = []
     
     if num_search_turns_reward > 0:
@@ -137,7 +138,7 @@ def find_search_turns_reward_spans(response: str, extracted_context: str, num_se
     return spans
 
 
-def find_rubric_reward_spans(response: str, extracted_answer: str, rubric_reward: float) -> List[FinegrainedScore]:
+def find_rubric_reward_spans(response: str, extracted_answer: str, rubric_reward: float) -> List["FinegrainedScore"]:
     """
     Find spans for rubric rewards.
     
@@ -147,6 +148,7 @@ def find_rubric_reward_spans(response: str, extracted_answer: str, rubric_reward
         List of FinegrainedScore objects
         reward_group_id: 4=rubric
     """
+    from open_instruct.ground_truth_utils import FinegrainedScore
     spans = []
     
     if extracted_answer:
@@ -181,7 +183,7 @@ def find_rubric_reward_spans(response: str, extracted_answer: str, rubric_reward
     return spans
 
 
-def find_citation_reward_spans(response: str, extracted_citations: Dict[str, str], citation_reward: float) -> List[FinegrainedScore]:
+def find_citation_reward_spans(response: str, extracted_citations: Dict[str, str], citation_reward: float) -> List["FinegrainedScore"]:
     """
     Find spans for citation rewards.
     
@@ -191,6 +193,7 @@ def find_citation_reward_spans(response: str, extracted_citations: Dict[str, str
         List of FinegrainedScore objects
         reward_group_id: 5=citation
     """
+    from open_instruct.ground_truth_utils import FinegrainedScore
     spans = []
     
     # Find all citation spans in the response
@@ -238,7 +241,7 @@ def combine_all_reward_spans(
     num_search_turns_reward: float,
     rubric_reward: float,
     citation_reward: float
-) -> List[FinegrainedScore]:
+) -> List["FinegrainedScore"]:
     """
     Combine all reward spans from different reward types.
     
@@ -246,6 +249,7 @@ def combine_all_reward_spans(
         List of FinegrainedScore objects
         reward_group_ids: 0-2=format rewards, 3=search_turns, 4=rubric, 5=citation
     """
+    from open_instruct.ground_truth_utils import FinegrainedScore
     all_rewards_with_spans = []
     
     # Format reward spans (groups 0-2)
