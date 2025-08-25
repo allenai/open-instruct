@@ -829,7 +829,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     mb_query_responses = collated_query_responses[i]
                     mb_tool_mask = collated_tool_masks[i]
                     # todo: make sure the advantages return these stats
-                    mb_advantages_list, mb_advantages_mask_list = collated_advantages[i]
+                    mb_advantages_list = [collated_advantages[i]]  # Wrap in list for compatibility
                     mb_response_masks = collated_response_masks[i]
                     mb_response_masks_bool = mb_response_masks[:, 1:].bool()
                     # if masking snippets, do it here.
@@ -845,8 +845,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         pad_token_id,
                         args.temperature,
                     )
-                    # todo: obtain the logprobs for different finegrained segments
-                    mb_new_logprobs_list = [torch.masked_fill(mb_new_logprobs, ~mb_advantages_mask_list[j], INVALID_LOGPROB) for j in range(len(mb_advantages_list))]
+                    # For fgrpo, we don't need to mask logprobs since zero advantages naturally contribute zero gradient
+                    mb_new_logprobs_list = [mb_new_logprobs for j in range(len(mb_advantages_list))]
 
                     # Cache the old logprobs
                     with torch.no_grad():
@@ -1422,9 +1422,9 @@ def data_preparation_thread(
                     collated_response_masks.append(
                         collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0)
                     )
-                    collated_advantages.append(
-                        collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0)
-                    )
+                    # For fgrpo, just use the advantages directly - no need for masking
+                    collated_advs = collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0)
+                    collated_advantages.append(collated_advs)
                 collated_data.append(
                     {
                         "collated_query_responses": collated_query_responses,
