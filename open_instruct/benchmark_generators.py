@@ -473,7 +473,7 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
     for result in results:
         for key, value in result.items():
-            if key in ["mfu", "total_tokens_per_second", "total_generation_time", "total_num_new_tokens"]:
+            if key in ["total_mfu", "total_tokens_per_second", "total_generation_time", "total_num_new_tokens"]:
                 aggregated_results[key] += value
             elif key == "finish_reasons":
                 for reason, count in value.items():
