@@ -16,7 +16,7 @@ import pathlib
 import threading
 import time
 from concurrent import futures
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional, Sequence
 
 import datasets
 import numpy as np
@@ -202,7 +202,7 @@ def free_all_gpu_memory(device: int | str = 0) -> None:
     logger.info(f"[GPU {dev.index}] {free / gib:.2f} GiB free of {total / gib:.2f} GiB after cleanup")
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class ModelDims:
     num_layers: int
     hidden_size: int
@@ -211,93 +211,91 @@ class ModelDims:
     num_attn_heads: int
     num_kv_heads: Optional[int] = None
 
+    # Conventions (fixed; not switches)
+    FLOP_PER_MAC: ClassVar[int] = 2
+    # Approximate softmax cost per attention score:
+    # ~4 scalar ops/score: exp + subtract max (stabilization) + sum + divide.
+    SOFTMAX_FLOPS_PER_SCORE: ClassVar[int] = 4
+
     def __post_init__(self):
         if self.num_kv_heads is None:
             self.num_kv_heads = self.num_attn_heads
 
-    def attn_flops(self, query_len: int, kv_len: int) -> int:
-        """Calculate attention FLOPs.
-
-        Args:
-            query_len: Number of query tokens (seq_len for prefill, 1 for decode)
-            kv_len: Number of key/value tokens (seq_len for prefill, context_len for decode)
-        """
-        head_dim = self.hidden_size // self.num_attn_heads
-
-        # Query projection: process query_len tokens
-        q_projection_flops = query_len * self.hidden_size * self.hidden_size
-
-        # Key and Value projections: process query_len new tokens
-        # (In decode, we only project the new token; in prefill, we project all tokens)
-        kv_projection_flops = 2 * query_len * self.hidden_size * (self.num_kv_heads * head_dim)
-
-        # 2. Attention score computation: Q @ K^T
-        # query_len queries attend to kv_len keys
-        attention_scores_flops = self.num_attn_heads * query_len * kv_len * head_dim
-
-        # 3. Softmax (over kv_len scores for each of query_len positions)
-        softmax_flops = self.num_attn_heads * query_len * kv_len
-
-        # 4. Attention-weighted values: softmax(QK^T) @ V
-        attention_values_flops = self.num_attn_heads * query_len * kv_len * head_dim
-
-        # 5. Output projection for query_len tokens
-        output_projection_flops = query_len * self.hidden_size * self.hidden_size
-
-        total_flops = (
-            q_projection_flops
-            + kv_projection_flops
-            + attention_scores_flops
-            + softmax_flops
-            + attention_values_flops
-            + output_projection_flops
+        assert self.hidden_size % self.num_attn_heads == 0, "hidden_size must be divisible by num_attn_heads"
+        assert self.num_attn_heads % self.num_kv_heads == 0, (
+            "num_attn_heads must be divisible by num_kv_heads (GQA/MQA)"
         )
 
-        return total_flops
+    @property
+    def head_dim(self) -> int:
+        return self.hidden_size // self.num_attn_heads
+
+    def attn_flops(self, query_len: int, kv_len: int) -> int:
+        """FLOPs for one layer of self-attention given query_len and kv_len.
+
+        Assumptions:
+          - 1 MAC = 2 FLOPs (FLOP_PER_MAC).
+          - Efficient GQA/MQA K/V projections with width = num_kv_heads * head_dim.
+          - Softmax ≈ 4 FLOPs per score (see SOFTMAX_FLOPS_PER_SCORE).
+          - LayerNorms and minor ops ignored (dominated by matmuls).
+        """
+        d = self.head_dim
+        mul = self.FLOP_PER_MAC
+
+        # Projections for the query_len new tokens
+        q_proj = mul * query_len * self.hidden_size * self.hidden_size
+        kv_proj = mul * 2 * query_len * self.hidden_size * (self.num_kv_heads * d)  # GQA/MQA
+
+        # Scores and attention-weighted values
+        qk = mul * self.num_attn_heads * query_len * kv_len * d
+        softmax = self.SOFTMAX_FLOPS_PER_SCORE * self.num_attn_heads * query_len * kv_len
+        av = mul * self.num_attn_heads * query_len * kv_len * d
+
+        # Output projection
+        out_proj = mul * query_len * self.hidden_size * self.hidden_size
+
+        return q_proj + kv_proj + qk + softmax + av + out_proj
 
     def mlp_flops(self, seq_len: int) -> int:
-        # 1. First linear layer
-        first_linear_flops = seq_len * self.hidden_size * self.intermediate_size
+        """Two matmuls dominate; activation cost under-counted on purpose."""
+        mul = self.FLOP_PER_MAC
+        first = mul * seq_len * self.hidden_size * self.intermediate_size
+        act = seq_len * self.intermediate_size  # under-counted on purpose
+        second = mul * seq_len * self.intermediate_size * self.hidden_size
+        return first + act + second
 
-        # 2. Activation function (approximate as d_ff operations per position)
-        activation_flops = seq_len * self.intermediate_size
+    def prefill_flops(self, prompt_lengths: Sequence[int]) -> int:
+        """Prefill builds the KV cache; logits are computed once after each prompt."""
+        total = 0
+        for L in prompt_lengths:
+            total += self.num_layers * (self.attn_flops(L, L) + self.mlp_flops(L))
+            # Always include a single LM head after prefill (next-token logits)
+            total += self.FLOP_PER_MAC * self.hidden_size * self.vocab_size
+        return total
 
-        # 3. Second linear layer
-        second_linear_flops = seq_len * self.intermediate_size * self.hidden_size
-
-        total_flops = first_linear_flops + activation_flops + second_linear_flops
-        return total_flops
-
-    def prefill_flops(self, prompt_lengths: list[int]) -> int:
-        total_flops = 0
-        for length in prompt_lengths:
-            total_flops = length * self.vocab_size * self.hidden_size  # Embedding layer
-            total_flops += self.num_layers * (
-                self.attn_flops(query_len=length, kv_len=length) + self.mlp_flops(length)
-            )
-            total_flops += length * self.vocab_size * self.hidden_size  # Final LM head
-        return total_flops
-
-    def decode_flops(self, prompt_lengths: list[int], response_lengths: list[int]) -> int:
-        """Calculate FLOPs for the decode/generation phase."""
+    def decode_flops(self, prompt_lengths: Sequence[int], response_lengths: Sequence[int]) -> int:
+        """Decode/generation FLOPs. Embedding lookups are ignored by design."""
         assert len(prompt_lengths) == len(response_lengths), "Prompt and response lengths must match"
+        total = 0
+        for P, R in zip(prompt_lengths, response_lengths):
+            # MLP per generated token across all layers
+            total += R * self.num_layers * self.mlp_flops(seq_len=1)
 
-        total_flops = 0
+            # Attention per token; kv_len grows with context
+            for t in range(R):
+                kv_len = P + t + 1  # prompt + generated so far + current
+                total += self.num_layers * self.attn_flops(query_len=1, kv_len=kv_len)
 
-        for prompt_len, response_len in zip(prompt_lengths, response_lengths):
-            total_flops += response_len * self.vocab_size * self.hidden_size
-            total_flops += response_len * self.num_layers * self.mlp_flops(seq_len=1)
-            total_flops += response_len * self.num_layers * self.hidden_size * self.vocab_size
-            for curr_length in range(response_len):
-                context_len = prompt_len + curr_length + 1
-                total_flops += self.num_layers * self.attn_flops(query_len=1, kv_len=context_len)
+            # LM head once per generated token (not per layer)
+            total += R * self.FLOP_PER_MAC * self.hidden_size * self.vocab_size
+        return total
 
-        return total_flops
-
-    def flops(self, prompt_lengths: list[int], response_lengths: Optional[list[int]] = None) -> int:
-        """Calculate total FLOPs for prefill and optional decode phases."""
-        total_flops = self.prefill_flops(prompt_lengths) + self.decode_flops(prompt_lengths, response_lengths)
-        return total_flops
+    def flops(self, prompt_lengths: Sequence[int], response_lengths: Optional[Sequence[int]] = None) -> int:
+        """Total FLOPs for prefill and (optionally) decode."""
+        total = self.prefill_flops(prompt_lengths)
+        if response_lengths is not None:
+            total += self.decode_flops(prompt_lengths, response_lengths)
+        return total
 
 
 def load_model_dims(model_name: str) -> ModelDims:
@@ -401,18 +399,6 @@ def setup_vllm_engines(
     return vllm_engines, param_prompt_Q, inference_results_Q, actor_manager
 
 
-def get_batch_data(
-    dataset: datasets.Dataset, batch_size: int, batch_idx: int
-) -> tuple[list[list[int]], list[str], list[str]]:
-    """Get a batch of data from the dataset."""
-    start_idx = batch_idx * batch_size
-    end_idx = min(start_idx + batch_size, len(dataset))
-
-    batch_data = dataset[start_idx:end_idx]
-    prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
-    return prompts
-
-
 def generate_thread(vllm_engines: list[ray.actor.ActorHandle], stop_event: threading.Event) -> None:
     """Thread that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] Starting generation thread")
@@ -427,20 +413,33 @@ def generate_thread(vllm_engines: list[ray.actor.ActorHandle], stop_event: threa
 
 def submission_thread(
     param_prompt_Q: ray_queue.Queue,
-    all_prompts: list,
+    dataset: datasets.Dataset,
     generation_config: vllm.SamplingParams,
     stop_event: threading.Event,
+    batch_size: int,
+    start_batch_idx: int,
+    num_batches: int,
 ) -> None:
     """Thread that submits prompts to the queue."""
     logger.info("[Submission Thread] Starting prompt submission")
-    for batch_idx, prompts in enumerate(all_prompts):
+    for batch_idx in range(start_batch_idx, start_batch_idx + num_batches):
         if stop_event.is_set():
             logger.info("[Submission Thread] Stopped due to stop event")
             break
+
+        # Get batch data from dataset
+        start_idx = batch_idx * batch_size
+        end_idx = min(start_idx + batch_size, len(dataset))
+        batch_data = dataset[start_idx:end_idx]
+        prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+
+        # Create list of dataset indices for this batch
+        dataset_indices = list(range(start_idx, end_idx))
+
         param_prompt_Q.put(
-            PromptRequest(prompts=prompts, dataset_index=batch_idx, generation_config=generation_config)
+            PromptRequest(prompts=prompts, dataset_index=dataset_indices, generation_config=generation_config)
         )
-    logger.info(f"[Submission Thread] All {len(all_prompts)} prompts submitted")
+    logger.info(f"[Submission Thread] All {num_batches} batches submitted")
 
 
 def run_benchmark(
@@ -480,15 +479,18 @@ def run_benchmark(
     device_name = get_device_name(torch.cuda.get_device_name(0))
     device_flops = GPU_SPECS[device_name]["flops"]
 
-    logger.info(f"Preparing {num_batches} batches...")
-    all_prompts = [
-        get_batch_data(dataset, args.num_unique_prompts_rollout, batch_idx) for batch_idx in range(num_batches)
-    ]
-
     # Submit warmup batch first
     logger.info("Submitting warmup batch...")
-    warmup_prompts = all_prompts[0]
-    param_prompt_Q.put(PromptRequest(prompts=warmup_prompts, dataset_index=0, generation_config=generation_config))
+    warmup_start_idx = 0
+    warmup_end_idx = min(args.num_unique_prompts_rollout, len(dataset))
+    warmup_data = dataset[warmup_start_idx:warmup_end_idx]
+    warmup_prompts = warmup_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+    warmup_dataset_indices = list(range(warmup_start_idx, warmup_end_idx))
+    param_prompt_Q.put(
+        PromptRequest(
+            prompts=warmup_prompts, dataset_index=warmup_dataset_indices, generation_config=generation_config
+        )
+    )
     model_dims = load_model_dims(model_config.model_name_or_path)
 
     try:
@@ -498,7 +500,14 @@ def run_benchmark(
         logger.info(f"Warmup batch completed with {len(warmup_result.responses)} responses")
         logger.info(f"Submitting {num_batches - 1} batches for main benchmark...")
         submission_future = executor.submit(
-            submission_thread, param_prompt_Q, all_prompts[1:], generation_config, stop_event
+            submission_thread,
+            param_prompt_Q,
+            dataset,
+            generation_config,
+            stop_event,
+            args.num_unique_prompts_rollout,
+            1,
+            num_batches - 1,
         )
         last_completion_time = time.time()
 
@@ -521,10 +530,12 @@ def run_benchmark(
                 "num_new_tokens": new_tokens,
                 "finish_reasons": collections.Counter(result.finish_reasons),
                 "response_lengths": [len(response) for response in result.responses],
-                "batch_idx": result.dataset_index,
+                "dataset_indices": result.dataset_index,
             }
-            # Get prompt lengths for all prompts in this batch
-            prompt_lengths = [len(prompt) for prompt in all_prompts[batch_idx]]
+            # Get prompt lengths using dataset indices from the result
+            prompt_data = dataset[result.dataset_index]
+            prompts = prompt_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+            prompt_lengths = [len(prompt) for prompt in prompts]
             response_lengths = [len(response) for response in result.responses]
 
             # Calculate total FLOPs for all prompts and responses in the batch
@@ -534,7 +545,7 @@ def run_benchmark(
             model_flops_per_second = model_flops / batch_generation_time if batch_generation_time > 0 else 0
             result_dict["mfu"] = 100 * model_flops_per_second / device_flops
 
-            save_completion_lengths([result_dict], timestamp, result.dataset_index)
+            save_completion_lengths([result_dict], timestamp, batch_idx)
             results.append(result_dict)
             logger.info(
                 f"Batch {batch_idx}/{num_batches - 1}: "
