@@ -445,7 +445,6 @@ class Args:
         if self.gs_bucket_path is not None and self.gs_checkpoint_state_dir is None:
             if self.checkpoint_state_dir is None:
                 raise ValueError("`checkpoint_state_dir` must be provided when using `gs_bucket_path`!")
-            # Use basename to avoid path issues
             checkpoint_dir_name = self.checkpoint_state_dir.rstrip("/")
             beaker_users = get_beaker_whoami()
             if beaker_users is not None:
