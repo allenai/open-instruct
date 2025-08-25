@@ -71,6 +71,7 @@ import torch.distributed as dist
 import torch.utils
 import torch.utils.data
 import vllm
+import wandb
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util import queue as ray_queue
@@ -93,7 +94,7 @@ from open_instruct.dataset_transformation import (
 from open_instruct.ground_truth_utils import (
     build_all_verifiers,
     cleanup_all_llm_judge_clients,
-    soft_format_reward_func, d
+    soft_format_reward_func,
 )
 from open_instruct.model_utils import (
     Batch,
