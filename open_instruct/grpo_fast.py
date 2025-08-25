@@ -436,7 +436,7 @@ class Args:
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
             raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
-        
+
         if self.gs_checkpoint_state_dir is not None and not self.gs_checkpoint_state_dir.startswith("gs://"):
             raise ValueError(f"`gs_checkpoint_state_dir` must start with 'gs://', got: {self.gs_checkpoint_state_dir}")
         if self.gs_bucket_path is not None and not self.gs_bucket_path.startswith("gs://"):
@@ -453,9 +453,9 @@ class Args:
             else:
                 self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{checkpoint_dir_name}"
 
-        if self.gs_checkpoint_state_dir is not None and self.checkpoint_state_dir is not None:
-            download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
         if self.checkpoint_state_dir is not None:
+            if self.gs_checkpoint_state_dir is not None:
+                download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
         if self.tools is not None and len(self.tools) > 0:
             for tool in self.tools:
@@ -675,8 +675,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     np.random.set_state(rng_states["numpy_rng_state"])
                     random.setstate(rng_states["python_rng_state"])
 
-                    # Restore CUDA RNG states
                     if torch.cuda.is_available() and "torch_cuda_rng_states" in rng_states:
+                        # device_str, e.g. "cuda:0"
                         for device_str, rng_state in rng_states["torch_cuda_rng_states"].items():
                             device_id = int(device_str.split(":")[1])
                             torch.cuda.set_rng_state(rng_state, device_id)
@@ -1982,7 +1982,7 @@ def create_generation_configs(args: Args):
         skip_special_tokens=False,
         n=args.num_samples_per_prompt_rollout,
         stop=args.stop_strings,
-        seed=args.seed,  # IMPORTANT: Set seed for reproducible generation
+        seed=args.seed,
         # IMPORTANT: Set output_kind to FINAL_ONLY to ensure vLLM V1 properly handles n>1
         # With the default CUMULATIVE mode, vLLM V1 returns separate outputs for each
         # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode
@@ -2176,9 +2176,6 @@ def one_training_step(
                         step_dir, leaderboard_name, wandb_url, training_step
                     )
         save_time += timer.duration
-
-    # Checkpoint logic has been moved to the main training loop
-    # to ensure checkpointing happens even when a step is skipped
 
     if len(update_ref_policy_future) > 0:
         with Timer("[Main Thread] 🔃 Updating reference policy"):
@@ -2525,7 +2522,6 @@ def run_training(
             param_prompt_Q,
             generation_configs["train"],
         )
-    # Restore num_total_tokens if available from checkpoint
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
         num_total_tokens = checkpoint_state["num_total_tokens"]
         logger.info(f"Restored num_total_tokens: {num_total_tokens}")
@@ -2694,7 +2690,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     generation_configs = create_generation_configs(args)
 
-    # Load checkpoint state if available
     checkpoint_state = None
     if args.checkpoint_state_dir and os.path.exists(args.checkpoint_state_dir):
         # Try to load the checkpoint state from the first rank
@@ -2703,15 +2698,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             checkpoint_state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
             logger.info(f"Loaded checkpoint state from {checkpoint_path}")
 
-            # Restore episode count if available
-            if "episode" in checkpoint_state:
-                episode = checkpoint_state["episode"]
-                logger.info(f"Restored episode count: {episode}")
+            episode = checkpoint_state["episode"]
+            logger.info(f"Restored episode count: {episode}")
 
     train_dataset_idxs = np.arange(len(train_dataset))
     iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
 
-    # Restore ShufflingIterator state if available
     if checkpoint_state and "shuffling_iterator_state" in checkpoint_state:
         iter_dataloader.set_state(checkpoint_state["shuffling_iterator_state"])
         logger.info("Restored ShufflingIterator state from checkpoint")
