@@ -976,18 +976,11 @@ def maybe_update_beaker_description(
         )
         return
 
-    logger.info(f"BEAKER_WORKLOAD_ID: {experiment_id}")
-
     client = beaker.Beaker.from_env()
 
     try:
         spec = client.experiment.get(experiment_id)
         current_description = spec.description or ""
-        logger.info(
-            f"Current Beaker description: {current_description[:100]}..."
-            if len(current_description) > 100
-            else f"Current Beaker description: {current_description}"
-        )
     except beaker.exceptions.ExperimentNotFound:
         logger.warning(f"Failed to get Beaker experiment with ID: {experiment_id}")
         logger.warning("This might be fine if you are e.g. running in an interactive job.")
