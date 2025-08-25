@@ -978,7 +978,11 @@ def maybe_update_beaker_description(
 
     logger.info(f"BEAKER_WORKLOAD_ID: {experiment_id}")
 
-    client = beaker.Beaker.from_env()
+    try:
+        client = beaker.Beaker.from_env()
+    except beaker.exceptions.ConfigurationError as e:
+        logger.warning(f"Failed to initialize Beaker client: {e}")
+        return
 
     try:
         spec = client.experiment.get(experiment_id)
