@@ -93,6 +93,8 @@ def compute_rubric_reward(response: str, ground_truth: Dict[str, Any], use_gener
     Compute a reward score for a response based on a test case.
     """
     result = {
+        "reward": 0.0,
+        "rubric_averaged_reward": 0.0,
         "rubric_scores": {},
         "answer_extracted": None,
         "extraction_success": False,
@@ -112,6 +114,7 @@ def compute_rubric_reward(response: str, ground_truth: Dict[str, Any], use_gener
             "format_correct_has_answer": 0.0,
             "num_search_turns": num_search_turns,
             "in_context_search_turns_reward": in_context_search_turns_reward,
+            "rubric_averaged_reward": 0.0,
         }
         return result
 
@@ -119,13 +122,14 @@ def compute_rubric_reward(response: str, ground_truth: Dict[str, Any], use_gener
     rubric_scores = _score_rubric(extracted_answer, ground_truth, use_general_rubric=use_general_rubric)
                     
     result["rubric_scores"] = rubric_scores
-    result["reward"] = 0.8 * sum(rubric_scores.values()) / len(rubric_scores) \
+    result["rubric_averaged_reward"] = sum(rubric_scores.values()) / len(rubric_scores)
+    result["reward"] = 0.8 * result["rubric_averaged_reward"] \
         + 0.2 * in_context_search_turns_reward
     result["log_values"] = {
         "format_correct_has_answer": 1.0,
         "in_context_search_turns_reward": in_context_search_turns_reward,
-        "rubric_averaged_reward": sum(rubric_scores.values()) / len(rubric_scores),
         "num_search_turns": num_search_turns,
+        "rubric_averaged_reward": result["rubric_averaged_reward"],
         }
     return result
 
