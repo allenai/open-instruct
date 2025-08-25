@@ -2424,15 +2424,18 @@ def run_training(
         )
     num_total_tokens = 0
     training_start_time = time.time()  # Track overall training start time
+
+    # Update every 5% of steps, at least every 10 steps, and at most every step.
+    update_every = int((args.num_training_steps + 1 - resume_training_step) * 0.05)
+    update_every = max(min(update_every, 10), 1)
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
         if (
             training_step == resume_training_step
-            or training_step % 10 == 0
+            or training_step % update_every == 0
             or training_step == args.num_training_steps
         ):
-            logger.info(f"Progress update for Beaker description: step {training_step}/{args.num_training_steps}")
             maybe_update_beaker_description(
                 current_step=training_step,
                 total_steps=args.num_training_steps,
