@@ -43,7 +43,7 @@ from vllm.v1 import kv_cache_interface
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
-from open_instruct.queue_types import GenerationResult, RequestInfo
+from open_instruct.queue_types import GenerationResult, RequestInfo, TokenStatistics
 from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
@@ -105,9 +105,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 def _process_outputs(
     outputs: List[vllm.RequestOutput],
     dataset_index: Optional[List[int]] = None,
-    prompt_tokens: Optional[int] = None,
-    generation_tokens: Optional[int] = None,
-    generation_time: Optional[float] = None,
+    token_statistics: Optional[TokenStatistics] = None,
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -136,9 +134,7 @@ def _process_outputs(
         masks=masks,
         request_info=request_info,
         dataset_index=dataset_index,
-        prompt_tokens=prompt_tokens,
-        generation_tokens=generation_tokens,
-        generation_time=generation_time,
+        token_statistics=token_statistics,
     )
 
     return result
@@ -147,9 +143,7 @@ def _process_outputs(
 def _process_outputs_with_tools(
     outputs: List[vllm.RequestOutput],
     dataset_index: Optional[List[int]] = None,
-    prompt_tokens: Optional[int] = None,
-    generation_tokens: Optional[int] = None,
-    generation_time: Optional[float] = None,
+    token_statistics: Optional[TokenStatistics] = None,
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format with tool information."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -178,27 +172,17 @@ def _process_outputs_with_tools(
         masks=masks,
         request_info=request_info,
         dataset_index=dataset_index,
-        prompt_tokens=prompt_tokens,
-        generation_tokens=generation_tokens,
-        generation_time=generation_time,
+        token_statistics=token_statistics,
     )
 
     return result
 
 
-def _finalize_outputs(
-    outputs, tracking, dataset_index, tools, prompt_tokens=None, generation_tokens=None, generation_time=None
-):
+def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=None):
     """Prepare final outputs based on whether tools were used."""
     if not tools:
         outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
-        return _process_outputs(
-            outputs,
-            dataset_index=dataset_index,
-            prompt_tokens=prompt_tokens,
-            generation_tokens=generation_tokens,
-            generation_time=generation_time,
-        )
+        return _process_outputs(outputs, dataset_index=dataset_index, token_statistics=token_statistics)
 
     # Tool mode: add metadata and merge completions
     for req_id in tracking["masks"]:
@@ -225,13 +209,7 @@ def _finalize_outputs(
         merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1]))
     )
 
-    return _process_outputs_with_tools(
-        final_outputs,
-        dataset_index=dataset_index,
-        prompt_tokens=prompt_tokens,
-        generation_tokens=generation_tokens,
-        generation_time=generation_time,
-    )
+    return _process_outputs_with_tools(final_outputs, dataset_index=dataset_index, token_statistics=token_statistics)
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -467,16 +445,16 @@ class LLMRayActor:
             tracking,
             request.dataset_index,
             self.tools,
-            prompt_tokens=total_prompt_tokens,
-            generation_tokens=total_generation_tokens,
-            generation_time=generation_time,
+            token_statistics=TokenStatistics(
+                num_prompt_tokens=total_prompt_tokens,
+                num_response_tokens=total_generation_tokens,
+                generation_time=generation_time,
+            ),
         )
         return result
 
     def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step):
         """Add initial requests to the engine."""
-        import time
-
         for i, prompt in enumerate(prompts):
             if self.tools:
                 # Create individual requests for each sample when using tools
