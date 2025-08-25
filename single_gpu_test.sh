@@ -1,27 +1,7 @@
 #!/bin/bash
 
-# Get the Beaker username to construct the image name
-BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
-
-echo "Using Beaker image: $BEAKER_IMAGE"
-
-uv run python mason.py \
-       --cluster ai2/jupiter-cirrascale-2 \
-       --cluster ai2/augusta-google-1 \
-       --cluster ai2/saturn-cirrascale \
-       --image "$BEAKER_IMAGE" \
-       --pure_docker_mode \
-       --workspace ai2/tulu-thinker \
-       --priority high \
-       --preemptible \
-       --num_nodes 1 \
-       --max_retries 0 \
-       --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-       --budget ai2/oe-adapt \
-       --no-host-networking \
-       --gpus 1 \
-	   -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+# Run with py-spy profiling to generate flame graph
+uv run py-spy record -o flame_graph.svg --format speedscope -- python open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
@@ -31,7 +11,6 @@ uv run python mason.py \
     --response_length 512 \
     --verbose True \
     --pack_length 1024 \
-    --inflight_updates True \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
@@ -45,7 +24,6 @@ uv run python mason.py \
     --learning_rate 3e-7 \
     --total_episodes 200 \
     --deepspeed_stage 2 \
-    --with_tracking \
     --num_epochs 1 \
     --num_learners_per_node 1 \
     --vllm_tensor_parallel_size 1 \

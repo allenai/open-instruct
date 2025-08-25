@@ -20,6 +20,7 @@ uv run python mason.py \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
+	--verbose True \
         --num_samples_per_prompt_rollout 16 \
         --num_unique_prompts_rollout 32 \
         --num_mini_batches 1 \
@@ -35,6 +36,7 @@ uv run python mason.py \
         --max_prompt_token_length 2048 \
         --response_length 4096 \
         --pack_length 20480 \
+        --inflight_updates True \
         --model_name_or_path Qwen/Qwen2.5-7B \
         --chat_template_name tulu_thinker \
         --stop_strings "</answer>" \

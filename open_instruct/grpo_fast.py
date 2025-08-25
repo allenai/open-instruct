@@ -323,6 +323,8 @@ class Args:
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
     vllm_num_engines: int = 1
     """number of vLLM Engines, set to 0 to disable vLLM"""
+    inflight_updates: bool = False
+    """If True, return immediately even with pending work. If False, wait for all work to complete before exiting."""
     vllm_tensor_parallel_size: int = 1
     """tensor parallel size of vLLM Engine for multi-GPU inference"""
     vllm_enforce_eager: bool = False
@@ -335,6 +337,8 @@ class Args:
     """whether to enable prefix caching"""
     vllm_top_p: float = 1.0
     """vLLM top p for nucleus sampling"""
+    inference_batch_size: Optional[int] = None
+    """Number of inference requests to batch together for vLLM processing"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     gather_whole_model: bool = True
@@ -428,6 +432,8 @@ class Args:
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
+        if self.inference_batch_size is None:
+            self.inference_batch_size = self.num_unique_prompts_rollout // self.vllm_num_engines
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
@@ -1221,16 +1227,18 @@ def accumulate_inference_batches(
     args: Args,
     training_step: int,
     generation_config,
+    num_prompts: int,
     timeout: Optional[float] = None,
 ) -> tuple[GenerationResult, Batch]:
     """Accumulate multiple inference results into a single training batch.
 
     Args:
-        inference_results_Q: Queue containing GenerationResult objects
+        inference_results_Q: Queue containing individual GenerationResult objects (one per prompt)
         pending_queries_map: PendingQueriesMap instance for thread-safe query tracking
-        args: Arguments containing vllm_num_engines
+        args: Arguments containing vllm_num_engines and batch size info
         training_step: Current training step for error reporting
         generation_config: Generation config containing n (number of samples per prompt)
+        num_prompts: Number of prompts to accumulate
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
 
     Raises:
@@ -1239,15 +1247,15 @@ def accumulate_inference_batches(
     Returns:
         Tuple of (combined_result, Batch with queries, ground_truths, datasets) or (ShutdownSentinel, None) if shutdown signal received
     """
-    # Collect results from all engines with non-blocking progress bar
     results = []
     all_queries = []
     all_ground_truths = []
     all_datasets = []
+
     for i in tqdm(
-        range(args.vllm_num_engines),
-        total=args.vllm_num_engines,
-        desc=f"Accumulating results from {args.vllm_num_engines} engines",
+        range(num_prompts),
+        total=num_prompts,
+        desc=f"Accumulating {num_prompts} results (each with {generation_config.n} completions)",
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     ):
@@ -1255,37 +1263,17 @@ def accumulate_inference_batches(
 
         if isinstance(result, ShutdownSentinel):
             return result, None
-        dataset_indices = result.dataset_index
 
-        if dataset_indices is None:
-            raise RuntimeError(f"Dataset indices is None for result {i}")
-
-        # When generation_config.n > 1, vLLM generates multiple responses per prompt
-        # but dataset_indices only contains the unique indices (not replicated)
-        # So we expect: len(responses) == len(dataset_indices) * generation_config.n
-        expected_responses = len(dataset_indices) * generation_config.n
-        assert len(result.responses) == expected_responses, (
-            f"Mismatch: number of responses ({len(result.responses)}) "
-            f"doesn't match expected ({expected_responses}) for result {i}"
-            f". {generation_config.n=}"
-            f", {len(dataset_indices)=}"
+        dataset_index = result.dataset_index
+        assert len(result.responses) == generation_config.n, (
+            f"Result {i} has {len(result.responses)} responses, expected {generation_config.n}"
         )
-
-        # Get corresponding queries, ground_truths, datasets for each individual prompt
-        batch_queries = []
-        batch_ground_truths = []
-        batch_datasets = []
-
-        for dataset_idx in dataset_indices:
-            query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
-            batch_queries.append(query)
-            batch_ground_truths.append(ground_truth)
-            batch_datasets.append(dataset)
+        query, ground_truth, dataset = pending_queries_map.pop(dataset_index)
+        all_queries.append(query)
+        all_ground_truths.append(ground_truth)
+        all_datasets.append(dataset)
 
         results.append(result)
-        all_queries.extend(batch_queries)
-        all_ground_truths.extend(batch_ground_truths)
-        all_datasets.extend(batch_datasets)
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1353,7 +1341,12 @@ def data_preparation_thread(
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
             result, batch = accumulate_inference_batches(
-                inference_results_Q, pending_queries_map, args, training_step, generation_config
+                inference_results_Q,
+                pending_queries_map,
+                args,
+                training_step,
+                generation_config,
+                num_prompts=args.num_unique_prompts_rollout,
             )
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
@@ -1486,8 +1479,7 @@ def data_preparation_thread(
                         )
 
                         finish_reasons += [finish_reasons[i] for i in sampled_indices]
-
-                        print(
+                        logger.info(
                             f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses"
                         )
 
@@ -1517,7 +1509,8 @@ def data_preparation_thread(
                 shortfall = args.world_size - len(packed_sequences.query_responses)
                 if shortfall > 0:
                     logger.warning(
-                        f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this."
+                        f"[Data Preparation Thread] Step {training_step}: Padding {shortfall} sequences for world size. "
+                        f"In future, you should adjust your compute this."
                     )
                     # construct "dummy" sequences for padding out the world size
                     dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
@@ -1827,6 +1820,7 @@ def create_model_and_optimizer(
         max_len,
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
+        args.inference_batch_size,
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
         max_tool_calls=args.max_tool_calls,
@@ -1834,6 +1828,7 @@ def create_model_and_optimizer(
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
+        inflight_updates=args.inflight_updates,
     )
 
     resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
@@ -1890,32 +1885,14 @@ def split_and_insert_batch(
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    import math
-
-    inference_batch_size = max(1, math.ceil(len(batch.queries) / vllm_num_engines))
-
-    for batch_idx in range(vllm_num_engines):
-        start_idx = batch_idx * inference_batch_size
-        end_idx = min(start_idx + inference_batch_size, len(batch.queries))
-
-        # Stop if we've distributed all queries
-        if start_idx >= len(batch.queries):
-            break
-
-        sub_batch = batch[start_idx:end_idx]
-
-        # Store prompts in the map using thread-safe insert_many
-        pending_queries_map.insert_many(
-            sub_batch.indices, sub_batch.queries, sub_batch.ground_truths, sub_batch.datasets
-        )
-
-        # Use PromptRequest for Ray queue with batch-specific dataset_index list
+    pending_queries_map.insert_many(batch.indices, batch.queries, batch.ground_truths, batch.datasets)
+    for i, prompt in enumerate(batch.queries):
         param_prompt_Q.put(
             PromptRequest(
-                prompts=sub_batch.queries,
+                prompt=prompt,
                 generation_config=generation_config,
                 training_step=training_step,
-                dataset_index=sub_batch.indices,
+                dataset_index=batch.indices[i],
                 is_eval=is_eval,
             )
         )
@@ -1941,16 +1918,14 @@ def sync_weights_and_prepare_prompts(
         else "🔄 Loading weights using shared memory"
     ):
         ray.get(actor_manager.set_should_stop.remote(True))
-        logger.debug(f"[Main Thread] Set should_stop to True for weight sync at step {training_step}")
 
         ray_get_with_progress(
             [m.broadcast_to_vllm.remote() for m in policy_group.models],
-            desc=f"[Main thread] Broadcasting weights to vLLM engines at training step {training_step}",
+            desc=f"[Main Thread] Broadcasting weights to vLLM engines at training step {training_step}",
             enable=args.verbose,
         )
 
         ray.get(actor_manager.set_should_stop.remote(False))
-        logger.debug(f"[Main Thread] Set should_stop to False after weight sync at step {training_step}")
 
     split_and_insert_batch(
         batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]
@@ -1967,7 +1942,7 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
                 logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
                 return None, {}, num_total_tokens
             try:
-                packed_data = packed_sequences_Q.get(timeout=30.0)
+                packed_data = packed_sequences_Q.get(timeout=60.0)
                 break
             except Empty:
                 logger.warning("[Main Thread] Timeout waiting for packed sequences. Retrying...")
@@ -1994,9 +1969,11 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
                 enable=args.verbose,
             )
             num_processed = sum(int(result) for result in processed_results)
+            logger.info(f"[Generate Thread] vLLM engines returned, processed {num_processed} total requests")
             # Suppress timing output if nothing was processed
             if num_processed == 0:
                 timer.noop = True
+                time.sleep(10)
         if num_processed > 0:
             try:
                 generate_metrics_Q.put_nowait({"time/generation": timer.duration})
@@ -2121,6 +2098,7 @@ def maybe_evaluate(
     eval_pending_queries_map: PendingQueriesMap,
     eval_generation_config,
     generate_metrics_Q: Queue,
+    num_eval_prompts: int,
 ):
     """Optionally evaluate the model."""
     try:
@@ -2135,6 +2113,7 @@ def maybe_evaluate(
             args,
             training_step,
             eval_generation_config,
+            num_prompts=num_eval_prompts,
             timeout=timeout,
         )
 
@@ -2366,6 +2345,7 @@ def run_training(
     tokenizer,
     train_dataset,
     eval_batch,
+    num_eval_prompts,
     policy_group,
     vllm_engines,
     generation_configs,
@@ -2511,6 +2491,7 @@ def run_training(
             eval_pending_queries_map,
             generation_configs["eval"],
             generate_metrics_Q,
+            num_eval_prompts,
         )
 
     if resume_training_step > args.num_training_steps:
@@ -2534,10 +2515,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     ray.init(dashboard_host="0.0.0.0")
 
     # Create Ray queues.
-    queue_size = (args.async_steps + 1) * args.vllm_num_engines
+    queue_size = (args.async_steps + 1) * args.num_unique_prompts_rollout
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
-    evaluation_inference_results_Q = ray_queue.Queue(maxsize=args.vllm_num_engines)
+    # Size eval queue based on actual eval samples (num_eval_samples) with 2x overhead for buffering.
+    evaluation_inference_results_Q = ray_queue.Queue(maxsize=num_eval_samples * 2)
 
     policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
         create_model_and_optimizer(
@@ -2566,9 +2548,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     if eval_dataset is None:
         eval_batch = None
+        num_eval_prompts = 0
     else:
         eval_dataset_indices = list(range(min(num_eval_samples, len(eval_dataset))))
         eval_batch = next_batch(eval_dataset_indices, eval_dataset)
+        num_eval_prompts = len(eval_dataset_indices)
     reward_fn = make_reward_fn(args)
 
     stop_event = threading.Event()
@@ -2580,6 +2564,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             tokenizer,
             train_dataset,
             eval_batch,
+            num_eval_prompts,
             policy_group,
             vllm_engines,
             generation_configs,

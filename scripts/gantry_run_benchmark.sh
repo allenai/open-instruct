@@ -15,7 +15,7 @@ fi
 
 git_hash=$(git rev-parse --short HEAD)
 git_branch=$(git rev-parse --abbrev-ref HEAD)
-model_name_or_path="hamishivi/qwen2_5_openthoughts2" \
+model_name_or_path="hamishivi/qwen2_5_openthoughts2"
 
 gantry run \
        --name open_instruct-benchmark_generators \
@@ -36,7 +36,7 @@ gantry run \
     --temperature 1.0 \
     --response_length "$response_length" \
     --vllm_top_p 0.9 \
-    --num_unique_prompts_rollout 32 \
+    --num_unique_prompts_rollout 4 \
     --num_samples_per_prompt_rollout 16 \
     --vllm_num_engines 1 \
     --vllm_tensor_parallel_size 1 \
