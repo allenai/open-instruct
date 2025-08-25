@@ -7,8 +7,9 @@ class FinegrainedScore:
     score: float
     effective_spans: List[Tuple[int, int]]
     reward_group_id: int
-    reward_group_name: str
     query_idx: Optional[int] = None
+    response_idx: Optional[int] = None
+    reward_group_name: Optional[str] = None
     advantage: Optional[float] = None
 
 
@@ -23,7 +24,6 @@ def find_format_reward_spans(response: str) -> List["FinegrainedScore"]:
         List of FinegrainedScore objects
         reward_group_id: 0=answer_format, 1=citation_format, 2=query_format
     """
-    from open_instruct.ground_truth_utils import FinegrainedScore
     spans = []
     
     # Check answer format - reward group 0
@@ -34,20 +34,18 @@ def find_format_reward_spans(response: str) -> List["FinegrainedScore"]:
         answer_format_reward = 1.0
         spans.append(FinegrainedScore(
             score=answer_format_reward, 
-            effective_span=answer_match.span(), 
+            effective_spans=[answer_match.span()], 
             reward_group_id=0, 
             reward_group_name="answer_format",
-            response_idx=None
         ))
     else:
         # Negative reward for whole response
         answer_format_reward = 0.0
         spans.append(FinegrainedScore(
             score=answer_format_reward, 
-            effective_span=(0, len(response)), 
+            effective_spans=[(0, len(response))], 
             reward_group_id=0, 
             reward_group_name="answer_format",
-            response_idx=None
         ))
     
     # Check citation format - reward group 1
@@ -59,15 +57,14 @@ def find_format_reward_spans(response: str) -> List["FinegrainedScore"]:
         for match in citation_matches:
             spans.append(FinegrainedScore(
                 score=citation_format_reward, 
-                effective_span=match.span(), 
+                effective_spans=[match.span()], 
                 reward_group_id=1, 
                 reward_group_name="citation_format",
-                response_idx=None
             ))
     else:
         # Negative reward for whole response
         citation_format_reward = 0.0
-        spans.append(FinegrainedScore(score=citation_format_reward, effective_span=(0, len(response)), reward_group_id=1, response_idx=None))
+        spans.append(FinegrainedScore(score=citation_format_reward, effective_spans=[(0, len(response))], reward_group_id=1, response_idx=None))
     
     # Check query format - reward group 2
     query_pattern = r"<query>.*?</query>"
@@ -78,20 +75,18 @@ def find_format_reward_spans(response: str) -> List["FinegrainedScore"]:
         for match in query_matches:
             spans.append(FinegrainedScore(
                 score=query_format_reward, 
-                effective_span=match.span(), 
+                effective_spans=[match.span()], 
                 reward_group_id=2, 
                 reward_group_name="query_format",
-                response_idx=None
             ))
     else:
         # Negative reward for whole response
         query_format_reward = 0.0
         spans.append(FinegrainedScore(
             score=query_format_reward, 
-            effective_span=(0, len(response)), 
+            effective_spans=[(0, len(response))], 
             reward_group_id=2, 
             reward_group_name="query_format",
-            response_idx=None
         ))
     
     return spans
@@ -108,7 +103,6 @@ def find_search_turns_reward_spans(response: str, extracted_context: str, num_se
         List of FinegrainedScore objects
         reward_group_id: 3=search_turns
     """
-    from open_instruct.ground_truth_utils import FinegrainedScore
     spans = []
     
     if num_search_turns_reward > 0:
@@ -123,26 +117,25 @@ def find_search_turns_reward_spans(response: str, extracted_context: str, num_se
                 content_end = match.end() - len("</query>")
                 spans.append(FinegrainedScore(
                     score=num_search_turns_reward, 
-                    effective_span=(content_start, content_end), 
+                    effective_spans=[(content_start, content_end)], 
                     reward_group_id=3, 
                     reward_group_name="search_turns",
-                    response_idx=None))
+                ))
         else:
             # If no query tags found but reward > 0, reward whole response
             spans.append(FinegrainedScore(
                 score=num_search_turns_reward, 
-                effective_span=(0, len(response)), 
+                effective_spans=[(0, len(response))], 
                 reward_group_id=3, 
                 reward_group_name="search_turns",
-                response_idx=None))
+            ))
     else:
         # Negative reward for whole response
         spans.append(FinegrainedScore(
             score=num_search_turns_reward, 
-            effective_span=(0, len(response)), 
+            effective_spans=[(0, len(response))], 
             reward_group_id=3, 
             reward_group_name="search_turns",
-            response_idx=None
         ))
     
     return spans
@@ -158,7 +151,6 @@ def find_rubric_reward_spans(response: str, extracted_answer: str, rubric_reward
         List of FinegrainedScore objects
         reward_group_id: 4=rubric
     """
-    from open_instruct.ground_truth_utils import FinegrainedScore
     spans = []
     
     if extracted_answer:
@@ -172,22 +164,20 @@ def find_rubric_reward_spans(response: str, extracted_answer: str, rubric_reward
             content_end = answer_match.end() - len("</answer>")
             spans.append(FinegrainedScore(
                 score=rubric_reward, 
-                effective_span=(content_start, content_end), 
+                effective_spans=[(content_start, content_end)], 
                 reward_group_id=4, 
                 reward_group_name="rubric",
-                response_idx=None
             ))
         else:
             # Fallback: reward/penalize whole response
-            spans.append(FinegrainedScore(score=rubric_reward, effective_span=(0, len(response)), reward_group_id=4, reward_group_name="rubric", response_idx=None))
+            spans.append(FinegrainedScore(score=rubric_reward, effective_spans=[(0, len(response))], reward_group_id=4, reward_group_name="rubric", response_idx=None))
     else:
         # No answer extracted, penalize whole response
         spans.append(FinegrainedScore(
             score=0.0, 
-            effective_span=(0, len(response)), 
+            effective_spans=[(0, len(response))], 
             reward_group_id=4, 
             reward_group_name="rubric",
-            response_idx=None
         ))
     
     return spans
@@ -203,7 +193,6 @@ def find_citation_reward_spans(response: str, extracted_citations: Dict[str, str
         List of FinegrainedScore objects
         reward_group_id: 5=citation
     """
-    from open_instruct.ground_truth_utils import FinegrainedScore
     spans = []
     
     # Find all citation spans in the response
@@ -223,20 +212,18 @@ def find_citation_reward_spans(response: str, extracted_citations: Dict[str, str
             
             spans.append(FinegrainedScore(
                 score=citation_reward, 
-                effective_span=(cite_start_tag_end, cite_end_tag_start), 
+                effective_spans=[(cite_start_tag_end, cite_end_tag_start)], 
                 reward_group_id=5, 
                 reward_group_name="citation",
-                response_idx=None
             ))
     else:
         # No citations found, penalize whole response if reward is negative, or no span if positive
         if citation_reward <= 0:
             spans.append(FinegrainedScore(
                 score=citation_reward, 
-                effective_span=(0, len(response)), 
+                effective_spans=[(0, len(response))], 
                 reward_group_id=5, 
                 reward_group_name="citation",
-                response_idx=None
             ))
     
     return spans
@@ -259,7 +246,6 @@ def combine_all_reward_spans(
         List of FinegrainedScore objects
         reward_group_ids: 0-2=format rewards, 3=search_turns, 4=rubric, 5=citation
     """
-    from open_instruct.ground_truth_utils import FinegrainedScore
     all_rewards_with_spans = []
     
     # Format reward spans (groups 0-2)

@@ -115,7 +115,7 @@ class FinegrainedRewardOutput:
     the unpacked format expected by fgrpo_fast.py.
     
     Attributes:
-        finegrained_scores: List of (score, effective_span, reward_group_id, response_idx) tuples
+        finegrained_scores: List of FinegrainedScore objects
         log_values: Optional dictionary of metrics for logging (matches VerificationResult)
         cost: Cost of computing the rewards (matches VerificationResult)
         reasoning: Optional reasoning text (matches VerificationResult)

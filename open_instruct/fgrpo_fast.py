@@ -1181,11 +1181,13 @@ def data_preparation_thread(
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
             # fine-grained rewards are a list of FinegrainedScore objects of length num responses
             # each finegrained_score is a FinegrainedScore object including attributes: score, effective_spans, reward_group_id, query_idx, advantage
-            finegrained_scores, reward_metrics = asyncio.run(
+            all_finegrained_rewards, reward_metrics = asyncio.run(
                 reward_fn(
                     responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries
                 )
             )
+            print("Number of finegrained score outputs: ", len(all_finegrained_rewards))  # should be number of responses
+            print("Number of responses: ", len(responses)) 
             
         with Timer("🔄 [Data Preparation Thread] Converting string spans to token spans"):
             def convert_string_span_to_token_span(effective_spans, decoded_resp, token_resp, tokenizer):
@@ -1276,35 +1278,41 @@ def data_preparation_thread(
                 
                 return mask
             
-            scores = [item.score for item in finegrained_scores]
-            effective_spans = [item.effective_spans for item in finegrained_scores]
-            reward_group_ids = [item.reward_group_id for item in finegrained_scores]
-            query_indices = [item.query_idx for item in finegrained_scores]
-            advantages = [item.advantage for item in finegrained_scores]
-
-            # Update span masks using query indices (no filtering has been done yet)
-            for i, (effective_spans_per_response, decoded_resp) in enumerate(zip(effective_spans, decoded_responses)):
-                token_resp = responses[i]
+            # Calculate per-token advantages by averaging advantages from all effective spans that cover each token
+            advantages = []
+            for i, (token_resp, decoded_resp, finegrained_rewards) in enumerate(zip(responses, decoded_responses, all_finegrained_rewards)):                
+                # Initialize per-token advantage array
+                token_advantage = np.zeros(len(token_resp), dtype=np.float32)
+                token_advantage_count = np.zeros(len(token_resp), dtype=np.int32)
                 
-                # Use the convert function to get the mask directly
-                span_mask = convert_string_span_to_token_span(
-                    effective_spans_per_response, decoded_resp, token_resp, tokenizer
-                )
-                
-                # If no valid spans were found (all False except possibly EOS), default to original mask
-                # Otherwise, use the span mask
-                if np.array(span_mask, dtype=bool).any():
-                    masks[i] = span_mask
+                for score_obj in finegrained_rewards.finegrained_scores:
+                    # Get token mask for this finegrained score's spans
+                    span_mask = convert_string_span_to_token_span(
+                        score_obj.effective_spans, decoded_resp, token_resp, tokenizer
+                    )
+                    
+                    # Add this advantage to all tokens covered by the spans
+                    for token_idx, is_covered in enumerate(span_mask):
+                        if is_covered == 1:
+                            token_advantage[token_idx] += score_obj.advantage
+                            token_advantage_count[token_idx] += 1
+                    
+                # Calculate average advantages
+                for token_idx in range(len(token_resp)):
+                    if token_advantage_count[token_idx] > 0:
+                        token_advantage[token_idx] /= token_advantage_count[token_idx]
+                    
+                advantages.append(token_advantage)
+            advantages = np.array(advantages)
 
-            
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
-            # Filter to keep only finegrained scores from groups with non-zero std
-            non_zero_gradient_index = [i for i, advantage in enumerate(advantages) if advantage != -100]
-            real_batch_size_ratio = non_zero_gradient_index.sum() * args.num_samples_per_prompt_rollout / len(scores)
-            expanded_mask = np.repeat(non_zero_gradient_index, args.num_samples_per_prompt_rollout)
+            # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
+            # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
+            non_zero_std_mask = (advantages != 0).any(axis=-1)
+            real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(advantages)
+            expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
             non_zero_gradient_index = np.where(expanded_mask)[0]
             advantages = advantages[non_zero_gradient_index]
-            scores = scores[non_zero_gradient_index]
             responses = [responses[i] for i in non_zero_gradient_index]
             masks = [masks[i] for i in non_zero_gradient_index]
             queries = [queries[i] for i in non_zero_gradient_index]
@@ -1422,38 +1430,18 @@ def data_preparation_thread(
 
         # Create a result package with metrics and data
         sequence_lengths = np.array([len(response) for response in responses])
-        sequence_length_solved = (
-            np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == max_possible_score])
-        )
-        sequence_length_unsolved = (
-            np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
-        )
         if len(responses) > 0:
             metrics = {
-                "scores": np.array(scores).mean(),
                 "real_batch_size_ratio": real_batch_size_ratio,
-                "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
                 "packed_ratio": len(packed_sequences.query_responses) / len(responses),
                 "val/sequence_lengths": sequence_lengths.mean(),
                 "val/sequence_lengths_min": sequence_lengths.min(),
                 "val/sequence_lengths_max": sequence_lengths.max(),
-                "val/sequence_lengths_unsolved": (
-                    0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean()
-                ),
-                "val/sequence_lengths_solved": 0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean(),
-                "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
-                "val/sequence_lengths_solved_hist": sequence_length_solved,
                 "val/stop_rate": stop_rate,
                 "val/advantages_mean": advantages.mean(),
                 "val/advantages_min": advantages.min(),
                 "val/advantages_max": advantages.max(),
                 "val/advantages_hist": advantages,
-                "val/num_calls_rate": np.array(num_calls).mean(),
-                "val/timeouts_rate": np.array(timeouts).mean(),
-                "val/tool_errors_rate": np.array([len(item) > 0 for item in tool_errors]).mean(),
-                "val/good_outputs_rate": np.array(good_outputs).mean(),
-                "val/tool_runtimes_rate": np.array(tool_runtimes).mean(),
-                "val/tool_calleds_rate": np.array(tool_calleds).mean(),
                 **reward_metrics,
             }
         else:
@@ -1462,7 +1450,7 @@ def data_preparation_thread(
 
         if args.save_traces:
             traces = {
-                "scores": scores.tolist(),
+                "advantages": advantages.tolist(),
                 "finish_reasons": finish_reasons,
                 "responses": responses,
                 "queries": queries,
@@ -2170,11 +2158,10 @@ if __name__ == "__main__":
         # Check if we need finegrained rewards
         assert args.apply_finegrained_reward, "Finegrained rewards are not applied"
         # For finegrained rewards, we need to return (finegrained_scores, metrics)
-        finegrained_scores = []
         metrics = {}
         
         with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying finegrained reward"):
-            finegrained_scores, log_values = await apply_finegrained_reward(
+            finegrained_rewards, log_values = await apply_finegrained_reward(
                 reward_fn_mapping,
                 responses,
                 decoded_responses,
@@ -2192,9 +2179,10 @@ if __name__ == "__main__":
             
             # Directly compute advantages in the reward function
             scores_by_query_and_reward_group = defaultdict(lambda: defaultdict(list))
-            for score_obj in finegrained_scores:
-                # score_obj is a FinegrainedScore object including attributes: score, effective_spans, reward_group_id, query_idx
-                scores_by_query_and_reward_group[score_obj.query_idx][score_obj.reward_group_id].append(score_obj.score)
+            for finegrained_reward in finegrained_rewards:
+                for score_obj in finegrained_reward.finegrained_scores:
+                    # score_obj is a FinegrainedScore object including attributes: score, effective_spans, reward_group_id, query_idx
+                    scores_by_query_and_reward_group[score_obj.query_idx][score_obj.reward_group_id].append(score_obj.score)
             
             # Calculate average score per response for metrics
             reward_stats_by_query_and_reward_group = defaultdict(lambda: defaultdict(float))
@@ -2204,12 +2192,11 @@ if __name__ == "__main__":
                     reward_stats_by_query_and_reward_group[query_idx][reward_group_id] = (mean, std)
             
             # Calculate advantages
-            for score_obj in finegrained_scores:
-                mean, std = reward_stats_by_query_and_reward_group[score_obj.query_idx][score_obj.reward_group_id]
-                score_obj.advantage = (score_obj.score - mean) / std
-                if std == 1e-8:
-                    score_obj.advantage = -100  # should be filtered out
+            for finegrained_reward in finegrained_rewards:
+                for score_obj in finegrained_reward.finegrained_scores:
+                    mean, std = reward_stats_by_query_and_reward_group[score_obj.query_idx][score_obj.reward_group_id]
+                    score_obj.advantage = (score_obj.score - mean) / std
             
-        return finegrained_scores, metrics
+        return finegrained_rewards, metrics
 
     main(args, tokenizer_config, model_config, reward_fn)

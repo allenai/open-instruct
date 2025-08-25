@@ -370,7 +370,7 @@ async def apply_finegrained_reward(
                     logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
                 continue
 
-            # Create async task
+            # Create async task, where task is FinegrainedRewardOutput object
             task = reward_func.async_call(
                 tokenized_prediction=tok_prediction,
                 prediction=prediction,
@@ -391,22 +391,24 @@ async def apply_finegrained_reward(
         reward_results = []
 
     # Process finegrained results
-    all_finegrained_scores = []
     aggregated_log_values = defaultdict(list)
     
     for result, metadata in zip(reward_results, task_metadata):
         query_idx = metadata["query_idx"]
+        response_idx = metadata["response_idx"]
+        
         reward_mult = metadata["reward_mult"]
         reward_weight = metadata["reward_weight"]
         
         assert hasattr(result, "finegrained_scores"), "Result must be a FinegrainedRewardOutput"
-        # This is a FinegrainedRewardOutput
+        # Add response_idx and query_idx to the finegrained scores, which is a FinegrainedRewardOutput
+        # its finegrained_scores is a list of FinegrainedScore objects
         for score_obj in result.finegrained_scores:
             # Apply scaling and set correct query index
             scaled_score = reward_mult * score_obj.score * reward_weight
             score_obj.score = scaled_score
             score_obj.query_idx = query_idx
-            all_finegrained_scores.append(score_obj)
+            score_obj.response_idx = response_idx
         
         # Collect log values
         if result.log_values is not None:
@@ -418,7 +420,7 @@ async def apply_finegrained_reward(
     for key, values in aggregated_log_values.items():
         final_log_values[key] = np.mean(values) if values else 0.0
 
-    return all_finegrained_scores, final_log_values
+    return reward_results, final_log_values
 
 
 def forward(
