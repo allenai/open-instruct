@@ -82,6 +82,7 @@ from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokeni
 from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import logger_utils, vllm_utils3
+from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -1844,7 +1845,7 @@ def create_model_and_optimizer(
         "Param Prompt Queue": param_prompt_Q,
         "Evaluation Queue": evaluation_inference_results_Q,
     }
-    actor_manager = vllm_utils3.ActorManager.remote(queues=queues_to_monitor)
+    actor_manager = ActorManager.remote(queues=queues_to_monitor)
 
     # Create vLLM engines with queues
     vllm_engines = vllm_utils3.create_vllm_engines(
@@ -1968,7 +1969,7 @@ def sync_weights_and_prepare_prompts(
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q: ray_queue.Queue,
     generation_configs: Dict[str, vllm.SamplingParams],
-    actor_manager: vllm_utils3.ActorManager,
+    actor_manager: ActorManager,
 ) -> Batch:
     """Sync weights and send the next batch of prompts to vLLM."""
     dataset_indices = next(iter_dataloader)
@@ -2375,7 +2376,7 @@ def cleanup_training_resources(
     stop_event: threading.Event,
     executor: futures.ThreadPoolExecutor,
     queues: list[ray_queue.Queue],
-    actor_manager: vllm_utils3.ActorManager,
+    actor_manager: ActorManager,
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
     # Signal generate_thread to stop
@@ -2429,7 +2430,7 @@ def run_training(
     pending_queries_map,
     eval_pending_queries_map,
     generate_metrics_Q,
-    actor_manager: vllm_utils3.ActorManager,
+    actor_manager: ActorManager,
 ):
     """Run the main training loop with worker threads."""
     ray_get_with_progress(
