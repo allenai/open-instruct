@@ -436,21 +436,22 @@ class Args:
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
             raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
+        
+        if self.gs_checkpoint_state_dir is not None and not self.gs_checkpoint_state_dir.startswith("gs://"):
+            raise ValueError(f"`gs_checkpoint_state_dir` must start with 'gs://', got: {self.gs_checkpoint_state_dir}")
+        if self.gs_bucket_path is not None and not self.gs_bucket_path.startswith("gs://"):
+            raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")
+
         if self.gs_bucket_path is not None and self.gs_checkpoint_state_dir is None:
             if self.checkpoint_state_dir is None:
                 raise ValueError("`checkpoint_state_dir` must be provided when using `gs_bucket_path`!")
             # Use basename to avoid path issues
-            checkpoint_dir_name = os.path.basename(self.checkpoint_state_dir.rstrip("/"))
+            checkpoint_dir_name = self.checkpoint_state_dir.rstrip("/")
             beaker_users = get_beaker_whoami()
             if beaker_users is not None:
                 self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{beaker_users}/{checkpoint_dir_name}"
             else:
                 self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{checkpoint_dir_name}"
-
-        if self.gs_checkpoint_state_dir is not None and not self.gs_checkpoint_state_dir.startswith("gs://"):
-            raise ValueError(f"`gs_checkpoint_state_dir` must start with 'gs://', got: {self.gs_checkpoint_state_dir}")
-        if self.gs_bucket_path is not None and not self.gs_bucket_path.startswith("gs://"):
-            raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")
 
         if self.gs_checkpoint_state_dir is not None and self.checkpoint_state_dir is not None:
             download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
