@@ -35,14 +35,20 @@ Return a score on a scale of 0 to 2 indicating how appropriate the response is b
         f"""<question>{question}</question>\n<response>{response}</response>\n<criterion>{prop}</criterion>"""
     )
 
-    resp = run_litellm(
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        model_name=os.environ.get("RUBRIC_JUDGE_MODEL", "gpt-4.1"),
-    )
+    # wrap in try-except to handle litellm API errors
+    # these might just be ephemeral, so we don't want to crash the whole training job.
+    try:
+        resp = run_litellm(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model_name=os.environ.get("RUBRIC_JUDGE_MODEL", "gpt-4.1"),
+        )
 
-    obj = extract_json_from_response(resp)
-    if not obj:
+        obj = extract_json_from_response(resp)
+        if not obj:
+            return 0.0
+    except litellm.exceptions.APIError as e:
+        LOGGER.warning(f"Error scoring rubric: {e}")
         return 0.0
 
     return obj["score"] / 2.0
