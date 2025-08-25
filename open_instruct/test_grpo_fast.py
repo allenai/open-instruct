@@ -11,6 +11,7 @@ from transformers import AutoTokenizer
 from vllm import SamplingParams
 
 from open_instruct import grpo_fast, model_utils, utils
+from open_instruct.grpo_fast import ReplayBuffer
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo
 from open_instruct.vllm_utils3 import create_vllm_engines
 
@@ -854,6 +855,145 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         # Verify total responses
         self.assertEqual(total_responses, num_prompts * num_samples)
         self.assertEqual(len(pending_queries_map), 0)
+
+
+class TestReplayBuffer(unittest.TestCase):
+    """Test cases for the ReplayBuffer class."""
+
+    def test_fifo_sampling(self):
+        """Test FIFO sampling strategy."""
+        buffer = ReplayBuffer(max_size=5, sampling_strategy="fifo")
+
+        # Add items to buffer
+        for i in range(5):
+            buffer.add({"id": i, "data": f"item_{i}"})
+
+        # Sample items - should get them in FIFO order
+        batch = buffer.sample(batch_size=3)
+        self.assertEqual(len(batch), 3)
+        self.assertEqual([item["id"] for item in batch], [0, 1, 2])
+
+        # Sample again - should continue from where we left off
+        batch = buffer.sample(batch_size=2)
+        self.assertEqual(len(batch), 2)
+        self.assertEqual([item["id"] for item in batch], [3, 4])
+
+        # Sample again - should wrap around
+        batch = buffer.sample(batch_size=2)
+        self.assertEqual(len(batch), 2)
+        self.assertEqual([item["id"] for item in batch], [0, 1])
+
+    def test_uniform_sampling(self):
+        """Test uniform random sampling strategy."""
+        buffer = ReplayBuffer(max_size=10, sampling_strategy="uniform")
+
+        # Add items to buffer
+        for i in range(10):
+            buffer.add({"id": i, "data": f"item_{i}"})
+
+        # Sample items multiple times
+        sampled_ids = set()
+        for _ in range(5):
+            batch = buffer.sample(batch_size=3)
+            self.assertEqual(len(batch), 3)
+            # Check no duplicates within batch
+            batch_ids = [item["id"] for item in batch]
+            self.assertEqual(len(batch_ids), len(set(batch_ids)))
+            sampled_ids.update(batch_ids)
+
+        # We should have sampled different items over multiple samples
+        self.assertGreater(len(sampled_ids), 3)
+
+    def test_buffer_overflow(self):
+        """Test that buffer correctly removes oldest items when full."""
+        buffer = ReplayBuffer(max_size=3, sampling_strategy="fifo")
+
+        # Add more items than buffer can hold
+        for i in range(5):
+            buffer.add({"id": i})
+
+        # Buffer should only contain last 3 items
+        self.assertEqual(len(buffer), 3)
+        batch = buffer.sample(batch_size=3)
+        ids = sorted([item["id"] for item in batch])
+        self.assertEqual(ids, [2, 3, 4])
+
+    def test_invalidation_after_n_samples(self):
+        """Test that items are removed after being sampled N times."""
+        buffer = ReplayBuffer(max_size=5, sampling_strategy="fifo", invalidate_after_n_samples=2)
+
+        # Add items
+        for i in range(3):
+            buffer.add({"id": i})
+
+        # Sample first item twice
+        batch1 = buffer.sample(batch_size=1)
+        self.assertEqual(batch1[0]["id"], 0)
+        batch2 = buffer.sample(batch_size=1)
+        self.assertEqual(batch2[0]["id"], 1)
+
+        # Go back to first item
+        batch3 = buffer.sample(batch_size=1)
+        self.assertEqual(batch3[0]["id"], 2)
+        batch4 = buffer.sample(batch_size=1)
+        self.assertEqual(batch4[0]["id"], 0)  # Back to first item (second sampling)
+
+        # After this sample, item 0 should be invalidated
+        self.assertEqual(len(buffer), 2)  # Item 0 should be removed
+
+        # Next sample should skip the removed item
+        batch5 = buffer.sample(batch_size=1)
+        self.assertEqual(batch5[0]["id"], 1)
+
+    def test_insufficient_data(self):
+        """Test that sample returns None when not enough data."""
+        buffer = ReplayBuffer(max_size=10, sampling_strategy="uniform")
+
+        # Empty buffer
+        self.assertIsNone(buffer.sample(batch_size=1))
+
+        # Add one item
+        buffer.add({"id": 0})
+
+        # Can sample 1 item
+        batch = buffer.sample(batch_size=1)
+        self.assertIsNotNone(batch)
+        self.assertEqual(len(batch), 1)
+
+        # Cannot sample 2 items
+        self.assertIsNone(buffer.sample(batch_size=2))
+
+    @parameterized.expand([("fifo",), ("uniform",)])
+    def test_clear_buffer(self, sampling_strategy):
+        """Test clearing the buffer."""
+        buffer = ReplayBuffer(max_size=5, sampling_strategy=sampling_strategy)
+
+        # Add items
+        for i in range(3):
+            buffer.add({"id": i})
+
+        self.assertEqual(len(buffer), 3)
+
+        # Clear buffer
+        buffer.clear()
+        self.assertEqual(len(buffer), 0)
+        self.assertIsNone(buffer.sample(batch_size=1))
+
+    def test_default_batch_size(self):
+        """Test that default batch size works correctly."""
+        buffer = ReplayBuffer(max_size=5, sampling_strategy="fifo", batch_size=2)
+
+        # Add items
+        for i in range(3):
+            buffer.add({"id": i})
+
+        # Sample without specifying batch_size - should use default
+        batch = buffer.sample()
+        self.assertEqual(len(batch), 2)
+
+        # Override default batch size
+        batch = buffer.sample(batch_size=1)
+        self.assertEqual(len(batch), 1)
 
 
 if __name__ == "__main__":

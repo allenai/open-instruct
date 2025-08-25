@@ -413,6 +413,16 @@ class Args:
     # code-tool specific settings
     code_tool_api_endpoint: Optional[str] = None
 
+    # Replay buffer settings
+    replay_buffer_size: int = 100
+    """Maximum size of the replay buffer"""
+    replay_buffer_sampling_strategy: Literal["fifo", "uniform"] = "uniform"
+    """Sampling strategy for the replay buffer: 'fifo' or 'uniform'"""
+    replay_buffer_invalidate_after_n_samples: Optional[int] = None
+    """Number of times data can be sampled before invalidation. None means no invalidation."""
+    replay_buffer_batch_size: Optional[int] = None
+    """Batch size for sampling from replay buffer. If None, uses the same size as incoming data."""
+
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
@@ -532,6 +542,132 @@ class ShufflingIterator:
         self.index = end_index
 
         return batch
+
+
+class ReplayBuffer:
+    """A replay buffer supporting FIFO and uniform random sampling with optional invalidation."""
+
+    def __init__(
+        self,
+        max_size: int,
+        sampling_strategy: Literal["fifo", "uniform"] = "uniform",
+        invalidate_after_n_samples: Optional[int] = None,
+        batch_size: Optional[int] = None,
+    ):
+        """Initialize the replay buffer.
+
+        Args:
+            max_size: Maximum number of items the buffer can hold
+            sampling_strategy: "fifo" for first-in-first-out or "uniform" for uniform random sampling
+            invalidate_after_n_samples: Remove data after being sampled this many times. None means no invalidation.
+            batch_size: Size of batches to return when sampling. None means return single items.
+        """
+        self.max_size = max_size
+        self.sampling_strategy = sampling_strategy
+        self.invalidate_after_n_samples = invalidate_after_n_samples
+        self.batch_size = batch_size
+
+        self.buffer = []
+        self.sample_counts = {}  # Track how many times each item has been sampled
+        self.current_index = 0  # For FIFO sampling
+        self.rng = np.random.default_rng()
+
+    def add(self, data: Dict[str, Any]) -> None:
+        """Add data to the buffer. If buffer is full, removes oldest item (FIFO)."""
+        if len(self.buffer) >= self.max_size:
+            # Remove oldest item
+            removed_item_id = id(self.buffer[0])
+            self.buffer.pop(0)
+            if removed_item_id in self.sample_counts:
+                del self.sample_counts[removed_item_id]
+            # Adjust current_index if needed
+            if self.current_index > 0:
+                self.current_index -= 1
+
+        self.buffer.append(data)
+        if self.invalidate_after_n_samples is not None:
+            self.sample_counts[id(data)] = 0
+
+    def sample(self, batch_size: Optional[int] = None) -> Optional[List[Dict[str, Any]]]:
+        """Sample a batch from the buffer based on the sampling strategy.
+
+        Args:
+            batch_size: Number of items to sample. If None, uses self.batch_size.
+                       If that's also None, returns a single item.
+
+        Returns:
+            List of sampled items, or None if buffer doesn't have enough data.
+        """
+        if len(self.buffer) == 0:
+            return None
+
+        batch_size = batch_size or self.batch_size or 1
+
+        if batch_size > len(self.buffer):
+            return None
+
+        if self.sampling_strategy == "fifo":
+            # FIFO sampling: take next batch_size items in order
+            batch = []
+            for _ in range(batch_size):
+                if self.current_index >= len(self.buffer):
+                    self.current_index = 0
+                item = self.buffer[self.current_index]
+                batch.append(item)
+                self._update_sample_count(item)
+                self.current_index += 1
+        else:
+            # Uniform random sampling
+            indices = self.rng.choice(len(self.buffer), size=batch_size, replace=False)
+            batch = [self.buffer[i] for i in indices]
+            for item in batch:
+                self._update_sample_count(item)
+
+        # Invalidate items that have been sampled too many times
+        if self.invalidate_after_n_samples is not None:
+            self._invalidate_oversampled_items()
+
+        return batch
+
+    def _update_sample_count(self, item: Dict[str, Any]) -> None:
+        """Update the sample count for an item."""
+        if self.invalidate_after_n_samples is not None:
+            item_id = id(item)
+            if item_id in self.sample_counts:
+                self.sample_counts[item_id] += 1
+
+    def _invalidate_oversampled_items(self) -> None:
+        """Remove items that have been sampled too many times."""
+        if self.invalidate_after_n_samples is None:
+            return
+
+        items_to_remove = []
+        for i, item in enumerate(self.buffer):
+            item_id = id(item)
+            if item_id in self.sample_counts and self.sample_counts[item_id] >= self.invalidate_after_n_samples:
+                items_to_remove.append(i)
+
+        # Remove items in reverse order to maintain indices
+        for i in reversed(items_to_remove):
+            removed_item_id = id(self.buffer[i])
+            self.buffer.pop(i)
+            if removed_item_id in self.sample_counts:
+                del self.sample_counts[removed_item_id]
+            # Adjust current_index if needed
+            if self.current_index > i:
+                self.current_index -= 1
+            elif self.current_index == i and self.current_index >= len(self.buffer):
+                self.current_index = 0
+
+    def __len__(self) -> int:
+        """Return the current size of the buffer."""
+        return len(self.buffer)
+
+    def clear(self) -> None:
+        """Clear all data from the buffer."""
+        self.buffer.clear()
+        self.sample_counts.clear()
+        self.current_index = 0
 
 
 @ray.remote(num_gpus=1)
@@ -1959,13 +2095,15 @@ def sync_weights_and_prepare_prompts(
     return batch
 
 
-def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event):
-    """Get the packed sequences with advantages from the packing thread."""
+def load_data_from_packing_thread(
+    packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event, replay_buffer: ReplayBuffer
+):
+    """Get the packed sequences with advantages from the packing thread and add to replay buffer."""
     with Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
         while True:
             if stop_event.is_set():
                 logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
-                return None, {}, num_total_tokens
+                return False, {}, num_total_tokens
             try:
                 packed_data = packed_sequences_Q.get(timeout=30.0)
                 break
@@ -1979,8 +2117,14 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
     data_thread_metrics["time/trainer_idling"] = timer.duration
     if B == 0:
         logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-        return None, data_thread_metrics, num_total_tokens
-    return collated_data, data_thread_metrics, num_total_tokens
+        return False, data_thread_metrics, num_total_tokens
+
+    # Add each device's data to the replay buffer as a separate item
+    for device_data in collated_data:
+        replay_buffer.add(device_data)
+
+    logger.info(f"[Main Thread] Added {len(collated_data)} items to replay buffer. Buffer size: {len(replay_buffer)}")
+    return True, data_thread_metrics, num_total_tokens
 
 
 def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q):
@@ -2008,7 +2152,7 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
 def one_training_step(
     args: Args,
     policy_group: ModelGroup,
-    collated_data,
+    replay_buffer: ReplayBuffer,
     tokenizer,
     data_thread_metrics,
     episode,
@@ -2019,7 +2163,21 @@ def one_training_step(
     wandb_url,
     chat_template_name,
 ):
-    """Train the model for one step."""
+    """Train the model for one step by sampling from replay buffer."""
+    # Sample a batch from the replay buffer
+    batch_size = args.replay_buffer_batch_size or args.world_size
+    sampled_data = replay_buffer.sample(batch_size=batch_size)
+
+    if sampled_data is None or len(sampled_data) < args.world_size:
+        logger.warning(
+            f"[Main Thread] Not enough data in replay buffer. Buffer size: {len(replay_buffer)}, "
+            f"requested: {args.world_size}"
+        )
+        return False  # Signal that training couldn't happen
+
+    # Use only the first args.world_size items if we sampled more
+    collated_data = sampled_data[: args.world_size]
+
     update_ref_policy_future = []
     with Timer("[Main Thread] 🗡️ Training") as train_timer:
         metrics_list: List[dict[str, float]] = ray_get_with_progress(
@@ -2108,6 +2266,8 @@ def one_training_step(
                 if len(value) > 0:
                     metrics[key] = wandb.Histogram(value)
         wandb.log(metrics, step=episode)
+
+    return True  # Training was successful
 
 
 def maybe_evaluate(
@@ -2391,6 +2551,19 @@ def run_training(
         [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
     )
 
+    # Initialize replay buffer
+    replay_buffer = ReplayBuffer(
+        max_size=args.replay_buffer_size,
+        sampling_strategy=args.replay_buffer_sampling_strategy,
+        invalidate_after_n_samples=args.replay_buffer_invalidate_after_n_samples,
+        batch_size=args.replay_buffer_batch_size,
+    )
+    logger.info(
+        f"Initialized replay buffer with size={args.replay_buffer_size}, "
+        f"strategy={args.replay_buffer_sampling_strategy}, "
+        f"invalidate_after={args.replay_buffer_invalidate_after_n_samples}"
+    )
+
     logger.info("======== ✅ data preparation thread starts =========")
     packing_future = executor.submit(
         data_preparation_thread,
@@ -2471,10 +2644,10 @@ def run_training(
             )
 
         # The generate_thread is now handling vLLM processing asynchronously
-        collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
-            packed_sequences_Q, num_total_tokens, stop_event
+        data_added, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
+            packed_sequences_Q, num_total_tokens, stop_event, replay_buffer
         )
-        if collated_data is None:
+        if not data_added:
             continue
 
         generate_metrics = {}
@@ -2485,10 +2658,11 @@ def run_training(
 
         data_thread_metrics = {**data_thread_metrics, **generate_metrics}
 
-        one_training_step(
+        # Try to train using the replay buffer
+        training_successful = one_training_step(
             args,
             policy_group,
-            collated_data,
+            replay_buffer,
             tokenizer,
             data_thread_metrics,
             episode,
@@ -2499,6 +2673,10 @@ def run_training(
             wandb_url,
             tc.chat_template_name,
         )
+
+        if not training_successful:
+            logger.warning(f"[Main Thread] Training step {training_step} skipped due to insufficient data in buffer")
+            continue
 
         maybe_evaluate(
             args,
