@@ -83,6 +83,11 @@ class CodeVerifierConfig(VerifierConfig):
 
 
 @dataclass
+class MaxLengthVerifierConfig(VerifierConfig):
+    max_length_verifier_max_length: int
+
+
+@dataclass
 class VerificationResult:
     score: float
     cost: float = 0.0
@@ -530,7 +535,7 @@ class MaxLenVerifier(VerifierFunction):
     The ground truth (label) is interpreted as the maximum length.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: MaxLengthVerifierConfig) -> None:
         super().__init__("max_length", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
@@ -540,7 +545,7 @@ class MaxLenVerifier(VerifierFunction):
         # return absolute difference between the length of the prediction and the max length
         # make sure to disallow negative rewards
         length_diff = abs(len(tokenized_prediction) - desired_length)
-        score = 1 - (length_diff / 8192)
+        score = 1 - (length_diff / self.verifier_config.max_length_verifier_max_length)
         return VerificationResult(score=score)
 
 
