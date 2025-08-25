@@ -220,36 +220,6 @@ def free_all_gpu_memory(device: int | str = 0) -> None:
     logger.info(f"[GPU {dev.index}] {free / gib:.2f} GiB free of {total / gib:.2f} GiB after cleanup")
 
 
-def estimate_prefill_flops(prompt_lengths: np.ndarray, dims: FLOPsModelDims) -> int:
-    """
-    Sum over prompts P: N * [ (4 d^2 + 2 d d_ff) * P + 4 d * P^2 ]
-    """
-    N, d, d_ff = dims.num_layers, dims.hidden_size, dims.intermediate_size
-    P = prompt_lengths.astype(np.int64)
-    static = _static_per_token_flops(d, d_ff)
-    total = N * (static * int(P.sum()) + 4 * d * int((P * P).sum()))
-    return int(total)
-
-
-def estimate_decode_flops(prompt_lengths: np.ndarray, resp_len_matrix: np.ndarray, dims: FLOPsModelDims) -> int:
-    """
-    R shape: (num_prompts, n_samples_per_prompt)
-    Total = N * [ static * T_total + 4 d * ( Σ_i P_i * Σ_j T_ij + Σ_{i,j} T_ij (T_ij - 1)/2 ) ]
-    """
-    N, d, d_ff = dims.num_layers, dims.hidden_size, dims.intermediate_size
-    static = _static_per_token_flops(d, d_ff)
-
-    P = prompt_lengths.astype(np.int64)  # (U,)
-    R = resp_len_matrix.astype(np.int64)  # (U, n)
-    T_sum_per_prompt = R.sum(axis=1)  # (U,)
-    T_total = int(T_sum_per_prompt.sum())
-    pair_sum = int((R * (R - 1) // 2).sum())  # Σ T(T-1)/2 across all samples
-    cross = int((P * T_sum_per_prompt).sum())  # Σ P_i * Σ_j T_ij
-
-    total = N * (static * T_total + 4 * d * (cross + pair_sum))
-    return int(total)
-
-
 @dataclasses.dataclass(frozen=True)
 class ModelDims:
     num_layers: int
@@ -317,9 +287,7 @@ class ModelDims:
         return total_flops
 
     def prefill_flops(self, prompt_lengths: list[int]) -> int:
-        num_kv_heads = self.num_kv_heads | self.num_attn_heads
         total_flops = 0
-
         for length in prompt_lengths:
             total_flops = length * self.vocab_size * self.hidden_size  # Embedding layer
             total_flops += self.num_layers * (
@@ -350,7 +318,7 @@ class ModelDims:
         return total_flops
 
 
-def load_model_dims(model_name: str) -> FLOPsModelDims:
+def load_model_dims(model_name: str) -> ModelDims:
     cfg = transformers.AutoConfig.from_pretrained(model_name, trust_remote_code=True)
     return ModelDims(
         num_layers=cfg.num_hidden_layers,
