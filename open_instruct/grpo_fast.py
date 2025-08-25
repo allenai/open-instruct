@@ -1850,16 +1850,6 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ model update group setup successfully =========")
 
-    if resume_training_step > 1:
-        logger.info(f"Resuming training from step {resume_training_step}... Broadcasting weights to vLLM engines.")
-        with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
-            weight_sync_future = ray_get_with_progress(
-                [m.broadcast_to_vllm.remote() for m in policy_group.models],
-                desc="Broadcasting weights to vLLM engines",
-                enable=args.verbose,
-            )
-            ray.get(weight_sync_future)
-
     return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager
 
 
@@ -1926,7 +1916,7 @@ def split_and_insert_batch(
         )
 
 
-def trigger_weight_sync_and_prepare_prompts(
+def prepare_prompts(
     training_step: int,
     args: Args,
     train_dataset: Any,
@@ -1939,11 +1929,6 @@ def trigger_weight_sync_and_prepare_prompts(
     """Trigger weight sync and prepare the next batch of prompts for vLLM."""
     dataset_indices = next(iter_dataloader)
     batch = next_batch(dataset_indices, train_dataset)
-
-    # Trigger weight sync in the weight sync thread
-    weight_sync_trigger_event._training_step = training_step  # Store training step for the thread
-    weight_sync_trigger_event.set()
-    logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
 
     split_and_insert_batch(
         batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]
@@ -1977,10 +1962,19 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
 
 
 def weight_sync_thread(
-    args, stop_event, weight_sync_trigger_event, policy_group, actor_manager, weight_sync_metrics_Q
+    args: Args,
+    stop_event: threading.Event,
+    weight_sync_trigger_event: threading.Event,
+    policy_group: ModelGroup,
+    actor_manager: vllm_utils3.ActorManager,
+    weight_sync_metrics_Q: Queue,
+    resume_training_step: int = 1,
 ):
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
+    if resume_training_step > 1:
+        weight_sync_trigger_event.set()
+
     while not stop_event.is_set():
         # Wait for weight sync trigger from main thread
         if not weight_sync_trigger_event.wait(timeout=1.0):
@@ -1989,38 +1983,33 @@ def weight_sync_thread(
         # Clear the event for next iteration
         weight_sync_trigger_event.clear()
 
-        training_step = getattr(weight_sync_trigger_event, "_training_step", 0)
-
         with Timer("[Weight Sync]") as timer:
-            logger.debug(f"[Weight Sync Thread] Starting weight sync for step {training_step}")
+            logger.debug("[Weight Sync Thread] Starting weight sync")
 
             # Set actors to stop
             ray.get(actor_manager.set_should_stop.remote(True))
-            logger.debug(f"[Weight Sync Thread] Set should_stop to True for weight sync at step {training_step}")
+            logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
 
             # Broadcast weights to vLLM engines
-            # First get the futures (which return lists of ObjectRefs)
-            weight_broadcast_futures = ray_get_with_progress(
-                [m.broadcast_to_vllm.remote() for m in policy_group.models],
-                desc=f"[Weight Sync Thread] Starting weight broadcast to vLLM engines at training step {training_step}",
-                enable=args.verbose,
-            )
+            # First get the futures
+            weight_broadcast_futures: List[List[ray.ObjectRef]] = [
+                m.broadcast_to_vllm.remote() for m in policy_group.models
+            ]
 
             # Flatten the list of ObjectRef lists and wait for all weight updates to complete
             all_weight_refs = []
             for refs_list in weight_broadcast_futures:
                 all_weight_refs.extend(refs_list)
 
-            if all_weight_refs:
-                ray_get_with_progress(
-                    all_weight_refs,
-                    desc=f"[Weight Sync Thread] Waiting for weight updates to complete at training step {training_step}",
-                    enable=args.verbose,
-                )
+            ray_get_with_progress(
+                all_weight_refs,
+                desc="[Weight Sync Thread] Waiting for weight updates to complete",
+                enable=args.verbose,
+            )
 
             # Allow actors to resume
             ray.get(actor_manager.set_should_stop.remote(False))
-            logger.debug(f"[Weight Sync Thread] Set should_stop to False after weight sync at step {training_step}")
+            logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
 
         try:
             weight_sync_metrics_Q.put_nowait({"time/weight_sync": timer.duration})
@@ -2434,6 +2423,22 @@ def run_training(
     weight_sync_metrics_Q,
     actor_manager: vllm_utils3.ActorManager,
 ):
+    if resume_training_step > 1:
+        logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
+
+    logger.info("======== ✅ weight sync thread starts =========")
+    weight_sync_trigger_event = threading.Event()
+    weight_sync_thread_future = executor.submit(
+        weight_sync_thread,
+        args,
+        stop_event,
+        weight_sync_trigger_event,
+        policy_group,
+        actor_manager,
+        weight_sync_metrics_Q,
+        resume_training_step,
+    )
+
     """Run the main training loop with worker threads."""
     ray_get_with_progress(
         [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
@@ -2456,18 +2461,6 @@ def run_training(
     logger.info("======== ✅ generation thread starts =========")
     generation_future = executor.submit(
         generate_thread, args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q
-    )
-
-    logger.info("======== ✅ weight sync thread starts =========")
-    weight_sync_trigger_event = threading.Event()
-    weight_sync_thread_future = executor.submit(
-        weight_sync_thread,
-        args,
-        stop_event,
-        weight_sync_trigger_event,
-        policy_group,
-        actor_manager,
-        weight_sync_metrics_Q,
     )
 
     # Send initial data to ensure we have a N-step offset.
@@ -2503,8 +2496,11 @@ def run_training(
         # Check if any of the threads have raised an exception.
         [f.result() for f in [packing_future, generation_future, weight_sync_thread_future] if f.done()]
 
+        logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
+        weight_sync_trigger_event.set()
+
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-        trigger_weight_sync_and_prepare_prompts(
+        prepare_prompts(
             training_step,
             args,
             train_dataset,
