@@ -548,6 +548,16 @@ class MaxLenVerifier(VerifierFunction):
         score = 1 - (length_diff / self.verifier_config.max_length_verifier_max_length)
         return VerificationResult(score=score)
 
+    @classmethod
+    def get_config_class(cls) -> type:
+        """
+        Return the configuration class for this verifier.
+
+        Returns:
+            type: The VerifierConfig class or its subclass
+        """
+        return MaxLengthVerifierConfig
+
 
 class UpToMaxLenVerifier(VerifierFunction):
     """
@@ -556,7 +566,7 @@ class UpToMaxLenVerifier(VerifierFunction):
     The ground truth (label) is interpreted as the maximum length.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: MaxLengthVerifierConfig) -> None:
         super().__init__("up_to_max_length", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
@@ -569,8 +579,18 @@ class UpToMaxLenVerifier(VerifierFunction):
             return VerificationResult(score=1.0)
         # if we were too long, return the difference
         # make sure to disallow negative rewards
-        score = 1 - (length_diff / 8192)
+        score = 1 - (length_diff / self.verifier_config.max_length_verifier_max_length)
         return VerificationResult(score=score)
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        """
+        Return the configuration class for this verifier.
+
+        Returns:
+            type: The VerifierConfig class or its subclass
+        """
+        return MaxLengthVerifierConfig
 
 
 class LMJudgeVerifier(VerifierFunction):
