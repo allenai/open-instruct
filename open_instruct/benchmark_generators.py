@@ -129,17 +129,7 @@ def save_benchmark_results_to_csv(
 ) -> None:
     """Save benchmark results to CSV file."""
     git_commit = get_git_commit()
-    csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
-
-    # Calculate aggregated metrics for main benchmark batches only
     avg_results = average_results(results)
-    total_tokens = avg_results["total_num_new_tokens"]
-    total_generation_time = avg_results["total_generation_time"]
-
-    # Calculate true average tokens per second
-    true_avg_tokens_per_second = total_tokens / total_generation_time if total_generation_time > 0 else 0
-
-    # Prepare row data
     row_data = {
         "git_commit": git_commit,
         "model": model_config.model_name_or_path,
@@ -149,35 +139,25 @@ def save_benchmark_results_to_csv(
         "num_samples_per_prompt_rollout": args.num_samples_per_prompt_rollout,
         "response_length": args.response_length,
         "total_time": total_time,
-        "total_generation_time": total_generation_time,
-        "generation_time_percentage": (total_generation_time / total_time) * 100,
-        "total_tokens": total_tokens,
+        "total_generation_time": avg_results["total_generation_time"],
+        "generation_time_percentage": (avg_results["total_generation_time"] / total_time) * 100,
+        "total_tokens": avg_results["total_num_new_tokens"],
         "avg_tokens_per_second": true_avg_tokens_per_second,
         "avg_mfu": avg_results["avg_mfu"],
         "avg_generation_time_per_batch": avg_results["avg_generation_time"],
-        "avg_new_tokens_per_sample": total_tokens
+        "avg_new_tokens_per_sample": avg_results["total_num_new_tokens"]
         / (len(results) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout),
     }
 
-    # Check if file exists to determine if we need to write headers
-    file_exists = pathlib.Path(csv_path).exists()
-
-    # Create directory if it doesn't exist
+    csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
     csv_dir = csv_path.parent
     csv_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write to CSV
     with csv_path.open("a", newline="") as csvfile:
-        fieldnames = list(row_data.keys())
-
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
-        # Write header if file is new
-        if not file_exists:
+        writer = csv.DictWriter(csvfile, fieldnames=list(row_data.keys()))
+        if not csv_path.exists():
             writer.writeheader()
-
         writer.writerow(row_data)
-
     logger.info(f"Saved benchmark results to {csv_path}")
 
 
