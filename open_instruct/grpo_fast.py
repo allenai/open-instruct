@@ -447,7 +447,6 @@ class Args:
             else:
                 self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{checkpoint_dir_name}"
 
-        # Validate GCS paths
         if self.gs_checkpoint_state_dir is not None and not self.gs_checkpoint_state_dir.startswith("gs://"):
             raise ValueError(f"`gs_checkpoint_state_dir` must start with 'gs://', got: {self.gs_checkpoint_state_dir}")
         if self.gs_bucket_path is not None and not self.gs_bucket_path.startswith("gs://"):
