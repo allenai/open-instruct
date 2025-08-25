@@ -608,9 +608,9 @@ class LLMRayActor:
 
         # Get vllm_config from the engine and estimate available memory
         vllm_config = self.llm_engine.vllm_config
-        available_memory = int(
-            vllm_config.cache_config.gpu_memory_utilization * torch.cuda.get_device_properties(0).total_memory
-        )
+        gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
+        total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
+        available_memory = int(gpu_memory_utilization * total_gpu_memory)
 
         num_blocks = kv_cache_utils.get_num_blocks(vllm_config, len(kv_cache_spec), available_memory, page_size)
 
@@ -628,6 +628,19 @@ class LLMRayActor:
         max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(
             self.llm_engine.vllm_config, kv_cache_config
         )
+
+        # Log detailed information about the calculation
+        logger.info("======== KV Cache Concurrency Calculation Details ========")
+        logger.info(f"GPU memory utilization: {gpu_memory_utilization}")
+        logger.info(f"Total GPU memory: {total_gpu_memory / (1024**3):.2f} GiB")
+        logger.info(f"Available memory for KV cache: {available_memory / (1024**3):.2f} GiB")
+        logger.info(f"Page size: {page_size}")
+        logger.info(f"Number of blocks: {num_blocks}")
+        logger.info(f"Per layer size: {per_layer_size}")
+        logger.info(f"Number of KV cache layers: {len(kv_cache_spec)}")
+        logger.info(f"Max model length: {vllm_config.model_config.max_model_len}")
+        logger.info(f"Calculated max concurrency: {max_concurrency}")
+        logger.info("========================================================")
 
         return int(max_concurrency)
 

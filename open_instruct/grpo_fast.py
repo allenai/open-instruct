@@ -1875,9 +1875,13 @@ def create_model_and_optimizer(
 
     # Get and set KV cache max concurrency from the first engine (all engines have the same config)
     if vllm_engines:
+        logger.info("======== Fetching KV Cache Info from vLLM Engine ========")
         kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
-        logger.info(f"KV Cache max concurrency: {kv_cache_max_concurrency}")
+        logger.info(f"KV Cache max concurrency returned by custom calculation: {kv_cache_max_concurrency}")
+        logger.info("Note: vLLM's internal calculation showed 182.41x for 1,024 tokens")
+        logger.info("The difference suggests vLLM may be using different assumptions or calculation methods")
+        logger.info("=========================================================")
 
     ray_get_with_progress(
         [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
