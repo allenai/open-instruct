@@ -92,6 +92,8 @@ class CodeVerifierConfig(VerifierConfig):
 class RubricVerifierConfig(VerifierConfig):
     use_general_rubric: bool = False
     """Whether to use the general rubric for evaluation instead of specific rubrics"""
+    evaluate_closed_book_answer: bool = False
+    """Whether to evaluate the closed book answer"""
 
 @dataclass
 class VerificationResult:
@@ -934,6 +936,8 @@ class RLRAGLongFormVerifier(VerifierFunction):
 class RLRAGLongFormRubricsOnlyVerifier(VerifierFunction):
     """
     Verifier that computes the RL-RAG (long form) score between the prediction and the label.
+    For closed book answer, we use the rubric averaged reward.
+    For search-augmented answer, we plus additional num_search_turns_reward.
     """
 
     def __init__(self, verifier_config: Optional[RubricVerifierConfig] = None) -> None:
@@ -951,8 +955,10 @@ class RLRAGLongFormRubricsOnlyVerifier(VerifierFunction):
     ) -> VerificationResult:
         test_case = json.loads(label)
         use_general_rubric = self.verifier_config.use_general_rubric if self.verifier_config else False
+        evaluate_closed_book_answer = self.verifier_config.evaluate_closed_book_answer if self.verifier_config else False
+        
         result = compute_rubric_reward(prediction, test_case, use_general_rubric=use_general_rubric)
-        score = result["reward"]
+        score = result["reward"] if not evaluate_closed_book_answer else result["rubric_averaged_reward"]
         return VerificationResult(score=score, log_values=result["log_values"])
 
 
