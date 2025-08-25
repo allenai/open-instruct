@@ -275,7 +275,7 @@ class ModelDims:
 
     def decode_flops(self, prompt_lengths: Sequence[int], response_lengths: Sequence[int]) -> int:
         """Decode/generation FLOPs. Embedding lookups are ignored by design."""
-        assert len(prompt_lengths) == len(response_lengths), "Prompt and response lengths must match"
+        assert len(prompt_lengths) == len(response_lengths), f"{len(prompt_lengths)=} != {len(response_lengths)=}"
         total = 0
         for P, R in zip(prompt_lengths, response_lengths):
             # MLP per generated token across all layers
