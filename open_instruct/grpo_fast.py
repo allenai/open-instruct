@@ -1932,6 +1932,7 @@ def split_and_insert_batch(
     generation_config,
     is_eval: bool = False,
     actor_manager=None,
+    args: Args = None,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
     import math
@@ -1940,7 +1941,9 @@ def split_and_insert_batch(
 
     # Report inference batch size to ActorManager
     if actor_manager and not is_eval:
-        ray.get(actor_manager.set_inference_batch_size.remote(inference_batch_size))
+        ray.get(
+            actor_manager.set_inference_batch_size.remote(inference_batch_size * args.num_samples_per_prompt_rollout)
+        )
 
     for batch_idx in range(vllm_num_engines):
         start_idx = batch_idx * inference_batch_size
@@ -2008,6 +2011,7 @@ def sync_weights_and_prepare_prompts(
         param_prompt_Q,
         generation_configs["train"],
         actor_manager=actor_manager,
+        args=args,
     )
 
     return batch
