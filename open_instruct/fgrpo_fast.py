@@ -1303,16 +1303,17 @@ def data_preparation_thread(
                         token_advantage[token_idx] /= token_advantage_count[token_idx]
                     
                 advantages.append(token_advantage)
-            advantages = np.array(advantages)
+            # Note: advantages is a list of variable-length arrays, not converted to numpy array
 
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
-            # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
-            # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
-            non_zero_std_mask = (advantages != 0).any(axis=-1)
-            real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(advantages)
-            expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
-            non_zero_gradient_index = np.where(expanded_mask)[0]
-            advantages = advantages[non_zero_gradient_index]
+            # For finegrained rewards, we simply filter out responses where all advantages are zero
+            # This is different from GRPO where we check std=0 across prompt groups
+            # Here we just need to remove rollouts with all-zero advantages
+            non_zero_advantage_mask = np.array([(adv != 0).any() for adv in advantages])
+            non_zero_gradient_index = np.where(non_zero_advantage_mask)[0]
+            
+            real_batch_size_ratio = len(non_zero_gradient_index) / len(advantages)
+            advantages = [advantages[i] for i in non_zero_gradient_index]
             responses = [responses[i] for i in non_zero_gradient_index]
             masks = [masks[i] for i in non_zero_gradient_index]
             queries = [queries[i] for i in non_zero_gradient_index]
@@ -1322,7 +1323,7 @@ def data_preparation_thread(
             if args.mask_truncated_completions:
                 stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
                 scores = scores[stop_idxes]
-                advantages = advantages[stop_idxes]
+                advantages = [advantages[i] for i in stop_idxes]
                 responses = [responses[i] for i in stop_idxes]
                 masks = [masks[i] for i in stop_idxes]
                 queries = [queries[i] for i in stop_idxes]
@@ -1339,14 +1340,21 @@ def data_preparation_thread(
                 pad_token_id=tokenizer.pad_token_id,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
-            # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
-            # and each value is the corresponding advantage score: index 0 is set to 0 since response masks start from 1 (1-indexed)
-            lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
-            lookup_advantages[1:] = advantages
-            packed_advantages = [
-                torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
-                for packed_mask in packed_sequences.response_masks
-            ]
+            # For finegrained rewards, we need to map per-token advantages to packed sequences
+            # Each response has variable-length per-token advantages
+            packed_advantages = []
+            for packed_mask in packed_sequences.response_masks:
+                packed_adv = np.zeros(len(packed_mask), dtype=np.float32)
+                for token_idx, response_id in enumerate(packed_mask):
+                    if response_id > 0:  # response_id is 1-indexed, 0 means query token
+                        response_idx = response_id - 1  # convert to 0-indexed
+                        if response_idx < len(advantages):
+                            # Find the position within the response tokens
+                            # Count how many response tokens we've seen for this response_id
+                            response_token_pos = sum(1 for prev_id in packed_mask[:token_idx] if prev_id == response_id)
+                            if response_token_pos < len(advantages[response_idx]):
+                                packed_adv[token_idx] = advantages[response_idx][response_token_pos]
+                packed_advantages.append(torch.tensor(packed_adv, dtype=torch.float32))
             packed_sequences.advantages = packed_advantages
 
         # if we have less batches than world size, we need to pad out so each world is fine
@@ -1438,10 +1446,10 @@ def data_preparation_thread(
                 "val/sequence_lengths_min": sequence_lengths.min(),
                 "val/sequence_lengths_max": sequence_lengths.max(),
                 "val/stop_rate": stop_rate,
-                "val/advantages_mean": advantages.mean(),
-                "val/advantages_min": advantages.min(),
-                "val/advantages_max": advantages.max(),
-                "val/advantages_hist": advantages,
+                "val/advantages_mean": np.concatenate(advantages).mean() if len(advantages) > 0 else 0.0,
+                "val/advantages_min": np.concatenate(advantages).min() if len(advantages) > 0 else 0.0,
+                "val/advantages_max": np.concatenate(advantages).max() if len(advantages) > 0 else 0.0,
+                "val/advantages_hist": np.concatenate(advantages) if len(advantages) > 0 else np.array([]),
                 **reward_metrics,
             }
         else:
@@ -1450,7 +1458,7 @@ def data_preparation_thread(
 
         if args.save_traces:
             traces = {
-                "advantages": advantages.tolist(),
+                "advantages": [adv.tolist() for adv in advantages],
                 "finish_reasons": finish_reasons,
                 "responses": responses,
                 "queries": queries,
