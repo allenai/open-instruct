@@ -669,7 +669,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
                 optimization_steps_done = states["training_step"]
 
-                
                 rng_states = states["rng_states"]
                 torch.set_rng_state(rng_states["torch_cpu_rng_state"])
                 np.random.set_state(rng_states["numpy_rng_state"])
