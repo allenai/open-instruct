@@ -80,6 +80,13 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
+# cluster/weka mount logic: default true (to use non-augusta)
+# if model starts with gs://, set evaluate_on_weka to false.
+# All the logic is now handled internally, the flag is useless but keeping for backwards compatibility since people have scripts with it
+EVALUATE_ON_WEKA="true"
+if [[ "$MODEL_LOCATION" == gs://* ]]; then
+    EVALUATE_ON_WEKA="false"
+fi
 
 # Optional: Default number of GPUs if not specified
 NUM_GPUS="${NUM_GPUS:-1}"
@@ -315,7 +322,7 @@ for TASK in "${TASKS[@]}"; do
     # NOTE: For gantry args here and below, random numbers like #42 are added to the env variables because they need to be unique names. The numbers are ignored.
     # Build gantry args
     if [ "$EVALUATE_ON_WEKA" == "true" ]; then
-        GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"weka\": \"oe-adapt-default:/weka/oe-adapt-default\", \"weka#44\": \"oe-training-default:/weka/oe-training-default\", \"env#132\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#42\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\"${MAX_TOKENS_ARG}}"
+        GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"weka\": \"oe-adapt-default:/weka/oe-adapt-default\", \"weka#44\": \"oe-training-default:/weka/oe-training-default\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"env#132\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#42\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\"${MAX_TOKENS_ARG}}"
     else
         GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env-secret#43\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"${MAX_TOKENS_ARG}}"
     fi

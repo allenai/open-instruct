@@ -1,7 +1,7 @@
 """
 can launch local server with:
 ```
-uv run nohup uvicorn open_instruct.code.api:app --host 0.0.0.0 --port 1234 &
+uv run nohup uvicorn open_instruct.code_utils.api:app --host 0.0.0.0 --port 1234 &
 ```
 
 or launch the server in a docker container:
@@ -22,19 +22,18 @@ curl -X POST http://localhost:1234/test_program -H "Content-Type: application/js
 curl -X POST http://localhost:1234/test_program_stdio -H "Content-Type: application/json" -d '{"program": "import sys\nfor line in sys.stdin.read().splitlines():\n    print(int(line.strip()) + 1)", "tests": [{"input": "1\n", "output": "2\n"}, {"input": "100\n", "output": "101\n"}], "max_execution_time": 1.0}'
 """
 
-import logging
 import traceback
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from open_instruct.code.code_utils import decode_tests, get_successful_tests_fast, get_successful_tests_stdio
+from open_instruct import logger_utils
+from open_instruct.code_utils.code_utils import decode_tests, get_successful_tests_fast, get_successful_tests_stdio
 
 app = FastAPI()
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
 class TestRequest(BaseModel):

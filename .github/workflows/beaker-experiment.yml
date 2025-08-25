@@ -1,21 +1,6 @@
 name: Beaker Experiment Launch
 
 on:
-  push:
-    # Run this workflow anytime a push updates one of the files in the image's directory
-    # (other than the README), and anytime there's a new release tag for this image.
-    paths:
-      - 'mason.py'
-      - 'open_instruct/**'
-      - '!open_instruct/README.md'
-      - 'requirements.txt'
-      - 'Dockerfile'
-      - '.github/workflows/push-image.yml'
-      # Note, add .olmo dockerfile + requirements if adding auto build to those.
-
-    # But only on pushes to main.
-    branches: [main]
-
   merge_group:
 
   # Adding a comment to trigger a run.
@@ -39,7 +24,7 @@ env:
 jobs:
   launch-experiment:
     name: Launch Beaker Experiment
-    runs-on: ubuntu-latest
+    runs-on: 8-Core-XL-Runner-Ubuntu-Latest
     timeout-minutes: 35
 
     steps:
@@ -85,6 +70,38 @@ jobs:
         with:
           token: ${{ secrets.BEAKER_TOKEN }}
           workspace: ai2/tulu-thinker
+
+      - name: Install minimal CUDA toolkit for nvcc
+        run: |
+          # Install only the minimal CUDA toolkit needed for nvcc
+          sudo apt-get update
+          sudo apt-get install -y wget software-properties-common
+
+          # Add NVIDIA package repositories
+          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          rm cuda-keyring_1.1-1_all.deb
+
+          # Install only cuda-nvcc package (much smaller than full toolkit)
+          sudo apt-get update
+          sudo apt-get install -y cuda-nvcc-12-6
+
+          # Clean up apt cache to save disk space
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+
+          # Clean up apt cache to save disk space
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+
+          # Create symlink so nvcc is available
+          ln -s /usr/local/cuda-12.6/bin/nvcc /usr/bin/nvcc || true
+
+          echo "nvcc installed, checking version:"
+          nvcc --version || echo "nvcc not found"
+
+          echo "Disk space after CUDA install and cleanup:"
+          df -h
 
       - name: Install dependencies
         run: |

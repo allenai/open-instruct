@@ -16,7 +16,6 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 import copy
-import logging
 import os
 import queue
 from collections import defaultdict
@@ -40,11 +39,12 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
+from open_instruct import logger_utils
 from open_instruct.queue_types import GenerationResult, RequestInfo
 from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
 def _init_tool_tracking():
@@ -313,6 +313,7 @@ class LLMRayActor:
         actor_manager=None,
         **kwargs,
     ):
+        self.logger = logger_utils.setup_logger(__name__)
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
 
@@ -338,14 +339,13 @@ class LLMRayActor:
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
-            print(f"creating LLM with bundle_indices={bundle_indices}")
+            self.logger.info(f"creating LLM with bundle_indices={bundle_indices}")
 
         self.llm_engine = vllm.LLMEngine.from_engine_args(vllm.EngineArgs(*args, **kwargs))
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
-        self.logger = logging.getLogger(__name__)
         self.actor_manager = actor_manager
 
     def process_from_queue(self, timeout: float = 60.0):
@@ -359,7 +359,6 @@ class LLMRayActor:
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
             if ready_refs and ray.get(ready_refs[0]):
-                self.logger.info("[LLMRayActor] Actor manager signaled to stop. Exiting generation loop.")
                 return 0
 
             try:
@@ -413,9 +412,6 @@ class LLMRayActor:
             # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
             if self.llm_engine.has_unfinished_requests():
                 step_outputs = list(self.llm_engine.step())
-                if iteration % 100 == 1 and step_outputs:
-                    self.logger.info(f"[LLMRayActor] Got {len(step_outputs)} outputs from engine.step()")
-
                 for output in step_outputs:
                     if output.finished:
                         result = _handle_output(
@@ -423,7 +419,6 @@ class LLMRayActor:
                         )
                         if result is not None:
                             outputs.append(result)
-                            self.logger.info(f"[LLMRayActor] Added output {output.request_id} to results")
 
             # Check termination condition (matching ToolUseLLM exactly)
             pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
@@ -564,7 +559,9 @@ def get_cuda_arch_list() -> str:
     # Remove duplicates and sort
     cuda_capabilities = sorted(set(cuda_capabilities))
     cuda_arch_list = ";".join(cuda_capabilities)
-    print(f"Detected CUDA compute capabilities: {cuda_capabilities}, setting TORCH_CUDA_ARCH_LIST={cuda_arch_list}")
+    logger.info(
+        f"Detected CUDA compute capabilities: {cuda_capabilities}, setting TORCH_CUDA_ARCH_LIST={cuda_arch_list}"
+    )
     return cuda_arch_list
 
 
@@ -611,7 +608,7 @@ def create_vllm_engines(
         # 2 instances on the same GPUs.
         num_gpus = 0.5
 
-    print(f"num_gpus: {num_gpus}")
+    logger.info(f"num_gpus: {num_gpus}")
 
     if not use_hybrid_engine:
         # Create a big placement group to ensure that all engines are packed
@@ -748,4 +745,4 @@ if __name__ == "__main__":
     )
     ray.get(refs)
     output = ray.get(llm.generate.remote("San Franciso is a"))
-    print(f"output: {output}")
+    logger.info(f"output: {output}")

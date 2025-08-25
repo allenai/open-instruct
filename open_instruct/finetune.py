@@ -30,7 +30,6 @@ except Exception:
     pass
 # isort: on
 import json
-import logging
 import math
 import os
 import shutil
@@ -54,6 +53,7 @@ from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, DataCollatorForSeq2Seq, get_scheduler
 from transformers.training_args import _convert_str_dict
 
+from open_instruct import logger_utils
 from open_instruct.dataset_transformation import (
     INPUT_IDS_KEY,
     TOKENIZED_SFT_DATASET_KEYS,
@@ -464,9 +464,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         pprint([args, tc])
 
     # Make one log on every process with the configuration for debugging.
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
-    )
+    logger_utils.setup_logger()
     logger.info(accelerator.state, main_process_only=False)
     if accelerator.is_local_main_process:
         datasets.utils.logging.set_verbosity_warning()
