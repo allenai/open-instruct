@@ -273,23 +273,52 @@ class ModelDims:
             total += self.FLOP_PER_MAC * self.hidden_size * self.vocab_size
         return total
 
-    def decode_flops(self, prompt_lengths: Sequence[int], response_lengths: Sequence[int]) -> int:
-        """Decode/generation FLOPs. Embedding lookups are ignored by design."""
-        assert len(prompt_lengths) == len(response_lengths), f"{len(prompt_lengths)=} != {len(response_lengths)=}"
+    def decode_flops(
+        self, prompt_lengths: Sequence[int], response_lengths: Sequence[int], samples_per_prompt: int = 1
+    ) -> int:
+        """Decode/generation FLOPs.
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+
+        Embedding lookups are ignored by design.
+        """
+        assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+            f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+        )
+
         total = 0
-        for P, R in zip(prompt_lengths, response_lengths):
-            total += R * self.num_layers * self.mlp_flops(seq_len=1)
-            for t in range(R):
-                kv_len = P + t + 1  # prompt + generated so far + current
-                total += self.num_layers * self.attn_flops(query_len=1, kv_len=kv_len)
-            total += R * self.FLOP_PER_MAC * self.hidden_size * self.vocab_size
+        response_idx = 0
+        for P in prompt_lengths:
+            # Process all samples for this prompt
+            for _ in range(samples_per_prompt):
+                R = response_lengths[response_idx]
+                total += R * self.num_layers * self.mlp_flops(seq_len=1)
+                for t in range(R):
+                    kv_len = P + t + 1  # prompt + generated so far + current
+                    total += self.num_layers * self.attn_flops(query_len=1, kv_len=kv_len)
+                total += R * self.FLOP_PER_MAC * self.hidden_size * self.vocab_size
+                response_idx += 1
         return total
 
-    def flops(self, prompt_lengths: Sequence[int], response_lengths: Optional[Sequence[int]] = None) -> int:
-        """Total FLOPs for prefill and (optionally) decode."""
+    def flops(
+        self,
+        prompt_lengths: Sequence[int],
+        response_lengths: Optional[Sequence[int]] = None,
+        samples_per_prompt: int = 1,
+    ) -> int:
+        """Total FLOPs for prefill and (optionally) decode.
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+        """
         total = self.prefill_flops(prompt_lengths)
         if response_lengths is not None:
-            total += self.decode_flops(prompt_lengths, response_lengths)
+            total += self.decode_flops(prompt_lengths, response_lengths, samples_per_prompt)
         return total
 
 
@@ -432,7 +461,12 @@ def submission_thread(
         dataset_indices = list(range(start_idx, end_idx))
 
         param_prompt_Q.put(
-            PromptRequest(prompts=prompts, dataset_index=dataset_indices, generation_config=generation_config)
+            PromptRequest(
+                prompts=prompts,
+                dataset_index=dataset_indices,
+                generation_config=generation_config,
+                start_time=time.perf_counter(),
+            )
         )
     logger.info(f"[Submission Thread] All {num_batches} batches submitted")
 
@@ -483,7 +517,10 @@ def run_benchmark(
     warmup_dataset_indices = list(range(warmup_start_idx, warmup_end_idx))
     param_prompt_Q.put(
         PromptRequest(
-            prompts=warmup_prompts, dataset_index=warmup_dataset_indices, generation_config=generation_config
+            prompts=warmup_prompts,
+            dataset_index=warmup_dataset_indices,
+            generation_config=generation_config,
+            start_time=time.perf_counter(),
         )
     )
     model_dims = load_model_dims(model_config.model_name_or_path)
@@ -504,17 +541,15 @@ def run_benchmark(
             1,
             num_batches - 1,
         )
-        last_completion_time = time.time()
-
         # Process remaining batches with timing
         for batch_idx in range(1, num_batches):
             # Quick health check!
             [future.result() for future in [submission_future, generation_future] if future.done()]
             result = inference_results_Q.get()
 
-            completion_time = time.time()
-            batch_generation_time = completion_time - last_completion_time
-            last_completion_time = completion_time
+            completion_time = time.perf_counter()
+            # Calculate generation time from when the request was enqueued
+            batch_generation_time = completion_time - result.start_time if result.start_time else 0
 
             new_tokens = sum(len(response) for response in result.responses)
             tokens_per_second = new_tokens / batch_generation_time if batch_generation_time > 0 else 0
@@ -533,15 +568,11 @@ def run_benchmark(
             prompt_lengths = [len(prompt) for prompt in prompts]
             response_lengths = [len(response) for response in result.responses]
 
-            # Expand prompt lengths to match responses (n samples per prompt)
-            # vLLM returns responses grouped by prompt: [prompt0_samples, prompt1_samples, ...]
-            expanded_prompt_lengths = []
-            for prompt_length in prompt_lengths:
-                expanded_prompt_lengths.extend([prompt_length] * args.num_samples_per_prompt_rollout)
-            prompt_lengths = expanded_prompt_lengths
-
             # Calculate total FLOPs for all prompts and responses in the batch
-            model_flops = model_dims.flops(prompt_lengths, response_lengths)
+            # No need to expand prompt_lengths - the flops method now handles samples_per_prompt
+            model_flops = model_dims.flops(
+                prompt_lengths, response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
+            )
 
             # MFU = (FLOPs / time) / peak_FLOPS * 100
             model_flops_per_second = model_flops / batch_generation_time if batch_generation_time > 0 else 0
