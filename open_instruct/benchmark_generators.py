@@ -523,9 +523,16 @@ def run_benchmark(
                 "response_lengths": [len(response) for response in result.responses],
                 "batch_idx": result.dataset_index,
             }
-            prompt_length = len(all_prompts[batch_idx][result.dataset_index])
-            model_flops = model_dims.flops([prompt_length], [new_tokens])
-            result_dict["mfu"] = 100 * model_flops / device_flops
+            # Get prompt lengths for all prompts in this batch
+            prompt_lengths = [len(prompt) for prompt in all_prompts[batch_idx]]
+            response_lengths = [len(response) for response in result.responses]
+
+            # Calculate total FLOPs for all prompts and responses in the batch
+            model_flops = model_dims.flops(prompt_lengths, response_lengths)
+
+            # MFU = (FLOPs / time) / peak_FLOPS * 100
+            model_flops_per_second = model_flops / batch_generation_time if batch_generation_time > 0 else 0
+            result_dict["mfu"] = 100 * model_flops_per_second / device_flops
 
             save_completion_lengths([result_dict], timestamp, result.dataset_index)
             results.append(result_dict)
