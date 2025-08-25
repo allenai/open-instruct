@@ -25,6 +25,7 @@ gantry run \
        --beaker-image nathanl/open_instruct_auto \
        --cluster ai2/prior-elanding \
        --budget ai2/oe-adapt \
+       --env VLLM_ATTENTION_BACKEND=FLASHINFER \
        --install 'uv sync' \
        -- uv run python -m open_instruct.benchmark_generators \
     --model_name_or_path "$model_name_or_path" \
@@ -36,7 +37,7 @@ gantry run \
     --temperature 1.0 \
     --response_length "$response_length" \
     --vllm_top_p 0.9 \
-    --num_unique_prompts_rollout 32 \
+    --num_unique_prompts_rollout 4 \
     --num_samples_per_prompt_rollout 16 \
     --vllm_num_engines 1 \
     --vllm_tensor_parallel_size 1 \
