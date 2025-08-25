@@ -278,15 +278,10 @@ class ModelDims:
         assert len(prompt_lengths) == len(response_lengths), f"{len(prompt_lengths)=} != {len(response_lengths)=}"
         total = 0
         for P, R in zip(prompt_lengths, response_lengths):
-            # MLP per generated token across all layers
             total += R * self.num_layers * self.mlp_flops(seq_len=1)
-
-            # Attention per token; kv_len grows with context
             for t in range(R):
                 kv_len = P + t + 1  # prompt + generated so far + current
                 total += self.num_layers * self.attn_flops(query_len=1, kv_len=kv_len)
-
-            # LM head once per generated token (not per layer)
             total += R * self.FLOP_PER_MAC * self.hidden_size * self.vocab_size
         return total
 
@@ -537,6 +532,13 @@ def run_benchmark(
             prompts = prompt_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
             prompt_lengths = [len(prompt) for prompt in prompts]
             response_lengths = [len(response) for response in result.responses]
+
+            # Expand prompt lengths to match responses (n samples per prompt)
+            # vLLM returns responses grouped by prompt: [prompt0_samples, prompt1_samples, ...]
+            expanded_prompt_lengths = []
+            for prompt_length in prompt_lengths:
+                expanded_prompt_lengths.extend([prompt_length] * args.num_samples_per_prompt_rollout)
+            prompt_lengths = expanded_prompt_lengths
 
             # Calculate total FLOPs for all prompts and responses in the batch
             model_flops = model_dims.flops(prompt_lengths, response_lengths)
