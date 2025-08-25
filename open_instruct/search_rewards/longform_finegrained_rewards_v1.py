@@ -75,7 +75,7 @@ def compute_longform_finegrained_reward(response: str, ground_truth: Dict[str, A
     result["format_reward"] = format_reward
     
     # score num search turns
-    num_search_turns, num_search_turns_reward = score_num_in_context_search_turns(extracted_context)
+    num_search_turns_reward, num_search_turns = score_num_in_context_search_turns(extracted_context)
     result["num_search_turns_reward"] = num_search_turns_reward
     
     # Initialize rewards for span calculation

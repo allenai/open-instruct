@@ -119,7 +119,7 @@ def score_in_context_citations(question: str, response: str, citations: Dict[str
     if len(claims) > 0:
         avg_f1 /= len(claims)
 
-    return 0.9 * avg_f1 + 0.1 * citation_format_reward
+    return 0.6 * avg_f1 + 0.4 * citation_format_reward
 
 
 def score_citation_format(claims: Dict[str, List[str]], citations: Dict[str, str]) -> Dict[str, float]:
@@ -404,7 +404,7 @@ async def score_in_context_citations_async(
     # Calculate average F1 score
     avg_f1 = sum(f1_scores) / len(f1_scores) if f1_scores else 0
 
-    return 0.9 * avg_f1 + 0.1 * citation_format_reward
+    return 0.6 * avg_f1 + 0.4 * citation_format_reward
 
 
 def score_in_context_citations_async_wrapper(
