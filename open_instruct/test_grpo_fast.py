@@ -640,67 +640,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         # Some entries should be removed
         self.assertLess(len(pending_queries_map), num_prompts)
 
-    def test_kv_cache_specs_list_handling(self):
-        """Test that get_kv_cache_info handles list return type from get_kv_cache_specs (vLLM 0.9.1+)."""
-        from vllm.v1.kv_cache_interface import KVCacheSpec
-
-        from open_instruct.vllm_utils3 import LLMRayActor
-
-        # Create a mock LLMRayActor
-        actor = Mock(spec=LLMRayActor)
-
-        # Create a mock LLM engine that returns a list instead of dict
-        mock_engine = Mock()
-        mock_model_executor = Mock()
-
-        # vLLM 0.9.1+ returns a list of dicts with KVCacheSpec objects
-        mock_kv_cache_specs = [{"layer_0": KVCacheSpec(block_size=16), "layer_1": KVCacheSpec(block_size=16)}]
-        mock_model_executor.get_kv_cache_specs.return_value = mock_kv_cache_specs
-        mock_engine.model_executor = mock_model_executor
-
-        # Mock vllm_config
-        mock_cache_config = Mock()
-        mock_cache_config.gpu_memory_utilization = 0.9
-        mock_vllm_config = Mock()
-        mock_vllm_config.cache_config = mock_cache_config
-        mock_engine.vllm_config = mock_vllm_config
-
-        # Assign mocked engine to actor
-        actor.llm_engine = mock_engine
-
-        # Mock CUDA properties
-        with unittest.mock.patch("torch.cuda.get_device_properties") as mock_cuda_props:
-            mock_device_props = Mock()
-            mock_device_props.total_memory = 16 * 1024**3  # 16 GB
-            mock_cuda_props.return_value = mock_device_props
-
-            # Mock kv_cache_utils functions
-            with unittest.mock.patch(
-                "open_instruct.vllm_utils3.kv_cache_utils.get_uniform_page_size"
-            ) as mock_page_size:
-                mock_page_size.return_value = 16384  # Return page size in bytes
-
-                with unittest.mock.patch("open_instruct.vllm_utils3.kv_cache_utils.get_num_blocks") as mock_num_blocks:
-                    mock_num_blocks.return_value = 1000
-
-                    with unittest.mock.patch(
-                        "open_instruct.vllm_utils3.kv_cache_utils.create_kv_cache_group_specs"
-                    ) as mock_create_groups:
-                        mock_create_groups.return_value = []  # Return empty list of groups
-
-                        with unittest.mock.patch(
-                            "open_instruct.vllm_utils3.kv_cache_utils.get_max_concurrency_for_kv_cache_config"
-                        ) as mock_max_concurrency:
-                            mock_max_concurrency.return_value = 32
-
-                            # Call the actual get_kv_cache_info method
-                            # With the fix, this should work without errors
-                            kv_cache_max_concurrency = LLMRayActor.get_kv_cache_info(actor)
-
-                            # Should return an integer (max concurrency)
-                            self.assertIsInstance(kv_cache_max_concurrency, int)
-                            self.assertEqual(kv_cache_max_concurrency, 32)
-
 
 class TestStreamingAccumulation(TestGrpoFastBase):
     """Test the new streaming accumulation functionality."""

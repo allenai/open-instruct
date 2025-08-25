@@ -108,7 +108,7 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo
+from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.rl_utils2 import Timer, pack_sequences
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -1300,9 +1300,8 @@ def accumulate_inference_batches(
     combined_tool_runtimes = []
     combined_tool_calleds = []
 
-    # Token statistics
     total_prompt_tokens = 0
-    total_generation_tokens = 0
+    total_response_tokens = 0
     max_generation_time = 0
 
     for result in results:
@@ -1316,13 +1315,9 @@ def accumulate_inference_batches(
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
 
-        # Accumulate token statistics
-        if result.prompt_tokens is not None:
-            total_prompt_tokens += result.prompt_tokens
-        if result.generation_tokens is not None:
-            total_generation_tokens += result.generation_tokens
-        if result.generation_time is not None:
-            max_generation_time = max(max_generation_time, result.generation_time)
+        total_prompt_tokens += result.prompt_tokens
+        total_response_tokens += result.generation_tokens
+        max_generation_time = max(max_generation_time, result.generation_time)
 
     # Create combined RequestInfo
     combined_request_info = RequestInfo(
@@ -1341,18 +1336,17 @@ def accumulate_inference_batches(
         masks=combined_masks,
         request_info=combined_request_info,
         dataset_index=None,  # Not meaningful for combined result
-        prompt_tokens=total_prompt_tokens if total_prompt_tokens > 0 else None,
-        generation_tokens=total_generation_tokens if total_generation_tokens > 0 else None,
-        generation_time=max_generation_time if max_generation_time > 0 else None,
+        prompt_tokens=total_prompt_tokens,
+        generation_tokens=total_response_tokens,
+        generation_time=max_generation_time,
     )
 
-    # Report token statistics to ActorManager if available
-    if actor_manager is not None and total_prompt_tokens > 0 and total_generation_tokens > 0:
-        ray.get(actor_manager.report_token_stats.remote(total_prompt_tokens, total_generation_tokens))
-
-    # Report batch generation time to ActorManager if available
-    if actor_manager is not None and max_generation_time > 0:
-        ray.get(actor_manager.report_batch_generation_time.remote(max_generation_time))
+    token_stats = TokenStatistics(
+        num_prompt_tokens=total_prompt_tokens,
+        num_response_tokens=total_response_tokens,
+        generation_time=max_generation_time,
+    )
+    ray.get(actor_manager.report_token_statistics.remote(token_stats))
 
     # Note: We don't have dataset_indices here, but they're not needed for the returned batch
     batch = Batch(
@@ -1839,7 +1833,6 @@ def create_model_and_optimizer(
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 
-    # Pass queues to ActorManager for monitoring
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
         "Param Prompt Queue": param_prompt_Q,
@@ -1875,13 +1868,8 @@ def create_model_and_optimizer(
 
     # Get and set KV cache max concurrency from the first engine (all engines have the same config)
     if vllm_engines:
-        logger.info("======== Fetching KV Cache Info from vLLM Engine ========")
         kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
-        logger.info(f"KV Cache max concurrency returned by custom calculation: {kv_cache_max_concurrency}")
-        logger.info("Note: vLLM's internal calculation showed 182.41x for 1,024 tokens")
-        logger.info("The difference suggests vLLM may be using different assumptions or calculation methods")
-        logger.info("=========================================================")
 
     ray_get_with_progress(
         [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
@@ -1939,8 +1927,7 @@ def split_and_insert_batch(
 
     inference_batch_size = max(1, math.ceil(len(batch.queries) / vllm_num_engines))
 
-    # Report inference batch size to ActorManager
-    if actor_manager and not is_eval:
+    if not is_eval:
         ray.get(
             actor_manager.set_inference_batch_size.remote(inference_batch_size * args.num_samples_per_prompt_rollout)
         )
@@ -2141,9 +2128,7 @@ def one_training_step(
         with Timer("[Main Thread] 🔃 Updating reference policy"):
             ray_get_with_progress(update_ref_policy_future, desc="Updating reference policy")
 
-    # Report training step time to ActorManager
-    if actor_manager is not None:
-        ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
+    ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
 
     average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
     total_time = time.perf_counter() - start_time

@@ -18,6 +18,7 @@
 import copy
 import os
 import queue
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -395,8 +396,6 @@ class LLMRayActor:
 
     def _process_request(self, request):
         """Unified processing for both tool and non-tool generation."""
-        import time
-
         prompts = request.prompts
         sampling_params = request.generation_config
 
@@ -443,13 +442,11 @@ class LLMRayActor:
                 self.logger.info(f"[LLMRayActor] Terminating after {iteration} iterations with {len(outputs)} outputs")
                 break
 
-        # Calculate token statistics
         end_time = time.time()
         total_prompt_tokens = 0
         total_generation_tokens = 0
         earliest_start_time = float("inf")
 
-        # Collect stats from all processed requests
         for output in outputs:
             request_id = output.request_id
             if request_id in self.request_metadata:
@@ -457,13 +454,11 @@ class LLMRayActor:
                 total_prompt_tokens += metadata["prompt_tokens"]
                 earliest_start_time = min(earliest_start_time, metadata["start_time"])
 
-                # Calculate generation tokens from output
                 for completion in output.outputs:
                     total_generation_tokens += len(completion.token_ids)
 
         generation_time = end_time - earliest_start_time if earliest_start_time != float("inf") else 0
 
-        # Clean up metadata for processed requests
         for output in outputs:
             self.request_metadata.pop(output.request_id, None)
 
@@ -600,13 +595,11 @@ class LLMRayActor:
 
     def get_kv_cache_info(self):
         """Get KV cache max concurrency from the vLLM engine."""
-        # Calculate maximum theoretical concurrency
         kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
         kv_cache_spec = kv_cache_specs[0]
         grouped_layer_names = [list(kv_cache_spec.keys())]
         page_size = kv_cache_utils.get_uniform_page_size(kv_cache_spec)
 
-        # Get vllm_config from the engine and estimate available memory
         vllm_config = self.llm_engine.vllm_config
         gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
         total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
@@ -628,19 +621,6 @@ class LLMRayActor:
         max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(
             self.llm_engine.vllm_config, kv_cache_config
         )
-
-        # Log detailed information about the calculation
-        logger.info("======== KV Cache Concurrency Calculation Details ========")
-        logger.info(f"GPU memory utilization: {gpu_memory_utilization}")
-        logger.info(f"Total GPU memory: {total_gpu_memory / (1024**3):.2f} GiB")
-        logger.info(f"Available memory for KV cache: {available_memory / (1024**3):.2f} GiB")
-        logger.info(f"Page size: {page_size}")
-        logger.info(f"Number of blocks: {num_blocks}")
-        logger.info(f"Per layer size: {per_layer_size}")
-        logger.info(f"Number of KV cache layers: {len(kv_cache_spec)}")
-        logger.info(f"Max model length: {vllm_config.model_config.max_model_len}")
-        logger.info(f"Calculated max concurrency: {max_concurrency}")
-        logger.info("========================================================")
 
         return int(max_concurrency)
 
