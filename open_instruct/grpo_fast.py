@@ -669,21 +669,21 @@ class PolicyTrainerRayProcess(RayProcess):
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
                 optimization_steps_done = states["training_step"]
 
-                if "rng_states" in states:
-                    rng_states = states["rng_states"]
-                    torch.set_rng_state(rng_states["torch_cpu_rng_state"])
-                    np.random.set_state(rng_states["numpy_rng_state"])
-                    random.setstate(rng_states["python_rng_state"])
+                
+                rng_states = states["rng_states"]
+                torch.set_rng_state(rng_states["torch_cpu_rng_state"])
+                np.random.set_state(rng_states["numpy_rng_state"])
+                random.setstate(rng_states["python_rng_state"])
 
-                    if torch.cuda.is_available() and "torch_cuda_rng_states" in rng_states:
-                        # device_str, e.g. "cuda:0"
-                        for device_str, rng_state in rng_states["torch_cuda_rng_states"].items():
-                            device_id = int(device_str.split(":")[1])
-                            torch.cuda.set_rng_state(rng_state, device_id)
-                        if "torch_cuda_rng_state_all" in rng_states:
-                            torch.cuda.set_rng_state_all(rng_states["torch_cuda_rng_state_all"])
+                if torch.cuda.is_available() and "torch_cuda_rng_states" in rng_states:
+                    # device_str, e.g. "cuda:0"
+                    for device_str, rng_state in rng_states["torch_cuda_rng_states"].items():
+                        device_id = int(device_str.split(":")[1])
+                        torch.cuda.set_rng_state(rng_state, device_id)
+                    if "torch_cuda_rng_state_all" in rng_states:
+                        torch.cuda.set_rng_state_all(rng_states["torch_cuda_rng_state_all"])
 
-                    logger.info(f"{self.rank=}: Restored RNG states from checkpoint")
+                logger.info(f"{self.rank=}: Restored RNG states from checkpoint")
 
                 # Save reference policy path to load later (after ref_policy is initialized)
                 self.ref_policy_checkpoint_path = None
