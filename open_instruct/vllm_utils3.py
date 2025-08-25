@@ -103,11 +103,7 @@ def _process_outputs(
     outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format."""
-    logger.info(f"_process_outputs: Processing {len(outputs)} RequestOutput objects")
-    for i, output in enumerate(outputs):
-        logger.info(f"  Output {i}: {len(output.outputs)} samples")
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
-    logger.info(f"_process_outputs: Total responses flattened: {len(response_ids)}")
     finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
 
     masks = [[1] * len(resp) for resp in response_ids]
@@ -387,21 +383,7 @@ class LLMRayActor:
         prompts = request.prompts
         sampling_params = request.generation_config
 
-        # Check that output_kind is FINAL_ONLY when n > 1
-        if sampling_params.n > 1 and (
-            not hasattr(sampling_params, "output_kind")
-            or sampling_params.output_kind != vllm.sampling_params.RequestOutputKind.FINAL_ONLY
-        ):
-            raise ValueError(
-                f"When SamplingParams.n > 1 (n={sampling_params.n}), "
-                f"output_kind must be set to RequestOutputKind.FINAL_ONLY. "
-                f"Current output_kind: {getattr(sampling_params, 'output_kind', 'not set')}"
-            )
-
         self.logger.info(f"[LLMRayActor] Processing request with {len(prompts)} prompts, tools={bool(self.tools)}")
-        self.logger.info(
-            f"[LLMRayActor] Sampling params n={sampling_params.n}, max_tokens={sampling_params.max_tokens}"
-        )
 
         if self.tools:
             # Need n=1 for individual tool tracking
@@ -444,19 +426,11 @@ class LLMRayActor:
                 self.logger.info(f"[LLMRayActor] Terminating after {iteration} iterations with {len(outputs)} outputs")
                 break
 
-        self.logger.info(f"[LLMRayActor] Before finalize: {len(outputs)} outputs")
-        for i, out in enumerate(outputs[:3]):  # Log first 3 outputs
-            self.logger.info(f"  Output {i}: request_id={out.request_id}, num_samples={len(out.outputs)}")
-
         result = _finalize_outputs(outputs, tracking, request.dataset_index, self.tools)
-        self.logger.info(f"[LLMRayActor] After finalize: {len(result.responses)} total responses")
         return result
 
     def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step):
         """Add initial requests to the engine."""
-        self.logger.info(
-            f"[_add_initial_requests] Adding {len(prompts)} prompts, n_samples={n_samples}, sampling_params.n={sampling_params.n}"
-        )
         for i, prompt in enumerate(prompts):
             if self.tools:
                 # Create individual requests for each sample when using tools
