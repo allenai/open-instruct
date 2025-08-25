@@ -19,6 +19,7 @@ import copy
 import os
 import queue
 import threading
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
@@ -287,11 +288,42 @@ def init_process_group(
 class ActorManager:
     """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
 
-    def __init__(self):
+    def __init__(self, queues=None):
         self._should_stop = False
         self._last_updated = datetime.now()
         self._dashboard_port = int(os.environ.get("DASHBOARD_PORT", 8080))
+        self._queues = queues or {}
+        self._queue_sizes = {}
+        self._queue_info = {}
+        self._setup_queue_monitoring()
         self._start_dashboard()
+
+    def _setup_queue_monitoring(self):
+        """Setup queue monitoring with background polling thread."""
+        # Initialize queue info
+        for queue_name, q in self._queues.items():
+            self._queue_info[queue_name] = {"maxsize": q.maxsize if hasattr(q, "maxsize") else 0, "queue": q}
+            self._queue_sizes[queue_name] = 0
+
+        # Start background polling thread
+        if self._queues:
+            self._polling_active = True
+            self._poll_thread = threading.Thread(target=self._poll_queue_sizes, daemon=True)
+            self._poll_thread.start()
+
+    def _poll_queue_sizes(self):
+        """Background thread to poll queue sizes."""
+        while self._polling_active:
+            for queue_name, info in self._queue_info.items():
+                try:
+                    # Get current size from the queue
+                    current_size = info["queue"].size()
+                    self._queue_sizes[queue_name] = current_size
+                except Exception:
+                    # If we can't get the size, keep the last known value
+                    pass
+            # Small sleep to avoid excessive polling
+            time.sleep(0.5)
 
     def _start_dashboard(self):
         """Start the FastAPI dashboard server in a background thread."""
@@ -382,6 +414,69 @@ class ActorManager:
                         50% { opacity: 0.3; }
                         100% { opacity: 1; }
                     }
+                    .queue-section {
+                        margin-top: 30px;
+                    }
+                    .queue-card {
+                        background: #f8f9fa;
+                        border-radius: 6px;
+                        padding: 15px;
+                        margin: 15px 0;
+                    }
+                    .queue-name {
+                        font-size: 16px;
+                        font-weight: 600;
+                        color: #444;
+                        margin-bottom: 10px;
+                    }
+                    .queue-stats {
+                        font-size: 14px;
+                        color: #666;
+                        margin-bottom: 8px;
+                    }
+                    .progress-bar-container {
+                        width: 100%;
+                        height: 30px;
+                        background: #e9ecef;
+                        border-radius: 4px;
+                        overflow: hidden;
+                        position: relative;
+                    }
+                    .progress-bar {
+                        height: 100%;
+                        background: linear-gradient(90deg, #28a745, #20c997);
+                        transition: width 0.3s ease;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        color: white;
+                        font-weight: 600;
+                        font-size: 14px;
+                    }
+                    .progress-bar.warning {
+                        background: linear-gradient(90deg, #ffc107, #fd7e14);
+                    }
+                    .progress-bar.danger {
+                        background: linear-gradient(90deg, #dc3545, #c82333);
+                    }
+                    .progress-text {
+                        position: absolute;
+                        width: 100%;
+                        text-align: center;
+                        line-height: 30px;
+                        color: #333;
+                        font-weight: 600;
+                        font-size: 14px;
+                        z-index: 1;
+                    }
+                    h2 {
+                        color: #444;
+                        margin-top: 30px;
+                        margin-bottom: 20px;
+                        font-size: 20px;
+                        border-bottom: 2px solid #e9ecef;
+                        padding-bottom: 10px;
+                    }
                 </style>
             </head>
             <body>
@@ -391,6 +486,12 @@ class ActorManager:
                     <div id="status-container">
                         <div class="status-card">
                             <div class="status-label">Loading...</div>
+                        </div>
+                    </div>
+                    <h2>📊 Queue Status</h2>
+                    <div id="queue-container">
+                        <div class="queue-card">
+                            <div class="queue-name">Loading queues...</div>
                         </div>
                     </div>
                 </div>
@@ -409,6 +510,48 @@ class ActorManager:
                                 <div class="timestamp">Last updated: ${data.last_updated}</div>
                             </div>
                         `;
+
+                        // Update queue visualizations
+                        if (data.queues) {
+                            let queueHtml = '';
+                            for (const [queueName, queueInfo] of Object.entries(data.queues)) {
+                                const percentage = queueInfo.maxsize > 0
+                                    ? Math.round((queueInfo.current / queueInfo.maxsize) * 100)
+                                    : 0;
+
+                                let barClass = '';
+                                if (percentage >= 90) {
+                                    barClass = 'danger';
+                                } else if (percentage >= 70) {
+                                    barClass = 'warning';
+                                }
+
+                                queueHtml += `
+                                    <div class="queue-card">
+                                        <div class="queue-name">${queueName}</div>
+                                        <div class="queue-stats">
+                                            Current: ${queueInfo.current} / Max: ${queueInfo.maxsize}
+                                            (${percentage}% full)
+                                        </div>
+                                        <div class="progress-bar-container">
+                                            <div class="progress-text">${queueInfo.current} / ${queueInfo.maxsize}</div>
+                                            <div class="progress-bar ${barClass}" style="width: ${percentage}%;">
+                                            </div>
+                                        </div>
+                                    </div>
+                                `;
+                            }
+
+                            if (queueHtml === '') {
+                                queueHtml = `
+                                    <div class="queue-card">
+                                        <div class="queue-name">No queues configured</div>
+                                    </div>
+                                `;
+                            }
+
+                            document.getElementById('queue-container').innerHTML = queueHtml;
+                        }
                     }
 
                     // Update immediately and then every second
@@ -423,7 +566,16 @@ class ActorManager:
         @app.get("/api/status")
         async def api_status():
             """Return the current status as JSON."""
-            return {"should_stop": self._should_stop, "last_updated": self._last_updated.isoformat()}
+            # Prepare queue information
+            queues_data = {}
+            for queue_name, info in self._queue_info.items():
+                queues_data[queue_name] = {"current": self._queue_sizes.get(queue_name, 0), "maxsize": info["maxsize"]}
+
+            return {
+                "should_stop": self._should_stop,
+                "last_updated": self._last_updated.isoformat(),
+                "queues": queues_data,
+            }
 
         # Store app reference for potential cleanup
         self._app = app

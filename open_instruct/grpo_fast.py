@@ -1812,7 +1812,13 @@ def create_model_and_optimizer(
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 
-    actor_manager = vllm_utils3.ActorManager.remote()
+    # Pass queues to ActorManager for monitoring
+    queues_to_monitor = {
+        "Inference Results Queue": inference_results_Q,
+        "Param Prompt Queue": param_prompt_Q,
+        "Evaluation Queue": evaluation_inference_results_Q,
+    }
+    actor_manager = vllm_utils3.ActorManager.remote(queues=queues_to_monitor)
 
     # Create vLLM engines with queues
     vllm_engines = vllm_utils3.create_vllm_engines(
