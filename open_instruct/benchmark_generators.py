@@ -141,9 +141,9 @@ def save_benchmark_results_to_csv(
         "total_time": total_time,
         "total_generation_time": agg_results["total_generation_time"],
         "generation_time_percentage": (agg_results["total_generation_time"] / total_time) * 100,
-        "total_tokens": avg_results["total_num_new_tokens"],
+        "total_tokens": agg_results["total_num_new_tokens"],
         "avg_tokens_per_second": agg_results["avg_tokens_per_second"],
-        "avg_mfu": avg_results["avg_mfu"],
+        "avg_mfu": agg_results["avg_mfu"],
         "avg_generation_time_per_batch": agg_results["avg_generation_time"],
         "avg_new_tokens_per_sample": agg_results["total_num_new_tokens"]
         / (len(results) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout),
