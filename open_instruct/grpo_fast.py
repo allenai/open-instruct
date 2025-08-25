@@ -1412,9 +1412,8 @@ def accumulate_inference_batches(
     combined_tool_runtimes = []
     combined_tool_calleds = []
 
-    total_prompt_tokens = 0
-    total_response_tokens = 0
-    max_generation_time = 0
+    # Initialize accumulated token statistics
+    accumulated_stats = TokenStatistics(num_prompt_tokens=0, num_response_tokens=0, generation_time=0)
 
     for result in results:
         combined_responses.extend(result.responses)
@@ -1427,9 +1426,12 @@ def accumulate_inference_batches(
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
 
-        total_prompt_tokens += result.prompt_tokens
-        total_response_tokens += result.generation_tokens
-        max_generation_time = max(max_generation_time, result.generation_time)
+        if result.token_statistics:
+            accumulated_stats.num_prompt_tokens += result.token_statistics.num_prompt_tokens
+            accumulated_stats.num_response_tokens += result.token_statistics.num_response_tokens
+            accumulated_stats.generation_time = max(
+                accumulated_stats.generation_time, result.token_statistics.generation_time
+            )
 
     # Create combined RequestInfo
     combined_request_info = RequestInfo(
@@ -1448,17 +1450,10 @@ def accumulate_inference_batches(
         masks=combined_masks,
         request_info=combined_request_info,
         dataset_index=None,  # Not meaningful for combined result
-        prompt_tokens=total_prompt_tokens,
-        generation_tokens=total_response_tokens,
-        generation_time=max_generation_time,
+        token_statistics=accumulated_stats,
     )
 
-    token_stats = TokenStatistics(
-        num_prompt_tokens=total_prompt_tokens,
-        num_response_tokens=total_response_tokens,
-        generation_time=max_generation_time,
-    )
-    ray.get(actor_manager.report_token_statistics.remote(token_stats))
+    ray.get(actor_manager.report_token_statistics.remote(accumulated_stats))
 
     # Note: We don't have dataset_indices here, but they're not needed for the returned batch
     batch = Batch(

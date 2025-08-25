@@ -435,7 +435,7 @@ class LLMRayActor:
                 for completion in output.outputs:
                     total_generation_tokens += len(completion.token_ids)
 
-        generation_time = end_time - earliest_start_time if earliest_start_time != float("inf") else 0
+        generation_time = end_time - earliest_start_time
 
         for output in outputs:
             self.request_metadata.pop(output.request_id, None)
