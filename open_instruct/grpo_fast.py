@@ -1838,7 +1838,7 @@ def create_model_and_optimizer(
         "Param Prompt Queue": param_prompt_Q,
         "Evaluation Queue": evaluation_inference_results_Q,
     }
-    actor_manager = ActorManager.remote(queues=queues_to_monitor)
+    actor_manager = ray.remote(ActorManager).remote(queues=queues_to_monitor)
 
     # Create vLLM engines with queues
     vllm_engines = vllm_utils3.create_vllm_engines(
@@ -1927,7 +1927,7 @@ def split_and_insert_batch(
 
     inference_batch_size = max(1, math.ceil(len(batch.queries) / vllm_num_engines))
 
-    if not is_eval:
+    if not is_eval and actor_manager is not None:
         ray.get(
             actor_manager.set_inference_batch_size.remote(inference_batch_size * args.num_samples_per_prompt_rollout)
         )

@@ -20,12 +20,9 @@ import threading
 import time
 from datetime import datetime
 
-import ray
-
 from open_instruct import logger_utils
 
 
-@ray.remote
 class ActorManager:
     """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
 
