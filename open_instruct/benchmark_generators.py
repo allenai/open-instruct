@@ -220,29 +220,146 @@ def free_all_gpu_memory(device: int | str = 0) -> None:
     logger.info(f"[GPU {dev.index}] {free / gib:.2f} GiB free of {total / gib:.2f} GiB after cleanup")
 
 
-def calculate_model_usage_per_token(model_path: str) -> int:
+def estimate_prefill_flops(prompt_lengths: np.ndarray, dims: FLOPsModelDims) -> int:
     """
-    Calculate actual FLOPs per token for a transformer model using torch FlopCounterMode.
-
-    Args:
-        model_path: Path to the actual model for precise measurement
-
-    Returns:
-        FLOPs per token as integer.
+    Sum over prompts P: N * [ (4 d^2 + 2 d d_ff) * P + 4 d * P^2 ]
     """
-    model = transformers.AutoModelForCausalLM.from_pretrained(
-        model_path, torch_dtype=torch.bfloat16, device_map="cuda", trust_remote_code=True
+    N, d, d_ff = dims.num_layers, dims.hidden_size, dims.intermediate_size
+    P = prompt_lengths.astype(np.int64)
+    static = _static_per_token_flops(d, d_ff)
+    total = N * (static * int(P.sum()) + 4 * d * int((P * P).sum()))
+    return int(total)
+
+
+def estimate_decode_flops(prompt_lengths: np.ndarray, resp_len_matrix: np.ndarray, dims: FLOPsModelDims) -> int:
+    """
+    R shape: (num_prompts, n_samples_per_prompt)
+    Total = N * [ static * T_total + 4 d * ( Σ_i P_i * Σ_j T_ij + Σ_{i,j} T_ij (T_ij - 1)/2 ) ]
+    """
+    N, d, d_ff = dims.num_layers, dims.hidden_size, dims.intermediate_size
+    static = _static_per_token_flops(d, d_ff)
+
+    P = prompt_lengths.astype(np.int64)  # (U,)
+    R = resp_len_matrix.astype(np.int64)  # (U, n)
+    T_sum_per_prompt = R.sum(axis=1)  # (U,)
+    T_total = int(T_sum_per_prompt.sum())
+    pair_sum = int((R * (R - 1) // 2).sum())  # Σ T(T-1)/2 across all samples
+    cross = int((P * T_sum_per_prompt).sum())  # Σ P_i * Σ_j T_ij
+
+    total = N * (static * T_total + 4 * d * (cross + pair_sum))
+    return int(total)
+
+
+@dataclasses.dataclass(frozen=True)
+class ModelDims:
+    num_layers: int
+    hidden_size: int
+    intermediate_size: int
+    vocab_size: int
+    num_attn_heads: int
+    num_kv_heads: Optional[int] = None
+
+    def __post_init__(self):
+        if self.num_kv_heads is None:
+            self.num_kv_heads = self.num_attn_heads
+
+    def attn_flops(self, query_len: int, kv_len: int) -> int:
+        """Calculate attention FLOPs.
+
+        Args:
+            query_len: Number of query tokens (seq_len for prefill, 1 for decode)
+            kv_len: Number of key/value tokens (seq_len for prefill, context_len for decode)
+        """
+        head_dim = self.hidden_size // self.num_attn_heads
+
+        # Query projection: process query_len tokens
+        q_projection_flops = query_len * self.hidden_size * self.hidden_size
+
+        # Key and Value projections: process query_len new tokens
+        # (In decode, we only project the new token; in prefill, we project all tokens)
+        kv_projection_flops = 2 * query_len * self.hidden_size * (self.num_kv_heads * head_dim)
+
+        # 2. Attention score computation: Q @ K^T
+        # query_len queries attend to kv_len keys
+        attention_scores_flops = self.num_attn_heads * query_len * kv_len * head_dim
+
+        # 3. Softmax (over kv_len scores for each of query_len positions)
+        softmax_flops = self.num_attn_heads * query_len * kv_len
+
+        # 4. Attention-weighted values: softmax(QK^T) @ V
+        attention_values_flops = self.num_attn_heads * query_len * kv_len * head_dim
+
+        # 5. Output projection for query_len tokens
+        output_projection_flops = query_len * self.hidden_size * self.hidden_size
+
+        total_flops = (
+            q_projection_flops
+            + kv_projection_flops
+            + attention_scores_flops
+            + softmax_flops
+            + attention_values_flops
+            + output_projection_flops
+        )
+
+        return total_flops
+
+    def mlp_flops(self, seq_len: int) -> int:
+        # 1. First linear layer
+        first_linear_flops = seq_len * self.hidden_size * self.intermediate_size
+
+        # 2. Activation function (approximate as d_ff operations per position)
+        activation_flops = seq_len * self.intermediate_size
+
+        # 3. Second linear layer
+        second_linear_flops = seq_len * self.intermediate_size * self.hidden_size
+
+        total_flops = first_linear_flops + activation_flops + second_linear_flops
+        return total_flops
+
+    def prefill_flops(self, prompt_lengths: list[int]) -> int:
+        num_kv_heads = self.num_kv_heads | self.num_attn_heads
+        total_flops = 0
+
+        for length in prompt_lengths:
+            total_flops = length * self.vocab_size * self.hidden_size  # Embedding layer
+            total_flops += self.num_layers * (
+                self.attn_flops(query_len=length, kv_len=length) + self.mlp_flops(length)
+            )
+            total_flops += length * self.vocab_size * self.hidden_size  # Final LM head
+        return total_flops
+
+    def decode_flops(self, prompt_lengths: list[int], response_lengths: list[int]) -> int:
+        """Calculate FLOPs for the decode/generation phase."""
+        assert len(prompt_lengths) == len(response_lengths), "Prompt and response lengths must match"
+
+        total_flops = 0
+
+        for prompt_len, response_len in zip(prompt_lengths, response_lengths):
+            total_flops += response_len * self.vocab_size * self.hidden_size
+            total_flops += response_len * self.num_layers * self.mlp_flops(seq_len=1)
+            total_flops += response_len * self.num_layers * self.hidden_size * self.vocab_size
+            for curr_length in range(response_len):
+                context_len = prompt_len + curr_length + 1
+                total_flops += self.num_layers * self.attn_flops(query_len=1, kv_len=context_len)
+
+        return total_flops
+
+    def flops(self, prompt_lengths: list[int], response_lengths: Optional[list[int]] = None) -> int:
+        """Calculate total FLOPs for prefill and optional decode phases."""
+        total_flops = self.prefill_flops(prompt_lengths) + self.decode_flops(prompt_lengths, response_lengths)
+        return total_flops
+
+
+def load_model_dims(model_name: str) -> FLOPsModelDims:
+    cfg = transformers.AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+    return ModelDims(
+        num_layers=cfg.num_hidden_layers,
+        hidden_size=cfg.hidden_size,
+        intermediate_size=cfg.intermediate_size,
+        vocab_size=cfg.vocab_size,
+        num_attn_heads=cfg.num_attention_heads,
+        num_kv_heads=getattr(cfg, "num_key_value_heads", None),
     )
-
-    # Create a single token input
-    input_ids = torch.tensor([[1]], device=model.device)  # Single token
-
-    model.eval()  # Set model to evaluation mode for consistent FLOPs counting
-    flop_counter = torch.utils.flop_counter.FlopCounterMode(display=False, depth=None)
-    with flop_counter:
-        model(input_ids)
-
-    return flop_counter.get_total_flops()
 
 
 def get_device_name(device_name: str) -> str:
@@ -384,7 +501,6 @@ def run_benchmark(
     args: grpo_fast.Args,
     model_config: model_utils.ModelConfig,
     timestamp: int,
-    flops_per_token: int,
     num_batches: int = 5,
 ) -> list[dict[str, Any]]:
     """Run the full benchmark."""
@@ -418,6 +534,7 @@ def run_benchmark(
     logger.info("Submitting warmup batch...")
     warmup_prompts = all_prompts[0]
     param_prompt_Q.put(PromptRequest(prompts=warmup_prompts, dataset_index=0, generation_config=generation_config))
+    model_dims = load_model_dims(model_config.model_name_or_path)
 
     try:
         logger.info("Running warmup batch...")
@@ -451,7 +568,9 @@ def run_benchmark(
                 "response_lengths": [len(response) for response in result.responses],
                 "batch_idx": result.dataset_index,
             }
-            result_dict["mfu"] = 100 * result_dict["tokens_per_second"] * flops_per_token / device_flops
+            prompt_length = len(all_prompts[batch_idx][result.dataset_index])
+            model_flops = model_dims.flops([prompt_length], [new_tokens])
+            result_dict["mfu"] = 100 * model_flops / device_flops
 
             save_completion_lengths([result_dict], timestamp, result.dataset_index)
             results.append(result_dict)
@@ -615,8 +734,6 @@ def main() -> None:
 
     # Calculate flops per token before starting vLLM
     logger.info("Calculating model FLOPs per token...")
-    flops_per_token = calculate_model_usage_per_token(model_config.model_name_or_path)
-    logger.info(f"Model FLOPs per token: {flops_per_token:,}")
 
     # Free GPU memory after calculating FLOPs and before starting vLLM
     logger.info("Freeing GPU memory before starting vLLM...")
@@ -628,9 +745,7 @@ def main() -> None:
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
     save_config(args, tokenizer_config, model_config, timestamp)
-    run_benchmark(
-        dataset, vllm_engines, param_prompt_Q, inference_results_Q, args, model_config, timestamp, flops_per_token
-    )
+    run_benchmark(dataset, vllm_engines, param_prompt_Q, inference_results_Q, args, model_config, timestamp)
 
     cleanup(vllm_engines, actor_manager)
 
