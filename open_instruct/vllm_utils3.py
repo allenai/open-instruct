@@ -38,8 +38,8 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
-from vllm.v1.core import kv_cache_utils
 from vllm.v1 import kv_cache_interface
+from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
 from open_instruct.queue_types import GenerationResult, RequestInfo
@@ -605,15 +605,20 @@ class LLMRayActor:
         kv_cache_spec = kv_cache_specs[0]
         grouped_layer_names = [list(kv_cache_spec.keys())]
         page_size = kv_cache_utils.get_uniform_page_size(kv_cache_spec)
-        
+
         # Get vllm_config from the engine and estimate available memory
         vllm_config = self.llm_engine.vllm_config
-        available_memory = int(vllm_config.cache_config.gpu_memory_utilization * torch.cuda.get_device_properties(0).total_memory)
-        
+        available_memory = int(
+            vllm_config.cache_config.gpu_memory_utilization * torch.cuda.get_device_properties(0).total_memory
+        )
+
         num_blocks = kv_cache_utils.get_num_blocks(vllm_config, len(kv_cache_spec), available_memory, page_size)
 
         per_layer_size = page_size * num_blocks
-        kv_cache_tensors = [kv_cache_interface.KVCacheTensor(size=per_layer_size, shared_by=[layer_name]) for layer_name in kv_cache_spec]
+        kv_cache_tensors = [
+            kv_cache_interface.KVCacheTensor(size=per_layer_size, shared_by=[layer_name])
+            for layer_name in kv_cache_spec
+        ]
 
         kv_cache_config = kv_cache_interface.KVCacheConfig(
             num_blocks=num_blocks,

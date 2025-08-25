@@ -1927,11 +1927,16 @@ def split_and_insert_batch(
     param_prompt_Q,
     generation_config,
     is_eval: bool = False,
+    actor_manager=None,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
     import math
 
     inference_batch_size = max(1, math.ceil(len(batch.queries) / vllm_num_engines))
+
+    # Report inference batch size to ActorManager
+    if actor_manager and not is_eval:
+        ray.get(actor_manager.set_inference_batch_size.remote(inference_batch_size))
 
     for batch_idx in range(vllm_num_engines):
         start_idx = batch_idx * inference_batch_size
@@ -1992,7 +1997,13 @@ def sync_weights_and_prepare_prompts(
         logger.debug(f"[Main Thread] Set should_stop to False after weight sync at step {training_step}")
 
     split_and_insert_batch(
-        batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]
+        batch,
+        training_step,
+        args.vllm_num_engines,
+        pending_queries_map,
+        param_prompt_Q,
+        generation_configs["train"],
+        actor_manager=actor_manager,
     )
 
     return batch
@@ -2468,6 +2479,7 @@ def run_training(
             pending_queries_map,
             param_prompt_Q,
             generation_configs["train"],
+            actor_manager=actor_manager,
         )
     num_total_tokens = 0
     training_start_time = time.time()  # Track overall training start time
@@ -2515,6 +2527,7 @@ def run_training(
                 param_prompt_Q,
                 generation_configs["eval"],
                 is_eval=True,
+                actor_manager=actor_manager,
             )
 
         # The generate_thread is now handling vLLM processing asynchronously
