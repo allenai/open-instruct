@@ -8,12 +8,9 @@ from typing import Optional
 
 import pandas as pd
 
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[logging.StreamHandler(sys.stdout)],
-    level=logging.INFO,
-)
+from open_instruct import logger_utils
+
+logger = logger_utils.setup_logger(__name__)
 
 
 def create_openai_chat_fmt(
