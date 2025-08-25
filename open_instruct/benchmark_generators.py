@@ -582,8 +582,14 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
     for result in results:
         for key, value in result.items():
-            if key in ["total_mfu", "total_tokens_per_second", "total_generation_time", "total_num_new_tokens"]:
-                aggregated_results[key] += value
+            if key == "mfu":
+                aggregated_results["total_mfu"] += value
+            elif key == "tokens_per_second":
+                aggregated_results["total_tokens_per_second"] += value
+            elif key == "generation_time":
+                aggregated_results["total_generation_time"] += value
+            elif key == "num_new_tokens":
+                aggregated_results["total_num_new_tokens"] += value
             elif key == "finish_reasons":
                 for reason, count in value.items():
                     aggregated_results["finish_reasons"][reason] += count
