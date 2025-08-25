@@ -2035,8 +2035,19 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     )
                 )
                 eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
+                # Extract scalar scores from FinegrainedRewardOutput objects
+                scalar_eval_scores = []
+                for score_output in eval_scores:
+                    if hasattr(score_output, 'finegrained_scores'):
+                        # Sum all finegrained scores for this response
+                        total_score = sum(score_obj.score for score_obj in score_output.finegrained_scores)
+                        scalar_eval_scores.append(total_score)
+                    else:
+                        # Fallback for scalar scores
+                        scalar_eval_scores.append(float(score_output))
+                
                 eval_metrics = {
-                    "eval/scores": np.array(eval_scores).mean(),
+                    "eval/scores": np.array(scalar_eval_scores).mean() if scalar_eval_scores else 0.0,
                     "eval/sequence_lengths": eval_sequence_lengths.mean(),
                     "eval/sequence_lengths_min": eval_sequence_lengths.min(),
                     "eval/sequence_lengths_max": eval_sequence_lengths.max(),
@@ -2050,7 +2061,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
                 table["response"] = eval_decoded_responses
                 table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
-                table["scores"] = eval_scores
+                table["scores"] = scalar_eval_scores
                 table["ground_truth"] = eval_ground_truths
                 df = pd.DataFrame(table)
                 if args.with_tracking:
