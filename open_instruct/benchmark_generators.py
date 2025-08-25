@@ -323,7 +323,6 @@ def get_batch_data(
 
     batch_data = dataset[start_idx:end_idx]
     prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
-    logger.info(f"get_batch_data: batch_idx={batch_idx}, returning {len(prompts)} unique prompts")
     return prompts
 
 
