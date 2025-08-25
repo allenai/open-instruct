@@ -1992,17 +1992,11 @@ def weight_sync_thread(
 
             # Broadcast weights to vLLM engines
             # First get the futures
-            weight_broadcast_futures: List[List[ray.ObjectRef]] = [
-                m.broadcast_to_vllm.remote() for m in policy_group.models
-            ]
+            weight_broadcast_futures: List[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
 
-            # Flatten the list of ObjectRef lists and wait for all weight updates to complete
-            all_weight_refs = []
-            for refs_list in weight_broadcast_futures:
-                all_weight_refs.extend(refs_list)
-
+            # Wait for all weight updates to complete
             ray_get_with_progress(
-                all_weight_refs,
+                weight_broadcast_futures,
                 desc="[Weight Sync Thread] Waiting for weight updates to complete",
                 enable=args.verbose,
             )
