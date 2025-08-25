@@ -495,12 +495,8 @@ def print_summary(
     """Print benchmark summary statistics."""
 
     agg_results = aggregate_results(results)
-    total_tokens = agg_results["total_num_new_tokens"]
-    total_generation_time = agg_results["total_generation_time"]
-
-    # Calculate average new tokens per sample
     total_samples = len(results) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-    avg_new_tokens_per_sample = total_tokens / total_samples if total_samples > 0 else 0
+    avg_new_tokens_per_sample = agg_results["total_num_new_tokens"] / total_samples
 
     print("\n" + "=" * 60)
     print("BENCHMARK SUMMARY")
@@ -512,8 +508,8 @@ def print_summary(
     print(f"Num rollouts: {args.num_samples_per_prompt_rollout}")
     print(f"Max tokens: {args.response_length}")
     print("-" * 60)
-    print(f"Total time (main benchmark): {total_generation_time:.2f}s")
-    print(f"Total new tokens generated: {total_tokens}")
+    print(f"Total time (main benchmark): {agg_results['total_generation_time']:.2f}s")
+    print(f"Total new tokens generated: {agg_results['total_num_new_tokens']}")
     print("-" * 60)
     print(f"Average results over {len(results)} main benchmark batches:")
     print(f"Average tokens/second: {agg_results['avg_tokens_per_second']:.2f}")
