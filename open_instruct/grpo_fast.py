@@ -1942,7 +1942,7 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
                 logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
                 return None, {}, num_total_tokens
             try:
-                packed_data = packed_sequences_Q.get(timeout=30.0)
+                packed_data = packed_sequences_Q.get(timeout=60.0)
                 break
             except Empty:
                 logger.warning("[Main Thread] Timeout waiting for packed sequences. Retrying...")
