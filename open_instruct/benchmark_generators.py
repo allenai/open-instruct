@@ -130,6 +130,8 @@ def save_benchmark_results_to_csv(
     """Save benchmark results to CSV file."""
     git_commit = get_git_commit()
     agg_results = aggregate_results(results)
+    csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
+
     row_data = {
         "git_commit": git_commit,
         "model": model_config.model_name_or_path,
