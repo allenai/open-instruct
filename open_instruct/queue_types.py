@@ -24,6 +24,9 @@ class GenerationResult:
     request_info: RequestInfo
     dataset_index: Optional[List[int]] = None
     training_step: Optional[int] = None
+    prompt_tokens: Optional[int] = None
+    generation_tokens: Optional[int] = None
+    generation_time: Optional[float] = None
 
 
 @dataclass

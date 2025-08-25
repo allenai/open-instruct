@@ -15,6 +15,7 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
+import collections
 import copy
 import os
 import queue
@@ -102,7 +103,11 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
 
 def _process_outputs(
-    outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None
+    outputs: List[vllm.RequestOutput],
+    dataset_index: Optional[List[int]] = None,
+    prompt_tokens: Optional[int] = None,
+    generation_tokens: Optional[int] = None,
+    generation_time: Optional[float] = None,
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -131,13 +136,20 @@ def _process_outputs(
         masks=masks,
         request_info=request_info,
         dataset_index=dataset_index,
+        prompt_tokens=prompt_tokens,
+        generation_tokens=generation_tokens,
+        generation_time=generation_time,
     )
 
     return result
 
 
 def _process_outputs_with_tools(
-    outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None
+    outputs: List[vllm.RequestOutput],
+    dataset_index: Optional[List[int]] = None,
+    prompt_tokens: Optional[int] = None,
+    generation_tokens: Optional[int] = None,
+    generation_time: Optional[float] = None,
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format with tool information."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -166,16 +178,27 @@ def _process_outputs_with_tools(
         masks=masks,
         request_info=request_info,
         dataset_index=dataset_index,
+        prompt_tokens=prompt_tokens,
+        generation_tokens=generation_tokens,
+        generation_time=generation_time,
     )
 
     return result
 
 
-def _finalize_outputs(outputs, tracking, dataset_index, tools):
+def _finalize_outputs(
+    outputs, tracking, dataset_index, tools, prompt_tokens=None, generation_tokens=None, generation_time=None
+):
     """Prepare final outputs based on whether tools were used."""
     if not tools:
         outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
-        return _process_outputs(outputs, dataset_index=dataset_index)
+        return _process_outputs(
+            outputs,
+            dataset_index=dataset_index,
+            prompt_tokens=prompt_tokens,
+            generation_tokens=generation_tokens,
+            generation_time=generation_time,
+        )
 
     # Tool mode: add metadata and merge completions
     for req_id in tracking["masks"]:
@@ -202,7 +225,13 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools):
         merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1]))
     )
 
-    return _process_outputs_with_tools(final_outputs, dataset_index=dataset_index)
+    return _process_outputs_with_tools(
+        final_outputs,
+        dataset_index=dataset_index,
+        prompt_tokens=prompt_tokens,
+        generation_tokens=generation_tokens,
+        generation_time=generation_time,
+    )
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -295,6 +324,19 @@ class ActorManager:
         self._queues = queues or {}
         self._queue_sizes = {}
         self._queue_info = {}
+        self._sample_window = 100  # Keep last 100 samples for moving averages
+        self._token_history = collections.deque(maxlen=self._sample_window)  # Keep last 100 token entries
+        self._total_prefill_tokens = 0
+        self._total_decode_tokens = 0
+        # New timing metrics
+        self._training_step_history = collections.deque(
+            maxlen=self._sample_window
+        )  # Keep last 100 training step times
+        self._generation_batch_history = collections.deque(
+            maxlen=self._sample_window
+        )  # Keep last 100 batch generation times
+        # KV cache metrics
+        self._kv_cache_max_concurrency = None
         self._setup_queue_monitoring()
         self._start_dashboard()
 
@@ -477,6 +519,44 @@ class ActorManager:
                         border-bottom: 2px solid #e9ecef;
                         padding-bottom: 10px;
                     }
+                    .token-section {
+                        margin-top: 30px;
+                    }
+                    .token-card {
+                        background: #f0f8ff;
+                        border-radius: 6px;
+                        padding: 20px;
+                        margin: 15px 0;
+                        border-left: 4px solid #2196F3;
+                    }
+                    .token-grid {
+                        display: grid;
+                        grid-template-columns: 1fr 1fr;
+                        gap: 20px;
+                        margin-top: 15px;
+                    }
+                    .token-stat {
+                        background: white;
+                        padding: 15px;
+                        border-radius: 4px;
+                    }
+                    .token-label {
+                        font-size: 12px;
+                        color: #666;
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
+                    }
+                    .token-value {
+                        font-size: 24px;
+                        font-weight: bold;
+                        color: #2196F3;
+                        margin-top: 5px;
+                    }
+                    .token-rate {
+                        font-size: 14px;
+                        color: #999;
+                        margin-top: 3px;
+                    }
                 </style>
             </head>
             <body>
@@ -492,6 +572,36 @@ class ActorManager:
                     <div id="queue-container">
                         <div class="queue-card">
                             <div class="queue-name">Loading queues...</div>
+                        </div>
+                    </div>
+                    <h2>⚡ Token Throughput</h2>
+                    <div id="token-container">
+                        <div class="token-card">
+                            <div class="token-grid">
+                                <div class="token-stat">
+                                    <div class="token-label">Loading...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <h2>⏱️ Performance Metrics</h2>
+                    <div id="timing-container">
+                        <div class="token-card" style="border-left-color: #9C27B0;">
+                            <div class="token-grid">
+                                <div class="token-stat">
+                                    <div class="token-label">Loading...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <h2>💾 KV Cache</h2>
+                    <div id="kv-cache-container">
+                        <div class="token-card" style="border-left-color: #FF9800;">
+                            <div class="token-grid">
+                                <div class="token-stat">
+                                    <div class="token-label">Loading...</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -552,6 +662,74 @@ class ActorManager:
 
                             document.getElementById('queue-container').innerHTML = queueHtml;
                         }
+
+                        // Update token statistics
+                        if (data.token_stats) {
+                            const stats = data.token_stats;
+                            const formatNumber = (num) => {
+                                if (num >= 1000000) return (num / 1000000).toFixed(2) + 'M';
+                                if (num >= 1000) return (num / 1000).toFixed(2) + 'K';
+                                return num.toFixed(0);
+                            };
+
+                            document.getElementById('token-container').innerHTML = `
+                                <div class="token-card">
+                                    <div class="token-grid">
+                                        <div class="token-stat">
+                                            <div class="token-label">Prefill Tokens/Sec</div>
+                                            <div class="token-value">${stats.prefill_tokens_per_sec.toFixed(1)}</div>
+                                            <div class="token-rate">Avg over ${stats.sample_count} samples | Total: ${formatNumber(stats.total_prefill_tokens)}</div>
+                                        </div>
+                                        <div class="token-stat">
+                                            <div class="token-label">Decode Tokens/Sec</div>
+                                            <div class="token-value">${stats.decode_tokens_per_sec.toFixed(1)}</div>
+                                            <div class="token-rate">Avg over ${stats.sample_count} samples | Total: ${formatNumber(stats.total_decode_tokens)}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+
+                        // Update timing statistics
+                        if (data.timing_stats) {
+                            const timing = data.timing_stats;
+                            const formatTime = (seconds) => {
+                                if (seconds >= 60) return (seconds / 60).toFixed(2) + ' min';
+                                return seconds.toFixed(2) + ' sec';
+                            };
+
+                            document.getElementById('timing-container').innerHTML = `
+                                <div class="token-card" style="border-left-color: #9C27B0;">
+                                    <div class="token-grid">
+                                        <div class="token-stat">
+                                            <div class="token-label">Avg Training Step Time</div>
+                                            <div class="token-value" style="color: #9C27B0;">${formatTime(timing.avg_training_step_time)}</div>
+                                            <div class="token-rate">Moving avg: last ${timing.training_step_count} of 100 steps</div>
+                                        </div>
+                                        <div class="token-stat">
+                                            <div class="token-label">Avg Batch Generation Time</div>
+                                            <div class="token-value" style="color: #9C27B0;">${formatTime(timing.avg_batch_generation_time)}</div>
+                                            <div class="token-rate">Moving avg: last ${timing.batch_generation_count} of 100 batches</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+
+                        // Update KV cache statistics
+                        if (data.kv_cache_max_concurrency !== null && data.kv_cache_max_concurrency !== undefined) {
+                            document.getElementById('kv-cache-container').innerHTML = `
+                                <div class="token-card" style="border-left-color: #FF9800;">
+                                    <div class="token-grid">
+                                        <div class="token-stat">
+                                            <div class="token-label">Max Theoretical Generation Concurrency</div>
+                                            <div class="token-value" style="color: #FF9800;">${data.kv_cache_max_concurrency}</div>
+                                            <div class="token-rate">Maximum concurrent generations supported by KV cache configuration</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        }
                     }
 
                     // Update immediately and then every second
@@ -571,10 +749,19 @@ class ActorManager:
             for queue_name, info in self._queue_info.items():
                 queues_data[queue_name] = {"current": self._queue_sizes.get(queue_name, 0), "maxsize": info["maxsize"]}
 
+            # Get token statistics
+            token_stats = self.get_token_stats()
+
+            # Get timing statistics
+            timing_stats = self.get_timing_stats()
+
             return {
                 "should_stop": self._should_stop,
                 "last_updated": self._last_updated.isoformat(),
                 "queues": queues_data,
+                "token_stats": token_stats,
+                "timing_stats": timing_stats,
+                "kv_cache_max_concurrency": self._kv_cache_max_concurrency,
             }
 
         # Store app reference for potential cleanup
@@ -613,6 +800,91 @@ class ActorManager:
         """Check if actors should stop processing."""
         return self._should_stop
 
+    def report_token_stats(self, prompt_tokens: int, generation_tokens: int):
+        """Report token statistics from main thread."""
+        current_time = time.time()
+
+        # Update totals
+        self._total_prefill_tokens += prompt_tokens
+        self._total_decode_tokens += generation_tokens
+
+        # Add to history for moving average (deque automatically maintains last N samples)
+        self._token_history.append(
+            {"timestamp": current_time, "prompt_tokens": prompt_tokens, "generation_tokens": generation_tokens}
+        )
+
+    def report_training_step_time(self, duration: float):
+        """Report the time taken for a training step."""
+        # Add to history (deque automatically maintains last N samples)
+        self._training_step_history.append(duration)
+
+    def report_batch_generation_time(self, duration: float):
+        """Report the time taken to generate a batch of data."""
+        # Add to history (deque automatically maintains last N samples)
+        self._generation_batch_history.append(duration)
+
+    def set_kv_cache_max_concurrency(self, max_concurrency: int):
+        """Set the KV cache max concurrency value."""
+        self._kv_cache_max_concurrency = max_concurrency
+
+    def get_token_stats(self):
+        """Calculate and return current token statistics."""
+        if not self._token_history:
+            return {
+                "total_prefill_tokens": self._total_prefill_tokens,
+                "total_decode_tokens": self._total_decode_tokens,
+                "prefill_tokens_per_sec": 0,
+                "decode_tokens_per_sec": 0,
+                "sample_count": 0,
+            }
+
+        current_time = time.time()
+
+        # Calculate total tokens in the sample window
+        window_prompt_tokens = 0
+        window_generation_tokens = 0
+        oldest_timestamp = self._token_history[0]["timestamp"]
+
+        for entry in self._token_history:
+            window_prompt_tokens += entry["prompt_tokens"]
+            window_generation_tokens += entry["generation_tokens"]
+
+        # Calculate time span of samples
+        time_span = current_time - oldest_timestamp if len(self._token_history) > 1 else 1
+
+        # Calculate tokens per second based on actual time span of samples
+        prompt_tokens_per_sec = window_prompt_tokens / time_span if time_span > 0 else 0
+        generation_tokens_per_sec = window_generation_tokens / time_span if time_span > 0 else 0
+
+        return {
+            "total_prefill_tokens": self._total_prefill_tokens,
+            "total_decode_tokens": self._total_decode_tokens,
+            "prefill_tokens_per_sec": prompt_tokens_per_sec,
+            "decode_tokens_per_sec": generation_tokens_per_sec,
+            "sample_count": len(self._token_history),
+        }
+
+    def get_timing_stats(self):
+        """Calculate and return current timing statistics."""
+        # Calculate average training step time from last N samples
+        avg_training_step_time = (
+            sum(self._training_step_history) / len(self._training_step_history) if self._training_step_history else 0
+        )
+
+        # Calculate average batch generation time from last N samples
+        avg_batch_generation_time = (
+            sum(self._generation_batch_history) / len(self._generation_batch_history)
+            if self._generation_batch_history
+            else 0
+        )
+
+        return {
+            "avg_training_step_time": avg_training_step_time,
+            "avg_batch_generation_time": avg_batch_generation_time,
+            "training_step_count": len(self._training_step_history),
+            "batch_generation_count": len(self._generation_batch_history),
+        }
+
 
 class LLMRayActor:
     """Ray actor for LLM generation with optional tool support."""
@@ -632,6 +904,7 @@ class LLMRayActor:
         self.logger = logger_utils.setup_logger(__name__)
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
+        self.request_metadata = {}
 
         if self.tools:
             self.executor = ThreadPoolExecutor(max_workers=20)
@@ -696,6 +969,8 @@ class LLMRayActor:
 
     def _process_request(self, request):
         """Unified processing for both tool and non-tool generation."""
+        import time
+
         prompts = request.prompts
         sampling_params = request.generation_config
 
@@ -742,21 +1017,57 @@ class LLMRayActor:
                 self.logger.info(f"[LLMRayActor] Terminating after {iteration} iterations with {len(outputs)} outputs")
                 break
 
-        result = _finalize_outputs(outputs, tracking, request.dataset_index, self.tools)
+        # Calculate token statistics
+        end_time = time.time()
+        total_prompt_tokens = 0
+        total_generation_tokens = 0
+        earliest_start_time = float("inf")
+
+        # Collect stats from all processed requests
+        for output in outputs:
+            request_id = output.request_id
+            if request_id in self.request_metadata:
+                metadata = self.request_metadata[request_id]
+                total_prompt_tokens += metadata["prompt_tokens"]
+                earliest_start_time = min(earliest_start_time, metadata["start_time"])
+
+                # Calculate generation tokens from output
+                for completion in output.outputs:
+                    total_generation_tokens += len(completion.token_ids)
+
+        generation_time = end_time - earliest_start_time if earliest_start_time != float("inf") else 0
+
+        # Clean up metadata for processed requests
+        for output in outputs:
+            self.request_metadata.pop(output.request_id, None)
+
+        result = _finalize_outputs(
+            outputs,
+            tracking,
+            request.dataset_index,
+            self.tools,
+            prompt_tokens=total_prompt_tokens,
+            generation_tokens=total_generation_tokens,
+            generation_time=generation_time,
+        )
         return result
 
     def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step):
         """Add initial requests to the engine."""
+        import time
+
         for i, prompt in enumerate(prompts):
             if self.tools:
                 # Create individual requests for each sample when using tools
                 for j in range(n_samples):
                     request_id = f"{training_step}_{i}-{j}"
+                    self.request_metadata[request_id] = {"start_time": time.time(), "prompt_tokens": len(prompt)}
                     tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
                     self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
             else:
                 # Standard request format for non-tool mode
                 request_id = f"batch_{training_step}_{i}"
+                self.request_metadata[request_id] = {"start_time": time.time(), "prompt_tokens": len(prompt)}
                 tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
                 self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
 
@@ -860,6 +1171,15 @@ class LLMRayActor:
 
     def ready(self):
         return True
+
+    def get_kv_cache_info(self):
+        """Get KV cache max concurrency from the vLLM engine."""
+        # Calculate maximum theoretical concurrency
+        max_concurrency = vllm.v1.core.kv_cache_utils.get_max_concurrency_for_kv_cache_config(
+            self.llm_engine.engine_config, self.llm_engine.cache_config
+        )
+
+        return int(max_concurrency)
 
 
 def get_cuda_arch_list() -> str:

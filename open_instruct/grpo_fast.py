@@ -1221,6 +1221,7 @@ def accumulate_inference_batches(
     args: Args,
     training_step: int,
     generation_config,
+    actor_manager=None,
     timeout: Optional[float] = None,
 ) -> tuple[GenerationResult, Batch]:
     """Accumulate multiple inference results into a single training batch.
@@ -1298,6 +1299,11 @@ def accumulate_inference_batches(
     combined_tool_runtimes = []
     combined_tool_calleds = []
 
+    # Token statistics
+    total_prompt_tokens = 0
+    total_generation_tokens = 0
+    max_generation_time = 0
+
     for result in results:
         combined_responses.extend(result.responses)
         combined_finish_reasons.extend(result.finish_reasons)
@@ -1308,6 +1314,14 @@ def accumulate_inference_batches(
         combined_tool_outputs.extend(result.request_info.tool_outputs)
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
+
+        # Accumulate token statistics
+        if result.prompt_tokens is not None:
+            total_prompt_tokens += result.prompt_tokens
+        if result.generation_tokens is not None:
+            total_generation_tokens += result.generation_tokens
+        if result.generation_time is not None:
+            max_generation_time = max(max_generation_time, result.generation_time)
 
     # Create combined RequestInfo
     combined_request_info = RequestInfo(
@@ -1326,7 +1340,18 @@ def accumulate_inference_batches(
         masks=combined_masks,
         request_info=combined_request_info,
         dataset_index=None,  # Not meaningful for combined result
+        prompt_tokens=total_prompt_tokens if total_prompt_tokens > 0 else None,
+        generation_tokens=total_generation_tokens if total_generation_tokens > 0 else None,
+        generation_time=max_generation_time if max_generation_time > 0 else None,
     )
+
+    # Report token statistics to ActorManager if available
+    if actor_manager is not None and total_prompt_tokens > 0 and total_generation_tokens > 0:
+        ray.get(actor_manager.report_token_stats.remote(total_prompt_tokens, total_generation_tokens))
+
+    # Report batch generation time to ActorManager if available
+    if actor_manager is not None and max_generation_time > 0:
+        ray.get(actor_manager.report_batch_generation_time.remote(max_generation_time))
 
     # Note: We don't have dataset_indices here, but they're not needed for the returned batch
     batch = Batch(
@@ -1348,12 +1373,13 @@ def data_preparation_thread(
     num_training_steps: int,
     generation_config,
     resume_training_step: int,
+    actor_manager=None,
 ):
     for training_step in range(resume_training_step, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
             result, batch = accumulate_inference_batches(
-                inference_results_Q, pending_queries_map, args, training_step, generation_config
+                inference_results_Q, pending_queries_map, args, training_step, generation_config, actor_manager
             )
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
@@ -1846,6 +1872,12 @@ def create_model_and_optimizer(
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     logger.info("======== ✅ all models and vLLM engines initialized =========")
 
+    # Get and set KV cache max concurrency from the first engine (all engines have the same config)
+    if vllm_engines:
+        kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
+        ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
+        logger.info(f"KV Cache max concurrency: {kv_cache_max_concurrency}")
+
     ray_get_with_progress(
         [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
         desc="Setting up model update group",
@@ -2024,6 +2056,7 @@ def one_training_step(
     train_dataset,
     wandb_url,
     chat_template_name,
+    actor_manager=None,
 ):
     """Train the model for one step."""
     update_ref_policy_future = []
@@ -2088,6 +2121,10 @@ def one_training_step(
         with Timer("[Main Thread] 🔃 Updating reference policy"):
             ray_get_with_progress(update_ref_policy_future, desc="Updating reference policy")
 
+    # Report training step time to ActorManager
+    if actor_manager is not None:
+        ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
+
     average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
     total_time = time.perf_counter() - start_time
     metrics = {
@@ -2127,6 +2164,7 @@ def maybe_evaluate(
     eval_pending_queries_map: PendingQueriesMap,
     eval_generation_config,
     generate_metrics_Q: Queue,
+    actor_manager=None,
 ):
     """Optionally evaluate the model."""
     try:
@@ -2141,6 +2179,7 @@ def maybe_evaluate(
             args,
             training_step,
             eval_generation_config,
+            actor_manager,
             timeout=timeout,
         )
 
@@ -2409,6 +2448,7 @@ def run_training(
         args.num_training_steps,
         generation_configs["train"],
         resume_training_step,
+        actor_manager,
     )
 
     logger.info("======== ✅ generation thread starts =========")
@@ -2504,6 +2544,7 @@ def run_training(
             train_dataset,
             wandb_url,
             tc.chat_template_name,
+            actor_manager,
         )
 
         maybe_evaluate(
@@ -2517,6 +2558,7 @@ def run_training(
             eval_pending_queries_map,
             generation_configs["eval"],
             generate_metrics_Q,
+            actor_manager,
         )
 
     if resume_training_step > args.num_training_steps:
