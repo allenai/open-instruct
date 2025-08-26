@@ -1453,7 +1453,8 @@ def accumulate_inference_batches(
         token_statistics=accumulated_stats,
     )
 
-    ray.get(actor_manager.report_token_statistics.remote(accumulated_stats))
+    if actor_manager is not None:
+        ray.get(actor_manager.report_token_statistics.remote(accumulated_stats))
 
     # Note: We don't have dataset_indices here, but they're not needed for the returned batch
     batch = Batch(
