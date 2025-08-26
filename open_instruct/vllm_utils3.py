@@ -303,7 +303,7 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         "sampling_params": request.generation_config,
     }
 
-    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt)
+    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
 
     # We *have* to manually duplicate requests to properly handle tool tracking,
     # so we always do it to only have one code path.
@@ -590,9 +590,8 @@ class LLMRayActor:
                 new_sampling_params.max_tokens = new_sample_tokens
 
                 try:
-                    self.llm_engine.add_request(
-                        req_id, vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token), new_sampling_params
-                    )
+                    prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token, cache_salt=req_id)
+                    self.llm_engine.add_request(req_id, prompt, new_sampling_params)
                     # Update the sampling params in request_metadata for the restarted request
                     if req_id in self.request_metadata:
                         self.request_metadata[req_id]["sampling_params"] = new_sampling_params
