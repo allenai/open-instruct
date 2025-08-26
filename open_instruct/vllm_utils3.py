@@ -436,7 +436,7 @@ class LLMRayActor:
                 # Create individual requests for each sample when using tools
                 for j in range(n_samples):
                     request_id = f"{training_step}_{i}-{j}"
-                    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=request_id)
+                    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=f"{training_step}_{i}")
                     self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
             else:
                 # Standard request format for non-tool mode
