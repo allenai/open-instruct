@@ -19,7 +19,7 @@ to use it for training on next-token prediction tasks (e.g. SFT).
 
 OLMoCore accepts data in numpy mmap format. One file is for the input tokens and one for the labels mask.
 
-Usage:
+## Usage:
     ```bash
     python scripts/data/convert_sft_data_for_olmocore.py \
         --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
@@ -28,10 +28,9 @@ Usage:
         --chat_template_name olmo
     ```
 
-Ai2 Internal Usage (requires gantry>=3):
+## Ai2 Internal Usage (requires gantry>=3):
     ```bash
     gantry run \
-        --allow-dirty \
         --workspace ai2/jacobm \
         --budget ai2/oe-base \
         --priority normal \
@@ -39,7 +38,7 @@ Ai2 Internal Usage (requires gantry>=3):
         --weka=oe-training-default:/weka/oe-training-default \
         --task-name convert-sft-data-for-olmocore \
         --env-secret HF_TOKEN=HF_TOKEN \
-        --install "echo 'do nothing'" \
+        --install "echo '¯\_(ツ)_/¯'" \
         -- uv run --script scripts/data/convert_sft_data_for_olmocore.py \
             --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture 1.0 \
             --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
@@ -48,8 +47,11 @@ Ai2 Internal Usage (requires gantry>=3):
             --chat_template_name olmo \
             --max_seq_length 16384
     ```
-    Add `--show-logs` to stream the logs to the terminal. By default `gantry run` will detach the job.
 
+    Dependencies for this script when run with `uv` are declared at the top of the file. `uv` will
+    automatically install them *and not the project dependencies*.
+
+    Add `--show-logs` to stream the logs to the terminal. By default `gantry run` will detach the job.
 
 NOTE: allenai/OLMo-2-1124-7B tokenizer is the same as allenai/dolma2-tokenizer, but allenai/OLMo-2-1124-7B
 has additional metadata required for this script.
