@@ -45,6 +45,7 @@ except Exception:
 import asyncio
 import atexit
 import json
+import logging
 import math
 import os
 import shutil
@@ -1203,6 +1204,7 @@ def data_preparation_thread(
                 Returns:
                     List of integers where 1 means the token should be trained on, 0 means masked
                 """
+                logger = logging.getLogger(__name__)
                 if not effective_spans or len(token_resp) == 0:
                     # If no effective spans or no tokens, mask everything except last EOS
                     mask = [0] * len(token_resp)
@@ -1248,7 +1250,10 @@ def data_preparation_thread(
                 mask = [0] * len(token_resp)
                 
                 # Unmask tokens that fall within effective spans
-                for start_char, end_char in effective_spans:
+                for span_idx, (start_char, end_char) in enumerate(effective_spans):
+                    # Store original values for logging
+                    original_start, original_end = start_char, end_char
+                    
                     # Clamp character indices to valid range
                     start_char = max(0, min(start_char, len(decoded_resp)))
                     end_char = max(start_char, min(end_char, len(decoded_resp)))
@@ -1257,11 +1262,13 @@ def data_preparation_thread(
                     if start_char < len(decoded_resp) and start_char in char_to_token:
                         token_start = char_to_token[start_char]
                     else:
+                        logger.warning(f"Span {span_idx} [{original_start}:{original_end}]: start_char {start_char} not in char_to_token, using fallback token_start=0")
                         token_start = 0
                     
                     if end_char > 0 and (end_char - 1) in char_to_token:
                         token_end = char_to_token[end_char - 1] + 1
                     else:
+                        logger.warning(f"Span {span_idx} [{original_start}:{original_end}]: end_char-1 {end_char-1} not in char_to_token, using fallback token_end=token_start ({token_start})")
                         token_end = token_start
                     
                     # Clamp to valid token range
