@@ -25,7 +25,7 @@ for split_var in mixin_it_up; do
         --exp_name ${exp_name} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 8 \
-        --num_unique_prompts_rollout 16 \
+        --num_unique_prompts_rollout 64 \
         --num_mini_batches 4 \
         --num_epochs 1 \
         --learning_rate 1e-6 \
@@ -50,9 +50,9 @@ for split_var in mixin_it_up; do
         --sft_messages_key messages \
         --total_episodes 10000000 \
         --deepspeed_stage 3 \
-        --num_learners_per_node 8 \
-        --vllm_num_engines 12 \
-        --vllm_tensor_parallel_size 2 \
+        --num_learners_per_node 8 8 \
+        --vllm_num_engines 16 \
+        --vllm_tensor_parallel_size 1 \
         --lr_scheduler_type constant \
         --apply_verifiable_reward true \
         --seed 1 \
