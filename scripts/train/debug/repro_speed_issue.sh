@@ -42,8 +42,7 @@ for split_var in mixin_it_up; do
         --response_length 32768 \
         --pack_length 35840 \
         --model_name_or_path /weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/rl-sft/olmo2-7B-FINAL-lc-OT3-full-regen-wc-oasst-ccn-pif-qif-wgwj-syn2-aya-tgpt-ncode-scode \
-	--tokenizer_name_or_path allenai/olmo-2-1124-7b \
-        --chat_template_name olmo_thinker \
+	--chat_template_name olmo_thinker \
         --stop_strings "</answer>" \
         --non_stop_penalty True \
         --temperature 1.0 \
