@@ -824,14 +824,6 @@ class BeakerRuntimeConfig:
     beaker_dataset_id_urls: Optional[List[str]] = None
 
 
-def is_beaker_job() -> bool:
-    has_beaker_job = "BEAKER_JOB_ID" in os.environ
-    logger.info(f"is_beaker_job: BEAKER_JOB_ID present: {has_beaker_job}")
-    if has_beaker_job:
-        logger.info(f"is_beaker_job: BEAKER_JOB_ID value: {os.environ.get('BEAKER_JOB_ID')}")
-    return has_beaker_job
-
-
 def get_beaker_experiment_info(experiment_id: str) -> Optional[dict]:
     get_experiment_command = f"beaker experiment get {experiment_id} --format json"
     process = subprocess.Popen(["bash", "-c", get_experiment_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -965,7 +957,7 @@ def maybe_update_beaker_description(
         f"maybe_update_beaker_description called with: current_step={current_step}, total_steps={total_steps}, wandb_url={wandb_url}"
     )
 
-    if not is_beaker_job():
+    if not "BEAKER_JOB_ID" in os.environ:
         logger.info("Not a Beaker job, returning early")
         return
 
