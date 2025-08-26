@@ -52,7 +52,7 @@ logger = logger_utils.setup_logger(__name__)
 # so this function is used to get the bundle indices of a placement group
 # and ensure that the bundles placed on the same node are grouped together.
 # avoids unnecessary communication for TP>1 with vllm.
-def get_bundle_indices_list(placement_group: ray.util.placement_group.PlacementGroup) -> List[int]:
+def get_bundle_indices_list(placement_group: ray.util.placement_group) -> List[int]:
     pg_infos = ray.util.placement_group_table(placement_group)
 
     node_id_to_bundles = defaultdict(list)
