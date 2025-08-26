@@ -9,6 +9,7 @@ uv run python mason.py \
         --cluster ai2/augusta-google-1 \
         --image "$BEAKER_IMAGE" \
 	--pure_docker_mode \
+	--gs_model_name olmo2_7b_sft_lc_ot3_full_regen_wc_oasst_ccn_pif_qif_wgwj_syn2_aya_tgpt_ncode_scode \
         --workspace ai2/tulu-thinker \
         --priority high \
         --preemptible \
@@ -29,6 +30,7 @@ uv run python mason.py \
         --per_device_train_batch_size 1 \
         --kl_estimator kl3 \
         --dataset_mixer_list saurabh5/rlvr_acecoder_filtered ${num_prompts} saurabh5/open-code-reasoning-rlvr-stdio ${num_prompts} \
+	--add_bos \
         --dataset_mixer_list_splits train \
         --dataset_mixer_eval_list saurabh5/rlvr_acecoder_filtered 8 saurabh5/open-code-reasoning-rlvr-stdio 8 \
         --dataset_mixer_eval_list_splits train \
@@ -38,7 +40,7 @@ uv run python mason.py \
         --pack_length 40000 \
         --inflight_updates True \
         --model_name_or_path /weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/rl-sft/olmo2-7B-FINAL-lc-OT3-full-regen-wc-oasst-ccn-pif-qif-wgwj-syn2-aya-tgpt-ncode-scode \
-        --chat_template_name tulu_thinker \
+	--chat_template_name tulu_thinker \
         --stop_strings "</answer>" \
         --non_stop_penalty False \
         --temperature 1.0 \
