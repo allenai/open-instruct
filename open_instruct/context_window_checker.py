@@ -140,7 +140,7 @@ def check_context_window_limit(
 
     except Exception as e:
         logger.warning(f"Failed to load HuggingFace tokenizer for {model_name}: {e}. Falling back to tiktoken.")
-        
+
         # Fall back to tiktoken if HuggingFace tokenizer fails
         if not TIKTOKEN_AVAILABLE:
             logger.warning("tiktoken not available. Skipping context window check.")
