@@ -72,7 +72,16 @@ Return a score on a scale of 0 to 10 indicating how appropriate the response is 
         if not obj:
             return 0.0
 
-        return obj["score"] / 10.0
+        # Validate that obj is a dictionary and has the expected structure
+        if not isinstance(obj, dict) or "score" not in obj:
+            return 0.0
+            
+        # Validate that score is a number
+        try:
+            score = float(obj["score"])
+            return score / 10.0
+        except (ValueError, TypeError):
+            return 0.0
 
     def _score_evidence(self, response: str, evidence: List[str]) -> float:
         """
@@ -99,7 +108,17 @@ Return a score on a scale of 0 to 10 indicating how appropriate the response is 
         obj = extract_json_from_response(resp)
         if not obj:
             return 0.0
-        return min(obj["score"] / len(evidence), 1.0)
+        
+        # Validate that obj is a dictionary and has the expected structure
+        if not isinstance(obj, dict) or "score" not in obj:
+            return 0.0
+            
+        # Validate that score is a number
+        try:
+            score = float(obj["score"])
+            return min(score / len(evidence), 1.0)
+        except (ValueError, TypeError):
+            return 0.0
 
     def _score_citations_excerpts(self, response: str) -> Dict[str, float]:
 

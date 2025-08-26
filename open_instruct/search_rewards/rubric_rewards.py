@@ -1,9 +1,13 @@
 import os
 from typing import Any, Dict
 import json
+import logging
+import litellm
 from open_instruct.search_rewards.format_utils import extract_answer_context_citations
 from open_instruct.search_rewards.run_utils import extract_json_from_response, run_litellm
 from open_instruct.search_rewards.citation_rewards_utils import score_num_in_context_search_turns
+
+LOGGER = logging.getLogger(__name__)
 
 
 
@@ -47,11 +51,23 @@ Return a score on a scale of 0 to 2 indicating how appropriate the response is b
         obj = extract_json_from_response(resp)
         if not obj:
             return 0.0
-    except litellm.exceptions.APIError as e:
+        
+        # Validate that obj is a dictionary and has the expected structure
+        if not isinstance(obj, dict) or "score" not in obj:
+            LOGGER.warning(f"Invalid JSON structure in response: {obj}")
+            return 0.0
+            
+        # Validate that score is a number
+        try:
+            score = float(obj["score"])
+            return score / 2.0
+        except (ValueError, TypeError) as e:
+            LOGGER.warning(f"Invalid score value in response: {obj['score']}, error: {e}")
+            return 0.0
+            
+    except Exception as e:
         LOGGER.warning(f"Error scoring rubric: {e}")
         return 0.0
-
-    return obj["score"] / 2.0
 
 
 def _score_rubric(response: str, ground_truth: Dict[str, Any], use_general_rubric: bool = False) -> Dict[str, float]:
