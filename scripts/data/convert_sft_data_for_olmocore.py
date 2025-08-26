@@ -1,5 +1,5 @@
 # /// script
-# requires-python = "==3.12"
+# requires-python = ">=3.12"
 # dependencies = [
 #     "beaker-py>=1.32.2,<2.0",
 #     "datasets>=4.0.0",
