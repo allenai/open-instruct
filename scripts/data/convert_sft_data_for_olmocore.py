@@ -1,16 +1,3 @@
-# /// script
-# requires-python = ">=3.12"
-# dependencies = [
-#     "beaker-py>=1.32.2,<2.0",
-#     "datasets>=4.0.0",
-#     "numpy<2",
-#     "rich>=13.7.0",
-#     "tqdm",
-#     "transformers>=4.52.4",
-#     "torch>=2.7.0,<2.8",
-# ]
-# ///
-
 """
 This script converts SFT datasets to OLMoCore format. OLMoCore has a more efficient
 implementation of the OLMo models (espeically for MoE), and so it can be preferable
@@ -35,8 +22,7 @@ Ai2 Internal Usage (requires gantry>=3):
         --weka=oe-training-default:/weka/oe-training-default \
         --task-name convert-sft-data-for-olmocore \
         --env-secret HF_TOKEN=HF_TOKEN \
-        --install "echo 'do nothing'" \
-        -- uv run --script scripts/data/convert_sft_data_for_olmocore.py \
+        -- uv run scripts/data/convert_sft_data_for_olmocore.py \
             --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture 1.0 \
             --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
             --output_dir /weka/oe-training-default/ai2-llm/tylerr/data/sft/tulu-3-sft-olmo-2-mixture-0225-olmocore-test1 \
