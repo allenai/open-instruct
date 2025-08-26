@@ -1030,8 +1030,12 @@ def maybe_update_beaker_description(
         if len(new_description) > 200
         else f"Setting new Beaker description: {new_description}"
     )
-    client.experiment.set_description(experiment_id, new_description)
-    logger.info("Successfully updated Beaker description")
+    try:
+        client.experiment.set_description(experiment_id, new_description)
+        logger.info("Successfully updated Beaker description")
+    except requests.exceptions.HTTPError as e:
+        logger.warning(f"Failed to update Beaker description due to HTTP error: {e}")
+        logger.warning("Continuing without updating description - this is likely a temporary Beaker service issue")
 
 
 def live_subprocess_output(cmd: List[str]) -> str:
