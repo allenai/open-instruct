@@ -1,8 +1,7 @@
-#!/usr/bin/env -S uv run --script --no-project
-#
 # /// script
-# requires-python = ">=3.10,<3.13"
+# requires-python = ">=3.10"
 # dependencies = [
+#     "beaker-py>=1.32.2,<2.0",
 #     "datasets>=4.0.0",
 #     "numpy<2",
 #     "rich>=13.7.0",
@@ -26,20 +25,18 @@ Usage:
         --output_dir ./data/tulu-3-sft-olmo-2-mixture-0225-olmocore \
         --chat_template_name olmo
 
-Ai2 Internal Usage:
-    uv run --with "beaker-gantry>=3" gantry run \
+Ai2 Internal Usage (requires gantry>=3):
+    gantry run \
         --allow-dirty \
-        --uv-no-extras \
-        --cluster ai2/phobos-cirrascale \
-        --timeout -1 \
-        -y \
-        --budget ai2/oe-base \
         --workspace ai2/jacobm \
-        --weka=oe-training-default:/weka/oe-training-default \
-        --env-secret HF_TOKEN=HF_TOKEN \
-        --task-name convert-sft-data-for-olmocore \
+        --budget ai2/oe-base \
         --priority normal \
-        -- ./scripts/data/convert_sft_data_for_olmocore.py \
+        --cluster ai2/phobos-cirrascale --yes \
+        --weka=oe-training-default:/weka/oe-training-default \
+        --task-name convert-sft-data-for-olmocore \
+        --env-secret HF_TOKEN=HF_TOKEN \
+        --install "echo 'do nothing'" \
+        -- uv run --script --no-project scripts/data/convert_sft_data_for_olmocore.py \
             --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture 1.0 \
             --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
             --output_dir /weka/oe-training-default/ai2-llm/tylerr/data/sft/tulu-3-sft-olmo-2-mixture-0225-olmocore-test1 \

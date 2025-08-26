@@ -20,7 +20,6 @@ dependencies = [
     "packaging>=24.2",
     "peft>=0.13.2",
     "ray[default]>=2.44.1",
-    "rich>=13.7.0",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch>=2.7.0,<2.8",
@@ -79,7 +78,8 @@ link-mode = "hardlink"
 
 [dependency-groups]
 dev = [
-    "beaker-py>=1.32.2,<2.0",
+    "rich>=13.7.0",            # required by data_transformation.py
+    "beaker-py>=1.32.2,<2.0",  # required by data_transformation.py
     "mkdocs-material>=9.6.8",
     "markdown-include>=0.8.1",
     "pytest>=8.3.4",
