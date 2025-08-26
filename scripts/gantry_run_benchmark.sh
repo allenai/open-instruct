@@ -1,11 +1,12 @@
 #!/bin/bash
-# Runs the benchmark on gantry. Takes one argument which is the response length.
-# Usage: ./gantry_run_benchmark.sh [response_length]
-# E.g. $ ./gantry_run_benchmark.sh 64000
+# Runs the benchmark on gantry. Takes two arguments: response length and model.
+# Usage: ./gantry_run_benchmark.sh [response_length] [model]
+# E.g. $ ./gantry_run_benchmark.sh 64000 hamishivi/qwen2_5_openthoughts2
 set -e
 
-# Set default value for response_length
+# Set default values
 response_length=64000
+model_name_or_path="hamishivi/qwen2_5_openthoughts2"
 
 # If first argument exists and is a number, use it as response_length
 if [[ "$1" =~ ^[0-9]+$ ]]; then
@@ -13,9 +14,14 @@ if [[ "$1" =~ ^[0-9]+$ ]]; then
   shift
 fi
 
+# If second argument exists, use it as model
+if [[ -n "$1" ]]; then
+  model_name_or_path="$1"
+  shift
+fi
+
 git_hash=$(git rev-parse --short HEAD)
-git_branch=$(git rev-parse --abbrev-ref HEAD)
-model_name_or_path="hamishivi/qwen2_5_openthoughts2" \
+git_branch=$(git rev-parse --abbrev-ref HEAD) \
 
 gantry run \
        --name open_instruct-benchmark_generators \
