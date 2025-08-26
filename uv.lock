@@ -2279,7 +2279,6 @@ dependencies = [
     { name = "peft" },
     { name = "pytest-xdist" },
     { name = "ray", extra = ["default"] },
-    { name = "rich" },
     { name = "setuptools" },
     { name = "tensorboard" },
     { name = "torch", version = "2.7.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
@@ -2304,6 +2303,7 @@ dev = [
     { name = "mkdocs-material" },
     { name = "parameterized" },
     { name = "pytest" },
+    { name = "rich" },
     { name = "ruff" },
 ]
 
@@ -2333,7 +2333,6 @@ requires-dist = [
     { name = "pytest-xdist", specifier = "==3.8.0" },
     { name = "ray", extras = ["default"], specifier = ">=2.44.1" },
     { name = "requests", marker = "extra == 'code'", specifier = ">=2.28.0" },
-    { name = "rich", specifier = ">=13.7.0" },
     { name = "setuptools", specifier = ">=75.6.0,<80.0.0" },
     { name = "tensorboard", specifier = ">=2.18.0" },
     { name = "torch", marker = "sys_platform != 'darwin'", specifier = ">=2.7.0,<2.8", index = "https://download.pytorch.org/whl/cu128" },
@@ -2352,6 +2351,7 @@ dev = [
     { name = "mkdocs-material", specifier = ">=9.6.8" },
     { name = "parameterized", specifier = ">=0.9.0" },
     { name = "pytest", specifier = ">=8.3.4" },
+    { name = "rich", specifier = ">=13.7.0" },
     { name = "ruff", specifier = ">=0.11.13" },
 ]
 

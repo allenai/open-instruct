@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.10"
+# requires-python = "==3.12"
 # dependencies = [
 #     "beaker-py>=1.32.2,<2.0",
 #     "datasets>=4.0.0",
@@ -36,7 +36,7 @@ Ai2 Internal Usage (requires gantry>=3):
         --task-name convert-sft-data-for-olmocore \
         --env-secret HF_TOKEN=HF_TOKEN \
         --install "echo 'do nothing'" \
-        -- uv run --script --no-project scripts/data/convert_sft_data_for_olmocore.py \
+        -- uv run --script scripts/data/convert_sft_data_for_olmocore.py \
             --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture 1.0 \
             --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
             --output_dir /weka/oe-training-default/ai2-llm/tylerr/data/sft/tulu-3-sft-olmo-2-mixture-0225-olmocore-test1 \
