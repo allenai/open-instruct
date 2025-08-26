@@ -176,6 +176,8 @@ class Args:
     """The maximum prompt token length to use for the dataset"""
     system_prompt: Optional[str] = None
     """Optional system prompt to prepend to all prompts sent to the engine"""
+    system_prompt_file: Optional[str] = None
+    """Optional file path containing the system prompt to prepend to all prompts"""
 
     # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -2654,8 +2656,16 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
     # Tokenize system prompt if provided
-    if args.system_prompt:
-        system_prompt_tokens = tokenizer.encode(args.system_prompt, add_special_tokens=False)
+    system_prompt_text = None
+    if args.system_prompt_file:
+        with open(args.system_prompt_file, 'r') as f:
+            system_prompt_text = f.read().strip()
+        logger.info(f"Loaded system prompt from file: {args.system_prompt_file}")
+    elif args.system_prompt:
+        system_prompt_text = args.system_prompt
+        
+    if system_prompt_text:
+        system_prompt_tokens = tokenizer.encode(system_prompt_text, add_special_tokens=False)
         logger.info(f"System prompt tokenized to {len(system_prompt_tokens)} tokens")
     else:
         system_prompt_tokens = []
