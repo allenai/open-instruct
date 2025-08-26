@@ -23,6 +23,8 @@ from typing import Dict, List
 
 from open_instruct import logger_utils
 
+from transformers import AutoTokenizer
+
 logger = logger_utils.setup_logger(__name__)
 
 # Try to import tiktoken, but provide fallback if not available
@@ -99,22 +101,19 @@ def check_context_window_limit(
     Returns:
         bool: True if the request would fit within context window, False otherwise
     """
-    if not TIKTOKEN_AVAILABLE:
-        logger.warning("tiktoken not available. Skipping context window check.")
-        return True
-
     try:
-        # Get the appropriate encoding for the model
-        encoding = get_encoding_for_model(model_name)
+        # First try to load the actual model tokenizer from HuggingFace
+        tokenizer = AutoTokenizer.from_pretrained(model_name.replace("hosted_vllm/", ""))
+        max_context_length = tokenizer.model_max_length
 
-        # Count tokens in all messages
+        # Count tokens in all messages using HuggingFace tokenizer
         total_message_tokens = 0
         for message in messages:
             content = message.get("content", "")
             role = message.get("role", "")
 
-            # Count tokens in content
-            content_tokens = len(encoding.encode(content))
+            # Count tokens in content using HuggingFace tokenizer
+            content_tokens = len(tokenizer.encode(content, add_special_tokens=False))
 
             # Add tokens for role formatting (approximate)
             # System messages typically add ~4 tokens, user/assistant messages add ~3 tokens
@@ -140,8 +139,52 @@ def check_context_window_limit(
         return True
 
     except Exception as e:
-        logger.warning(f"Error checking judge context window limit: {e}. Proceeding with request.")
-        return True  # Default to allowing the request if we can't check
+        logger.warning(f"Failed to load HuggingFace tokenizer for {model_name}: {e}. Falling back to tiktoken.")
+        
+        # Fall back to tiktoken if HuggingFace tokenizer fails
+        if not TIKTOKEN_AVAILABLE:
+            logger.warning("tiktoken not available. Skipping context window check.")
+            return True
+
+        try:
+            # Get the appropriate encoding for the model
+            encoding = get_encoding_for_model(model_name)
+
+            # Count tokens in all messages
+            total_message_tokens = 0
+            for message in messages:
+                content = message.get("content", "")
+                role = message.get("role", "")
+
+                # Count tokens in content
+                content_tokens = len(encoding.encode(content))
+
+                # Add tokens for role formatting (approximate)
+                # System messages typically add ~4 tokens, user/assistant messages add ~3 tokens
+                if role == "system":
+                    role_tokens = 4
+                else:
+                    role_tokens = 3
+
+                total_message_tokens += content_tokens + role_tokens
+
+            # Calculate total tokens needed
+            total_tokens_needed = total_message_tokens + max_completion_tokens + safety_margin
+
+            # Check if we would exceed the context window
+            if total_tokens_needed > max_context_length:
+                logger.warning(
+                    f"Judge context window would be exceeded: {total_tokens_needed} tokens needed "
+                    f"(messages: {total_message_tokens}, completion: {max_completion_tokens}, "
+                    f"safety: {safety_margin}) > {max_context_length} max context length"
+                )
+                return False
+
+            return True
+
+        except Exception as e:
+            logger.warning(f"Error checking judge context window limit: {e}. Proceeding with request.")
+            return True  # Default to allowing the request if we can't check
 
 
 def truncate_messages_to_fit_context(
