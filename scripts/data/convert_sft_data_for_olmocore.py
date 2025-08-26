@@ -1,3 +1,17 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "beaker-py>=1.32.2,<2.0",
+#     "datasets>=4.0.0",
+#     "numpy<2",
+#     "ray[default]>=2.44.1",
+#     "rich>=13.7.0",
+#     "tqdm",
+#     "transformers>=4.52.4",
+#     "torch>=2.7.0,<2.8",
+# ]
+# ///
+
 """
 This script converts SFT datasets to OLMoCore format. OLMoCore has a more efficient
 implementation of the OLMo models (espeically for MoE), and so it can be preferable
@@ -6,13 +20,16 @@ to use it for training on next-token prediction tasks (e.g. SFT).
 OLMoCore accepts data in numpy mmap format. One file is for the input tokens and one for the labels mask.
 
 Usage:
+    ```bash
     python scripts/data/convert_sft_data_for_olmocore.py \
         --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
         --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture-0225 1.0 \
         --output_dir ./data/tulu-3-sft-olmo-2-mixture-0225-olmocore \
         --chat_template_name olmo
+    ```
 
 Ai2 Internal Usage (requires gantry>=3):
+    ```bash
     gantry run \
         --allow-dirty \
         --workspace ai2/jacobm \
@@ -22,13 +39,17 @@ Ai2 Internal Usage (requires gantry>=3):
         --weka=oe-training-default:/weka/oe-training-default \
         --task-name convert-sft-data-for-olmocore \
         --env-secret HF_TOKEN=HF_TOKEN \
-        -- uv run scripts/data/convert_sft_data_for_olmocore.py \
+        --install "echo 'do nothing'" \
+        -- uv run --script scripts/data/convert_sft_data_for_olmocore.py \
             --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture 1.0 \
             --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
             --output_dir /weka/oe-training-default/ai2-llm/tylerr/data/sft/tulu-3-sft-olmo-2-mixture-0225-olmocore-test1 \
             --visualize True \
             --chat_template_name olmo \
             --max_seq_length 16384
+    ```
+    Add `--show-logs` to stream the logs to the terminal. By default `gantry run` will detach the job.
+
 
 NOTE: allenai/OLMo-2-1124-7B tokenizer is the same as allenai/dolma2-tokenizer, but allenai/OLMo-2-1124-7B
 has additional metadata required for this script.
