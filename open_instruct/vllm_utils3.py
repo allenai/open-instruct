@@ -433,6 +433,8 @@ class LLMRayActor:
 
     def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step):
         """Add initial requests to the engine."""
+        if os.environ.get("VLLM_USE_V1") == 0:
+            logging.warning("When using the v0 version of vLLM, caching is broken and will never be invalidated.")
         for i, prompt in enumerate(prompts):
             # Prepend system prompt tokens if available
             full_prompt = self.system_prompt_tokens + prompt
