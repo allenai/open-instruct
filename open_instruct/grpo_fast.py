@@ -174,6 +174,8 @@ class Args:
     """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
     """The maximum prompt token length to use for the dataset"""
+    system_prompt: Optional[str] = None
+    """Optional system prompt to prepend to all prompts sent to the engine"""
 
     # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -1875,6 +1877,7 @@ def create_model_and_optimizer(
     inference_results_Q: ray_queue.Queue,
     param_prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q: ray_queue.Queue,
+    system_prompt_tokens: List[int],
 ) -> tuple[ModelGroup, list[vllm_utils3.LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
@@ -1938,6 +1941,7 @@ def create_model_and_optimizer(
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
+        system_prompt_tokens=system_prompt_tokens,
     )
 
     resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
@@ -2649,6 +2653,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     args = setup_runtime_variables(args)
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
+    # Tokenize system prompt if provided
+    if args.system_prompt:
+        system_prompt_tokens = tokenizer.encode(args.system_prompt, add_special_tokens=False)
+        logger.info(f"System prompt tokenized to {len(system_prompt_tokens)} tokens")
+    else:
+        system_prompt_tokens = []
+
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
     if args.cache_dataset_only:
         return
@@ -2675,6 +2686,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             inference_results_Q,
             param_prompt_Q,
             evaluation_inference_results_Q,
+            system_prompt_tokens,
         )
     )
 
