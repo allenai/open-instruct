@@ -53,7 +53,7 @@ import numpy as np
 import torch
 import transformers
 from datasets import Dataset, concatenate_datasets, load_dataset
-from huggingface_hub import ModelCard, revision_exists, HfApi
+from huggingface_hub import ModelCard, revision_exists
 from rich.console import Console
 from rich.text import Text
 from transformers import (
@@ -65,6 +65,8 @@ from transformers import (
     PreTrainedTokenizer,
 )
 from transformers.utils.hub import _CACHED_NO_EXIST, TRANSFORMERS_CACHE, extract_commit_hash, try_to_load_from_cache
+
+from open_instruct.utils import hf_whoami
 
 
 # ----------------------------------------------------------------------------
@@ -1433,7 +1435,7 @@ def compute_config_hash(dcs: List[DatasetConfig], tc: TokenizerConfig) -> str:
 class DatasetTransformationCache:
     def __init__(self, config_hash: str, hf_entity: Optional[str] = None):
         self.config_hash = config_hash
-        self.hf_entity = hf_entity or HfApi().whoami()["name"]
+        self.hf_entity = hf_entity or hf_whoami()["name"]
 
     def load_or_transform_dataset(
         self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False

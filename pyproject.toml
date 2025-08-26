@@ -78,13 +78,13 @@ link-mode = "hardlink"
 
 [dependency-groups]
 dev = [
-    "rich>=13.7.0",            # required by data_transformation.py
-    "beaker-py>=1.32.2,<2.0",  # required by data_transformation.py
+    "beaker-py>=1.32.2,<2.0",
     "mkdocs-material>=9.6.8",
     "markdown-include>=0.8.1",
     "pytest>=8.3.4",
     "ruff>=0.11.13",
     "parameterized>=0.9.0",
+    "rich>=13.7.0",
 ]
 
 [tool.pytest.ini_options]
