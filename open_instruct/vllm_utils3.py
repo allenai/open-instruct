@@ -47,6 +47,24 @@ from open_instruct.utils import ray_get_with_progress
 logger = logger_utils.setup_logger(__name__)
 
 
+# From: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
+# Turns out Ray doesnt necessarily place bundles together,
+# so this function is used to get the bundle indices of a placement group
+# and ensure that the bundles placed on the same node are grouped together.
+# avoids unnecessary communication for TP>1 with vllm.
+def get_bundle_indices(placement_group, index, length):
+    import ray
+
+    pg_infos = ray.util.placement_group_table(placement_group)
+
+    node_id_to_bundles = {}
+    for bundle, node_id in pg_infos["bundles_to_node_id"].items():
+        node_id_to_bundles.setdefault(node_id, []).append(bundle)
+
+    sorted_bundle_indices = sum(node_id_to_bundles.values(), [])
+    return sorted_bundle_indices[index * length : (index + 1) * length]
+
+
 def _init_tool_tracking():
     """Initialize tracking variables for tool mode."""
     return {
@@ -619,12 +637,12 @@ def create_vllm_engines(
     for i in range(num_engines):
         bundle_indices = None
         if tensor_parallel_size > 1:
-            bundle_indices = list(range(i * tensor_parallel_size, (i + 1) * tensor_parallel_size))
+            bundle_indices = get_bundle_indices(pg, i, tensor_parallel_size)
 
         scheduling_strategy = PlacementGroupSchedulingStrategy(
             placement_group=pg,
             placement_group_capture_child_tasks=True,
-            placement_group_bundle_index=i * tensor_parallel_size,
+            placement_group_bundle_index=bundle_indices[0] if bundle_indices else i,
         )
 
         vllm_engines.append(
