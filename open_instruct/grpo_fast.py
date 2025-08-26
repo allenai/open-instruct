@@ -2530,7 +2530,7 @@ def run_training(
             try:
                 metrics = metrics_Q.get_nowait()
             except Empty:
-                logger.info("[Main Thread] didn't get generation metrics")
+                logger.info("[Main Thread] didn't get train generation metrics")
 
             data_thread_metrics = {**data_thread_metrics, **metrics}
 
