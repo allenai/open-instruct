@@ -2319,7 +2319,6 @@ dependencies = [
     { name = "torch", version = "2.7.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.7.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform != 'darwin'" },
     { name = "transformers" },
-    { name = "vllm" },
     { name = "wandb" },
 ]
 
@@ -2329,6 +2328,9 @@ code = [
     { name = "pydantic" },
     { name = "requests" },
     { name = "uvicorn" },
+]
+vllm = [
+    { name = "vllm" },
 ]
 
 [package.dev-dependencies]
@@ -2374,10 +2376,10 @@ requires-dist = [
     { name = "torch", marker = "sys_platform == 'darwin'", specifier = ">=2.7.0,<2.8" },
     { name = "transformers", git = "https://github.com/2015aroras/transformers.git?rev=shanea%2Folmo2-retrofit" },
     { name = "uvicorn", marker = "extra == 'code'", specifier = ">=0.20.0" },
-    { name = "vllm", git = "https://github.com/2015aroras/vllm.git?rev=shanea%2Folmo2-retrofit" },
+    { name = "vllm", marker = "extra == 'vllm'", editable = "vllm_olmo2.5" },
     { name = "wandb", specifier = "==0.18.1" },
 ]
-provides-extras = ["code"]
+provides-extras = ["code", "vllm"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -4231,8 +4233,7 @@ wheels = [
 
 [[package]]
 name = "vllm"
-version = "0.1.dev7527+gbe33c078b.precompiled"
-source = { git = "https://github.com/2015aroras/vllm.git?rev=shanea%2Folmo2-retrofit#be33c078b2421b663d359545eb56811cfd1de6c9" }
+source = { editable = "vllm_olmo2.5" }
 dependencies = [
     { name = "aiohttp" },
     { name = "blake3" },
@@ -4288,6 +4289,74 @@ dependencies = [
     { name = "xformers", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "xgrammar", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'x86_64'" },
 ]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp" },
+    { name = "blake3" },
+    { name = "boto3", marker = "extra == 'runai'" },
+    { name = "cachetools" },
+    { name = "cloudpickle" },
+    { name = "compressed-tensors", specifier = "==0.10.2" },
+    { name = "datasets", marker = "extra == 'bench'" },
+    { name = "depyf", specifier = "==0.18.0" },
+    { name = "einops" },
+    { name = "fastapi", extras = ["standard"], specifier = ">=0.115.0" },
+    { name = "fastsafetensors", marker = "extra == 'fastsafetensors'", specifier = ">=0.1.10" },
+    { name = "filelock", specifier = ">=3.16.1" },
+    { name = "gguf", specifier = ">=0.13.0" },
+    { name = "huggingface-hub", extras = ["hf-xet"], specifier = ">=0.33.0" },
+    { name = "importlib-metadata", marker = "python_full_version < '3.10'" },
+    { name = "lark", specifier = "==1.2.2" },
+    { name = "librosa", marker = "extra == 'audio'" },
+    { name = "llguidance", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'x86_64'", specifier = ">=0.7.11,<0.8.0" },
+    { name = "lm-format-enforcer", specifier = ">=0.10.11,<0.11" },
+    { name = "mistral-common", extras = ["opencv"], specifier = ">=1.6.2" },
+    { name = "msgspec" },
+    { name = "ninja" },
+    { name = "numba", marker = "python_full_version == '3.9.*'", specifier = "==0.60.0" },
+    { name = "numba", marker = "python_full_version >= '3.10'", specifier = "==0.61.2" },
+    { name = "numpy" },
+    { name = "openai", specifier = ">=1.87.0,<=1.90.0" },
+    { name = "opencv-python-headless", specifier = ">=4.11.0" },
+    { name = "outlines", specifier = "==0.1.11" },
+    { name = "pandas", marker = "extra == 'bench'" },
+    { name = "partial-json-parser" },
+    { name = "pillow" },
+    { name = "prometheus-client", specifier = ">=0.18.0" },
+    { name = "prometheus-fastapi-instrumentator", specifier = ">=7.0.0" },
+    { name = "protobuf" },
+    { name = "psutil" },
+    { name = "py-cpuinfo" },
+    { name = "pybase64" },
+    { name = "pydantic", specifier = ">=2.10" },
+    { name = "python-json-logger" },
+    { name = "pyyaml" },
+    { name = "pyzmq", specifier = ">=25.0.0" },
+    { name = "ray", extras = ["cgraph"], specifier = ">=2.43.0,!=2.44.*" },
+    { name = "regex" },
+    { name = "requests", specifier = ">=2.26.0" },
+    { name = "runai-model-streamer", marker = "extra == 'runai'" },
+    { name = "runai-model-streamer-s3", marker = "extra == 'runai'" },
+    { name = "scipy" },
+    { name = "sentencepiece" },
+    { name = "setuptools", marker = "python_full_version >= '3.12'", specifier = ">=77.0.3,<80" },
+    { name = "six", marker = "python_full_version >= '3.12'", specifier = ">=1.16.0" },
+    { name = "soundfile", marker = "extra == 'audio'" },
+    { name = "tensorizer", marker = "extra == 'tensorizer'", specifier = ">=2.9.0" },
+    { name = "tiktoken", specifier = ">=0.6.0" },
+    { name = "tokenizers", specifier = ">=0.21.1" },
+    { name = "torch", specifier = "==2.7.0" },
+    { name = "torchaudio", specifier = "==2.7.0" },
+    { name = "torchvision", specifier = "==0.22.0" },
+    { name = "tqdm" },
+    { name = "transformers", specifier = ">=4.51.1" },
+    { name = "typing-extensions", specifier = ">=4.10" },
+    { name = "watchfiles" },
+    { name = "xformers", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = "==0.0.30" },
+    { name = "xgrammar", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'x86_64'", specifier = "==0.1.19" },
+]
+provides-extras = ["bench", "tensorizer", "fastsafetensors", "runai", "audio", "video"]
 
 [[package]]
 name = "wandb"
