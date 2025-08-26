@@ -1833,6 +1833,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
             # ------------------------------------------------------------------------------------------------
             # Get the packed sequences with advantages from the packing thread
+            skip_batch = False
             with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
                 packed_data = packed_sequences_Q.get()
                 data_thread_metrics = packed_data["metrics"]
@@ -1840,80 +1841,83 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 collated_data = packed_data["collated_data"]
                 num_total_tokens += packed_data["num_new_tokens"]
                 if B == 0:
-                    print("[Main Thread] 🤡 After packing, there is not enough data to train")
-                    continue
+                    print("[Main Thread] 🤡 After packing, there is not enough data to train. Will save though.")
+                    skip_batch = True
 
             # ------------------------------------------------------------------------------------------------
             # Train the model
-            update_ref_policy_future = []
-            with Timer("[Main Thread] 🗡️ Training"):
-                metrics_list: List[dict[str, float]] = ray.get(
-                    [
-                        policy_group.models[i].train.remote(
-                            **collated_data[i],
-                            pad_token_id=tokenizer.pad_token_id,
-                            num_mini_batches=args.num_mini_batches,
-                        )
-                        for i in range(args.world_size)
-                    ]
-                )
-                if (
-                    args.ref_policy_update_freq is not None
-                    and training_step % args.ref_policy_update_freq == 0
-                    and args.alpha > 0
-                ):
-                    update_ref_policy_future.extend(
-                        [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
+            if not skip_batch:
+                update_ref_policy_future = []
+                with Timer("[Main Thread] 🗡️ Training"):
+                    metrics_list: List[dict[str, float]] = ray.get(
+                        [
+                            policy_group.models[i].train.remote(
+                                **collated_data[i],
+                                pad_token_id=tokenizer.pad_token_id,
+                                num_mini_batches=args.num_mini_batches,
+                            )
+                            for i in range(args.world_size)
+                        ]
                     )
-
-                average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
-                metrics = {
-                    "episode": episode,
-                    "training_step": training_step,
-                    "val/num_total_tokens": num_total_tokens,
-                    "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
-                    "tokens_per_second": num_total_tokens / (time.time() - start_time),
-                    **data_thread_metrics,
-                    **average_metrics,
-                }
-                scalar_metrics = {}
-                for key, value in metrics.items():
-                    if isinstance(value, float) or isinstance(value, int):
-                        writer.add_scalar(key, value, episode)
-                        scalar_metrics[key] = value
-                    if isinstance(value, np.ndarray) or isinstance(value, list):
-                        if len(value) > 0:
-                            writer.add_histogram(key, value, episode)
-                print_rich_single_line_metrics(scalar_metrics)
-
-                if args.save_freq > 0 and training_step % args.save_freq == 0:
-                    with Timer("[Main Thread] 🗡️ Saving model"):
-                        checkpoint_dir = f"{args.output_dir}_checkpoints"
-                        step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-                        print(f"Saving model at step {training_step} to {step_dir}")
-                        ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
-                        if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
-                            leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
-                            for i in range(args.world_size):
-                                policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                                    step_dir, leaderboard_name, wandb_url, training_step
-                                )
-                if (
-                    args.checkpoint_state_freq > 0
-                    and training_step % args.checkpoint_state_freq == 0
-                    and args.checkpoint_state_dir is not None
-                ):
-                    with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
-                        client_state = {"training_step": training_step}
-                        ray.get(
-                            [
-                                policy_group.models[i].save_checkpoint_state.remote(
-                                    args.checkpoint_state_dir, client_state
-                                )
-                                for i in range(args.world_size)
-                            ]
+                    if (
+                        args.ref_policy_update_freq is not None
+                        and training_step % args.ref_policy_update_freq == 0
+                        and args.alpha > 0
+                    ):
+                        update_ref_policy_future.extend(
+                            [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
                         )
-                        print(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
+
+                    average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
+                    metrics = {
+                        "episode": episode,
+                        "training_step": training_step,
+                        "val/num_total_tokens": num_total_tokens,
+                        "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
+                        "tokens_per_second": num_total_tokens / (time.time() - start_time),
+                        **data_thread_metrics,
+                        **average_metrics,
+                    }
+                    scalar_metrics = {}
+                    for key, value in metrics.items():
+                        if isinstance(value, float) or isinstance(value, int):
+                            writer.add_scalar(key, value, episode)
+                            scalar_metrics[key] = value
+                        if isinstance(value, np.ndarray) or isinstance(value, list):
+                            if len(value) > 0:
+                                writer.add_histogram(key, value, episode)
+                    print_rich_single_line_metrics(scalar_metrics)
+
+            if args.save_freq > 0 and training_step % args.save_freq == 0:
+                with Timer("[Main Thread] 🗡️ Saving model"):
+                    checkpoint_dir = f"{args.output_dir}_checkpoints"
+                    step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
+                    print(f"Saving model at step {training_step} to {step_dir}")
+                    ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
+                    if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
+                        leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
+                        for i in range(args.world_size):
+                            policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                                step_dir, leaderboard_name, wandb_url, training_step
+                            )
+                if skip_batch:
+                    continue
+            if (
+                args.checkpoint_state_freq > 0
+                and training_step % args.checkpoint_state_freq == 0
+                and args.checkpoint_state_dir is not None
+            ):
+                with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
+                    client_state = {"training_step": training_step}
+                    ray.get(
+                        [
+                            policy_group.models[i].save_checkpoint_state.remote(
+                                args.checkpoint_state_dir, client_state
+                            )
+                            for i in range(args.world_size)
+                        ]
+                    )
+                    print(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
             if len(update_ref_policy_future) > 0:
                 with Timer("[Main Thread] 🔃 Updating reference policy"):
