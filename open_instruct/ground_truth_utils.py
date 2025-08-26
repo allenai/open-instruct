@@ -36,6 +36,11 @@ from open_instruct.math_utils import (
     remove_boxed,
 )
 from open_instruct.utils import extract_final_answer
+from open_instruct.tool_utils.swe_tool_parser import (
+    FunctionCallingParser,
+    Command as SWECommand,
+    Argument as SWEArgument,
+)
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -903,25 +908,108 @@ class CodeSearchVerifier(VerifierFunction):
         super().__init__("code_search", verifier_config=verifier_config, weight=1.0)
 
     def parse_tool_calls(self, prediction: str) -> List[Dict[str, Any]]:
-        """
-        Parse the tool calls from the prediction.
+        """Parse and validate tool calls using FunctionCallingParser.
+
+        Accepts <tool_call> {"name": ..., "arguments": {...}} </tool_call> blocks.
+        Validates each call against a minimal schema for str_replace_editor (view only).
+        Returns only validated calls as dictionaries identical to the model JSON.
         """
         tool_call_pattern = r"<tool_call>\s*(.*?)\s*</tool_call>"
         tool_calls = re.findall(tool_call_pattern, prediction, re.DOTALL)
 
-        parsed_calls = []
-        for tool_call in tool_calls:
-            try:
-                # Try to parse the JSON directly
-                parsed = json.loads(tool_call)
-                parsed_calls.append(parsed)
-            except json.JSONDecodeError as e:
-                # Log the error for debugging
-                warnings.warn(f"Failed to parse tool call JSON: {e}\nRaw content: {tool_call[:200]}...")
+        # Minimal command schema for the code-view tool
+        str_replace_editor_cmd = SWECommand(
+            name="str_replace_editor",
+            docstring="Custom tool for viewing files; only 'view' is supported here.",
+            arguments=[
+                SWEArgument(
+                    name="command",
+                    type="string",
+                    description="The command to run",
+                    required=True,
+                    enum=["view"],
+                ),
+                SWEArgument(
+                    name="path",
+                    type="string",
+                    description="Absolute path to file or directory",
+                    required=True,
+                ),
+                SWEArgument(
+                    name="view_range",
+                    type="array",
+                    description="[start, end] line numbers when viewing a file",
+                    required=True,
+                    items={"type": "integer"},
+                ),
+                SWEArgument(
+                    name="repo_name",
+                    type="string",
+                    description="Optional repository name",
+                    required=False,
+                ),
+            ],
+        )
+        parser = FunctionCallingParser()
 
-                # Don't try to fix malformed JSON - only reward correct format
-                # The model should output: {"name": "tool_name", "arguments": {...}}
-                pass  # Skip malformed tool calls
+        parsed_calls: List[Dict[str, Any]] = []
+
+        def _fallback_parse(raw_str: str) -> Optional[Dict[str, Any]]:
+            try:
+                m_name = re.search(r'"name"\s*:\s*"([^"]+)"', raw_str)
+                if not m_name:
+                    return None
+                name = m_name.group(1)
+                m_args = re.search(r'("arguments"\s*:\s*\{)|(?:arguments\s*=\s*\{)', raw_str)
+                if not m_args:
+                    return {"name": name, "arguments": {}}
+                start = m_args.end() - 1
+                depth = 0
+                end = None
+                for i in range(start, len(raw_str)):
+                    ch = raw_str[i]
+                    if ch == '{':
+                        depth += 1
+                    elif ch == '}':
+                        depth -= 1
+                        if depth == 0:
+                            end = i + 1
+                            break
+                if end is None:
+                    return None
+                args_str = raw_str[start:end]
+                arguments = json.loads(args_str)
+                return {"name": name, "arguments": arguments}
+            except Exception:
+                return None
+
+        for raw in tool_calls:
+            data = None
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                data = _fallback_parse(raw)
+                if data is None:
+                    warnings.warn(f"Failed to parse tool call JSON and fallback failed. Raw content: {raw}")
+                    continue
+            try:
+                # Build LiteLLM-style function call wrapper expected by the parser
+                model_response = {
+                    "message": prediction,
+                    "tool_calls": [
+                        {
+                            "function": {
+                                "name": data.get("name"),
+                                "arguments": data.get("arguments", {}),
+                            }
+                        }
+                    ],
+                }
+                # Validate; throws on schema issues
+                _thought, _action = parser(model_response, commands=[str_replace_editor_cmd], strict=True)
+                parsed_calls.append(data)
+            except Exception as e:
+                warnings.warn(f"Skipping invalid tool call: {e}")
 
         return parsed_calls
 

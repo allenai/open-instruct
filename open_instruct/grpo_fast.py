@@ -155,7 +155,8 @@ def log_rollouts(
     """Log prompts and completions to a JSON file for debugging and analysis."""
     from pathlib import Path
     
-    rollout_log_dir = Path(output_dir) / "rollout_logs"
+    # Hardcode rollout logs directory as requested, ignoring provided output_dir
+    rollout_log_dir = Path("/weka/oe-adapt-default/saurabhs/repos/open-instruct-3/rollouts/test2")
     rollout_log_dir.mkdir(parents=True, exist_ok=True)
     
     # Create filename with timestamp and step info

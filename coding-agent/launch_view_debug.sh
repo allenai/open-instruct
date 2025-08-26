@@ -2,21 +2,21 @@ python open_instruct/grpo_fast.py \
     --exp_name view_debug \
     --beta 0.0 \
     --num_samples_per_prompt_rollout 4 \
-    --num_unique_prompts_rollout 4 \
+    --num_unique_prompts_rollout 8 \
     --num_mini_batches 1 \
     --num_epochs 1 \
     --learning_rate 5e-7 \
     --per_device_train_batch_size 1 \
     --output_dir /output \
     --kl_estimator kl3 \
-    --dataset_mixer_list saurabh5/rlvr-code-view-tool-queries 256 \
+    --dataset_mixer_list saurabh5/rlvr-code-view-tool-new-first-turn-only 256 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list saurabh5/rlvr-code-view-tool-queries 4 \
+    --dataset_mixer_eval_list saurabh5/rlvr-code-view-tool-new-first-turn-only 4 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 1024 \
-    --max_prompt_token_length 1024 \
-    --response_length 1024 \
-    --pack_length 2048\
+    --max_token_length 2048 \
+    --max_prompt_token_length 2048 \
+    --response_length 2048 \
+    --pack_length 4096 \
     --model_name_or_path Qwen/Qwen2.5-0.5B-Instruct \
     --chat_template_name chatml \
     --non_stop_penalty False \
@@ -28,15 +28,15 @@ python open_instruct/grpo_fast.py \
     --num_learners_per_node 1 \
     --vllm_num_engines 1 \
     --vllm_tensor_parallel_size 1 \
+    --vllm_sync_backend gloo \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
-    --code_view_api_endpoint http://localhost:1234/view_file \
+    --code_view_api_endpoint http://localhost:7872/view_file \
     --seed 42 \
-    --num_evals 5 \
     --save_freq 50 \
     --try_launch_beaker_eval_jobs_on_weka False \
     --gradient_checkpointing \
-    --oe_eval_max_length 16384 \
     --tools code_view \
-    --max_tool_calls 15 \
+    --max_tool_calls 5 \
+    --allow_world_padding True \
     --single_gpu_mode
