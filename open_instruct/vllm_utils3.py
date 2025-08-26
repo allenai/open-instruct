@@ -59,7 +59,6 @@ def get_bundle_indices_list(placement_group: ray.util.placement_group) -> List[i
     for bundle, node_id in pg_infos["bundles_to_node_id"].items():
         node_id_to_bundles[node_id].append(bundle)
 
-    # create a flattened list of bundles we can use.
     flattened_bundle_indices = []
     for node_id, bundles in node_id_to_bundles.items():
         flattened_bundle_indices.extend(bundles)
