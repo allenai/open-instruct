@@ -50,6 +50,7 @@ from open_instruct import utils
 import asyncio
 import json
 import math
+import random
 import shutil
 import socket
 import threading
@@ -435,15 +436,25 @@ class Args:
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
             raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
+
+        if self.gs_checkpoint_state_dir is not None and not self.gs_checkpoint_state_dir.startswith("gs://"):
+            raise ValueError(f"`gs_checkpoint_state_dir` must start with 'gs://', got: {self.gs_checkpoint_state_dir}")
+        if self.gs_bucket_path is not None and not self.gs_bucket_path.startswith("gs://"):
+            raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")
+
         if self.gs_bucket_path is not None and self.gs_checkpoint_state_dir is None:
+            if self.checkpoint_state_dir is None:
+                raise ValueError("`checkpoint_state_dir` must be provided when using `gs_bucket_path`!")
+            checkpoint_dir_name = self.checkpoint_state_dir.rstrip("/")
             beaker_users = get_beaker_whoami()
             if beaker_users is not None:
-                self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{beaker_users}/{self.checkpoint_state_dir}"
+                self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{beaker_users}/{checkpoint_dir_name}"
             else:
-                self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{self.checkpoint_state_dir}"
-        if self.gs_checkpoint_state_dir is not None:
-            download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
+                self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{checkpoint_dir_name}"
+
         if self.checkpoint_state_dir is not None:
+            if self.gs_checkpoint_state_dir is not None:
+                download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
         if self.tools is not None and len(self.tools) > 0:
             for tool in self.tools:
@@ -533,6 +544,20 @@ class ShufflingIterator:
 
         return batch
 
+    def get_state(self) -> Dict[str, Any]:
+        """Get the current state of the iterator for checkpointing."""
+        return {
+            "index": self.index,
+            "data": self.data.copy(),  # Current shuffled order
+            "rng_state": self.rng.bit_generator.state,
+        }
+
+    def set_state(self, state: Dict[str, Any]) -> None:
+        """Restore the iterator state from a checkpoint."""
+        self.index = state["index"]
+        self.data = state["data"].copy()
+        self.rng.bit_generator.state = state["rng_state"]
+
 
 @ray.remote(num_gpus=1)
 class PolicyTrainerRayProcess(RayProcess):
@@ -567,6 +592,14 @@ class PolicyTrainerRayProcess(RayProcess):
         self.wandb_url = wandb_url
         torch.cuda.set_device(self.local_rank)
         self.device = torch.device(self.local_rank)
+
+        # Set seeds for this worker (different per rank to avoid correlation)
+        worker_seed = args.seed + self.local_rank
+        torch.manual_seed(worker_seed)
+        torch.cuda.manual_seed(worker_seed)
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
+
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
         ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
@@ -634,6 +667,31 @@ class PolicyTrainerRayProcess(RayProcess):
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
                 optimization_steps_done = states["training_step"]
+
+                rng_states = states["rng_states"]
+                torch.set_rng_state(rng_states["torch_cpu_rng_state"])
+                np.random.set_state(rng_states["numpy_rng_state"])
+                random.setstate(rng_states["python_rng_state"])
+
+                if torch.cuda.is_available() and "torch_cuda_rng_states" in rng_states:
+                    # device_str, e.g. "cuda:0"
+                    for device_str, rng_state in rng_states["torch_cuda_rng_states"].items():
+                        device_id = int(device_str.split(":")[1])
+                        torch.cuda.set_rng_state(rng_state, device_id)
+                    if "torch_cuda_rng_state_all" in rng_states:
+                        torch.cuda.set_rng_state_all(rng_states["torch_cuda_rng_state_all"])
+
+                logger.info(f"{self.rank=}: Restored RNG states from checkpoint")
+
+                # Save reference policy path to load later (after ref_policy is initialized)
+                self.ref_policy_checkpoint_path = None
+                if states.get("ref_policy_saved", False):
+                    ref_policy_dir = os.path.join(args.checkpoint_state_dir, "ref_policy")
+                    model_path = os.path.join(ref_policy_dir, "pytorch_model.bin")
+                    if os.path.exists(model_path):
+                        self.ref_policy_checkpoint_path = model_path
+                        logger.info(f"{self.rank=}: Will load reference policy from {model_path}")
+
                 logger.info(
                     f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}"
                 )
@@ -665,6 +723,16 @@ class PolicyTrainerRayProcess(RayProcess):
         disable_dropout_in_model(self.ref_policy)
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
         self.ref_policy.eval()
+
+        # Load reference policy checkpoint if available
+        if hasattr(self, "ref_policy_checkpoint_path") and self.ref_policy_checkpoint_path:
+            state_dict = torch.load(self.ref_policy_checkpoint_path, map_location=self.device)
+            if hasattr(self.ref_policy, "module"):
+                # If wrapped by DeepSpeed
+                self.ref_policy.module.load_state_dict(state_dict)
+            else:
+                self.ref_policy.load_state_dict(state_dict)
+            logger.info(f"{self.rank=}: Loaded reference policy checkpoint from {self.ref_policy_checkpoint_path}")
         self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
         return optimization_steps_done
 
@@ -1009,15 +1077,59 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
                 return self.local_metrics.get_metrics_list()
 
-    def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: Dict[str, str]) -> None:
+    def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: Dict[str, Any]) -> None:
         args = self.args
+
+        # Save comprehensive RNG states for each rank
+        rng_states = {
+            "torch_cpu_rng_state": torch.get_rng_state(),
+            "numpy_rng_state": np.random.get_state(),
+            "python_rng_state": random.getstate(),
+        }
+
+        # Save CUDA RNG states for all devices
+        if torch.cuda.is_available():
+            rng_states["torch_cuda_rng_states"] = {
+                f"cuda:{i}": torch.cuda.get_rng_state(i) for i in range(torch.cuda.device_count())
+            }
+            rng_states["torch_cuda_rng_state_all"] = torch.cuda.get_rng_state_all()
+
+        # Add RNG states to client_state
+        client_state["rng_states"] = rng_states
+        client_state["rank"] = self.rank
+
+        # Save reference policy checkpoint (model only, no optimizer)
+        if hasattr(self, "ref_policy") and self.ref_policy is not None:
+            ref_policy_dir = os.path.join(checkpoint_state_dir, "ref_policy")
+            os.makedirs(ref_policy_dir, exist_ok=True)
+
+            # For reference policy, we save just the model weights
+            # We can't use save_checkpoint because it would try to save DummyOptim
+            # which doesn't have state_dict
+            if self.rank == 0:
+                # Only rank 0 saves the model state
+                if hasattr(self.ref_policy, "module"):
+                    # If wrapped by DeepSpeed, get the underlying module
+                    model_to_save = self.ref_policy.module
+                else:
+                    model_to_save = self.ref_policy
+
+                # Save the state dict
+                torch.save(model_to_save.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
+                logger.info(f"Saved reference policy model to {ref_policy_dir}")
+
+            client_state["ref_policy_saved"] = True
+
+        # Save the main model checkpoint with enhanced client state
         self.model.save_checkpoint(checkpoint_state_dir, client_state=client_state)
+
         # `save_checkpoint` needs to be called on all ranks, only rank 0 will have all the states
         if self.rank == 0:
             if args.keep_last_n_checkpoints >= 0:
                 clean_last_n_checkpoints_deepspeed(checkpoint_state_dir, args.keep_last_n_checkpoints)
 
-            if args.gs_bucket_path is not None:
+            # Sync to GCS if configured (check the actual target, not just gs_bucket_path)
+            if args.gs_checkpoint_state_dir is not None:
                 ray.remote(sync_gs_bucket).options(num_cpus=1).remote(
                     checkpoint_state_dir, args.gs_checkpoint_state_dir
                 )
@@ -1863,6 +1975,7 @@ def create_generation_configs(args: Args):
         skip_special_tokens=False,
         n=args.num_samples_per_prompt_rollout,
         stop=args.stop_strings,
+        seed=args.seed,
         # IMPORTANT: Set output_kind to FINAL_ONLY to ensure vLLM V1 properly handles n>1
         # With the default CUMULATIVE mode, vLLM V1 returns separate outputs for each
         # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode
@@ -2048,6 +2161,7 @@ def one_training_step(
     train_dataset,
     wandb_url,
     chat_template_name,
+    iter_dataloader=None,
 ):
     """Train the model for one step."""
     update_ref_policy_future = []
@@ -2089,23 +2203,6 @@ def one_training_step(
                     policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
                         step_dir, leaderboard_name, wandb_url, training_step
                     )
-        save_time += timer.duration
-
-    if (
-        args.checkpoint_state_freq > 0
-        and training_step % args.checkpoint_state_freq == 0
-        and args.checkpoint_state_dir is not None
-    ):
-        with Timer("[Main Thread] 🗡️ Saving checkpoint state") as timer:
-            client_state = {"training_step": training_step}
-            ray_get_with_progress(
-                [
-                    policy_group.models[i].save_checkpoint_state.remote(args.checkpoint_state_dir, client_state)
-                    for i in range(args.world_size)
-                ],
-                desc=f"Saving checkpoint state at step {training_step}",
-            )
-            logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
         save_time += timer.duration
 
     if len(update_ref_policy_future) > 0:
@@ -2416,6 +2513,7 @@ def run_training(
     generate_metrics_Q,
     weight_sync_metrics_Q,
     actor_manager: vllm_utils3.ActorManager,
+    checkpoint_state=None,
 ):
     if resume_training_step > 1:
         logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
@@ -2469,6 +2567,12 @@ def run_training(
             param_prompt_Q,
             generation_configs["train"],
         )
+    if checkpoint_state and "num_total_tokens" in checkpoint_state:
+        num_total_tokens = checkpoint_state["num_total_tokens"]
+        logger.info(f"Restored num_total_tokens: {num_total_tokens}")
+    else:
+        num_total_tokens = 0
+
     num_total_tokens = 0
     training_start_time = time.time()  # Track overall training start time
     for training_step in range(resume_training_step, args.num_training_steps + 1):
@@ -2547,7 +2651,36 @@ def run_training(
             train_dataset,
             wandb_url,
             tc.chat_template_name,
+            iter_dataloader,
         )
+
+        # Checkpoint after one_training_step (or even if it was skipped)
+        # This ensures we checkpoint progress even if the exact checkpoint step has no data
+        if (
+            args.checkpoint_state_freq > 0
+            and training_step % args.checkpoint_state_freq == 0
+            and args.checkpoint_state_dir is not None
+        ):
+            with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
+                # Save comprehensive client state including ShufflingIterator state
+                client_state = {
+                    "training_step": training_step,
+                    "episode": episode,
+                    "num_total_tokens": num_total_tokens,
+                }
+
+                # Save ShufflingIterator state
+                if iter_dataloader is not None:
+                    client_state["shuffling_iterator_state"] = iter_dataloader.get_state()
+
+                ray_get_with_progress(
+                    [
+                        policy_group.models[i].save_checkpoint_state.remote(args.checkpoint_state_dir, client_state)
+                        for i in range(args.world_size)
+                    ],
+                    desc=f"Saving checkpoint state at step {training_step}",
+                )
+                logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
         maybe_evaluate(
             args,
@@ -2604,8 +2737,23 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     generation_configs = create_generation_configs(args)
 
+    checkpoint_state = None
+    if args.checkpoint_state_dir and os.path.exists(args.checkpoint_state_dir):
+        # Try to load the checkpoint state from the first rank
+        checkpoint_path = os.path.join(args.checkpoint_state_dir, "global_0", "state.pt")
+        if os.path.exists(checkpoint_path):
+            checkpoint_state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+            logger.info(f"Loaded checkpoint state from {checkpoint_path}")
+
+            episode = checkpoint_state["episode"]
+            logger.info(f"Restored episode count: {episode}")
+
     train_dataset_idxs = np.arange(len(train_dataset))
     iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
+
+    if checkpoint_state and "shuffling_iterator_state" in checkpoint_state:
+        iter_dataloader.set_state(checkpoint_state["shuffling_iterator_state"])
+        logger.info("Restored ShufflingIterator state from checkpoint")
 
     # Create additional queues (main queues already created above)
     packed_sequences_Q = Queue(maxsize=args.async_steps)
@@ -2650,6 +2798,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             generate_metrics_Q,
             weight_sync_metrics_Q,
             actor_manager,
+            checkpoint_state,
         )
     finally:
         cleanup_training_resources(
