@@ -34,10 +34,10 @@ uv run python mason.py \
         --dataset_mixer_eval_list_splits train \
         --max_token_length 10240 \
         --max_prompt_token_length 2048 \
-        --response_length 4096 \
-        --pack_length 20480 \
+        --response_length 32000 \
+        --pack_length 40000 \
         --inflight_updates True \
-        --model_name_or_path Qwen/Qwen2.5-7B \
+        --model_name_or_path /weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/rl-sft/olmo2-7B-FINAL-lc-OT3-full-regen-wc-oasst-ccn-pif-qif-wgwj-syn2-aya-tgpt-ncode-scode \
         --chat_template_name tulu_thinker \
         --stop_strings "</answer>" \
         --non_stop_penalty False \
