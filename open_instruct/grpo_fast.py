@@ -310,6 +310,10 @@ class Args:
     code_apply_perf_penalty: bool = False
     """whether to apply a performance penalty to the code verifier"""
 
+    # -- max length verifier
+    max_length_verifier_max_length: int = 32768
+    """the max length to use for the max length verifier"""
+
     # -- non stop penalty
     non_stop_penalty: bool = False
     """whether to penalize responses which did not finish generation"""
