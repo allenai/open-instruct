@@ -28,17 +28,17 @@ OLMoCore accepts data in numpy mmap format. One file is for the input tokens and
         --chat_template_name olmo
     ```
 
-## Ai2 Internal Usage (requires gantry>=3):
+## Ai2 Internal Usage (requires `gantry>=3`):
     ```bash
     gantry run \
         --workspace ai2/jacobm \
         --budget ai2/oe-base \
         --priority normal \
-        --cluster ai2/phobos-cirrascale --yes \
+        --cluster ai2/neptune-cirrascale --gpus 1 \
         --weka=oe-training-default:/weka/oe-training-default \
-        --task-name convert-sft-data-for-olmocore \
+        --task-name convert-sft-data-for-olmocore --yes \
         --env-secret HF_TOKEN=HF_TOKEN \
-        --install "echo '¯\_(ツ)_/¯'" \
+        --install "echo 'do nothing'" \
         -- uv run --script scripts/data/convert_sft_data_for_olmocore.py \
             --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture 1.0 \
             --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
