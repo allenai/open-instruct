@@ -100,7 +100,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
 
 def _process_outputs(
-    outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None
+    outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None, start_time: Optional[float] = None
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -129,13 +129,14 @@ def _process_outputs(
         masks=masks,
         request_info=request_info,
         dataset_index=dataset_index,
+        start_time=start_time,
     )
 
     return result
 
 
 def _process_outputs_with_tools(
-    outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None
+    outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None, start_time: Optional[float] = None
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format with tool information."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -164,16 +165,17 @@ def _process_outputs_with_tools(
         masks=masks,
         request_info=request_info,
         dataset_index=dataset_index,
+        start_time=start_time,
     )
 
     return result
 
 
-def _finalize_outputs(outputs, tracking, dataset_index, tools):
+def _finalize_outputs(outputs, tracking, dataset_index, tools, start_time=None):
     """Prepare final outputs based on whether tools were used."""
     if not tools:
         outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
-        return _process_outputs(outputs, dataset_index=dataset_index)
+        return _process_outputs(outputs, dataset_index=dataset_index, start_time=start_time)
 
     # Tool mode: add metadata and merge completions
     for req_id in tracking["masks"]:
@@ -200,7 +202,7 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools):
         merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1]))
     )
 
-    return _process_outputs_with_tools(final_outputs, dataset_index=dataset_index)
+    return _process_outputs_with_tools(final_outputs, dataset_index=dataset_index, start_time=start_time)
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -382,6 +384,7 @@ class LLMRayActor:
         """Unified processing for both tool and non-tool generation."""
         prompts = request.prompts
         sampling_params = request.generation_config
+        start_time = request.start_time
 
         self.logger.info(f"[LLMRayActor] Processing request with {len(prompts)} prompts, tools={bool(self.tools)}")
 
@@ -426,7 +429,7 @@ class LLMRayActor:
                 self.logger.info(f"[LLMRayActor] Terminating after {iteration} iterations with {len(outputs)} outputs")
                 break
 
-        result = _finalize_outputs(outputs, tracking, request.dataset_index, self.tools)
+        result = _finalize_outputs(outputs, tracking, request.dataset_index, self.tools, start_time)
         return result
 
     def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step):
