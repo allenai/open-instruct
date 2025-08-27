@@ -136,31 +136,16 @@ def save_benchmark_results_to_csv(
     agg_results = aggregate_results(results)
     csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
 
-    # Calculate overall MFU using ModelDims
     device_name = get_device_name(torch.cuda.get_device_name(0))
     device_flops = GPU_SPECS[device_name]["flops"]
-
-    # Load model dims for FLOPS calculation
     model_dims = load_model_dims(model_config.model_name_or_path)
+    all_prompt_lengths = [result["prompt_lengths"] for result in results]
+    all_response_lengths = [result["response_lengths"] for result in results]
 
-    # Collect all prompt and response lengths from results
-    all_prompt_lengths = []
-    all_response_lengths = []
-    for result in results:
-        if "prompt_lengths" in result:
-            all_prompt_lengths.extend(result["prompt_lengths"])
-        if "response_lengths" in result:
-            all_response_lengths.extend(result["response_lengths"])
-
-    # Calculate total FLOPs for all prompts and responses
     total_flops = model_dims.flops(
         all_prompt_lengths, all_response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
     )
 
-    # Calculate overall MFU
-    overall_mfu = 100 * (total_flops / total_time) / device_flops
-
-    # Prepare row data
     row_data = {
         "git_commit": git_commit,
         "model": model_config.model_name_or_path,
@@ -178,7 +163,7 @@ def save_benchmark_results_to_csv(
         "avg_generation_time_per_batch": agg_results["avg_generation_time"],
         "avg_new_tokens_per_sample": agg_results["total_num_new_tokens"]
         / (len(results) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout),
-        "overall_mfu": overall_mfu,
+        "overall_mfu": 100 * (total_flops / total_time) / device_flops,
     }
 
     csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
@@ -462,40 +447,16 @@ def generate_thread(vllm_engines: list[ray.actor.ActorHandle], stop_event: threa
     """Thread that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] Starting generation thread")
     while not stop_event.is_set():
-        try:
-            # Use ray.wait with a timeout to allow checking stop_event periodically
-            futures = [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines]
-            ready, not_ready = ray.wait(futures, timeout=1.0)  # Check every 1 second
-
-            if not ready and stop_event.is_set():
-                logger.info("[Generate Thread] Stopping due to stop event")
-                break
-
-            # Get all results (this will block if not all are ready)
-            if ready:
-                processed_results = ray.get(ready)
-                # Cancel any not ready futures if stop event is set
-                if not_ready and stop_event.is_set():
-                    break
-                # Wait for remaining if not stopping
-                if not_ready:
-                    remaining = ray.get(not_ready)
-                    processed_results.extend(remaining)
-            else:
-                continue  # No results ready yet, loop again
-
-            num_processed = sum(int(result) for result in processed_results)
-            if num_processed == 0:
-                time.sleep(1)
-            else:
-                logger.debug(f"[Generate Thread] Processed {num_processed} requests")
-        except Exception as e:
-            if stop_event.is_set():
-                logger.info("[Generate Thread] Interrupted while stopping")
-                break
-            logger.error(f"[Generate Thread] Error: {e}")
-            raise
-    logger.info("[Generate Thread] Exiting")
+        processed_results = utils.ray_get_with_progress(
+            [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
+            "[Generate Thread] Waiting for engines to process prompts",
+            enable=False,
+        )
+        num_processed = sum(int(result) for result in processed_results)
+        if num_processed == 0:
+            time.sleep(1)
+        else:
+            logger.debug(f"[Generate Thread] Processed {num_processed} requests")
 
 
 def submission_thread(
@@ -510,20 +471,13 @@ def submission_thread(
     """Thread that submits individual prompts to the queue."""
     logger.info("[Submission Thread] Starting prompt submission")
     total_prompts_submitted = 0
-    # Generate batches of prompts from the dataset
     for batch_idx in range(num_batches):
-        if stop_event.is_set():
-            logger.info("[Submission Thread] Stopped due to stop event")
-            break
-        # Submit each prompt individually, matching grpo_fast.py behavior
         for prompt_idx in range(batch_size):
-            # Calculate the actual dataset index
             dataset_idx = start_batch_idx * batch_size + batch_idx * batch_size + prompt_idx
             if dataset_idx >= len(dataset):
                 break
 
             prompt = dataset[dataset_idx][dataset_transformation.INPUT_IDS_PROMPT_KEY]
-            # Note: batch_idx here is relative to the main benchmark batches
             actual_batch_idx = start_batch_idx + batch_idx
             actual_dataset_index = dataset_idx
             param_prompt_Q.put(
@@ -596,9 +550,8 @@ def run_benchmark(
     try:
         logger.info("Running warmup batch...")
 
-        # Collect results for all warmup prompts
         for _ in range(args.num_unique_prompts_rollout):
-            inference_results_Q.get()  # Discard warmup results
+            inference_results_Q.get()
         logger.info("Warmup batch completed")
         logger.info(f"Submitting {num_batches - 1} batches for main benchmark...")
         submission_future = executor.submit(
@@ -612,15 +565,11 @@ def run_benchmark(
             num_batches - 1,
         )
 
-        # Start overall timing for main benchmark
         main_benchmark_start_time = time.perf_counter()
 
-        # Process remaining batches with timing
         for batch_idx in range(1, num_batches):
-            # Quick health check!
             [future.result() for future in [submission_future, generation_future] if future.done()]
 
-            # Collect results for all prompts in this batch
             batch_results = []
             batch_start_time = time.perf_counter()
             for _ in range(args.num_unique_prompts_rollout):
@@ -629,20 +578,17 @@ def run_benchmark(
             completion_time = time.perf_counter()
             batch_generation_time = completion_time - batch_start_time
 
-            # Aggregate metrics from all individual results
             total_new_tokens = 0
             all_response_lengths = []
             all_finish_reasons = []
 
             for i, result in enumerate(batch_results):
-                # Each result has n=num_samples_per_prompt_rollout responses
                 result_tokens = sum(len(response) for response in result.responses)
                 total_new_tokens += result_tokens
                 all_response_lengths.extend([len(response) for response in result.responses])
                 all_finish_reasons.extend(result.finish_reasons)
 
             tokens_per_second = total_new_tokens / batch_generation_time if batch_generation_time > 0 else 0
-
             result_dict = {
                 "tokens_per_second": tokens_per_second,
                 "generation_time": batch_generation_time,
@@ -651,25 +597,17 @@ def run_benchmark(
                 "response_lengths": all_response_lengths,
                 "dataset_indices": [r.dataset_index for r in batch_results],
             }
-            # Get prompt lengths for all results in this batch
             prompt_lengths = []
             response_lengths = all_response_lengths
             for r in batch_results:
                 prompt_data = dataset[r.dataset_index]
                 prompt = prompt_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
-                # Only add one entry per unique prompt since flops() handles samples_per_prompt
                 prompt_lengths.append(len(prompt))
 
-            # Store unique prompt lengths for FLOPS calculation
             result_dict["prompt_lengths"] = prompt_lengths
-
-            # Calculate total FLOPs for all prompts and responses in the batch
-            # prompt_lengths contains unique prompts, flops method handles samples_per_prompt
             model_flops = model_dims.flops(
                 prompt_lengths, response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
             )
-
-            # MFU = (FLOPs / time) / peak_FLOPS * 100
             model_flops_per_second = model_flops / batch_generation_time
             result_dict["mfu"] = 100 * model_flops_per_second / device_flops
 
@@ -683,11 +621,9 @@ def run_benchmark(
                 f"total new tokens: {total_new_tokens}"
             )
 
-        # End overall timing for main benchmark
         main_benchmark_end_time = time.time()
         main_benchmark_total_time = main_benchmark_end_time - main_benchmark_start_time
 
-        # Calculate total tokens generated in main benchmark
         total_main_tokens = sum(r["num_new_tokens"] for r in results)
         overall_tokens_per_second = (
             total_main_tokens / main_benchmark_total_time if main_benchmark_total_time > 0 else 0
@@ -706,20 +642,12 @@ def run_benchmark(
         logger.info("Starting cleanup...")
         stop_event.set()
 
-        # Wait for threads to finish with a timeout
         logger.info("Waiting for threads to complete...")
         try:
-            # Give threads time to notice the stop event
-            if submission_future:
-                submission_future.result(timeout=5)
-            if generation_future:
-                generation_future.result(timeout=10)  # Give more time for generation thread
-        except futures.TimeoutError:
-            logger.warning("Threads did not complete within timeout, forcing shutdown")
-        except Exception as e:
-            logger.warning(f"Error waiting for threads: {e}")
-
-        executor.shutdown(wait=True)
+            submission_future.result(timeout=5)
+            generation_future.result(timeout=10)
+        finally:
+            executor.shutdown(wait=True)
         logger.info("Threads cleaned up")
 
 
