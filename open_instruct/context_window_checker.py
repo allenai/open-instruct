@@ -249,8 +249,12 @@ def truncate_messages_to_fit_context(
                 break
 
         # append judgment format to the last message, only if there are messages
-        if truncated_messages and truncated_messages[-1]["role"] == "user" and not truncated_messages[-1]["content"].endswith(
-            'Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}'
+        if (
+            truncated_messages
+            and truncated_messages[-1]["role"] == "user"
+            and not truncated_messages[-1]["content"].endswith(
+                'Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}'
+            )
         ):
             truncated_messages[-1]["content"] = (
                 f'{truncated_messages[-1]["content"]}\nRespond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}'
@@ -313,8 +317,12 @@ def truncate_messages_to_fit_context(
                     break
 
             # append judgment format to the last message, only if there are messages
-            if truncated_messages and truncated_messages[-1]["role"] == "user" and not truncated_messages[-1]["content"].endswith(
-                'Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}'
+            if (
+                truncated_messages
+                and truncated_messages[-1]["role"] == "user"
+                and not truncated_messages[-1]["content"].endswith(
+                    'Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}'
+                )
             ):
                 truncated_messages[-1]["content"] = (
                     f'{truncated_messages[-1]["content"]}\nRespond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}'
