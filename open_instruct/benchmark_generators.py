@@ -537,8 +537,7 @@ class ModelDims:
 DEFAULT_SENTINEL = object()
 
 
-def maybe_get_attribute(cfg: transformers.AutoConfig, attr_names: list[str],
-                        default=DEFAULT_SENTINEL) -> Any:
+def maybe_get_attribute(cfg: transformers.AutoConfig, attr_names: list[str], default=DEFAULT_SENTINEL) -> Any:
     """Get the first matching attribute from cfg."""
     for name in attr_names:
         if hasattr(cfg, name):
