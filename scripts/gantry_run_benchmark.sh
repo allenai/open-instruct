@@ -32,6 +32,7 @@ gantry run \
        --cluster ai2/prior-elanding \
        --budget ai2/oe-adapt \
        --env VLLM_ATTENTION_BACKEND=FLASHINFER \
+       --env-secret="HF_TOKEN=finbarrt_HF_TOKEN" \
        --install 'uv sync' \
        -- uv run python -m open_instruct.benchmark_generators \
     --model_name_or_path "$model_name_or_path" \
@@ -52,7 +53,7 @@ gantry run \
     --chat_template_name "tulu_thinker" \
     --trust_remote_code \
     --seed 42 \
+    --add_bos \
     --dataset_local_cache_dir "benchmark_cache" \
     --dataset_cache_mode "local" \
-    --dataset_transform_fn "rlvr_tokenize_v1" "rlvr_filter_v1" \
-    "$@"
+    --dataset_transform_fn "rlvr_tokenize_v1" "rlvr_filter_v1"
