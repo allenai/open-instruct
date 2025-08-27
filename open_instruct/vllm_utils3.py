@@ -516,14 +516,6 @@ class LLMRayActor:
                     continue
 
                 outputs_to_finalize = collected_outputs[base_request_id]
-
-                # Debug logging for benchmark debugging
-                if metadata.get("training_step") == 1 and num_processed < 2:
-                    self.logger.info(f"[DEBUG] Finalizing request {base_request_id}:")
-                    self.logger.info(f"  - Expected n: {expected_n}")
-                    self.logger.info(f"  - Collected outputs: {len(outputs_to_finalize)}")
-                    self.logger.info(f"  - Dataset index: {metadata['dataset_index']}")
-
                 num_processed += 1
                 finalize_start = time.time()
                 result = _finalize_outputs(outputs_to_finalize, tracking, metadata["dataset_index"], self.tools)
