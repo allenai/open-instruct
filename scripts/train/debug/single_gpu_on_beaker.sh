@@ -50,6 +50,7 @@ uv run python mason.py \
     --beta 0.01 \
     --seed 3 \
     --local_eval_every 1 \
+    --vllm_enable_prefix_caching True \
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.3 \
     --save_traces \
