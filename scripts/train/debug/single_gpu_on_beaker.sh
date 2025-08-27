@@ -26,11 +26,11 @@ uv run python mason.py \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 512 \
+    --max_token_length 16000 \
     --max_prompt_token_length 512 \
-    --response_length 512 \
+    --response_length 16000 \
     --verbose True \
-    --pack_length 1024 \
+    --pack_length 18024 \
     --inflight_updates True \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
