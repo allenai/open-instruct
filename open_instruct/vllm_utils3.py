@@ -451,6 +451,8 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed.
         """
+        self.time_metrics = defaultdict(float)
+        self.call_counts = defaultdict(int)
         process_start_time = time.perf_counter()
         num_processed = 0
 
@@ -514,7 +516,10 @@ class LLMRayActor:
                 self.request_metadata.pop(base_request_id, None)
                 for i in range(metadata["generation_config"].n):
                     self.request_metadata.pop(f"{base_request_id}-{i}", None)
+                maybe_add_start = time.perf_counter()
                 self._maybe_add_new_request()
+                self.time_metrics["maybe_add_new_request"] += time.perf_counter() - maybe_add_start
+                self.call_counts["maybe_add_new_request"] += 1
             self.time_metrics["output_loop"] += time.perf_counter() - output_loop_start
 
             should_stop_start = time.perf_counter()
@@ -532,7 +537,7 @@ class LLMRayActor:
         """Log performance metrics."""
         total_time = time.perf_counter() - process_start_time
         loop_time = time.perf_counter() - loop_start_time
-        
+
         if total_time == 0:
             return
 
@@ -542,7 +547,9 @@ class LLMRayActor:
         self.logger.info(f"\nTiming breakdown:")
         self.logger.info(f"  1. Total process_from_queue time: {total_time:.3f}s")
         self.logger.info(f"  2. While loop time: {loop_time:.3f}s")
-        self.logger.info(f"  3. step_engine time: {self.time_metrics.get('step_engine', 0):.3f}s ({self.call_counts.get('step_engine', 0)} calls)")
+        self.logger.info(
+            f"  3. step_engine time: {self.time_metrics.get('step_engine', 0):.3f}s ({self.call_counts.get('step_engine', 0)} calls)"
+        )
         self.logger.info(f"  4. Output processing loop time: {self.time_metrics.get('output_loop', 0):.3f}s")
         self.logger.info(f"  5. Should-stop check time: {self.time_metrics.get('should_stop_check', 0):.3f}s")
         self.logger.info("==================================\n")
@@ -571,7 +578,11 @@ class LLMRayActor:
                     if result is not None:
                         outputs.append(result)
         while self.llm_engine.get_num_unfinished_requests() < self.inference_batch_size:
-            if not self._maybe_add_new_request():
+            maybe_add_start = time.perf_counter()
+            added = self._maybe_add_new_request()
+            self.time_metrics["maybe_add_new_request"] += time.perf_counter() - maybe_add_start
+            self.call_counts["maybe_add_new_request"] += 1
+            if not added:
                 break
 
         return outputs
