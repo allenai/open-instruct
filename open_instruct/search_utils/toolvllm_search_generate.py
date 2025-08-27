@@ -117,7 +117,7 @@ def main():
         parser.add_argument("--model_path", type=str, help="Path to the model.")
         parser.add_argument("--model_revision", type=str, default="main", help="Model revision.")
         parser.add_argument("--tokenizer_revision", type=str, default="main", help="Tokenizer revision.")
-        parser.add_argument("--model_len", type=int, default=8192, help="Max model length.")
+        parser.add_argument("--model_len", type=int, default=16384, help="Max model length.")
         parser.add_argument("--output_dir", type=str, default="tmp", help="Output directory.")
         parser.add_argument("--max_eval_samples", type=int, default=2000, help="Max eval samples.")
         parser.add_argument("--offset", type=int, default=0, help="Offset for the eval samples.")
@@ -209,17 +209,17 @@ def main():
             revision=args.model_revision,
             tokenizer_revision=args.tokenizer_revision,
             tools={tool.end_str: tool},
-            max_tool_calls=3,
+            max_tool_calls=10,
             max_model_len=args.model_len,
         )
         # use greedy decoding
         sampling_params = SamplingParams(
-            temperature=0.0,
-            top_p=1.0,
+            temperature=0.6,
+            top_p=0.95,
             max_tokens=args.model_len,
             include_stop_str_in_output=True,
             n=1,
-            stop=[tool.end_str, "</answer>"],
+            stop=[tool.end_str]#, "</answer>"],
         )
         # Generate output using the actor.
         result = actor.generate(
