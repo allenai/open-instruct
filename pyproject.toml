@@ -31,7 +31,7 @@ dependencies = [
     "flash-attn>=2.8.0.post2; platform_system != 'Darwin'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
     "flashinfer-python==0.2.8; platform_system == 'Linux' and platform_machine == 'x86_64'",
-    # "vllm" installed locally with git clone because it needs to be editable for some reason
+    "vllm" # installed locally with git clone because it needs to be editable for some reason
 ]
 
 [build-system]
@@ -53,7 +53,6 @@ vllm = { VLLM_USE_PRECOMPILED = "1" }
 torch = [
   { index = "pytorch-cu128", marker = "platform_system != 'Darwin'"},
 ]
-vllm = { path = "./vllm_olmo2.5", editable = true }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
@@ -73,7 +72,7 @@ code = [
     "requests>=2.28.0",
 ]
 vllm = [
-    "vllm"
+    "vllm @ file:///weka/oe-adapt-default/michaeln/2.5-open-instruct/vllm_olmo2.5"
 ]
 
 [tool.uv]
