@@ -385,10 +385,9 @@ class ModelDims:
 
         # For each new token, read all previous KV values
         # sum_{i=0}^{R-1} (P + i) = R*P + R*(R-1)/2
-        # But we need (P + i + 1) for the context length at each step
         kv_read_terms = 0
         for P, R in zip(prompt_lengths, response_lengths):
-            kv_read_terms += (R * P) + (R * (R + 1) // 2)
+            kv_read_terms += (R * P) + (R * (R - 1) // 2)
 
         # 2x for K and V
         kv_bytes_per_token = 2 * num_kv * head_dim * dtype_bytes
