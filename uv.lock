@@ -2330,9 +2330,6 @@ code = [
     { name = "requests" },
     { name = "uvicorn" },
 ]
-vllm = [
-    { name = "vllm" },
-]
 
 [package.dev-dependencies]
 dev = [
@@ -2377,11 +2374,10 @@ requires-dist = [
     { name = "torch", marker = "sys_platform == 'darwin'", specifier = ">=2.7.0,<2.8" },
     { name = "transformers", git = "https://github.com/2015aroras/transformers.git?rev=shanea%2Folmo2-retrofit" },
     { name = "uvicorn", marker = "extra == 'code'", specifier = ">=0.20.0" },
-    { name = "vllm" },
-    { name = "vllm", marker = "extra == 'vllm'", directory = "vllm_olmo2.5" },
+    { name = "vllm", directory = "vllm_olmo2.5" },
     { name = "wandb", specifier = "==0.18.1" },
 ]
-provides-extras = ["code", "vllm"]
+provides-extras = ["code"]
 
 [package.metadata.requires-dev]
 dev = [
