@@ -438,7 +438,7 @@ class LLMRayActor:
         """
         if not self._should_stop():
             try:
-                request = self.prompt_queue.get(timeout=0.1)
+                request = self.prompt_queue.get_nowait()
                 add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
                 return True
             except queue.Empty:
@@ -471,6 +471,7 @@ class LLMRayActor:
             leave=False,
         ):
             try:
+                # Use longer timeout for initial pre-filling
                 request = self.prompt_queue.get(timeout=0.1)
                 add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
             except queue.Empty:
@@ -516,10 +517,6 @@ class LLMRayActor:
                 self.request_metadata.pop(base_request_id, None)
                 for i in range(metadata["generation_config"].n):
                     self.request_metadata.pop(f"{base_request_id}-{i}", None)
-                maybe_add_start = time.perf_counter()
-                self._maybe_add_new_request()
-                self.time_metrics["maybe_add_new_request"] += time.perf_counter() - maybe_add_start
-                self.call_counts["maybe_add_new_request"] += 1
             self.time_metrics["output_loop"] += time.perf_counter() - output_loop_start
 
             should_stop_start = time.perf_counter()
@@ -541,18 +538,17 @@ class LLMRayActor:
         if total_time == 0:
             return
 
-        self.logger.info(f"\n=== Performance Metrics (inflight_updates={self.inflight_updates}) ===")
-        self.logger.info(f"Requests processed: {num_processed}")
-        self.logger.info(f"Loop iterations: {self.call_counts['loop_iterations']}")
-        self.logger.info(f"\nTiming breakdown:")
-        self.logger.info(f"  1. Total process_from_queue time: {total_time:.3f}s")
-        self.logger.info(f"  2. While loop time: {loop_time:.3f}s")
-        self.logger.info(
-            f"  3. step_engine time: {self.time_metrics.get('step_engine', 0):.3f}s ({self.call_counts.get('step_engine', 0)} calls)"
+        metrics_str = (
+            f"Performance Metrics (inflight_updates={self.inflight_updates}) | "
+            f"Requests: {num_processed} | "
+            f"Iterations: {self.call_counts['loop_iterations']} | "
+            f"Total: {total_time:.3f}s | "
+            f"Loop: {loop_time:.3f}s | "
+            f"step_engine: {self.time_metrics.get('step_engine', 0):.3f}s ({self.call_counts.get('step_engine', 0)} calls) | "
+            f"Output processing: {self.time_metrics.get('output_loop', 0):.3f}s | "
+            f"Should-stop check: {self.time_metrics.get('should_stop_check', 0):.3f}s"
         )
-        self.logger.info(f"  4. Output processing loop time: {self.time_metrics.get('output_loop', 0):.3f}s")
-        self.logger.info(f"  5. Should-stop check time: {self.time_metrics.get('should_stop_check', 0):.3f}s")
-        self.logger.info("==================================\n")
+        self.logger.info(metrics_str)
 
     def _step_engine(self, tracking, tokenizer):
         """Unified processing for both tool and non-tool generation.
