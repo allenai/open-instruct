@@ -402,9 +402,18 @@ class LLMRayActor:
         self._should_stop_value = None
         self._should_stop_timeout_s = 5
 
+        # Performance metrics
+        self.time_metrics = defaultdict(float)
+        self.call_counts = defaultdict(int)
+
     def _should_stop(self) -> bool:
+        start_time = time.time()
+        self.call_counts["should_stop"] += 1
+
         last_update = self._last_should_stop_update
         if last_update is None or (time.time() - last_update) > self._should_stop_timeout_s:
+            remote_start = time.time()
+            self.call_counts["should_stop_remote"] += 1
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
             if ready_refs:
@@ -412,8 +421,13 @@ class LLMRayActor:
             else:
                 ray.cancel(should_stop_ref)
                 should_stop = False
+            self.time_metrics["should_stop_remote"] += time.time() - remote_start
             self._last_should_stop_update = time.time()
             self._should_stop_value = should_stop
+        else:
+            self.call_counts["should_stop_cached"] += 1
+
+        self.time_metrics["should_stop"] += time.time() - start_time
         return self._should_stop_value
 
     def _insert_result_to_queue(self, result, is_eval: bool):
@@ -446,7 +460,7 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed.
         """
-
+        process_start_time = time.time()
         num_processed = 0
 
         tracking = _init_tool_tracking() if self.tools else None
@@ -464,8 +478,15 @@ class LLMRayActor:
             leave=False,
         ):
             try:
+                queue_start = time.time()
                 request = self.prompt_queue.get(timeout=0.1)
+                self.time_metrics["queue_get"] += time.time() - queue_start
+                self.call_counts["queue_get"] += 1
+
+                add_start = time.time()
                 add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
+                self.time_metrics["add_request"] += time.time() - add_start
+                self.call_counts["add_request"] += 1
             except queue.Empty:
                 # If we couldn't get a request quickly and have some requests, start processing
                 if self.llm_engine.has_unfinished_requests():
@@ -473,9 +494,15 @@ class LLMRayActor:
                 # Otherwise continue trying to get more requests
 
         while True:
+            self.call_counts["loop_iterations"] += 1
             if self._should_stop() and self.inflight_updates:
+                self._log_metrics(process_start_time, num_processed)
                 return num_processed
+
+            step_start = time.time()
             outputs = self._step_engine(tracking, tokenizer)
+            self.time_metrics["step_engine"] += time.time() - step_start
+            self.call_counts["step_engine"] += 1
             for output in outputs:
                 base_request_id = output.request_id.split("-")[0]
 
@@ -498,13 +525,19 @@ class LLMRayActor:
                     self.logger.info(f"  - Dataset index: {metadata['dataset_index']}")
 
                 num_processed += 1
+                finalize_start = time.time()
                 result = _finalize_outputs(outputs_to_finalize, tracking, metadata["dataset_index"], self.tools)
+                self.time_metrics["finalize_outputs"] += time.time() - finalize_start
+                self.call_counts["finalize_outputs"] += 1
 
                 # Debug: Log result structure
                 if metadata.get("training_step") == 1 and num_processed <= 2:
                     self.logger.info(f"  - Result has {len(result.responses)} responses")
                     self.logger.info(f"  - Response lengths: {[len(r) for r in result.responses]}")
+                queue_start = time.time()
                 self._insert_result_to_queue(result, metadata["is_eval"])
+                self.time_metrics["queue_put"] += time.time() - queue_start
+                self.call_counts["queue_put"] += 1
                 del collected_outputs[base_request_id]
                 self.request_metadata.pop(base_request_id, None)
                 for i in range(metadata["generation_config"].n):
@@ -516,7 +549,56 @@ class LLMRayActor:
                 if not self.llm_engine.has_unfinished_requests() and not pending_tool_futures:
                     break
 
+        self._log_metrics(process_start_time, num_processed)
         return num_processed
+
+    def _log_metrics(self, start_time: float, num_processed: int):
+        """Log performance metrics as percentages."""
+        total_time = time.time() - start_time
+        if total_time == 0:
+            return
+
+        self.logger.info(f"\n=== Performance Metrics (inflight_updates={self.inflight_updates}) ===")
+        self.logger.info(f"Total processing time: {total_time:.2f}s")
+        self.logger.info(f"Requests processed: {num_processed}")
+        self.logger.info(f"Loop iterations: {self.call_counts['loop_iterations']}")
+
+        # Calculate percentages
+        metrics_pct = {}
+        for key, value in self.time_metrics.items():
+            metrics_pct[key] = (value / total_time) * 100
+
+        # Log time breakdown
+        self.logger.info("\nTime breakdown:")
+        self.logger.info(
+            f"  should_stop: {metrics_pct.get('should_stop', 0):.1f}% ({self.time_metrics.get('should_stop', 0):.3f}s, {self.call_counts.get('should_stop', 0)} calls)"
+        )
+        self.logger.info(
+            f"    - remote calls: {metrics_pct.get('should_stop_remote', 0):.1f}% ({self.time_metrics.get('should_stop_remote', 0):.3f}s, {self.call_counts.get('should_stop_remote', 0)} calls)"
+        )
+        self.logger.info(f"    - cached calls: {self.call_counts.get('should_stop_cached', 0)} calls")
+        self.logger.info(
+            f"  step_engine: {metrics_pct.get('step_engine', 0):.1f}% ({self.time_metrics.get('step_engine', 0):.3f}s, {self.call_counts.get('step_engine', 0)} calls)"
+        )
+        self.logger.info(
+            f"  queue_get: {metrics_pct.get('queue_get', 0):.1f}% ({self.time_metrics.get('queue_get', 0):.3f}s, {self.call_counts.get('queue_get', 0)} calls)"
+        )
+        self.logger.info(
+            f"  queue_put: {metrics_pct.get('queue_put', 0):.1f}% ({self.time_metrics.get('queue_put', 0):.3f}s, {self.call_counts.get('queue_put', 0)} calls)"
+        )
+        self.logger.info(
+            f"  add_request: {metrics_pct.get('add_request', 0):.1f}% ({self.time_metrics.get('add_request', 0):.3f}s, {self.call_counts.get('add_request', 0)} calls)"
+        )
+        self.logger.info(
+            f"  finalize_outputs: {metrics_pct.get('finalize_outputs', 0):.1f}% ({self.time_metrics.get('finalize_outputs', 0):.3f}s, {self.call_counts.get('finalize_outputs', 0)} calls)"
+        )
+
+        # Calculate other time
+        accounted_time = sum(self.time_metrics.values())
+        other_time = total_time - accounted_time
+        other_pct = (other_time / total_time) * 100
+        self.logger.info(f"  other: {other_pct:.1f}% ({other_time:.3f}s)")
+        self.logger.info("==================================\n")
 
     def _step_engine(self, tracking, tokenizer):
         """Unified processing for both tool and non-tool generation.
