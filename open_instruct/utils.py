@@ -1016,19 +1016,22 @@ def maybe_update_beaker_description(
         description_components[0] = base_description
 
         progress_pct = (current_step / total_steps) * 100
+        elapsed_time = time.time() - start_time
 
         if current_step >= total_steps:
-            progress_bar = f"[100% complete (step {total_steps}/{total_steps}), finished]"
+            time_str = format_eta(elapsed_time)
+            time_label = "finished in"
         else:
-            elapsed_time = time.time() - start_time
             if current_step > 0:
                 time_per_step = elapsed_time / current_step
                 remaining_steps = total_steps - current_step
                 eta_seconds = time_per_step * remaining_steps
-                eta_str = format_eta(eta_seconds)
+                time_str = format_eta(eta_seconds)
             else:
-                eta_str = "calculating..."
-            progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), eta {eta_str}]"
+                time_str = "calculating..."
+            time_label = "eta"
+
+        progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), {time_label} {time_str}]"
         description_components.append(progress_bar)
     new_description = " ".join(description_components)
     logger.info(
