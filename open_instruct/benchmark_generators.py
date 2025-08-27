@@ -686,15 +686,20 @@ def run_benchmark(
             for r in batch_results:
                 prompt_data = dataset[r.dataset_index]
                 prompt = prompt_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
-                # Each prompt is used for num_samples_per_prompt_rollout responses
-                for _ in range(len(r.responses)):
-                    prompt_lengths.append(len(prompt))
+                # Only add one entry per unique prompt since flops() handles samples_per_prompt
+                prompt_lengths.append(len(prompt))
 
-            # Store prompt and response lengths in result for overall MFU calculation
-            result_dict["prompt_lengths"] = prompt_lengths
+            # Store expanded prompt lengths (one per response) for overall MFU calculation
+            expanded_prompt_lengths = []
+            for r in batch_results:
+                prompt_data = dataset[r.dataset_index]
+                prompt = prompt_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+                for _ in range(len(r.responses)):
+                    expanded_prompt_lengths.append(len(prompt))
+            result_dict["prompt_lengths"] = expanded_prompt_lengths
 
             # Calculate total FLOPs for all prompts and responses in the batch
-            # No need to expand prompt_lengths - the flops method now handles samples_per_prompt
+            # prompt_lengths contains unique prompts, flops method handles samples_per_prompt
             model_flops = model_dims.flops(
                 prompt_lengths, response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
             )
