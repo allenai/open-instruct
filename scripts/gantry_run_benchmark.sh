@@ -32,13 +32,13 @@ git_branch=$(git rev-parse --abbrev-ref HEAD)
 for model_name_or_path in "$@"; do
     echo ""
     echo "Starting benchmark for model: $model_name_or_path"
-    
+
     gantry run \
            --name open_instruct-benchmark_generators \
            --workspace ai2/tulu-thinker \
            --gpus 1 \
            --description "Running benchmark with response length of $response_length at commit $git_hash on branch $git_branch with model $model_name_or_path." \
-           --beaker-image nathanl/open_instruct_auto \
+	   --beaker-image oe-eval-beaker/oe_eval_olmo3_auto \
            --cluster ai2/prior-elanding \
            --budget ai2/oe-adapt \
            --env VLLM_ATTENTION_BACKEND=FLASHINFER \
@@ -68,7 +68,7 @@ for model_name_or_path in "$@"; do
         --dataset_local_cache_dir "benchmark_cache" \
         --dataset_cache_mode "local" \
         --dataset_transform_fn "rlvr_tokenize_v1" "rlvr_filter_v1"
-    
+
     echo "Completed benchmark for model: $model_name_or_path"
     echo "----------------------------------------"
 done
