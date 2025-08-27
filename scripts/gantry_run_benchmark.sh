@@ -41,7 +41,6 @@ for model_name_or_path in "$@"; do
 	   --beaker-image oe-eval-beaker/oe_eval_olmo3_auto \
            --cluster ai2/prior-elanding \
            --budget ai2/oe-adapt \
-           --env VLLM_ATTENTION_BACKEND=FLASHINFER \
            --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
            --env-secret="HF_TOKEN=finbarrt_HF_TOKEN" \
            --install 'uv sync' \
