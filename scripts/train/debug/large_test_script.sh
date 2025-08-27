@@ -35,7 +35,7 @@ uv run python mason.py \
         --max_prompt_token_length 2048 \
         --response_length 4096 \
         --pack_length 20480 \
-        --model_name_or_path Qwen/Qwen2.5-7B \
+        --model_name_or_path hamishivi/qwen2_5_openthoughts2 \
         --chat_template_name tulu_thinker \
         --stop_strings "</answer>" \
         --non_stop_penalty False \
