@@ -46,6 +46,7 @@ flash-attn = [{ requirement = "torch", match-runtime = true }]
 
 [tool.uv.extra-build-variables]
 flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
+<<<<<<< HEAD
 vllm = { VLLM_USE_PRECOMPILED = "1" }
 
 # pytorch related setups
@@ -54,6 +55,8 @@ torch = [
   { index = "pytorch-cu128", marker = "platform_system != 'Darwin'"},
 ]
 vllm = { path = "vllm_olmo2.5", editable = true }
+=======
+>>>>>>> random reward
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
