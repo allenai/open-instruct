@@ -34,6 +34,7 @@ from open_instruct.math_utils import (
     remove_boxed,
 )
 from open_instruct.utils import extract_final_answer
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -916,6 +917,7 @@ def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     """
     verifiers: Dict[str, VerifierFunction] = {}
     for subclass in VerifierFunction.__subclasses__():
+        print(subclass)
         if subclass == LMJudgeVerifier:
             continue
 
