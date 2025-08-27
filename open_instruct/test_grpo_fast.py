@@ -5,6 +5,7 @@ import time
 import unittest
 from unittest.mock import Mock
 
+import numpy as np
 import ray
 import torch
 from parameterized import parameterized
@@ -952,6 +953,120 @@ class TestStreamingAccumulation(TestGrpoFastBase):
             # Check that at least some tools were called
             if any(result.request_info.tool_calleds):
                 print(f"Tool was called for result with dataset_index {result.dataset_index}")
+
+
+class TestShufflingIterator(unittest.TestCase):
+    """Test ShufflingIterator state preservation functionality."""
+
+    def test_basic_iteration(self):
+        """Test basic iteration functionality."""
+
+        data = np.arange(100)
+        batch_size = 10
+        iterator = grpo_fast.ShufflingIterator(data, batch_size, seed=42)
+
+        # Get first batch
+        batch1 = next(iterator)
+        self.assertEqual(len(batch1), batch_size)
+        self.assertTrue(all(isinstance(x, int) for x in batch1))
+
+        # Get second batch
+        batch2 = next(iterator)
+        self.assertEqual(len(batch2), batch_size)
+        # Batches should be different
+        self.assertNotEqual(batch1, batch2)
+
+    def test_state_preservation_and_restoration(self):
+        """Test that state can be saved and restored correctly."""
+
+        data = np.arange(100)
+        batch_size = 10
+        seed = 42
+
+        # Create original iterator
+        iter1 = grpo_fast.ShufflingIterator(data, batch_size, seed=seed)
+
+        # Get a few batches
+        _ = next(iter1)
+        _ = next(iter1)
+        _ = next(iter1)
+
+        # Save state after 3 batches
+        state = iter1.get_state()
+
+        # Verify state contains expected keys
+        self.assertIn("index", state)
+        self.assertIn("data", state)
+        self.assertIn("rng_state", state)
+        self.assertEqual(state["index"], 30)  # 3 batches * 10 batch_size
+
+        # Get next batches from original
+        batch4_original = next(iter1)
+        batch5_original = next(iter1)
+
+        # Create new iterator with different seed and restore state
+        iter2 = grpo_fast.ShufflingIterator(data, batch_size, seed=999)
+        iter2.set_state(state)
+
+        # Get batches from restored iterator
+        batch4_restored = next(iter2)
+        batch5_restored = next(iter2)
+
+        # Batches should match exactly
+        self.assertEqual(batch4_original, batch4_restored)
+        self.assertEqual(batch5_original, batch5_restored)
+
+    def test_epoch_boundary_state(self):
+        """Test state preservation at epoch boundary."""
+
+        data = np.arange(20)
+        batch_size = 5
+
+        # Create iterator and complete one epoch
+        iterator = grpo_fast.ShufflingIterator(data, batch_size, seed=123)
+        for _ in range(4):  # 20 / 5 = 4 batches per epoch
+            next(iterator)
+
+        # Save state at epoch boundary
+        state = iterator.get_state()
+        # After one complete epoch, index should reset
+        self.assertEqual(state["index"], 20)
+
+        # Create new iterator and restore state
+        iter2 = grpo_fast.ShufflingIterator(data, batch_size, seed=456)
+        iter2.set_state(state)
+
+        # Next batches should match
+        batch_original = next(iterator)
+        batch_restored = next(iter2)
+        self.assertEqual(batch_original, batch_restored)
+
+    def test_rng_state_preservation(self):
+        """Test that RNG state is properly preserved."""
+
+        data = np.arange(1000)
+        batch_size = 50
+
+        # Create two iterators with same seed
+        iter1 = grpo_fast.ShufflingIterator(data, batch_size, seed=42)
+        _ = grpo_fast.ShufflingIterator(data, batch_size, seed=42)
+
+        # Advance first iterator
+        for _ in range(5):
+            next(iter1)
+
+        # Save state and create new iterator with different seed
+        state = iter1.get_state()
+        iter3 = grpo_fast.ShufflingIterator(data, batch_size, seed=999)
+
+        # Restore state - this should override the different seed
+        iter3.set_state(state)
+
+        # Next 10 batches should match between iter1 and iter3
+        for _ in range(10):
+            batch1 = next(iter1)
+            batch3 = next(iter3)
+            self.assertEqual(batch1, batch3)
 
 
 if __name__ == "__main__":

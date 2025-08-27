@@ -89,6 +89,11 @@ class VerificationResult:
     reasoning: Optional[str] = None
 
 
+@dataclass
+class MaxLengthVerifierConfig(VerifierConfig):
+    max_length_verifier_max_length: int
+
+
 class VerifierFunction(ABC):
     """
     Base class for all verifier functions that evaluate model predictions against ground truth.
@@ -540,8 +545,17 @@ class MaxLenVerifier(VerifierFunction):
         # return absolute difference between the length of the prediction and the max length
         # make sure to disallow negative rewards
         length_diff = abs(len(tokenized_prediction) - desired_length)
-        score = 1 - (length_diff / 8192)
+        score = 1 - (length_diff / self.verifier_config.max_length_verifier_max_length)
         return VerificationResult(score=score)
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        """
+        Return the configuration class for this verifier.
+        Returns:
+            type: The VerifierConfig class or its subclass
+        """
+        return MaxLengthVerifierConfig
 
 
 class UpToMaxLenVerifier(VerifierFunction):
@@ -564,8 +578,17 @@ class UpToMaxLenVerifier(VerifierFunction):
             return VerificationResult(score=1.0)
         # if we were too long, return the difference
         # make sure to disallow negative rewards
-        score = 1 - (length_diff / 8192)
+        score = 1 - (length_diff / self.verifier_config.max_length_verifier_max_length)
         return VerificationResult(score=score)
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        """
+        Return the configuration class for this verifier.
+        Returns:
+            type: The VerifierConfig class or its subclass
+        """
+        return MaxLengthVerifierConfig
 
 
 class LMJudgeVerifier(VerifierFunction):

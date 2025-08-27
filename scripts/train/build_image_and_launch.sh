@@ -3,7 +3,10 @@ set -euo pipefail
 
 git_hash=$(git rev-parse --short HEAD)
 git_branch=$(git rev-parse --abbrev-ref HEAD)
-image_name=open-instruct-integration-test-${git_branch}
+# Sanitize the branch name to remove invalid characters for Beaker names
+# Beaker names can only contain letters, numbers, -_. and may not start with -
+sanitized_branch=$(echo "$git_branch" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/^-//')
+image_name=open-instruct-integration-test-${sanitized_branch}
 
 # Build the Docker image exactly like push-image.yml does, passing git info as build args
 docker build --platform=linux/amd64 \

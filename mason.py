@@ -503,6 +503,8 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
         ])
 
     # by default, we turn off vllm compile cache
+    # torch compile caching seems consistently broken, but the actual compiling isn't.
+    # Not sure why, for now we have disabled the caching (VLLM_DISABLE_COMPILE_CACHE=1).
     env_vars.extend([
         beaker.EnvVar(
             name="VLLM_DISABLE_COMPILE_CACHE",
