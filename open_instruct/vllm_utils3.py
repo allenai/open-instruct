@@ -216,7 +216,7 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools, start_time=None):
         # Replace the output with the tool-processed one
         output.outputs[0] = tool_output
 
-    return _process_outputs_with_tools(final_outputs, dataset_index=dataset_index, start_time=start_time)
+    return _process_outputs_with_tools(outputs, dataset_index=dataset_index, start_time=start_time)
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
