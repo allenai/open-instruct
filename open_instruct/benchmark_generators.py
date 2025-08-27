@@ -629,7 +629,6 @@ def run_benchmark(
             completion_time = time.perf_counter()
             batch_generation_time = completion_time - batch_start_time
 
-
             # Aggregate metrics from all individual results
             total_new_tokens = 0
             all_response_lengths = []
@@ -642,12 +641,7 @@ def run_benchmark(
                 all_response_lengths.extend([len(response) for response in result.responses])
                 all_finish_reasons.extend(result.finish_reasons)
 
-
             tokens_per_second = total_new_tokens / batch_generation_time if batch_generation_time > 0 else 0
-
-            expected_total_responses = args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-            actual_total_responses = len(all_response_lengths)
-            expected_tokens = expected_total_responses * args.response_length
 
             result_dict = {
                 "tokens_per_second": tokens_per_second,
@@ -698,7 +692,6 @@ def run_benchmark(
         overall_tokens_per_second = (
             total_main_tokens / main_benchmark_total_time if main_benchmark_total_time > 0 else 0
         )
-
 
         logger.info("\nOverall main benchmark performance:")
         logger.info(f"  Total wall-clock time: {main_benchmark_total_time:.2f}s")

@@ -925,7 +925,6 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         num_processed = actor.process_from_queue(timeout=30.0)
 
         elapsed = time.time() - start_time
-        print(f"Processed {num_processed} requests in {elapsed:.2f} seconds")
 
         # Check results
         results_received = []
@@ -935,8 +934,6 @@ class TestStreamingAccumulation(TestGrpoFastBase):
                 results_received.append(result)
             except queue.Empty:
                 break
-
-        print(f"Received {len(results_received)} results")
 
         # Verify we didn't hang
         self.assertLess(elapsed, 60, "Should complete in less than 60 seconds")
@@ -951,8 +948,6 @@ class TestStreamingAccumulation(TestGrpoFastBase):
             self.assertIsNotNone(result.request_info)
             self.assertIsNotNone(result.request_info.tool_calleds)
             # Check that at least some tools were called
-            if any(result.request_info.tool_calleds):
-                print(f"Tool was called for result with dataset_index {result.dataset_index}")
 
 
 class TestShufflingIterator(unittest.TestCase):
