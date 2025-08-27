@@ -179,6 +179,25 @@ def remove_thinking_section(prediction: str) -> str:
     return prediction.strip()
 
 
+class RandomVerifier(VerifierFunction):
+    """
+    Verifier for random reward that returns a random reward between 0 and 1 with a given probability.
+    """
+
+    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+        super().__init__("random", verifier_config=verifier_config, weight=1.0)
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
+        # check that probability is in verifier config
+        if self.verifier_config.probability is None:
+             score = random.random() > 0.5
+        else: 
+            score = random.random() > self.verifier_config.probability
+        return VerificationResult(score=score)
+
+
 class GSM8KVerifier(VerifierFunction):
     """
     Verifier for GSM8K tasks that extracts the last number from the prediction
