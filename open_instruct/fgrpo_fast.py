@@ -255,6 +255,16 @@ class Args:
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
     mask_truncated_completions: bool = False
     """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
+    
+    # Advantage visualization settings
+    log_advantage_visualization: bool = False
+    """Whether to log advantage visualization examples during training."""
+    advantage_vis_frequency: int = 1
+    """Log advantage visualization every N steps (1 = every step, 10 = every 10 steps)."""
+    advantage_vis_num_examples: int = 5
+    """Number of examples to show in advantage visualization."""
+    advantage_vis_show_token_details: bool = False
+    """Whether to show detailed token breakdown in advantage visualization."""
 
     # Reward
     # -- r1 style format reward
@@ -381,6 +391,8 @@ class Args:
     """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
     use_mcp_tools: bool = False
     """Whether to use MCP tools. For now if you use the MCP tools, you need to run an MCP server on the background."""
+    mcp_tool_name: Optional[str] = "s2"
+    """The name of the MCP tool to use. For now only supports `s2` and `serper`."""
     mcp_server_command: Optional[str] = None
     """Command to run MCP server subprocess when use_mcp_tools is enabled. Example: 'fastmcp run rag_mcp/main.py:mcp --transport streamable-http --port 8000'"""
 
@@ -1311,6 +1323,30 @@ def data_preparation_thread(
                     
                 advantages.append(token_advantage)
             # Note: advantages is a list of variable-length arrays, not converted to numpy array
+            
+        # Log advantage visualization examples for monitoring
+        if args.log_advantage_visualization and training_step % args.advantage_vis_frequency == 0:
+            try:
+                from open_instruct.search_rewards.advantage_visualization import log_advantage_examples, log_advantage_statistics
+                
+                # Log examples based on user settings
+                if len(all_finegrained_rewards) > 0:
+                    log_advantage_examples(
+                        responses=responses,
+                        decoded_responses=decoded_responses,
+                        all_finegrained_rewards=all_finegrained_rewards,
+                        tokenizer=tokenizer,
+                        step=training_step,
+                        num_examples=args.advantage_vis_num_examples,
+                        show_token_details=args.advantage_vis_show_token_details
+                    )
+                    
+                    log_advantage_statistics(
+                        all_finegrained_rewards=all_finegrained_rewards,
+                        step=training_step
+                    )
+            except Exception as e:
+                print(f"Warning: Failed to log advantage visualization: {e}")
 
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # For finegrained rewards, we simply filter out responses where all advantages are zero
@@ -1753,12 +1789,21 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 if args.use_mcp_tools:
                     from open_instruct.tool_utils.tool_mcp import (
                         SemanticScholarSnippetSearchTool,
+                        SerperSearchTool,
                     )
 
-                    tool = SemanticScholarSnippetSearchTool(
-                        start_str="<search>",
-                        end_str="</search>",
-                    )
+                    if args.mcp_tool_name == "s2":
+                        tool = SemanticScholarSnippetSearchTool(
+                            start_str="<search>",
+                            end_str="</search>",
+                        )
+                    elif args.mcp_tool_name == "serper":
+                        tool = SerperSearchTool(
+                            start_str="<search>",
+                            end_str="</search>",
+                        )
+                    else:
+                        raise ValueError(f"Unknown MCP tool: {args.mcp_tool_name}")
                 else:
                     from open_instruct.search_utils.search_tool import SearchTool
 

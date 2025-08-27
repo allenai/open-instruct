@@ -375,6 +375,8 @@ class Args:
     """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
     use_mcp_tools: bool = False
     """Whether to use MCP tools. For now if you use the MCP tools, you need to run an MCP server on the background."""
+    mcp_tool_name: Optional[str] = "s2"
+    """The name of the MCP tool to use. For now only supports `s2` and `serper`."""
     mcp_server_command: Optional[str] = None
     """Command to run MCP server subprocess when use_mcp_tools is enabled. Example: 'fastmcp run rag_mcp/main.py:mcp --transport streamable-http --port 8000'"""
 
@@ -1659,12 +1661,20 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 if args.use_mcp_tools:
                     from open_instruct.tool_utils.tool_mcp import (
                         SemanticScholarSnippetSearchTool,
+                        SerperSearchTool,
                     )
-
-                    tool = SemanticScholarSnippetSearchTool(
-                        start_str="<search>",
-                        end_str="</search>",
-                    )
+                    if args.mcp_tool_name == "s2":
+                        tool = SemanticScholarSnippetSearchTool(
+                            start_str="<search>",
+                            end_str="</search>",
+                        )
+                    elif args.mcp_tool_name == "serper":
+                        tool = SerperSearchTool(
+                            start_str="<search>",
+                            end_str="</search>",
+                        )
+                    else:
+                        raise ValueError(f"Unknown MCP tool: {args.mcp_tool_name}")
                 else:
                     from open_instruct.search_utils.search_tool import SearchTool
 
