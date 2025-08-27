@@ -53,7 +53,7 @@ vllm = { VLLM_USE_PRECOMPILED = "1" }
 torch = [
   { index = "pytorch-cu128", marker = "platform_system != 'Darwin'"},
 ]
-vllm = { path = "vllm_olmo2.5" }
+vllm = { path = "vllm_olmo2.5", editable = true }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"

@@ -71,7 +71,7 @@ RUN git clone -b shanea/olmo2-retrofit https://github.com/2015aroras/vllm.git vl
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-cache --extra vllm
+    uv sync --frozen --no-cache
 
 RUN uv run --no-sync -m nltk.downloader punkt punkt_tab
 

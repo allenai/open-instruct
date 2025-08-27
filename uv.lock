@@ -2374,7 +2374,7 @@ requires-dist = [
     { name = "torch", marker = "sys_platform == 'darwin'", specifier = ">=2.7.0,<2.8" },
     { name = "transformers", git = "https://github.com/2015aroras/transformers.git?rev=shanea%2Folmo2-retrofit" },
     { name = "uvicorn", marker = "extra == 'code'", specifier = ">=0.20.0" },
-    { name = "vllm", directory = "vllm_olmo2.5" },
+    { name = "vllm", editable = "vllm_olmo2.5" },
     { name = "wandb", specifier = "==0.18.1" },
 ]
 provides-extras = ["code"]
@@ -4231,7 +4231,7 @@ wheels = [
 
 [[package]]
 name = "vllm"
-source = { directory = "vllm_olmo2.5" }
+source = { editable = "vllm_olmo2.5" }
 dependencies = [
     { name = "aiohttp" },
     { name = "blake3" },
