@@ -686,7 +686,7 @@ class LMJudgeVerifier(VerifierFunction):
                         max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                         model_name=self.verifier_config.llm_judge_model,
                         max_context_length=self.verifier_config.llm_judge_max_context_length,  # Adjust based on your model
-                        safety_margin=250,
+                        safety_margin=150,
                     ):
                         # Try to truncate messages to fit
                         messages = truncate_messages_to_fit_context(
@@ -694,7 +694,7 @@ class LMJudgeVerifier(VerifierFunction):
                             max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                             model_name=self.verifier_config.llm_judge_model,
                             max_context_length=self.verifier_config.llm_judge_max_context_length,
-                            safety_margin=250,
+                            safety_margin=200,
                         )
 
                         # Check again after truncation
@@ -703,7 +703,7 @@ class LMJudgeVerifier(VerifierFunction):
                             max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                             model_name=self.verifier_config.llm_judge_model,
                             max_context_length=self.verifier_config.llm_judge_max_context_length,
-                            safety_margin=10,
+                            safety_margin=150,
                         ):
                             logger.error("Cannot fit request within context window even after truncation.")
                             return VerificationResult(score=0.0, cost=0.0, reasoning="Error: Context window exceeded")
