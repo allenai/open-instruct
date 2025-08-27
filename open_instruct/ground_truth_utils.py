@@ -43,6 +43,7 @@ from open_instruct.search_rewards.finegrained_rewards import compute_finegrained
 from open_instruct.search_rewards.longform_averaged_outcome_rewards import compute_longform_averaged_outcome_reward
 from open_instruct.search_rewards.longform_finegrained_rewards_v1 import compute_longform_finegrained_reward
 from open_instruct.search_rewards.find_reward_spans import FinegrainedScore 
+from open_instruct.search_rewards.toy_case_multi_dataset_reward import compute_multi_question_reward
 from open_instruct.utils import extract_final_answer
 from open_instruct.IFEvalG import instructions_registry
 
@@ -1010,6 +1011,40 @@ class RLRAGLongFormFinegrainedVerifier(VerifierFunction):
         result = compute_longform_finegrained_reward(prediction, test_case, query)
         return FinegrainedRewardOutput(
             finegrained_scores=result["finegrained_scores"],
+            log_values=result["log_values"],
+        )
+
+class RLRAGToyCaseMultiDatasetFinegrainedVerifier(VerifierFunction):
+    """
+    Verifier that computes the RL-RAG (toy case) finegrained score between the prediction and the label.
+    """
+
+    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+        super().__init__("rl_rag_toy_case_multi_dataset_finegrained", verifier_config=verifier_config, weight=1.0)
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> FinegrainedRewardOutput:
+        result = compute_multi_question_reward(prediction, label, query, reward_type="finegrained")
+        return FinegrainedRewardOutput(
+            finegrained_scores=result["finegrained_scores"],
+            log_values=result["log_values"],
+        )
+
+class RLRAGToyCaseMultiDatasetAveragedVerifier(VerifierFunction):
+    """
+    Verifier that computes the RL-RAG (toy case) averaged score between the prediction and the label.
+    """
+
+    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+        super().__init__("rl_rag_toy_case_multi_dataset_averaged", verifier_config=verifier_config, weight=1.0)
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
+        result = compute_multi_question_reward(prediction, label, query, reward_type="averaged")
+        return VerificationResult(
+            score=result["score"],
             log_values=result["log_values"],
         )
 
