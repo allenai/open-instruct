@@ -1,6 +1,7 @@
 import logging
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional, Union
+import json
 
 from open_instruct.search_rewards.find_reward_spans import FinegrainedScore
 from open_instruct.math_utils import normalize_final_answer
@@ -92,7 +93,7 @@ def extract_boxed_answer_from_response(response: str) -> str:
     # If no boxed answer found, return empty string
     return ""
 
-def verify_one_question(response: str, target: str, use_exact_match: bool = True) -> float:
+def verify_one_question(response: str, target: str, use_exact_match: bool = False) -> float:
     """
     Verify a single question response against ground truth.
     
@@ -107,23 +108,40 @@ def verify_one_question(response: str, target: str, use_exact_match: bool = True
     if not response or not target:
         return 0.0
     
-    # Normalize both strings for comparison
-    response_normalized = normalize_final_answer(extract_boxed_answer_from_response(response.strip()))
-    target_normalized = normalize_final_answer(target.strip())
+    # check if the response is a list of answers
+    parsed_labels: Union[List, str]
+    try:
+        parsed = json.loads(target)
+        parsed_labels = parsed if isinstance(parsed, list) else [parsed]
+    except (json.JSONDecodeError, TypeError):
+        # Fallback: treat label as raw string or list-of-strings
+        if isinstance(target, list):
+            parsed_labels = target
+        else:
+            parsed_labels = [str(target).strip()]
     
-    if use_exact_match:
-        # Exact match after normalization
-        return 1.0 if response_normalized == target_normalized else 0.0
-    else:
-        # Contains match - check if ground truth is contained in response
-        return 1.0 if target_normalized.lower() in response_normalized.lower() else 0.0
+    for label in parsed_labels:
+        # Normalize both strings for comparison
+        response_normalized = normalize_final_answer(extract_boxed_answer_from_response(response.strip()))
+        target_normalized = normalize_final_answer(label.strip())
+        
+        if use_exact_match:
+            # Exact match after normalization
+            if response_normalized == target_normalized:
+                return 1.0
+        else:
+            # Contains match - check if ground truth is contained in response
+            if target_normalized.lower() in response_normalized.lower() or response_normalized.lower() in target_normalized.lower():
+                return 1.0
+    return 0.0
 
 
 
 def compute_multi_question_reward(
     response: str, 
     ground_truth: str, 
-    use_exact_match: bool = True,
+    query: Optional[str] = None,
+    use_exact_match: bool = False,
     reward_type: str = "finegrained",
     ) -> Dict[str, Any]:
     """
@@ -148,8 +166,8 @@ def compute_multi_question_reward(
     
     # Compute finegrained scores for each question
     finegrained_scores = []
-    for i, (sub_response, gt_question, span) in enumerate(zip(sub_responses, ground_truth_per_question, spans)):
-        sub_score = verify_one_question(sub_response, gt_question, use_exact_match)
+    for i, (sub_response, gt, span) in enumerate(zip(sub_responses, ground_truth_per_question, spans)):
+        sub_score = verify_one_question(sub_response, gt, use_exact_match)
     
         # Generate finegrained spans based on verifiable scores
         finegrained_scores.append(
@@ -189,4 +207,4 @@ def compute_multi_question_reward(
 if __name__ == "__main__":
     response = "Prefix random text. The answer is \\boxed{1}. The answer is \\boxed{2}. The answer is \\boxed{3}. this is extra"
     ground_truth = "1; 2; 3"
-    print(compute_multi_question_reward(response, ground_truth, reward_type="averaged"))
+    print(compute_multi_question_reward(response, ground_truth, query=None, reward_type="averaged"))
