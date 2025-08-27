@@ -451,7 +451,7 @@ class LLMRayActor:
         tracking = _init_tool_tracking() if self.tools else None
         tokenizer = self.llm_engine.tokenizer if self.tools else None
 
-        collected_outputs = {}
+        collected_outputs = defaultdict(list)
 
         if self._should_stop():
             return num_processed
@@ -472,18 +472,13 @@ class LLMRayActor:
 
             outputs = self._step_engine(tracking, tokenizer)
             for output in outputs:
-                base_request_id = output.request_id.split("-")[0]
-
-                if base_request_id not in collected_outputs:
-                    collected_outputs[base_request_id] = []
+                request_id = output.request_id.split("-")[0]
                 collected_outputs[base_request_id].append(output)
-                metadata = self.request_metadata[base_request_id]
-                expected_n = metadata["generation_config"].n
-
-                if len(collected_outputs[base_request_id]) != expected_n:
+                metadata = self.request_metadata[request_id]
+                if len(collected_outputs[base_request_id]) != metadata["generation_config"].n:
                     continue
 
-                outputs_to_finalize = collected_outputs[base_request_id]
+                outputs_to_finalize = collected_outputs[request_id]
                 num_processed += 1
                 result = _finalize_outputs(outputs_to_finalize, tracking, metadata["dataset_index"], self.tools)
                 self._insert_result_to_queue(result, metadata["is_eval"])
@@ -491,7 +486,6 @@ class LLMRayActor:
                 self.request_metadata.pop(base_request_id, None)
                 for i in range(metadata["generation_config"].n):
                     self.request_metadata.pop(f"{base_request_id}-{i}", None)
-                self._maybe_add_new_request()
 
             if self._should_stop() and not self.inflight_updates:
                 pending_tool_futures = tracking["pending_tool_futures"] if self.tools else {}
@@ -523,7 +517,7 @@ class LLMRayActor:
                     )
                     if result is not None:
                         outputs.append(result)
-        while self.llm_engine.get_num_unfinished_requests() < self.inference_batch_size:
+        while not self.llm_engine.get_num_unfinished_requests() < self.inference_batch_size:
             if not self._maybe_add_new_request():
                 break
 
