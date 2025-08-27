@@ -322,16 +322,33 @@ class ModelDims:
         return total
 
 
+DEFAULT_SENTINEL = object()
+
+
+def maybe_get_attribute(cfg: transformers.AutoConfig, attr_names: list[str],
+                        default=DEFAULT_SENTINEL) -> Any:
+    """Get the first matching attribute from cfg."""
+    for name in attr_names:
+        if hasattr(cfg, name):
+            return getattr(cfg, name)
+    if default is not DEFAULT_SENTINEL:
+        return default
+    raise ValueError(f"None of the attributes {attr_names} found in config.")
+
+
 def load_model_dims(model_name: str) -> ModelDims:
     cfg = transformers.AutoConfig.from_pretrained(model_name, trust_remote_code=True)
-    return ModelDims(
-        num_layers=cfg.num_hidden_layers,
-        hidden_size=cfg.hidden_size,
-        intermediate_size=cfg.intermediate_size,
+    logger.info(f"HF config is: {cfg}.")
+    model_dims = ModelDims(
+        num_layers=maybe_get_attribute(cfg, ["num_hidden_layers", "n_layers"]),
+        hidden_size=maybe_get_attribute(cfg, ["hidden_size", "dim"]),
+        intermediate_size=maybe_get_attribute(cfg, ["intermediate_size"], default=None)
         vocab_size=cfg.vocab_size,
         num_attn_heads=cfg.num_attention_heads,
         num_kv_heads=getattr(cfg, "num_key_value_heads", None),
     )
+    if model_dims.intermediate_size is None:
+        model_dims.intermediate_size = 4 * model_dims.hidden_size
 
 
 def get_device_name(device_name: str) -> str:
