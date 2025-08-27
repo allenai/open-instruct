@@ -134,7 +134,7 @@ def create_multi_question_examples(hotpotqa_dataset, wiki2_dataset, num_examples
         example = {
             "messages": [{"role": "user", "content": formatted_prompt}],
             "ground_truth": combined_ground_truth,
-            "dataset": "multi_question_synthetic",
+            "dataset": "rl_rag_toy_case_multi_dataset_finegrained",
             "source_datasets": ["hotpotqa", "2wiki"],
             "individual_ground_truths": [hotpotqa_answer, wiki2_answer],
             "individual_questions": [hotpotqa_question, wiki2_question]
@@ -183,7 +183,7 @@ def create_multi_question_dataset(num_examples: int = 1000, seed: int = 42, push
     return dataset
 
 
-def create_balanced_multi_question_dataset(num_examples: int = 1000, seed: int = 42, push_to_hub: bool = False, hub_id: str = None):
+def create_balanced_multi_question_dataset(num_examples: int = 1000, seed: int = 42, push_to_hub: bool = False, hub_id: str = None, dataset_name: str = "rl_rag_toy_case_multi_dataset_finegrained"):
     """
     Create a balanced multi-question dataset with equal representation from both datasets.
     This version ensures we get exactly num_examples/2 from each pairing direction.
@@ -222,7 +222,7 @@ def create_balanced_multi_question_dataset(num_examples: int = 1000, seed: int =
         example = {
             "messages": [{"role": "user", "content": formatted_prompt}],
             "ground_truth": combined_ground_truth,
-            "dataset": "multi_question_synthetic",
+            "dataset": dataset_name,
             "source_datasets": ["hotpotqa", "2wiki"],
             "individual_ground_truths": [hotpotqa_answer, wiki2_answer],
             "individual_questions": [hotpotqa_question, wiki2_question],
@@ -250,7 +250,7 @@ def create_balanced_multi_question_dataset(num_examples: int = 1000, seed: int =
         example = {
             "messages": [{"role": "user", "content": formatted_prompt}],
             "ground_truth": combined_ground_truth,
-            "dataset": "multi_question_synthetic",
+            "dataset": dataset_name,
             "source_datasets": ["2wiki", "hotpotqa"],
             "individual_ground_truths": [wiki2_answer, hotpotqa_answer],
             "individual_questions": [wiki2_question, hotpotqa_question],
@@ -289,7 +289,16 @@ if __name__ == "__main__":
         num_examples=1000,
         seed=42,
         push_to_hub=True,  # Push to hub
-        hub_id="rulins/multi_question_synthetic_concat_of_2wiki_and_hotpotqa"
+        hub_id="rulins/multi_question_synthetic_concat_of_2wiki_and_hotpotqa_finegrained",
+        dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
+    )
+    
+    dataset = create_balanced_multi_question_dataset(
+        num_examples=1000,
+        seed=42,
+        push_to_hub=True,  # Push to hub
+        hub_id="rulins/multi_question_synthetic_concat_of_2wiki_and_hotpotqa_averaged",
+        dataset_name="rl_rag_toy_case_multi_dataset_averaged",
     )
     
     print(f"\nDataset created and pushed successfully with {len(dataset)} examples!")
