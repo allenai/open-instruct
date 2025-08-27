@@ -39,7 +39,6 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
-from tqdm import tqdm
 
 from open_instruct import logger_utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo
@@ -402,10 +401,6 @@ class LLMRayActor:
         self._should_stop_value = None
         self._should_stop_timeout_s = 5
 
-        # Performance metrics
-        self.time_metrics = defaultdict(float)
-        self.call_counts = defaultdict(int)
-
     def _should_stop(self) -> bool:
         last_update = self._last_should_stop_update
         if last_update is None or (time.perf_counter() - last_update) > self._should_stop_timeout_s:
@@ -459,20 +454,14 @@ class LLMRayActor:
         tracking = _init_tool_tracking() if self.tools else None
         tokenizer = self.llm_engine.tokenizer if self.tools else None
 
-        collected_outputs = {}
+        collected_outputs = defaultdict(list)
 
         if self._should_stop():
             return num_processed
 
-        for i in tqdm(
-            range(self.inference_batch_size),
-            desc="[vLLM] Pre-filling requests",
-            total=self.inference_batch_size,
-            leave=False,
-        ):
+        for i in range(self.inference_batch_size):
             try:
-                # Use longer timeout for initial pre-filling
-                request = self.prompt_queue.get(timeout=0.1)
+                request = self.prompt_queue.get_nowait()
                 add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
             except queue.Empty:
                 # If we couldn't get a request quickly and have some requests, start processing
@@ -482,7 +471,6 @@ class LLMRayActor:
 
         loop_start_time = time.perf_counter()
         while True:
-            self.call_counts["loop_iterations"] += 1
             if self._should_stop() and self.inflight_updates:
                 self._log_metrics(process_start_time, loop_start_time, num_processed)
                 return num_processed
@@ -493,25 +481,16 @@ class LLMRayActor:
             self.call_counts["step_engine"] += 1
             output_loop_start = time.perf_counter()
             for output in outputs:
-                base_request_id = output.request_id.split("-")[0]
-
-                if base_request_id not in collected_outputs:
-                    collected_outputs[base_request_id] = []
+                request_id = output.request_id.split("-")[0]
                 collected_outputs[base_request_id].append(output)
-                metadata = self.request_metadata[base_request_id]
-                expected_n = metadata["generation_config"].n
-
-                if len(collected_outputs[base_request_id]) != expected_n:
+                metadata = self.request_metadata[request_id]
+                if len(collected_outputs[base_request_id]) != metadata["generation_config"].n:
                     continue
 
-                outputs_to_finalize = collected_outputs[base_request_id]
+                outputs_to_finalize = collected_outputs[request_id]
                 num_processed += 1
                 result = _finalize_outputs(outputs_to_finalize, tracking, metadata["dataset_index"], self.tools)
 
-                # Debug: Log result structure
-                if metadata.get("training_step") == 1 and num_processed <= 2:
-                    self.logger.info(f"  - Result has {len(result.responses)} responses")
-                    self.logger.info(f"  - Response lengths: {[len(r) for r in result.responses]}")
                 self._insert_result_to_queue(result, metadata["is_eval"])
                 del collected_outputs[base_request_id]
                 self.request_metadata.pop(base_request_id, None)
@@ -573,12 +552,8 @@ class LLMRayActor:
                     )
                     if result is not None:
                         outputs.append(result)
-        while self.llm_engine.get_num_unfinished_requests() < self.inference_batch_size:
-            maybe_add_start = time.perf_counter()
-            added = self._maybe_add_new_request()
-            self.time_metrics["maybe_add_new_request"] += time.perf_counter() - maybe_add_start
-            self.call_counts["maybe_add_new_request"] += 1
-            if not added:
+        while not self.llm_engine.get_num_unfinished_requests() < self.inference_batch_size:
+            if not self._maybe_add_new_request():
                 break
 
         return outputs
