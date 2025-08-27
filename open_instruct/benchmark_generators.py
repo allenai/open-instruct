@@ -411,7 +411,7 @@ def setup_vllm_engines(
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
 
-    actor_manager = vllm_utils3.ActorManager.remote()
+    actor_manager = ray.remote(vllm_utils3.ActorManager).remote()
 
     vllm_engines = vllm_utils3.create_vllm_engines(
         num_engines=args.vllm_num_engines,

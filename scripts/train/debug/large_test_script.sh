@@ -9,7 +9,6 @@ uv run python mason.py \
         --cluster ai2/augusta-google-1 \
         --image "$BEAKER_IMAGE" \
 	--pure_docker_mode \
-	--gs_model_name olmo2_7b_sft_lc_ot3_full_regen_wc_oasst_ccn_pif_qif_wgwj_syn2_aya_tgpt_ncode_scode \
         --workspace ai2/tulu-thinker \
         --priority high \
         --preemptible \
@@ -36,10 +35,10 @@ uv run python mason.py \
         --dataset_mixer_eval_list_splits train \
         --max_token_length 10240 \
         --max_prompt_token_length 2048 \
-        --response_length 32000 \
-        --pack_length 40000 \
+        --response_length 16000 \
+        --pack_length 20000 \
         --inflight_updates True \
-        --model_name_or_path /weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/rl-sft/olmo2-7B-FINAL-lc-OT3-full-regen-wc-oasst-ccn-pif-qif-wgwj-syn2-aya-tgpt-ncode-scode \
+        --model_name_or_path Qwen/Qwen2.5-7B \
 	--chat_template_name tulu_thinker \
         --stop_strings "</answer>" \
         --non_stop_penalty False \

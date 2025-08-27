@@ -1917,7 +1917,7 @@ def create_model_and_optimizer(
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 
-    actor_manager = vllm_utils3.ActorManager.remote()
+    actor_manager = ray.remote(vllm_utils3.ActorManager).remote()
 
     # Create vLLM engines with queues
     vllm_engines = vllm_utils3.create_vllm_engines(
