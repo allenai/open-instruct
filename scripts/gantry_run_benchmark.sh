@@ -31,7 +31,7 @@ git_branch=$(git rev-parse --abbrev-ref HEAD)
 # Loop through remaining arguments (models)
 for model_name_or_path in "$@"; do
     echo ""
-    echo "Starting benchmark for model: $model_name_or_path"
+    echo "Launching benchmark for model: $model_name_or_path"
 
     gantry run \
            --name open_instruct-benchmark_generators \
@@ -55,7 +55,7 @@ for model_name_or_path in "$@"; do
         --response_length "$response_length" \
         --vllm_top_p 0.9 \
         --num_unique_prompts_rollout 4 \
-        --num_samples_per_prompt_rollout 16 \
+v        --num_samples_per_prompt_rollout 16 \
         --vllm_num_engines 1 \
         --vllm_tensor_parallel_size 1 \
         --vllm_gpu_memory_utilization 0.9 \
