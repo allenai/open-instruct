@@ -427,15 +427,6 @@ class Args:
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
 
-        if self.inflight_updates:
-            logger.warning(
-                "\n" + "=" * 80 + "\n"
-                "⚠️  WARNING: INFLIGHT UPDATES IS ENABLED (BETA FEATURE) ⚠️\n"
-                "=" * 80 + "\n"
-                "This is a BETA feature that will probably make your experiment 10x slower.\n"
-                "The system will return immediately even with pending work.\n"
-                "Use with caution in production environments.\n" + "=" * 80 + "\n"
-            )
         assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
             "At least one reward must be applied!"
         )

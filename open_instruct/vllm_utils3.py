@@ -446,9 +446,6 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed.
         """
-        self.time_metrics = defaultdict(float)
-        self.call_counts = defaultdict(int)
-        process_start_time = time.perf_counter()
         num_processed = 0
 
         tracking = _init_tool_tracking() if self.tools else None
@@ -469,17 +466,11 @@ class LLMRayActor:
                     break
                 # Otherwise continue trying to get more requests
 
-        loop_start_time = time.perf_counter()
         while True:
             if self._should_stop() and self.inflight_updates:
-                self._log_metrics(process_start_time, loop_start_time, num_processed)
                 return num_processed
 
-            step_start = time.perf_counter()
             outputs = self._step_engine(tracking, tokenizer)
-            self.time_metrics["step_engine"] += time.perf_counter() - step_start
-            self.call_counts["step_engine"] += 1
-            output_loop_start = time.perf_counter()
             for output in outputs:
                 request_id = output.request_id.split("-")[0]
                 collected_outputs[request_id].append(output)
@@ -496,38 +487,13 @@ class LLMRayActor:
                 self.request_metadata.pop(request_id, None)
                 for i in range(metadata["generation_config"].n):
                     self.request_metadata.pop(f"{request_id}-{i}", None)
-            self.time_metrics["output_loop"] += time.perf_counter() - output_loop_start
 
-            should_stop_start = time.perf_counter()
             if self._should_stop() and not self.inflight_updates:
                 pending_tool_futures = tracking["pending_tool_futures"] if self.tools else {}
                 if not self.llm_engine.has_unfinished_requests() and not pending_tool_futures:
-                    self.time_metrics["should_stop_check"] += time.perf_counter() - should_stop_start
                     break
-            self.time_metrics["should_stop_check"] += time.perf_counter() - should_stop_start
 
-        self._log_metrics(process_start_time, loop_start_time, num_processed)
         return num_processed
-
-    def _log_metrics(self, process_start_time: float, loop_start_time: float, num_processed: int):
-        """Log performance metrics."""
-        total_time = time.perf_counter() - process_start_time
-        loop_time = time.perf_counter() - loop_start_time
-
-        if total_time == 0:
-            return
-
-        metrics_str = (
-            f"Performance Metrics (inflight_updates={self.inflight_updates}) | "
-            f"Requests: {num_processed} | "
-            f"Iterations: {self.call_counts['loop_iterations']} | "
-            f"Total: {total_time:.3f}s | "
-            f"Loop: {loop_time:.3f}s | "
-            f"step_engine: {self.time_metrics.get('step_engine', 0):.3f}s ({self.call_counts.get('step_engine', 0)} calls) | "
-            f"Output processing: {self.time_metrics.get('output_loop', 0):.3f}s | "
-            f"Should-stop check: {self.time_metrics.get('should_stop_check', 0):.3f}s"
-        )
-        self.logger.info(metrics_str)
 
     def _step_engine(self, tracking, tokenizer):
         """Unified processing for both tool and non-tool generation.

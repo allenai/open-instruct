@@ -629,17 +629,6 @@ def run_benchmark(
             completion_time = time.perf_counter()
             batch_generation_time = completion_time - batch_start_time
 
-            # Debug logging to understand the response structure
-            if batch_idx == 1:  # Only log for first main batch
-                logger.info(f"[DEBUG] Batch {batch_idx} structure:")
-                logger.info(f"  - Number of results collected: {len(batch_results)}")
-                logger.info(f"  - Expected prompts: {args.num_unique_prompts_rollout}")
-                logger.info(f"  - Expected samples per prompt: {args.num_samples_per_prompt_rollout}")
-                for i, result in enumerate(batch_results[:2]):  # Log first 2 results
-                    logger.info(f"  - Result {i}:")
-                    logger.info(f"    - Number of responses: {len(result.responses)}")
-                    logger.info(f"    - Response lengths: {[len(r) for r in result.responses]}")
-                    logger.info(f"    - Number of finish_reasons: {len(result.finish_reasons)}")
 
             # Aggregate metrics from all individual results
             total_new_tokens = 0
@@ -653,24 +642,12 @@ def run_benchmark(
                 all_response_lengths.extend([len(response) for response in result.responses])
                 all_finish_reasons.extend(result.finish_reasons)
 
-                # Extra debug for first batch
-                if batch_idx == 1 and i < 2:
-                    logger.info(f"  - Result {i} tokens: {result_tokens} from {len(result.responses)} responses")
 
             tokens_per_second = total_new_tokens / batch_generation_time if batch_generation_time > 0 else 0
 
-            # Debug: Log expected vs actual tokens
             expected_total_responses = args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
             actual_total_responses = len(all_response_lengths)
             expected_tokens = expected_total_responses * args.response_length
-            if batch_idx == 1:  # Only log for first main batch
-                logger.info("[DEBUG] Token count analysis:")
-                logger.info(
-                    f"  - Expected responses: {expected_total_responses} ({args.num_unique_prompts_rollout} prompts × {args.num_samples_per_prompt_rollout} samples)"
-                )
-                logger.info(f"  - Actual responses: {actual_total_responses}")
-                logger.info(f"  - Expected total tokens: {expected_tokens} (if all hit max)")
-                logger.info(f"  - Actual total tokens: {total_new_tokens}")
 
             result_dict = {
                 "tokens_per_second": tokens_per_second,
@@ -722,11 +699,6 @@ def run_benchmark(
             total_main_tokens / main_benchmark_total_time if main_benchmark_total_time > 0 else 0
         )
 
-        # Debug: Log breakdown
-        logger.info("[DEBUG] Token count breakdown:")
-        logger.info(f"  - Number of main batches: {len(results)}")
-        logger.info(f"  - Tokens per batch: {[r['num_new_tokens'] for r in results]}")
-        logger.info(f"  - Total tokens across all batches: {total_main_tokens}")
 
         logger.info("\nOverall main benchmark performance:")
         logger.info(f"  Total wall-clock time: {main_benchmark_total_time:.2f}s")
