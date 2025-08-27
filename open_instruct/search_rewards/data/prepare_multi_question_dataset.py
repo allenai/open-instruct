@@ -219,6 +219,7 @@ def create_multi_question_examples_from_tqa(tqa_dataset, num_examples: int = 100
     """
     Create multi-question examples by concatenating multiple questions from TQA dataset.
     Ensures no overlap of questions among different examples.
+    Filters out samples with semicolons in ground truth to avoid parsing issues.
     
     Args:
         tqa_dataset: The TQA dataset to sample questions from
@@ -230,13 +231,28 @@ def create_multi_question_examples_from_tqa(tqa_dataset, num_examples: int = 100
     
     tqa_list = list(tqa_dataset)
     
-    # Check if we have enough questions
-    total_questions_needed = num_examples * num_questions
-    if len(tqa_list) < total_questions_needed:
-        raise ValueError(f"Not enough questions in TQA dataset. Need {total_questions_needed} but only have {len(tqa_list)}")
+    # Filter out samples that contain semicolons in their ground truth
+    # This prevents parsing issues when combining multiple ground truths
+    filtered_tqa_list = []
+    skipped_count = 0
     
-    # Shuffle the dataset to ensure randomness
-    random.shuffle(tqa_list)
+    for sample in tqa_list:
+        ground_truth = sample["ground_truth"]
+        if ";" in ground_truth:
+            skipped_count += 1
+        else:
+            filtered_tqa_list.append(sample)
+    
+    print(f"Filtered out {skipped_count} samples containing semicolons in ground truth")
+    print(f"Remaining samples: {len(filtered_tqa_list)}")
+    
+    # Check if we have enough questions after filtering
+    total_questions_needed = num_examples * num_questions
+    if len(filtered_tqa_list) < total_questions_needed:
+        raise ValueError(f"Not enough questions in TQA dataset after filtering. Need {total_questions_needed} but only have {len(filtered_tqa_list)}")
+    
+    # Shuffle the filtered dataset to ensure randomness
+    random.shuffle(filtered_tqa_list)
     
     multi_question_examples = []
     
@@ -249,7 +265,7 @@ def create_multi_question_examples_from_tqa(tqa_dataset, num_examples: int = 100
         # Sample num_questions without overlap
         start_idx = i * num_questions
         end_idx = start_idx + num_questions
-        selected_questions = tqa_list[start_idx:end_idx]
+        selected_questions = filtered_tqa_list[start_idx:end_idx]
         
         # Extract questions and ground truth answers
         questions = []
@@ -273,6 +289,7 @@ def create_multi_question_examples_from_tqa(tqa_dataset, num_examples: int = 100
         formatted_prompt = prompt_template.replace("{question}", combined_question)
         
         # Create combined ground truth (semicolon-separated)
+        # Note: We've filtered out samples with semicolons to avoid parsing conflicts
         combined_ground_truth = "; ".join(answers)
         
         # Create the example in the same format as the original datasets
@@ -499,8 +516,8 @@ if __name__ == "__main__":
     tqa_5q_dataset = create_multi_question_dataset_from_tqa(
         num_examples=1000,  # Fewer examples since we need more questions per example
         seed=42,
-        num_questions=5,  # 5 questions per example
-        push_to_hub=False,  # Set to True to push to hub
+        num_questions=5,  # 5 quedstions per example
+        push_to_hub=True,  # Set to True to push to hub
         hub_id="rulins/multi_question_synthetic_single_source_tqa_5q",
         dataset_name="rl_rag_toy_case_multi_dataset_finegrained"
     )

@@ -47,7 +47,7 @@ def get_snippets_for_query(query, api_endpoint=None, number_of_results=3):
                 "domains": "dpr_wiki_contriever",
             },  # domains is meaningless for now
             headers={"Content-Type": "application/json"},
-            timeout=(3, 15),
+            timeout=(10, 60),
         )
         res.raise_for_status()  # Raises HTTPError for bad responses
         data = res.json()
