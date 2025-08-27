@@ -55,6 +55,7 @@ import sys
 import threading
 import time
 import traceback
+import wandb
 from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
@@ -363,6 +364,14 @@ class Args:
     """the max generation length for evaluation for oe-eval"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
+
+    # Training rollout logging
+    log_training_rollouts: bool = False
+    """Whether to log training rollouts to wandb"""
+    log_training_rollouts_freq: int = 10
+    """How often to log training rollouts (every N training steps)"""
+    num_training_rollouts_to_log: int = 16
+    """Number of training rollouts to log each time"""
 
     # Tool settings
     tools: Optional[List[str]] = None
@@ -1180,6 +1189,15 @@ def data_preparation_thread(
             decoded_queries = tokenizer.batch_decode(queries, skip_special_tokens=True)
             decoded_queries = [extract_user_query(query) for query in decoded_queries]
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
+            
+            # DEBUG: Log a few sample responses to check for answer tags
+            if training_step % 10 == 0 and args.log_training_rollouts:  # Log every 10 steps
+                print(f"[DEBUG] Sample responses at step {training_step}:")
+                for i in range(min(3, len(decoded_responses))):
+                    print(f"  Response {i}: {decoded_responses[i][:200]}...{decoded_responses[i][-200:]}")
+                    has_answer_tags = any(tag in decoded_responses[i] for tag in ['</answer0>', '</answer1>', '</answer>', '<answer>'])
+                    print(f"  Has answer tags: {has_answer_tags}")
+                print()
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
             scores, reward_metrics = asyncio.run(
@@ -1199,6 +1217,27 @@ def data_preparation_thread(
                 advantages = scores - mean_grouped_rewards
             else:
                 raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
+
+        # Log training rollouts if enabled
+        training_rollouts_data = None
+        if args.log_training_rollouts and training_step % args.log_training_rollouts_freq == 0 and args.with_tracking:
+            print(f"[Data Preparation Thread] 📊 Preparing training rollouts for logging at step {training_step}")
+            
+            # Select a subset of samples for logging
+            num_to_log = min(args.num_training_rollouts_to_log, len(responses))
+            if num_to_log > 0:
+                indices_to_log = np.random.choice(len(responses), size=num_to_log, replace=False)
+                
+                training_rollouts_data = {
+                    "prompt": [extract_user_query(tokenizer.decode(queries[i], skip_special_tokens=True)) for i in indices_to_log],
+                    "response": [decoded_responses[i] for i in indices_to_log],
+                    "scores": [float(scores[i]) for i in indices_to_log],
+                    "advantages": [float(advantages[i]) for i in indices_to_log],
+                    "ground_truth": [str(ground_truths[i]) for i in indices_to_log],
+                    "finish_reason": [finish_reasons[i] for i in indices_to_log],
+                    "dataset": [datasets[i] for i in indices_to_log],
+                    "training_step": training_step,
+                }
 
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved
@@ -1396,6 +1435,7 @@ def data_preparation_thread(
                 "responses_count": len(responses),
                 "num_new_tokens": num_new_tokens,
                 "B": B,
+                "training_rollouts_data": training_rollouts_data,  # Add training rollouts data
             }
         )
 
@@ -1555,8 +1595,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         all_configs.update(vars(beaker_config))
     all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config))
     if args.with_tracking:
-        import wandb
-
         wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
@@ -1850,6 +1888,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 B = packed_data["B"]
                 collated_data = packed_data["collated_data"]
                 num_total_tokens += packed_data["num_new_tokens"]
+                training_rollouts_data = packed_data.get("training_rollouts_data")
                 if B == 0:
                     print("[Main Thread] 🤡 After packing, there is not enough data to train. Will save though.")
                     skip_batch = True
@@ -1897,6 +1936,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                             if len(value) > 0:
                                 writer.add_histogram(key, value, episode)
                     print_rich_single_line_metrics(scalar_metrics)
+
+            # Log training rollouts if available (thread-safe logging in main thread)
+            if training_rollouts_data is not None and args.with_tracking:
+                print(f"[Main Thread] 📊 Logging {len(training_rollouts_data['prompt'])} training rollouts to wandb")
+                train_df = pd.DataFrame(training_rollouts_data)
+                if args.with_tracking:
+                    wandb.log({"training_rollouts": wandb.Table(dataframe=train_df)}, step=episode)
 
             if args.save_freq > 0 and training_step % args.save_freq == 0:
                 with Timer("[Main Thread] 🗡️ Saving model"):

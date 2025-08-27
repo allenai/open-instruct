@@ -223,7 +223,7 @@ def create_multi_question_examples_from_tqa(tqa_dataset, num_examples: int = 100
     
     Args:
         tqa_dataset: The TQA dataset to sample questions from
-        num_examples: Number of multi-question examples to generate
+        num_examples: Number of multi-question examples to generate. If -1, generate maximum possible examples.
         seed: Random seed for reproducibility
         num_questions: Number of questions to concatenate in each example
     """
@@ -246,10 +246,18 @@ def create_multi_question_examples_from_tqa(tqa_dataset, num_examples: int = 100
     print(f"Filtered out {skipped_count} samples containing semicolons in ground truth")
     print(f"Remaining samples: {len(filtered_tqa_list)}")
     
-    # Check if we have enough questions after filtering
-    total_questions_needed = num_examples * num_questions
-    if len(filtered_tqa_list) < total_questions_needed:
-        raise ValueError(f"Not enough questions in TQA dataset after filtering. Need {total_questions_needed} but only have {len(filtered_tqa_list)}")
+    # Calculate maximum possible examples
+    max_possible_examples = len(filtered_tqa_list) // num_questions
+    
+    # Handle num_examples = -1 (generate maximum possible)
+    if num_examples == -1:
+        num_examples = max_possible_examples
+        print(f"num_examples set to -1: generating maximum possible examples = {num_examples}")
+    else:
+        # Check if we have enough questions after filtering
+        total_questions_needed = num_examples * num_questions
+        if len(filtered_tqa_list) < total_questions_needed:
+            raise ValueError(f"Not enough questions in TQA dataset after filtering. Need {total_questions_needed} but only have {len(filtered_tqa_list)}. Maximum possible examples: {max_possible_examples}")
     
     # Shuffle the filtered dataset to ensure randomness
     random.shuffle(filtered_tqa_list)
@@ -312,17 +320,18 @@ def create_multi_question_examples_from_tqa(tqa_dataset, num_examples: int = 100
     return multi_question_examples
 
 
-def create_multi_question_dataset_from_tqa(num_examples: int = 1000, seed: int = 42, num_questions: int = 2, push_to_hub: bool = False, hub_id: str = None, dataset_name: str = "rl_rag_toy_case_multi_dataset_single_source_tqa"):
+def create_multi_question_dataset_from_tqa(num_examples: int = 1000, seed: int = 42, num_questions: int = 2, push_to_hub: bool = False, hub_id: str = None, dataset_name: str = "rl_rag_toy_case_multi_dataset_single_source_tqa", val_size: int = 300):
     """
     Create a multi-question dataset from TQA dataset (single source).
     
     Args:
-        num_examples: Number of examples to generate
+        num_examples: Number of examples to generate. If -1, generate maximum possible examples.
         seed: Random seed for reproducibility
         num_questions: Number of questions to concatenate in each example
         push_to_hub: Whether to push to Hugging Face Hub
         hub_id: Hub ID for pushing (e.g., "username/dataset_name")
         dataset_name: Name to assign to the dataset
+        val_size: Number of examples to reserve for validation set
     """
     # Load TQA dataset
     tqa_dataset = load_tqa_dataset()
@@ -330,26 +339,51 @@ def create_multi_question_dataset_from_tqa(num_examples: int = 1000, seed: int =
     # Create multi-question examples
     examples = create_multi_question_examples_from_tqa(tqa_dataset, num_examples, seed, num_questions)
     
-    # Create dataset
-    dataset = Dataset.from_list(examples)
+    # Create full dataset
+    full_dataset = Dataset.from_list(examples)
     
-    print(f"Created TQA single-source dataset with {len(dataset)} examples")
+    # Split into train and validation sets
+    if len(full_dataset) > val_size:
+        # Use a different seed for splitting to ensure reproducibility
+        split_seed = seed + 1000
+        dataset_dict = full_dataset.train_test_split(test_size=val_size, seed=split_seed)
+        train_dataset = dataset_dict['train']
+        val_dataset = dataset_dict['test']
+        
+        print(f"Created TQA single-source dataset with {len(full_dataset)} total examples")
+        print(f"Split into: {len(train_dataset)} train examples, {len(val_dataset)} validation examples")
+    else:
+        print(f"Warning: Dataset has only {len(full_dataset)} examples, which is <= val_size ({val_size})")
+        print("Using all examples as training set, no validation split created.")
+        train_dataset = full_dataset
+        val_dataset = None
+    
     print(f"Each example contains {num_questions} questions")
-    print(f"Total unique questions used: {len(dataset) * num_questions}")
+    print(f"Total unique questions used: {len(full_dataset) * num_questions}")
     print("\nSample example:")
-    print("Question:", dataset[0]["messages"][0]["content"][:300] + "...")
-    print("Ground truth:", dataset[0]["ground_truth"])
-    print("Number of questions:", dataset[0]["num_questions"])
-    print("Individual questions:", [q[:50] + "..." for q in dataset[0]["individual_questions"]])
-    print("Individual ground truths:", dataset[0]["individual_ground_truths"])
+    print("Question:", train_dataset[0]["messages"][0]["content"][:300] + "...")
+    print("Ground truth:", train_dataset[0]["ground_truth"])
+    print("Number of questions:", train_dataset[0]["num_questions"])
+    print("Individual questions:", [q[:50] + "..." for q in train_dataset[0]["individual_questions"]])
+    print("Individual ground truths:", train_dataset[0]["individual_ground_truths"])
     
     # Optionally push to hub
     if push_to_hub and hub_id:
         print(f"Pushing dataset to {hub_id}...")
-        dataset.push_to_hub(hub_id)
-        print("Dataset pushed successfully!")
+        if val_dataset is not None:
+            # Create DatasetDict with train and validation splits
+            from datasets import DatasetDict
+            dataset_dict = DatasetDict({
+                'train': train_dataset,
+                'validation': val_dataset
+            })
+            dataset_dict.push_to_hub(hub_id)
+            print(f"Dataset pushed successfully with train ({len(train_dataset)}) and validation ({len(val_dataset)}) splits!")
+        else:
+            train_dataset.push_to_hub(hub_id)
+            print("Dataset pushed successfully (train split only)!")
     
-    return dataset
+    return {'train': train_dataset, 'validation': val_dataset} if val_dataset is not None else {'train': train_dataset}
 
 
 def create_multi_question_dataset(num_examples: int = 1000, seed: int = 42, push_to_hub: bool = False, hub_id: str = None):
@@ -502,29 +536,42 @@ if __name__ == "__main__":
     print("\n=== Creating multi-question dataset from single TQA source ===")
     
     # Create dataset with 2 questions per example from TQA
-    tqa_2q_dataset = create_multi_question_dataset_from_tqa(
-        num_examples=1000,
+    tqa_2q_datasets = create_multi_question_dataset_from_tqa(
+        num_examples=-1,
         seed=42,
         num_questions=2,  # 2 questions per example
         push_to_hub=True,  # Set to True to push to hub
         hub_id="rulins/multi_question_synthetic_single_source_tqa_2q",
-        dataset_name="rl_rag_toy_case_multi_dataset_finegrained"
+        dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
+        val_size=300  # 300 examples for validation
     )
     
-    # Create dataset with 3 questions per example from TQA
-    print("\n=== Creating 5-question dataset from TQA ===")
-    tqa_5q_dataset = create_multi_question_dataset_from_tqa(
-        num_examples=1000,  # Fewer examples since we need more questions per example
+    # Create dataset with 5 questions per example from TQA (maximum possible examples)
+    print("\n=== Creating 5-question dataset from TQA (maximum examples) ===")
+    tqa_5q_datasets = create_multi_question_dataset_from_tqa(
+        num_examples=-1,  # Generate maximum possible examples until no more samples
         seed=42,
-        num_questions=5,  # 5 quedstions per example
+        num_questions=5,  # 5 questions per example
         push_to_hub=True,  # Set to True to push to hub
         hub_id="rulins/multi_question_synthetic_single_source_tqa_5q",
-        dataset_name="rl_rag_toy_case_multi_dataset_finegrained"
+        dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
+        val_size=300  # 300 examples for validation
     )
     
     print(f"\n=== Summary ===")
-    print(f"Single source TQA (2Q): {len(tqa_2q_dataset)} examples, {len(tqa_2q_dataset) * 2} total questions used")
-    print(f"Single source TQA (5Q): {len(tqa_5q_dataset)} examples, {len(tqa_5q_dataset) * 5} total questions used")
-    print(f"Total TQA questions used: {len(tqa_2q_dataset) * 2 + len(tqa_5q_dataset) * 5}")
+    tqa_2q_train_size = len(tqa_2q_datasets['train'])
+    tqa_2q_val_size = len(tqa_2q_datasets['validation']) if 'validation' in tqa_2q_datasets else 0
+    tqa_2q_total = tqa_2q_train_size + tqa_2q_val_size
+    
+    tqa_5q_train_size = len(tqa_5q_datasets['train'])
+    tqa_5q_val_size = len(tqa_5q_datasets['validation']) if 'validation' in tqa_5q_datasets else 0
+    tqa_5q_total = tqa_5q_train_size + tqa_5q_val_size
+    
+    print(f"Single source TQA (2Q): {tqa_2q_total} total examples ({tqa_2q_train_size} train, {tqa_2q_val_size} val), {tqa_2q_total * 2} total questions used")
+    print(f"Single source TQA (5Q): {tqa_5q_total} total examples ({tqa_5q_train_size} train, {tqa_5q_val_size} val), {tqa_5q_total * 5} total questions used")
+    print(f"Total TQA questions used: {tqa_2q_total * 2 + tqa_5q_total * 5}")
     
     print("\nTo push datasets to hub, set push_to_hub=True in the function calls above.")
+    print("\nNote: Setting num_examples=-1 will generate the maximum possible number of examples")
+    print("until there are no more training samples to unpack from the source dataset.")
+    print(f"Each dataset is automatically split into train/validation with {300} examples reserved for validation.")

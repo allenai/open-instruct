@@ -2,9 +2,9 @@ import logging
 import re
 from typing import Any, Dict, List, Tuple, Optional, Union
 import json
+import string
 
 from open_instruct.search_rewards.find_reward_spans import FinegrainedScore
-from open_instruct.math_utils import normalize_final_answer
 
 LOGGER = logging.getLogger(__name__)
 
@@ -90,9 +90,29 @@ def extract_boxed_answer_from_response(response: str) -> str:
     if boxed_match:
         return boxed_match.group(1).strip()
     
-    # If no boxed answer found, return empty string
-    return ""
+    # If no boxed answer found, return the entire response
+    return response
 
+def normalize_answer(s: str) -> str:
+    """
+    Normalize the answer by lowercasing, removing punctuation, articles,
+    and extra whitespace.
+
+    Based on:
+    https://github.com/huggingface/evaluate/blob/main/metrics/squad/compute_score.py
+    """
+
+    def remove_articles(text: str) -> str:
+        return re.sub(r"\b(a|an|the)\b", " ", text)
+
+    def white_space_fix(text: str) -> str:
+        return " ".join(text.split())
+
+    def remove_punc(text: str) -> str:
+        return "".join(ch for ch in text if ch not in set(string.punctuation))
+
+    return white_space_fix(remove_articles(remove_punc(s.lower())))
+    
 def verify_one_question(response: str, target: str, use_exact_match: bool = False) -> float:
     """
     Verify a single question response against ground truth.
@@ -122,8 +142,8 @@ def verify_one_question(response: str, target: str, use_exact_match: bool = Fals
     
     for label in parsed_labels:
         # Normalize both strings for comparison
-        response_normalized = normalize_final_answer(extract_boxed_answer_from_response(response.strip()))
-        target_normalized = normalize_final_answer(label.strip())
+        response_normalized = normalize_answer(extract_boxed_answer_from_response(response.strip()))
+        target_normalized = normalize_answer(label.strip())
         
         if use_exact_match:
             # Exact match after normalization
@@ -131,7 +151,7 @@ def verify_one_question(response: str, target: str, use_exact_match: bool = Fals
                 return 1.0
         else:
             # Contains match - check if ground truth is contained in response
-            if target_normalized.lower() in response_normalized.lower() or response_normalized.lower() in target_normalized.lower():
+            if target_normalized.lower() in response_normalized.lower():
                 return 1.0
     return 0.0
 
