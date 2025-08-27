@@ -482,9 +482,9 @@ class LLMRayActor:
             output_loop_start = time.perf_counter()
             for output in outputs:
                 request_id = output.request_id.split("-")[0]
-                collected_outputs[base_request_id].append(output)
+                collected_outputs[request_id].append(output)
                 metadata = self.request_metadata[request_id]
-                if len(collected_outputs[base_request_id]) != metadata["generation_config"].n:
+                if len(collected_outputs[request_id]) != metadata["generation_config"].n:
                     continue
 
                 outputs_to_finalize = collected_outputs[request_id]
@@ -492,10 +492,10 @@ class LLMRayActor:
                 result = _finalize_outputs(outputs_to_finalize, tracking, metadata["dataset_index"], self.tools)
 
                 self._insert_result_to_queue(result, metadata["is_eval"])
-                del collected_outputs[base_request_id]
-                self.request_metadata.pop(base_request_id, None)
+                del collected_outputs[request_id]
+                self.request_metadata.pop(request_id, None)
                 for i in range(metadata["generation_config"].n):
-                    self.request_metadata.pop(f"{base_request_id}-{i}", None)
+                    self.request_metadata.pop(f"{request_id}-{i}", None)
             self.time_metrics["output_loop"] += time.perf_counter() - output_loop_start
 
             should_stop_start = time.perf_counter()
