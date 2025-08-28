@@ -43,7 +43,6 @@ for model_name_or_path in "$@"; do
            --budget ai2/oe-adapt \
            --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
            --env-secret="HF_TOKEN=finbarrt_HF_TOKEN" \
-           --install 'uv sync' \
            -- uv run python -m open_instruct.benchmark_generators \
         --model_name_or_path "$model_name_or_path" \
         --tokenizer_name_or_path "$model_name_or_path" \
