@@ -15,21 +15,21 @@ exp_name=rlvr_code_view_tool_sft
         --exp_name ${exp_name} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 8 \
-        --num_unique_prompts_rollout 64 \
+        --num_unique_prompts_rollout 32 \
         --num_mini_batches 4 \
         --num_epochs 1 \
         --learning_rate 1e-6 \
         --per_device_train_batch_size 1 \
         --output_dir /output \
         --kl_estimator kl3 \
-        --dataset_mixer_list saurabh5/rlvr-code-view-tool-new-first-turn-only 1.0 \
+        --dataset_mixer_list saurabh5/rlvr-code-view-tool-new-first-turn-only-2 1.0 \
         --dataset_mixer_list_splits train \
-        --dataset_mixer_eval_list saurabh5/rlvr-code-view-tool-new-first-turn-only 8 \
+        --dataset_mixer_eval_list saurabh5/rlvr-code-view-tool-new-first-turn-only-2 8 \
         --dataset_mixer_eval_list_splits train \
         --max_token_length 4096 \
         --max_prompt_token_length 4096 \
-        --response_length 8192 \
-        --pack_length 12288 \
+        --response_length 16384 \
+        --pack_length 20480 \
         --model_name_or_path  /weka/oe-adapt-default/ethans/llm-weights/Qwen3.2-8B-nothink \
         --chat_template_name chatml \
         --non_stop_penalty False \
@@ -52,8 +52,9 @@ exp_name=rlvr_code_view_tool_sft
         --with_tracking \
         --tools code_view \
         --vllm_enable_prefix_caching \
-        --max_tool_calls 5 \
+        --max_tool_calls 15 \
         --allow_world_padding True \
         --vllm_top_p 0.95 \
         --log_rollouts_to_file True \
-        --max_rollout_logs_per_step 10
+        --max_rollout_logs_per_step 10 \
+        --dataset_skip_cache True

@@ -243,7 +243,7 @@ def _normalize_path(path: str, repo_name: Optional[str] = None) -> tuple[str, st
     else:
         # Use path as-is
         full_path = path
-    
+
     # Default to current directory if empty
     if not full_path:
         full_path = "."

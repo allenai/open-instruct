@@ -1074,6 +1074,14 @@ class PolicyTrainerRayProcess(RayProcess):
             # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
             model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
+        # Fix generation config validation error when do_sample=False
+        if hasattr(model_to_save, "generation_config"):
+            if not model_to_save.generation_config.do_sample:
+                # Unset sampling parameters when do_sample is False
+                model_to_save.generation_config.temperature = None
+                model_to_save.generation_config.top_p = None
+                model_to_save.generation_config.top_k = None
+
         if self.rank == 0:
             os.makedirs(output_dir, exist_ok=True)
 
