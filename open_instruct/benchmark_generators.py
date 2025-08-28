@@ -348,6 +348,7 @@ def load_model_dims(model_name: str) -> ModelDims:
     )
     if model_dims.intermediate_size is None:
         model_dims.intermediate_size = 4 * model_dims.hidden_size
+    return model_dims
 
 
 def get_device_name(device_name: str) -> str:
