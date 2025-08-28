@@ -1,5 +1,6 @@
 # /weka/oe-adapt-default/allennlp/deletable_checkpoint/stellal/grpo_mathonly_1m_olmo3-meta-fvi-noisy-5b-5b-5b__1__1755969330_checkpoints
-# 
+# /weka/oe-adapt-default/allennlp/deletable_checkpoint/stellal/grpo_mathonly_1m_olmo3-meta-noisy-fvi-5b-5b-5b__1__1755969488_checkpoints
+
 
 
 steps=(
@@ -17,7 +18,7 @@ for step in "${steps[@]}"; do
         --location gs://ai2-llm/post-training//faezeb//output/olmo3_10b_microanneal_metareasoning_13639_math_code_rl__1__1753343950_checkpoints/step_${step} \
         --cluster ai2/augusta-google-1 \
         --workspace "ai2/tulu-3-results" \
-        --priority normal \
+        --priority high \
         --preemptible \
         --run_oe_eval_experiments \
         --use_hf_tokenizer_template \
