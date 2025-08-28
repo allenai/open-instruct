@@ -341,23 +341,55 @@ class CodeViewTool(Tool):
                 if name == "bash":
                     if not bash_cmd:
                         raise ValueError("Missing 'command' for bash function call")
-                    response = requests.post(
-                        f"{self.base_api}/run_bash",
-                        json={
-                            "repo_name": repo_name,
-                            "cmd": bash_cmd,
-                            "cwd": path or cwd,
-                            "base_commit": base_commit,
-                            "patches": patches,
-                            "timeout_seconds": timeout_seconds,
-                        },
-                        timeout=timeout_seconds,
-                    )
+
+                    # Retry logic for API gateway errors
+                    max_retries = 2
+                    response = None
+                    for attempt in range(max_retries):
+                        try:
+                            response = requests.post(
+                                f"{self.base_api}/run_bash",
+                                json={
+                                    "repo_name": repo_name,
+                                    "cmd": bash_cmd,
+                                    "cwd": path or cwd,
+                                    "base_commit": base_commit,
+                                    "patches": patches,
+                                    "timeout_seconds": timeout_seconds,
+                                },
+                                timeout=timeout_seconds,
+                            )
+                            if response.status_code in [502, 503, 504]:
+                                if attempt < max_retries - 1:
+                                    time.sleep(1)  # Brief pause before retry
+                                    continue
+                                else:
+                                    # Return a cleaner error message instead of HTML
+                                    content = f"OBSERVATION:\nAPI error (status {response.status_code}): Gateway timeout or service unavailable. Please try again.\n"
+                                    all_outputs.append(content)
+                                    response = None  # Mark as failed
+                            break
+                        except requests.exceptions.RequestException as e:
+                            if attempt < max_retries - 1:
+                                time.sleep(1)
+                                continue
+                            else:
+                                content = f"OBSERVATION:\nAPI connection error: {str(e)}\n"
+                                all_outputs.append(content)
+                                response = None  # Mark as failed
                 elif name == "submit":
-                    # No-op; just acknowledge submission, similar to SWE-agent behavior
+                    # Submit should terminate generation immediately
                     content = "OBSERVATION:\nSubmission received. Task marked as complete.\n"
                     all_outputs.append(content)
-                    continue
+                    # Set terminate flag to stop generation
+                    return ToolOutput(
+                        output="\n\n".join(all_outputs) if all_outputs else content,
+                        called=True,
+                        error="",
+                        timeout=False,
+                        runtime=time.time() - start_time,
+                        terminate=True,  # Signal to terminate generation
+                    )
                 else:
                     # str_replace_editor commands routed to /edit_file (including view)
                     payload = {
@@ -374,14 +406,16 @@ class CodeViewTool(Tool):
                     }
                     response = requests.post(f"{self.base_api}/edit_file", json=payload, timeout=timeout_seconds)
 
-                if response.status_code == 200:
-                    result = response.json()
-                    content = result.get("content", "")
-                    all_outputs.append(content)
-                else:
-                    error_msg = f"API error (status {response.status_code}): {response.text}"
-                    all_outputs.append(error_msg)
-                    error = error_msg
+                # Only process response if we have one
+                if response is not None:
+                    if response.status_code == 200:
+                        result = response.json()
+                        content = result.get("content", "")
+                        all_outputs.append(content)
+                    else:
+                        error_msg = f"API error (status {response.status_code}): {response.text}"
+                        all_outputs.append(error_msg)
+                        error = error_msg
 
             except requests.Timeout:
                 all_outputs.append("Timeout viewing file")
@@ -540,6 +574,8 @@ class ToolUseLLM(LLM):
                         concat_outputs[req_id].outputs[0].finish_reason = "stop"  # Mark as properly finished
                         outputs.append(concat_outputs[req_id])
                         dict_keys_to_delete.append(req_id)
+                        # Abort the request in the vLLM engine to stop generation immediately
+                        self.llm_engine.abort_request(req_id)
                         continue
 
                     if tool_result.called:

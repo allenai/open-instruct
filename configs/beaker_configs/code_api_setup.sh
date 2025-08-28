@@ -46,9 +46,9 @@ server {
         proxy_pass http://api_servers;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
-        proxy_connect_timeout 5s;
-        proxy_send_timeout 5s;
-        proxy_read_timeout 5s;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 65s;
+        proxy_read_timeout 65s;
     }
 }
 EOF

@@ -533,13 +533,28 @@ class LLMRayActor:
             last_prompt_token_ids = last_output.prompt_token_ids
             last_token_ids = last_o.token_ids
             tool_output_token_ids = tokenizer.encode(
-                "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+                "<tool_response>\n" + tool_result.output + "</tool_response>\n", add_special_tokens=False
             )
             tracking["timeout"][req_id] = tool_result.timeout
             tracking["tool_error"][req_id] += "" if tool_result.error is None else tool_result.error
             tracking["tool_output"][req_id] += tool_result.output
             tracking["tool_runtime"][req_id] += tool_result.runtime
             tracking["tool_called"][req_id] = True
+
+            # Check if tool requested termination (e.g., MaxCallsExceededTool)
+            if hasattr(tool_result, "terminate") and tool_result.terminate:
+                # Add the tool output to response and mark as finished without continuing
+                tracking["concat_outputs"][req_id].outputs[0].token_ids.extend(tool_output_token_ids)
+                tracking["masks"][req_id].extend([0] * len(tool_output_token_ids))
+                # Mark as finished by setting finish reason
+                tracking["concat_outputs"][req_id].outputs[0].finish_reason = "stop"
+                # Abort the request in the vLLM engine to stop generation immediately
+                try:
+                    self.llm_engine.abort_request(req_id)
+                except Exception as e:
+                    self.logger.warning(f"Failed to abort request {req_id}: {e}")
+                dict_keys_to_delete.append(req_id)
+                continue
 
             # Edge case 1: clip against model context length
             prompt_and_tool_output_token = last_prompt_token_ids + last_token_ids + tool_output_token_ids
