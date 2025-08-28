@@ -89,6 +89,10 @@ class VerificationResult:
     reasoning: Optional[str] = None
 
 
+@dataclass
+class RandomVerifierConfig(VerifierConfig):
+    probability: Optional[float] = 0.5
+
 class VerifierFunction(ABC):
     """
     Base class for all verifier functions that evaluate model predictions against ground truth.
@@ -171,7 +175,9 @@ class RandomVerifier(VerifierFunction):
     Verifier for random reward that returns a random reward between 0 and 1 with a given probability.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: Optional[RandomVerifierConfig] = None) -> None:
+        if verifier_config is None:
+            verifier_config = RandomVerifierConfig()
         super().__init__("random", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
@@ -184,6 +190,9 @@ class RandomVerifier(VerifierFunction):
             score = random.random() > self.verifier_config.probability
         return VerificationResult(score=score)
 
+    @classmethod
+    def get_config_class(cls) -> type:
+        return RandomVerifierConfig
 
 class GSM8KVerifier(VerifierFunction):
     """
