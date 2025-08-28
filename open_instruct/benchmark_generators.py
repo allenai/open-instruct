@@ -791,7 +791,6 @@ def run_benchmark(
             result_dict["mfu"] = 100 * model_flops_per_second / device_flops
 
             # Calculate total memory bytes for all prompts and responses in the batch
-            print(f"{prompt_lengths=}, {response_lengths=}")
             model_memory_bytes = model_dims.memory_bytes(
                 prompt_lengths, response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
             )
@@ -854,7 +853,11 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
                 aggregated_results[key].extend(value)
 
     num_results = len(results)
-    aggregated_results["avg_tokens_per_second"] = aggregated_results["total_tokens_per_second"] / num_results
+    aggregated_results["avg_tokens_per_second"] = (
+        aggregated_results["total_num_new_tokens"] / aggregated_results["total_generation_time"]
+        if aggregated_results["total_generation_time"] > 0
+        else 0
+    )
     aggregated_results["avg_mfu"] = aggregated_results["total_mfu"] / num_results
     aggregated_results["avg_mbu"] = aggregated_results["total_mbu"] / num_results
     aggregated_results["avg_generation_time"] = aggregated_results["total_generation_time"] / num_results
