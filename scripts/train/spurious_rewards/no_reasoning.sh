@@ -20,8 +20,8 @@ EXP_NAME=${EXP_NAME:-${exp_name}}
 
 
 # cluster
-cluster=ai2/augusta-google-1
-# cluster=ai2/jupiter-cirrascale-2
+# cluster=ai2/augusta-google-1
+cluster=ai2/jupiter-cirrascale-2
 
 NUM_GPUS=${NUM_GPUS:-8}
 
@@ -31,7 +31,7 @@ python mason.py \
     --workspace ai2/tulu-thinker \
     --priority high \
     --pure_docker_mode \
-    --image michaeln/open_instruct_olmo2_retrofit \
+    --image nathanl/open_instruct_auto \
     --preemptible \
     --num_nodes 4 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
@@ -42,6 +42,8 @@ python mason.py \
     -- \
 source configs/beaker_configs/ray_node_setup.sh \&\& \
 source configs/beaker_configs/code_api_setup.sh \&\& \
+export BEAKER_TOKEN=MHa4sF+u8x/OY9tE \&\& \
+export WANDB_API_KEY=a84285031fcd2e0955fd1d015249882145a057ff \&\& \
 python open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
@@ -83,4 +85,5 @@ python open_instruct/grpo_fast.py \
     --oe_eval_max_length 8192 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --oe_eval_tasks ${evals} \
-    --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto $@
+    --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto $@ \
+    --eval_priority high
