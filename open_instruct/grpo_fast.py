@@ -145,45 +145,42 @@ class ShutdownSentinel:
 
 
 def log_rollouts(
-    queries: List[str], 
-    responses: List[str], 
-    training_step: int, 
-    episode: int, 
-    output_dir: str,
-    max_logs: int = 10
+    queries: List[str], responses: List[str], training_step: int, episode: int, output_dir: str, max_logs: int = 10
 ):
     """Log prompts and completions to a JSON file for debugging and analysis."""
     from pathlib import Path
-    
+
     # Hardcode rollout logs directory as requested, ignoring provided output_dir
-    rollout_log_dir = Path("/weka/oe-adapt-default/saurabhs/repos/open-instruct-3/rollouts/test2")
+    rollout_log_dir = Path("/weka/oe-adapt-default/saurabhs/repos/open-instruct-3/rollouts/test")
     rollout_log_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Create filename with timestamp and step info
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = rollout_log_dir / f"rollouts_step_{training_step}_episode_{episode}_{timestamp}.jsonl"
-    
+
     # Limit the number of logs to avoid huge files
     num_to_log = min(len(queries), max_logs)
-    
+
     # Prepare data for logging
     rollout_data = []
     for i in range(num_to_log):
-        rollout_data.append({
-            "index": i,
-            "training_step": training_step,
-            "episode": episode,
-            "timestamp": timestamp,
-            "query": queries[i],
-            "response": responses[i],
-            "response_length": len(responses[i]),
-        })
-    
+        rollout_data.append(
+            {
+                "index": i,
+                "training_step": training_step,
+                "episode": episode,
+                "timestamp": timestamp,
+                "query": queries[i],
+                "response": responses[i],
+                "response_length": len(responses[i]),
+            }
+        )
+
     # Write to file in JSONL format for easy streaming
     with open(log_file, "w") as f:
         for entry in rollout_data:
             f.write(json.dumps(entry) + "\n")
-    
+
     logger.info(f"📝 Logged {len(rollout_data)} rollouts to {log_file}")
 
 
@@ -357,7 +354,7 @@ class Args:
     """whether to penalize responses which did not finish generation"""
     non_stop_penalty_value: float = 0.0
     """the reward value for responses which did not finish generation"""
-    
+
     # Logging
     log_rollouts_to_file: bool = False
     """whether to log prompts and completions from rollouts to a file"""
@@ -1384,12 +1381,7 @@ def accumulate_inference_batches(
         dataset_index=None,
     )
 
-    batch = Batch(
-        queries=all_queries,
-        ground_truths=all_ground_truths,
-        datasets=all_datasets,
-        indices=None,
-    )
+    batch = Batch(queries=all_queries, ground_truths=all_ground_truths, datasets=all_datasets, indices=None)
     return combined_result, batch
 
 
@@ -1449,18 +1441,18 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
                 result.finish_reasons
             )
-            
+
             # Log prompts and completions to file if enabled
             if args.log_rollouts_to_file:
                 # Calculate episode based on training step
                 episode = (training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
                 log_rollouts(
-                    decoded_queries, 
-                    decoded_responses, 
-                    training_step, 
-                    episode, 
+                    decoded_queries,
+                    decoded_responses,
+                    training_step,
+                    episode,
                     args.output_dir,
-                    max_logs=args.max_rollout_logs_per_step
+                    max_logs=args.max_rollout_logs_per_step,
                 )
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):

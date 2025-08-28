@@ -38,8 +38,9 @@ class ToolOutput:
     error: str
     timeout: bool
     runtime: float
-    start_str: str = "<output>\n"
-    end_str: str = "\n</output>"
+    terminate: bool = False  # If True, terminate generation immediately
+    start_str: str = "<tool_response>\n"
+    end_str: str = "\n</tool_response>"
 
 
 class Tool:
@@ -53,7 +54,14 @@ class Tool:
 
 class MaxCallsExceededTool(Tool):
     def __call__(self, prompt: str) -> ToolOutput:
-        return ToolOutput(output="Max tool calls exceeded.", called=False, error="", timeout=False, runtime=0)
+        return ToolOutput(
+            output="Max tool calls exceeded. Terminating generation.",
+            called=True,
+            error="",
+            timeout=False,
+            runtime=0,
+            terminate=True,  # Signal to terminate generation immediately
+        )
 
 
 class PythonCodeTool(Tool):
@@ -209,14 +217,18 @@ class CodeViewTool(Tool):
             name="bash",
             docstring="runs the given command directly in bash",
             arguments=[
-                SWEArgument(
-                    name="command", type="string", description="The bash command to execute.", required=True
-                ),
+                SWEArgument(name="command", type="string", description="The bash command to execute.", required=True),
                 SWEArgument(name="path", type="string", description="Optional working dir", required=False),
                 SWEArgument(name="cwd", type="string", description="Optional working dir", required=False),
                 SWEArgument(name="repo_name", type="string", description="Optional repo name", required=False),
                 SWEArgument(name="base_commit", type="string", description="Optional base commit", required=False),
-                SWEArgument(name="patches", type="array", description="Optional patches", required=False, items={"type": "string"}),
+                SWEArgument(
+                    name="patches",
+                    type="array",
+                    description="Optional patches",
+                    required=False,
+                    items={"type": "string"},
+                ),
             ],
         )
         str_replace_editor_schema = SWECommand(
@@ -233,21 +245,37 @@ class CodeViewTool(Tool):
                     required=True,
                     enum=["view", "create", "str_replace", "insert", "undo_edit"],
                 ),
-                SWEArgument(name="path", type="string", description="Absolute path to file or directory", required=True),
-                SWEArgument(name="view_range", type="array", description="[start,end] when viewing a file", required=False, items={"type": "integer"}),
+                SWEArgument(
+                    name="path", type="string", description="Absolute path to file or directory", required=True
+                ),
+                SWEArgument(
+                    name="view_range",
+                    type="array",
+                    description="[start,end] when viewing a file",
+                    required=False,
+                    items={"type": "integer"},
+                ),
                 SWEArgument(name="file_text", type="string", description="File contents for create", required=False),
                 SWEArgument(name="old_str", type="string", description="Old string for replace", required=False),
-                SWEArgument(name="new_str", type="string", description="New string for replace/insert", required=False),
-                SWEArgument(name="insert_line", type="integer", description="Insertion line (0-indexed)", required=False),
+                SWEArgument(
+                    name="new_str", type="string", description="New string for replace/insert", required=False
+                ),
+                SWEArgument(
+                    name="insert_line", type="integer", description="Insertion line (0-indexed)", required=False
+                ),
                 SWEArgument(name="repo_name", type="string", description="Optional repo name", required=False),
                 SWEArgument(name="base_commit", type="string", description="Optional base commit", required=False),
-                SWEArgument(name="patches", type="array", description="Optional patches", required=False, items={"type": "string"}),
+                SWEArgument(
+                    name="patches",
+                    type="array",
+                    description="Optional patches",
+                    required=False,
+                    items={"type": "string"},
+                ),
             ],
         )
         submit_schema = SWECommand(
-            name="submit",
-            docstring="Signal that the task is complete and submit the solution.",
-            arguments=[],
+            name="submit", docstring="Signal that the task is complete and submit the solution.", arguments=[]
         )
 
         for tool_call_str in tool_calls:
@@ -259,12 +287,7 @@ class CodeViewTool(Tool):
                 model_response = {
                     "message": prompt,
                     "tool_calls": [
-                        {
-                            "function": {
-                                "name": tool_call.get("name"),
-                                "arguments": tool_call.get("arguments", {}),
-                            }
-                        }
+                        {"function": {"name": tool_call.get("name"), "arguments": tool_call.get("arguments", {})}}
                     ],
                 }
                 name = tool_call.get("name", "")
@@ -290,11 +313,8 @@ class CodeViewTool(Tool):
                 bash_cmd = args.get("command") or args.get("cmd")
                 cwd = args.get("cwd")
 
-                # Remove /testbed/ prefix if present
-                if path.startswith("/testbed/"):
-                    path = path[9:]  # Remove "/testbed/" prefix
-                elif path.startswith("testbed/"):
-                    path = path[8:]  # Remove "testbed/" prefix
+                # Keep the path as-is - the API will handle normalization
+                # We don't strip /testbed anymore since API expects testbed/... paths
 
                 # Extract repo_name from the tool call arguments or fallback to context
                 repo_name = args.get("repo_name") or tool_ctx.get("repo_name")
@@ -352,11 +372,7 @@ class CodeViewTool(Tool):
                         "base_commit": base_commit,
                         "patches": patches,
                     }
-                    response = requests.post(
-                        f"{self.base_api}/edit_file",
-                        json=payload,
-                        timeout=timeout_seconds,
-                    )
+                    response = requests.post(f"{self.base_api}/edit_file", json=payload, timeout=timeout_seconds)
 
                 if response.status_code == 200:
                     result = response.json()
@@ -508,12 +524,30 @@ class ToolUseLLM(LLM):
                     timeout[req_id] = tool_result.timeout
                     tool_error[req_id] += "" if tool_result.error is None else tool_result.error
                     tool_runtime[req_id] += tool_result.runtime
+
+                    # Check if tool requested termination
+                    if tool_result.terminate:
+                        # Add the tool output to response and mark as finished without continuing
+                        tool_called[req_id] = True
+                        last_token_ids = last_o.token_ids
+                        tool_output_token_ids = tokenizer.encode(
+                            "<tool_response>\n" + tool_result.output + "</tool_response>\n", add_special_tokens=False
+                        )
+                        concat_outputs[req_id].outputs[0].token_ids.extend(tool_output_token_ids)
+                        concat_outputs[req_id].outputs[0].text = tokenizer.decode(
+                            concat_outputs[req_id].outputs[0].token_ids, skip_special_tokens=False
+                        )
+                        concat_outputs[req_id].outputs[0].finish_reason = "stop"  # Mark as properly finished
+                        outputs.append(concat_outputs[req_id])
+                        dict_keys_to_delete.append(req_id)
+                        continue
+
                     if tool_result.called:
                         tool_called[req_id] = True
                         last_prompt_token_ids = last_output.prompt_token_ids
                         last_token_ids = last_o.token_ids
                         tool_output_token_ids = tokenizer.encode(
-                            "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+                            "<tool_response>\n" + tool_result.output + "</tool_response>\n", add_special_tokens=False
                         )
                         # Edge case 1: clip against model context length
                         prompt_and_tool_output_token = last_prompt_token_ids + last_token_ids + tool_output_token_ids
@@ -617,8 +651,7 @@ class ToolUseLLM(LLM):
                                 and stop_str in self.tools
                                 and num_calls[output.request_id] > self.max_tool_calls[stop_str]
                             ):
-                                # If the tool has been called too many times, we tell the model it has exceeded the limit.
-                                # use a dummy tool object to keep things simple.
+                                # Max tool calls exceeded - terminate generation immediately
                                 tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
                                 future = self.executor.submit(tool, o.text)
                                 self.pending_tool_futures[output.request_id] = (future, o, output)
@@ -696,7 +729,7 @@ You could run python code by putting your code between <code> and </code> tags. 
 <code>
 print("Hello, world!")
 </code>
-and you will get the output between the <output> and </output> tags.
+and you will get the output between the <tool_response> and </tool_response> tags.
 """
 
     console.print(f"system_prompt: {system_prompt}")

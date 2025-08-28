@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 """Our parsers parse output from the LM into thoughts and actions.
 
 For example, our most basic parser is the `ThoughtActionParser`.
@@ -62,7 +63,9 @@ class FunctionCallingFormatError(FormatError):
         num_tools: optional count used for missing/multiple cases
     """
 
-    def __init__(self, message: str, error_code: str, num_tools: int | None = None, exception_message: str | None = None):
+    def __init__(
+        self, message: str, error_code: str, num_tools: int | None = None, exception_message: str | None = None
+    ):
         super().__init__(message)
         self.error_code = error_code
         self.num_tools = num_tools
@@ -74,7 +77,7 @@ def _extract_keys(signature: str) -> set[str]:
 
     Example: "cmd {a} {b}" -> {"a", "b"}
     """
-    return set(re.findall(r"{(" + ARGUMENT_NAME_PATTERN + r")}" , signature))
+    return set(re.findall(r"{(" + ARGUMENT_NAME_PATTERN + r")}", signature))
 
 
 def _should_quote(value: str, _command=None) -> bool:
@@ -107,7 +110,10 @@ def _warn_probably_wrong_jinja_syntax(value: str) -> None:
             )
     except Exception:
         pass
+
+
 # -----------------------------------------------------------------------------
+
 
 class Argument(BaseModel):
     f"""Defines an argument that can be passed to a command.
@@ -134,6 +140,7 @@ class Argument(BaseModel):
     def validate_argument_format(cls, value: str) -> str:
         _warn_probably_wrong_jinja_syntax(value)
         return value
+
 
 class Command(BaseModel):
     """Represents an executable command with arguments and documentation.
@@ -194,13 +201,7 @@ class Command(BaseModel):
         Returns:
             Dict containing the OpenAI function schema for this command
         """
-        tool = {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.docstring or "",
-            },
-        }
+        tool = {"type": "function", "function": {"name": self.name, "description": self.docstring or ""}}
         properties = {}
         required = []
         if self.arguments:
@@ -256,6 +257,7 @@ class Command(BaseModel):
             msg = f"Command '{self.name}': Argument names ({invoke_keys}) in signature / invoke_format {self.invoke_format!r} do not match argument names"
             raise ValueError(msg)
         return self
+
 
 class AbstractParseFunction(ABC):
     """
@@ -639,6 +641,7 @@ class JsonParser(AbstractParseFunction, BaseModel):
             msg = "Model output is not valid JSON."
             raise FormatError(msg)
 
+
 FN_REGEX_PATTERN = r"<function=([^>]+)>\n(.*?)</function>"
 FN_PARAM_REGEX_PATTERN = r"<parameter=([^>]+)>(.*?)</parameter>"
 
@@ -736,6 +739,7 @@ class XMLFunctionCallingParser(AbstractParseFunction, BaseModel):
             for arg in command.arguments
         }
         return thought, command.invoke_format.format(**formatted_args).strip()
+
 
 ParseFunction = (
     ActionParser

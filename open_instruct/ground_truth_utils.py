@@ -923,17 +923,10 @@ class CodeSearchVerifier(VerifierFunction):
             docstring="Custom tool for viewing files; only 'view' is supported here.",
             arguments=[
                 SWEArgument(
-                    name="command",
-                    type="string",
-                    description="The command to run",
-                    required=True,
-                    enum=["view"],
+                    name="command", type="string", description="The command to run", required=True, enum=["view"]
                 ),
                 SWEArgument(
-                    name="path",
-                    type="string",
-                    description="Absolute path to file or directory",
-                    required=True,
+                    name="path", type="string", description="Absolute path to file or directory", required=True
                 ),
                 SWEArgument(
                     name="view_range",
@@ -942,12 +935,7 @@ class CodeSearchVerifier(VerifierFunction):
                     required=True,
                     items={"type": "integer"},
                 ),
-                SWEArgument(
-                    name="repo_name",
-                    type="string",
-                    description="Optional repository name",
-                    required=False,
-                ),
+                SWEArgument(name="repo_name", type="string", description="Optional repository name", required=False),
             ],
         )
         parser = FunctionCallingParser()
@@ -968,9 +956,9 @@ class CodeSearchVerifier(VerifierFunction):
                 end = None
                 for i in range(start, len(raw_str)):
                     ch = raw_str[i]
-                    if ch == '{':
+                    if ch == "{":
                         depth += 1
-                    elif ch == '}':
+                    elif ch == "}":
                         depth -= 1
                         if depth == 0:
                             end = i + 1
@@ -987,23 +975,18 @@ class CodeSearchVerifier(VerifierFunction):
             data = None
             try:
                 data = json.loads(raw)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
                 data = _fallback_parse(raw)
                 if data is None:
-                    warnings.warn(f"Failed to parse tool call JSON and fallback failed. Raw content: {raw}")
+                    warnings.warn(
+                        f"Failed to parse tool call JSON and fallback failed. Raw content: {raw}, Error: {e}"
+                    )
                     continue
             try:
                 # Build LiteLLM-style function call wrapper expected by the parser
                 model_response = {
                     "message": prediction,
-                    "tool_calls": [
-                        {
-                            "function": {
-                                "name": data.get("name"),
-                                "arguments": data.get("arguments", {}),
-                            }
-                        }
-                    ],
+                    "tool_calls": [{"function": {"name": data.get("name"), "arguments": data.get("arguments", {})}}],
                 }
                 # Validate; throws on schema issues
                 _thought, _action = parser(model_response, commands=[str_replace_editor_cmd], strict=True)

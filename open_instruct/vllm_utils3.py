@@ -421,7 +421,11 @@ class LLMRayActor:
 
             # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
             if self.llm_engine.has_unfinished_requests():
-                step_outputs = list(self.llm_engine.step())
+                try:
+                    step_outputs = list(self.llm_engine.step())
+                except AssertionError:
+                    # Handle race condition where requests finish between check and step
+                    step_outputs = []
                 for output in step_outputs:
                     if output.finished:
                         result = _handle_output(

@@ -33,7 +33,7 @@ tmp_unlink = os.unlink
 
 logger = logger_utils.setup_logger(__name__)
 
-REPO_DIR = os.path.join(os.path.dirname(__file__), "testbed")
+REPO_DIR = os.path.join(os.path.dirname(__file__), "repos")
 os.makedirs(REPO_DIR, exist_ok=True)
 # -------------------------------------------------------------
 # The slow but  accurate version
