@@ -88,8 +88,8 @@ from open_instruct.utils import (
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
-    setup_logger,
 )
+from open_instruct import logger_utils
 
 logger = get_logger(__name__)
 
@@ -524,7 +524,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         init_gpu_memory = torch.cuda.mem_get_info()[0]
 
     # Make one log on every process with the configuration for debugging.
-    setup_logger()
+    logger_utils.setup_logger()
     logger.info(accelerator.state, main_process_only=False)
     if accelerator.is_local_main_process:
         datasets.utils.logging.set_verbosity_warning()
