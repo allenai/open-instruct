@@ -35,7 +35,7 @@ python mason.py \
     --pure_docker_mode \
     --image stellal/open_instruct_dev \
     --preemptible \
-    --num_nodes 4 \
+    --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gs_model_name $gs_model_name \
@@ -44,6 +44,8 @@ python mason.py \
     -- \
 source configs/beaker_configs/ray_node_setup.sh \&\& \
 source configs/beaker_configs/code_api_setup.sh \&\& \
+export BEAKER_TOKEN=MHa4sF+u8x/OY9tE \&\& \
+export WANDB_API_KEY=a84285031fcd2e0955fd1d015249882145a057ff \&\& \
 python open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
