@@ -31,7 +31,7 @@ python mason.py \
     --workspace ai2/tulu-thinker \
     --priority high \
     --pure_docker_mode \
-    --image nathanl/open_instruct_auto \
+    --image michaeln/open_instruct_olmo2_retrofit \
     --preemptible \
     --num_nodes 4 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
