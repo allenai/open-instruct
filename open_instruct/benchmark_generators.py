@@ -366,28 +366,58 @@ class ModelDims:
         return self.num_layers * num_tokens * kv_write_bytes_per_token
 
     def kv_cache_read_bytes(
-        self, prompt_lengths: Sequence[int], response_lengths: Sequence[int], dtype_bytes: int = 2
+        self,
+        prompt_lengths: Sequence[int],
+        response_lengths: Sequence[int],
+        samples_per_prompt: int = 1,
+        dtype_bytes: int = 2,
     ) -> int:
         """Memory bytes for reading KV cache during decode.
 
         For each new token generated, we read all previous tokens' KV cache.
+        When generating multiple samples per prompt, the prompt KV cache is shared.
 
         Args:
-            prompt_lengths: List of prompt lengths
-            response_lengths: List of response lengths
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
             dtype_bytes: Bytes per element (2 for FP16/BF16)
 
         Returns:
             Total bytes for KV cache reads during decode
         """
+        assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+            f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+        )
+
         num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
         head_dim = self.hidden_size // self.num_attn_heads
 
-        # For each new token, read all previous KV values
-        # sum_{i=0}^{R-1} (P + i) = R*P + R*(R-1)/2
+        # For batched sampling with shared prompt KV cache:
+        # - Prompt KV is read once per new token across ALL samples (not per sample)
+        # - Each sample has its own KV for generated tokens
         kv_read_terms = 0
-        for P, R in zip(prompt_lengths, response_lengths):
-            kv_read_terms += (R * P) + (R * (R - 1) // 2)
+        response_idx = 0
+
+        for P in prompt_lengths:
+            # For this prompt, collect all response lengths
+            prompt_responses = []
+            for _ in range(samples_per_prompt):
+                prompt_responses.append(response_lengths[response_idx])
+                response_idx += 1
+
+            # Total new tokens being generated across all samples
+            total_new_tokens = sum(prompt_responses)
+
+            # Prompt KV reads: Each new token reads the prompt KV once
+            # (shared across samples generating in parallel)
+            kv_read_terms += total_new_tokens * P
+
+            # Per-sample generated KV reads: Each sample reads its own previously generated tokens
+            for R in prompt_responses:
+                # Each token in this sample reads its previously generated tokens
+                # sum_{i=0}^{R-1} i = R*(R-1)/2
+                kv_read_terms += R * (R - 1) // 2
 
         # 2x for K and V
         kv_bytes_per_token = 2 * num_kv * head_dim * dtype_bytes
@@ -413,7 +443,11 @@ class ModelDims:
         return weight_bytes + kv_write_bytes
 
     def decode_memory_bytes(
-        self, prompt_lengths: Sequence[int], response_lengths: Sequence[int], dtype_bytes: int = 2
+        self,
+        prompt_lengths: Sequence[int],
+        response_lengths: Sequence[int],
+        samples_per_prompt: int = 1,
+        dtype_bytes: int = 2,
     ) -> int:
         """Memory bytes for decode/generation phase.
 
@@ -423,8 +457,9 @@ class ModelDims:
         - Read all previous KV cache for attention
 
         Args:
-            prompt_lengths: List of prompt lengths
-            response_lengths: List of response lengths
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
             dtype_bytes: Bytes per element (2 for FP16/BF16)
 
         Returns:
@@ -433,7 +468,7 @@ class ModelDims:
         total_decode_tokens = sum(response_lengths)
         weight_bytes = self.weight_memory_bytes(total_decode_tokens, dtype_bytes)
         kv_write_bytes = self.kv_cache_write_bytes(total_decode_tokens, dtype_bytes)
-        kv_read_bytes = self.kv_cache_read_bytes(prompt_lengths, response_lengths, dtype_bytes)
+        kv_read_bytes = self.kv_cache_read_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
         return weight_bytes + kv_write_bytes + kv_read_bytes
 
     def memory_bytes(
@@ -460,6 +495,7 @@ class ModelDims:
         Assumptions:
           - Weights are read once per token per layer (Q,K,V,O + MLP up/down)
           - KV cache: write K/V for every token; during decode, read all past K/V per new token
+          - When batching samples, prompt KV cache is shared across samples
           - Embedding and LM head reads are ignored (usually dominated by matmul weight traffic)
         """
         total = self.prefill_memory_bytes(prompt_lengths, dtype_bytes)
@@ -469,12 +505,8 @@ class ModelDims:
                 f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
             )
 
-            # Process responses for each prompt with its samples
-            expanded_prompt_lengths = []
-            for prompt_len in prompt_lengths:
-                expanded_prompt_lengths.extend([prompt_len] * samples_per_prompt)
-
-            total += self.decode_memory_bytes(expanded_prompt_lengths, response_lengths, dtype_bytes)
+            # Pass original prompt_lengths with samples_per_prompt to correctly handle shared KV cache
+            total += self.decode_memory_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
 
         return total
 
