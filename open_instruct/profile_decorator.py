@@ -37,8 +37,11 @@ def profile(func=None, *, filter_module=None):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             git_commit = os.environ.get("GIT_COMMIT", "unknown")
-            suffix = f"_filtered_{filter_module.replace('.', '_')}" if filter_module else ""
-            profile_path = f"/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/finbarrt/{git_commit}_{func.__name__}{suffix}.pstats"
+            # Keep the suffix in filename to distinguish different profiling runs
+            suffix = f"_filter_{filter_module.replace('.', '_')}" if filter_module else ""
+            # Use /tmp for local testing, /weka path on the cluster
+            base_path = "/tmp" if os.path.exists("/tmp") and not os.path.exists("/weka") else "/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/finbarrt"
+            profile_path = f"{base_path}/{git_commit}_{func.__name__}{suffix}.pstats"
 
             profiler = cProfile.Profile()
             profiler.enable()
@@ -51,32 +54,19 @@ def profile(func=None, *, filter_module=None):
                 # Ensure directory exists
                 os.makedirs(os.path.dirname(profile_path), exist_ok=True)
 
+                # Always save full stats for proper analysis with gprof2dot
+                profiler.dump_stats(profile_path)
+
                 if filter_module:
-                    # Create filtered stats
-                    stats = pstats.Stats(profiler)
-
-                    # Filter to only include functions from the specified module
-                    filtered_stats = {}
-                    for (filename, line, funcname), callinfo in stats.stats.items():
-                        # Check if this function belongs to the target module
-                        if filter_module in filename:
-                            filtered_stats[(filename, line, funcname)] = callinfo
-
-                    # Replace stats with filtered version
-                    stats.stats = filtered_stats
-                    stats.dump_stats(profile_path)
-
-                    # Log filtered summary
+                    # Log filtered summary showing only functions from the target module
+                    # but keeping cumulative times intact
                     s = io.StringIO()
-                    ps = pstats.Stats(profiler, stream=s)
-                    # Only print functions from the target module
+                    ps = pstats.Stats(profiler, stream=s).sort_stats("cumulative")
+                    # Print only functions from the target module, sorted by cumulative time
                     ps.print_stats(f".*{filter_module.replace('.', '/')}.*")
-                    logger.info(f"\nFiltered profile for {func.__name__} (module: {filter_module}):")
+                    logger.info(f"\nProfile for {func.__name__} (filtered to {filter_module}, sorted by cumulative time):")
                     logger.info(s.getvalue())
                 else:
-                    # Save full stats
-                    profiler.dump_stats(profile_path)
-
                     # Log summary to console (optional)
                     s = io.StringIO()
                     ps = pstats.Stats(profiler, stream=s).sort_stats("cumulative")
