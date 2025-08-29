@@ -17,6 +17,9 @@ style-check:   ## *fail* if anything needs rewriting
 quality-check: ## *fail* if any rewrite was needed
 	uv run ruff check --exit-non-zero-on-fix $(check_dirs)
 
+setup:
+	git clone -b shanea/olmo2-retrofit https://github.com/2015aroras/vllm.git vllm_olmo2.5
+
 docker:
 	DOCKER_BUILDKIT=1 docker build -f Dockerfile --build-arg UV_CACHE_DIR=$(UV_CACHE_DIR) -t open_instruct_olmo2_retrofit .
 	# if you are internally at AI2, you can create an image like this:

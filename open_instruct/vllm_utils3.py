@@ -349,9 +349,6 @@ class LLMRayActor:
             # at the top-level when the distributed_executor_backend is ray.
             os.environ.pop("CUDA_VISIBLE_DEVICES", None)
             os.environ.pop("ROCR_VISIBLE_DEVICES", None)
-            # Ensure device type is explicitly set for VLLM when using ray backend
-            if "device" not in kwargs:
-                kwargs["device"] = "cuda"
         elif noset_visible_devices:
             # We need to set CUDA_VISIBLE_DEVICES to the ray assigned GPU
             # when the distributed_executor_backend is not ray and
