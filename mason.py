@@ -217,7 +217,7 @@ def get_args():
     # can resume if the command is in OPEN_INSTRUCT_RESUMABLES and --non_resumable is not set
     is_resumable = _commands_include_resumable_target(commands) and not mason_args.non_resumable
     if not is_resumable and not mason_args.non_resumable:
-        console.warning("--non_resumable is not set, but the command is not in OPEN_INSTRUCT_RESUMABLES, so the job will not be resumable")
+        console.log("--non_resumable is not set, but the command is not in OPEN_INSTRUCT_RESUMABLES, so the job will not be resumable")
     setattr(mason_args, "resumable", is_resumable)
 
     return mason_args, commands
@@ -523,6 +523,10 @@ def get_datasets(beaker_datasets, cluster: List[str]):
             beaker.DataMount(
                 source=beaker.DataSource(weka="oe-training-default"),
                 mount_path="/weka/oe-training-default",
+            ),
+            beaker.DataMount(
+                source=beaker.DataSource(weka="prior-default"),
+                mount_path="/weka/prior-default",
             ),
         ]
     elif all(c in GCP_CLUSTERS for c in cluster):
