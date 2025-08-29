@@ -235,6 +235,8 @@ class Args:
     stop_strings: Optional[List[str]] = None
     """List of strings that stop the generation when they are generated.
     The returned output will not contain the stop strings."""
+    use_fp8_kv_cache: bool = False
+    """Whether to use fp8 kv cache. This is useful for larger models or olmo."""
 
     # Algorithm
     async_steps: int = 1
@@ -2062,6 +2064,7 @@ def create_model_and_optimizer(
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
         inflight_updates=args.inflight_updates,
+        use_fp8_kv_cache=args.use_fp8_kv_cache,
     )
 
     resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
