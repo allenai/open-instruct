@@ -50,6 +50,24 @@ from open_instruct.utils import ray_get_with_progress
 logger = logger_utils.setup_logger(__name__)
 
 
+# Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
+# Turns out Ray doesnt necessarily place bundles together,
+# so this function is used to get the bundle indices of a placement group
+# and ensure that the bundles placed on the same node are grouped together.
+# avoids unnecessary communication for TP>1 with vllm.
+def get_bundle_indices_list(placement_group: ray.util.placement_group) -> List[int]:
+    pg_infos = ray.util.placement_group_table(placement_group)
+
+    node_id_to_bundles = defaultdict(list)
+    for bundle, node_id in pg_infos["bundles_to_node_id"].items():
+        node_id_to_bundles[node_id].append(bundle)
+
+    flattened_bundle_indices = []
+    for node_id, bundles in node_id_to_bundles.items():
+        flattened_bundle_indices.extend(bundles)
+    return flattened_bundle_indices
+
+
 def _init_tool_tracking():
     """Initialize tracking variables for tool mode."""
     return {
@@ -106,6 +124,7 @@ def _process_outputs(
     outputs: List[vllm.RequestOutput],
     dataset_index: Optional[List[int]] = None,
     token_statistics: Optional[TokenStatistics] = None,
+    start_time: Optional[float] = None
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -135,6 +154,7 @@ def _process_outputs(
         request_info=request_info,
         dataset_index=dataset_index,
         token_statistics=token_statistics,
+        start_time=start_time,
     )
 
     return result
@@ -144,6 +164,7 @@ def _process_outputs_with_tools(
     outputs: List[vllm.RequestOutput],
     dataset_index: Optional[List[int]] = None,
     token_statistics: Optional[TokenStatistics] = None,
+    start_time: Optional[float] = None
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format with tool information."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -173,16 +194,17 @@ def _process_outputs_with_tools(
         request_info=request_info,
         dataset_index=dataset_index,
         token_statistics=token_statistics,
+        start_time=start_time,
     )
 
     return result
 
 
-def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=None):
+def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=None, start_time=None):
     """Prepare final outputs based on whether tools were used."""
     if not tools:
         outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
-        return _process_outputs(outputs, dataset_index=dataset_index, token_statistics=token_statistics)
+        return _process_outputs(outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time)
 
     # Tool mode: add metadata and merge completions
     for req_id in tracking["masks"]:
@@ -209,7 +231,7 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=
         merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1]))
     )
 
-    return _process_outputs_with_tools(final_outputs, dataset_index=dataset_index, token_statistics=token_statistics)
+    return _process_outputs_with_tools(final_outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time)
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -376,6 +398,7 @@ class LLMRayActor:
         """Unified processing for both tool and non-tool generation."""
         prompts = request.prompts
         sampling_params = request.generation_config
+        start_time = request.start_time
 
         self.logger.info(f"[LLMRayActor] Processing request with {len(prompts)} prompts, tools={bool(self.tools)}")
 
@@ -449,8 +472,7 @@ class LLMRayActor:
                 num_prompt_tokens=total_prompt_tokens,
                 num_response_tokens=total_generation_tokens,
                 generation_time=generation_time,
-            ),
-        )
+            ), start_time)
         return result
 
     def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step):
@@ -673,15 +695,17 @@ def create_vllm_engines(
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
+    # ensure we use bundles on the same node where possible if tp>1.
+    bundle_indices_list = get_bundle_indices_list(pg)
+
     for i in range(num_engines):
         bundle_indices = None
-        if tensor_parallel_size > 1:
-            bundle_indices = list(range(i * tensor_parallel_size, (i + 1) * tensor_parallel_size))
+        bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
 
         scheduling_strategy = PlacementGroupSchedulingStrategy(
             placement_group=pg,
             placement_group_capture_child_tasks=True,
-            placement_group_bundle_index=i * tensor_parallel_size,
+            placement_group_bundle_index=bundle_indices[0],
         )
 
         vllm_engines.append(

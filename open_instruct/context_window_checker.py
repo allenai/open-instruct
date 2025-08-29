@@ -21,20 +21,12 @@ Usage:
 
 from typing import Dict, List
 
+import tiktoken
 from transformers import AutoTokenizer
 
 from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
-
-# Try to import tiktoken, but provide fallback if not available
-try:
-    import tiktoken
-
-    TIKTOKEN_AVAILABLE = True
-except ImportError:
-    TIKTOKEN_AVAILABLE = False
-    logger.warning("tiktoken not available. Context window checking will be disabled.")
 
 
 def get_encoding_for_model(model_name: str):
@@ -104,7 +96,7 @@ def check_context_window_limit(
     try:
         # First try to load the actual model tokenizer from HuggingFace
         tokenizer = AutoTokenizer.from_pretrained(model_name.replace("hosted_vllm/", ""))
-        max_context_length = tokenizer.model_max_length
+        max_context_length = tokenizer.model_max_length if max_context_length is None else max_context_length
 
         # Count tokens in all messages using HuggingFace tokenizer
         total_message_tokens = 0
@@ -142,10 +134,6 @@ def check_context_window_limit(
         logger.warning(f"Failed to load HuggingFace tokenizer for {model_name}: {e}. Falling back to tiktoken.")
 
         # Fall back to tiktoken if HuggingFace tokenizer fails
-        if not TIKTOKEN_AVAILABLE:
-            logger.warning("tiktoken not available. Skipping context window check.")
-            return True
-
         try:
             # Get the appropriate encoding for the model
             encoding = get_encoding_for_model(model_name)
@@ -207,13 +195,10 @@ def truncate_messages_to_fit_context(
     Returns:
         List[Dict[str, str]]: Truncated messages that fit within context window
     """
-    if not TIKTOKEN_AVAILABLE:
-        logger.warning("tiktoken not available. Returning original messages.")
-        return messages
-
     try:
-        # Get the appropriate encoding for the model
-        encoding = get_encoding_for_model(model_name)
+        # First try to load the actual model tokenizer from HuggingFace
+        tokenizer = AutoTokenizer.from_pretrained(model_name.replace("hosted_vllm/", ""))
+        max_context_length = tokenizer.model_max_length if max_context_length is None else max_context_length
 
         # Calculate available tokens for messages
         available_tokens = max_context_length - max_completion_tokens - safety_margin
@@ -222,11 +207,11 @@ def truncate_messages_to_fit_context(
         system_messages = [msg for msg in messages if msg.get("role") == "system"]
         other_messages = [msg for msg in messages if msg.get("role") != "system"]
 
-        # Count tokens in system messages
+        # Count tokens in system messages using HuggingFace tokenizer
         system_tokens = 0
         for msg in system_messages:
             content = msg.get("content", "")
-            system_tokens += len(encoding.encode(content)) + 4  # +4 for role formatting
+            system_tokens += len(tokenizer.encode(content, add_special_tokens=False)) + 4  # +4 for role formatting
 
         # Calculate remaining tokens for other messages
         remaining_tokens = available_tokens - system_tokens
@@ -243,8 +228,8 @@ def truncate_messages_to_fit_context(
             content = msg.get("content", "")
             role = msg.get("role", "")
 
-            # Count tokens for this message
-            content_tokens = len(encoding.encode(content))
+            # Count tokens for this message using HuggingFace tokenizer
+            content_tokens = len(tokenizer.encode(content, add_special_tokens=False))
             role_tokens = 3  # user/assistant messages add ~3 tokens
             message_tokens = content_tokens + role_tokens
 
@@ -256,15 +241,20 @@ def truncate_messages_to_fit_context(
                 # Try to truncate the content to fit
                 available_for_content = remaining_tokens - current_tokens - role_tokens
                 if available_for_content > 0:
-                    # Truncate content to fit
-                    truncated_content = encoding.decode(encoding.encode(content)[:available_for_content])
+                    # Truncate content to fit using HuggingFace tokenizer
+                    content_tokens_encoded = tokenizer.encode(content, add_special_tokens=False)
+                    truncated_content = tokenizer.decode(content_tokens_encoded[:available_for_content])
                     truncated_messages.append({"role": role, "content": truncated_content})
                     logger.warning("Truncated message content to fit judge context window")
                 break
 
         # append judgment format to the last message, only if there are messages
-        if truncated_messages[-1]["role"] == "user" and not truncated_messages[-1]["content"].endswith(
-            'Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}'
+        if (
+            truncated_messages
+            and truncated_messages[-1]["role"] == "user"
+            and not truncated_messages[-1]["content"].endswith(
+                'Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}'
+            )
         ):
             truncated_messages[-1]["content"] = (
                 f'{truncated_messages[-1]["content"]}\nRespond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}'
@@ -272,8 +262,76 @@ def truncate_messages_to_fit_context(
         return truncated_messages
 
     except Exception as e:
-        logger.warning(f"Error truncating messages: {e}. Returning original messages.")
-        return messages
+        logger.warning(f"Failed to load HuggingFace tokenizer for {model_name}: {e}. Falling back to tiktoken.")
+
+        # Fall back to tiktoken if HuggingFace tokenizer fails
+        try:
+            # Get the appropriate encoding for the model
+            encoding = get_encoding_for_model(model_name)
+
+            # Calculate available tokens for messages
+            available_tokens = max_context_length - max_completion_tokens - safety_margin
+
+            # Separate system messages from other messages
+            system_messages = [msg for msg in messages if msg.get("role") == "system"]
+            other_messages = [msg for msg in messages if msg.get("role") != "system"]
+
+            # Count tokens in system messages
+            system_tokens = 0
+            for msg in system_messages:
+                content = msg.get("content", "")
+                system_tokens += len(encoding.encode(content)) + 4  # +4 for role formatting
+
+            # Calculate remaining tokens for other messages
+            remaining_tokens = available_tokens - system_tokens
+
+            if remaining_tokens <= 0:
+                logger.warning("System messages alone exceed judge context window. Keeping only system messages.")
+                return system_messages
+
+            # Truncate other messages to fit
+            truncated_messages = system_messages.copy()
+            current_tokens = system_tokens
+
+            for msg in other_messages:
+                content = msg.get("content", "")
+                role = msg.get("role", "")
+
+                # Count tokens for this message
+                content_tokens = len(encoding.encode(content))
+                role_tokens = 3  # user/assistant messages add ~3 tokens
+                message_tokens = content_tokens + role_tokens
+
+                # Check if adding this message would exceed the limit
+                if current_tokens + message_tokens <= remaining_tokens:
+                    truncated_messages.append(msg)
+                    current_tokens += message_tokens
+                else:
+                    # Try to truncate the content to fit
+                    available_for_content = remaining_tokens - current_tokens - role_tokens
+                    if available_for_content > 0:
+                        # Truncate content to fit
+                        truncated_content = encoding.decode(encoding.encode(content)[:available_for_content])
+                        truncated_messages.append({"role": role, "content": truncated_content})
+                        logger.warning("Truncated message content to fit judge context window")
+                    break
+
+            # append judgment format to the last message, only if there are messages
+            if (
+                truncated_messages
+                and truncated_messages[-1]["role"] == "user"
+                and not truncated_messages[-1]["content"].endswith(
+                    'Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}'
+                )
+            ):
+                truncated_messages[-1]["content"] = (
+                    f'{truncated_messages[-1]["content"]}\nRespond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}'
+                )
+            return truncated_messages
+
+        except Exception as e:
+            logger.warning(f"Error truncating messages: {e}. Returning original messages.")
+            return messages
 
 
 async def safe_acompletion_with_context_check(
@@ -381,10 +439,6 @@ def truncate_str_for_prompt_template(
     Returns:
         The truncated string.
     """
-    if not TIKTOKEN_AVAILABLE:
-        logger.warning("tiktoken not available. Skipping truncation.")
-        return unformatted_str
-
     try:
         encoding = get_encoding_for_model(model_name)
 

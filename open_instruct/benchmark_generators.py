@@ -16,7 +16,7 @@ import pathlib
 import threading
 import time
 from concurrent import futures
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional, Sequence
 
 import datasets
 import numpy as np
@@ -202,29 +202,136 @@ def free_all_gpu_memory(device: int | str = 0) -> None:
     logger.info(f"[GPU {dev.index}] {free / gib:.2f} GiB free of {total / gib:.2f} GiB after cleanup")
 
 
-def calculate_model_usage_per_token(model_path: str) -> int:
-    """
-    Calculate actual FLOPs per token for a transformer model using torch FlopCounterMode.
+@dataclasses.dataclass
+class ModelDims:
+    num_layers: int
+    hidden_size: int
+    intermediate_size: int
+    vocab_size: int
+    num_attn_heads: int
+    num_kv_heads: Optional[int] = None
 
-    Args:
-        model_path: Path to the actual model for precise measurement
+    # Conventions (fixed; not switches)
+    FLOP_PER_MAC: ClassVar[int] = 2
+    # Approximate softmax cost per attention score:
+    # ~4 scalar ops/score: exp + subtract max (stabilization) + sum + divide.
+    SOFTMAX_FLOPS_PER_SCORE: ClassVar[int] = 4
 
-    Returns:
-        FLOPs per token as integer.
-    """
-    model = transformers.AutoModelForCausalLM.from_pretrained(
-        model_path, torch_dtype=torch.bfloat16, device_map="cuda", trust_remote_code=True
+    def __post_init__(self):
+        if self.num_kv_heads is None:
+            self.num_kv_heads = self.num_attn_heads
+
+        assert self.hidden_size % self.num_attn_heads == 0, "hidden_size must be divisible by num_attn_heads"
+        assert self.num_attn_heads % self.num_kv_heads == 0, (
+            "num_attn_heads must be divisible by num_kv_heads (GQA/MQA)"
+        )
+
+    @property
+    def head_dim(self) -> int:
+        return self.hidden_size // self.num_attn_heads
+
+    def attn_flops(self, query_len: int, kv_len: int) -> int:
+        """FLOPs for one layer of self-attention given query_len and kv_len.
+
+        Assumptions:
+          - 1 MAC = 2 FLOPs (FLOP_PER_MAC).
+          - Efficient GQA/MQA K/V projections with width = num_kv_heads * head_dim.
+          - Softmax ≈ 4 FLOPs per score (see SOFTMAX_FLOPS_PER_SCORE).
+          - LayerNorms and minor ops ignored (dominated by matmuls).
+        """
+        d = self.head_dim
+        mul = self.FLOP_PER_MAC
+
+        # Projections for the query_len new tokens
+        q_proj = mul * query_len * self.hidden_size * self.hidden_size
+        kv_proj = mul * 2 * query_len * self.hidden_size * (self.num_kv_heads * d)  # GQA/MQA
+
+        # Scores and attention-weighted values
+        qk = mul * self.num_attn_heads * query_len * kv_len * d
+        softmax = self.SOFTMAX_FLOPS_PER_SCORE * self.num_attn_heads * query_len * kv_len
+        av = mul * self.num_attn_heads * query_len * kv_len * d
+
+        # Output projection
+        out_proj = mul * query_len * self.hidden_size * self.hidden_size
+
+        return q_proj + kv_proj + qk + softmax + av + out_proj
+
+    def mlp_flops(self, seq_len: int) -> int:
+        """Two matmuls dominate; activation cost under-counted on purpose."""
+        mul = self.FLOP_PER_MAC
+        first = mul * seq_len * self.hidden_size * self.intermediate_size
+        act = seq_len * self.intermediate_size  # under-counted on purpose
+        second = mul * seq_len * self.intermediate_size * self.hidden_size
+        return first + act + second
+
+    def prefill_flops(self, prompt_lengths: Sequence[int]) -> int:
+        """Prefill builds the KV cache; logits are computed once after each prompt."""
+        total = 0
+        for L in prompt_lengths:
+            total += self.num_layers * (self.attn_flops(L, L) + self.mlp_flops(L))
+            # Always include a single LM head after prefill (next-token logits)
+            total += self.FLOP_PER_MAC * self.hidden_size * self.vocab_size
+        return total
+
+    def decode_flops(
+        self, prompt_lengths: Sequence[int], response_lengths: Sequence[int], samples_per_prompt: int = 1
+    ) -> int:
+        """Decode/generation FLOPs.
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+
+        Embedding lookups are ignored by design.
+        """
+        assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+            f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+        )
+
+        total = 0
+        response_idx = 0
+        for P in prompt_lengths:
+            # Process all samples for this prompt
+            for _ in range(samples_per_prompt):
+                R = response_lengths[response_idx]
+                total += R * self.num_layers * self.mlp_flops(seq_len=1)
+                for t in range(R):
+                    kv_len = P + t + 1  # prompt + generated so far + current
+                    total += self.num_layers * self.attn_flops(query_len=1, kv_len=kv_len)
+                total += R * self.FLOP_PER_MAC * self.hidden_size * self.vocab_size
+                response_idx += 1
+        return total
+
+    def flops(
+        self,
+        prompt_lengths: Sequence[int],
+        response_lengths: Optional[Sequence[int]] = None,
+        samples_per_prompt: int = 1,
+    ) -> int:
+        """Total FLOPs for prefill and (optionally) decode.
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+        """
+        total = self.prefill_flops(prompt_lengths)
+        if response_lengths is not None:
+            total += self.decode_flops(prompt_lengths, response_lengths, samples_per_prompt)
+        return total
+
+
+def load_model_dims(model_name: str) -> ModelDims:
+    cfg = transformers.AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+    return ModelDims(
+        num_layers=cfg.num_hidden_layers,
+        hidden_size=cfg.hidden_size,
+        intermediate_size=cfg.intermediate_size,
+        vocab_size=cfg.vocab_size,
+        num_attn_heads=cfg.num_attention_heads,
+        num_kv_heads=getattr(cfg, "num_key_value_heads", None),
     )
-
-    # Create a single token input
-    input_ids = torch.tensor([[1]], device=model.device)  # Single token
-
-    model.eval()  # Set model to evaluation mode for consistent FLOPs counting
-    flop_counter = torch.utils.flop_counter.FlopCounterMode(display=False, depth=None)
-    with flop_counter:
-        model(input_ids)
-
-    return flop_counter.get_total_flops()
 
 
 def get_device_name(device_name: str) -> str:
@@ -316,18 +423,6 @@ def setup_vllm_engines(
     return vllm_engines, param_prompt_Q, inference_results_Q, actor_manager
 
 
-def get_batch_data(
-    dataset: datasets.Dataset, batch_size: int, batch_idx: int
-) -> tuple[list[list[int]], list[str], list[str]]:
-    """Get a batch of data from the dataset."""
-    start_idx = batch_idx * batch_size
-    end_idx = min(start_idx + batch_size, len(dataset))
-
-    batch_data = dataset[start_idx:end_idx]
-    prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
-    return prompts
-
-
 def generate_thread(vllm_engines: list[ray.actor.ActorHandle], stop_event: threading.Event) -> None:
     """Thread that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] Starting generation thread")
@@ -342,20 +437,38 @@ def generate_thread(vllm_engines: list[ray.actor.ActorHandle], stop_event: threa
 
 def submission_thread(
     param_prompt_Q: ray_queue.Queue,
-    all_prompts: list,
+    dataset: datasets.Dataset,
     generation_config: vllm.SamplingParams,
     stop_event: threading.Event,
+    batch_size: int,
+    start_batch_idx: int,
+    num_batches: int,
 ) -> None:
     """Thread that submits prompts to the queue."""
     logger.info("[Submission Thread] Starting prompt submission")
-    for batch_idx, prompts in enumerate(all_prompts):
+    for batch_idx in range(start_batch_idx, start_batch_idx + num_batches):
         if stop_event.is_set():
             logger.info("[Submission Thread] Stopped due to stop event")
             break
+
+        # Get batch data from dataset
+        start_idx = batch_idx * batch_size
+        end_idx = min(start_idx + batch_size, len(dataset))
+        batch_data = dataset[start_idx:end_idx]
+        prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+
+        # Create list of dataset indices for this batch
+        dataset_indices = list(range(start_idx, end_idx))
+
         param_prompt_Q.put(
-            PromptRequest(prompts=prompts, dataset_index=batch_idx, generation_config=generation_config)
+            PromptRequest(
+                prompts=prompts,
+                dataset_index=dataset_indices,
+                generation_config=generation_config,
+                start_time=time.perf_counter(),
+            )
         )
-    logger.info(f"[Submission Thread] All {len(all_prompts)} prompts submitted")
+    logger.info(f"[Submission Thread] All {num_batches} batches submitted")
 
 
 def run_benchmark(
@@ -366,7 +479,6 @@ def run_benchmark(
     args: grpo_fast.Args,
     model_config: model_utils.ModelConfig,
     timestamp: int,
-    flops_per_token: int,
     num_batches: int = 5,
 ) -> list[dict[str, Any]]:
     """Run the full benchmark."""
@@ -396,15 +508,22 @@ def run_benchmark(
     device_name = get_device_name(torch.cuda.get_device_name(0))
     device_flops = GPU_SPECS[device_name]["flops"]
 
-    logger.info(f"Preparing {num_batches} batches...")
-    all_prompts = [
-        get_batch_data(dataset, args.num_unique_prompts_rollout, batch_idx) for batch_idx in range(num_batches)
-    ]
-
     # Submit warmup batch first
     logger.info("Submitting warmup batch...")
-    warmup_prompts = all_prompts[0]
-    param_prompt_Q.put(PromptRequest(prompts=warmup_prompts, dataset_index=0, generation_config=generation_config))
+    warmup_start_idx = 0
+    warmup_end_idx = min(args.num_unique_prompts_rollout, len(dataset))
+    warmup_data = dataset[warmup_start_idx:warmup_end_idx]
+    warmup_prompts = warmup_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+    warmup_dataset_indices = list(range(warmup_start_idx, warmup_end_idx))
+    param_prompt_Q.put(
+        PromptRequest(
+            prompts=warmup_prompts,
+            dataset_index=warmup_dataset_indices,
+            generation_config=generation_config,
+            start_time=time.perf_counter(),
+        )
+    )
+    model_dims = load_model_dims(model_config.model_name_or_path)
 
     try:
         logger.info("Running warmup batch...")
@@ -413,19 +532,24 @@ def run_benchmark(
         logger.info(f"Warmup batch completed with {len(warmup_result.responses)} responses")
         logger.info(f"Submitting {num_batches - 1} batches for main benchmark...")
         submission_future = executor.submit(
-            submission_thread, param_prompt_Q, all_prompts[1:], generation_config, stop_event
+            submission_thread,
+            param_prompt_Q,
+            dataset,
+            generation_config,
+            stop_event,
+            args.num_unique_prompts_rollout,
+            1,
+            num_batches - 1,
         )
-        last_completion_time = time.time()
-
         # Process remaining batches with timing
         for batch_idx in range(1, num_batches):
             # Quick health check!
             [future.result() for future in [submission_future, generation_future] if future.done()]
             result = inference_results_Q.get()
 
-            completion_time = time.time()
-            batch_generation_time = completion_time - last_completion_time
-            last_completion_time = completion_time
+            completion_time = time.perf_counter()
+            # Calculate generation time from when the request was enqueued
+            batch_generation_time = completion_time - result.start_time if result.start_time else 0
 
             new_tokens = sum(len(response) for response in result.responses)
             tokens_per_second = new_tokens / batch_generation_time if batch_generation_time > 0 else 0
@@ -436,11 +560,25 @@ def run_benchmark(
                 "num_new_tokens": new_tokens,
                 "finish_reasons": collections.Counter(result.finish_reasons),
                 "response_lengths": [len(response) for response in result.responses],
-                "batch_idx": result.dataset_index,
+                "dataset_indices": result.dataset_index,
             }
-            result_dict["mfu"] = 100 * result_dict["tokens_per_second"] * flops_per_token / device_flops
+            # Get prompt lengths using dataset indices from the result
+            prompt_data = dataset[result.dataset_index]
+            prompts = prompt_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+            prompt_lengths = [len(prompt) for prompt in prompts]
+            response_lengths = [len(response) for response in result.responses]
 
-            save_completion_lengths([result_dict], timestamp, result.dataset_index)
+            # Calculate total FLOPs for all prompts and responses in the batch
+            # No need to expand prompt_lengths - the flops method now handles samples_per_prompt
+            model_flops = model_dims.flops(
+                prompt_lengths, response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
+            )
+
+            # MFU = (FLOPs / time) / peak_FLOPS * 100
+            model_flops_per_second = model_flops / batch_generation_time if batch_generation_time > 0 else 0
+            result_dict["mfu"] = 100 * model_flops_per_second / device_flops
+
+            save_completion_lengths([result_dict], timestamp, batch_idx)
             results.append(result_dict)
             logger.info(
                 f"Batch {batch_idx}/{num_batches - 1}: "
@@ -475,8 +613,14 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
     for result in results:
         for key, value in result.items():
-            if key in ["total_mfu", "total_tokens_per_second", "total_generation_time", "total_num_new_tokens"]:
-                aggregated_results[key] += value
+            if key == "mfu":
+                aggregated_results["total_mfu"] += value
+            elif key == "tokens_per_second":
+                aggregated_results["total_tokens_per_second"] += value
+            elif key == "generation_time":
+                aggregated_results["total_generation_time"] += value
+            elif key == "num_new_tokens":
+                aggregated_results["total_num_new_tokens"] += value
             elif key == "finish_reasons":
                 for reason, count in value.items():
                     aggregated_results["finish_reasons"][reason] += count
@@ -584,8 +728,6 @@ def main() -> None:
 
     # Calculate flops per token before starting vLLM
     logger.info("Calculating model FLOPs per token...")
-    flops_per_token = calculate_model_usage_per_token(model_config.model_name_or_path)
-    logger.info(f"Model FLOPs per token: {flops_per_token:,}")
 
     # Free GPU memory after calculating FLOPs and before starting vLLM
     logger.info("Freeing GPU memory before starting vLLM...")
@@ -597,9 +739,7 @@ def main() -> None:
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
     save_config(args, tokenizer_config, model_config, timestamp)
-    run_benchmark(
-        dataset, vllm_engines, param_prompt_Q, inference_results_Q, args, model_config, timestamp, flops_per_token
-    )
+    run_benchmark(dataset, vllm_engines, param_prompt_Q, inference_results_Q, args, model_config, timestamp)
 
     cleanup(vllm_engines, actor_manager)
 
