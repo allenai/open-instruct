@@ -71,7 +71,6 @@ import torch.distributed as dist
 import torch.utils
 import torch.utils.data
 import vllm
-import wandb
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util import queue as ray_queue
@@ -82,6 +81,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
+import wandb
 from open_instruct import logger_utils, vllm_utils3
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
@@ -146,6 +146,7 @@ def _attach_future_exception_logger(future: futures.Future, thread_name: str) ->
 
     This ensures background thread failures are visible immediately in logs.
     """
+
     def _log_if_failed(f: futures.Future) -> None:
         try:
             exc = f.exception()
@@ -154,8 +155,7 @@ def _attach_future_exception_logger(future: futures.Future, thread_name: str) ->
             return
         if exc is not None:
             logger.error(
-                f"[{thread_name}] Unhandled exception in thread",
-                exc_info=(type(exc), exc, exc.__traceback__),
+                f"[{thread_name}] Unhandled exception in thread", exc_info=(type(exc), exc, exc.__traceback__)
             )
 
     try:
@@ -2077,7 +2077,9 @@ def prepare_prompts(
     return batch
 
 
-def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event, packing_future: futures.Future):
+def load_data_from_packing_thread(
+    packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event, packing_future: futures.Future
+):
     """Get the packed sequences with advantages from the packing thread."""
     with Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
         while True:
