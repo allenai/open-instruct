@@ -174,10 +174,6 @@ class Args:
     """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
     """The maximum prompt token length to use for the dataset"""
-    system_prompt: Optional[str] = None
-    """Optional system prompt to prepend to all prompts sent to the engine"""
-    system_prompt_file: Optional[str] = None
-    """Optional file path containing the system prompt to prepend to all prompts"""
 
     # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -423,6 +419,8 @@ class Args:
     code_tool_api_endpoint: Optional[str] = None
 
     def __post_init__(self):
+        if os.environ.get("VLLM_USE_V1") == "0":
+            logger.warning("When using the v0 version of vLLM, caching is broken and will never be invalidated.")
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
@@ -1887,7 +1885,6 @@ def create_model_and_optimizer(
     inference_results_Q: ray_queue.Queue,
     param_prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q: ray_queue.Queue,
-    system_prompt_tokens: List[int],
 ) -> tuple[ModelGroup, list[vllm_utils3.LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
@@ -1951,7 +1948,6 @@ def create_model_and_optimizer(
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
-        system_prompt_tokens=system_prompt_tokens,
     )
 
     resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1

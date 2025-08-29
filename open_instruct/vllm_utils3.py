@@ -331,13 +331,11 @@ class LLMRayActor:
         results_queue=None,
         eval_results_queue=None,
         actor_manager=None,
-        system_prompt_tokens: Optional[List[int]] = None,
         **kwargs,
     ):
         self.logger = logger_utils.setup_logger(__name__)
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
-        self.system_prompt_tokens = system_prompt_tokens or []
 
         if self.tools:
             self.executor = ThreadPoolExecutor(max_workers=20)
@@ -454,22 +452,17 @@ class LLMRayActor:
 
     def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step):
         """Add initial requests to the engine."""
-        if os.environ.get("VLLM_USE_V1") == "0":
-            self.logger.warning("When using the v0 version of vLLM, caching is broken and will never be invalidated.")
         for i, prompt in enumerate(prompts):
-            # Prepend system prompt tokens if available
-            full_prompt = self.system_prompt_tokens + prompt
-
             if self.tools:
                 # Create individual requests for each sample when using tools
                 for j in range(n_samples):
                     request_id = f"{training_step}_{i}-{j}"
-                    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=full_prompt, cache_salt=f"{training_step}_{i}")
+                    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
                     self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
             else:
                 # Standard request format for non-tool mode
                 request_id = f"batch_{training_step}_{i}"
-                tokens_prompt = vllm.TokensPrompt(prompt_token_ids=full_prompt, cache_salt=request_id)
+                tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
                 self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
 
     def _poll_tool_futures(self, tracking, sampling_params, tokenizer):
@@ -613,7 +606,6 @@ def create_vllm_engines(
     results_queue=None,
     eval_results_queue=None,
     actor_manager=None,
-    system_prompt_tokens: Optional[List[int]] = None,
 ) -> list[LLMRayActor]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
@@ -694,7 +686,6 @@ def create_vllm_engines(
                 actor_manager=actor_manager,
                 tools=tools,
                 max_tool_calls=max_tool_calls_dict,
-                system_prompt_tokens=system_prompt_tokens,
             )
         )
 
