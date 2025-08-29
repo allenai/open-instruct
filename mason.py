@@ -217,7 +217,7 @@ def get_args():
     # can resume if the command is in OPEN_INSTRUCT_RESUMABLES and --non_resumable is not set
     is_resumable = _commands_include_resumable_target(commands) and not mason_args.non_resumable
     if not is_resumable and not mason_args.non_resumable:
-        console.warning("--non_resumable is not set, but the command is not in OPEN_INSTRUCT_RESUMABLES, so the job will not be resumable")
+        console.log("--non_resumable is not set, but the command is not in OPEN_INSTRUCT_RESUMABLES, so the job will not be resumable")
     setattr(mason_args, "resumable", is_resumable)
 
     return mason_args, commands
@@ -264,6 +264,9 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
     if "VLLM_ATTENTION_BACKEND" not in additional_env_vars:
         env_vars.append(beaker.EnvVar(name="VLLM_ATTENTION_BACKEND",
                                       value="FLASHINFER"))
+    if "RAY_CGRAPH_get_timeout" not in additional_env_vars:
+        env_vars.append(beaker.EnvVar(name="RAY_CGRAPH_get_timeout",
+                                      value="300"))
     # Add user-specified environment variables first
     for env_var in additional_env_vars:
         env_vars.append(
@@ -500,6 +503,8 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
         ])
 
     # by default, we turn off vllm compile cache
+    # torch compile caching seems consistently broken, but the actual compiling isn't.
+    # Not sure why, for now we have disabled the caching (VLLM_DISABLE_COMPILE_CACHE=1).
     env_vars.extend([
         beaker.EnvVar(
             name="VLLM_DISABLE_COMPILE_CACHE",
