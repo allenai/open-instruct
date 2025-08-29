@@ -489,13 +489,13 @@ class LLMRayActor:
                 for j in range(n_samples):
                     request_id = f"{training_step}_{i}-{j}"
                     self.request_metadata[request_id] = {"start_time": time.time(), "prompt_tokens": len(prompt)}
-                    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
+                    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=f"{training_step}_{i}")
                     self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
             else:
                 # Standard request format for non-tool mode
                 request_id = f"batch_{training_step}_{i}"
                 self.request_metadata[request_id] = {"start_time": time.time(), "prompt_tokens": len(prompt)}
-                tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
+                tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=request_id)
                 self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
 
     def _poll_tool_futures(self, tracking, sampling_params, tokenizer):
