@@ -407,7 +407,6 @@ class LLMRayActor:
 
         self.logger.info(f"[LLMRayActor] Processing request with {len(prompts)} prompts, tools={bool(self.tools)}")
 
-        # Setup phase
         if self.tools:
             # Need n=1 for individual tool tracking
             sampling_params = copy.deepcopy(sampling_params)
@@ -425,7 +424,6 @@ class LLMRayActor:
         outputs = []
         iteration = 0
 
-        # Main generation loop
         while True:
             iteration += 1
 
@@ -450,9 +448,7 @@ class LLMRayActor:
                 self.logger.info(f"[LLMRayActor] Terminating after {iteration} iterations with {len(outputs)} outputs")
                 break
 
-        # Finalization
         result = _finalize_outputs(outputs, tracking, request.dataset_index, self.tools, start_time)
-
         return result
 
     def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step):
