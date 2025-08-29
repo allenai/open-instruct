@@ -656,7 +656,7 @@ class LMJudgeVerifier(VerifierFunction):
         # client = self._get_client()
         final_answer = extract_final_answer(prediction)
         prompt = self.prompt_template.format(input=query, output=final_answer, label=label)
-        breakpoint()
+        # breakpoint()
         max_retries = 3  # for rate limits
         retry_delay = 1.0
 

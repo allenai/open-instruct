@@ -1514,7 +1514,7 @@ def data_preparation_thread(
                     result.masks[i].append(1)  # never mask the eos token for now?
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
-            breakpoint()
+            # breakpoint()
             decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
             # decoded_queries = tokenizer.batch_decode(batch.queries, skip_special_tokens=True)
             # decoded_queries = [extract_user_query(query) for query in decoded_queries]
