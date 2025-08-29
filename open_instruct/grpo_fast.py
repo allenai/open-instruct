@@ -1281,8 +1281,16 @@ class PendingQueriesMap:
         with self._lock:
             if dataset_idx in self._map:
                 # Already exists - just increment count
-                existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count = self._map[dataset_idx]
-                self._map[dataset_idx] = (existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count + 1)
+                existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count = self._map[
+                    dataset_idx
+                ]
+                self._map[dataset_idx] = (
+                    existing_query,
+                    existing_ground_truth,
+                    existing_dataset,
+                    existing_raw_query,
+                    count + 1,
+                )
             else:
                 # New entry - count starts at 1
                 self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, 1)
@@ -1292,11 +1300,19 @@ class PendingQueriesMap:
         with self._lock:
             for i, dataset_idx in enumerate(dataset_indices):
                 current_raw_query = raw_queries[i]
-                
+
                 if dataset_idx in self._map:
                     # Already exists - just increment count
-                    existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count = self._map[dataset_idx]
-                    self._map[dataset_idx] = (existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count + 1)
+                    existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count = self._map[
+                        dataset_idx
+                    ]
+                    self._map[dataset_idx] = (
+                        existing_query,
+                        existing_ground_truth,
+                        existing_dataset,
+                        existing_raw_query,
+                        count + 1,
+                    )
                 else:
                     # New entry - count starts at 1
                     self._map[dataset_idx] = (queries[i], ground_truths[i], datasets[i], current_raw_query, 1)
@@ -1870,7 +1886,7 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
         dataset_skip_cache=args.dataset_skip_cache,
     )
     train_dataset = train_dataset.shuffle(seed=args.seed)
-    
+
     eval_dataset = None
     if len(args.dataset_mixer_eval_list) > 0:
         eval_dataset = get_cached_dataset_tulu(
@@ -2093,6 +2109,7 @@ def load_data_from_packing_thread(
         return None, data_thread_metrics, num_total_tokens
     return collated_data, data_thread_metrics, num_total_tokens
 
+
 # def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event):
 #     """Get the packed sequences with advantages from the packing thread."""
 #     with Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
@@ -2112,12 +2129,12 @@ def load_data_from_packing_thread(
 #                 if retries >= max_retries:
 #                     logger.error("[Main Thread] Maximum retries reached waiting for packed sequences")
 #                     return None, {"error": "Maximum retries reached waiting for packed sequences"}, num_total_tokens
-        
+
 #         # Check if we got error data
 #         if packed_data.get("collated_data") is None and "error" in packed_data.get("metrics", {}):
 #             logger.error(f"[Main Thread] Received error data: {packed_data['metrics']['error']}")
 #             return None, packed_data["metrics"], num_total_tokens
-        
+
 #         data_thread_metrics = packed_data["metrics"]
 #         B = packed_data["B"]
 #         collated_data = packed_data["collated_data"]
