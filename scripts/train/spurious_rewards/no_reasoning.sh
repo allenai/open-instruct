@@ -21,7 +21,8 @@ EXP_NAME=${EXP_NAME:-${exp_name}}
 
 # cluster
 # cluster=ai2/augusta-google-1
-cluster=ai2/jupiter-cirrascale-2
+# cluster=ai2/jupiter-cirrascale-2
+cluster=ai2/saturn-cirrascale
 
 NUM_GPUS=${NUM_GPUS:-8}
 
@@ -33,7 +34,7 @@ python mason.py \
     --pure_docker_mode \
     --image michaeln/open_instruct_olmo2_retrofit \
     --preemptible \
-    --num_nodes 4 \
+    --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gs_model_name $gs_model_name \
@@ -42,8 +43,6 @@ python mason.py \
     -- \
 source configs/beaker_configs/ray_node_setup.sh \&\& \
 source configs/beaker_configs/code_api_setup.sh \&\& \
-export BEAKER_TOKEN=MHa4sF+u8x/OY9tE \&\& \
-export WANDB_API_KEY=a84285031fcd2e0955fd1d015249882145a057ff \&\& \
 python open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
@@ -69,8 +68,8 @@ python open_instruct/grpo_fast.py \
     --temperature 1.0 \
     --total_episodes 1024000 \
     --deepspeed_stage 2 \
-    --num_learners_per_node 8 \
-    --vllm_num_engines 24 \
+    --num_learners_per_node 4 \
+    --vllm_num_engines 4 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \

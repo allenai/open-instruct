@@ -20,8 +20,10 @@ EXP_NAME=${EXP_NAME:-${exp_name}}
 
 
 # cluster
-cluster=ai2/augusta-google-1
-cluster=ai2/jupiter-cirrascale-2
+# cluster=ai2/augusta-google-1
+# cluster=ai2/jupiter-cirrascale-2
+# cluster=ai2/saturn-cirrascale
+cluster=ai2/neptune-cirrascale
 
 NUM_GPUS=${NUM_GPUS:-4}
 
@@ -66,8 +68,8 @@ python open_instruct/grpo_fast.py \
     --temperature 1.0 \
     --total_episodes 1024000 \
     --deepspeed_stage 2 \
-    --num_learners_per_node 8 \
-    --vllm_num_engines 24 \
+    --num_learners_per_node 2 \
+    --vllm_num_engines 2 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
