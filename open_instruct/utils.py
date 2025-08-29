@@ -1539,14 +1539,14 @@ def extract_user_query(conversation: str, chat_template_name: str = None) -> str
         r")",
         re.DOTALL,
     )
-
+    breakpoint()
     # Get the last user query matched (most recent user turn before assistant <think>)
     matches = list(pattern.finditer(conversation))
     if matches:
         m = matches[-1]
         user_query = (m.group("simple") or m.group("im")).strip()
     else:
-        user_query = None
+        user_query = conversation
 
     return user_query
 

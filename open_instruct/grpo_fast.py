@@ -87,6 +87,7 @@ from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
+    RAW_PROMPT_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
@@ -474,6 +475,7 @@ def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
         queries=data_next[INPUT_IDS_PROMPT_KEY],
         ground_truths=data_next[GROUND_TRUTHS_KEY],
         datasets=data_next[VERIFIER_SOURCE_KEY],
+        raw_queries=data_next[RAW_PROMPT_KEY],
         indices=dataset_indices,
     )
 
@@ -1484,11 +1486,15 @@ def data_preparation_thread(
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
         if args.num_samples_per_prompt_rollout > 1:
+            # breakpoint()
             batch = Batch(
                 queries=repeat_each(batch.queries, args.num_samples_per_prompt_rollout),
                 ground_truths=repeat_each(batch.ground_truths, args.num_samples_per_prompt_rollout),
                 datasets=repeat_each(batch.datasets, args.num_samples_per_prompt_rollout),
                 indices=repeat_each(batch.indices, args.num_samples_per_prompt_rollout) if batch.indices else None,
+                raw_queries=repeat_each(batch.raw_queries, args.num_samples_per_prompt_rollout)
+                if batch.raw_queries
+                else None,
             )
             good_outputs = [
                 len(result.request_info.tool_outputs[i]) > 0
@@ -1508,9 +1514,11 @@ def data_preparation_thread(
                     result.masks[i].append(1)  # never mask the eos token for now?
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
+            breakpoint()
             decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
-            decoded_queries = tokenizer.batch_decode(batch.queries, skip_special_tokens=True)
-            decoded_queries = [extract_user_query(query) for query in decoded_queries]
+            # decoded_queries = tokenizer.batch_decode(batch.queries, skip_special_tokens=True)
+            # decoded_queries = [extract_user_query(query) for query in decoded_queries]
+            decoded_queries = batch.raw_queries
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
                 result.finish_reasons
             )
@@ -1858,7 +1866,7 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
         dataset_skip_cache=args.dataset_skip_cache,
     )
     train_dataset = train_dataset.shuffle(seed=args.seed)
-
+    
     eval_dataset = None
     if len(args.dataset_mixer_eval_list) > 0:
         eval_dataset = get_cached_dataset_tulu(
