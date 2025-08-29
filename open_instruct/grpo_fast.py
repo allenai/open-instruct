@@ -312,6 +312,10 @@ class Args:
     code_apply_perf_penalty: bool = False
     """whether to apply a performance penalty to the code verifier"""
 
+    # -- max length verifier
+    max_length_verifier_max_length: int = 32768
+    """the max length to use for the max length verifier"""
+
     # -- non stop penalty
     non_stop_penalty: bool = False
     """whether to penalize responses which did not finish generation"""
@@ -850,10 +854,14 @@ class PolicyTrainerRayProcess(RayProcess):
                 with deepspeed.zero.GatheredParameters([param], enabled=self.args.deepspeed_stage == 3):
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+
+        # Return futures instead of blocking - let caller handle completion
+        all_refs = []
         if torch.distributed.get_rank() == 0:
-            ray_get_with_progress(refss, desc="Broadcasting weights to vLLM", enable=self.args.verbose)
-        if self.args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
-            ray_get_with_progress(cache_reset_refs, desc="Resetting vLLM prefix cache", enable=self.args.verbose)
+            all_refs.extend(refss)
+            if self.args.vllm_enable_prefix_caching:
+                all_refs.extend(cache_reset_refs)
+        return all_refs
 
     def update_ref_policy(self):
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
@@ -1961,15 +1969,6 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ model update group setup successfully =========")
 
-    if resume_training_step > 1:
-        logger.info(f"Resuming training from step {resume_training_step}... Broadcasting weights to vLLM engines.")
-        with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
-            ray_get_with_progress(
-                [m.broadcast_to_vllm.remote() for m in policy_group.models],
-                desc="Broadcasting weights to vLLM engines",
-                enable=args.verbose,
-            )
-
     return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager
 
 
@@ -2037,36 +2036,19 @@ def split_and_insert_batch(
         )
 
 
-def sync_weights_and_prepare_prompts(
+def prepare_prompts(
     training_step: int,
     args: Args,
     train_dataset: Any,
     iter_dataloader: Iterator[List[int]],
-    policy_group: ModelGroup,
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q: ray_queue.Queue,
     generation_configs: Dict[str, vllm.SamplingParams],
-    actor_manager: vllm_utils3.ActorManager,
+    weight_sync_trigger_event: threading.Event,
 ) -> Batch:
-    """Sync weights and send the next batch of prompts to vLLM."""
+    """Trigger weight sync and prepare the next batch of prompts for vLLM."""
     dataset_indices = next(iter_dataloader)
     batch = next_batch(dataset_indices, train_dataset)
-    with Timer(
-        "[Main Thread] 🔄 Loading weights using shared memory"
-        if args.async_steps > 0
-        else "🔄 Loading weights using shared memory"
-    ):
-        ray.get(actor_manager.set_should_stop.remote(True))
-        logger.debug(f"[Main Thread] Set should_stop to True for weight sync at step {training_step}")
-
-        ray_get_with_progress(
-            [m.broadcast_to_vllm.remote() for m in policy_group.models],
-            desc=f"[Main thread] Broadcasting weights to vLLM engines at training step {training_step}",
-            enable=args.verbose,
-        )
-
-        ray.get(actor_manager.set_should_stop.remote(False))
-        logger.debug(f"[Main Thread] Set should_stop to False after weight sync at step {training_step}")
 
     split_and_insert_batch(
         batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]
@@ -2097,6 +2079,58 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
         logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
         return None, data_thread_metrics, num_total_tokens
     return collated_data, data_thread_metrics, num_total_tokens
+
+
+def weight_sync_thread(
+    args: Args,
+    stop_event: threading.Event,
+    weight_sync_trigger_event: threading.Event,
+    policy_group: ModelGroup,
+    actor_manager: vllm_utils3.ActorManager,
+    weight_sync_metrics_Q: Queue,
+    resume_training_step: int = 1,
+):
+    """Thread function that handles weight sync operations and actor manager coordination."""
+    logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
+    if resume_training_step > 1:
+        weight_sync_trigger_event.set()
+
+    while not stop_event.is_set():
+        # Wait for weight sync trigger from main thread
+        if not weight_sync_trigger_event.wait(timeout=1.0):
+            continue
+
+        # Clear the event for next iteration
+        weight_sync_trigger_event.clear()
+
+        with Timer("[Weight Sync]") as timer:
+            logger.debug("[Weight Sync Thread] Starting weight sync")
+
+            # Set actors to stop
+            ray.get(actor_manager.set_should_stop.remote(True))
+            logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
+
+            # Broadcast weights to vLLM engines
+            # First get the futures
+            weight_broadcast_futures: List[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+
+            # Wait for all weight updates to complete
+            ray_get_with_progress(
+                weight_broadcast_futures,
+                desc="[Weight Sync Thread] Waiting for weight updates to complete",
+                enable=args.verbose,
+            )
+
+            # Allow actors to resume
+            ray.get(actor_manager.set_should_stop.remote(False))
+            logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
+
+        try:
+            weight_sync_metrics_Q.put_nowait({"time/weight_sync": timer.duration})
+        except Full:
+            logger.warning("[Weight Sync Thread] weight sync metrics queue full, skipping metric")
+
+    logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
 
 
 def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q):
@@ -2484,9 +2518,26 @@ def run_training(
     pending_queries_map,
     eval_pending_queries_map,
     generate_metrics_Q,
+    weight_sync_metrics_Q,
     actor_manager: vllm_utils3.ActorManager,
     checkpoint_state=None,
 ):
+    if resume_training_step > 1:
+        logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
+
+    logger.info("======== ✅ weight sync thread starts =========")
+    weight_sync_trigger_event = threading.Event()
+    weight_sync_thread_future = executor.submit(
+        weight_sync_thread,
+        args,
+        stop_event,
+        weight_sync_trigger_event,
+        policy_group,
+        actor_manager,
+        weight_sync_metrics_Q,
+        resume_training_step,
+    )
+
     """Run the main training loop with worker threads."""
     ray_get_with_progress(
         [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
@@ -2548,19 +2599,21 @@ def run_training(
             )
 
         # Check if any of the threads have raised an exception.
-        [f.result() for f in [packing_future, generation_future] if f.done()]
+        [f.result() for f in [packing_future, generation_future, weight_sync_thread_future] if f.done()]
+
+        logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
+        weight_sync_trigger_event.set()
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-        batch = sync_weights_and_prepare_prompts(
+        prepare_prompts(
             training_step,
             args,
             train_dataset,
             iter_dataloader,
-            policy_group,
             pending_queries_map,
             param_prompt_Q,
             generation_configs,
-            actor_manager,
+            weight_sync_trigger_event,
         )
         if (
             training_step % args.local_eval_every == 0
@@ -2584,13 +2637,11 @@ def run_training(
         if collated_data is None:
             continue
 
-        generate_metrics = {}
-        try:
-            generate_metrics = generate_metrics_Q.get_nowait()
-        except Empty:
-            logger.info("[Main Thread] didn't get generation metrics")
-
-        data_thread_metrics = {**data_thread_metrics, **generate_metrics}
+        for metrics_Q in [generate_metrics_Q, weight_sync_metrics_Q]:
+            try:
+                data_thread_metrics |= metrics_Q.get_nowait()
+            except Empty:
+                logger.info("[Main Thread] didn't get train generation metrics")
 
         one_training_step(
             args,
@@ -2714,6 +2765,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     pending_queries_map = PendingQueriesMap()
     eval_pending_queries_map = PendingQueriesMap()
     generate_metrics_Q = Queue(maxsize=args.async_steps)
+    weight_sync_metrics_Q = Queue(maxsize=args.async_steps)
 
     if eval_dataset is None:
         eval_batch = None
@@ -2723,7 +2775,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     reward_fn = make_reward_fn(args)
 
     stop_event = threading.Event()
-    executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="grpo")
+    executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo")
 
     try:
         episode = run_training(
@@ -2749,6 +2801,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             pending_queries_map,
             eval_pending_queries_map,
             generate_metrics_Q,
+            weight_sync_metrics_Q,
             actor_manager,
             checkpoint_state,
         )
