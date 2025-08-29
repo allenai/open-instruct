@@ -23,12 +23,11 @@ from vllm.model_executor.guided_decoding.guided_fields import GuidedDecodingRequ
 from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sampling_params import RequestOutputKind
 
+from open_instruct.tool_utils.swe_tool_parser import Argument as SWEArgument
+from open_instruct.tool_utils.swe_tool_parser import Command as SWECommand
+
 # SWE-agent style function calling parser (minimal local deps included in repo)
-from open_instruct.tool_utils.swe_tool_parser import (
-    FunctionCallingParser,
-    Command as SWECommand,
-    Argument as SWEArgument,
-)
+from open_instruct.tool_utils.swe_tool_parser import FunctionCallingParser
 
 
 @dataclass

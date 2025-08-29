@@ -1,8 +1,9 @@
 exp_name=rlvr_code_view_tool_sft
     python mason.py \
         --cluster ai2/jupiter-cirrascale-2 \
-        --image nathanl/open_instruct_auto  \
-        --workspace ai2/open-coding-agent-dev \
+        --image saurabhs/open-coding-agent-dev \
+        --pure_docker_mode \
+        --workspace ai2/open-coding-agent \
         --priority urgent \
         --preemptible \
         --num_nodes 4 \
@@ -14,17 +15,17 @@ exp_name=rlvr_code_view_tool_sft
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
-        --num_samples_per_prompt_rollout 8 \
-        --num_unique_prompts_rollout 32 \
+        --num_samples_per_prompt_rollout 16 \
+        --num_unique_prompts_rollout 64 \
         --num_mini_batches 4 \
         --num_epochs 1 \
         --learning_rate 1e-6 \
         --per_device_train_batch_size 1 \
         --output_dir /output \
         --kl_estimator kl3 \
-        --dataset_mixer_list saurabh5/rlvr-code-view-tool-new-first-turn-only-2 1.0 \
+        --dataset_mixer_list saurabh5/rlvr-code-view-tool-new-first-turn-only-user 1.0 \
         --dataset_mixer_list_splits train \
-        --dataset_mixer_eval_list saurabh5/rlvr-code-view-tool-new-first-turn-only-2 8 \
+        --dataset_mixer_eval_list saurabh5/rlvr-code-view-tool-new-first-turn-only-user 8 \
         --dataset_mixer_eval_list_splits train \
         --max_token_length 4096 \
         --max_prompt_token_length 4096 \
@@ -36,7 +37,7 @@ exp_name=rlvr_code_view_tool_sft
         --temperature 1.0 \
         --ground_truths_key ground_truth \
         --sft_messages_key messages \
-        --total_episodes 10000000 \
+        --total_episodes 1200000 \
         --deepspeed_stage 3 \
         --num_learners_per_node 8 8 \
         --vllm_num_engines 16 \
@@ -46,15 +47,17 @@ exp_name=rlvr_code_view_tool_sft
         --apply_verifiable_reward true \
         --code_view_api_endpoint \$CODE_API_URL/view_file \
         --seed 42 \
-        --save_freq 50 \
+        --save_freq 25 \
         --try_launch_beaker_eval_jobs_on_weka False \
         --gradient_checkpointing \
         --with_tracking \
         --tools code_view \
         --vllm_enable_prefix_caching \
         --max_tool_calls 15 \
-        --allow_world_padding True \
         --vllm_top_p 0.95 \
         --log_rollouts_to_file True \
         --max_rollout_logs_per_step 10 \
-        --dataset_skip_cache True
+        --dataset_skip_cache True \
+        --checkpoint_state_freq 25 \
+        --checkpoint_state_dir "/weka/oe-adapt-default/saurabhs/repos/open-instruct-3/checkpoints"
+

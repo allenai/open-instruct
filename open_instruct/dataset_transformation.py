@@ -134,14 +134,38 @@ COLORS = ["on red", "on green", "on blue", "on yellow", "on magenta"]
 
 
 def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
-    i = 0
-    console = Console()
-    rich_text = Text()
-    for i, token in enumerate(tokens):
-        color = COLORS[i % len(COLORS)]
-        decoded_token = tokenizer.decode(token)
-        rich_text.append(f"{decoded_token}", style=color)
-    console.print(rich_text)
+    # Decode the full text first
+    full_text = tokenizer.decode(tokens)
+    
+    # Print WITHOUT using Rich console to avoid truncation issues
+    print("\n" + "="*80)
+    print(f"PROMPT VISUALIZATION (Total: {len(tokens)} tokens)")
+    print("="*80)
+    
+    # Check for role markers
+    has_system = "<|im_start|>system" in full_text
+    has_user = "<|im_start|>user" in full_text
+    has_assistant = "<|im_start|>assistant" in full_text
+    
+    print(f"Roles present: system={has_system}, user={has_user}, assistant={has_assistant}")
+    
+    # Show the full decoded text (up to 3000 chars to ensure we see user turn)
+    print("\nFull decoded prompt (first 3000 chars):")
+    print("-"*80)
+    print(full_text)
+    # if len(full_text) > 3000:
+    #     print(f"\n... (truncated, total length: {len(full_text)} chars)")
+    print("-"*80)
+    
+    # Optional: Still show colored version but with a note
+    if False:  # Disabled for now to avoid confusion
+        console = Console()
+        rich_text = Text()
+        for i, token in enumerate(tokens[:50]):
+            color = COLORS[i % len(COLORS)]
+            decoded_token = tokenizer.decode(token)
+            rich_text.append(f"{decoded_token}", style=color)
+        console.print(rich_text)
 
 
 def visualize_token_role(tokens: list[int], masks: list[int], tokenizer: PreTrainedTokenizer):
@@ -249,6 +273,20 @@ CHAT_TEMPLATES = {
         "{% endfor %}"
     ),
     "chatml": (
+        '<|im_start|>system\n'
+        'You are a helpful assistant that can interact with a computer to analyze code.\n\n'
+        '# Tools\n\n'
+        'You may call one or more functions to assist with the user query.\n\n'
+        'You are provided with function signatures within <tools></tools> XML tags:\n'
+        '<tools>\n'
+        '{"type": "function", "function": {"name": "bash", "description": "runs the given command directly in bash", "parameters": {"type": "object", "properties": {"command": {"type": "string", "description": "The bash command to execute."}}, "required": ["command"]}}}\n'
+        '{"type": "function", "function": {"name": "str_replace_editor", "description": "Custom tool for viewing files * State is persistent across command calls and discussions with the user * If `path` is a file, `view` displays the result of applying `cat -n`. If `path` is a directory, `view` lists non-hidden files and directories up to 2 levels deep * If a `command` generates a long output, it will be truncated and marked with `<response clipped>`\\n", "parameters": {"type": "object", "properties": {"command": {"type": "string", "description": "The commands to run. The only allowed option is: `view`.", "enum": ["view"]}, "path": {"type": "string", "description": "Absolute path to file or directory, e.g. `/testbed/file.py` or `/testbed`."}, "view_range": {"type": "array", "description": "Optional parameter of `view` command when `path` points to a file. If none is given, the full file is shown. If provided, the file will be shown in the indicated line number range, e.g. [11, 12] will show lines 11 and 12. Indexing at 1 to start. Setting `[start_line, -1]` shows all lines from `start_line` to the end of the file.", "items": {"type": "integer"}}}, "required": ["command", "path"]}}}\n'
+        '{"type": "function", "function": {"name": "submit", "description": "submits the current file", "parameters": {"type": "object", "properties": {}, "required": []}}}\n'
+        '</tools>\n\n'
+        'For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n'
+        '<tool_call>\n'
+        '{"name": <function-name>, "arguments": <args-json-object>}\n'
+        '</tool_call><|im_end|>\n'
         "{% for message in messages %}"
         "{{ '<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>\n' }}"
         "{% endfor %}"
@@ -869,10 +907,12 @@ TOKENIZED_PREFERENCE_DATASET_KEYS = [
 def sft_tokenize_v1(
     row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
 ):
-    if len(row[sft_messages_key]) == 1:
-        prompt = row[sft_messages_key]
-    else:
+    # If the last message is from assistant, exclude it from the prompt
+    # Otherwise, include all messages in the prompt
+    if len(row[sft_messages_key]) > 0 and row[sft_messages_key][-1].get("role") == "assistant":
         prompt = row[sft_messages_key][:-1]
+    else:
+        prompt = row[sft_messages_key]
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
@@ -886,10 +926,12 @@ def sft_tokenize_mask_out_prompt_v1(
     row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
 ):
     """mask out the prompt tokens by manipulating labels"""
-    if len(row[sft_messages_key]) == 1:
-        prompt = row[sft_messages_key]
-    else:
+    # If the last message is from assistant, exclude it from the prompt
+    # Otherwise, include all messages in the prompt
+    if len(row[sft_messages_key]) > 0 and row[sft_messages_key][-1].get("role") == "assistant":
         prompt = row[sft_messages_key][:-1]
+    else:
+        prompt = row[sft_messages_key]
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
@@ -1182,10 +1224,12 @@ def rlvr_tokenize_v1(
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
 ):
-    if len(row[sft_messages_key]) == 1:
-        prompt = row[sft_messages_key]
-    else:
+    # If the last message is from assistant, exclude it from the prompt
+    # Otherwise, include all messages in the prompt
+    if len(row[sft_messages_key]) > 0 and row[sft_messages_key][-1].get("role") == "assistant":
         prompt = row[sft_messages_key][:-1]
+    else:
+        prompt = row[sft_messages_key]
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
@@ -1203,11 +1247,35 @@ def rlvr_tokenize_v2(
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
 ):
-    if len(row[sft_messages_key]) == 1:
-        prompt = row[sft_messages_key]
-    else:
+    # DEBUG: Log what we receive
+    import os
+    if os.environ.get("DEBUG_TOKENIZATION") == "1":
+        print(f"[DEBUG rlvr_tokenize_v2] Input messages: {len(row.get(sft_messages_key, []))} messages")
+        for i, msg in enumerate(row.get(sft_messages_key, [])):
+            print(f"  Message {i}: role={msg.get('role')}, content_len={len(msg.get('content', ''))}")
+    
+    # If the last message is from assistant, exclude it from the prompt
+    # Otherwise, include all messages in the prompt
+    if len(row[sft_messages_key]) > 0 and row[sft_messages_key][-1].get("role") == "assistant":
         prompt = row[sft_messages_key][:-1]
+    else:
+        prompt = row[sft_messages_key]
+    
+    # DEBUG: Log what we're tokenizing
+    if os.environ.get("DEBUG_TOKENIZATION") == "1":
+        print(f"[DEBUG rlvr_tokenize_v2] Prompt to tokenize: {len(prompt)} messages")
+        for i, msg in enumerate(prompt):
+            print(f"  Prompt message {i}: role={msg.get('role')}")
+    
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
+    
+    # DEBUG: Check result
+    if os.environ.get("DEBUG_TOKENIZATION") == "1":
+        decoded = tokenizer.decode(row[INPUT_IDS_PROMPT_KEY])
+        has_user = "<|im_start|>user" in decoded
+        print(f"[DEBUG rlvr_tokenize_v2] Result: {len(row[INPUT_IDS_PROMPT_KEY])} tokens, has_user={has_user}")
+        if not has_user:
+            print(f"  WARNING: User turn missing! First 500 chars: {decoded[:500]}")
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     # weird issue with qwen: sometimes the padding token ends up in the input ids?
     # ill look into this more later, for now this guard should be enough

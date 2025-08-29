@@ -20,7 +20,6 @@ curl -X POST http://localhost:7872/run_bash -H "Content-Type: application/json" 
 """
 
 import json
-import logging
 import os
 import subprocess
 import traceback
@@ -29,8 +28,8 @@ from typing import Any, List, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from open_instruct.code_utils.code_utils import decode_tests, get_successful_tests_fast, get_successful_tests_stdio
 from open_instruct import logger_utils
+from open_instruct.code_utils.code_utils import decode_tests, get_successful_tests_fast, get_successful_tests_stdio
 
 app = FastAPI()
 

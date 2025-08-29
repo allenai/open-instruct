@@ -35,12 +35,10 @@ from open_instruct.math_utils import (
     normalize_final_answer,
     remove_boxed,
 )
+from open_instruct.tool_utils.swe_tool_parser import Argument as SWEArgument
+from open_instruct.tool_utils.swe_tool_parser import Command as SWECommand
+from open_instruct.tool_utils.swe_tool_parser import FunctionCallingParser
 from open_instruct.utils import extract_final_answer
-from open_instruct.tool_utils.swe_tool_parser import (
-    FunctionCallingParser,
-    Command as SWECommand,
-    Argument as SWEArgument,
-)
 
 logger = logger_utils.setup_logger(__name__)
 

@@ -30,16 +30,15 @@ Or from the command line: `--agent.tools.parse_function.type=thought_action`
 import json
 import re
 import textwrap
+import warnings
 from abc import ABC, abstractmethod
+from functools import cached_property
 from shlex import quote
 from textwrap import dedent
 from typing import Literal
 
 from jinja2 import Template
-from pydantic import BaseModel
-from pydantic import field_validator, model_validator
-import warnings
-from functools import cached_property
+from pydantic import BaseModel, field_validator, model_validator
 
 # ---------------- Minimal local deps to avoid importing sweagent ----------------
 
