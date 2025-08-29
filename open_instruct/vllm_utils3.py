@@ -39,7 +39,7 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
-from open_instruct import logger_utils
+from open_instruct import logger_utils, profile_decorator
 from open_instruct.queue_types import GenerationResult, RequestInfo
 from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
@@ -368,6 +368,7 @@ class LLMRayActor:
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
 
+    @profile_decorator.profile(filter_module="open_instruct.vllm_utils3")
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
