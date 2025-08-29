@@ -368,7 +368,7 @@ class LLMRayActor:
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
 
-    @profile_decorator.profile
+    @profile_decorator.profile(filter_module="open_instruct.vllm_utils3")
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 

@@ -8,13 +8,23 @@ import pstats
 logger = logging.getLogger(__name__)
 
 
-def profile(func):
+def profile(func=None, *, filter_module=None):
     """Decorator to profile a function and save results for gprof2dot visualization.
 
     Saves to: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/finbarrt/${GIT_COMMIT}_<func_name>.pstats
 
+    Args:
+        func: The function to profile (when used without arguments)
+        filter_module: Optional module name to filter profiling results (e.g., 'open_instruct.vllm_utils3')
+
     Usage:
         @profile
+        def my_function():
+            # Your code here
+            pass
+
+        # Or with module filtering:
+        @profile(filter_module='open_instruct.vllm_utils3')
         def my_function():
             # Your code here
             pass
@@ -23,36 +33,66 @@ def profile(func):
         gprof2dot -f pstats <output_file>.pstats | dot -Tpng -o output.png
     """
 
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        git_commit = os.environ.get("GIT_COMMIT", "unknown")
-        profile_path = (
-            f"/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/finbarrt/{git_commit}_{func.__name__}.pstats"
-        )
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            git_commit = os.environ.get("GIT_COMMIT", "unknown")
+            suffix = f"_filtered_{filter_module.replace('.', '_')}" if filter_module else ""
+            profile_path = f"/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/finbarrt/{git_commit}_{func.__name__}{suffix}.pstats"
 
-        profiler = cProfile.Profile()
-        profiler.enable()
-        try:
-            result = func(*args, **kwargs)
-            return result
-        finally:
-            profiler.disable()
+            profiler = cProfile.Profile()
+            profiler.enable()
+            try:
+                result = func(*args, **kwargs)
+                return result
+            finally:
+                profiler.disable()
 
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(profile_path), exist_ok=True)
+                # Ensure directory exists
+                os.makedirs(os.path.dirname(profile_path), exist_ok=True)
 
-            # Save to file for gprof2dot
-            profiler.dump_stats(profile_path)
+                if filter_module:
+                    # Create filtered stats
+                    stats = pstats.Stats(profiler)
 
-            # Log summary to console (optional)
-            s = io.StringIO()
-            ps = pstats.Stats(profiler, stream=s).sort_stats("cumulative")
-            ps.print_stats(10)  # Print top 10 functions
-            logger.info(f"\nProfile for {func.__name__}:")
-            logger.info(s.getvalue())
-            logger.info(f"Profile saved to {profile_path}")
+                    # Filter to only include functions from the specified module
+                    filtered_stats = {}
+                    for (filename, line, funcname), callinfo in stats.stats.items():
+                        # Check if this function belongs to the target module
+                        if filter_module in filename:
+                            filtered_stats[(filename, line, funcname)] = callinfo
 
-    return wrapper
+                    # Replace stats with filtered version
+                    stats.stats = filtered_stats
+                    stats.dump_stats(profile_path)
+
+                    # Log filtered summary
+                    s = io.StringIO()
+                    ps = pstats.Stats(profiler, stream=s)
+                    # Only print functions from the target module
+                    ps.print_stats(f".*{filter_module.replace('.', '/')}.*")
+                    logger.info(f"\nFiltered profile for {func.__name__} (module: {filter_module}):")
+                    logger.info(s.getvalue())
+                else:
+                    # Save full stats
+                    profiler.dump_stats(profile_path)
+
+                    # Log summary to console (optional)
+                    s = io.StringIO()
+                    ps = pstats.Stats(profiler, stream=s).sort_stats("cumulative")
+                    ps.print_stats(10)  # Print top 10 functions
+                    logger.info(f"\nProfile for {func.__name__}:")
+                    logger.info(s.getvalue())
+
+                logger.info(f"Profile saved to {profile_path}")
+
+        return wrapper
+
+    # Handle both @profile and @profile(filter_module='...')
+    if func is None:
+        return decorator
+    else:
+        return decorator(func)
 
 
 # Example usage
