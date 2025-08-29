@@ -825,11 +825,7 @@ class BeakerRuntimeConfig:
 
 
 def is_beaker_job() -> bool:
-    has_beaker_job = "BEAKER_JOB_ID" in os.environ
-    logger.info(f"is_beaker_job: BEAKER_JOB_ID present: {has_beaker_job}")
-    if has_beaker_job:
-        logger.info(f"is_beaker_job: BEAKER_JOB_ID value: {os.environ.get('BEAKER_JOB_ID')}")
-    return has_beaker_job
+    return "BEAKER_JOB_ID" in os.environ
 
 
 def get_beaker_experiment_info(experiment_id: str) -> Optional[dict]:
