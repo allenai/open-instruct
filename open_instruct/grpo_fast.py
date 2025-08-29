@@ -421,6 +421,8 @@ class Args:
     def __post_init__(self):
         if os.environ.get("VLLM_USE_V1") == "0":
             logger.warning("When using the v0 version of vLLM, caching is broken and will never be invalidated.")
+            if self.vllm_enable_prefix_caching:
+                raise ValueError("Prefix caching is currently not supported for v0.")
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
