@@ -38,6 +38,14 @@ from open_instruct.utils import extract_final_answer
 
 logger = logger_utils.setup_logger(__name__)
 
+import logging
+logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+logging.getLogger("litellm").setLevel(logging.ERROR)
+logging.getLogger("litellm.cost_calculator").setLevel(logging.CRITICAL)
+logging.getLogger("litellm._client").setLevel(logging.CRITICAL)
+logging.getLogger("cost_calculator").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING) 
+
 
 @dataclass
 class VerifierConfig:
@@ -656,15 +664,15 @@ class LMJudgeVerifier(VerifierFunction):
         # client = self._get_client()
         final_answer = extract_final_answer(prediction)
         prompt = self.prompt_template.format(input=query, output=final_answer, label=label)
-        # breakpoint()
+
         max_retries = 3  # for rate limits
         retry_delay = 1.0
 
         for attempt in range(max_retries):
             # judges the quality of a response
             try:
-                system_prompt = "Do not generate text between the <think> and </think> tags."  # "You are a concise assistant who gives very short explanations before giving a quality score."
-                messages = build_messages(prompt, system_prompt)
+                # system_prompt = "Do not generate text between the <think> and </think> tags."  # "You are a concise assistant who gives very short explanations before giving a quality score."
+                messages = build_messages(prompt, system_prompt=None)
 
                 # Faeze: check if the request would exceed context window
                 # Import the context window checker

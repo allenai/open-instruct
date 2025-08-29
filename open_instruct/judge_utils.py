@@ -79,7 +79,7 @@ Please act as an impartial judge and evaluate the quality of the answer provided
 AI assistant to the user query displayed below. Judge whether the provided answer is good by comparing it to the reference answer.
 
 Notes:
-- Besides comparing to the referennce answer, your evaluation should consider factors such as the helpfulness, relevance, accuracy, depth, creativity, and appropriate level of detail of the response.
+- Besides comparing to the referennce answer, your evaluation should consider factors such as the helpfulness, relevance, accuracy, creativity, appropriate level of detail, and how well the response satisfies the user’s explicit constraints or accurately follows their instructions.
 - Note that sometimes the reference answer is not the only answer. So any valid variation of the reference answer is also acceptable and can get a full score.
 - Begin your evaluation by providing a short explanation.
 - Be as objective as possible. After providing your short explanation, please output a score on a scale of 1 to 10.

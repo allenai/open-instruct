@@ -1276,7 +1276,7 @@ class PendingQueriesMap:
         self._map = {}  # dataset_idx -> (query, ground_truth, dataset, count)
         self._lock = threading.Lock()
 
-    def insert(self, dataset_idx, query, ground_truth, dataset, raw_query=None):
+    def insert(self, dataset_idx, query, ground_truth, dataset, raw_query):
         """Insert or increment count for a dataset index."""
         with self._lock:
             if dataset_idx in self._map:
@@ -1287,11 +1287,11 @@ class PendingQueriesMap:
                 # New entry - count starts at 1
                 self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, 1)
 
-    def insert_many(self, dataset_indices, queries, ground_truths, datasets, raw_queries=None):
+    def insert_many(self, dataset_indices, queries, ground_truths, datasets, raw_queries):
         """Insert or increment count for multiple dataset indices at once."""
         with self._lock:
             for i, dataset_idx in enumerate(dataset_indices):
-                current_raw_query = raw_queries[i] if raw_queries else None
+                current_raw_query = raw_queries[i]
                 
                 if dataset_idx in self._map:
                     # Already exists - just increment count
@@ -1498,6 +1498,7 @@ def data_preparation_thread(
                 queries=repeat_each(batch.queries, args.num_samples_per_prompt_rollout),
                 ground_truths=repeat_each(batch.ground_truths, args.num_samples_per_prompt_rollout),
                 datasets=repeat_each(batch.datasets, args.num_samples_per_prompt_rollout),
+                raw_queries=repeat_each(batch.raw_queries, args.num_samples_per_prompt_rollout),
                 indices=repeat_each(batch.indices, args.num_samples_per_prompt_rollout) if batch.indices else None,
             )
             good_outputs = [
@@ -1519,8 +1520,9 @@ def data_preparation_thread(
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
-            decoded_queries = tokenizer.batch_decode(batch.queries, skip_special_tokens=True)
-            decoded_queries = [extract_user_query(query) for query in decoded_queries]
+            # decoded_queries = tokenizer.batch_decode(batch.queries, skip_special_tokens=True)
+            # decoded_queries = [extract_user_query(query) for query in decoded_queries]
+            decoded_queries = batch.raw_queries
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
                 result.finish_reasons
             )
@@ -2028,7 +2030,7 @@ def split_and_insert_batch(
 
         # Store prompts in the map using thread-safe insert_many
         pending_queries_map.insert_many(
-            sub_batch.indices, sub_batch.queries, sub_batch.ground_truths, sub_batch.datasets
+            sub_batch.indices, sub_batch.queries, sub_batch.ground_truths, sub_batch.datasets, sub_batch.raw_queries
         )
 
         # Use PromptRequest for Ray queue with batch-specific dataset_index list

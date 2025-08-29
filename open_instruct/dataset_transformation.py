@@ -814,7 +814,6 @@ class TokenizerConfig:
 INPUT_IDS_KEY = "input_ids"
 ATTENTION_MASK_KEY = "attention_mask"
 LABELS_KEY = "labels"
-RAW_PROMPT_KEY = "prompt"
 DATASET_ORIGIN_KEY = "dataset_source"  # just 'dataset' clashes with RLVR stuff (see VERIFIER_SOURCE_KEY)
 TOKENIZED_SFT_DATASET_KEYS = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY, RAW_PROMPT_KEY]
 TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY, DATASET_ORIGIN_KEY, RAW_PROMPT_KEY]
@@ -846,7 +845,6 @@ REJECTED_INPUT_IDS_KEY = "rejected_input_ids"
 REJECTED_ATTENTION_MASK_KEY = "rejected_attention_mask"
 REJECTED_LABELS_KEY = "rejected_labels"
 
-RAW_PROMPT_KEY = "prompt"
 INPUT_IDS_PROMPT_KEY = "input_ids_prompt"
 ATTENTION_MASK_PROMPT_KEY = "attention_mask_prompt"
 
