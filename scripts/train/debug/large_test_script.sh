@@ -20,13 +20,14 @@ uv run python mason.py \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
-        --num_samples_per_prompt_rollout 16 \
-        --num_unique_prompts_rollout 32 \
+        --num_samples_per_prompt_rollout 2 \
+        --num_unique_prompts_rollout 8 \
         --num_mini_batches 1 \
         --num_epochs 1 \
         --learning_rate 5e-7 \
         --per_device_train_batch_size 1 \
         --kl_estimator kl3 \
+	--verbose True \
         --dataset_mixer_list saurabh5/rlvr_acecoder_filtered ${num_prompts} saurabh5/open-code-reasoning-rlvr-stdio ${num_prompts} \
         --dataset_mixer_list_splits train \
         --dataset_mixer_eval_list saurabh5/rlvr_acecoder_filtered 8 saurabh5/open-code-reasoning-rlvr-stdio 8 \
@@ -46,6 +47,7 @@ uv run python mason.py \
         --deepspeed_stage 2 \
         --num_learners_per_node 8 \
 	--inflight_updates True \
+	--update_every 1 \
         --vllm_num_engines 8 \
         --vllm_tensor_parallel_size 1 \
         --lr_scheduler_type constant \

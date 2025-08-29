@@ -201,6 +201,10 @@ class Args:
     fused_optimizer: bool = False
     """Whether to use fused optimizer"""
 
+    # Progress reporting
+    update_every: int = 10
+    """How often to update the Beaker description progress bar."""
+
     # Batch sizes
     per_device_train_batch_size: int = 1
     """The forward batch size per device (local_micro_batch_size)"""
@@ -530,6 +534,87 @@ def to_device_inplace(tensors_list: List[torch.Tensor], device: torch.device):
         tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
 
 
+def log_memory_usage(
+    rank: int, device: torch.device, stage: str, include_tensors: bool = False, top_k_tensors: int = 10
+):
+    """Log comprehensive memory usage information for debugging OOM errors.
+
+    Args:
+        rank: Process rank
+        device: CUDA device
+        stage: String describing the current stage of execution
+        include_tensors: Whether to log information about individual tensors
+        top_k_tensors: Number of largest tensors to log
+    """
+    import gc
+
+    import psutil
+
+    # System RAM usage
+    process = psutil.Process()
+    ram_usage_gb = process.memory_info().rss / (1024**3)
+    ram_percent = process.memory_percent()
+
+    # Get available system memory
+    vm = psutil.virtual_memory()
+    available_ram_gb = vm.available / (1024**3)
+    total_ram_gb = vm.total / (1024**3)
+
+    logger.info(f"[Rank {rank}] Memory @ {stage}:")
+    logger.info(
+        f"  System RAM: {ram_usage_gb:.2f}GB ({ram_percent:.1f}%) | Available: {available_ram_gb:.2f}GB / {total_ram_gb:.2f}GB"
+    )
+
+    if torch.cuda.is_available():
+        # Force synchronization to get accurate memory stats
+        torch.cuda.synchronize(device)
+
+        # GPU memory usage
+        allocated_gb = torch.cuda.memory_allocated(device) / (1024**3)
+        reserved_gb = torch.cuda.memory_reserved(device) / (1024**3)
+        max_allocated_gb = torch.cuda.max_memory_allocated(device) / (1024**3)
+
+        # Get total GPU memory
+        total_gpu_memory = torch.cuda.get_device_properties(device).total_memory / (1024**3)
+        free_memory = (torch.cuda.get_device_properties(device).total_memory - torch.cuda.memory_reserved(device)) / (
+            1024**3
+        )
+
+        logger.info("  GPU Memory:")
+        logger.info(
+            f"    Allocated: {allocated_gb:.2f}GB / Reserved: {reserved_gb:.2f}GB / Total: {total_gpu_memory:.2f}GB"
+        )
+        logger.info(f"    Max Allocated: {max_allocated_gb:.2f}GB | Free: {free_memory:.2f}GB")
+        logger.info(f"    Utilization: {(reserved_gb / total_gpu_memory * 100):.1f}%")
+
+        # Memory summary from PyTorch
+        if hasattr(torch.cuda, "memory_summary"):
+            summary = torch.cuda.memory_summary(device, abbreviated=True)
+            logger.debug(f"  PyTorch Memory Summary:\n{summary}")
+
+        if include_tensors:
+            # Find and log largest tensors
+            tensor_sizes = []
+            for obj in gc.get_objects():
+                try:
+                    if torch.is_tensor(obj) and obj.is_cuda and obj.device == device:
+                        size_mb = float(obj.element_size() * obj.nelement() / (1024**2))
+                        tensor_sizes.append((size_mb, obj.shape, obj.dtype, obj.device))
+                except Exception:
+                    pass
+
+            if tensor_sizes:
+                tensor_sizes.sort(reverse=True, key=lambda x: x[0])
+                logger.info(f"  Top {min(top_k_tensors, len(tensor_sizes))} Tensors on GPU:")
+                for i, (size_mb, shape, dtype, dev) in enumerate(tensor_sizes[:top_k_tensors]):
+                    logger.info(f"    {i + 1}. {size_mb:.2f}MB | Shape: {shape} | Dtype: {dtype}")
+
+                total_tracked_mb = float(sum(x[0] for x in tensor_sizes))
+                logger.info(
+                    f"  Total tracked tensor memory: {total_tracked_mb:.2f}MB ({total_tracked_mb / 1024:.2f}GB)"
+                )
+
+
 class ShufflingIterator:
     def __init__(self, data: np.ndarray, batch_size: int, seed: Optional[int] = None):
         self.data = data.copy()
@@ -626,6 +711,9 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = None
         logger.info(f"Deepspeed config: {dschf=}")
 
+        # Log memory before loading policy model
+        log_memory_usage(self.rank, self.device, "Before loading policy model", include_tensors=False)
+
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
@@ -635,6 +723,9 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
+
+        # Log memory after loading policy model
+        log_memory_usage(self.rank, self.device, "After loading policy model", include_tensors=False)
         # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
         # AdamOptimizer = FusedAdam
         if args.set_weight_decay_on_bias_and_norm:
@@ -724,6 +815,9 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = None
         logger.info(f"DeepSpeed config: {dschf=}")
 
+        # Log memory before loading reference policy
+        log_memory_usage(self.rank, self.device, "Before loading ref_policy", include_tensors=False)
+
         self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
@@ -734,6 +828,9 @@ class PolicyTrainerRayProcess(RayProcess):
         disable_dropout_in_model(self.ref_policy)
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
         self.ref_policy.eval()
+
+        # Log memory after loading reference policy
+        log_memory_usage(self.rank, self.device, "After loading ref_policy", include_tensors=True, top_k_tensors=10)
 
         # Load reference policy checkpoint if available
         if hasattr(self, "ref_policy_checkpoint_path") and self.ref_policy_checkpoint_path:
@@ -881,12 +978,19 @@ class PolicyTrainerRayProcess(RayProcess):
         num_mini_batches: int,
     ):
         args = self.args
+
+        # Log memory before moving tensors to device
+        log_memory_usage(self.rank, self.device, "Before to_device", include_tensors=False)
+
         to_device_inplace(collated_query_responses, self.device)
         to_device_inplace(collated_tool_masks, self.device)
         to_device_inplace(collated_attention_masks, self.device)
         to_device_inplace(collated_position_ids, self.device)
         to_device_inplace(collated_advantages, self.device)
         to_device_inplace(collated_response_masks, self.device)
+
+        # Log memory after moving tensors to device
+        log_memory_usage(self.rank, self.device, "After to_device", include_tensors=True, top_k_tensors=5)
         # accumulation steps should always be at least 1
         accumulation_steps = max(math.ceil(len(collated_query_responses) / num_mini_batches - 0.5), 1)
         leftover = len(collated_query_responses) % accumulation_steps
@@ -958,6 +1062,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         old_logprob = torch.masked_fill(old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
                         old_logprobs[i] = old_logprob
                         torch.cuda.empty_cache()
+
+        # Log memory before training loop
+        log_memory_usage(self.rank, self.device, "Before training loop", include_tensors=False)
 
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
@@ -1034,7 +1141,23 @@ class PolicyTrainerRayProcess(RayProcess):
                     # grpo change: directly subtract KL in loss (add)
                     loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
                     loss = loss / accumulation_steps
+
+                    # Log memory before backward pass
+                    log_memory_usage(
+                        self.rank, self.device, f"Before backward (step {local_step})", include_tensors=False
+                    )
+
                     self.model.backward(loss)
+
+                    # Log memory after backward pass
+                    log_memory_usage(
+                        self.rank,
+                        self.device,
+                        f"After backward (step {local_step})",
+                        include_tensors=True,
+                        top_k_tensors=10,
+                    )
+
                     if (local_step + 1) % accumulation_steps == 0:
                         self.model.step()
                     local_step += 1
@@ -1814,6 +1937,7 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
             name=args.run_name,
             save_code=True,
             tags=[args.exp_name] + get_wandb_tags(),
+            settings={"quiet": False, "show_errors": True, "show_warnings": True, "silent": False},
         )
         wandb_url = wandb.run.get_url()
         logger.info(f"Initial Beaker description update with wandb_url: {wandb_url}")
@@ -1882,7 +2006,6 @@ def create_model_and_optimizer(
     ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
     inits = []
     policy_group = ModelGroup(pg, PolicyTrainerRayProcess, args.num_learners_per_node, args.single_gpu_mode)
-    wandb_url = wandb.run.get_url() if args.with_tracking else None
     inits.extend(
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
         for model in policy_group.models
@@ -1915,7 +2038,7 @@ def create_model_and_optimizer(
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 
-    actor_manager = ray.remote(vllm_utils3.ActorManager).remote()
+    actor_manager = vllm_utils3.ActorManager.remote()
 
     # Create vLLM engines with queues
     vllm_engines = vllm_utils3.create_vllm_engines(
@@ -2207,7 +2330,21 @@ def one_training_step(
             if isinstance(value, np.ndarray) or isinstance(value, list):
                 if len(value) > 0:
                     metrics[key] = wandb.Histogram(value)
-        wandb.log(metrics, step=episode)
+        logger.info(f"About to log to wandb... step={episode}")
+        result = wandb.log(metrics, step=episode)
+        logger.info(f"WandB log() returned: {result}, logged {metrics=} to wandb.")
+
+        # Debug: Check if wandb.run is active and what's in the summary
+        if wandb.run:
+            logger.info(f"WandB run is active. Run ID: {wandb.run.id}")
+            logger.info(f"WandB run name: {wandb.run.name}")
+            logger.info(f"WandB run URL: {wandb.run.get_url()}")
+            # Check if data was actually logged
+            summary_keys = list(wandb.run.summary.keys()) if wandb.run.summary else []
+            logger.info(f"WandB summary has {len(summary_keys)} keys: {summary_keys[:10]}...")  # Show first 10 keys
+        else:
+            logger.error("WandB run is not active!")
+    logger.info("Done step.")
 
 
 def maybe_evaluate(
@@ -2556,7 +2693,7 @@ def run_training(
 
         if (
             training_step == resume_training_step
-            or training_step % 10 == 0
+            or training_step % args.update_every == 0
             or training_step == args.num_training_steps
         ):
             logger.info(f"Progress update for Beaker description: step {training_step}/{args.num_training_steps}")
@@ -2609,10 +2746,9 @@ def run_training(
         for metrics_Q in [generate_metrics_Q, weight_sync_metrics_Q]:
             try:
                 metrics = metrics_Q.get_nowait()
+                data_thread_metrics = {**data_thread_metrics, **metrics}
             except Empty:
                 logger.info("[Main Thread] didn't get train generation metrics")
-
-            data_thread_metrics = {**data_thread_metrics, **metrics}
 
         one_training_step(
             args,

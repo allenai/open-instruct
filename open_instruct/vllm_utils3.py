@@ -297,6 +297,7 @@ def init_process_group(
     return pg
 
 
+@ray.remote
 class ActorManager:
     """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
 
@@ -335,6 +336,9 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
     request_metadata[request_id] = metadata
     for j in range(request.generation_config.n):
         sub_request_id = f"{request_id}-{j}"
+        if request.generation_config.seed is not None:
+            # We need to seed each sub-request differently to avoid getting the same output.
+            sampling_params.seed = request.generation_config.seed + j
         llm_engine.add_request(sub_request_id, tokens_prompt, sampling_params)
         request_metadata[sub_request_id] = metadata
 
@@ -434,10 +438,17 @@ class LLMRayActor:
         if not self._should_stop():
             try:
                 request = self.prompt_queue.get_nowait()
+                self.logger.debug(
+                    f"[_maybe_add_new_request] Added new request during processing: "
+                    f"is_eval={request.is_eval}, dataset_index={request.dataset_index}, "
+                    f"training_step={request.training_step}"
+                )
                 add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
                 return True
             except queue.Empty:
                 pass  # No new request available, continue processing
+        else:
+            self.logger.debug("[_maybe_add_new_request] Skipping due to should_stop signal")
         return False
 
     def process_from_queue(self, timeout: float = 60.0):
@@ -446,7 +457,9 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed.
         """
+        self.logger.info(f"[process_from_queue] Starting with inference_batch_size={self.inference_batch_size}")
         num_processed = 0
+        overall_start_time = time.perf_counter()
 
         tracking = _init_tool_tracking() if self.tools else None
         tokenizer = self.llm_engine.tokenizer if self.tools else None
@@ -454,32 +467,81 @@ class LLMRayActor:
         collected_outputs = defaultdict(list)
 
         if self._should_stop():
+            self.logger.info("[process_from_queue] Early exit due to should_stop signal")
             return num_processed
 
-        for i in range(self.inference_batch_size):
+        # Initial batch loading
+        batch_load_start = time.perf_counter()
+        initial_requests = 0
+        while initial_requests < self.inference_batch_size:
             try:
-                request = self.prompt_queue.get_nowait()
+                request = self.prompt_queue.get(timeout=timeout)
+                self.logger.debug(
+                    f"[process_from_queue] Got request from queue: "
+                    f"is_eval={request.is_eval}, dataset_index={request.dataset_index}, "
+                    f"training_step={request.training_step}"
+                )
                 add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
+                initial_requests += 1
             except queue.Empty:
                 # If we couldn't get a request quickly and have some requests, start processing
                 if self.llm_engine.has_unfinished_requests():
+                    self.logger.debug(
+                        f"[process_from_queue] Queue empty after {initial_requests} requests, starting processing"
+                    )
                     break
                 # Otherwise continue trying to get more requests
 
+        batch_load_time = time.perf_counter() - batch_load_start
+        self.logger.info(
+            f"[process_from_queue] Initial batch loaded {initial_requests} requests in {batch_load_time:.2f}s"
+        )
+
+        # Main processing loop
+        loop_iteration = 0
+        # Timing accumulators for every 100 iterations
+        step_engine_time_acc = 0.0
+        output_processing_time_acc = 0.0
+        loop_block_start = time.perf_counter()
+
         while True:
+            loop_iteration += 1
+
             if self._should_stop() and self.inflight_updates:
+                self.logger.info(
+                    f"[process_from_queue] Stopping due to should_stop signal (inflight_updates=True) after {loop_iteration} iterations"
+                )
                 return num_processed
 
+            step_start = time.perf_counter()
             outputs = self._step_engine(tracking, tokenizer)
+            step_engine_time = time.perf_counter() - step_start
+            step_engine_time_acc += step_engine_time
+
+            self.logger.debug(
+                f"[process_from_queue] Loop iteration {loop_iteration}: got {len(outputs)} outputs from step_engine"
+            )
+
+            output_start = time.perf_counter()
             for output in outputs:
                 request_id = output.request_id.split("-")[0]
                 collected_outputs[request_id].append(output)
                 metadata = self.request_metadata[request_id]
+
+                self.logger.debug(
+                    f"[process_from_queue] Collected output for {request_id}: "
+                    f"{len(collected_outputs[request_id])}/{metadata['generation_config'].n} outputs"
+                )
+
                 if len(collected_outputs[request_id]) != metadata["generation_config"].n:
                     continue
 
                 outputs_to_finalize = collected_outputs[request_id]
                 num_processed += 1
+                self.logger.debug(
+                    f"[process_from_queue] Finalizing outputs for {request_id}, total processed: {num_processed}"
+                )
+
                 result = _finalize_outputs(outputs_to_finalize, tracking, metadata["dataset_index"], self.tools)
 
                 self._insert_result_to_queue(result, metadata["is_eval"])
@@ -487,12 +549,41 @@ class LLMRayActor:
                 self.request_metadata.pop(request_id, None)
                 for i in range(metadata["generation_config"].n):
                     self.request_metadata.pop(f"{request_id}-{i}", None)
+            output_processing_time = time.perf_counter() - output_start
+            output_processing_time_acc += output_processing_time
 
+            unfinished = self.llm_engine.has_unfinished_requests()
             if self._should_stop() and not self.inflight_updates:
                 pending_tool_futures = tracking["pending_tool_futures"] if self.tools else {}
-                if not self.llm_engine.has_unfinished_requests() and not pending_tool_futures:
+                if not unfinished and not pending_tool_futures:
+                    total_time = time.perf_counter() - overall_start_time
+                    self.logger.info(
+                        f"[process_from_queue] Stopping: no unfinished requests or pending tools, "
+                        f"processed {num_processed} requests in {loop_iteration} iterations, total_time={total_time:.2f}s"
+                    )
                     break
 
+            # Log timing summary every 100 iterations
+            if loop_iteration % 100 == 0:
+                loop_block_time = time.perf_counter() - loop_block_start
+                self.logger.info(
+                    f"[process_from_queue] Timing (iters {loop_iteration - 99}-{loop_iteration}): "
+                    f"total={loop_block_time:.2f}s, "
+                    f"step_engine={step_engine_time_acc:.2f}s ({step_engine_time_acc / loop_block_time * 100:.1f}%), "
+                    f"output_processing={output_processing_time_acc:.2f}s ({output_processing_time_acc / loop_block_time * 100:.1f}%), "
+                    f"processed={num_processed}"
+                )
+                # Reset accumulators
+                step_engine_time_acc = 0.0
+                output_processing_time_acc = 0.0
+                loop_block_start = time.perf_counter()
+
+        total_time = time.perf_counter() - overall_start_time
+        self.logger.info(
+            f"[process_from_queue] Completed: processed {num_processed} requests in {total_time:.2f}s (avg {total_time / num_processed:.2f}s per request)"
+            if num_processed > 0
+            else "[process_from_queue] Completed: no requests processed"
+        )
         return num_processed
 
     def _step_engine(self, tracking, tokenizer):
@@ -506,9 +597,14 @@ class LLMRayActor:
         if self.tools and tracking["pending_tool_futures"]:
             tool_outputs = self._poll_tool_futures(tracking, tokenizer)
             outputs.extend(tool_outputs)
+            if tool_outputs:
+                self.logger.debug(f"[_step_engine] Got {len(tool_outputs)} outputs from tool futures")
 
         if self.llm_engine.has_unfinished_requests():
+            num_unfinished = self.llm_engine.get_num_unfinished_requests()
+            self.logger.debug(f"[_step_engine] Stepping engine with {num_unfinished} unfinished requests")
             step_outputs = list(self.llm_engine.step())
+            self.logger.debug(f"[_step_engine] Engine step returned {len(step_outputs)} outputs")
 
             for output in step_outputs:
                 if output.finished:
@@ -518,9 +614,17 @@ class LLMRayActor:
                     )
                     if result is not None:
                         outputs.append(result)
+                        self.logger.debug(f"[_step_engine] Finished output for request {output.request_id}")
+
+        # Try to keep the engine full
+        added_count = 0
         while not self.llm_engine.get_num_unfinished_requests() < self.inference_batch_size:
             if not self._maybe_add_new_request():
                 break
+            added_count += 1
+
+        if added_count > 0:
+            self.logger.debug(f"[_step_engine] Added {added_count} new requests to maintain batch size")
 
         return outputs
 
