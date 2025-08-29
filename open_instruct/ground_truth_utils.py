@@ -141,6 +141,9 @@ class FinegrainedRewardOutput:
                     raise ValueError(f"effective_spans[{j}] in finegrained_scores[{i}] must be a 2-tuple (start_char, end_char)")
                 
                 start_char, end_char = effective_span
+                if start_char == -1 and end_char == -1:
+                    # this is a fallback span, so we don't need to check it
+                    continue
                 if start_char < 0 or end_char < start_char:
                     raise ValueError(f"Invalid effective_span {effective_span} in finegrained_scores[{i}].effective_spans[{j}]")
             

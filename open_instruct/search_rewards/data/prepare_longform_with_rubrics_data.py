@@ -53,6 +53,8 @@ REQUIREMENTS:
 - Do not cite any claims that are not from the search results"""
 
 
+HF_USERNAME = "rl-rag"
+
 def upload_scholarqabench_data(use_system_prompt: bool = True) -> List[Dict[str, Any]]:
     """
     dict_keys(['initial_prompt', 'metric_config', 'case_id', 'annotator', 'agreement'])
@@ -78,22 +80,24 @@ def upload_scholarqabench_data(use_system_prompt: bool = True) -> List[Dict[str,
     # push to huggingface
     dataset = Dataset.from_list(formatted_data)
     dataset.push_to_hub(
-        "rulins/scholarqabench_rlvr_no_prompt"
+        f"{HF_USERNAME}/scholarqabench_rlvr_no_prompt"
         if not use_system_prompt
-        else "rulins/scholarqabench_rlvr_with_system_prompt"
+        else f"{HF_USERNAME}/scholarqabench_rlvr_with_system_prompt"
     )
 
     return formatted_data
 
 
-def upload_longform_sqa_train_data(use_system_prompt: bool = True, reward_type: str = "rubrics_only") -> List[Dict[str, Any]]:
+def upload_longform_sqa_train_data(use_system_prompt: bool = True, reward_type: str = "rubrics_only", rubric_type: str = "no_retrieval_1k") -> List[Dict[str, Any]]:
     data = []
-    with open("rubrics_1k.jsonl", "r") as f:
+    with open(f"rubrics_{rubric_type}.jsonl", "r") as f:
         for line in f:
             data.append(json.loads(line))
     
     formatted_data = []
     for ex in data:
+        if isinstance(ex["Question"], list):
+            continue
         if use_system_prompt:
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -119,18 +123,18 @@ def upload_longform_sqa_train_data(use_system_prompt: bool = True, reward_type: 
     dataset = Dataset.from_list(formatted_data)
     if use_system_prompt:
         if reward_type == "rubrics_only":
-            dataset.push_to_hub("rulins/rl_rag_longform_rubrics_only_with_system_prompt")
+            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_{rubric_type}_longform_rubrics_only_with_system_prompt")
         elif reward_type == "averaged_outcome":
-            dataset.push_to_hub("rulins/rl_rag_sqa_1k_longform_averaged_outcome_with_system_prompt")
+            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_sqa_{rubric_type}_longform_averaged_outcome_with_system_prompt")
         elif reward_type == "finegrained":
-            dataset.push_to_hub("rulins/rl_rag_sqa_1k_longform_finegrained_with_system_prompt")
+            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_sqa_{rubric_type}_longform_finegrained_with_system_prompt")
     else:
         if reward_type == "rubrics_only":
-            dataset.push_to_hub("rulins/rl_rag_longform_rubrics_only_no_system_prompt")
+            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_{rubric_type}_longform_rubrics_only_no_system_prompt")
         elif reward_type == "averaged_outcome":
-            dataset.push_to_hub("rulins/rl_rag_sqa_1k_longform_averaged_outcome_no_system_prompt")
+            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_sqa_{rubric_type}_longform_averaged_outcome_no_system_prompt")
         elif reward_type == "finegrained":
-            dataset.push_to_hub("rulins/rl_rag_sqa_1k_longform_finegrained_no_system_prompt")
+            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_sqa_{rubric_type}_longform_finegrained_no_system_prompt")
     
     return formatted_data
 
@@ -161,22 +165,22 @@ def upload_longform_surveyqa_validation_data(use_system_prompt: bool = True, rew
     dataset = Dataset.from_list(formatted_data)
     if use_system_prompt:
         if reward_type == "rubrics_only":
-            dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_rubrics_only_with_system_prompt")
+            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_surveyqa_validation_longform_rubrics_only_with_system_prompt")
         elif reward_type == "averaged_outcome":
-            dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_averaged_outcome_with_system_prompt")
+            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_surveyqa_validation_longform_averaged_outcome_with_system_prompt")
         elif reward_type == "finegrained":
-            dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_finegrained_with_system_prompt")
+            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_surveyqa_validation_longform_finegrained_with_system_prompt")
     else:
         if reward_type == "rubrics_only":
-            dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_rubrics_only_no_system_prompt")
+            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_surveyqa_validation_longform_rubrics_only_no_system_prompt")
         elif reward_type == "averaged_outcome":
-            dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_averaged_outcome_no_system_prompt")
+            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_surveyqa_validation_longform_averaged_outcome_no_system_prompt")
         elif reward_type == "finegrained":
-            dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_finegrained_no_system_prompt")
+            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_surveyqa_validation_longform_finegrained_no_system_prompt")
     return formatted_data
 
 
 if __name__ == "__main__":
     # data = upload_scholarqabench_data(use_system_prompt=True)
-    data = upload_longform_sqa_train_data(use_system_prompt=True, reward_type="finegrained")
+    data = upload_longform_sqa_train_data(use_system_prompt=True, reward_type="finegrained", rubric_type="no_retrieval_1k")
     # data = upload_longform_surveyqa_validation_data(use_system_prompt=True, reward_type="finegrained")
