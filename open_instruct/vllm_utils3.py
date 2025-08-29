@@ -124,7 +124,7 @@ def _process_outputs(
     outputs: List[vllm.RequestOutput],
     dataset_index: Optional[List[int]] = None,
     token_statistics: Optional[TokenStatistics] = None,
-    start_time: Optional[float] = None
+    start_time: Optional[float] = None,
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -164,7 +164,7 @@ def _process_outputs_with_tools(
     outputs: List[vllm.RequestOutput],
     dataset_index: Optional[List[int]] = None,
     token_statistics: Optional[TokenStatistics] = None,
-    start_time: Optional[float] = None
+    start_time: Optional[float] = None,
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format with tool information."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -204,7 +204,9 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=
     """Prepare final outputs based on whether tools were used."""
     if not tools:
         outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
-        return _process_outputs(outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time)
+        return _process_outputs(
+            outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
+        )
 
     # Tool mode: add metadata and merge completions
     for req_id in tracking["masks"]:
@@ -231,7 +233,9 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=
         merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1]))
     )
 
-    return _process_outputs_with_tools(final_outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time)
+    return _process_outputs_with_tools(
+        final_outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
+    )
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -472,7 +476,9 @@ class LLMRayActor:
                 num_prompt_tokens=total_prompt_tokens,
                 num_response_tokens=total_generation_tokens,
                 generation_time=generation_time,
-            ), start_time)
+            ),
+            start_time=start_time,
+        )
         return result
 
     def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step):

@@ -33,7 +33,7 @@ from open_instruct import logger_utils
 class ActorManager:
     """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
 
-    def __init__(self, queues=None):
+    def __init__(self, queues: dict, args, enable_dashboard: bool = True):
         self._should_stop = False
         self._last_updated = datetime.now()
         self._dashboard_port = int(os.environ.get("DASHBOARD_PORT", 8080))
@@ -47,9 +47,10 @@ class ActorManager:
         self._training_step_history = collections.deque(maxlen=self._sample_window)
         self._generation_batch_history = collections.deque(maxlen=self._sample_window)
         self._kv_cache_max_concurrency = None
-        self._inference_batch_size = None
-        self._setup_queue_monitoring()
-        self._start_dashboard()
+        self._args = args
+        if enable_dashboard:
+            self._setup_queue_monitoring()
+            self._start_dashboard()
 
     def _setup_queue_monitoring(self):
         """Setup queue monitoring with background polling thread."""
@@ -98,7 +99,7 @@ class ActorManager:
                 "token_stats": self.get_token_stats(),
                 "timing_stats": self.get_timing_stats(),
                 "kv_cache_max_concurrency": self._kv_cache_max_concurrency,
-                "inference_batch_size": self._inference_batch_size,
+                "inference_batch_size": self._args.inference_batch_size,
             }
 
         def run_server():
@@ -160,10 +161,6 @@ class ActorManager:
     def set_kv_cache_max_concurrency(self, max_concurrency: int):
         """Set the KV cache max concurrency value."""
         self._kv_cache_max_concurrency = max_concurrency
-
-    def set_inference_batch_size(self, batch_size: int):
-        """Set the inference batch size value."""
-        self._inference_batch_size = batch_size
 
     def get_token_stats(self):
         """Calculate and return current token statistics."""

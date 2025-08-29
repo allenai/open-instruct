@@ -329,6 +329,8 @@ class Args:
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
     vllm_num_engines: int = 1
     """number of vLLM Engines, set to 0 to disable vLLM"""
+    inference_batch_size: Optional[int] = None
+    """inference batch size per vLLM engine. If None, calculated as ceil(num_unique_prompts_rollout / vllm_num_engines) * num_samples_per_prompt_rollout"""
     vllm_tensor_parallel_size: int = 1
     """tensor parallel size of vLLM Engine for multi-GPU inference"""
     vllm_enforce_eager: bool = False
@@ -1827,6 +1829,11 @@ def setup_runtime_variables(args: Args) -> Args:
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
     args.tool_use = args.tools is not None and len(args.tools) > 0
+    if args.inference_batch_size is None:
+        args.inference_batch_size = (
+            max(1, math.ceil(args.num_unique_prompts_rollout / args.vllm_num_engines))
+            * args.num_samples_per_prompt_rollout
+        )
     return args
 
 
@@ -1954,7 +1961,7 @@ def create_model_and_optimizer(
         "Param Prompt Queue": param_prompt_Q,
         "Evaluation Queue": evaluation_inference_results_Q,
     }
-    actor_manager = ray.remote(ActorManager).remote(queues=queues_to_monitor)
+    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
 
     # Create vLLM engines with queues
     vllm_engines = vllm_utils3.create_vllm_engines(
@@ -2026,23 +2033,13 @@ def split_and_insert_batch(
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q,
     generation_config,
+    args: Args,
     is_eval: bool = False,
-    actor_manager=None,
-    args: Args = None,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    import math
-
-    inference_batch_size = max(1, math.ceil(len(batch.queries) / vllm_num_engines))
-
-    if not is_eval and actor_manager is not None:
-        ray.get(
-            actor_manager.set_inference_batch_size.remote(inference_batch_size * args.num_samples_per_prompt_rollout)
-        )
-
     for batch_idx in range(vllm_num_engines):
-        start_idx = batch_idx * inference_batch_size
-        end_idx = min(start_idx + inference_batch_size, len(batch.queries))
+        start_idx = batch_idx * args.inference_batch_size
+        end_idx = min(start_idx + args.inference_batch_size, len(batch.queries))
 
         # Stop if we've distributed all queries
         if start_idx >= len(batch.queries):
@@ -2088,8 +2085,7 @@ def prepare_prompts(
         pending_queries_map,
         param_prompt_Q,
         generation_configs["train"],
-        actor_manager=actor_manager,
-        args=args,
+        args,
     )
 
     return batch
@@ -2567,7 +2563,6 @@ def run_training(
     generate_metrics_Q,
     weight_sync_metrics_Q,
     actor_manager: ActorManager,
-    actor_manager: vllm_utils3.ActorManager,
     checkpoint_state=None,
 ):
     if resume_training_step > 1:
@@ -2626,7 +2621,7 @@ def run_training(
             pending_queries_map,
             param_prompt_Q,
             generation_configs["train"],
-            actor_manager=actor_manager,
+            args,
         )
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
         num_total_tokens = checkpoint_state["num_total_tokens"]
@@ -2681,8 +2676,8 @@ def run_training(
                 eval_pending_queries_map,
                 param_prompt_Q,
                 generation_configs["eval"],
+                args,
                 is_eval=True,
-                actor_manager=actor_manager,
             )
 
         # The generate_thread is now handling vLLM processing asynchronously
