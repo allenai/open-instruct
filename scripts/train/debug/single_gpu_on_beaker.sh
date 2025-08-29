@@ -8,7 +8,6 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 
 uv run python mason.py \
        --cluster ai2/jupiter-cirrascale-2 \
-       --cluster ai2/augusta-google-1 \
        --cluster ai2/saturn-cirrascale \
        --cluster ai2/ceres-cirrascale \
        --image "$BEAKER_IMAGE" \

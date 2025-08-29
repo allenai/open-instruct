@@ -41,7 +41,7 @@ def find_free_port():
 class ActorManager:
     """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
 
-    def __init__(self, queues: dict, args, enable_dashboard: bool = True):
+    def __init__(self, queues: dict, args):
         self._should_stop = False
         self._last_updated = datetime.now()
         self._dashboard_port = None
@@ -56,7 +56,7 @@ class ActorManager:
         self._generation_batch_history = collections.deque(maxlen=self._sample_window)
         self._kv_cache_max_concurrency = None
         self._args = args
-        if enable_dashboard:
+        if self._args.enable_queue_dashboard:
             self._setup_queue_monitoring()
             self._start_dashboard()
 
@@ -228,3 +228,14 @@ class ActorManager:
     def get_dashboard_port(self):
         """Get the port number where the dashboard is running."""
         return self._dashboard_port
+
+    def cleanup(self):
+        """Clean up resources including stopping the polling thread."""
+        logger = logger_utils.setup_logger(__name__)
+
+        # Stop the polling thread if dashboard was enabled
+        if self._args.enable_queue_dashboard:
+            logger.info("Stopping queue polling thread...")
+            self._polling_active = False
+            # Wait for the thread to finish with a timeout
+            self._poll_thread.join(timeout=2.0)

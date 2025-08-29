@@ -347,6 +347,8 @@ class Args:
     """the deepspeed stage"""
     gather_whole_model: bool = True
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
+    enable_queue_dashboard: bool = True
+    """whether to enable the ActorManager queue monitoring dashboard"""
 
     # Experiment tracking
     verbose: bool = False
@@ -1957,7 +1959,9 @@ def create_model_and_optimizer(
         "Param Prompt Queue": param_prompt_Q,
         "Evaluation Queue": evaluation_inference_results_Q,
     }
-    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
+    actor_manager = ray.remote(ActorManager).remote(
+        queues_to_monitor, args, enable_dashboard=args.enable_queue_dashboard
+    )
 
     # Create vLLM engines with queues
     vllm_engines = vllm_utils3.create_vllm_engines(
@@ -2512,6 +2516,11 @@ def cleanup_training_resources(
     logger.info("Signaling all actors to stop...")
     ray.get(actor_manager.set_should_stop.remote(True))
     logger.info("✅ Signaled all actors to stop")
+
+    # Clean up ActorManager resources
+    logger.info("Cleaning up ActorManager resources...")
+    ray.get(actor_manager.cleanup.remote())
+    logger.info("✅ ActorManager resources cleaned up")
 
     logger.info("Pushing shutdown sentinel to queues...")
     # Push sentinel to the first queue (inference_results_Q)

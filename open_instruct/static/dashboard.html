@@ -56,7 +56,7 @@
             const data = await response.json();
 
             const statusClass = data.should_stop ? 'active' : 'inactive';
-            const statusText = data.should_stop ? 'STOPPED' : 'RUNNING';
+            const statusText = data.should_stop ? 'TRUE' : 'FALSE';
 
             document.getElementById('status-container').innerHTML = `
                 <div class="status-card ${statusClass}">
