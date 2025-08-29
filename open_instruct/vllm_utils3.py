@@ -16,11 +16,8 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 import copy
-import cProfile
-import functools
 import os
 import queue
-import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -42,11 +39,10 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
-from open_instruct import logger_utils
+from open_instruct import logger_utils, profile_decorator
 from open_instruct.queue_types import GenerationResult, RequestInfo
 from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
-from profile_decorator import profile
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -372,7 +368,7 @@ class LLMRayActor:
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
 
-    @profile
+    @profile_decorator.profile
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
@@ -387,26 +383,17 @@ class LLMRayActor:
                 return 0
 
             try:
-                queue_start = time.perf_counter()
                 request = self.prompt_queue.get(timeout=timeout)
-                queue_time = time.perf_counter() - queue_start
-                self.logger.info(f"[TIMING] Queue get took {queue_time:.3f}s")
             except queue.Empty:
                 return 0
 
-            process_start = time.perf_counter()
             result = self._process_request(request)
-            process_time = time.perf_counter() - process_start
-            self.logger.info(f"[TIMING] _process_request took {process_time:.3f}s")
 
             try:
-                put_start = time.perf_counter()
                 if request.is_eval:
                     self.eval_results_queue.put(result, timeout=10)
                 else:
                     self.results_queue.put(result, timeout=10)
-                put_time = time.perf_counter() - put_start
-                self.logger.info(f"[TIMING] Results queue put took {put_time:.3f}s")
                 return 1  # Successfully processed one request
             except queue.Full:
                 self.logger.warning("Results queue is full, discarding result.")
@@ -420,8 +407,7 @@ class LLMRayActor:
 
         self.logger.info(f"[LLMRayActor] Processing request with {len(prompts)} prompts, tools={bool(self.tools)}")
 
-        # Setup phase timing
-        setup_start = time.perf_counter()
+        # Setup phase
         if self.tools:
             # Need n=1 for individual tool tracking
             sampling_params = copy.deepcopy(sampling_params)
@@ -435,14 +421,11 @@ class LLMRayActor:
             tokenizer = None
 
         self._add_initial_requests(prompts, sampling_params, original_n, request.training_step)
-        setup_time = time.perf_counter() - setup_start
-        self.logger.info(f"[TIMING] Request setup (tool init + add_initial_requests) took {setup_time:.3f}s")
 
         outputs = []
         iteration = 0
 
-        # Main generation loop timing
-        loop_start = time.perf_counter()
+        # Main generation loop
         while True:
             iteration += 1
 
@@ -464,16 +447,11 @@ class LLMRayActor:
             # Check termination condition (matching ToolUseLLM exactly)
             pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
             if not self.llm_engine.has_unfinished_requests() and pending_count == 0:
-                loop_time = time.perf_counter() - loop_start
-                self.logger.info(f"[TIMING] Generation loop took {loop_time:.3f}s for {iteration} iterations")
                 self.logger.info(f"[LLMRayActor] Terminating after {iteration} iterations with {len(outputs)} outputs")
                 break
 
-        # Finalization timing
-        finalize_start = time.perf_counter()
+        # Finalization
         result = _finalize_outputs(outputs, tracking, request.dataset_index, self.tools, start_time)
-        finalize_time = time.perf_counter() - finalize_start
-        self.logger.info(f"[TIMING] Output finalization took {finalize_time:.3f}s")
 
         return result
 
