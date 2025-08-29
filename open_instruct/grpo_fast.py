@@ -2711,19 +2711,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
     # Tokenize system prompt if provided
-    system_prompt_text = None
-    if args.system_prompt_file:
-        with open(args.system_prompt_file, "r") as f:
-            system_prompt_text = f.read().strip()
-        logger.info(f"Loaded system prompt from file: {args.system_prompt_file}")
-    elif args.system_prompt:
-        system_prompt_text = args.system_prompt
-
-    if system_prompt_text:
-        system_prompt_tokens = tokenizer.encode(system_prompt_text, add_special_tokens=False)
-        logger.info(f"System prompt tokenized to {len(system_prompt_tokens)} tokens")
-    else:
-        system_prompt_tokens = []
 
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
     if args.cache_dataset_only:
@@ -2751,7 +2738,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             inference_results_Q,
             param_prompt_Q,
             evaluation_inference_results_Q,
-            system_prompt_tokens,
         )
     )
 
