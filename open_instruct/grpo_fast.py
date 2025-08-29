@@ -2052,7 +2052,9 @@ def prepare_prompts(
     return batch
 
 
-def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event):
+def load_data_from_packing_thread(
+    packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event, health_check_fn: Callable[[], None]
+):
     """Get the packed sequences with advantages from the packing thread."""
     with Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
         while True:
@@ -2063,6 +2065,8 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
                 packed_data = packed_sequences_Q.get(timeout=30.0)
                 break
             except Empty:
+                # check that everything is still alive
+                health_check_fn()
                 logger.warning("[Main Thread] Timeout waiting for packed sequences. Retrying...")
         data_thread_metrics = packed_data["metrics"]
         B = packed_data["B"]
@@ -2557,6 +2561,10 @@ def run_training(
         generate_thread, args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q
     )
 
+    # setup health check function to check that everything is still alive
+    def health_check_fn():
+        [f.result() for f in [packing_future, generation_future, weight_sync_thread_future] if f.done()]
+
     # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps):
         dataset_indices = next(iter_dataloader)
@@ -2594,7 +2602,7 @@ def run_training(
             )
 
         # Check if any of the threads have raised an exception.
-        [f.result() for f in [packing_future, generation_future, weight_sync_thread_future] if f.done()]
+        health_check_fn()
 
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
         weight_sync_trigger_event.set()
@@ -2627,18 +2635,16 @@ def run_training(
 
         # The generate_thread is now handling vLLM processing asynchronously
         collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
-            packed_sequences_Q, num_total_tokens, stop_event
+            packed_sequences_Q, num_total_tokens, stop_event, health_check_fn
         )
         if collated_data is None:
             continue
 
         for metrics_Q in [generate_metrics_Q, weight_sync_metrics_Q]:
             try:
-                metrics = metrics_Q.get_nowait()
+                data_thread_metrics |= metrics_Q.get_nowait()
             except Empty:
                 logger.info("[Main Thread] didn't get train generation metrics")
-
-            data_thread_metrics = {**data_thread_metrics, **metrics}
 
         one_training_step(
             args,
