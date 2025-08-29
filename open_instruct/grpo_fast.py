@@ -2745,8 +2745,7 @@ def run_training(
 
         for metrics_Q in [generate_metrics_Q, weight_sync_metrics_Q]:
             try:
-                metrics = metrics_Q.get_nowait()
-                data_thread_metrics = {**data_thread_metrics, **metrics}
+                data_thread_metrics |= metrics_Q.get_nowait()
             except Empty:
                 logger.info("[Main Thread] didn't get train generation metrics")
 
