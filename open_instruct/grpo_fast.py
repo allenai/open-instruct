@@ -2564,7 +2564,9 @@ def run_training(
     )
 
     # setup health check function to check that everything is still alive
-    health_check_fn = lambda: [f.result() for f in [packing_future, generation_future, weight_sync_thread_future] if f.done()]
+    health_check_fn = lambda: [
+        f.result() for f in [packing_future, generation_future, weight_sync_thread_future] if f.done()
+    ]
 
     # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps):
