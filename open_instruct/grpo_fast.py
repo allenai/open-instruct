@@ -1553,6 +1553,16 @@ def data_preparation_thread(
             real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
             expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
             non_zero_gradient_index = np.where(expanded_mask)[0]
+
+            # Log zero-gradient filtering statistics
+            num_zero_std_prompts = (~non_zero_std_mask).sum()
+            num_filtered_responses = len(scores) - len(non_zero_gradient_index)
+            if num_filtered_responses > 0:
+                logger.info(
+                    f"[Zero-gradient filtering] Filtered {num_zero_std_prompts} prompts with zero std "
+                    f"({num_filtered_responses} responses). Retention rate: {len(non_zero_gradient_index) / len(scores):.2%}"
+                )
+
             advantages = advantages[non_zero_gradient_index]
             original_batch_size = len(scores)
             scores = scores[non_zero_gradient_index]
@@ -1562,6 +1572,12 @@ def data_preparation_thread(
             finish_reasons = [result.finish_reasons[i] for i in non_zero_gradient_index]
             if args.mask_truncated_completions:
                 stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
+                num_truncated = len(finish_reasons) - len(stop_idxes)
+                if num_truncated > 0:
+                    logger.info(
+                        f"[Truncated completions filtering] Filtered {num_truncated} responses that didn't finish with 'stop'. "
+                        f"Retention rate: {len(stop_idxes) / len(finish_reasons):.2%}"
+                    )
                 scores = scores[stop_idxes]
                 advantages = advantages[stop_idxes]
                 responses = [responses[i] for i in stop_idxes]
@@ -1581,6 +1597,11 @@ def data_preparation_thread(
                         scores_matrix = scores.reshape(current_prompt_cnt, k)
                         stds = scores_matrix.std(axis=1) + 1e-8
                         probs = stds / stds.sum()
+
+                        logger.info(
+                            f"[Refill completions] Need to fill {need_to_fill_prompt} prompts to maintain batch size. "
+                            f"Original: {original_prompt_cnt}, Current: {current_prompt_cnt}"
+                        )
 
                         sampled_prompt_ids = np.random.choice(
                             current_prompt_cnt, size=need_to_fill_prompt, replace=True, p=probs
@@ -1607,9 +1628,17 @@ def data_preparation_thread(
 
                         finish_reasons += [finish_reasons[i] for i in sampled_indices]
 
-                        print(
+                        logger.info(
                             f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses"
                         )
+
+            # Log filtering summary
+            final_batch_size = len(scores)
+            logger.info(
+                f"[Filtering Summary] Original batch size: {original_batch_size}, "
+                f"Final batch size: {final_batch_size}, "
+                f"Overall retention rate: {final_batch_size / original_batch_size:.2%}"
+            )
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
