@@ -30,7 +30,7 @@ python mason.py \
     --cluster ${cluster} \
     --workspace ai2/tulu-thinker \
     --priority high \
-    --image michaeln/open_instruct_olmo2_retrofit \
+    --image michaeln/open_instruct_olmo3 \
     --preemptible \
     --num_nodes 4 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
