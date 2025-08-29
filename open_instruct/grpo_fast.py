@@ -1276,28 +1276,30 @@ class PendingQueriesMap:
         self._map = {}  # dataset_idx -> (query, ground_truth, dataset, count)
         self._lock = threading.Lock()
 
-    def insert(self, dataset_idx, query, ground_truth, dataset):
+    def insert(self, dataset_idx, query, ground_truth, dataset, raw_query=None):
         """Insert or increment count for a dataset index."""
         with self._lock:
             if dataset_idx in self._map:
                 # Already exists - just increment count
-                existing_query, existing_ground_truth, existing_dataset, count = self._map[dataset_idx]
-                self._map[dataset_idx] = (existing_query, existing_ground_truth, existing_dataset, count + 1)
+                existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count = self._map[dataset_idx]
+                self._map[dataset_idx] = (existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count + 1)
             else:
                 # New entry - count starts at 1
-                self._map[dataset_idx] = (query, ground_truth, dataset, 1)
+                self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, 1)
 
-    def insert_many(self, dataset_indices, queries, ground_truths, datasets):
+    def insert_many(self, dataset_indices, queries, ground_truths, datasets, raw_queries=None):
         """Insert or increment count for multiple dataset indices at once."""
         with self._lock:
             for i, dataset_idx in enumerate(dataset_indices):
+                current_raw_query = raw_queries[i] if raw_queries else None
+                
                 if dataset_idx in self._map:
                     # Already exists - just increment count
-                    existing_query, existing_ground_truth, existing_dataset, count = self._map[dataset_idx]
-                    self._map[dataset_idx] = (existing_query, existing_ground_truth, existing_dataset, count + 1)
+                    existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count = self._map[dataset_idx]
+                    self._map[dataset_idx] = (existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count + 1)
                 else:
                     # New entry - count starts at 1
-                    self._map[dataset_idx] = (queries[i], ground_truths[i], datasets[i], 1)
+                    self._map[dataset_idx] = (queries[i], ground_truths[i], datasets[i], current_raw_query, 1)
 
     def pop(self, dataset_idx):
         """Retrieve data and decrement count. Removes entry when count reaches 0."""
@@ -1305,16 +1307,16 @@ class PendingQueriesMap:
             if dataset_idx not in self._map:
                 raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
 
-            query, ground_truth, dataset, count = self._map[dataset_idx]
+            query, ground_truth, dataset, raw_query, count = self._map[dataset_idx]
 
             if count > 1:
                 # More results expected - just decrement
-                self._map[dataset_idx] = (query, ground_truth, dataset, count - 1)
+                self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, count - 1)
             else:
                 # Last result - remove entry
                 del self._map[dataset_idx]
 
-            return query, ground_truth, dataset
+            return query, ground_truth, dataset, raw_query
 
     def __len__(self):
         """Return the number of entries in the map."""
@@ -1366,6 +1368,7 @@ def accumulate_inference_batches(
     all_queries = []
     all_ground_truths = []
     all_datasets = []
+    all_raw_queries = []
     for i in tqdm(
         range(args.vllm_num_engines),
         total=args.vllm_num_engines,
@@ -1397,17 +1400,21 @@ def accumulate_inference_batches(
         batch_queries = []
         batch_ground_truths = []
         batch_datasets = []
+        batch_raw_queries = []
 
         for dataset_idx in dataset_indices:
-            query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
+            query, ground_truth, dataset, raw_query = pending_queries_map.pop(dataset_idx)
             batch_queries.append(query)
             batch_ground_truths.append(ground_truth)
+            # TODO
             batch_datasets.append(dataset)
+            batch_raw_queries.append(raw_query)
 
         results.append(result)
         all_queries.extend(batch_queries)
         all_ground_truths.extend(batch_ground_truths)
         all_datasets.extend(batch_datasets)
+        all_raw_queries.extend(batch_raw_queries)
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1455,6 +1462,7 @@ def accumulate_inference_batches(
         queries=all_queries,
         ground_truths=all_ground_truths,
         datasets=all_datasets,
+        raw_queries=all_raw_queries,
         indices=None,  # Not meaningful for combined results
     )
     return combined_result, batch
@@ -1486,15 +1494,11 @@ def data_preparation_thread(
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
         if args.num_samples_per_prompt_rollout > 1:
-            # breakpoint()
             batch = Batch(
                 queries=repeat_each(batch.queries, args.num_samples_per_prompt_rollout),
                 ground_truths=repeat_each(batch.ground_truths, args.num_samples_per_prompt_rollout),
                 datasets=repeat_each(batch.datasets, args.num_samples_per_prompt_rollout),
                 indices=repeat_each(batch.indices, args.num_samples_per_prompt_rollout) if batch.indices else None,
-                raw_queries=repeat_each(batch.raw_queries, args.num_samples_per_prompt_rollout)
-                if batch.raw_queries
-                else None,
             )
             good_outputs = [
                 len(result.request_info.tool_outputs[i]) > 0
@@ -1514,11 +1518,9 @@ def data_preparation_thread(
                     result.masks[i].append(1)  # never mask the eos token for now?
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
-            # breakpoint()
             decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
-            # decoded_queries = tokenizer.batch_decode(batch.queries, skip_special_tokens=True)
-            # decoded_queries = [extract_user_query(query) for query in decoded_queries]
-            decoded_queries = batch.raw_queries
+            decoded_queries = tokenizer.batch_decode(batch.queries, skip_special_tokens=True)
+            decoded_queries = [extract_user_query(query) for query in decoded_queries]
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
                 result.finish_reasons
             )
@@ -2088,6 +2090,42 @@ def load_data_from_packing_thread(
         logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
         return None, data_thread_metrics, num_total_tokens
     return collated_data, data_thread_metrics, num_total_tokens
+
+# def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event):
+#     """Get the packed sequences with advantages from the packing thread."""
+#     with Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
+#         retries = 0
+#         max_retries = 3
+#         while True:
+#             if stop_event.is_set():
+#                 logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
+#                 return None, {}, num_total_tokens
+#             try:
+#                 # Increase timeout if needed for your specific workload
+#                 packed_data = packed_sequences_Q.get(timeout=60.0)  # Increased timeout
+#                 break
+#             except Empty:
+#                 retries += 1
+#                 logger.warning(f"[Main Thread] Timeout ({retries}/{max_retries}) waiting for packed sequences. Retrying...")
+#                 if retries >= max_retries:
+#                     logger.error("[Main Thread] Maximum retries reached waiting for packed sequences")
+#                     return None, {"error": "Maximum retries reached waiting for packed sequences"}, num_total_tokens
+        
+#         # Check if we got error data
+#         if packed_data.get("collated_data") is None and "error" in packed_data.get("metrics", {}):
+#             logger.error(f"[Main Thread] Received error data: {packed_data['metrics']['error']}")
+#             return None, packed_data["metrics"], num_total_tokens
+        
+#         data_thread_metrics = packed_data["metrics"]
+#         B = packed_data["B"]
+#         collated_data = packed_data["collated_data"]
+#         num_total_tokens += packed_data["num_new_tokens"]
+
+#     data_thread_metrics["time/trainer_idling"] = timer.duration
+#     if B == 0:
+#         logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
+#         return None, data_thread_metrics, num_total_tokens
+#     return collated_data, data_thread_metrics, num_total_tokens
 
 
 def weight_sync_thread(

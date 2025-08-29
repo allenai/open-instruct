@@ -892,7 +892,6 @@ def sft_tokenize_mask_out_prompt_v1(
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     labels[: len(row[INPUT_IDS_PROMPT_KEY])] = [-100] * len(row[INPUT_IDS_PROMPT_KEY])
     row[LABELS_KEY] = labels
-    row[DEFAULT_SFT_MESSAGES_KEY] = prompt
     return row
 
 
