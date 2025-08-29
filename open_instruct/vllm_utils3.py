@@ -16,7 +16,6 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 import copy
-import logging
 import os
 import queue
 from collections import defaultdict
@@ -40,11 +39,30 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
+from open_instruct import logger_utils
 from open_instruct.queue_types import GenerationResult, RequestInfo
 from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
+
+
+# Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
+# Turns out Ray doesnt necessarily place bundles together,
+# so this function is used to get the bundle indices of a placement group
+# and ensure that the bundles placed on the same node are grouped together.
+# avoids unnecessary communication for TP>1 with vllm.
+def get_bundle_indices_list(placement_group: ray.util.placement_group) -> List[int]:
+    pg_infos = ray.util.placement_group_table(placement_group)
+
+    node_id_to_bundles = defaultdict(list)
+    for bundle, node_id in pg_infos["bundles_to_node_id"].items():
+        node_id_to_bundles[node_id].append(bundle)
+
+    flattened_bundle_indices = []
+    for node_id, bundles in node_id_to_bundles.items():
+        flattened_bundle_indices.extend(bundles)
+    return flattened_bundle_indices
 
 
 def _init_tool_tracking():
@@ -100,7 +118,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
 
 def _process_outputs(
-    outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None
+    outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None, start_time: Optional[float] = None
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -129,13 +147,14 @@ def _process_outputs(
         masks=masks,
         request_info=request_info,
         dataset_index=dataset_index,
+        start_time=start_time,
     )
 
     return result
 
 
 def _process_outputs_with_tools(
-    outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None
+    outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None, start_time: Optional[float] = None
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format with tool information."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -164,16 +183,17 @@ def _process_outputs_with_tools(
         masks=masks,
         request_info=request_info,
         dataset_index=dataset_index,
+        start_time=start_time,
     )
 
     return result
 
 
-def _finalize_outputs(outputs, tracking, dataset_index, tools):
+def _finalize_outputs(outputs, tracking, dataset_index, tools, start_time=None):
     """Prepare final outputs based on whether tools were used."""
     if not tools:
         outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
-        return _process_outputs(outputs, dataset_index=dataset_index)
+        return _process_outputs(outputs, dataset_index=dataset_index, start_time=start_time)
 
     # Tool mode: add metadata and merge completions
     for req_id in tracking["masks"]:
@@ -200,7 +220,7 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools):
         merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1]))
     )
 
-    return _process_outputs_with_tools(final_outputs, dataset_index=dataset_index)
+    return _process_outputs_with_tools(final_outputs, dataset_index=dataset_index, start_time=start_time)
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -313,6 +333,7 @@ class LLMRayActor:
         actor_manager=None,
         **kwargs,
     ):
+        self.logger = logger_utils.setup_logger(__name__)
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
 
@@ -338,14 +359,13 @@ class LLMRayActor:
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
-            print(f"creating LLM with bundle_indices={bundle_indices}")
+            self.logger.info(f"creating LLM with bundle_indices={bundle_indices}")
 
         self.llm_engine = vllm.LLMEngine.from_engine_args(vllm.EngineArgs(*args, **kwargs))
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
-        self.logger = logging.getLogger(__name__)
         self.actor_manager = actor_manager
 
     def process_from_queue(self, timeout: float = 60.0):
@@ -359,7 +379,6 @@ class LLMRayActor:
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
             if ready_refs and ray.get(ready_refs[0]):
-                self.logger.info("[LLMRayActor] Actor manager signaled to stop. Exiting generation loop.")
                 return 0
 
             try:
@@ -383,6 +402,7 @@ class LLMRayActor:
         """Unified processing for both tool and non-tool generation."""
         prompts = request.prompts
         sampling_params = request.generation_config
+        start_time = request.start_time
 
         self.logger.info(f"[LLMRayActor] Processing request with {len(prompts)} prompts, tools={bool(self.tools)}")
 
@@ -413,9 +433,6 @@ class LLMRayActor:
             # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
             if self.llm_engine.has_unfinished_requests():
                 step_outputs = list(self.llm_engine.step())
-                if iteration % 100 == 1 and step_outputs:
-                    self.logger.info(f"[LLMRayActor] Got {len(step_outputs)} outputs from engine.step()")
-
                 for output in step_outputs:
                     if output.finished:
                         result = _handle_output(
@@ -423,7 +440,6 @@ class LLMRayActor:
                         )
                         if result is not None:
                             outputs.append(result)
-                            self.logger.info(f"[LLMRayActor] Added output {output.request_id} to results")
 
             # Check termination condition (matching ToolUseLLM exactly)
             pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
@@ -431,7 +447,7 @@ class LLMRayActor:
                 self.logger.info(f"[LLMRayActor] Terminating after {iteration} iterations with {len(outputs)} outputs")
                 break
 
-        result = _finalize_outputs(outputs, tracking, request.dataset_index, self.tools)
+        result = _finalize_outputs(outputs, tracking, request.dataset_index, self.tools, start_time)
         return result
 
     def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step):
@@ -564,7 +580,9 @@ def get_cuda_arch_list() -> str:
     # Remove duplicates and sort
     cuda_capabilities = sorted(set(cuda_capabilities))
     cuda_arch_list = ";".join(cuda_capabilities)
-    print(f"Detected CUDA compute capabilities: {cuda_capabilities}, setting TORCH_CUDA_ARCH_LIST={cuda_arch_list}")
+    logger.info(
+        f"Detected CUDA compute capabilities: {cuda_capabilities}, setting TORCH_CUDA_ARCH_LIST={cuda_arch_list}"
+    )
     return cuda_arch_list
 
 
@@ -611,7 +629,7 @@ def create_vllm_engines(
         # 2 instances on the same GPUs.
         num_gpus = 0.5
 
-    print(f"num_gpus: {num_gpus}")
+    logger.info(f"num_gpus: {num_gpus}")
 
     if not use_hybrid_engine:
         # Create a big placement group to ensure that all engines are packed
@@ -619,15 +637,17 @@ def create_vllm_engines(
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
+    # ensure we use bundles on the same node where possible if tp>1.
+    bundle_indices_list = get_bundle_indices_list(pg)
+
     for i in range(num_engines):
         bundle_indices = None
-        if tensor_parallel_size > 1:
-            bundle_indices = list(range(i * tensor_parallel_size, (i + 1) * tensor_parallel_size))
+        bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
 
         scheduling_strategy = PlacementGroupSchedulingStrategy(
             placement_group=pg,
             placement_group_capture_child_tasks=True,
-            placement_group_bundle_index=i * tensor_parallel_size,
+            placement_group_bundle_index=bundle_indices[0],
         )
 
         vllm_engines.append(
@@ -748,4 +768,4 @@ if __name__ == "__main__":
     )
     ray.get(refs)
     output = ray.get(llm.generate.remote("San Franciso is a"))
-    print(f"output: {output}")
+    logger.info(f"output: {output}")

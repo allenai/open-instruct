@@ -53,7 +53,6 @@ except Exception:
 
 import gc
 import json
-import logging
 import math
 import random
 import shutil
@@ -124,6 +123,7 @@ from open_instruct.utils import (
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
+    setup_logger,
     upload_metadata_to_hf,
 )
 from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
@@ -565,9 +565,7 @@ class ShufflingIterator:
 
 class RayProcess:
     def __init__(self, world_size, rank, local_rank, master_addr, master_port):
-        logging.basicConfig(
-            format="%(asctime)s %(levelname)-8s %(message)s", level=logging.INFO, datefmt="%Y-%m-%d %H:%M:%S"
-        )
+        setup_logger()
         self.world_size = world_size
         self.rank = rank
         self.local_rank = local_rank
