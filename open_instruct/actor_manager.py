@@ -15,7 +15,6 @@
 """ActorManager for controlling evaluation and weight updates across all LLMRayActors."""
 
 import collections
-import os
 import socket
 import threading
 import time
@@ -30,13 +29,22 @@ from fastapi.staticfiles import StaticFiles
 from open_instruct import logger_utils
 
 
+def find_free_port():
+    """Find and return a free port number."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+    return port
+
+
 class ActorManager:
     """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
 
     def __init__(self, queues: dict, args, enable_dashboard: bool = True):
         self._should_stop = False
         self._last_updated = datetime.now()
-        self._dashboard_port = int(os.environ.get("DASHBOARD_PORT", 8080))
+        self._dashboard_port = None
         self._queues = queues or {}
         self._queue_sizes = {}
         self._queue_info = {}
@@ -72,6 +80,7 @@ class ActorManager:
 
     def _start_dashboard(self):
         """Start the FastAPI dashboard server in a background thread."""
+        self._dashboard_port = find_free_port()
         app = FastAPI(title="ActorManager Dashboard")
 
         static_dir = Path(__file__).parent / "static"
@@ -108,7 +117,7 @@ class ActorManager:
         self._server_thread = threading.Thread(target=run_server, daemon=True)
         self._server_thread.start()
 
-        hostname = socket.gethostname()
+        hostname = socket.getfqdn()
 
         logger = logger_utils.setup_logger(__name__)
         logger.info(f"Dashboard server started at http://{hostname}:{self._dashboard_port}")
@@ -214,3 +223,7 @@ class ActorManager:
             "training_step_count": len(self._training_step_history),
             "batch_generation_count": len(self._generation_batch_history),
         }
+
+    def get_dashboard_port(self):
+        """Get the port number where the dashboard is running."""
+        return self._dashboard_port
