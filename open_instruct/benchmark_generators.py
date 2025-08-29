@@ -28,6 +28,7 @@ import vllm
 from ray.util import queue as ray_queue
 
 from open_instruct import dataset_transformation, grpo_fast, logger_utils, model_utils, utils, vllm_utils3
+from open_instruct.actor_manager import ActorManager
 from open_instruct.queue_types import PromptRequest
 
 # For FLOPS, we assume bf16 and ignore sparsity.
@@ -396,7 +397,11 @@ def setup_vllm_engines(
     param_prompt_Q = ray_queue.Queue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
 
-    actor_manager = vllm_utils3.ActorManager.remote()
+    queues_to_monitor = {
+        "Param Prompt Queue": param_prompt_Q,
+        "Inference Results Queue": inference_results_Q,
+    }
+    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
 
     vllm_engines = vllm_utils3.create_vllm_engines(
         num_engines=args.vllm_num_engines,
