@@ -141,29 +141,6 @@ api = HfApi()
 INVALID_LOGPROB = 1.0
 
 
-def _attach_future_exception_logger(future: futures.Future, thread_name: str) -> None:
-    """Attach a callback that logs full traceback if the future ends with an exception.
-
-    This ensures background thread failures are visible immediately in logs.
-    """
-
-    def _log_if_failed(f: futures.Future) -> None:
-        try:
-            exc = f.exception()
-        except Exception:
-            logger.exception(f"[{thread_name}] Failed to retrieve thread exception")
-            return
-        if exc is not None:
-            logger.error(
-                f"[{thread_name}] Unhandled exception in thread", exc_info=(type(exc), exc, exc.__traceback__)
-            )
-
-    try:
-        future.add_done_callback(_log_if_failed)
-    except Exception:
-        logger.exception(f"[{thread_name}] Failed to attach exception logger callback")
-
-
 class ShutdownSentinel:
     """Sentinel value to signal thread shutdown via queue."""
 
@@ -2078,7 +2055,7 @@ def prepare_prompts(
 
 
 def load_data_from_packing_thread(
-    packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event, packing_future: futures.Future
+    packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event, health_check_fn: Callable[[], None]
 ):
     """Get the packed sequences with advantages from the packing thread."""
     with Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
@@ -2090,10 +2067,8 @@ def load_data_from_packing_thread(
                 packed_data = packed_sequences_Q.get(timeout=30.0)
                 break
             except Empty:
-                if packing_future.done():
-                    logger.warning("[Main Thread] Packing thread died unexpectedly.")
-                    packing_future.result()
-                    return None, {}, num_total_tokens
+                # check that everything is still alive
+                health_check_fn()
                 logger.warning("[Main Thread] Timeout waiting for packed sequences. Retrying...")
         data_thread_metrics = packed_data["metrics"]
         B = packed_data["B"]
@@ -2563,7 +2538,6 @@ def run_training(
         weight_sync_metrics_Q,
         resume_training_step,
     )
-    _attach_future_exception_logger(weight_sync_thread_future, "Weight Sync Thread")
 
     """Run the main training loop with worker threads."""
     ray_get_with_progress(
@@ -2583,13 +2557,14 @@ def run_training(
         generation_configs["train"],
         resume_training_step,
     )
-    _attach_future_exception_logger(packing_future, "Data Preparation Thread")
 
     logger.info("======== ✅ generation thread starts =========")
     generation_future = executor.submit(
         generate_thread, args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q
     )
-    _attach_future_exception_logger(generation_future, "Generate Thread")
+
+    # setup health check function to check that everything is still alive
+    health_check_fn = lambda: [f.result() for f in [packing_future, generation_future, weight_sync_thread_future] if f.done()]
 
     # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps):
@@ -2628,7 +2603,7 @@ def run_training(
             )
 
         # Check if any of the threads have raised an exception.
-        [f.result() for f in [packing_future, generation_future, weight_sync_thread_future] if f.done()]
+        health_check_fn()
 
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
         weight_sync_trigger_event.set()
@@ -2661,7 +2636,7 @@ def run_training(
 
         # The generate_thread is now handling vLLM processing asynchronously
         collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
-            packed_sequences_Q, num_total_tokens, stop_event, packing_future
+            packed_sequences_Q, num_total_tokens, stop_event, health_check_fn
         )
         if collated_data is None:
             continue
