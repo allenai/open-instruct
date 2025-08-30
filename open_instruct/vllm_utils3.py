@@ -474,7 +474,8 @@ class LLMRayActor:
                 else:
                     self.results_queue.put(individual_result, timeout=10)
             except queue.Full:
-                self.logger.warning("Results queue is full, discarding result.")
+                queue_desc = "eval" if combined_is_eval else "train"
+                self.logger.warning(f"{queue_desc} queue is full, discarding result.")
 
         return num_prompts  # Return number of individual results processed
 
