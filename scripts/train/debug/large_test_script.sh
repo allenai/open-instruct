@@ -8,9 +8,8 @@ uv run python mason.py \
         --cluster ai2/jupiter-cirrascale-2 \
         --image "$BEAKER_IMAGE" \
 	--pure_docker_mode \
-        --workspace ai2/tulu-thinker \
-        --priority high \
-        --preemptible \
+        --workspace ai2/open-instruct-dev \
+        --priority urgent \
         --num_nodes 2 \
         --description "rlvr ace fn and og ocr stdio from base with perf penalty" \
         --max_retries 0 \

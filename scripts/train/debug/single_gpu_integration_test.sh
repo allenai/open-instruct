@@ -12,7 +12,7 @@ uv run python mason.py \
        --cluster ai2/saturn-cirrascale \
        --image "$BEAKER_IMAGE" \
        --pure_docker_mode \
-       --workspace ai2/tulu-thinker \
+       --workspace ai2/open-instruct-dev \
        --priority high \
        --preemptible \
        --num_nodes 1 \
