@@ -343,6 +343,8 @@ class Args:
     """whether to enable prefix caching"""
     vllm_top_p: float = 1.0
     """vLLM top p for nucleus sampling"""
+    inference_batch_size: Optional[int] = None
+    """Number of inference requests to batch together for vLLM processing"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     gather_whole_model: bool = True
@@ -444,6 +446,8 @@ class Args:
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
+        if self.inference_batch_size is None:
+            self.inference_batch_size = self.num_unique_prompts_rollout // self.vllm_num_engines
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
@@ -1368,10 +1372,14 @@ def accumulate_inference_batches(
     all_queries = []
     all_ground_truths = []
     all_datasets = []
+    # Calculate expected number of individual results
+    # With batching, we expect num_unique_prompts_rollout individual results total
+    expected_results = args.num_unique_prompts_rollout
+
     for i in tqdm(
-        range(args.vllm_num_engines),
-        total=args.vllm_num_engines,
-        desc=f"Accumulating results from {args.vllm_num_engines} engines",
+        range(expected_results),
+        total=expected_results,
+        desc=f"Accumulating {expected_results} individual results",
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     ):
@@ -1379,37 +1387,24 @@ def accumulate_inference_batches(
 
         if isinstance(result, ShutdownSentinel):
             return result, None
-        dataset_indices = result.dataset_index
 
-        if dataset_indices is None:
-            raise RuntimeError(f"Dataset indices is None for result {i}")
+        dataset_index = result.dataset_index
 
-        # When generation_config.n > 1, vLLM generates multiple responses per prompt
-        # but dataset_indices only contains the unique indices (not replicated)
-        # So we expect: len(responses) == len(dataset_indices) * generation_config.n
-        expected_responses = len(dataset_indices) * generation_config.n
-        assert len(result.responses) == expected_responses, (
-            f"Mismatch: number of responses ({len(result.responses)}) "
-            f"doesn't match expected ({expected_responses}) for result {i}"
-            f". {generation_config.n=}"
-            f", {len(dataset_indices)=}"
+        if dataset_index is None:
+            raise RuntimeError(f"Dataset index is None for result {i}")
+
+        # Each result now represents a single prompt with generation_config.n responses
+        assert len(result.responses) == generation_config.n, (
+            f"Result {i} has {len(result.responses)} responses, expected {generation_config.n}"
         )
 
-        # Get corresponding queries, ground_truths, datasets for each individual prompt
-        batch_queries = []
-        batch_ground_truths = []
-        batch_datasets = []
-
-        for dataset_idx in dataset_indices:
-            query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
-            batch_queries.append(query)
-            batch_ground_truths.append(ground_truth)
-            batch_datasets.append(dataset)
+        # Get corresponding query, ground_truth, dataset for this prompt
+        query, ground_truth, dataset = pending_queries_map.pop(dataset_index)
 
         results.append(result)
-        all_queries.extend(batch_queries)
-        all_ground_truths.extend(batch_ground_truths)
-        all_datasets.extend(batch_datasets)
+        all_queries.append(query)
+        all_ground_truths.append(ground_truth)
+        all_datasets.append(dataset)
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1983,6 +1978,7 @@ def create_model_and_optimizer(
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
+        inference_batch_size=args.inference_batch_size,
     )
 
     resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
@@ -2037,28 +2033,14 @@ def split_and_insert_batch(
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    for batch_idx in range(vllm_num_engines):
-        start_idx = batch_idx * args.inference_batch_size
-        end_idx = min(start_idx + args.inference_batch_size, len(batch.queries))
-
-        # Stop if we've distributed all queries
-        if start_idx >= len(batch.queries):
-            break
-
-        sub_batch = batch[start_idx:end_idx]
-
-        # Store prompts in the map using thread-safe insert_many
-        pending_queries_map.insert_many(
-            sub_batch.indices, sub_batch.queries, sub_batch.ground_truths, sub_batch.datasets
-        )
-
-        # Use PromptRequest for Ray queue with batch-specific dataset_index list
+    pending_queries_map.insert_many(batch.indices, batch.queries, batch.ground_truths, batch.datasets)
+    for i, prompt in enumerate(batch.queries):
         param_prompt_Q.put(
             PromptRequest(
-                prompts=sub_batch.queries,
+                prompt=prompt,
                 generation_config=generation_config,
                 training_step=training_step,
-                dataset_index=sub_batch.indices,
+                dataset_index=batch.indices[i] if batch.indices else None,
                 is_eval=is_eval,
             )
         )
@@ -2778,10 +2760,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     ray.init(dashboard_host="0.0.0.0")
 
     # Create Ray queues.
-    queue_size = (args.async_steps + 1) * args.vllm_num_engines
+    # Since we now send/receive individual prompts, queue size should accommodate
+    # all prompts from async_steps + 1 training steps
+    queue_size = (args.async_steps + 1) * args.num_unique_prompts_rollout
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
-    evaluation_inference_results_Q = ray_queue.Queue(maxsize=args.vllm_num_engines)
+    # Evaluation queue should handle all eval samples with 2x buffer for smooth processing
+    evaluation_inference_results_Q = ray_queue.Queue(maxsize=num_eval_samples * 2)
 
     policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
         create_model_and_optimizer(
