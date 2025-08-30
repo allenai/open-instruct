@@ -410,8 +410,8 @@ class LLMRayActor:
 
         self.logger.info(f"[LLMRayActor] Collected {len(individual_requests)} individual prompts for batch processing")
 
-        # Combine individual requests into a single batch request
-        # Each individual request has prompts=[single_prompt]
+        # Combine individual requests into a single batch
+        # Each individual request has prompt=single_prompt
         combined_prompts = []
         combined_indices = []
         combined_training_step = individual_requests[0].training_step
@@ -420,21 +420,22 @@ class LLMRayActor:
         combined_start_time = individual_requests[0].start_time
 
         for req in individual_requests:
-            combined_prompts.extend(req.prompts)  # Each req.prompts contains one prompt
-            if req.dataset_index:
-                combined_indices.extend(req.dataset_index)
+            combined_prompts.append(req.prompt)  # Each req.prompt is a single prompt
+            if req.dataset_index is not None:
+                combined_indices.append(req.dataset_index)
 
-        # Create a combined batch request
-        from open_instruct.queue_types import PromptRequest
+        # Create a BatchRequest with multiple prompts for processing
+        # Note: _process_request expects prompts (plural) so we create a synthetic batch
+        class BatchRequest:
+            def __init__(self):
+                self.prompts = combined_prompts
+                self.generation_config = combined_generation_config
+                self.training_step = combined_training_step
+                self.dataset_index = combined_indices if combined_indices else None
+                self.is_eval = combined_is_eval
+                self.start_time = combined_start_time
 
-        batch_request = PromptRequest(
-            prompts=combined_prompts,
-            generation_config=combined_generation_config,
-            training_step=combined_training_step,
-            dataset_index=combined_indices if combined_indices else None,
-            is_eval=combined_is_eval,
-            start_time=combined_start_time,
-        )
+        batch_request = BatchRequest()
 
         # Process the batch request using existing logic
         result = self._process_request(batch_request)

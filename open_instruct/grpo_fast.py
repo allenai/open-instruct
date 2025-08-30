@@ -2010,10 +2010,10 @@ def split_and_insert_batch(
     for i, prompt in enumerate(batch.queries):
         param_prompt_Q.put(
             PromptRequest(
-                prompts=[prompt],
+                prompt=prompt,
                 generation_config=generation_config,
                 training_step=training_step,
-                dataset_index=[batch.indices[i]] if batch.indices else None,
+                dataset_index=batch.indices[i] if batch.indices else None,
                 is_eval=is_eval,
             )
         )

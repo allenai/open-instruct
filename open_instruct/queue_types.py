@@ -22,7 +22,7 @@ class GenerationResult:
     finish_reasons: List[str]
     masks: List[List[int]]
     request_info: RequestInfo
-    dataset_index: Optional[List[int]] = None
+    dataset_index: Optional[int] = None
     training_step: Optional[int] = None
     start_time: Optional[float] = None
 
@@ -36,9 +36,9 @@ class PromptRequest:
     `_QueueActor`.
     """
 
-    prompts: List[List[int]]
+    prompt: List[int]
     generation_config: Any
     training_step: Optional[int] = None
-    dataset_index: Optional[List[int]] = None
+    dataset_index: Optional[int] = None
     is_eval: bool = False
     start_time: Optional[float] = None
