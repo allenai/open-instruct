@@ -3,15 +3,6 @@ from typing import Any, List, Optional
 
 
 @dataclass
-class TokenStatistics:
-    """Container for token statistics from inference."""
-
-    num_prompt_tokens: int
-    num_response_tokens: int
-    generation_time: float
-
-
-@dataclass
 class RequestInfo:
     """Container for tool usage information used in queue payloads."""
 
@@ -33,7 +24,6 @@ class GenerationResult:
     request_info: RequestInfo
     dataset_index: Optional[List[int]] = None
     training_step: Optional[int] = None
-    token_statistics: Optional[TokenStatistics] = None
     start_time: Optional[float] = None
 
 
