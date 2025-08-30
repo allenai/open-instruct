@@ -18,7 +18,6 @@
 import copy
 import os
 import queue
-import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -228,7 +227,7 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=
         output.outputs[0] = tool_output
 
     return _process_outputs_with_tools(
-        final_outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
+        outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
     )
 
 
