@@ -340,6 +340,8 @@ class Args:
     """whether to enable prefix caching"""
     vllm_top_p: float = 1.0
     """vLLM top p for nucleus sampling"""
+    inference_batch_size: Optional[int] = None
+    """Number of inference requests to batch together for vLLM processing"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     gather_whole_model: bool = True
@@ -437,6 +439,8 @@ class Args:
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
+        if self.inference_batch_size is None:
+            self.inference_batch_size = self.num_unique_prompts_rollout // self.vllm_num_engines
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
@@ -1950,6 +1954,7 @@ def create_model_and_optimizer(
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
+        inference_batch_size=args.inference_batch_size,
     )
 
     resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
@@ -1998,32 +2003,17 @@ def split_and_insert_batch(
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    import math
+    # Store prompts in the map using thread-safe insert_many
+    pending_queries_map.insert_many(batch.indices, batch.queries, batch.ground_truths, batch.datasets)
 
-    inference_batch_size = max(1, math.ceil(len(batch.queries) / vllm_num_engines))
-
-    for batch_idx in range(vllm_num_engines):
-        start_idx = batch_idx * inference_batch_size
-        end_idx = min(start_idx + inference_batch_size, len(batch.queries))
-
-        # Stop if we've distributed all queries
-        if start_idx >= len(batch.queries):
-            break
-
-        sub_batch = batch[start_idx:end_idx]
-
-        # Store prompts in the map using thread-safe insert_many
-        pending_queries_map.insert_many(
-            sub_batch.indices, sub_batch.queries, sub_batch.ground_truths, sub_batch.datasets
-        )
-
-        # Use PromptRequest for Ray queue with batch-specific dataset_index list
+    # Send individual prompts to the queue for batching in LLMRayActor
+    for i, prompt in enumerate(batch.queries):
         param_prompt_Q.put(
             PromptRequest(
-                prompts=sub_batch.queries,
+                prompts=[prompt],
                 generation_config=generation_config,
                 training_step=training_step,
-                dataset_index=sub_batch.indices,
+                dataset_index=[batch.indices[i]] if batch.indices else None,
                 is_eval=is_eval,
             )
         )

@@ -331,11 +331,13 @@ class LLMRayActor:
         results_queue=None,
         eval_results_queue=None,
         actor_manager=None,
+        inference_batch_size: Optional[int] = None,
         **kwargs,
     ):
         self.logger = logger_utils.setup_logger(__name__)
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
+        self.inference_batch_size = inference_batch_size
 
         if self.tools:
             self.executor = ThreadPoolExecutor(max_workers=20)
@@ -372,31 +374,81 @@ class LLMRayActor:
         """Run generation loop using LLMEngine directly, with optional tool support.
 
         Returns:
-            int: Number of requests processed (0 or 1)
+            int: Number of requests processed
         """
-        while True:
-            # Non-blocking check for should_stop using ray.wait
+        # Check for should_stop signal
+        should_stop_ref = self.actor_manager.should_stop.remote()
+        ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
+        if ready_refs and ray.get(ready_refs[0]):
+            return 0
+
+        # Collect individual prompts until we have a batch
+        individual_requests = []
+
+        # Try to collect up to inference_batch_size requests
+        while len(individual_requests) < (self.inference_batch_size or 1):
+            # Check for should_stop between collecting requests
             should_stop_ref = self.actor_manager.should_stop.remote()
-            ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
+            ready_refs, _ = ray.wait([should_stop_ref], timeout=0.01)
             if ready_refs and ray.get(ready_refs[0]):
-                return 0
+                break
 
             try:
-                request = self.prompt_queue.get(timeout=timeout)
+                # Use a shorter timeout for subsequent requests to avoid long waits
+                current_timeout = timeout if len(individual_requests) == 0 else 1.0
+                request = self.prompt_queue.get(timeout=current_timeout)
+                individual_requests.append(request)
             except queue.Empty:
+                # If we have some requests, process them
+                if individual_requests:
+                    break
+                # If no requests at all, return
                 return 0
 
-            result = self._process_request(request)
+        if not individual_requests:
+            return 0
 
-            try:
-                if request.is_eval:
-                    self.eval_results_queue.put(result, timeout=10)
-                else:
-                    self.results_queue.put(result, timeout=10)
-                return 1  # Successfully processed one request
-            except queue.Full:
-                self.logger.warning("Results queue is full, discarding result.")
-                return 0
+        self.logger.info(f"[LLMRayActor] Collected {len(individual_requests)} individual prompts for batch processing")
+
+        # Combine individual requests into a single batch request
+        # Each individual request has prompts=[single_prompt]
+        combined_prompts = []
+        combined_indices = []
+        combined_training_step = individual_requests[0].training_step
+        combined_is_eval = individual_requests[0].is_eval
+        combined_generation_config = individual_requests[0].generation_config
+        combined_start_time = individual_requests[0].start_time
+
+        for req in individual_requests:
+            combined_prompts.extend(req.prompts)  # Each req.prompts contains one prompt
+            if req.dataset_index:
+                combined_indices.extend(req.dataset_index)
+
+        # Create a combined batch request
+        from open_instruct.queue_types import PromptRequest
+
+        batch_request = PromptRequest(
+            prompts=combined_prompts,
+            generation_config=combined_generation_config,
+            training_step=combined_training_step,
+            dataset_index=combined_indices if combined_indices else None,
+            is_eval=combined_is_eval,
+            start_time=combined_start_time,
+        )
+
+        # Process the batch request using existing logic
+        result = self._process_request(batch_request)
+
+        # Put result back to queue
+        try:
+            if batch_request.is_eval:
+                self.eval_results_queue.put(result, timeout=10)
+            else:
+                self.results_queue.put(result, timeout=10)
+            return 1  # Return 1 as we processed one batch
+        except queue.Full:
+            self.logger.warning("Results queue is full, discarding result.")
+            return 0
 
     def _process_request(self, request):
         """Unified processing for both tool and non-tool generation."""
@@ -606,6 +658,7 @@ def create_vllm_engines(
     results_queue=None,
     eval_results_queue=None,
     actor_manager=None,
+    inference_batch_size: Optional[int] = None,
 ) -> list[LLMRayActor]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
@@ -686,6 +739,7 @@ def create_vllm_engines(
                 actor_manager=actor_manager,
                 tools=tools,
                 max_tool_calls=max_tool_calls_dict,
+                inference_batch_size=inference_batch_size,
             )
         )
 
