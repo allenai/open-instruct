@@ -349,6 +349,8 @@ class Args:
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
     enable_queue_dashboard: bool = True
     """whether to enable the ActorManager queue monitoring dashboard"""
+    queue_dashboard_port: Optional[int] = None
+    """optional port for the dashboard server (if None, finds a free port automatically)"""
 
     # Experiment tracking
     verbose: bool = False

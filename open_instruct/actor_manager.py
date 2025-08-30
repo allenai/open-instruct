@@ -80,7 +80,10 @@ class ActorManager:
 
     def _start_dashboard(self):
         """Start the FastAPI dashboard server in a background thread."""
-        self._dashboard_port = find_free_port()
+        if self._args.queue_dashboard_port is None:
+            self._dashboard_port = find_free_port()
+        else:
+            self._dashboard_port = self._args.queue_dashboard_port
         app = FastAPI(title="ActorManager Dashboard")
 
         static_dir = Path(__file__).parent / "static"
