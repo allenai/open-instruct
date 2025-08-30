@@ -1959,9 +1959,7 @@ def create_model_and_optimizer(
         "Param Prompt Queue": param_prompt_Q,
         "Evaluation Queue": evaluation_inference_results_Q,
     }
-    actor_manager = ray.remote(ActorManager).remote(
-        queues_to_monitor, args
-    )
+    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
 
     # Create vLLM engines with queues
     vllm_engines = vllm_utils3.create_vllm_engines(
