@@ -394,6 +394,8 @@ class Args:
     """the docker image for evaluation for oe-eval"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
+    oe_eval_log_to_wandb: bool = False
+    """Whether to log oe-eval results to wandb as run.summary"""
 
     # Evaluation behavior
     eval_on_step_0: bool = False
@@ -1207,6 +1209,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 args.gs_bucket_path,
                 args.eval_priority,
                 args.oe_eval_beaker_image,
+                args.oe_eval_log_to_wandb,
             )
 
 
