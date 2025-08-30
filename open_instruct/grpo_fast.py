@@ -1364,10 +1364,14 @@ def accumulate_inference_batches(
     all_queries = []
     all_ground_truths = []
     all_datasets = []
+    # Calculate expected number of individual results
+    # With batching, we expect num_unique_prompts_rollout individual results total
+    expected_results = args.num_unique_prompts_rollout
+
     for i in tqdm(
-        range(args.vllm_num_engines),
-        total=args.vllm_num_engines,
-        desc=f"Accumulating results from {args.vllm_num_engines} engines",
+        range(expected_results),
+        total=expected_results,
+        desc=f"Accumulating {expected_results} individual results",
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     ):
@@ -1375,37 +1379,24 @@ def accumulate_inference_batches(
 
         if isinstance(result, ShutdownSentinel):
             return result, None
-        dataset_indices = result.dataset_index
 
-        if dataset_indices is None:
-            raise RuntimeError(f"Dataset indices is None for result {i}")
+        dataset_index = result.dataset_index
 
-        # When generation_config.n > 1, vLLM generates multiple responses per prompt
-        # but dataset_indices only contains the unique indices (not replicated)
-        # So we expect: len(responses) == len(dataset_indices) * generation_config.n
-        expected_responses = len(dataset_indices) * generation_config.n
-        assert len(result.responses) == expected_responses, (
-            f"Mismatch: number of responses ({len(result.responses)}) "
-            f"doesn't match expected ({expected_responses}) for result {i}"
-            f". {generation_config.n=}"
-            f", {len(dataset_indices)=}"
+        if dataset_index is None:
+            raise RuntimeError(f"Dataset index is None for result {i}")
+
+        # Each result now represents a single prompt with generation_config.n responses
+        assert len(result.responses) == generation_config.n, (
+            f"Result {i} has {len(result.responses)} responses, expected {generation_config.n}"
         )
 
-        # Get corresponding queries, ground_truths, datasets for each individual prompt
-        batch_queries = []
-        batch_ground_truths = []
-        batch_datasets = []
-
-        for dataset_idx in dataset_indices:
-            query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
-            batch_queries.append(query)
-            batch_ground_truths.append(ground_truth)
-            batch_datasets.append(dataset)
+        # Get corresponding query, ground_truth, dataset for this prompt
+        query, ground_truth, dataset = pending_queries_map.pop(dataset_index)
 
         results.append(result)
-        all_queries.extend(batch_queries)
-        all_ground_truths.extend(batch_ground_truths)
-        all_datasets.extend(batch_datasets)
+        all_queries.append(query)
+        all_ground_truths.append(ground_truth)
+        all_datasets.append(dataset)
 
     # Combine all results into a single GenerationResult
     combined_responses = []

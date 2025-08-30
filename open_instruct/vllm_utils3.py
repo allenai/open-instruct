@@ -438,18 +438,45 @@ class LLMRayActor:
         batch_request = BatchRequest()
 
         # Process the batch request using existing logic
-        result = self._process_request(batch_request)
+        batch_result = self._process_request(batch_request)
 
-        # Put result back to queue
-        try:
-            if batch_request.is_eval:
-                self.eval_results_queue.put(result, timeout=10)
-            else:
-                self.results_queue.put(result, timeout=10)
-            return 1  # Return 1 as we processed one batch
-        except queue.Full:
-            self.logger.warning("Results queue is full, discarding result.")
-            return 0
+        # Split the batched result into individual results
+        # Each prompt gets generation_config.n responses
+        n = combined_generation_config.n
+        num_prompts = len(combined_prompts)
+
+        for i in range(num_prompts):
+            # Extract responses for this prompt
+            start_idx = i * n
+            end_idx = (i + 1) * n
+
+            individual_result = GenerationResult(
+                responses=batch_result.responses[start_idx:end_idx],
+                finish_reasons=batch_result.finish_reasons[start_idx:end_idx],
+                masks=batch_result.masks[start_idx:end_idx],
+                request_info=RequestInfo(
+                    num_calls=batch_result.request_info.num_calls[start_idx:end_idx],
+                    timeouts=batch_result.request_info.timeouts[start_idx:end_idx],
+                    tool_errors=batch_result.request_info.tool_errors[start_idx:end_idx],
+                    tool_outputs=batch_result.request_info.tool_outputs[start_idx:end_idx],
+                    tool_runtimes=batch_result.request_info.tool_runtimes[start_idx:end_idx],
+                    tool_calleds=batch_result.request_info.tool_calleds[start_idx:end_idx],
+                ),
+                dataset_index=combined_indices[i] if combined_indices else None,
+                training_step=combined_training_step,
+                start_time=combined_start_time,
+            )
+
+            # Put individual result back to queue
+            try:
+                if combined_is_eval:
+                    self.eval_results_queue.put(individual_result, timeout=10)
+                else:
+                    self.results_queue.put(individual_result, timeout=10)
+            except queue.Full:
+                self.logger.warning("Results queue is full, discarding result.")
+
+        return num_prompts  # Return number of individual results processed
 
     def _process_request(self, request):
         """Unified processing for both tool and non-tool generation."""
