@@ -128,7 +128,7 @@ from open_instruct.utils import (
     sync_gs_bucket,
 )
 from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
-from open_instruct.search_utils.mcp_tools import MCP_TOOL_REGISTRY
+from open_instruct.search_utils.mcp_tools import MCP_TOOL_REGISTRY, MCPTool
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -1732,7 +1732,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 base_url=args.search_api_endpoint,
             )
             # mcp tools can have multiple end strings.
-            for end_str in tool.end_strings:
+            for end_str in tool.stop_strings:
                 tool_objects[end_str] = tool
 
     vllm_engines = create_vllm_engines(
