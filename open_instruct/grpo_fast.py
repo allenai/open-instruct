@@ -83,6 +83,7 @@ from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokeni
 from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import logger_utils, vllm_utils3
+from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -108,7 +109,7 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo
+from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.rl_utils2 import Timer, pack_sequences
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -328,6 +329,8 @@ class Args:
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
     vllm_num_engines: int = 1
     """number of vLLM Engines, set to 0 to disable vLLM"""
+    inference_batch_size: Optional[int] = None
+    """inference batch size per vLLM engine. If None, calculated as ceil(num_unique_prompts_rollout / vllm_num_engines) * num_samples_per_prompt_rollout"""
     vllm_tensor_parallel_size: int = 1
     """tensor parallel size of vLLM Engine for multi-GPU inference"""
     vllm_enforce_eager: bool = False
@@ -344,6 +347,10 @@ class Args:
     """the deepspeed stage"""
     gather_whole_model: bool = True
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
+    enable_queue_dashboard: bool = True
+    """whether to enable the ActorManager queue monitoring dashboard"""
+    queue_dashboard_port: Optional[int] = None
+    """optional port for the dashboard server (if None, finds a free port automatically)"""
 
     # Experiment tracking
     verbose: bool = False
@@ -1337,6 +1344,7 @@ def accumulate_inference_batches(
     args: Args,
     training_step: int,
     generation_config,
+    actor_manager=None,
     timeout: Optional[float] = None,
 ) -> tuple[GenerationResult, Batch]:
     """Accumulate multiple inference results into a single training batch.
@@ -1414,6 +1422,9 @@ def accumulate_inference_batches(
     combined_tool_runtimes = []
     combined_tool_calleds = []
 
+    # Initialize accumulated token statistics
+    accumulated_stats = TokenStatistics(num_prompt_tokens=0, num_response_tokens=0, generation_time=0)
+
     for result in results:
         combined_responses.extend(result.responses)
         combined_finish_reasons.extend(result.finish_reasons)
@@ -1424,6 +1435,13 @@ def accumulate_inference_batches(
         combined_tool_outputs.extend(result.request_info.tool_outputs)
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
+
+        if result.token_statistics:
+            accumulated_stats.num_prompt_tokens += result.token_statistics.num_prompt_tokens
+            accumulated_stats.num_response_tokens += result.token_statistics.num_response_tokens
+            accumulated_stats.generation_time = max(
+                accumulated_stats.generation_time, result.token_statistics.generation_time
+            )
 
     # Create combined RequestInfo
     combined_request_info = RequestInfo(
@@ -1442,7 +1460,11 @@ def accumulate_inference_batches(
         masks=combined_masks,
         request_info=combined_request_info,
         dataset_index=None,  # Not meaningful for combined result
+        token_statistics=accumulated_stats,
     )
+
+    if actor_manager is not None:
+        ray.get(actor_manager.report_token_statistics.remote(accumulated_stats))
 
     # Note: We don't have dataset_indices here, but they're not needed for the returned batch
     batch = Batch(
@@ -1464,12 +1486,13 @@ def data_preparation_thread(
     num_training_steps: int,
     generation_config,
     resume_training_step: int,
+    actor_manager=None,
 ):
     for training_step in range(resume_training_step, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
             result, batch = accumulate_inference_batches(
-                inference_results_Q, pending_queries_map, args, training_step, generation_config
+                inference_results_Q, pending_queries_map, args, training_step, generation_config, actor_manager
             )
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
@@ -1806,6 +1829,11 @@ def setup_runtime_variables(args: Args) -> Args:
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
     args.tool_use = args.tools is not None and len(args.tools) > 0
+    if args.inference_batch_size is None:
+        args.inference_batch_size = (
+            max(1, math.ceil(args.num_unique_prompts_rollout / args.vllm_num_engines))
+            * args.num_samples_per_prompt_rollout
+        )
     return args
 
 
@@ -1928,7 +1956,12 @@ def create_model_and_optimizer(
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 
-    actor_manager = vllm_utils3.ActorManager.remote()
+    queues_to_monitor = {
+        "Inference Results Queue": inference_results_Q,
+        "Param Prompt Queue": param_prompt_Q,
+        "Evaluation Queue": evaluation_inference_results_Q,
+    }
+    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
 
     # Create vLLM engines with queues
     vllm_engines = vllm_utils3.create_vllm_engines(
@@ -1955,6 +1988,11 @@ def create_model_and_optimizer(
     resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     logger.info("======== ✅ all models and vLLM engines initialized =========")
+
+    # Get and set KV cache max concurrency from the first engine (all engines have the same config)
+    if vllm_engines:
+        kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
+        ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
 
     ray_get_with_progress(
         [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
@@ -1995,16 +2033,13 @@ def split_and_insert_batch(
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q,
     generation_config,
+    args: Args,
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    import math
-
-    inference_batch_size = max(1, math.ceil(len(batch.queries) / vllm_num_engines))
-
     for batch_idx in range(vllm_num_engines):
-        start_idx = batch_idx * inference_batch_size
-        end_idx = min(start_idx + inference_batch_size, len(batch.queries))
+        start_idx = batch_idx * args.inference_batch_size
+        end_idx = min(start_idx + args.inference_batch_size, len(batch.queries))
 
         # Stop if we've distributed all queries
         if start_idx >= len(batch.queries):
@@ -2044,7 +2079,13 @@ def prepare_prompts(
     batch = next_batch(dataset_indices, train_dataset)
 
     split_and_insert_batch(
-        batch, training_step, args.vllm_num_engines, pending_queries_map, param_prompt_Q, generation_configs["train"]
+        batch,
+        training_step,
+        args.vllm_num_engines,
+        pending_queries_map,
+        param_prompt_Q,
+        generation_configs["train"],
+        args,
     )
 
     return batch
@@ -2083,7 +2124,7 @@ def weight_sync_thread(
     stop_event: threading.Event,
     weight_sync_trigger_event: threading.Event,
     policy_group: ModelGroup,
-    actor_manager: vllm_utils3.ActorManager,
+    actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
     resume_training_step: int = 1,
 ):
@@ -2165,6 +2206,7 @@ def one_training_step(
     train_dataset,
     wandb_url,
     chat_template_name,
+    actor_manager=None,
     iter_dataloader=None,
 ):
     """Train the model for one step."""
@@ -2213,6 +2255,8 @@ def one_training_step(
         with Timer("[Main Thread] 🔃 Updating reference policy"):
             ray_get_with_progress(update_ref_policy_future, desc="Updating reference policy")
 
+    ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
+
     average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
     total_time = time.perf_counter() - start_time
     metrics = {
@@ -2252,6 +2296,7 @@ def maybe_evaluate(
     eval_pending_queries_map: PendingQueriesMap,
     eval_generation_config,
     generate_metrics_Q: Queue,
+    actor_manager=None,
 ):
     """Optionally evaluate the model."""
     try:
@@ -2266,6 +2311,7 @@ def maybe_evaluate(
             args,
             training_step,
             eval_generation_config,
+            actor_manager,
             timeout=timeout,
         )
 
@@ -2461,7 +2507,7 @@ def cleanup_training_resources(
     stop_event: threading.Event,
     executor: futures.ThreadPoolExecutor,
     queues: list[ray_queue.Queue],
-    actor_manager: vllm_utils3.ActorManager,
+    actor_manager: ActorManager,
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
     # Signal generate_thread to stop
@@ -2470,6 +2516,11 @@ def cleanup_training_resources(
     logger.info("Signaling all actors to stop...")
     ray.get(actor_manager.set_should_stop.remote(True))
     logger.info("✅ Signaled all actors to stop")
+
+    # Clean up ActorManager resources
+    logger.info("Cleaning up ActorManager resources...")
+    ray.get(actor_manager.cleanup.remote())
+    logger.info("✅ ActorManager resources cleaned up")
 
     logger.info("Pushing shutdown sentinel to queues...")
     # Push sentinel to the first queue (inference_results_Q)
@@ -2516,7 +2567,7 @@ def run_training(
     eval_pending_queries_map,
     generate_metrics_Q,
     weight_sync_metrics_Q,
-    actor_manager: vllm_utils3.ActorManager,
+    actor_manager: ActorManager,
     checkpoint_state=None,
 ):
     if resume_training_step > 1:
@@ -2552,6 +2603,7 @@ def run_training(
         args.num_training_steps,
         generation_configs["train"],
         resume_training_step,
+        actor_manager,
     )
 
     logger.info("======== ✅ generation thread starts =========")
@@ -2574,6 +2626,7 @@ def run_training(
             pending_queries_map,
             param_prompt_Q,
             generation_configs["train"],
+            args,
         )
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
         num_total_tokens = checkpoint_state["num_total_tokens"]
@@ -2628,6 +2681,7 @@ def run_training(
                 eval_pending_queries_map,
                 param_prompt_Q,
                 generation_configs["eval"],
+                args,
                 is_eval=True,
             )
 
@@ -2657,6 +2711,7 @@ def run_training(
             train_dataset,
             wandb_url,
             tc.chat_template_name,
+            actor_manager,
             iter_dataloader,
         )
 
@@ -2699,6 +2754,7 @@ def run_training(
             eval_pending_queries_map,
             generation_configs["eval"],
             generate_metrics_Q,
+            actor_manager,
         )
 
     if resume_training_step > args.num_training_steps:

@@ -39,9 +39,11 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+from vllm.v1 import kv_cache_interface
+from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
-from open_instruct.queue_types import GenerationResult, RequestInfo
+from open_instruct.queue_types import GenerationResult, RequestInfo, TokenStatistics
 from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
@@ -119,7 +121,10 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
 
 def _process_outputs(
-    outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None, start_time: Optional[float] = None
+    outputs: List[vllm.RequestOutput],
+    dataset_index: Optional[List[int]] = None,
+    token_statistics: Optional[TokenStatistics] = None,
+    start_time: Optional[float] = None,
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -148,6 +153,7 @@ def _process_outputs(
         masks=masks,
         request_info=request_info,
         dataset_index=dataset_index,
+        token_statistics=token_statistics,
         start_time=start_time,
     )
 
@@ -155,7 +161,10 @@ def _process_outputs(
 
 
 def _process_outputs_with_tools(
-    outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None, start_time: Optional[float] = None
+    outputs: List[vllm.RequestOutput],
+    dataset_index: Optional[List[int]] = None,
+    token_statistics: Optional[TokenStatistics] = None,
+    start_time: Optional[float] = None,
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format with tool information."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -184,17 +193,20 @@ def _process_outputs_with_tools(
         masks=masks,
         request_info=request_info,
         dataset_index=dataset_index,
+        token_statistics=token_statistics,
         start_time=start_time,
     )
 
     return result
 
 
-def _finalize_outputs(outputs, tracking, dataset_index, tools, start_time=None):
+def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=None, start_time=None):
     """Prepare final outputs based on whether tools were used."""
     if not tools:
         outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
-        return _process_outputs(outputs, dataset_index=dataset_index, start_time=start_time)
+        return _process_outputs(
+            outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
+        )
 
     # Tool mode: add metadata and merge completions
     for req_id in tracking["masks"]:
@@ -221,7 +233,9 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools, start_time=None):
         merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1]))
     )
 
-    return _process_outputs_with_tools(final_outputs, dataset_index=dataset_index, start_time=start_time)
+    return _process_outputs_with_tools(
+        final_outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
+    )
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -303,22 +317,6 @@ def init_process_group(
     return pg
 
 
-@ray.remote
-class ActorManager:
-    """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
-
-    def __init__(self):
-        self._should_stop = False
-
-    def set_should_stop(self, should_stop: bool):
-        """Set whether actors should stop processing."""
-        self._should_stop = should_stop
-
-    def should_stop(self) -> bool:
-        """Check if actors should stop processing."""
-        return self._should_stop
-
-
 class LLMRayActor:
     """Ray actor for LLM generation with optional tool support."""
 
@@ -337,6 +335,7 @@ class LLMRayActor:
         self.logger = logger_utils.setup_logger(__name__)
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
+        self.request_metadata = {}
 
         if self.tools:
             self.executor = ThreadPoolExecutor(max_workers=20)
@@ -465,7 +464,38 @@ class LLMRayActor:
                 self.logger.info(f"[LLMRayActor] Terminating after {iteration} iterations with {len(outputs)} outputs")
                 break
 
-        result = _finalize_outputs(outputs, tracking, request.dataset_index, self.tools, start_time)
+        end_time = time.time()
+        total_prompt_tokens = 0
+        total_generation_tokens = 0
+        earliest_start_time = float("inf")
+
+        for output in outputs:
+            request_id = output.request_id
+            if request_id in self.request_metadata:
+                metadata = self.request_metadata[request_id]
+                total_prompt_tokens += metadata["prompt_tokens"]
+                earliest_start_time = min(earliest_start_time, metadata["start_time"])
+
+                for completion in output.outputs:
+                    total_generation_tokens += len(completion.token_ids)
+
+        generation_time = end_time - earliest_start_time
+
+        for output in outputs:
+            self.request_metadata.pop(output.request_id, None)
+
+        result = _finalize_outputs(
+            outputs,
+            tracking,
+            request.dataset_index,
+            self.tools,
+            token_statistics=TokenStatistics(
+                num_prompt_tokens=total_prompt_tokens,
+                num_response_tokens=total_generation_tokens,
+                generation_time=generation_time,
+            ),
+            start_time=start_time,
+        )
         return result
 
     def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step):
@@ -475,11 +505,13 @@ class LLMRayActor:
                 # Create individual requests for each sample when using tools
                 for j in range(n_samples):
                     request_id = f"{training_step}_{i}-{j}"
+                    self.request_metadata[request_id] = {"start_time": time.time(), "prompt_tokens": len(prompt)}
                     tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=f"{training_step}_{i}")
                     self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
             else:
                 # Standard request format for non-tool mode
                 request_id = f"batch_{training_step}_{i}"
+                self.request_metadata[request_id] = {"start_time": time.time(), "prompt_tokens": len(prompt)}
                 tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=request_id)
                 self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
 
@@ -583,6 +615,37 @@ class LLMRayActor:
 
     def ready(self):
         return True
+
+    def get_kv_cache_info(self):
+        """Get KV cache max concurrency from the vLLM engine."""
+        kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
+        kv_cache_spec = kv_cache_specs[0]
+        grouped_layer_names = [list(kv_cache_spec.keys())]
+        page_size = kv_cache_utils.get_uniform_page_size(kv_cache_spec)
+
+        vllm_config = self.llm_engine.vllm_config
+        gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
+        total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
+        available_memory = int(gpu_memory_utilization * total_gpu_memory)
+
+        num_blocks = kv_cache_utils.get_num_blocks(vllm_config, len(kv_cache_spec), available_memory, page_size)
+
+        per_layer_size = page_size * num_blocks
+        kv_cache_tensors = [
+            kv_cache_interface.KVCacheTensor(size=per_layer_size, shared_by=[layer_name])
+            for layer_name in kv_cache_spec
+        ]
+
+        kv_cache_config = kv_cache_interface.KVCacheConfig(
+            num_blocks=num_blocks,
+            kv_cache_tensors=kv_cache_tensors,
+            kv_cache_groups=kv_cache_utils.create_kv_cache_group_specs(kv_cache_spec, grouped_layer_names),
+        )
+        max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(
+            self.llm_engine.vllm_config, kv_cache_config
+        )
+
+        return int(max_concurrency)
 
 
 def get_cuda_arch_list() -> str:
