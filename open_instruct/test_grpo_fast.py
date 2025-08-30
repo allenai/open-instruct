@@ -165,8 +165,13 @@ class TestGrpoFastBase(unittest.TestCase):
         mock_generation_config = MagicMock()
         mock_generation_config.n = 4
 
+        # Create mock args with inference_batch_size
+        mock_args = MagicMock()
+        # Calculate inference_batch_size based on number of queries and engines
+        mock_args.inference_batch_size = max(1, len(queries) // num_engines)
+
         grpo_fast.split_and_insert_batch(
-            batch, training_step, num_engines, pending_queries_map, param_prompt_Q, mock_generation_config
+            batch, training_step, num_engines, pending_queries_map, param_prompt_Q, mock_generation_config, mock_args
         )
 
         return param_prompt_Q, inference_results_Q, pending_queries_map
@@ -674,6 +679,10 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         mock_generation_config = MagicMock()
         mock_generation_config.n = 1
 
+        # Create mock args with inference_batch_size
+        mock_args = MagicMock()
+        mock_args.inference_batch_size = max(1, num_queries // num_engines)
+
         grpo_fast.split_and_insert_batch(
             batch,
             training_step=1,
@@ -681,6 +690,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
             pending_queries_map=pending_queries_map,
             param_prompt_Q=param_prompt_Q,
             generation_config=mock_generation_config,
+            args=mock_args,
         )
 
         # Should have 4 batches (one for each query)
@@ -719,6 +729,10 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         mock_generation_config = MagicMock()
         mock_generation_config.n = 1
 
+        # Create mock args with inference_batch_size
+        mock_args = MagicMock()
+        mock_args.inference_batch_size = max(1, num_queries // num_engines + (1 if num_queries % num_engines else 0))
+
         grpo_fast.split_and_insert_batch(
             batch,
             training_step=1,
@@ -726,6 +740,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
             pending_queries_map=pending_queries_map,
             param_prompt_Q=param_prompt_Q,
             generation_config=mock_generation_config,
+            args=mock_args,
         )
 
         # Verify we get one PromptRequest per query
