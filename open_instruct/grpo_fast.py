@@ -202,6 +202,10 @@ class Args:
     fused_optimizer: bool = False
     """Whether to use fused optimizer"""
 
+    # Progress reporting
+    update_every: int = 10
+    """How often to update the Beaker description progress bar."""
+
     # Batch sizes
     per_device_train_batch_size: int = 1
     """The forward batch size per device (local_micro_batch_size)"""
@@ -329,6 +333,8 @@ class Args:
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
     vllm_num_engines: int = 1
     """number of vLLM Engines, set to 0 to disable vLLM"""
+    inflight_updates: bool = False
+    """If True, return immediately even with pending work. If False, wait for all work to complete before exiting."""
     inference_batch_size: Optional[int] = None
     """inference batch size per vLLM engine. If None, calculated as ceil(num_unique_prompts_rollout / vllm_num_engines) * num_samples_per_prompt_rollout"""
     vllm_tensor_parallel_size: int = 1
@@ -343,6 +349,8 @@ class Args:
     """whether to enable prefix caching"""
     vllm_top_p: float = 1.0
     """vLLM top p for nucleus sampling"""
+    inference_batch_size: Optional[int] = None
+    """Number of inference requests to batch together for vLLM processing"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     gather_whole_model: bool = True
@@ -433,6 +441,7 @@ class Args:
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
+
         assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
             "At least one reward must be applied!"
         )
@@ -444,6 +453,8 @@ class Args:
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
+        if self.inference_batch_size is None:
+            self.inference_batch_size = self.num_unique_prompts_rollout // self.vllm_num_engines
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
@@ -532,6 +543,87 @@ def collate_fn(tensors_list: List[torch.Tensor], pad_token_id: int, pin_memory: 
 def to_device_inplace(tensors_list: List[torch.Tensor], device: torch.device):
     for i in range(len(tensors_list)):
         tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
+
+
+def log_memory_usage(
+    rank: int, device: torch.device, stage: str, include_tensors: bool = False, top_k_tensors: int = 10
+):
+    """Log comprehensive memory usage information for debugging OOM errors.
+
+    Args:
+        rank: Process rank
+        device: CUDA device
+        stage: String describing the current stage of execution
+        include_tensors: Whether to log information about individual tensors
+        top_k_tensors: Number of largest tensors to log
+    """
+    import gc
+
+    import psutil
+
+    # System RAM usage
+    process = psutil.Process()
+    ram_usage_gb = process.memory_info().rss / (1024**3)
+    ram_percent = process.memory_percent()
+
+    # Get available system memory
+    vm = psutil.virtual_memory()
+    available_ram_gb = vm.available / (1024**3)
+    total_ram_gb = vm.total / (1024**3)
+
+    logger.info(f"[Rank {rank}] Memory @ {stage}:")
+    logger.info(
+        f"  System RAM: {ram_usage_gb:.2f}GB ({ram_percent:.1f}%) | Available: {available_ram_gb:.2f}GB / {total_ram_gb:.2f}GB"
+    )
+
+    if torch.cuda.is_available():
+        # Force synchronization to get accurate memory stats
+        torch.cuda.synchronize(device)
+
+        # GPU memory usage
+        allocated_gb = torch.cuda.memory_allocated(device) / (1024**3)
+        reserved_gb = torch.cuda.memory_reserved(device) / (1024**3)
+        max_allocated_gb = torch.cuda.max_memory_allocated(device) / (1024**3)
+
+        # Get total GPU memory
+        total_gpu_memory = torch.cuda.get_device_properties(device).total_memory / (1024**3)
+        free_memory = (torch.cuda.get_device_properties(device).total_memory - torch.cuda.memory_reserved(device)) / (
+            1024**3
+        )
+
+        logger.info("  GPU Memory:")
+        logger.info(
+            f"    Allocated: {allocated_gb:.2f}GB / Reserved: {reserved_gb:.2f}GB / Total: {total_gpu_memory:.2f}GB"
+        )
+        logger.info(f"    Max Allocated: {max_allocated_gb:.2f}GB | Free: {free_memory:.2f}GB")
+        logger.info(f"    Utilization: {(reserved_gb / total_gpu_memory * 100):.1f}%")
+
+        # Memory summary from PyTorch
+        if hasattr(torch.cuda, "memory_summary"):
+            summary = torch.cuda.memory_summary(device, abbreviated=True)
+            logger.debug(f"  PyTorch Memory Summary:\n{summary}")
+
+        if include_tensors:
+            # Find and log largest tensors
+            tensor_sizes = []
+            for obj in gc.get_objects():
+                try:
+                    if torch.is_tensor(obj) and obj.is_cuda and obj.device == device:
+                        size_mb = float(obj.element_size() * obj.nelement() / (1024**2))
+                        tensor_sizes.append((size_mb, obj.shape, obj.dtype, obj.device))
+                except Exception:
+                    pass
+
+            if tensor_sizes:
+                tensor_sizes.sort(reverse=True, key=lambda x: x[0])
+                logger.info(f"  Top {min(top_k_tensors, len(tensor_sizes))} Tensors on GPU:")
+                for i, (size_mb, shape, dtype, dev) in enumerate(tensor_sizes[:top_k_tensors]):
+                    logger.info(f"    {i + 1}. {size_mb:.2f}MB | Shape: {shape} | Dtype: {dtype}")
+
+                total_tracked_mb = float(sum(x[0] for x in tensor_sizes))
+                logger.info(
+                    f"  Total tracked tensor memory: {total_tracked_mb:.2f}MB ({total_tracked_mb / 1024:.2f}GB)"
+                )
 
 
 class ShufflingIterator:
@@ -630,6 +722,9 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = None
         logger.info(f"Deepspeed config: {dschf=}")
 
+        # Log memory before loading policy model
+        log_memory_usage(self.rank, self.device, "Before loading policy model", include_tensors=False)
+
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
@@ -639,6 +734,9 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
+
+        # Log memory after loading policy model
+        log_memory_usage(self.rank, self.device, "After loading policy model", include_tensors=False)
         # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
         # AdamOptimizer = FusedAdam
         if args.set_weight_decay_on_bias_and_norm:
@@ -728,6 +826,9 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = None
         logger.info(f"DeepSpeed config: {dschf=}")
 
+        # Log memory before loading reference policy
+        log_memory_usage(self.rank, self.device, "Before loading ref_policy", include_tensors=False)
+
         self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
@@ -738,6 +839,9 @@ class PolicyTrainerRayProcess(RayProcess):
         disable_dropout_in_model(self.ref_policy)
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
         self.ref_policy.eval()
+
+        # Log memory after loading reference policy
+        log_memory_usage(self.rank, self.device, "After loading ref_policy", include_tensors=True, top_k_tensors=10)
 
         # Load reference policy checkpoint if available
         if hasattr(self, "ref_policy_checkpoint_path") and self.ref_policy_checkpoint_path:
@@ -885,12 +989,19 @@ class PolicyTrainerRayProcess(RayProcess):
         num_mini_batches: int,
     ):
         args = self.args
+
+        # Log memory before moving tensors to device
+        log_memory_usage(self.rank, self.device, "Before to_device", include_tensors=False)
+
         to_device_inplace(collated_query_responses, self.device)
         to_device_inplace(collated_tool_masks, self.device)
         to_device_inplace(collated_attention_masks, self.device)
         to_device_inplace(collated_position_ids, self.device)
         to_device_inplace(collated_advantages, self.device)
         to_device_inplace(collated_response_masks, self.device)
+
+        # Log memory after moving tensors to device
+        log_memory_usage(self.rank, self.device, "After to_device", include_tensors=True, top_k_tensors=5)
         # accumulation steps should always be at least 1
         accumulation_steps = max(math.ceil(len(collated_query_responses) / num_mini_batches - 0.5), 1)
         leftover = len(collated_query_responses) % accumulation_steps
@@ -962,6 +1073,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         old_logprob = torch.masked_fill(old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
                         old_logprobs[i] = old_logprob
                         torch.cuda.empty_cache()
+
+        # Log memory before training loop
+        log_memory_usage(self.rank, self.device, "Before training loop", include_tensors=False)
 
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
@@ -1038,7 +1152,23 @@ class PolicyTrainerRayProcess(RayProcess):
                     # grpo change: directly subtract KL in loss (add)
                     loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
                     loss = loss / accumulation_steps
+
+                    # Log memory before backward pass
+                    log_memory_usage(
+                        self.rank, self.device, f"Before backward (step {local_step})", include_tensors=False
+                    )
+
                     self.model.backward(loss)
+
+                    # Log memory after backward pass
+                    log_memory_usage(
+                        self.rank,
+                        self.device,
+                        f"After backward (step {local_step})",
+                        include_tensors=True,
+                        top_k_tensors=10,
+                    )
+
                     if (local_step + 1) % accumulation_steps == 0:
                         self.model.step()
                     local_step += 1
@@ -1344,17 +1474,19 @@ def accumulate_inference_batches(
     args: Args,
     training_step: int,
     generation_config,
+    num_prompts: int,
     actor_manager=None,
     timeout: Optional[float] = None,
 ) -> tuple[GenerationResult, Batch]:
     """Accumulate multiple inference results into a single training batch.
 
     Args:
-        inference_results_Q: Queue containing GenerationResult objects
+        inference_results_Q: Queue containing individual GenerationResult objects (one per prompt)
         pending_queries_map: PendingQueriesMap instance for thread-safe query tracking
-        args: Arguments containing vllm_num_engines
+        args: Arguments containing vllm_num_engines and batch size info
         training_step: Current training step for error reporting
         generation_config: Generation config containing n (number of samples per prompt)
+        num_prompts: Number of prompts to accumulate
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
 
     Raises:
@@ -1363,15 +1495,15 @@ def accumulate_inference_batches(
     Returns:
         Tuple of (combined_result, Batch with queries, ground_truths, datasets) or (ShutdownSentinel, None) if shutdown signal received
     """
-    # Collect results from all engines with non-blocking progress bar
     results = []
     all_queries = []
     all_ground_truths = []
     all_datasets = []
+
     for i in tqdm(
-        range(args.vllm_num_engines),
-        total=args.vllm_num_engines,
-        desc=f"Accumulating results from {args.vllm_num_engines} engines",
+        range(num_prompts),
+        total=num_prompts,
+        desc=f"Accumulating {num_prompts} results (each with {generation_config.n} completions)",
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     ):
@@ -1379,37 +1511,17 @@ def accumulate_inference_batches(
 
         if isinstance(result, ShutdownSentinel):
             return result, None
-        dataset_indices = result.dataset_index
 
-        if dataset_indices is None:
-            raise RuntimeError(f"Dataset indices is None for result {i}")
-
-        # When generation_config.n > 1, vLLM generates multiple responses per prompt
-        # but dataset_indices only contains the unique indices (not replicated)
-        # So we expect: len(responses) == len(dataset_indices) * generation_config.n
-        expected_responses = len(dataset_indices) * generation_config.n
-        assert len(result.responses) == expected_responses, (
-            f"Mismatch: number of responses ({len(result.responses)}) "
-            f"doesn't match expected ({expected_responses}) for result {i}"
-            f". {generation_config.n=}"
-            f", {len(dataset_indices)=}"
+        dataset_index = result.dataset_index
+        assert len(result.responses) == generation_config.n, (
+            f"Result {i} has {len(result.responses)} responses, expected {generation_config.n}"
         )
-
-        # Get corresponding queries, ground_truths, datasets for each individual prompt
-        batch_queries = []
-        batch_ground_truths = []
-        batch_datasets = []
-
-        for dataset_idx in dataset_indices:
-            query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
-            batch_queries.append(query)
-            batch_ground_truths.append(ground_truth)
-            batch_datasets.append(dataset)
+        query, ground_truth, dataset = pending_queries_map.pop(dataset_index)
+        all_queries.append(query)
+        all_ground_truths.append(ground_truth)
+        all_datasets.append(dataset)
 
         results.append(result)
-        all_queries.extend(batch_queries)
-        all_ground_truths.extend(batch_ground_truths)
-        all_datasets.extend(batch_datasets)
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1492,7 +1604,13 @@ def data_preparation_thread(
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
             result, batch = accumulate_inference_batches(
-                inference_results_Q, pending_queries_map, args, training_step, generation_config, actor_manager
+                inference_results_Q,
+                pending_queries_map,
+                args,
+                training_step,
+                generation_config,
+                args.num_unique_prompts_rollout,
+                actor_manager
             )
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
@@ -1626,10 +1744,6 @@ def data_preparation_thread(
 
                         finish_reasons += [finish_reasons[i] for i in sampled_indices]
 
-                        print(
-                            f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses"
-                        )
-
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
                 queries=batch.queries,
@@ -1656,7 +1770,8 @@ def data_preparation_thread(
                 shortfall = args.world_size - len(packed_sequences.query_responses)
                 if shortfall > 0:
                     logger.warning(
-                        f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this."
+                        f"[Data Preparation Thread] Step {training_step}: Padding {shortfall} sequences for world size. "
+                        f"In future, you should adjust your compute this."
                     )
                     # construct "dummy" sequences for padding out the world size
                     dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
@@ -1855,6 +1970,7 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
             name=args.run_name,
             save_code=True,
             tags=[args.exp_name] + get_wandb_tags(),
+            settings={"quiet": False, "show_errors": True, "show_warnings": True, "silent": False},
         )
         wandb_url = wandb.run.get_url()
         logger.info(f"Initial Beaker description update with wandb_url: {wandb_url}")
@@ -1923,7 +2039,6 @@ def create_model_and_optimizer(
     ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
     inits = []
     policy_group = ModelGroup(pg, PolicyTrainerRayProcess, args.num_learners_per_node, args.single_gpu_mode)
-    wandb_url = wandb.run.get_url() if args.with_tracking else None
     inits.extend(
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
         for model in policy_group.models
@@ -1976,6 +2091,7 @@ def create_model_and_optimizer(
         max_len,
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
+        args.inference_batch_size,
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
         max_tool_calls=args.max_tool_calls,
@@ -1983,6 +2099,7 @@ def create_model_and_optimizer(
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
+        inflight_updates=args.inflight_updates,
     )
 
     resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
@@ -2037,28 +2154,14 @@ def split_and_insert_batch(
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    for batch_idx in range(vllm_num_engines):
-        start_idx = batch_idx * args.inference_batch_size
-        end_idx = min(start_idx + args.inference_batch_size, len(batch.queries))
-
-        # Stop if we've distributed all queries
-        if start_idx >= len(batch.queries):
-            break
-
-        sub_batch = batch[start_idx:end_idx]
-
-        # Store prompts in the map using thread-safe insert_many
-        pending_queries_map.insert_many(
-            sub_batch.indices, sub_batch.queries, sub_batch.ground_truths, sub_batch.datasets
-        )
-
-        # Use PromptRequest for Ray queue with batch-specific dataset_index list
+    pending_queries_map.insert_many(batch.indices, batch.queries, batch.ground_truths, batch.datasets)
+    for i, prompt in enumerate(batch.queries):
         param_prompt_Q.put(
             PromptRequest(
-                prompts=sub_batch.queries,
+                prompt=prompt,
                 generation_config=generation_config,
                 training_step=training_step,
-                dataset_index=sub_batch.indices,
+                dataset_index=batch.indices[i],
                 is_eval=is_eval,
             )
         )
@@ -2101,7 +2204,7 @@ def load_data_from_packing_thread(
                 logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
                 return None, {}, num_total_tokens
             try:
-                packed_data = packed_sequences_Q.get(timeout=30.0)
+                packed_data = packed_sequences_Q.get(timeout=60.0)
                 break
             except Empty:
                 # check that everything is still alive
@@ -2182,9 +2285,11 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
                 enable=args.verbose,
             )
             num_processed = sum(int(result) for result in processed_results)
+            logger.info(f"[Generate Thread] vLLM engines returned, processed {num_processed} total requests")
             # Suppress timing output if nothing was processed
             if num_processed == 0:
                 timer.noop = True
+                time.sleep(10)
         if num_processed > 0:
             try:
                 generate_metrics_Q.put_nowait({"time/generation": timer.duration})
@@ -2282,7 +2387,21 @@ def one_training_step(
             if isinstance(value, np.ndarray) or isinstance(value, list):
                 if len(value) > 0:
                     metrics[key] = wandb.Histogram(value)
-        wandb.log(metrics, step=episode)
+        logger.info(f"About to log to wandb... step={episode}")
+        result = wandb.log(metrics, step=episode)
+        logger.info(f"WandB log() returned: {result}, logged {metrics=} to wandb.")
+
+        # Debug: Check if wandb.run is active and what's in the summary
+        if wandb.run:
+            logger.info(f"WandB run is active. Run ID: {wandb.run.id}")
+            logger.info(f"WandB run name: {wandb.run.name}")
+            logger.info(f"WandB run URL: {wandb.run.get_url()}")
+            # Check if data was actually logged
+            summary_keys = list(wandb.run.summary.keys()) if wandb.run.summary else []
+            logger.info(f"WandB summary has {len(summary_keys)} keys: {summary_keys[:10]}...")  # Show first 10 keys
+        else:
+            logger.error("WandB run is not active!")
+    logger.info("Done step.")
 
 
 def maybe_evaluate(
@@ -2296,6 +2415,7 @@ def maybe_evaluate(
     eval_pending_queries_map: PendingQueriesMap,
     eval_generation_config,
     generate_metrics_Q: Queue,
+    num_eval_prompts: int,
     actor_manager=None,
 ):
     """Optionally evaluate the model."""
@@ -2311,6 +2431,7 @@ def maybe_evaluate(
             args,
             training_step,
             eval_generation_config,
+            num_prompts=num_eval_prompts,
             actor_manager,
             timeout=timeout,
         )
@@ -2548,6 +2669,7 @@ def run_training(
     tokenizer,
     train_dataset,
     eval_batch,
+    num_eval_prompts,
     policy_group,
     vllm_engines,
     generation_configs,
@@ -2641,7 +2763,7 @@ def run_training(
 
         if (
             training_step == resume_training_step
-            or training_step % 10 == 0
+            or training_step % args.update_every == 0
             or training_step == args.num_training_steps
         ):
             logger.info(f"Progress update for Beaker description: step {training_step}/{args.num_training_steps}")
@@ -2754,6 +2876,7 @@ def run_training(
             eval_pending_queries_map,
             generation_configs["eval"],
             generate_metrics_Q,
+            num_eval_prompts,
             actor_manager,
         )
 
@@ -2778,10 +2901,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     ray.init(dashboard_host="0.0.0.0")
 
     # Create Ray queues.
-    queue_size = (args.async_steps + 1) * args.vllm_num_engines
+    queue_size = (args.async_steps + 1) * args.num_unique_prompts_rollout
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
-    evaluation_inference_results_Q = ray_queue.Queue(maxsize=args.vllm_num_engines)
+    # Size eval queue based on actual eval samples (num_eval_samples) with 2x overhead for buffering.
+    evaluation_inference_results_Q = ray_queue.Queue(maxsize=num_eval_samples * 2)
 
     policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
         create_model_and_optimizer(
@@ -2826,9 +2950,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     if eval_dataset is None:
         eval_batch = None
+        num_eval_prompts = 0
     else:
         eval_dataset_indices = list(range(min(num_eval_samples, len(eval_dataset))))
         eval_batch = next_batch(eval_dataset_indices, eval_dataset)
+        num_eval_prompts = len(eval_dataset_indices)
     reward_fn = make_reward_fn(args)
 
     stop_event = threading.Event()
@@ -2840,6 +2966,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             tokenizer,
             train_dataset,
             eval_batch,
+            num_eval_prompts,
             policy_group,
             vllm_engines,
             generation_configs,
@@ -2862,6 +2989,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             actor_manager,
             checkpoint_state,
         )
+        logger.info("Done training!")
     finally:
         cleanup_training_resources(
             stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q], actor_manager

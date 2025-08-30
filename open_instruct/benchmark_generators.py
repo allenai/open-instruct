@@ -127,12 +127,26 @@ def get_git_commit() -> str:
 
 
 def save_benchmark_results_to_csv(
-    results: list[dict[str, Any]], total_time: float, args: grpo_fast.Args, model_config: model_utils.ModelConfig
+    results: list[dict[str, Any]],
+    total_time: float,
+    overall_tokens_per_second: float,
+    args: grpo_fast.Args,
+    model_config: model_utils.ModelConfig,
 ) -> None:
     """Save benchmark results to CSV file."""
     git_commit = get_git_commit()
     agg_results = aggregate_results(results)
     csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
+
+    device_name = get_device_name(torch.cuda.get_device_name(0))
+    device_flops = GPU_SPECS[device_name]["flops"]
+    model_dims = load_model_dims(model_config.model_name_or_path)
+    all_prompt_lengths = [result["prompt_lengths"] for result in results]
+    all_response_lengths = [result["response_lengths"] for result in results]
+
+    total_flops = model_dims.flops(
+        all_prompt_lengths, all_response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
+    )
 
     row_data = {
         "git_commit": git_commit,
@@ -152,6 +166,7 @@ def save_benchmark_results_to_csv(
         "avg_generation_time_per_batch": agg_results["avg_generation_time"],
         "avg_new_tokens_per_sample": agg_results["total_num_new_tokens"]
         / (len(results) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout),
+        "overall_mfu": 100 * (total_flops / total_time) / device_flops,
     }
 
     csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
@@ -591,7 +606,7 @@ def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation
 
 
 def setup_vllm_engines(
-    args: grpo_fast.Args, model_config: model_utils.ModelConfig, max_model_len: int = 20480
+    args: grpo_fast.Args, model_config: model_utils.ModelConfig, max_model_len: int = 20480, num_batches: int = 5
 ) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue]:
     """Set up vLLM engines and queues."""
     logger.info("Setting up vLLM engines...")
@@ -605,8 +620,12 @@ def setup_vllm_engines(
     pg = ray.util.placement_group(bundles, strategy="PACK")
     ray.get(pg.ready())
 
-    param_prompt_Q = ray_queue.Queue(maxsize=10)
-    inference_results_Q = ray_queue.Queue(maxsize=10)
+    # Queue size needs to accommodate all individual prompts across all batches.
+    # Each batch has num_unique_prompts_rollout prompts, and we submit them individually.
+    # Total individual prompts = num_unique_prompts_rollout * num_batches
+    queue_size = args.num_unique_prompts_rollout * num_batches
+    param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
+    inference_results_Q = ray_queue.Queue(maxsize=queue_size)
 
     queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
@@ -623,6 +642,7 @@ def setup_vllm_engines(
         max_model_len=max_model_len,
         vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
         single_gpu_mode=False,
+        inference_batch_size=args.inference_batch_size,
         pg=pg,
         tools={},
         max_tool_calls=[0],
@@ -640,7 +660,11 @@ def generate_thread(vllm_engines: list[ray.actor.ActorHandle], stop_event: threa
     """Thread that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] Starting generation thread")
     while not stop_event.is_set():
-        processed_results = ray.get([engine.process_from_queue.remote(timeout=20) for engine in vllm_engines])
+        processed_results = utils.ray_get_with_progress(
+            [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
+            "[Generate Thread] Waiting for engines to process prompts",
+            enable=False,
+        )
         num_processed = sum(int(result) for result in processed_results)
         if num_processed == 0:
             time.sleep(1)
@@ -657,31 +681,30 @@ def submission_thread(
     start_batch_idx: int,
     num_batches: int,
 ) -> None:
-    """Thread that submits prompts to the queue."""
+    """Thread that submits individual prompts to the queue."""
     logger.info("[Submission Thread] Starting prompt submission")
-    for batch_idx in range(start_batch_idx, start_batch_idx + num_batches):
-        if stop_event.is_set():
-            logger.info("[Submission Thread] Stopped due to stop event")
-            break
+    total_prompts_submitted = 0
+    for batch_idx in range(num_batches):
+        for prompt_idx in range(batch_size):
+            dataset_idx = start_batch_idx * batch_size + batch_idx * batch_size + prompt_idx
+            if dataset_idx >= len(dataset):
+                break
 
-        # Get batch data from dataset
-        start_idx = batch_idx * batch_size
-        end_idx = min(start_idx + batch_size, len(dataset))
-        batch_data = dataset[start_idx:end_idx]
-        prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
-
-        # Create list of dataset indices for this batch
-        dataset_indices = list(range(start_idx, end_idx))
-
-        param_prompt_Q.put(
-            PromptRequest(
-                prompts=prompts,
-                dataset_index=dataset_indices,
-                generation_config=generation_config,
-                start_time=time.perf_counter(),
+            prompt = dataset[dataset_idx][dataset_transformation.INPUT_IDS_PROMPT_KEY]
+            actual_batch_idx = start_batch_idx + batch_idx
+            actual_dataset_index = dataset_idx
+            param_prompt_Q.put(
+                PromptRequest(
+                    prompt=prompt,
+                    generation_config=generation_config,
+                    training_step=actual_batch_idx,
+                    dataset_index=actual_dataset_index,
+                    is_eval=False,
+                    start_time=time.perf_counter(),
+                )
             )
-        )
-    logger.info(f"[Submission Thread] All {num_batches} batches submitted")
+            total_prompts_submitted += 1
+    logger.info(f"[Submission Thread] All {total_prompts_submitted} individual prompts submitted")
 
 
 def run_benchmark(
@@ -713,37 +736,37 @@ def run_benchmark(
     )
 
     stop_event = threading.Event()
-    executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="benchmark")
+    executor = futures.ThreadPoolExecutor(max_workers=len(vllm_engines) + 1, thread_name_prefix="benchmark")
 
     generation_future = executor.submit(generate_thread, vllm_engines, stop_event)
+    submission_future = None  # Initialize to None for access in finally block
 
     results = []
     device_name = get_device_name(torch.cuda.get_device_name(0))
     device_flops = GPU_SPECS[device_name]["flops"]
     device_memory_bandwidth = GPU_SPECS[device_name]["memory_bandwidth"]
 
-    # Submit warmup batch first
-    logger.info("Submitting warmup batch...")
-    warmup_start_idx = 0
-    warmup_end_idx = min(args.num_unique_prompts_rollout, len(dataset))
-    warmup_data = dataset[warmup_start_idx:warmup_end_idx]
-    warmup_prompts = warmup_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
-    warmup_dataset_indices = list(range(warmup_start_idx, warmup_end_idx))
-    param_prompt_Q.put(
-        PromptRequest(
-            prompts=warmup_prompts,
-            dataset_index=warmup_dataset_indices,
-            generation_config=generation_config,
-            start_time=time.perf_counter(),
-        )
-    )
+    # Load model dims for FLOPS calculations
     model_dims = load_model_dims(model_config.model_name_or_path)
+
+    logger.info("Submitting warmup batch...")
+    for prompt_idx in range(args.num_unique_prompts_rollout):
+        param_prompt_Q.put(
+            PromptRequest(
+                prompt=dataset[prompt_idx][dataset_transformation.INPUT_IDS_PROMPT_KEY],
+                generation_config=generation_config,
+                training_step=0,  # warmup is training step 0
+                dataset_index=prompt_idx,
+                is_eval=False,
+            )
+        )
 
     try:
         logger.info("Running warmup batch...")
 
-        warmup_result = inference_results_Q.get()
-        logger.info(f"Warmup batch completed with {len(warmup_result.responses)} responses")
+        for _ in range(args.num_unique_prompts_rollout):
+            inference_results_Q.get()
+        logger.info("Warmup batch completed")
         logger.info(f"Submitting {num_batches - 1} batches for main benchmark...")
         submission_future = executor.submit(
             submission_thread,
@@ -755,41 +778,51 @@ def run_benchmark(
             1,
             num_batches - 1,
         )
-        # Process remaining batches with timing
+
+        main_benchmark_start_time = time.perf_counter()
+
         for batch_idx in range(1, num_batches):
-            # Quick health check!
             [future.result() for future in [submission_future, generation_future] if future.done()]
-            result = inference_results_Q.get()
+
+            batch_results = []
+            batch_start_time = time.perf_counter()
+            for _ in range(args.num_unique_prompts_rollout):
+                batch_results.append(inference_results_Q.get())
 
             completion_time = time.perf_counter()
-            # Calculate generation time from when the request was enqueued
-            batch_generation_time = completion_time - result.start_time if result.start_time else 0
+            batch_generation_time = completion_time - batch_start_time
 
-            new_tokens = sum(len(response) for response in result.responses)
-            tokens_per_second = new_tokens / batch_generation_time if batch_generation_time > 0 else 0
+            total_new_tokens = 0
+            all_response_lengths = []
+            all_finish_reasons = []
 
+            for i, result in enumerate(batch_results):
+                result_tokens = sum(len(response) for response in result.responses)
+                total_new_tokens += result_tokens
+                all_response_lengths.extend([len(response) for response in result.responses])
+                all_finish_reasons.extend(result.finish_reasons)
+
+            tokens_per_second = total_new_tokens / batch_generation_time if batch_generation_time > 0 else 0
             result_dict = {
                 "tokens_per_second": tokens_per_second,
                 "generation_time": batch_generation_time,
-                "num_new_tokens": new_tokens,
-                "finish_reasons": collections.Counter(result.finish_reasons),
-                "response_lengths": [len(response) for response in result.responses],
-                "dataset_indices": result.dataset_index,
+                "num_new_tokens": total_new_tokens,
+                "finish_reasons": collections.Counter(all_finish_reasons),
+                "response_lengths": all_response_lengths,
+                "dataset_indices": [r.dataset_index for r in batch_results],
             }
-            # Get prompt lengths using dataset indices from the result
-            prompt_data = dataset[result.dataset_index]
-            prompts = prompt_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
-            prompt_lengths = [len(prompt) for prompt in prompts]
-            response_lengths = [len(response) for response in result.responses]
+            prompt_lengths = []
+            response_lengths = all_response_lengths
+            for r in batch_results:
+                prompt_data = dataset[r.dataset_index]
+                prompt = prompt_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+                prompt_lengths.append(len(prompt))
 
-            # Calculate total FLOPs for all prompts and responses in the batch
-            # No need to expand prompt_lengths - the flops method now handles samples_per_prompt
+            result_dict["prompt_lengths"] = prompt_lengths
             model_flops = model_dims.flops(
                 prompt_lengths, response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
             )
-
-            # MFU = (FLOPs / time) / peak_FLOPS * 100
-            model_flops_per_second = model_flops / batch_generation_time if batch_generation_time > 0 else 0
+            model_flops_per_second = model_flops / batch_generation_time
             result_dict["mfu"] = 100 * model_flops_per_second / device_flops
 
             # Calculate total memory bytes for all prompts and responses in the batch
@@ -809,18 +842,36 @@ def run_benchmark(
                 f"MFU: {result_dict['mfu']:.2f}%, "
                 f"MBU: {result_dict['mbu']:.2f}%, "
                 f"generation time: {batch_generation_time:.2f}s, "
-                f"total new tokens: {new_tokens}"
+                f"total new tokens: {total_new_tokens}"
             )
 
-        # Calculate total time for main benchmark only
-        main_benchmark_time = sum(r["generation_time"] for r in results)
+        main_benchmark_end_time = time.time()
+        main_benchmark_total_time = main_benchmark_end_time - main_benchmark_start_time
 
-        print_summary(results, main_benchmark_time, args, model_config)
-        save_benchmark_results_to_csv(results, main_benchmark_time, args, model_config)
+        total_main_tokens = sum(r["num_new_tokens"] for r in results)
+        overall_tokens_per_second = (
+            total_main_tokens / main_benchmark_total_time if main_benchmark_total_time > 0 else 0
+        )
 
+        logger.info("\nOverall main benchmark performance:")
+        logger.info(f"  Total wall-clock time: {main_benchmark_total_time:.2f}s")
+        logger.info(f"  Total tokens generated: {total_main_tokens}")
+        logger.info(f"  Overall tokens/second: {overall_tokens_per_second:.2f}")
+
+        print_summary(results, main_benchmark_total_time, overall_tokens_per_second, args, model_config)
+        save_benchmark_results_to_csv(
+            results, main_benchmark_total_time, overall_tokens_per_second, args, model_config
+        )
     finally:
+        logger.info("Starting cleanup...")
         stop_event.set()
-        executor.shutdown(wait=True)
+
+        logger.info("Waiting for threads to complete...")
+        try:
+            submission_future.result(timeout=5)
+            generation_future.result(timeout=10)
+        finally:
+            executor.shutdown(wait=True)
         logger.info("Threads cleaned up")
 
 
@@ -867,7 +918,11 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def print_summary(
-    results: list[dict[str, Any]], total_time: float, args: grpo_fast.Args, model_config: model_utils.ModelConfig
+    results: list[dict[str, Any]],
+    total_time: float,
+    overall_tokens_per_second: float,
+    args: grpo_fast.Args,
+    model_config: model_utils.ModelConfig,
 ) -> None:
     """Print benchmark summary statistics."""
 
@@ -885,8 +940,11 @@ def print_summary(
     print(f"Num rollouts: {args.num_samples_per_prompt_rollout}")
     print(f"Max tokens: {args.response_length}")
     print("-" * 60)
+    print(f"Total wall-clock time (main benchmark): {total_time:.2f}s")
+    print(f"Total new tokens generated: {agg_results['total_num_new_tokens']}")
     print(f"Total time (main benchmark): {agg_results['total_generation_time']:.2f}s")
     print(f"Total new tokens generated: {agg_results['total_num_new_tokens']}")
+    print(f"Overall tokens/second: {overall_tokens_per_second:.2f}")
     print("-" * 60)
     print(f"Average results over {len(results)} main benchmark batches:")
     print(f"Average tokens/second: {agg_results['avg_tokens_per_second']:.2f}")
