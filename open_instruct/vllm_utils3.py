@@ -18,6 +18,7 @@
 import copy
 import os
 import queue
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -368,6 +369,26 @@ class LLMRayActor:
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
 
+        # For caching should_stop status.
+        self._last_should_stop_update = None
+        self._should_stop_value = None
+        self._should_stop_timeout_s = 5
+
+    def _should_stop(self) -> bool:
+        last_update = self._last_should_stop_update
+        if last_update is None or (time.perf_counter() - last_update) > self._should_stop_timeout_s:
+            should_stop_ref = self.actor_manager.should_stop.remote()
+            ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
+            if ready_refs:
+                should_stop = ray.get(ready_refs[0])
+            else:
+                ray.cancel(should_stop_ref)
+                should_stop = False
+            self._last_should_stop_update = time.perf_counter()
+            self._should_stop_value = should_stop
+
+        return self._should_stop_value
+
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
@@ -375,10 +396,7 @@ class LLMRayActor:
             int: Number of requests processed (0 or 1)
         """
         while True:
-            # Non-blocking check for should_stop using ray.wait
-            should_stop_ref = self.actor_manager.should_stop.remote()
-            ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
-            if ready_refs and ray.get(ready_refs[0]):
+            if self._should_stop():
                 return 0
 
             try:
