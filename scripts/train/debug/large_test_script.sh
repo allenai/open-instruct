@@ -6,7 +6,6 @@ exp_name=rlvr_ace_fn_and_og_ocr_stdio_from_base_with_perf_penalty
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 uv run python mason.py \
         --cluster ai2/jupiter-cirrascale-2 \
-        --cluster ai2/augusta-google-1 \
         --image "$BEAKER_IMAGE" \
 	--pure_docker_mode \
         --workspace ai2/tulu-thinker \
@@ -40,6 +39,7 @@ uv run python mason.py \
         --stop_strings "</answer>" \
         --non_stop_penalty False \
         --temperature 1.0 \
+	--verbose True \
         --ground_truths_key ground_truth \
         --sft_messages_key messages \
         --total_episodes 10_000 \
