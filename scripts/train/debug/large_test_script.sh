@@ -38,7 +38,6 @@ uv run python mason.py \
         --stop_strings "</answer>" \
         --non_stop_penalty False \
         --temperature 1.0 \
-	--verbose True \
         --ground_truths_key ground_truth \
         --sft_messages_key messages \
         --total_episodes 10_000 \
