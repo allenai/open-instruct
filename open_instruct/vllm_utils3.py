@@ -323,7 +323,7 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         "sampling_params": request.generation_config,
     }
 
-    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
+    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompts, cache_salt=request_id)
 
     # We *have* to manually duplicate requests to properly handle tool tracking,
     # so we always do it to only have one code path.
