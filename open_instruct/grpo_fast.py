@@ -419,6 +419,10 @@ class Args:
     code_tool_api_endpoint: Optional[str] = None
 
     def __post_init__(self):
+        if os.environ.get("VLLM_USE_V1") == "0":
+            logger.warning("When using the v0 version of vLLM, caching is broken and will never be invalidated.")
+            if self.vllm_enable_prefix_caching:
+                raise ValueError("Prefix caching is currently not supported for v0.")
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
@@ -810,12 +814,6 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
-        # clear vllm cache if we need to
-        cache_reset_refs = []
-        if self.args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
-            for engine in self.vllm_engines:
-                cache_reset_refs.append(engine.reset_prefix_cache.remote())
-
         # avoid OOM
         torch.cuda.empty_cache()
         model = self.model.module
@@ -857,8 +855,6 @@ class PolicyTrainerRayProcess(RayProcess):
         all_refs = []
         if torch.distributed.get_rank() == 0:
             all_refs.extend(refss)
-            if self.args.vllm_enable_prefix_caching:
-                all_refs.extend(cache_reset_refs)
         return all_refs
 
     def update_ref_policy(self):
