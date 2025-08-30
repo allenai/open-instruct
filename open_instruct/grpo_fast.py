@@ -128,6 +128,7 @@ from open_instruct.utils import (
     sync_gs_bucket,
 )
 from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
+from open_instruct.search_utils.mcp_tools import MCP_TOOL_REGISTRY
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -384,18 +385,20 @@ class Args:
     """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
     use_mcp_tools: bool = False
     """Whether to use MCP tools. For now if you use the MCP tools, you need to run an MCP server on the background."""
-    mcp_tool_name: Optional[str] = "s2"
-    """The name of the MCP tool to use. For now only supports `s2` and `serper`."""
+    mcp_tool_names: Optional[str] = "s2"
+    """The names (comma separated) of the MCP tool to use."""
     mcp_server_command: Optional[str] = None
-    """Command to run MCP server subprocess when use_mcp_tools is enabled. Example: 'fastmcp run rag_mcp/main.py:mcp --transport streamable-http --port 8000'"""
+    """Command to run MCP server subprocess when use_mcp_tools is enabled. Example: 'uv run python -m rl-rag-mcp.mcp_agents.mcp_backend.main --transport http --port 8000 --host 0.0.0.0 --path /mcp'"""
 
-    # rl-rag specific settngs
+
+    # rl-rag tool settings. These are shared across different tools.
     number_documents_to_search: int = 3
     """The maximum number of documents to retrieve for each query."""
     search_api_endpoint: Optional[str] = None
     """The API endpoint for the search engine."""
     use_massive_ds: bool = False
-    """Whether to use massive ds for search."""
+    """Whether to use massive ds for search. Only matters for non-MCP search tool."""
+
     # code-tool specific settings
     code_tool_api_endpoint: Optional[str] = None
 
@@ -431,6 +434,13 @@ class Args:
             download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
         if self.checkpoint_state_dir is not None:
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
+        if self.use_mcp_tools:
+            if self.mcp_tool_names is None:
+                raise ValueError("mcp_tool_names must be provided when use_mcp_tools is True")
+            self.mcp_tool_names = self.mcp_tool_names.split(",")
+            for mcp_tool_name in self.mcp_tool_names:
+                if mcp_tool_name not in MCP_TOOL_REGISTRY:
+                    raise ValueError(f"MCP tool {mcp_tool_name} is not supported. Supported tools are: {', '.join(MCP_TOOL_REGISTRY.keys())}")
         if self.tools is not None and len(self.tools) > 0:
             for tool in self.tools:
                 if tool not in ["search", "code"]:
@@ -1440,21 +1450,17 @@ def data_preparation_thread(
         )
 
 
-def launch_mcp_subprocess(use_mcp_tools: bool, run_mcp_command: str, output_dir: str) -> Optional[subprocess.Popen]:
+def launch_mcp_subprocess(run_mcp_command: str, output_dir: str) -> Optional[subprocess.Popen]:
     """
     Launch MCP server subprocess if use_mcp_tools is enabled.
     
     Args:
-        use_mcp_tools: Whether to launch MCP server
         run_mcp_command: Command to run MCP server
         output_dir: Base output directory for logs
         
     Returns:
         Popen object if launched, None otherwise
     """
-    if not use_mcp_tools:
-        return None
-        
     print(f"🚀 Launching MCP server subprocess: {run_mcp_command}")
     
     # Debug: Check if fastmcp command exists
@@ -1663,7 +1669,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         if args.mcp_server_command is None:
             print("mcp_server_command is not provided when use_mcp_tools is True; please make sure to launch the MCP server manually.")
         else:
-            mcp_process = launch_mcp_subprocess(args.use_mcp_tools, args.mcp_server_command, args.output_dir)
+            mcp_process = launch_mcp_subprocess(args.mcp_server_command, args.output_dir)
             if mcp_process is None:
                 raise RuntimeError("Failed to launch MCP server subprocess")
 
@@ -1693,39 +1699,20 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     max_len = args.max_prompt_token_length + args.response_length
     # make tool list
     tool_objects = {}
+    # first, handle the "regular" tools of search and code.
     if args.tools:
         for tool in args.tools:
             if tool.lower() == "search":
-                if args.use_mcp_tools:
-                    from open_instruct.tool_utils.tool_mcp import (
-                        SemanticScholarSnippetSearchTool,
-                        SerperSearchTool,
-                    )
-                    if args.mcp_tool_name == "s2":
-                        tool = SemanticScholarSnippetSearchTool(
-                            start_str="<search>",
-                            end_str="</search>",
-                        )
-                    elif args.mcp_tool_name == "serper":
-                        tool = SerperSearchTool(
-                            start_str="<search>",
-                            end_str="</search>",
-                        )
-                    else:
-                        raise ValueError(f"Unknown MCP tool: {args.mcp_tool_name}")
-                else:
-                    from open_instruct.search_utils.search_tool import SearchTool
+                from open_instruct.search_utils.search_tool import SearchTool
 
-                    tool = SearchTool(
-                        start_str="<search>",
-                        end_str="</search>",
-                        use_massive_ds=args.use_massive_ds,
-                        api_endpoint=args.search_api_endpoint,
-                        number_documents_to_search=args.number_documents_to_search,
-                    )
-                
+                tool = SearchTool(
+                    start_str="<search>",
+                    end_str="</search>",
+                    use_massive_ds=args.use_massive_ds,
+                    api_endpoint=args.search_api_endpoint,
+                    number_documents_to_search=args.number_documents_to_search,
+                )
                 tool_objects[tool.end_str] = tool
-                
             elif tool.lower() == "code":
                 from open_instruct.tool_utils.tool_vllm import PythonCodeTool
 
@@ -1737,6 +1724,16 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 tool_objects[tool.end_str] = tool
             else:
                 raise ValueError(f"Unknown tool: {tool}")
+    if args.use_mcp_tools:
+        for mcp_tool_name in args.mcp_tool_names:
+            tool = MCPTool(
+                mcp_tool_name=mcp_tool_name,
+                number_documents_to_search=args.number_documents_to_search,
+                base_url=args.search_api_endpoint,
+            )
+            # mcp tools can have multiple end strings.
+            for end_str in tool.end_strings:
+                tool_objects[end_str] = tool
 
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
