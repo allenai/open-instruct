@@ -315,31 +315,41 @@ class ActorManager:
 def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, request_metadata: dict):
     """Add a request to the LLM engine."""
     prefix = "eval" if request.is_eval else "train"
-    request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
-    metadata = {
-        "is_eval": request.is_eval,
-        "dataset_index": request.dataset_index,
-        "training_step": request.training_step,
-        "sampling_params": request.generation_config,
-    }
 
-    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompts, cache_salt=request_id)
+    # Handle batch of prompts - iterate over each prompt
+    for batch_idx, prompt in enumerate(request.prompts):
+        # Get the specific dataset index for this prompt
+        if isinstance(request.dataset_index, list):
+            dataset_idx = request.dataset_index[batch_idx]
+        else:
+            dataset_idx = request.dataset_index
 
-    # We *have* to manually duplicate requests to properly handle tool tracking,
-    # so we always do it to only have one code path.
-    # Create sampling params with n=1 for individual tracking
-    sampling_params = copy.deepcopy(request.generation_config)
-    sampling_params.n = 1
-    metadata["sampling_params"] = sampling_params
-    metadata["generation_config"] = request.generation_config
-    request_metadata[request_id] = metadata
-    for j in range(request.generation_config.n):
-        sub_request_id = f"{request_id}-{j}"
-        if request.generation_config.seed is not None:
-            # We need to seed each sub-request differently to avoid getting the same output.
-            sampling_params.seed = request.generation_config.seed + j
-        llm_engine.add_request(sub_request_id, tokens_prompt, sampling_params)
-        request_metadata[sub_request_id] = metadata
+        request_id = f"{prefix}_{request.training_step}_{dataset_idx}"
+        metadata = {
+            "is_eval": request.is_eval,
+            "dataset_index": dataset_idx,
+            "training_step": request.training_step,
+            "sampling_params": request.generation_config,
+        }
+
+        # Create TokensPrompt for this single prompt
+        tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=request_id)
+
+        # We *have* to manually duplicate requests to properly handle tool tracking,
+        # so we always do it to only have one code path.
+        # Create sampling params with n=1 for individual tracking
+        sampling_params = copy.deepcopy(request.generation_config)
+        sampling_params.n = 1
+        metadata["sampling_params"] = sampling_params
+        metadata["generation_config"] = request.generation_config
+        request_metadata[request_id] = metadata
+        for j in range(request.generation_config.n):
+            sub_request_id = f"{request_id}-{j}"
+            if request.generation_config.seed is not None:
+                # We need to seed each sub-request differently to avoid getting the same output.
+                sampling_params.seed = request.generation_config.seed + j
+            llm_engine.add_request(sub_request_id, tokens_prompt, sampling_params)
+            request_metadata[sub_request_id] = metadata
 
 
 class LLMRayActor:
