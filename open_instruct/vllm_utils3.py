@@ -370,7 +370,7 @@ class LLMRayActor:
 
         # For caching should_stop status.
         self._last_should_stop_update = None
-        self._should_stop_value = None
+        self._should_stop_value = False
         self._should_stop_timeout_s = 5
 
     def _should_stop(self) -> bool:
@@ -379,12 +379,11 @@ class LLMRayActor:
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
             if ready_refs:
-                should_stop = ray.get(ready_refs[0])
+                self._should_stop_value = ray.get(ready_refs[0])
+                self._last_should_stop_update = time.perf_counter()
             else:
                 ray.cancel(should_stop_ref)
-                should_stop = False
-            self._last_should_stop_update = time.perf_counter()
-            self._should_stop_value = should_stop
+                # On timeout, maintain the last known value (initialized to False)
 
         return self._should_stop_value
 
