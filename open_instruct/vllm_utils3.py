@@ -312,7 +312,7 @@ class ActorManager:
         return self._should_stop
 
 
-def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, request_metadata: dict = None):
+def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, request_metadata: dict):
     """Add a request to the LLM engine."""
     prefix = "eval" if request.is_eval else "train"
     request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
@@ -323,7 +323,7 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         "sampling_params": request.generation_config,
     }
 
-    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt)
+    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
 
     # We *have* to manually duplicate requests to properly handle tool tracking,
     # so we always do it to only have one code path.
@@ -332,16 +332,14 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
     sampling_params.n = 1
     metadata["sampling_params"] = sampling_params
     metadata["generation_config"] = request.generation_config
-    if request_metadata is not None:
-        request_metadata[request_id] = metadata
+    request_metadata[request_id] = metadata
     for j in range(request.generation_config.n):
         sub_request_id = f"{request_id}-{j}"
         if request.generation_config.seed is not None:
             # We need to seed each sub-request differently to avoid getting the same output.
             sampling_params.seed = request.generation_config.seed + j
         llm_engine.add_request(sub_request_id, tokens_prompt, sampling_params)
-        if request_metadata is not None:
-            request_metadata[sub_request_id] = metadata
+        request_metadata[sub_request_id] = metadata
 
 
 class LLMRayActor:
@@ -395,6 +393,15 @@ class LLMRayActor:
         self.actor_manager = actor_manager
         self.request_metadata = {}
 
+    def _insert_result_to_queue(self, result, is_eval: bool):
+        """Insert result into the appropriate queue with error handling."""
+        try:
+            results_queue = self.eval_results_queue if is_eval else self.results_queue
+            results_queue.put(result, timeout=10)
+        except queue.Full:
+            queue_name = "eval" if is_eval else "train"
+            self.logger.warning(f"{queue_name} results queue is full, discarding result.")
+
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
@@ -414,51 +421,32 @@ class LLMRayActor:
 
         collected_outputs = defaultdict(list)
 
-        # Get a single request to process
         try:
             request = self.prompt_queue.get(timeout=timeout)
         except queue.Empty:
             return num_processed
 
-        # Add the request to the engine
         add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
 
-        # Main processing loop
         while True:
-            # Step the engine
             outputs = self._step_engine(tracking, tokenizer)
-
-            # Collect outputs by request_id
             for output in outputs:
                 request_id = output.request_id.split("-")[0]
                 collected_outputs[request_id].append(output)
                 metadata = self.request_metadata[request_id]
-
-                # Check if we have all n outputs for this request
                 if len(collected_outputs[request_id]) == metadata["generation_config"].n:
                     outputs_to_finalize = collected_outputs[request_id]
                     num_processed += 1
 
-                    # Finalize the outputs
                     result = _finalize_outputs(outputs_to_finalize, tracking, metadata["dataset_index"], self.tools)
 
-                    # Put result in appropriate queue
-                    try:
-                        if metadata["is_eval"]:
-                            self.eval_results_queue.put(result, timeout=10)
-                        else:
-                            self.results_queue.put(result, timeout=10)
-                    except queue.Full:
-                        queue_name = "eval" if metadata["is_eval"] else "train"
-                        self.logger.warning(f"{queue_name} results queue is full, discarding result.")
+                    self._insert_result_to_queue(result, metadata["is_eval"])
 
-                    # Clean up metadata
                     del collected_outputs[request_id]
                     self.request_metadata.pop(request_id, None)
                     for i in range(metadata["generation_config"].n):
                         self.request_metadata.pop(f"{request_id}-{i}", None)
 
-            # Check termination condition
             pending_tool_futures = tracking["pending_tool_futures"] if self.tools else {}
             if not self.llm_engine.has_unfinished_requests() and not pending_tool_futures:
                 break
@@ -473,24 +461,22 @@ class LLMRayActor:
         """
         outputs = []
 
-        # Poll tool futures first if we have tools
         if self.tools and tracking["pending_tool_futures"]:
             tool_outputs = self._poll_tool_futures_and_get_outputs(tracking, tokenizer)
             outputs.extend(tool_outputs)
 
-        # Process engine steps if there are unfinished requests
         if self.llm_engine.has_unfinished_requests():
             step_outputs = list(self.llm_engine.step())
             for output in step_outputs:
                 if output.finished:
                     if self.tools:
-                        # Get sampling params from metadata
                         req_metadata = self.request_metadata.get(output.request_id, {})
                         sampling_params = req_metadata.get("sampling_params", None)
                         if sampling_params:
                             result = _handle_output(
                                 output, self.tools, tracking, sampling_params, self.max_tool_calls, self.executor
                             )
+                            # Result is None when we are waiting for tool execution.
                             if result is not None:
                                 outputs.append(result)
                     else:
@@ -509,17 +495,9 @@ class LLMRayActor:
         for req_id, (future, last_o, last_output) in tracking["pending_tool_futures"].items():
             if not future.done():
                 continue
+            tool_result = future.result()
 
-            # Tool future is done, process it
-            tool_result = future.result()  # Get the tool result
-
-            # Get sampling params from metadata
-            req_metadata = self.request_metadata.get(req_id, {})
-            sampling_params = req_metadata.get("sampling_params", None)
-            if not sampling_params:
-                dict_keys_to_delete.append(req_id)
-                continue
-
+            sampling_params = self.request_metadata[req_id]["sampling_params"]
             last_prompt_token_ids = last_output.prompt_token_ids
             last_token_ids = last_o.token_ids
             tool_output_token_ids = tokenizer.encode(
@@ -567,13 +545,9 @@ class LLMRayActor:
             else:
                 # If we can't make a new request, the output is complete
                 outputs.append(tracking["concat_outputs"][req_id])
-
             dict_keys_to_delete.append(req_id)
-
         for req_id in dict_keys_to_delete:
-            if req_id in tracking["pending_tool_futures"]:
-                del tracking["pending_tool_futures"][req_id]
-
+            tracking["pending_tool_futures"].pop(req_id, None)
         return outputs
 
     def init_process_group(
