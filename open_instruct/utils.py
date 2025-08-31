@@ -987,24 +987,21 @@ def maybe_update_beaker_description(
         logger.warning("This might be fine if you are e.g. running in an interactive job.")
         return
 
-    description_components = [
-        current_description,
-        f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}",
-        f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}",
-    ]
+    # Store the original description on first call
+    if experiment_id not in original_descriptions:
+        original_descriptions[experiment_id] = current_description
+
+    # Build description from scratch each time
+    description_components = [original_descriptions[experiment_id]]
+
+    # Add git info
+    description_components.append(f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}")
+    description_components.append(f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}")
 
     if wandb_url:
         description_components.append(wandb_url)
+
     if current_step is not None:
-        progress_pattern = r"\[[\d.]+% complete \(step \d+/\d+\), (?:eta [^\]]+|finished)\]"
-        base_description = re.sub(progress_pattern, "", current_description).strip()
-
-        if experiment_id not in original_descriptions:
-            original_descriptions[experiment_id] = base_description
-
-        base_description = original_descriptions[experiment_id]
-        description_components[0] = base_description
-
         progress_pct = (current_step / total_steps) * 100
         elapsed_time = time.time() - start_time
 
