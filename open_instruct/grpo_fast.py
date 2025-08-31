@@ -1830,10 +1830,7 @@ def setup_runtime_variables(args: Args) -> Args:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
     args.tool_use = args.tools is not None and len(args.tools) > 0
     if args.inference_batch_size is None:
-        args.inference_batch_size = (
-            max(1, math.ceil(args.num_unique_prompts_rollout / args.vllm_num_engines))
-            * args.num_samples_per_prompt_rollout
-        )
+        args.inference_batch_size = max(1, math.ceil(args.num_unique_prompts_rollout / args.vllm_num_engines))
     return args
 
 
