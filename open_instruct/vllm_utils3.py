@@ -343,10 +343,12 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         request_metadata[request_id] = metadata
         for j in range(request.generation_config.n):
             sub_request_id = f"{request_id}-{j}"
+            # Create a fresh copy of sampling_params for each sub-request
+            sub_sampling_params = copy.deepcopy(sampling_params)
             if request.generation_config.seed is not None:
                 # We need to seed each sub-request differently to avoid getting the same output.
-                sampling_params.seed = request.generation_config.seed + j
-            llm_engine.add_request(sub_request_id, tokens_prompt, sampling_params)
+                sub_sampling_params.seed = request.generation_config.seed + j
+            llm_engine.add_request(sub_request_id, tokens_prompt, sub_sampling_params)
             request_metadata[sub_request_id] = metadata
 
 
