@@ -672,8 +672,7 @@ class LMJudgeVerifier(VerifierFunction):
         for attempt in range(max_retries):
             # judges the quality of a response
             try:
-                # system_prompt = "Do not generate text between the <think> and </think> tags."  # "You are a concise assistant who gives very short explanations before giving a quality score."
-                messages = build_messages(prompt, system_prompt=None)
+                messages = build_messages(prompt)
 
                 # Faeze: check if the request would exceed context window
                 # Import the context window checker

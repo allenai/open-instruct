@@ -1514,18 +1514,7 @@ class RayProcess:
 
 
 def extract_user_query(conversation: str, chat_template_name: str = None) -> str:
-    # only works for tulu_thinker_r1_style
-    # pattern = r"\n\n<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
-
-    # works for tulu_thinker_r1_style and tulu_thinker
-    # pattern = r"<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
-
-    # match = re.search(pattern, conversation, re.DOTALL)
-    # # Return the captured group if found, else return None
-    # return match.group(1).strip() if match else None
-
-    # works for olmo too:
-    # TODO: implement a better logic to get queries before creating the chat template
+    
     pattern = re.compile(
         r"(?:"
         r"<\|user\|\>\n(?P<simple>.*?)\n<\|assistant\|\>\n<think>"  # template 0 (your original)
@@ -1535,7 +1524,6 @@ def extract_user_query(conversation: str, chat_template_name: str = None) -> str
         r")",
         re.DOTALL,
     )
-    breakpoint()
     # Get the last user query matched (most recent user turn before assistant <think>)
     matches = list(pattern.finditer(conversation))
     if matches:

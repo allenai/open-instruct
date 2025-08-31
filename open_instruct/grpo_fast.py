@@ -1418,7 +1418,6 @@ def accumulate_inference_batches(
             query, ground_truth, dataset, raw_query = pending_queries_map.pop(dataset_idx)
             batch_queries.append(query)
             batch_ground_truths.append(ground_truth)
-            # TODO
             batch_datasets.append(dataset)
             batch_raw_queries.append(raw_query)
 
@@ -1532,8 +1531,6 @@ def data_preparation_thread(
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
-            # decoded_queries = tokenizer.batch_decode(batch.queries, skip_special_tokens=True)
-            # decoded_queries = [extract_user_query(query) for query in decoded_queries]
             decoded_queries = batch.raw_queries
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
                 result.finish_reasons
@@ -2104,43 +2101,6 @@ def load_data_from_packing_thread(
         logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
         return None, data_thread_metrics, num_total_tokens
     return collated_data, data_thread_metrics, num_total_tokens
-
-
-# def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event):
-#     """Get the packed sequences with advantages from the packing thread."""
-#     with Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
-#         retries = 0
-#         max_retries = 3
-#         while True:
-#             if stop_event.is_set():
-#                 logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
-#                 return None, {}, num_total_tokens
-#             try:
-#                 # Increase timeout if needed for your specific workload
-#                 packed_data = packed_sequences_Q.get(timeout=60.0)  # Increased timeout
-#                 break
-#             except Empty:
-#                 retries += 1
-#                 logger.warning(f"[Main Thread] Timeout ({retries}/{max_retries}) waiting for packed sequences. Retrying...")
-#                 if retries >= max_retries:
-#                     logger.error("[Main Thread] Maximum retries reached waiting for packed sequences")
-#                     return None, {"error": "Maximum retries reached waiting for packed sequences"}, num_total_tokens
-
-#         # Check if we got error data
-#         if packed_data.get("collated_data") is None and "error" in packed_data.get("metrics", {}):
-#             logger.error(f"[Main Thread] Received error data: {packed_data['metrics']['error']}")
-#             return None, packed_data["metrics"], num_total_tokens
-
-#         data_thread_metrics = packed_data["metrics"]
-#         B = packed_data["B"]
-#         collated_data = packed_data["collated_data"]
-#         num_total_tokens += packed_data["num_new_tokens"]
-
-#     data_thread_metrics["time/trainer_idling"] = timer.duration
-#     if B == 0:
-#         logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-#         return None, data_thread_metrics, num_total_tokens
-#     return collated_data, data_thread_metrics, num_total_tokens
 
 
 def weight_sync_thread(
