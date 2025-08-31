@@ -411,6 +411,22 @@ class LLMRayActor:
             queue_name = "eval" if is_eval else "train"
             self.logger.warning(f"{queue_name} results queue is full, discarding result.")
 
+        # For caching should_stop status.
+        self._last_should_stop_update = float("-inf")
+        self._should_stop_value = False
+        self._should_stop_timeout_s = 5
+
+    def _should_stop(self) -> bool:
+        if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
+            should_stop_ref = self.actor_manager.should_stop.remote()
+            ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
+            if ready_refs:
+                self._should_stop_value = ray.get(ready_refs[0])
+                self._last_should_stop_update = time.perf_counter()
+            else:
+                ray.cancel(should_stop_ref)
+        return self._should_stop_value
+
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
@@ -420,9 +436,7 @@ class LLMRayActor:
         num_processed = 0
 
         # Non-blocking check for should_stop using ray.wait
-        should_stop_ref = self.actor_manager.should_stop.remote()
-        ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
-        if ready_refs and ray.get(ready_refs[0]):
+        if self._should_stop(): 
             return num_processed
 
         tracking = _init_tool_tracking() if self.tools else None
