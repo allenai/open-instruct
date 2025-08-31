@@ -29,6 +29,7 @@ uv run python mason.py \
         --dataset_mixer_list_splits train \
         --dataset_mixer_eval_list saurabh5/rlvr_acecoder_filtered 8 saurabh5/open-code-reasoning-rlvr-stdio 8 \
         --dataset_mixer_eval_list_splits train \
+	--error_on_all_filtered True \
         --max_token_length 10240 \
         --max_prompt_token_length 2048 \
         --response_length 4096 \
