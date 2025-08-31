@@ -1892,8 +1892,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
             # ------------------------------------------------------------------------------------------------
             # Train the model
+            update_ref_policy_future = []
             if not skip_batch:
-                update_ref_policy_future = []
                 with Timer("[Main Thread] 🗡️ Training"):
                     metrics_list: List[dict[str, float]] = ray.get(
                         [
