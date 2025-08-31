@@ -370,28 +370,31 @@ class LLMRayActor:
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
 
+        # For caching should_stop status.
+        self._last_should_stop_update = float("-inf")
+        self._should_stop_value = False
+        self._should_stop_timeout_s = 5
+
+    def _should_stop(self) -> bool:
+        if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
+            should_stop_ref = self.actor_manager.should_stop.remote()
+            ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
+            if ready_refs:
+                self._should_stop_value = ray.get(ready_refs[0])
+                self._last_should_stop_update = time.perf_counter()
+            else:
+                ray.cancel(should_stop_ref)
+        return self._should_stop_value
+
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
         Returns:
             int: Number of requests processed
         """
-        # Check for should_stop signal
-        should_stop_ref = self.actor_manager.should_stop.remote()
-        ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
-        if ready_refs and ray.get(ready_refs[0]):
-            return 0
-
-        # Collect individual prompts until we have a batch
-        individual_requests = []
-
-        # Try to collect up to inference_batch_size requests
         while len(individual_requests) < (self.inference_batch_size or 1):
-            # Check for should_stop between collecting requests
-            should_stop_ref = self.actor_manager.should_stop.remote()
-            ready_refs, _ = ray.wait([should_stop_ref], timeout=0.01)
-            if ready_refs and ray.get(ready_refs[0]):
-                break
+            if self._should_stop():
+                return 0
 
             try:
                 # Use a shorter timeout for subsequent requests to avoid long waits
