@@ -53,8 +53,8 @@ for model_name_or_path in "$@"; do
         --temperature 1.0 \
         --response_length "$response_length" \
         --vllm_top_p 0.9 \
-        --num_unique_prompts_rollout 1 \
-        --num_samples_per_prompt_rollout 1 \
+        --num_unique_prompts_rollout 4 \
+        --num_samples_per_prompt_rollout 16 \
         --vllm_num_engines 1 \
         --vllm_tensor_parallel_size 1 \
         --vllm_gpu_memory_utilization 0.9 \
