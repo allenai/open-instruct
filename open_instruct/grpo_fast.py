@@ -119,7 +119,6 @@ from open_instruct.utils import (
     calibrate_checkpoint_state_dir,
     clean_last_n_checkpoints_deepspeed,
     download_latest_checkpoint_from_gs,
-    extract_user_query,
     get_beaker_whoami,
     get_eval_ds_config,
     get_optimizer_grouped_parameters,
