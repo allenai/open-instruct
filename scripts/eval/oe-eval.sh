@@ -302,8 +302,8 @@ for TASK in "${TASKS[@]}"; do
                 continue
             fi
         fi
-        # Update env length variable in gantry-args, needed for bfcl
-        MAX_TOKENS_ARG=", \"env#111\": \"MAX_TOKENS=${MAX_LENGTH}\""
+        # Update env length variable in gantry-args, needed for bfcl, hardcoding 16384, need long length for multiturn
+        MAX_TOKENS_ARG=", \"env#111\": \"MAX_TOKENS=16384\""
     else
         # For other tasks, use the original MODEL_ARGS without metadata, and no gantry-arg for length
         MAX_TOKENS_ARG=""
