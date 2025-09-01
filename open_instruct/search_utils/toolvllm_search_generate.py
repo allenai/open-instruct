@@ -50,9 +50,11 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
     seen_citations = set()
     text_seen_so_far = ""
     for i, section in enumerate(answer_sections):
+        if section.strip() == "":
+            continue
         sections.append({
             "title": f"Section {i+1}",
-            "text": section,
+            "text": section.strip(),
             "citations": [],
         })
         # if there are citations inside the text, extract them
@@ -79,7 +81,11 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
     # so I'm going to support it anyway. Hopefully not too costly.
     # note that since we slowly grow the sections, we should add the citation to the minimal section it spans.
     for i in range(len(answer_sections)):
+        if answer_sections[i].strip() == "":
+            continue
         for j in range(i+1, len(answer_sections)+1):
+            if answer_sections[j].strip() == "":
+                continue
             citations = re.findall(r"<cite id=\"(\w+)\">((\n|.)*?)</cite>", "\n".join(answer_sections[i:j]))
             citations += re.findall(r"<cite id=(\w+)>((\n|.)*?)</cite>", "\n".join(answer_sections[i:j]))
             
@@ -94,7 +100,7 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
                     print(f"Snippet {citation_id} not found in thinking section, but it was cited in the answer section. Hallucination?")
                     snippet_text = ""
                 else:
-                    snippet_text = snippet[0]
+                    snippet_text = snippet[0][0]
                 citation_title = citation[1]  # use the query as the title
                 # add to all sections it spans
                 for k in range(i, j):
