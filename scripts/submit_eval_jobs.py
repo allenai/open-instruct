@@ -82,7 +82,7 @@ parser.add_argument("--workspace", type=str, default="oe-adapt-general")
 parser.add_argument("--model_name", type=str, default="hf-opt-7B")
 parser.add_argument("--hf_revision", type=str, default=None)
 parser.add_argument("--location", type=str, default=None)
-parser.add_argument("--beaker_image", type=str, default="oe-eval-beaker/oe_eval_auto", help="If given, use this Beaker image.")
+parser.add_argument("--beaker_image", type=str, default="oe-eval-beaker/oe_eval_olmo2_retrofit_auto", help="If given, use this Beaker image.")
 # image refernece: https://github.com/allenai/oe-eval-internal/blob/493660aca07d05384c6bd1860c4180860ccc7d53/oe_eval_internal/utilities/launch_utils.py#L143
 # image: https://legacy.beaker.org/im/01JRZWRN4FSGK7FWKV1DRPP1R1/details
 parser.add_argument("--beaker_subfolder", type=str, default=None)

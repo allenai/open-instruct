@@ -1157,7 +1157,7 @@ def launch_ai2_evals_on_weka(
     oe_eval_tasks: Optional[List[str]] = None,
     stop_strings: Optional[List[str]] = None,
     gs_bucket_path: Optional[str] = None,
-    eval_priority: Optional[str] = "normal",
+    eval_priority: Optional[str] = "high",
     beaker_image: Optional[str] = None,
 ) -> None:
     weka_cluster = "ai2/saturn-cirrascale ai2/neptune-cirrascale"
