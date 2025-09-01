@@ -86,8 +86,8 @@ from open_instruct import logger_utils, vllm_utils3
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
-    VERIFIER_SOURCE_KEY,
     RAW_PROMPT_KEY,
+    VERIFIER_SOURCE_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,

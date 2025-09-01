@@ -1514,7 +1514,6 @@ class RayProcess:
 
 
 def extract_user_query(conversation: str, chat_template_name: str = None) -> str:
-    
     pattern = re.compile(
         r"(?:"
         r"<\|user\|\>\n(?P<simple>.*?)\n<\|assistant\|\>\n<think>"  # template 0 (your original)

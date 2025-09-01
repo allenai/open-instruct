@@ -38,7 +38,6 @@ from open_instruct.utils import extract_final_answer
 
 logger = logger_utils.setup_logger(__name__)
 
-import logging
 
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 logging.getLogger("litellm").setLevel(logging.ERROR)
