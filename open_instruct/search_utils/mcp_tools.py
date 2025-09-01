@@ -81,8 +81,8 @@ class MCPTool(Tool):
                 error="Error calling tool.",
                 timeout=False,
                 runtime=0,
-                start_str="<snippets id=" + generate_snippet_id() + ">\n",
-                end_str="\n</snippets>",
+                start_str="<snippet id=" + generate_snippet_id() + ">\n",
+                end_str="\n</snippet>",
             )
 
         # munge into format that open-instruct likes.
@@ -92,8 +92,8 @@ class MCPTool(Tool):
             error=document_tool_output.error,
             timeout=document_tool_output.timeout,
             runtime=document_tool_output.runtime,
-            start_str="<snippets id=" + generate_snippet_id() + ">\n",
-            end_str="\n</snippets>",
+            start_str="<snippet id=" + generate_snippet_id() + ">\n",
+            end_str="\n</snippet>",
         )
 
 
