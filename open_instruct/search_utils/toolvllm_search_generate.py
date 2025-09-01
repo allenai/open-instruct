@@ -28,7 +28,6 @@ from datasets import Dataset, load_dataset
 from transformers import AutoTokenizer
 from vllm import SamplingParams
 
-from open_instruct.ground_truth_utils import f1_score
 from open_instruct.search_utils.search_tool import SearchTool
 from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 from open_instruct.tool_utils.tool_mcp import SemanticScholarSnippetSearchTool
@@ -69,7 +68,7 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
                 print(f"Snippet {citation_id} not found in thinking section, but it was cited in the answer section. Hallucination?")
                 snippet_text = ""
             else:
-                snippet_text = snippet[0]
+                snippet_text = snippet[0][0]
             citation_title = citation[1]  # use the query as the title
             sections[-1]["citations"].append({
                 "id": citation[0],

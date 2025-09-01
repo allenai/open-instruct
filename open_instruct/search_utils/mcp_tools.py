@@ -3,9 +3,7 @@ A wrapper and registry for tools in rl-rag-mcp.
 """
 import inspect
 import asyncio
-import re
 
-from mcp_agents.tool_interface.tool_parsers import get_registered_parsers
 from mcp_agents.tool_interface.mcp_tools import MassiveServeSearchTool, SemanticScholarSnippetSearchTool, SerperSearchTool
 
 from open_instruct.search_rewards.format_utils import generate_snippet_id
@@ -16,8 +14,6 @@ MCP_TOOL_REGISTRY = {
     "serper": SerperSearchTool,
     "massive_serve": MassiveServeSearchTool,
 }
-
-mcp_parsers = get_registered_parsers()
 
 def truncate_at_second_last_stop(text: str, stops: list[str]) -> str:
     # Collect all stop occurrences (position, stopstring)
@@ -98,6 +94,7 @@ class MCPTool(Tool):
 
 
 if __name__ == "__main__":
+    # example usage.
     from open_instruct.grpo_fast import launch_mcp_subprocess
     import time
     # need to launch mcp server first.
