@@ -1,7 +1,7 @@
 import asyncio
 import re
 import os
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # Handle imports for both direct execution and module import
 try:
@@ -9,6 +9,8 @@ try:
 except ImportError:
     # When running the file directly, use absolute import
     from run_utils import run_litellm, run_litellm_async
+
+from open_instruct.search_rewards.format_utils import extract_mcp_tool_calls
 
 citation_recall_has_citation_prompt = """You are an expert in evaluating text quality. You will receive a user's question about an uploaded document, a factual statement from an AI assistant's response based on that document, and a snippet from the document (since the document is too long to display in full). Your task is to carefully assess whether this statement is supported by the snippet. Please use the following scale to generate your rating:
 - [[Fully supported]] - Most information in the statement is supported by or extracted from the snippet. This applies only to cases where the statement and parts of the snippet are almost identical.
@@ -567,7 +569,7 @@ if __name__ == "__main__":
     # example_usage()
 
 
-def score_num_in_context_search_turns(context: str, upper_bound: int = 3) -> float:
+def score_num_in_context_search_turns(context: str, upper_bound: int = 3, mcp_parser_name: Optional[str] = None) -> float:
     """
     Score the number of search turns in the response.
     This function extracts all strings wrapped within <search> and </search> tags,
@@ -578,7 +580,18 @@ def score_num_in_context_search_turns(context: str, upper_bound: int = 3) -> flo
 
     # Use re.findall to extract all substrings within <search> tags
     # The re.DOTALL flag allows '.' to match newline characters, in case a query spans multiple lines.
-    queries = re.findall(r"<search>(.*?)</search>", context, re.DOTALL)
+    queries = extract_mcp_tool_calls(context, mcp_parser_name)
+    # if not mcp_parser_name:
+    #     queries = re.findall(r"<search>(.*?)</search>", context, re.DOTALL)
+    # else:
+    #     if mcp_parser_name == "unified":
+    #         queries = [match[1] for match in re.findall(r"<tool name=(.*?)</tool>", context, re.DOTALL)]
+    #     elif mcp_parser_name == "v20250824":
+    #         queries = [match[1] for match in re.findall(r"<call_tool name=(.*?)>(.*?)</call_tool>", context, re.DOTALL)]
+    #         if not queries:
+    #             queries = [match[1] for match in re.findall(r"<call_tool name=(.*?)>(.*?)</call>", context, re.DOTALL)]
+    #     else:
+    #         raise ValueError(f"Unsupported MCP parser name: {mcp_parser_name}")
 
     # A valid query must not be empty or contain only whitespace.
     num_valid_queries = sum(1 for q in queries if q.strip())

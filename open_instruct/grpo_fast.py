@@ -387,6 +387,8 @@ class Args:
     """Whether to use MCP tools. For now if you use the MCP tools, you need to run an MCP server on the background."""
     mcp_tool_names: Optional[str] = "s2"
     """The names (comma separated) of the MCP tool to use."""
+    mcp_parser_name: Optional[str] = "unified"
+    """The name of the MCP parser to use."""
     mcp_server_command: Optional[str] = None
     """Command to run MCP server subprocess when use_mcp_tools is enabled. Example: 'uv run python -m rl-rag-mcp.mcp_agents.mcp_backend.main --transport http --port 8000 --host 0.0.0.0 --path /mcp'"""
 
@@ -1728,6 +1730,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         for mcp_tool_name in args.mcp_tool_names:
             tool = MCPTool(
                 mcp_tool_name=mcp_tool_name,
+                parser_name=args.mcp_parser_name,
                 number_documents_to_search=args.number_documents_to_search,
                 base_url=args.search_api_endpoint,
             )

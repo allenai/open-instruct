@@ -1,6 +1,6 @@
 import hashlib
 import uuid
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
 import re
 import logging
 
@@ -81,7 +81,7 @@ def extract_citations_from_context(context: str) -> Dict[str, str]:
 
     # Pattern to match <snippets id="xxx" ...> content </snippets>
     # Updated to handle both quoted and unquoted attributes in HTML-like format
-    pattern = r'<snippets\s+id=(["\']?)([^"\'>\s]+)\1[^>]*>(.*?)</snippets>'
+    pattern = r'<snippets?\s+id=(["\']?)([^"\'>\s]+)\1[^>]*>(.*?)</snippets?>'
 
     matches = re.findall(pattern, context, re.DOTALL)
 
@@ -93,3 +93,16 @@ def extract_citations_from_context(context: str) -> Dict[str, str]:
 
     return citations
 
+
+def extract_mcp_tool_calls(context: str, mcp_parser_name: Optional[str] = None) -> List[str]:
+    if not mcp_parser_name:
+        return [match[1] for match in re.findall(r"<search>(.*?)</search>", context, re.DOTALL)]
+    elif mcp_parser_name == "unified":
+        return [match[1] for match in re.findall(r"<tool name=(.*?)>(.*?)</tool>", context, re.DOTALL)]
+    elif mcp_parser_name == "v20250824":
+        queries = [match[1] for match in re.findall(r"<call_tool name=(.*?)>(.*?)</call_tool>", context, re.DOTALL)]
+        if not queries:
+            queries = [match[1] for match in re.findall(r"<call_tool name=(.*?)>(.*?)</call>", context, re.DOTALL)]
+        return queries
+    else:
+        raise ValueError(f"Unsupported MCP parser name: {mcp_parser_name}")
