@@ -2024,7 +2024,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         stop=stop_strings,
     )
     eval_generation_config = SamplingParams(
-        temperature=0.0,
+        temperature=0.6,
         top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,

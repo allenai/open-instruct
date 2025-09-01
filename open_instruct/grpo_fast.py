@@ -95,6 +95,7 @@ from open_instruct.ground_truth_utils import (
     build_all_verifiers,
     cleanup_all_llm_judge_clients,
     soft_format_reward_func,
+    is_a_good_rl_rag_response,
 )
 from open_instruct.model_utils import (
     ModelConfig,
@@ -261,6 +262,8 @@ class Args:
     """whether to add the R1 style format reward"""
     r1_style_format_reward: float = 1.0
     """the reward value for R1 style format reward"""
+    apply_rl_rag_format_reward: bool = False
+    """whether to add the RL-RAG style format reward--only responses with a valid answer and at least one valid query will be rewarded"""
     additive_format_reward: bool = False
     """whether to add the format reward to the final reward"""
 
@@ -1779,7 +1782,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         stop=stop_strings,
     )
     eval_generation_config = SamplingParams(
-        temperature=0.0,
+        temperature=0.6,
         top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
@@ -1895,8 +1898,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
             # ------------------------------------------------------------------------------------------------
             # Train the model
+            update_ref_policy_future = []
             if not skip_batch:
-                update_ref_policy_future = []
                 with Timer("[Main Thread] 🗡️ Training"):
                     metrics_list: List[dict[str, float]] = ray.get(
                         [
@@ -2008,6 +2011,42 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     )
                 )
                 eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
+                
+                # Calculate per-dataset eval scores
+                per_dataset_scores = {}
+                if eval_dataset_names is not None:
+                    from collections import defaultdict
+                    dataset_scores = defaultdict(list)
+                    
+                    # Debug: Print the actual dataset names we're seeing
+                    print(f"[DEBUG] eval_dataset_names type: {type(eval_dataset_names)}")
+                    print(f"[DEBUG] First few eval_dataset_names: {eval_dataset_names[:5] if len(eval_dataset_names) > 0 else 'empty'}")
+                    unique_names = set()
+                    for name in eval_dataset_names:
+                        if isinstance(name, list):
+                            unique_names.add("_".join(str(x) for x in name))
+                        else:
+                            unique_names.add(str(name))
+                    print(f"[DEBUG] Unique dataset names found: {unique_names}")
+                    
+                    for score, dataset_name in zip(eval_scores, eval_dataset_names):
+                        # Convert dataset_name to string if it's a list
+                        if isinstance(dataset_name, list):
+                            dataset_name_str = "_".join(str(x) for x in dataset_name)
+                        else:
+                            dataset_name_str = str(dataset_name)
+                        dataset_scores[dataset_name_str].append(score)
+                    
+                    dataset_means = []
+                    for dataset_name, scores in dataset_scores.items():
+                        dataset_mean = np.array(scores).mean()
+                        per_dataset_scores[f"eval/scores_{dataset_name}"] = dataset_mean
+                        dataset_means.append(dataset_mean)
+                    
+                    # Add macro average (equal weight to each test set)
+                    if dataset_means:
+                        per_dataset_scores["eval/scores_macro"] = np.array(dataset_means).mean()
+                
                 eval_metrics = {
                     "eval/scores": np.array(eval_scores).mean(),
                     "eval/sequence_lengths": eval_sequence_lengths.mean(),
@@ -2015,6 +2054,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     "eval/sequence_lengths_max": eval_sequence_lengths.max(),
                     "eval/stop_rate": eval_stop_rate,
                     **eval_reward_metrics,
+                    **per_dataset_scores,
                 }
                 print_rich_single_line_metrics(eval_metrics)
                 for key, value in eval_metrics.items():
@@ -2025,6 +2065,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
                 table["scores"] = eval_scores
                 table["ground_truth"] = eval_ground_truths
+                if eval_dataset_names is not None:
+                    table["dataset"] = eval_dataset_names
                 df = pd.DataFrame(table)
                 if args.with_tracking:
                     wandb.log({"sample_completions": wandb.Table(dataframe=df)})
@@ -2145,6 +2187,14 @@ if __name__ == "__main__":
                 for i in range(len(format_scores)):
                     scores[i] = format_scores[i] + scores[i]
                 metrics["val/format_scores"] = np.array(format_scores).mean()
+        elif args.apply_rl_rag_format_reward:
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating RL-RAG format reward"):
+                rl_rag_format_scores = is_a_good_rl_rag_response(decoded_responses)
+                if len(rl_rag_format_scores) != len(scores):
+                    raise ValueError(f"{len(rl_rag_format_scores)=} != {len(scores)=}")
+                for i in range(len(rl_rag_format_scores)):
+                    scores[i] = rl_rag_format_scores[i] + scores[i]
+                metrics["val/rl_rag_format_scores"] = np.array(rl_rag_format_scores).mean()
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
@@ -2163,10 +2213,14 @@ if __name__ == "__main__":
                 # slightly complex combo of good outputs and additive format reward
                 for i in range(len(verifiable_rewards)):
                     if not args.only_reward_good_outputs or (good_outputs[i] and args.only_reward_good_outputs):
-                        if args.apply_r1_style_format_reward and args.additive_format_reward:
+                        if (args.apply_r1_style_format_reward or args.apply_rl_rag_format_reward) and args.additive_format_reward:
                             scores[i] = verifiable_rewards[i] + scores[i]
-                        elif args.apply_r1_style_format_reward and not args.additive_format_reward:
-                            scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
+                        elif (args.apply_r1_style_format_reward or args.apply_rl_rag_format_reward) and not args.additive_format_reward:
+                            # Check which format reward was applied
+                            if args.apply_r1_style_format_reward:
+                                scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
+                            elif args.apply_rl_rag_format_reward:
+                                scores[i] = verifiable_rewards[i] if rl_rag_format_scores[i] == 1 else 0
                         else:
                             scores[i] = verifiable_rewards[i]
                 np_verifiable_rewards = np.array(verifiable_rewards)
