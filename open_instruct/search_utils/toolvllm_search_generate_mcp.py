@@ -130,7 +130,6 @@ def main():
 
         if 'port' in args.mcp_server_command:
             os.environ["MCP_TRANSPORT_PORT"] = args.mcp_server_command.split("--port ")[1].split(" ")[0]
-        else:
 
         # make output directory
         os.makedirs(args.output_dir, exist_ok=True)
