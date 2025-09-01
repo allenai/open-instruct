@@ -1349,6 +1349,7 @@ def accumulate_inference_batches(
     training_step: int,
     generation_config,
     actor_manager=None,
+    expected_num_prompts: int,
     timeout: Optional[float] = None,
 ) -> tuple[GenerationResult, Batch]:
     """Accumulate multiple inference results into a single training batch.
@@ -1359,6 +1360,7 @@ def accumulate_inference_batches(
         args: Arguments containing vllm_num_engines
         training_step: Current training step for error reporting
         generation_config: Generation config containing n (number of samples per prompt)
+        expected_num_prompts: Number of prompts to accumulate
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
 
     Raises:
@@ -1372,14 +1374,11 @@ def accumulate_inference_batches(
     all_queries = []
     all_ground_truths = []
     all_datasets = []
-    # Calculate expected number of individual results
-    # With batching, we expect num_unique_prompts_rollout individual results total
-    expected_results = args.num_unique_prompts_rollout
 
     for i in tqdm(
-        range(expected_results),
-        total=expected_results,
-        desc=f"Accumulating {expected_results} individual results",
+        range(expected_num_prompts),
+        total=expected_num_prompts,
+        desc=f"Accumulating {expected_num_prompts} individual results",
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     ):
@@ -1487,7 +1486,13 @@ def data_preparation_thread(
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
             result, batch = accumulate_inference_batches(
-                inference_results_Q, pending_queries_map, args, training_step, generation_config, actor_manager
+                inference_results_Q,
+                pending_queries_map,
+                args,
+                training_step,
+                generation_config,
+                actor_manager,
+                args.num_unique_prompts_rollout,
             )
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
@@ -2291,6 +2296,7 @@ def maybe_evaluate(
             training_step,
             eval_generation_config,
             actor_manager,
+            len(eval_batch.queries),
             timeout=timeout,
         )
 

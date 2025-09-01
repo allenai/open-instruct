@@ -229,9 +229,8 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=
         else:
             merged_outputs[real_req_id].outputs.append(tracking["concat_outputs"][req_id].outputs[0])
 
-    final_outputs = sorted(
-        merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1]))
-    )
+    # Sort by dataset index (extracted from request_id format: "{training_step}_{idx}")
+    final_outputs = sorted(merged_outputs.values(), key=lambda x: int(x.request_id.split("_")[1].split("-")[0]))
 
     return _process_outputs_with_tools(
         final_outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
@@ -392,6 +391,7 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
+        individual_requests = []
         while len(individual_requests) < (self.inference_batch_size or 1):
             if self._should_stop():
                 return 0
@@ -424,8 +424,7 @@ class LLMRayActor:
 
         for req in individual_requests:
             combined_prompts.append(req.prompt)  # Each req.prompt is a single prompt
-            if req.dataset_index is not None:
-                combined_indices.append(req.dataset_index)
+            combined_indices.append(req.dataset_index)  # Always append to maintain alignment
 
         # Create a BatchRequest with multiple prompts for processing
         # Note: _process_request expects prompts (plural) so we create a synthetic batch
@@ -502,7 +501,7 @@ class LLMRayActor:
             tracking = None
             tokenizer = None
 
-        self._add_initial_requests(prompts, sampling_params, original_n, request.training_step)
+        self._add_initial_requests(prompts, sampling_params, original_n, request.training_step, request.dataset_index)
 
         outputs = []
         iteration = 0
@@ -565,20 +564,23 @@ class LLMRayActor:
         )
         return result
 
-    def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step):
+    def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step, dataset_indices):
         """Add initial requests to the engine."""
         for i, prompt in enumerate(prompts):
-            if self.tools:
-                # Create individual requests for each sample when using tools
-                for j in range(n_samples):
-                    request_id = f"{training_step}_{i}-{j}"
-                    self.request_metadata[request_id] = {"start_time": time.time(), "prompt_tokens": len(prompt)}
-                    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=f"{training_step}_{i}")
-                    self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
+            # Use dataset index if available, otherwise use local index for uniqueness
+            if dataset_indices and i < len(dataset_indices) and dataset_indices[i] is not None:
+                idx = dataset_indices[i]
             else:
-                # Standard request format for non-tool mode
-                request_id = f"batch_{training_step}_{i}"
-                self.request_metadata[request_id] = {"start_time": time.time(), "prompt_tokens": len(prompt)}
+                # Fallback to local index if dataset_index is None or not available
+                idx = i
+
+            request_id = f"{training_step}_{idx}"
+            if self.tools:
+                for j in range(n_samples):
+                    sample_request_id = f"{request_id}-{j}"
+                    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=sample_request_id))
+                    self.llm_engine.add_request(sample_request_id, tokens_prompt, sampling_params)
+            else:
                 tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=request_id)
                 self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
 
