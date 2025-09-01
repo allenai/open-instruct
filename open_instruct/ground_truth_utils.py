@@ -1082,6 +1082,24 @@ def soft_format_reward_func(responses: List[str], reward_scale: float = 1.0) -> 
     return [reward_scale if match else 0.0 for match in matches]
 
 
+def is_a_good_rl_rag_response(responses: List[str], reward_scale: float = 1.0) -> bool:
+    """
+    Check if the response is a good response.
+    """
+    # check whether the response output a valid answer
+    pattern = r".*?</think>\s*<answer>.*?</answer>"
+    matches1 = [re.match(pattern, r, re.DOTALL) for r in responses]
+
+    # check whether the response includes at least one valid query
+    pattern = r".*?</think>\s*<search>.+?</search>"
+    matches2 = [re.match(pattern, r, re.DOTALL) for r in responses]
+    
+    # only reward when both patterns are matched
+    matches = [match and match2 for match, match2 in zip(matches1, matches2)]
+    
+    return [reward_scale if match else 0.0 for match in matches]
+
+
 async def cleanup_all_llm_judge_clients():
     """
     Cleanup function to properly close all LLM judge clients before shutdown.
