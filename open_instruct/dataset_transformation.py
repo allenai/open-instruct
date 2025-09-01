@@ -1194,7 +1194,7 @@ def rlvr_tokenize_v1(
     row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
     row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
     # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
-    row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt if msg["role"] != "system")
+    row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
     return row
 
 
@@ -1225,7 +1225,7 @@ def rlvr_tokenize_v2(
     # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
     # row[DEFAULT_SFT_MESSAGES_KEY] = prompt
     # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
-    row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt if msg["role"] != "system")
+    row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
     # some basic transformations:
     # if ground truths is a string, make it a list
     if isinstance(row[ground_truths_key], str):

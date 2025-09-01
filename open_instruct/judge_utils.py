@@ -76,16 +76,17 @@ Respond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}"""
 general_quality_ref_template = """
 ### Task Description
 Please act as an impartial judge and evaluate the quality of the answer provided by an
-AI assistant to the user query displayed below. Judge whether the provided answer is good by comparing it to the reference answer.
+AI assistant to the conversation history leading up to the answer displayed below.
+Judge whether the provided answer is good by comparing it to the reference answer.
 
 Notes:
-- Besides comparing to the referennce answer, your evaluation should consider factors such as the helpfulness, relevance, accuracy, creativity, appropriate level of detail, and how well the response satisfies the user’s explicit constraints or accurately follows their instructions.
+- Besides comparing to the reference answer, your evaluation should consider factors such as the helpfulness, relevance, accuracy, creativity, appropriate level of detail, and how well the response satisfies the user's explicit constraints or accurately follows their instructions.
 - Note that sometimes the reference answer is not the only answer. So any valid variation of the reference answer is also acceptable and can get a full score.
 - Begin your evaluation by providing a short explanation.
 - Be as objective as possible. After providing your short explanation, please output a score on a scale of 1 to 10.
 - Please adhere to the following format.
 
-[Query]
+[Conversation History]
 {input}
 
 [AI Answer]
