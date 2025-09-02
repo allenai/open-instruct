@@ -82,24 +82,17 @@ class GetDatasetsTest(unittest.TestCase):
 class TestBeakerDescription(unittest.TestCase):
     """Test the beaker description update function."""
 
-    @mock.patch.dict(os.environ, {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"})
-    @mock.patch("open_instruct.utils.is_beaker_job")
-    @mock.patch("beaker.Beaker.from_env")
-    def test_description_does_not_accumulate(self, mock_beaker_from_env, mock_is_beaker_job):
-        """Test that the description doesn't accumulate git info and wandb URLs on repeated calls."""
-        # Setup mocks
+    def _setup_beaker_mocks(self, mock_beaker_from_env, mock_is_beaker_job, initial_description):
+        """Shared mock setup for beaker tests."""
         mock_is_beaker_job.return_value = True
 
-        # Mock the Beaker client and experiment
         mock_client = mock.MagicMock()
         mock_beaker_from_env.return_value = mock_client
 
-        # Mock experiment spec with initial description
         mock_spec = mock.MagicMock()
-        mock_spec.description = "Beaker-Mason job."
+        mock_spec.description = initial_description
         mock_client.experiment.get.return_value = mock_spec
 
-        # Track all set_description calls
         description_history = []
 
         def track_description(exp_id, desc):
@@ -107,13 +100,22 @@ class TestBeakerDescription(unittest.TestCase):
 
         mock_client.experiment.set_description.side_effect = track_description
 
+        return mock_client, mock_spec, description_history
+
+    @mock.patch.dict(os.environ, {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"})
+    @mock.patch("open_instruct.utils.is_beaker_job")
+    @mock.patch("beaker.Beaker.from_env")
+    def test_description_does_not_accumulate(self, mock_beaker_from_env, mock_is_beaker_job):
+        """Test that the description doesn't accumulate git info and wandb URLs on repeated calls."""
+        mock_client, mock_spec, description_history = self._setup_beaker_mocks(
+            mock_beaker_from_env, mock_is_beaker_job, "Beaker-Mason job."
+        )
+
         wandb_url = "https://wandb.ai/ai2-llm/open_instruct_internal/runs/1f3ow3oh"
         start_time = time.time()
 
-        # Use a shared original_descriptions dictionary across calls
         original_descriptions = {}
 
-        # Simulate a training loop with multiple updates
         for step in [10, 20, 30]:
             utils.maybe_update_beaker_description(
                 current_step=step,
@@ -122,21 +124,16 @@ class TestBeakerDescription(unittest.TestCase):
                 wandb_url=wandb_url,
                 original_descriptions=original_descriptions,
             )
-            # Update the mock description to simulate what Beaker would return
             if description_history:
                 mock_spec.description = description_history[-1]
 
-        # Check that descriptions were set
         self.assertEqual(len(description_history), 3)
 
-        # Check that git info and wandb URL don't accumulate
         for i, desc in enumerate(description_history):
-            # Count occurrences of key components
             git_commit_count = desc.count("git_commit:")
             git_branch_count = desc.count("git_branch:")
             wandb_count = desc.count(wandb_url)
 
-            # Each should appear exactly once
             self.assertEqual(
                 git_commit_count,
                 1,
@@ -153,7 +150,6 @@ class TestBeakerDescription(unittest.TestCase):
                 f"Step {(i + 1) * 10}: wandb URL should appear once, but appears {wandb_count} times in: {desc}",
             )
 
-            # Verify the structure is correct
             self.assertIn("Beaker-Mason job.", desc)
             self.assertIn("git_commit: abc123", desc)
             self.assertIn("git_branch: main", desc)
@@ -165,35 +161,19 @@ class TestBeakerDescription(unittest.TestCase):
     @mock.patch("beaker.Beaker.from_env")
     def test_description_without_progress(self, mock_beaker_from_env, mock_is_beaker_job):
         """Test description updates without progress information."""
-        mock_is_beaker_job.return_value = True
+        mock_client, mock_spec, description_history = self._setup_beaker_mocks(
+            mock_beaker_from_env, mock_is_beaker_job, "Initial job description"
+        )
 
-        mock_client = mock.MagicMock()
-        mock_beaker_from_env.return_value = mock_client
-
-        mock_spec = mock.MagicMock()
-        mock_spec.description = "Initial job description"
-        mock_client.experiment.get.return_value = mock_spec
-
-        description_history = []
-
-        def track_description(exp_id, desc):
-            description_history.append(desc)
-
-        mock_client.experiment.set_description.side_effect = track_description
-
-        # Use a shared original_descriptions dictionary
         original_descriptions = {}
 
-        # Call without progress info
         utils.maybe_update_beaker_description(
             wandb_url="https://wandb.ai/team/project/runs/xyz789", original_descriptions=original_descriptions
         )
 
-        # Check the description
         self.assertEqual(len(description_history), 1)
         desc = description_history[0]
 
-        # Should have base description, git info, and wandb URL, but no progress
         self.assertIn("Initial job description", desc)
         self.assertIn("git_commit: def456", desc)
         self.assertIn("git_branch: dev", desc)
