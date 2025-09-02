@@ -582,7 +582,6 @@ class LLMRayActor:
 
         for req_id in dict_keys_to_delete:
             tracking["pending_tool_futures"].pop(req_id, None)
-        return outputs
 
     def init_process_group(
         self,
