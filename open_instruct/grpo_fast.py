@@ -375,6 +375,8 @@ class Args:
     """How often to log training rollouts (every N training steps)"""
     num_training_rollouts_to_log: int = 16
     """Number of training rollouts to log each time"""
+    log_direction_agreement: bool = False
+    """Whether to log direction agreement between fine-grained rewards and global reward"""
 
     # Tool settings
     tools: Optional[List[str]] = None
@@ -2239,6 +2241,14 @@ if __name__ == "__main__":
                     np_value = np.array(value)
                     metrics[f"objective/{key}_reward"] = np_value.mean()
                     metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
+                
+                # log direction agreement
+                if args.log_direction_agreement:
+                    from open_instruct.search_rewards.utils._direction_agreement import compute_direction_agreement
+                    with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating direction agreement"):
+                        direction_agreement_dict = compute_direction_agreement(log_values, verifiable_rewards)
+                        for key, value in direction_agreement_dict.items():
+                            metrics[f"analysis/direction_agreement/{key}"] = value
 
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
         if args.non_stop_penalty:
