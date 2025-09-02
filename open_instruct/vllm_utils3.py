@@ -578,7 +578,7 @@ class LLMRayActor:
             if self.tools:
                 for j in range(n_samples):
                     sample_request_id = f"{request_id}-{j}"
-                    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=sample_request_id))
+                    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=sample_request_id)
                     self.llm_engine.add_request(sample_request_id, tokens_prompt, sampling_params)
             else:
                 tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=request_id)
