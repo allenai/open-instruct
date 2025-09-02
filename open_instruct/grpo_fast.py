@@ -1514,7 +1514,6 @@ def data_preparation_thread(
                 datasets=repeat_each(batch.datasets, args.num_samples_per_prompt_rollout),
                 indices=repeat_each(batch.indices, args.num_samples_per_prompt_rollout) if batch.indices else None,
             )
-
             good_outputs = [
                 len(result.request_info.tool_outputs[i]) > 0
                 and result.request_info.tool_calleds[i]
