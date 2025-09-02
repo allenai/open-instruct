@@ -49,14 +49,18 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
     answer_sections = answer_section.split("\n")
     seen_citations = set()
     text_seen_so_far = ""
+    # map each answer line index to its corresponding section index (or None if empty)
+    answer_idx_to_section_idx = {}
     for i, section in enumerate(answer_sections):
         if section.strip() == "":
+            answer_idx_to_section_idx[i] = None
             continue
         sections.append({
             "title": f"Section {i+1}",
             "text": section.strip(),
             "citations": [],
         })
+        answer_idx_to_section_idx[i] = len(sections) - 1
         # if there are citations inside the text, extract them
         citations = re.findall(r"<cite id=\"(\w+)\">((\n|.)*?)</cite>", section)
         citations += re.findall(r"<cite id=(\w+)>((\n|.)*?)</cite>", section)
@@ -64,8 +68,8 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
         for j, citation in enumerate(citations):
             citation_id = citation[0]
             seen_citations.add(citation_id)
-            # find corresponding snippet
-            snippet = re.findall(r"<snippets id=" + citation_id + r">((\n|.)*?)</snippets>", thinking_section)
+            # find corresponding snippet (support both <snippet> and <snippets>)
+            snippet = re.findall(r"<snippets? id=" + re.escape(citation_id) + r">((\n|.)*?)</snippets?>", thinking_section)
             if not snippet:
                 print(f"Snippet {citation_id} not found in thinking section, but it was cited in the answer section. Hallucination?")
                 snippet_text = ""
@@ -83,7 +87,8 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
     for i in range(len(answer_sections)):
         if answer_sections[i].strip() == "":
             continue
-        for j in range(i+1, len(answer_sections)+1):
+        # j is exclusive; iterate up to and including len(answer_sections)
+        for j in range(i + 1, len(answer_sections) + 1):
             if answer_sections[j].strip() == "":
                 continue
             citations = re.findall(r"<cite id=\"(\w+)\">((\n|.)*?)</cite>", "\n".join(answer_sections[i:j]))
@@ -95,7 +100,7 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
                     continue
                 seen_citations.add(citation_id)
                 # find corresponding snippet
-                snippet = re.findall(r"<snippets id=" + citation_id + r">((\n|.)*?)</snippets>", thinking_section)
+                snippet = re.findall(r"<snippets? id=" + re.escape(citation_id) + r">((\n|.)*?)</snippets?>", thinking_section)
                 if not snippet:
                     print(f"Snippet {citation_id} not found in thinking section, but it was cited in the answer section. Hallucination?")
                     snippet_text = ""
@@ -104,7 +109,10 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
                 citation_title = citation[1]  # use the query as the title
                 # add to all sections it spans
                 for k in range(i, j):
-                    sections[k]["citations"].append({
+                    section_idx = answer_idx_to_section_idx.get(k)
+                    if section_idx is None:
+                        continue
+                    sections[section_idx]["citations"].append({
                         "id": citation_id,
                         "title": citation_title,
                         "snippets": [snippet_text],
@@ -114,6 +122,7 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
     
 
 def main():
+    mcp_process = None
     try:
         parser = argparse.ArgumentParser(description="Eval SimpleQA using the search actor.")
         parser.add_argument(
@@ -235,8 +244,24 @@ def main():
         generations = [x.outputs[0].token_ids for x in result]
         generations = [tokenizer.decode(x, skip_special_tokens=True) for x in generations]
         # parse out answer
-        predictions = [x.split("<answer>")[-1].replace("</answer>", "") for x in generations]
-
+        predictions = []
+        extracted_count = 0
+        for generation in generations:
+            final_answer = ""
+            # first, try to find stuff between <answer> and </answer>
+            answer = re.search(r"<answer>(.*?)</answer>", generation)
+            if answer:
+                final_answer = answer.group(1).strip()
+                extracted_count += 1
+            # second, anything after <answer>, and strip the tags
+            answer = generation.split("<answer>")[-1].replace("</answer>", "")
+            final_answer = answer.strip()
+            if answer != generation.strip():                
+                final_answer = answer.strip()
+                extracted_count += 1
+            predictions.append(final_answer)
+        # stat: print extracted predictions
+        print(f"Extracted {extracted_count} predictions out of {len(generations)}, thats {extracted_count / len(generations) * 100:.2f}%")
         # save predictions with sample data.
         os.makedirs(args.output_dir, exist_ok=True)
         with open(f"{args.output_dir}/predictions.jsonl", "w") as f:
