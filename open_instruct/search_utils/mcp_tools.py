@@ -18,6 +18,8 @@ MCP_TOOL_REGISTRY = {
 }
 
 def truncate_at_second_last_stop(text: str, stops: list[str]) -> str:
+    # dedup stop strings
+    stops = list(set(stops))
     # Collect all stop occurrences (position, stopstring)
     positions = []
     for stop in stops:
