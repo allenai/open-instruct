@@ -467,14 +467,14 @@ class LLMRayActor:
 
             # Poll tool futures first (matching ToolUseLLM order)
             if tracking and tracking.get("pending_tool_futures"):
-                self._poll_tool_futures(tracking, request.sampling_params, tokenizer)
+                self._poll_tool_futures(tracking, request.generation_config, tokenizer)
 
             # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
             if self.llm_engine.has_unfinished_requests():
                 step_outputs = [o for o in self.llm_engine.step() if o.finished]
                 for output in step_outputs:
                     result = _handle_output(
-                        output, self.tools, tracking, request.sampling_params, self.max_tool_calls, self.executor
+                        output, self.tools, tracking, request.generation_config, self.max_tool_calls, self.executor
                     )
                     if result is not None:
                         outputs.append(result)
@@ -518,23 +518,6 @@ class LLMRayActor:
             start_time=request.start_time,
         )
         return result
-
-    def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step):
-        """Add initial requests to the engine."""
-        for i, prompt in enumerate(prompts):
-            if self.tools:
-                # Create individual requests for each sample when using tools
-                for j in range(n_samples):
-                    request_id = f"{training_step}_{i}-{j}"
-                    self.request_metadata[request_id] = {"start_time": time.time(), "prompt_tokens": len(prompt)}
-                    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=f"{training_step}_{i}")
-                    self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
-            else:
-                # Standard request format for non-tool mode
-                request_id = f"batch_{training_step}_{i}"
-                self.request_metadata[request_id] = {"start_time": time.time(), "prompt_tokens": len(prompt)}
-                tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=request_id)
-                self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
 
     def _poll_tool_futures(self, tracking, sampling_params, tokenizer):
         """Poll and handle completed tool executions."""
@@ -598,8 +581,8 @@ class LLMRayActor:
             dict_keys_to_delete.append(req_id)
 
         for req_id in dict_keys_to_delete:
-            if req_id in tracking["pending_tool_futures"]:
-                del tracking["pending_tool_futures"][req_id]
+            tracking["pending_tool_futures"].pop(req_id, None)
+        return outputs
 
     def init_process_group(
         self,
