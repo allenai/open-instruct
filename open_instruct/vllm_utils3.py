@@ -18,6 +18,7 @@
 import copy
 import os
 import queue
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -403,6 +404,10 @@ class LLMRayActor:
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
         self.request_metadata = {}
+        # For caching should_stop status.
+        self._last_should_stop_update = float("-inf")
+        self._should_stop_value = False
+        self._should_stop_timeout_s = 5
 
     def _insert_result_to_queue(self, result, is_eval: bool):
         """Insert result into the appropriate queue with error handling."""
@@ -412,11 +417,6 @@ class LLMRayActor:
         except queue.Full:
             queue_name = "eval" if is_eval else "train"
             self.logger.warning(f"{queue_name} results queue is full, discarding result.")
-
-        # For caching should_stop status.
-        self._last_should_stop_update = float("-inf")
-        self._should_stop_value = False
-        self._should_stop_timeout_s = 5
 
     def _should_stop(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
@@ -438,7 +438,7 @@ class LLMRayActor:
         num_processed = 0
 
         # Non-blocking check for should_stop using ray.wait
-        if self._should_stop(): 
+        if self._should_stop():
             return num_processed
 
         tracking = _init_tool_tracking() if self.tools else None

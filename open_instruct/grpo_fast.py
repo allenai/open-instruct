@@ -1530,13 +1530,13 @@ def data_preparation_thread(
 
         # Debug: Print first 20 tokens of each generation before filtering
         logger.info(
-            f"[Data Prep Debug] Step {training_step}: Received {len(result.responses)} responses before filtering"
+            f"[debug] [Data Prep] Step {training_step}: Received {len(result.responses)} responses before filtering"
         )
         for i in range(min(10, len(result.responses))):  # Show first 10 responses to avoid spam
             response_tokens = result.responses[i][:20]  # First 20 tokens
             decoded_preview = tokenizer.decode(response_tokens, skip_special_tokens=False)
             logger.info(
-                f"  Response {i}: finish_reason='{result.finish_reasons[i]}', "
+                f"[debug]   Response {i}: finish_reason='{result.finish_reasons[i]}', "
                 f"len={len(result.responses[i])}, preview: {decoded_preview!r}"
             )
 
@@ -1596,7 +1596,7 @@ def data_preparation_thread(
 
             # Debug: Log filtering stats
             logger.info(
-                f"[Data Prep Debug] Step {training_step}: After zero-std filtering: "
+                f"[debug] [Data Prep] Step {training_step}: After zero-std filtering: "
                 f"{original_batch_size} -> {len(scores)} responses "
                 f"({original_batch_size - len(scores)} filtered due to zero std)"
             )
@@ -1612,7 +1612,7 @@ def data_preparation_thread(
 
                 # Debug: Log truncated completion filtering
                 logger.info(
-                    f"[Data Prep Debug] Step {training_step}: After truncated completion filter: "
+                    f"[debug] [Data Prep] Step {training_step}: After truncated completion filter: "
                     f"{before_truncate_filter} -> {len(scores)} responses "
                     f"({before_truncate_filter - len(scores)} filtered due to non-stop finish reason)"
                 )
