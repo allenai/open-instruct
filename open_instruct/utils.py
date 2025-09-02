@@ -967,7 +967,6 @@ def maybe_update_beaker_description(
         )
         return
 
-    client = beaker.Beaker.from_env()
     try:
         client = beaker.Beaker.from_env()
     except beaker.exceptions.ConfigurationError as e:
