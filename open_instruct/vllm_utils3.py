@@ -448,7 +448,8 @@ class LLMRayActor:
 
             result = self._process_request(request)
 
-            return self._insert_result_to_queue(result, is_eval=request.is_eval)
+            self._insert_result_to_queue(result, is_eval=request.is_eval)
+            return 1
 
     def _process_request(self, request):
         """Unified processing for both tool and non-tool generation."""
@@ -517,8 +518,9 @@ class LLMRayActor:
             metadata = self.request_metadata.pop(request_id)
             total_prompt_tokens += metadata["prompt_tokens"]
             earliest_start_time = min(earliest_start_time, metadata["start_time"])
-            for completion in outs:
-                total_generation_tokens += len(completion.token_ids)
+            for output in outs:
+                for completion in output.outputs:
+                    total_generation_tokens += len(completion.token_ids)
         generation_time = end_time - earliest_start_time
         result = _finalize_outputs(
             outputs,
