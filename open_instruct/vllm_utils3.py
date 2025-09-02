@@ -43,7 +43,7 @@ from vllm.v1 import kv_cache_interface
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
-from open_instruct.queue_types import GenerationResult, RequestInfo, TokenStatistics
+from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
