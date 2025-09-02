@@ -267,6 +267,8 @@ class Args:
 
     fill_completions: bool = False
     """Whether to refill the batchsize with after filtering."""
+    error_on_empty_batch: bool = False
+    """Whether to raise an error when the filtered batch has 0 data."""
 
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
@@ -1639,6 +1641,20 @@ def data_preparation_thread(
                 f"Final batch size: {final_batch_size}, "
                 f"Overall retention rate: {final_batch_size / original_batch_size:.2%}"
             )
+
+            # Raise error if batch is empty and error_on_empty_batch is True
+            if args.error_on_empty_batch and final_batch_size == 0:
+                # Log first 80 characters of each response for debugging
+                logger.info("All responses were filtered out. First 80 characters of each response:")
+                for i, response_text in enumerate(decoded_responses):
+                    truncated = response_text[:80] + ("..." if len(response_text) > 80 else "")
+                    logger.info(f"  Response {i}: {truncated}")
+
+                raise ValueError(
+                    f"Filtered batch has 0 data. Original batch size was {original_batch_size}. "
+                    "This can happen when all prompts have zero std in their reward scores. "
+                    "Set --error_on_empty_batch False to log this as a warning instead."
+                )
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
