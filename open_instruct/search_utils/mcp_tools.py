@@ -1,6 +1,7 @@
 """
 A wrapper and registry for tools in rl-rag-mcp.
 """
+from typing import List
 import inspect
 import asyncio
 
@@ -43,34 +44,52 @@ def truncate_at_second_last_stop(text: str, stops: list[str]) -> str:
 
 
 class MCPTool(Tool):
-    def __init__(self, mcp_tool_name: str, parser_name: str = "unified", *args, **kwargs):
-        # filter kwargs so we only pass ones the constructor understands
-        mcp_tool_cls = MCP_TOOL_REGISTRY[mcp_tool_name]
-        sig = inspect.signature(mcp_tool_cls.__init__)
-        valid_params = set(sig.parameters.keys())
-        filtered_kwargs = {
-            k: v for k, v in kwargs.items() if k in valid_params
-        }
+    """
+    Unlike other tools, this guy handles *all mcp tools*. Why?
+    because they share the same end string (</tool>). Hence, we need the parsers
+    to work out how to route them. Ideally, this would be more tightly integrated into vllm,
+    but for now, this is a bit cleaner.
+    """
+    def __init__(self, mcp_tool_names: List[str], parser_name: str = "unified", *args, **kwargs):
+        self.mcp_tools = []
+        self.stop_strings = []
+        for mcp_tool_name in mcp_tool_names:
+            # filter kwargs so we only pass ones the constructor understands
+            mcp_tool_cls = MCP_TOOL_REGISTRY[mcp_tool_name]
+            sig = inspect.signature(mcp_tool_cls.__init__)
+            valid_params = set(sig.parameters.keys())
+            filtered_kwargs = {
+                k: v for k, v in kwargs.items() if k in valid_params
+            }
 
-        # basically, we want to defer as much as possible to the mcp tool.
-        # this 'tool' actually just passes everything down to the mcp tool.
-        self.mcp_tool = mcp_tool_cls(
-            name=mcp_tool_name,
-            tool_parser=parser_name,
-            transport_type="StreamableHttpTransport",  # for now, we only support streamable http transport.
-            **filtered_kwargs,
-        )
-        # assign the stop strings from the parser itself.
-        self.stop_strings = self.mcp_tool.tool_parser.stop_sequences
+            # basically, we want to defer as much as possible to the mcp tool.
+            # this 'tool' actually just passes everything down to the mcp tool.
+            self.mcp_tools.append(mcp_tool_cls(
+                name=mcp_tool_name,
+                tool_parser=parser_name,
+                transport_type="StreamableHttpTransport",  # for now, we only support streamable http transport.
+                **filtered_kwargs,
+            ))
+            # assign the stop strings from the parser itself.
+            self.stop_strings += self.mcp_tools[-1].tool_parser.stop_sequences
         # MCP tool handles its own start and end strings.
         super().__init__(start_str="", end_str=self.stop_strings[-1])
+
+    def get_stop_strings(self) -> List[str]:
+        return self.stop_strings
 
     def __call__(self, prompt: str) -> ToolOutput:
         # the one thing open-instruct needs to do: remove older tool calls.
         trunc_prompt = truncate_at_second_last_stop(prompt, self.stop_strings)
         print(f"trunc_prompt: {trunc_prompt}")
-        # then we just directly call the tool!
-        document_tool_output = asyncio.run(self.mcp_tool(trunc_prompt))
+        # work out which mcp tool to call.
+        document_tool_output = None
+        for mcp_tool in self.mcp_tools:
+            if mcp_tool.tool_parser.has_calls(trunc_prompt, mcp_tool.name):
+                document_tool_output = asyncio.run(mcp_tool(trunc_prompt))
+                break
+        if document_tool_output is None:
+            raise ValueError(f"No mcp tool found for prompt: {prompt}")       
         # mcp tool return is Optional[DocumentToolOutput]
         if document_tool_output is None:
             return ToolOutput(
@@ -104,6 +123,6 @@ if __name__ == "__main__":
     # wait for it to launch.
     time.sleep(10)
     # then we can use the mcp tool.
-    mcp_tool = MCPTool("serper", number_documents_to_search=10, api_endpoint="http://localhost:8000/mcp")
-    print(mcp_tool('<tool name="SerperSearchTool">What is the capital of France?</tool>'))
+    mcp_tool = MCPTool(["google_search"], number_documents_to_search=10, api_endpoint="http://localhost:8000/mcp")
+    print(mcp_tool('<tool name="google_search">What is the capital of France?</tool>'))
 

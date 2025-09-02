@@ -1727,16 +1727,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             else:
                 raise ValueError(f"Unknown tool: {tool}")
     if args.use_mcp_tools:
-        for mcp_tool_name in args.mcp_tool_names:
-            tool = MCPTool(
-                mcp_tool_name=mcp_tool_name,
-                parser_name=args.mcp_parser_name,
-                number_documents_to_search=args.number_documents_to_search,
-                base_url=args.search_api_endpoint,
-            )
-            # mcp tools can have multiple end strings.
-            for end_str in tool.stop_strings:
-                tool_objects[end_str] = tool
+        tool = MCPTool(
+            mcp_tool_name=mcp_tool_name.split(","),
+            parser_name=args.mcp_parser_name,
+            number_documents_to_search=args.number_documents_to_search,
+            base_url=args.search_api_endpoint,
+        )
+        # mcp tools can have multiple end strings.
+        for end_str in tool.get_stop_strings():
+            tool_objects[end_str] = tool
 
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
