@@ -1443,12 +1443,6 @@ def accumulate_inference_batches(
                 accumulated_stats.generation_time, result.token_statistics.generation_time
             )
 
-    combined_dataset_indices = []
-    for result in results:
-        if result.dataset_index is not None:
-            for idx in result.dataset_index:
-                combined_dataset_indices.extend([idx] * generation_config.n)
-
     # Create combined RequestInfo
     combined_request_info = RequestInfo(
         num_calls=combined_num_calls,
@@ -1464,7 +1458,7 @@ def accumulate_inference_batches(
         finish_reasons=combined_finish_reasons,
         masks=combined_masks,
         request_info=combined_request_info,
-        dataset_index=combined_dataset_indices,
+        dataset_index=None,  # Not meaningful for combined result
         token_statistics=accumulated_stats,
     )
 
