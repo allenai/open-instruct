@@ -1592,7 +1592,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     if args.with_tracking:
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
-    args.tool_use = args.tools is not None and len(args.tools) > 0
+    args.tool_use = (args.tools is not None and len(args.tools) > 0) or args.use_mcp_tools
 
     # ------------------------------------------------------------
     # Setup experiment tracking and seeds
