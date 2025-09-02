@@ -491,10 +491,11 @@ class LLMRayActor:
         # Preserve original order from request.dataset_index
         prefix = "eval" if request.is_eval else "train"
         ordered_ids = [f"{prefix}_{request.training_step}_{dataset_idx}" for dataset_idx in request.dataset_index]
+        final_outputs = []
         for request_id in ordered_ids:
             outs = combined_outputs[request_id]
             assert len(outs) == request.generation_config.n
-            outputs.append(
+            final_outputs.append(
                 vllm.RequestOutput(
                     request_id=request_id,
                     prompt=outs[0].prompt,
@@ -512,7 +513,7 @@ class LLMRayActor:
                     total_generation_tokens += len(completion.token_ids)
         generation_time = end_time - earliest_start_time
         result = _finalize_outputs(
-            outputs,
+            final_outputs,
             tracking,
             request.dataset_index,
             self.tools,
