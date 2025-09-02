@@ -1476,6 +1476,7 @@ def accumulate_inference_batches(
         tool_calleds=combined_tool_calleds,
     )
 
+    # Create combined GenerationResult
     combined_result = GenerationResult(
         responses=combined_responses,
         finish_reasons=combined_finish_reasons,
