@@ -349,9 +349,12 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
             sub_request_id = f"{request_id}_{j}"
             # Create a fresh copy of sampling_params for each sub-request
             sub_sampling_params = copy.deepcopy(sampling_params)
+            del sub_sampling_params.seed  # Remove seed to avoid vLLM warning
             if request.generation_config.seed is not None:
                 # We need to seed each sub-request differently to avoid getting the same output.
                 sub_sampling_params.seed = request.generation_config.seed + j
+            sub_sampling_params.seed = None
+            print(f"[DEBUG] {sampling_params=}, {sub_sampling_params=}, {request.generation_config=}")
             llm_engine.add_request(sub_request_id, tokens_prompt, sub_sampling_params)
 
 

@@ -1498,7 +1498,29 @@ def data_preparation_thread(
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
                 return
 
+            # Debug: Log shapes of accumulate_inference_batches results
+            logger.info(f"[DEBUG] accumulate_inference_batches results for training_step {training_step}:")
+            logger.info(f"  result.responses shape: {len(result.responses)} responses")
+            if result.responses:
+                logger.info(f"    First response length: {len(result.responses[0])} tokens")
+            logger.info(f"  result.finish_reasons length: {len(result.finish_reasons)}")
+            logger.info(f"  result.masks shape: {len(result.masks)} masks")
+            if result.masks:
+                logger.info(f"    First mask length: {len(result.masks[0])}")
+            logger.info(f"  result.infos: {len(result.infos)} info tuples")
+            logger.info(f"  batch.queries shape: {len(batch.queries)} queries")
+            if batch.queries:
+                logger.info(f"    First query length: {len(batch.queries[0])} tokens")
+            logger.info(f"  batch.ground_truths length: {len(batch.ground_truths)}")
+            logger.info(f"  batch.datasets length: {len(batch.datasets)}")
+
         getting_response_time = timer.duration
+
+        # Log first 100 characters of each prompt after receiving
+        logger.info("Prompts after receiving from accumulation:")
+        decoded_initial = tokenizer.batch_decode(batch.queries, skip_special_tokens=True)
+        for i, prompt in enumerate(decoded_initial[:5]):  # Show first 5 prompts
+            logger.info(f"  Prompt {i}: {prompt[:100]}...")
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -1509,6 +1531,12 @@ def data_preparation_thread(
                 datasets=repeat_each(batch.datasets, args.num_samples_per_prompt_rollout),
                 indices=repeat_each(batch.indices, args.num_samples_per_prompt_rollout) if batch.indices else None,
             )
+
+            # Log first 100 characters after multiple sampling
+            logger.info(f"After duplicating for {args.num_samples_per_prompt_rollout} samples per prompt:")
+            decoded_duplicated = tokenizer.batch_decode(batch.queries[:10], skip_special_tokens=True)  # Show first 10
+            for i, prompt in enumerate(decoded_duplicated):
+                logger.info(f"  Sample {i}: {prompt[:100]}...")
             good_outputs = [
                 len(result.request_info.tool_outputs[i]) > 0
                 and result.request_info.tool_calleds[i]
