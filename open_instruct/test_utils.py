@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Copied from https://github.com/huggingface/alignment-handbook/blob/main/tests/test_data.py
-import os
 import time
 import unittest
 from unittest import mock
@@ -103,11 +102,15 @@ def _setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, initial_descri
 class TestBeakerDescription(unittest.TestCase):
     """Test the beaker description update function."""
 
-    @mock.patch.dict(os.environ, {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"})
+    @mock.patch("os.environ.get")
     @mock.patch("beaker.Beaker.from_env")
     @mock.patch("open_instruct.utils.is_beaker_job")
-    def test_description_does_not_accumulate(self, mock_is_beaker_job, mock_beaker_from_env):
+    def test_description_does_not_accumulate(self, mock_is_beaker_job, mock_beaker_from_env, mock_environ_get):
         """Test that the description doesn't accumulate git info and wandb URLs on repeated calls."""
+        # Configure os.environ.get mock
+        env_values = {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"}
+        mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
+
         mock_client, mock_spec, description_history = _setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, "Beaker-Mason job."
         )
@@ -157,11 +160,15 @@ class TestBeakerDescription(unittest.TestCase):
             self.assertIn(wandb_url, desc)
             self.assertIn(f"% complete (step {(i + 1) * 10}/100)", desc)
 
-    @mock.patch.dict(os.environ, {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "def456", "GIT_BRANCH": "dev"})
+    @mock.patch("os.environ.get")
     @mock.patch("beaker.Beaker.from_env")
     @mock.patch("open_instruct.utils.is_beaker_job")
-    def test_description_without_progress(self, mock_is_beaker_job, mock_beaker_from_env):
+    def test_description_without_progress(self, mock_is_beaker_job, mock_beaker_from_env, mock_environ_get):
         """Test description updates without progress information."""
+        # Configure os.environ.get mock
+        env_values = {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "def456", "GIT_BRANCH": "dev"}
+        mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
+
         mock_client, mock_spec, description_history = _setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, "Initial job description"
         )
