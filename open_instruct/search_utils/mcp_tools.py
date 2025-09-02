@@ -89,7 +89,16 @@ class MCPTool(Tool):
                 document_tool_output = asyncio.run(mcp_tool(trunc_prompt))
                 break
         if document_tool_output is None:
-            raise print(f"No mcp tool found for tunc. prompt: {trunc_prompt}")      
+            print(f"No mcp tool found for tunc. prompt: {trunc_prompt}")      
+            return ToolOutput(
+                output="Error calling tool. Incorrect tool call format!",
+                called=False,
+                error="Error calling tool. Incorrect tool call format!",
+                timeout=False,
+                runtime=0,
+                start_str="<snippet id=" + generate_snippet_id() + ">\n",
+                end_str="\n</snippet>",
+            )
         # mcp tool return is Optional[DocumentToolOutput]
         if document_tool_output is None:
             return ToolOutput(
