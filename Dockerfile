@@ -42,12 +42,15 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 RUN python -m nltk.downloader punkt
 RUN python -m nltk.downloader punkt_tab
-COPY rl-rag-mcp/requirements.txt mcp-requirements.txt
-RUN pip install -r mcp-requirements.txt
+
+COPY rl-rag-mcp rl-rag-mcp
+RUN pip install -e rl-rag-mcp
+RUN python -m playwright install-deps
+RUN python -m playwright install chromium
+
 
 COPY open_instruct open_instruct
 COPY oe-eval-internal oe-eval-internal
-COPY rl-rag-mcp rl-rag-mcp
 
 # install the package in editable mode
 COPY pyproject.toml .
