@@ -17,6 +17,7 @@
 
 import os
 import queue
+import random
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -202,8 +203,6 @@ def _process_outputs_with_tools(
 def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=None, start_time=None):
     """Prepare final outputs based on whether tools were used."""
     if not tools:
-        # request_id is prefix _ training_step _ dataset_idx _ sub_idx.
-        outputs.sort(key=lambda x: int(x.request_id.split("_")[2]))
         return _process_outputs(
             outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
         )
@@ -334,8 +333,6 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
 
         tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=request_id)
 
-        # We *have* to manually duplicate requests to properly handle tool tracking,
-        # so we always do it to only have one code path.
         # Create sampling params with n=1 for individual tracking
         sampling_params = request.generation_config.clone()
         sampling_params.n = 1
@@ -343,18 +340,23 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         metadata["generation_config"] = request.generation_config
         metadata["prompt_tokens"] = len(prompt)
         metadata["start_time"] = time.perf_counter()
+        metadata["order"] = batch_idx
         request_metadata[request_id] = metadata
         for j in range(request.generation_config.n):
             sub_request_id = f"{request_id}_{j}"
+            # Track order for sub-requests too
+            request_metadata[sub_request_id] = {"order": batch_idx}
             # Create a fresh copy of sampling_params for each sub-request
             sub_sampling_params = sampling_params.clone()
             del sub_sampling_params.seed  # Remove seed to avoid vLLM warning
             if request.generation_config.seed is not None:
-                # We need to seed each sub-request differently to avoid getting the same output.
-                sub_sampling_params.seed = request.generation_config.seed + j
-                assert sampling_params.seed != sub_sampling_params.seed, (
-                    "Sub-request seed should differ from base seed"
-                )
+                # Use a deterministic RNG to generate diverse seeds for each sample
+                rng = random.Random(request.generation_config.seed + dataset_idx * 1_009 + j)
+                sub_sampling_params.seed = rng.randint(0, 2**31 - 1)
+            else:
+                # Keep existing logic for unseeded case
+                base_seed = int((request.training_step * 1_000_003) + (dataset_idx * 1_009)) & 0x7FFFFFFF
+                sub_sampling_params.seed = int(base_seed + j + 1)
             llm_engine.add_request(sub_request_id, tokens_prompt, sub_sampling_params)
 
 
@@ -505,9 +507,14 @@ class LLMRayActor:
             request_id = "_".join(output.request_id.split("_")[:-1])
             combined_outputs[request_id].append(output)
         outputs = []
-        for request_id, outs in combined_outputs.items():
+        ordered_ids = (
+            sorted(combined_outputs.keys(), key=lambda rid: self.request_metadata[rid]["order"])
+            if self.request_metadata
+            else list(combined_outputs.keys())
+        )
+        for request_id in ordered_ids:
+            outs = combined_outputs[request_id]
             assert len(outs) == request.generation_config.n
-            # Create a new RequestOutput with all required fields from the first output
             outputs.append(
                 vllm.RequestOutput(
                     request_id=request_id,
