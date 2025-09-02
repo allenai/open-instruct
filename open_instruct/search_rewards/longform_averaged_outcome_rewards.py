@@ -4,7 +4,8 @@ from typing import Any, Dict
 
 from open_instruct.search_rewards.utils.format_utils import extract_answer_context_citations
 from open_instruct.search_rewards.longform_rubric_only_rewards import _score_rubric
-from open_instruct.search_rewards.utils.citation_utils import score_in_context_citations, score_num_in_context_search_turns
+from open_instruct.search_rewards.utils.citation_utils import score_in_context_citations
+from open_instruct.search_rewards.utils.search_utils import score_num_in_context_search_turns
 
 LOGGER = logging.getLogger(__name__)
 

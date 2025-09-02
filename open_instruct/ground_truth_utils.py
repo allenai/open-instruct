@@ -36,14 +36,14 @@ from open_instruct.math_utils import (
     normalize_final_answer,
     remove_boxed,
 )
-from open_instruct.search_rewards.openscholar_rewards import compute_paper_reward
+from open_instruct.search_rewards.old_rewards.openscholar_rewards import compute_paper_reward
 from open_instruct.search_rewards.longform_hle_rewards import compute_hle_reward
 from open_instruct.search_rewards.longform_rubric_only_rewards import compute_rubric_reward
-from open_instruct.search_rewards.finegrained_rewards import compute_finegrained_reward
 from open_instruct.search_rewards.longform_averaged_outcome_rewards import compute_longform_averaged_outcome_reward
 from open_instruct.search_rewards.longform_finegrained_rewards_v1 import compute_longform_finegrained_reward
 from open_instruct.search_rewards.utils.find_reward_spans import FinegrainedScore 
 from open_instruct.search_rewards.toy_case_multi_dataset_reward import compute_multi_question_reward
+from open_instruct.search_rewards.utils.search_utils import score_query_redundancy
 from open_instruct.utils import extract_final_answer
 from open_instruct.IFEvalG import instructions_registry
 
@@ -1082,7 +1082,7 @@ def soft_format_reward_func(responses: List[str], reward_scale: float = 1.0) -> 
     return [reward_scale if match else 0.0 for match in matches]
 
 
-def is_a_good_rl_rag_response(responses: List[str], reward_scale: float = 1.0) -> bool:
+def is_a_good_rl_rag_response(responses: List[str], reward_scale: float = 5.0) -> List[float]:
     """
     Check if the response is a good response.
     """
@@ -1097,8 +1097,12 @@ def is_a_good_rl_rag_response(responses: List[str], reward_scale: float = 1.0) -
     # only reward when both patterns are matched
     matches = [match and match2 for match, match2 in zip(matches1, matches2)]
     
-    return [reward_scale if match else 0.0 for match in matches]
-
+    format_scores = [reward_scale if match else 0.0 for match in matches]
+    
+    query_redundancy_scores = [score_query_redundancy(r) for r in responses]
+    
+    fianl_socres = [format_score * query_redundancy_score for format_score, query_redundancy_score in zip(format_scores, query_redundancy_scores)]
+    return fianl_socres
 
 async def cleanup_all_llm_judge_clients():
     """
