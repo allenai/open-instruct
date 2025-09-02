@@ -1586,6 +1586,25 @@ def data_preparation_thread(
             real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
             expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
             non_zero_gradient_index = np.where(expanded_mask)[0]
+            
+            # Debug: Show examples of filtered responses
+            filtered_indices = np.where(~expanded_mask)[0]
+            if len(filtered_indices) > 0:
+                logger.info(f"[debug] Showing examples of filtered responses (zero std):")
+                # Show up to 5 filtered prompts
+                filtered_prompt_indices = np.where(~non_zero_std_mask)[0][:5]
+                for prompt_idx in filtered_prompt_indices:
+                    # Get the responses for this prompt
+                    start_idx = prompt_idx * args.num_samples_per_prompt_rollout
+                    end_idx = start_idx + args.num_samples_per_prompt_rollout
+                    prompt_scores = scores_per_prompt[prompt_idx]
+                    prompt_responses = result.responses[start_idx:end_idx]
+                    logger.info(f"  Prompt {prompt_idx}: scores={prompt_scores.tolist()}, std={prompt_scores.std():.6f}")
+                    for i, resp in enumerate(prompt_responses[:3]):  # Show first 3 responses
+                        # Truncate response for display
+                        resp_preview = resp[:100] + "..." if len(resp) > 100 else resp
+                        logger.info(f"    Response {i}: {repr(resp_preview)}")
+            
             advantages = advantages[non_zero_gradient_index]
             original_batch_size = len(scores)
             scores = scores[non_zero_gradient_index]

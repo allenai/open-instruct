@@ -315,23 +315,17 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
     """Add a request to the LLM engine."""
     prefix = "eval" if request.is_eval else "train"
 
-    # Handle batch of prompts - iterate over each prompt
     for batch_idx, prompt in enumerate(request.prompts):
-        # Get the specific dataset index for this prompt
-        if isinstance(request.dataset_index, list):
-            dataset_idx = request.dataset_index[batch_idx]
-        else:
-            dataset_idx = request.dataset_index
+        dataset_idx = request.dataset_index[batch_idx]
 
         request_id = f"{prefix}_{request.training_step}_{dataset_idx}"
         metadata = {
             "is_eval": request.is_eval,
-            "dataset_index": [dataset_idx],  # Wrap in list to maintain consistency with expected type
+            "dataset_index": dataset_idx,
             "training_step": request.training_step,
             "sampling_params": request.generation_config,
         }
 
-        # Create TokensPrompt for this single prompt
         tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=request_id)
 
         # We *have* to manually duplicate requests to properly handle tool tracking,
@@ -350,7 +344,6 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
                 # We need to seed each sub-request differently to avoid getting the same output.
                 sub_sampling_params.seed = request.generation_config.seed + j
             llm_engine.add_request(sub_request_id, tokens_prompt, sub_sampling_params)
-            request_metadata[sub_request_id] = metadata
 
 
 class LLMRayActor:
@@ -437,7 +430,6 @@ class LLMRayActor:
         """
         num_processed = 0
 
-        # Non-blocking check for should_stop using ray.wait
         if self._should_stop():
             return num_processed
 
@@ -462,13 +454,8 @@ class LLMRayActor:
                 collected_outputs[request_id].append(output)
                 metadata = self.request_metadata[request_id]
                 if len(collected_outputs[request_id]) == metadata["generation_config"].n:
-                    # Collect this prompt's outputs
-                    all_prompt_outputs.extend(collected_outputs[request_id])
-
-                    del collected_outputs[request_id]
+                    all_prompt_outputs.extend(collected_outputs.pop(request_id))
                     self.request_metadata.pop(request_id, None)
-                    for i in range(metadata["generation_config"].n):
-                        self.request_metadata.pop(f"{request_id}-{i}", None)
 
             pending_tool_futures = tracking["pending_tool_futures"] if self.tools else {}
             if not self.llm_engine.has_unfinished_requests() and not pending_tool_futures:
@@ -493,23 +480,18 @@ class LLMRayActor:
             tool_outputs = self._poll_tool_futures_and_get_outputs(tracking, tokenizer)
             outputs.extend(tool_outputs)
 
-        if self.llm_engine.has_unfinished_requests():
-            step_outputs = list(self.llm_engine.step())
-            for output in step_outputs:
-                if output.finished:
-                    if self.tools:
-                        req_metadata = self.request_metadata.get(output.request_id, {})
-                        sampling_params = req_metadata.get("sampling_params", None)
-                        if sampling_params:
-                            result = _handle_output(
-                                output, self.tools, tracking, sampling_params, self.max_tool_calls, self.executor
-                            )
-                            # Result is None when we are waiting for tool execution.
-                            if result is not None:
-                                outputs.append(result)
-                    else:
-                        outputs.append(output)
-
+        step_outputs = [o for o in self.llm_engine.step() if o.finished]
+        for output in step_outputs:
+            if self.tools:
+                sampling_params = self.request_metadata[output.request_id]["sampling_params"]
+                result = _handle_output(
+                    output, self.tools, tracking, sampling_params, self.max_tool_calls, self.executor
+                )
+                # Result is None when we are waiting for tool execution.
+                if result is not None:
+                    outputs.append(result)
+            else:
+                outputs.append(output)
         return outputs
 
     def _poll_tool_futures_and_get_outputs(self, tracking, tokenizer):
