@@ -1728,7 +1728,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 raise ValueError(f"Unknown tool: {tool}")
     if args.use_mcp_tools:
         tool = MCPTool(
-            mcp_tool_name=mcp_tool_name.split(","),
+            mcp_tool_names=args.mcp_tool_names.split(","),
             parser_name=args.mcp_parser_name,
             number_documents_to_search=args.number_documents_to_search,
             base_url=args.search_api_endpoint,
