@@ -5,7 +5,7 @@ from typing import List
 import inspect
 import asyncio
 
-from mcp_agents.tool_interface.mcp_tools import MassiveServeSearchTool, SemanticScholarSnippetSearchTool, SerperSearchTool, SerperBrowseTool
+from mcp_agents.tool_interface.mcp_tools import MassiveServeSearchTool, SemanticScholarSnippetSearchTool, SerperSearchTool, Crawl4AIBrowseTool
 
 from open_instruct.search_rewards.format_utils import generate_snippet_id
 from open_instruct.tool_utils.tool_vllm import Tool, ToolOutput
@@ -14,7 +14,7 @@ MCP_TOOL_REGISTRY = {
     "snippet_search": SemanticScholarSnippetSearchTool,
     "google_search": SerperSearchTool,
     "massive_serve": MassiveServeSearchTool,
-    "browse_webpage": SerperBrowseTool
+    "browse_webpage": Crawl4AIBrowseTool
 }
 
 def truncate_at_second_last_stop(text: str, stops: list[str]) -> str:
