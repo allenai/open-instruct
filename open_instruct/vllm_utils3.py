@@ -343,6 +343,7 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         metadata["sampling_params"] = sampling_params
         metadata["generation_config"] = request.generation_config
         metadata["prompt_tokens"] = len(prompt)
+        metadata["start_time"] = time.perf_counter()
         request_metadata[request_id] = metadata
         for j in range(request.generation_config.n):
             sub_request_id = f"{request_id}_{j}"
