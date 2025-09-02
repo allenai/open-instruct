@@ -110,7 +110,7 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
                         "snippets": [snippet_text],
                     })
 
-    return {"section": sections}
+    return {"response": {"section": sections}}
     
 
 def main():
@@ -245,6 +245,7 @@ def main():
 
         if args.use_astabench_format:
             predictions = [format_citation_data_into_sqa_format(x) for x in generations]
+            combined_data = [{**p, **ods} for p, ods in zip(predictions, original_dataset)]
             with open(f"{args.output_dir}/astabench_formatted_predictions.json", "w") as f:
                 json.dump(predictions, f)
     except Exception as e:

@@ -10,9 +10,10 @@ from open_instruct.search_rewards.format_utils import generate_snippet_id
 from open_instruct.tool_utils.tool_vllm import Tool, ToolOutput
 
 MCP_TOOL_REGISTRY = {
-    "semantic_scholar": SemanticScholarSnippetSearchTool,
-    "serper": SerperSearchTool,
+    "snippet_search": SemanticScholarSnippetSearchTool,
+    "google_search": SerperSearchTool,
     "massive_serve": MassiveServeSearchTool,
+    "browse_webpage": SerperBrowseTool
 }
 
 def truncate_at_second_last_stop(text: str, stops: list[str]) -> str:
