@@ -342,6 +342,7 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         sampling_params.n = 1
         metadata["sampling_params"] = sampling_params
         metadata["generation_config"] = request.generation_config
+        metadata["prompt_tokens"] = len(prompt)
         request_metadata[request_id] = metadata
         for j in range(request.generation_config.n):
             sub_request_id = f"{request_id}_{j}"
@@ -496,12 +497,22 @@ class LLMRayActor:
         combined_outputs = defaultdict(list)
         for output in outputs:
             # Remove the sub_idx.
-            request_id = "".join(output.request_id.split("_")[:-1])
+            request_id = "_".join(output.request_id.split("_")[:-1])
             combined_outputs[request_id].append(output)
         outputs = []
         for request_id, outs in combined_outputs.items():
             assert len(outs) == request.generation_config.n
-            outputs.append(vllm.RequestOutput(request_id=request_id, outputs=outs))
+            # Create a new RequestOutput with all required fields from the first output
+            outputs.append(
+                vllm.RequestOutput(
+                    request_id=request_id,
+                    prompt=outs[0].prompt,
+                    prompt_token_ids=outs[0].prompt_token_ids,
+                    prompt_logprobs=outs[0].prompt_logprobs,
+                    outputs=[completion for out in outs for completion in out.outputs],
+                    finished=outs[0].finished,
+                )
+            )
             metadata = self.request_metadata.pop(request_id)
             total_prompt_tokens += metadata["prompt_tokens"]
             earliest_start_time = min(earliest_start_time, metadata["start_time"])
