@@ -1,6 +1,6 @@
 import hashlib
 import uuid
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional, List
 import re
 import logging
 
@@ -81,7 +81,7 @@ def extract_citations_from_context(context: str) -> Dict[str, str]:
 
     # Pattern to match <snippets id="xxx" ...> content </snippets>
     # Updated to handle both quoted and unquoted attributes in HTML-like format
-    pattern = r'<snippets\s+id=(["\']?)([^"\'>\s]+)\1[^>]*>(.*?)</snippets>'
+    pattern = r'<snippets?\s+id=(["\']?)([^"\'>\s]+)\1[^>]*>(.*?)</snippets?>'
 
     matches = re.findall(pattern, context, re.DOTALL)
 

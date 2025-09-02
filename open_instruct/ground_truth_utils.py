@@ -95,6 +95,8 @@ class RubricVerifierConfig(VerifierConfig):
     """Whether to use the general rubric for evaluation instead of specific rubrics"""
     evaluate_closed_book_answer: bool = False
     """Whether to evaluate the closed book answer"""
+    mcp_parser_name: Optional[str] = "unified"
+    """The name of the MCP parser to use."""
 
 @dataclass
 class VerificationResult:
@@ -961,7 +963,7 @@ class RLRAGLongFormRubricsOnlyVerifier(VerifierFunction):
         use_general_rubric = self.verifier_config.use_general_rubric if self.verifier_config else False
         evaluate_closed_book_answer = self.verifier_config.evaluate_closed_book_answer if self.verifier_config else False
         
-        result = compute_rubric_reward(prediction, test_case, use_general_rubric=use_general_rubric)
+        result = compute_rubric_reward(prediction, test_case, use_general_rubric=use_general_rubric, mcp_parser_name=self.verifier_config.mcp_parser_name)
         score = result["reward"] if not evaluate_closed_book_answer else result["rubric_averaged_reward"]
         return VerificationResult(score=score, log_values=result["log_values"])
 

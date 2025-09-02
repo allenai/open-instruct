@@ -2,9 +2,7 @@
 Generate from json file.
 Used for astabench
 
-export MCP_TRANSPORT=StreamableHttpTransport
-export S2_API_KEY=xxxx
-python open_instruct/search_utils/toolvllm_search_generate.py \
+python open_instruct/search_utils/toolvllm_search_generate_mcp.py \
     --json_path rubrics_v2_recomputed.json \
     --model_path ai2-adapt-dev/tulu_3_long_finetune_qwen_7b_reg \
     --output_dir baseline_tulu_3_qwen25_7b_reg_asta_naive_rag \
@@ -12,7 +10,7 @@ python open_instruct/search_utils/toolvllm_search_generate.py \
     --offset 0 \
     --num_docs 3 \
     --search_api_endpoint https://api.semanticscholar.org/graph/v1/snippet/search \
-    --naive_rag_setting
+    --mcp_server_command 'python -m rl-rag-mcp.mcp_agents.mcp_backend.main --transport http --port 8000 --host 0.0.0.0 --path /mcp'
 """
 
 import argparse
@@ -21,20 +19,20 @@ import os
 import re
 import time
 import signal
-from tqdm import tqdm
 
 import ray
 from datasets import Dataset, load_dataset
 from transformers import AutoTokenizer
 from vllm import SamplingParams
 
-from open_instruct.search_utils.search_tool import SearchTool
 from open_instruct.tool_utils.tool_vllm import ToolUseLLM
-from open_instruct.tool_utils.tool_mcp import SemanticScholarSnippetSearchTool
+from open_instruct.search_utils.mcp_tools import MCPTool
 from open_instruct.grpo_fast import launch_mcp_subprocess
 
-
-SYSTEM_PROMPT = "You are a research assistant that answers questions through iterative reasoning and research.\n\nPROCESS:\n- Use <think></think> tags to show your reasoning at any point\n- Use <search>query</search> tags when you need information\n- You can alternate between thinking and searching multiple times\n- Only provide <answer></answer> tags when you have enough information for a complete response\n\nSEARCH RESULTS:\n- Results appear as: <snippet id=UNIQUE_ID>content</snippet>\n- Use exact snippet IDs for citations\n\nCITATION FORMAT:\n- In your final answer, wrap cited claims as: <cite id=SNIPPET_ID>your claim</cite>\n- Example: <cite id=a1b2c3d4>Studies show 85% effectiveness rates</cite>\n\nWORKFLOW EXAMPLE:\n<think>I need to understand the current market trends first</think>\n<search>2024 renewable energy market trends</search>\n[results provided]\n<think>Now I need specific data on solar panel efficiency</think>\n<search>latest solar panel efficiency 2024</search>\n[results provided]\n<answer>Based on my research... <cite id=abc123>claim from source</cite></answer>\n\nREQUIREMENTS:\n- Think and search iteratively until you have sufficient information\n- Only provide final answer when ready\n- Cite all claims from search results using exact snippet IDs"
+# load system prompt from a dataset to make my life easier.
+ds = load_dataset("rulins/rl_rag_no_retrieval_1k_longform_rubrics_only_with_system_prompt", split="train")
+assert ds[0]["messages"][0]["role"] == "system"
+SYSTEM_PROMPT = ds[0]["messages"][0]["content"]
 
 def format_citation_data_into_sqa_format(response: str) -> dict:
     """
@@ -50,11 +48,9 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
     seen_citations = set()
     text_seen_so_far = ""
     for i, section in enumerate(answer_sections):
-        if section.strip() == "":
-            continue
         sections.append({
             "title": f"Section {i+1}",
-            "text": section.strip(),
+            "text": section,
             "citations": [],
         })
         # if there are citations inside the text, extract them
@@ -65,7 +61,7 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
             citation_id = citation[0]
             seen_citations.add(citation_id)
             # find corresponding snippet
-            snippet = re.findall(r"<snippets id=" + citation_id + r">((\n|.)*?)</snippets>", thinking_section)
+            snippet = re.findall(r"<snippet id=" + citation_id + r">((\n|.)*?)</snippet>", thinking_section)
             if not snippet:
                 print(f"Snippet {citation_id} not found in thinking section, but it was cited in the answer section. Hallucination?")
                 snippet_text = ""
@@ -81,11 +77,7 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
     # so I'm going to support it anyway. Hopefully not too costly.
     # note that since we slowly grow the sections, we should add the citation to the minimal section it spans.
     for i in range(len(answer_sections)):
-        if answer_sections[i].strip() == "":
-            continue
         for j in range(i+1, len(answer_sections)+1):
-            if answer_sections[j].strip() == "":
-                continue
             citations = re.findall(r"<cite id=\"(\w+)\">((\n|.)*?)</cite>", "\n".join(answer_sections[i:j]))
             citations += re.findall(r"<cite id=(\w+)>((\n|.)*?)</cite>", "\n".join(answer_sections[i:j]))
             
@@ -95,12 +87,12 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
                     continue
                 seen_citations.add(citation_id)
                 # find corresponding snippet
-                snippet = re.findall(r"<snippets id=" + citation_id + r">((\n|.)*?)</snippets>", thinking_section)
+                snippet = re.findall(r"<snippet id=" + citation_id + r">((\n|.)*?)</snippet>", thinking_section)
                 if not snippet:
                     print(f"Snippet {citation_id} not found in thinking section, but it was cited in the answer section. Hallucination?")
                     snippet_text = ""
                 else:
-                    snippet_text = snippet[0][0]
+                    snippet_text = snippet[0]
                 citation_title = citation[1]  # use the query as the title
                 # add to all sections it spans
                 for k in range(i, j):
@@ -128,17 +120,23 @@ def main():
         parser.add_argument("--offset", type=int, default=0, help="Offset for the eval samples.")
         parser.add_argument("--num_docs", type=int, default=3, help="Number of documents to retrieve.")
         parser.add_argument("--search_api_endpoint", type=str, default="http://localhost:8000", help="Search API endpoint.")
-        parser.add_argument("--use_mcp_tool", action="store_true", help="Use the MCP search tool.")
         parser.add_argument("--use_astabench_format", action="store_true", help="Format citations into a format that can be used for astabench cached solver.")
         parser.add_argument("--dont_use_system_prompt", action="store_true", help="Don't use the system prompt.")
-        parser.add_argument("--naive_rag_setting", action="store_true", help="Naive rag setting: do a search, and directly generate after.")
+        parser.add_argument("--mcp_tool_names", type=str, default="semantic_scholar,serper", help="MCP tool names.")
+        parser.add_argument("--mcp_server_command", type=str, default="fastmcp run rl-rag-mcp/rag_mcp/main.py:mcp --transport streamable-http --port 8008", help="MCP server command.")
         args = parser.parse_args()
+
+        if 'port' in args.mcp_server_command:
+            os.environ["MCP_TRANSPORT_PORT"] = args.mcp_server_command.split("--port ")[1].split(" ")[0]
 
         # make output directory
         os.makedirs(args.output_dir, exist_ok=True)
 
         # Load the tokenizer
         tokenizer = AutoTokenizer.from_pretrained(args.model_path, revision=args.tokenizer_revision)
+
+        # launch mcp server
+        mcp_process = launch_mcp_subprocess(args.mcp_server_command, "./mcp_logs")
 
         # load the json data
         with open(args.json_path, "r") as f:
@@ -156,34 +154,19 @@ def main():
         else:
             raise ValueError(f"Question key not found in dataset: {dataset[0]}")
 
-        if args.use_mcp_tool:
-            # rn just hardcode the mcp server command
-            mcp_process = launch_mcp_subprocess(True, "fastmcp run rl-rag-mcp/rag_mcp/main.py:mcp --transport streamable-http --port 8000")
-            if mcp_process is None:
-                raise RuntimeError("Failed to launch MCP server subprocess")
-            tool = SemanticScholarSnippetSearchTool(
-                start_str="<search>",
-                end_str="</search>",
-            )
-        else:
-            tool = SearchTool(
-                start_str="<search>",
-                end_str="</search>",
-                api_endpoint=args.search_api_endpoint,
+        # load mcp tools
+        tool_objects = {}
+        for mcp_tool_name in args.mcp_tool_names.split(","):
+            tool = MCPTool(
+                mcp_tool_name=mcp_tool_name,
                 number_documents_to_search=args.num_docs,
+                base_url=args.search_api_endpoint,
             )
+            # mcp tools can have multiple end strings.
+            for end_str in tool.stop_strings:
+                tool_objects[end_str] = tool
 
-        if args.naive_rag_setting:
-            # for each prompt, directly search with our tool.
-            # then we will add the resulting answer to the prompt.
-            search_results = []
-            for sample in tqdm(dataset):
-                output = tool(f"<search>{sample[question_key]}</search>")
-                output_str = output.output
-                search_results.append(output_str)
-
-        # naive rag also doesn't use the system prompt.
-        if not args.dont_use_system_prompt and not args.naive_rag_setting:
+        if not args.dont_use_system_prompt:
             initial_message = [{"role": "system", "content": SYSTEM_PROMPT}]
         else:
             initial_message = []
@@ -193,13 +176,9 @@ def main():
             new_data = []
             for i, data in enumerate(dataset):
                 messages = initial_message + data["prompt"]
-                if args.naive_rag_setting:
-                    data["prompt"][-1]["content"] = f"Answer the question given the following documents.\nDocuments: {search_results[i]}\nQuestion: {data[question_key]}"
                 new_data.append({"messages": messages})
         else:
             ds = [{"messages": initial_message + [{"role": "user", "content": data[question_key]}]} for data in dataset]
-            if args.naive_rag_setting:
-                ds = [{"messages": initial_message + [{"role": "user", "content": f"Answer the question given the following documents.\nDocuments: {search_results[i]}\nQuestion: {data[question_key]}"}]} for i, data in enumerate(dataset)]
         ds = Dataset.from_list(ds)
 
         if args.max_eval_samples > -1 and args.max_eval_samples < len(ds):
@@ -213,7 +192,7 @@ def main():
             model=args.model_path,
             revision=args.model_revision,
             tokenizer_revision=args.tokenizer_revision,
-            tools={tool.end_str: tool},
+            tools=tool_objects,
             max_tool_calls=10,
             max_model_len=args.model_len,
         )
@@ -224,7 +203,7 @@ def main():
             max_tokens=args.model_len,
             include_stop_str_in_output=True,
             n=1,
-            stop=[tool.end_str]#, "</answer>"],
+            stop=list(tool_objects.keys()),
         )
         # Generate output using the actor.
         result = actor.generate(
@@ -249,26 +228,19 @@ def main():
                 json.dump(predictions, f)
     except Exception as e:
         print(f"Error: {e}")
-        if mcp_process is not None:
-            try:
-                print("🧹 Cleaning up MCP server subprocess...")
+        try:
+            print("🧹 Cleaning up MCP server subprocess...")
+            if mcp_process.poll() is None:
+                os.killpg(os.getpgid(mcp_process.pid), signal.SIGTERM)
+                time.sleep(2)
                 if mcp_process.poll() is None:
-                    os.killpg(os.getpgid(mcp_process.pid), signal.SIGTERM)
-                    time.sleep(2)
-                    if mcp_process.poll() is None:
-                        os.killpg(os.getpgid(mcp_process.pid), signal.SIGKILL)
-                print("✅ MCP server subprocess cleaned up")
-            except (OSError, ProcessLookupError) as cleanup_error:
-                print(f"Warning: Error during MCP cleanup: {cleanup_error}")
+                    os.killpg(os.getpgid(mcp_process.pid), signal.SIGKILL)
+            print("✅ MCP server subprocess cleaned up")
+        except (OSError, ProcessLookupError) as cleanup_error:
+            print(f"Warning: Error during MCP cleanup: {cleanup_error}")
         ray.shutdown()
         os._exit(1)
         raise  # Re-raise the exception after shutdown
-
-def test_format_citation_data_into_sqa_format():
-    from open_instruct.search_rewards.tests.formatted_test_answer import example_answer
-    import pprint
-    pprint.pprint(format_citation_data_into_sqa_format(example_answer))
-
 
 if __name__ == "__main__":
     main()
