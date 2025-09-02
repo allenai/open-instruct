@@ -15,7 +15,6 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
-import copy
 import os
 import queue
 import time
@@ -338,7 +337,7 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         # We *have* to manually duplicate requests to properly handle tool tracking,
         # so we always do it to only have one code path.
         # Create sampling params with n=1 for individual tracking
-        sampling_params = copy.deepcopy(request.generation_config)
+        sampling_params = request.generation_config.clone()
         sampling_params.n = 1
         metadata["sampling_params"] = sampling_params
         metadata["generation_config"] = request.generation_config
@@ -348,7 +347,7 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         for j in range(request.generation_config.n):
             sub_request_id = f"{request_id}_{j}"
             # Create a fresh copy of sampling_params for each sub-request
-            sub_sampling_params = copy.deepcopy(sampling_params)
+            sub_sampling_params = sampling_params.clone()
             del sub_sampling_params.seed  # Remove seed to avoid vLLM warning
             if request.generation_config.seed is not None:
                 # We need to seed each sub-request differently to avoid getting the same output.
@@ -588,7 +587,7 @@ class LLMRayActor:
             can_make_new_request = can_make_new_request and new_sample_tokens > 0
 
             if can_make_new_request:
-                new_sampling_params = copy.deepcopy(sampling_params)
+                new_sampling_params = sampling_params.clone()
                 new_sampling_params.max_tokens = new_sample_tokens
 
                 try:
