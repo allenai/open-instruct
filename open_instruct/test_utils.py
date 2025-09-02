@@ -79,35 +79,36 @@ class GetDatasetsTest(unittest.TestCase):
         self.assertTrue(parser.parse("0001-01-01T00:00:00Z"))
 
 
+def _setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, initial_description):
+    """Shared mock setup for beaker tests."""
+    mock_is_beaker_job.return_value = True
+
+    mock_client = mock.MagicMock()
+    mock_beaker_from_env.return_value = mock_client
+
+    mock_spec = mock.MagicMock()
+    mock_spec.description = initial_description
+    mock_client.experiment.get.return_value = mock_spec
+
+    description_history = []
+
+    def track_description(exp_id, desc):
+        description_history.append(desc)
+
+    mock_client.experiment.set_description.side_effect = track_description
+
+    return mock_client, mock_spec, description_history
+
+
 class TestBeakerDescription(unittest.TestCase):
     """Test the beaker description update function."""
-
-    def _setup_beaker_mocks(self, mock_beaker_from_env, mock_is_beaker_job, initial_description):
-        """Shared mock setup for beaker tests."""
-        mock_is_beaker_job.return_value = True
-
-        mock_client = mock.MagicMock()
-        mock_beaker_from_env.return_value = mock_client
-
-        mock_spec = mock.MagicMock()
-        mock_spec.description = initial_description
-        mock_client.experiment.get.return_value = mock_spec
-
-        description_history = []
-
-        def track_description(exp_id, desc):
-            description_history.append(desc)
-
-        mock_client.experiment.set_description.side_effect = track_description
-
-        return mock_client, mock_spec, description_history
 
     @mock.patch.dict(os.environ, {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"})
     @mock.patch("open_instruct.utils.is_beaker_job")
     @mock.patch("beaker.Beaker.from_env")
     def test_description_does_not_accumulate(self, mock_beaker_from_env, mock_is_beaker_job):
         """Test that the description doesn't accumulate git info and wandb URLs on repeated calls."""
-        mock_client, mock_spec, description_history = self._setup_beaker_mocks(
+        mock_client, mock_spec, description_history = _setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, "Beaker-Mason job."
         )
 
@@ -161,7 +162,7 @@ class TestBeakerDescription(unittest.TestCase):
     @mock.patch("beaker.Beaker.from_env")
     def test_description_without_progress(self, mock_beaker_from_env, mock_is_beaker_job):
         """Test description updates without progress information."""
-        mock_client, mock_spec, description_history = self._setup_beaker_mocks(
+        mock_client, mock_spec, description_history = _setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, "Initial job description"
         )
 
