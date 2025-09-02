@@ -278,5 +278,5 @@ def upload_longform_surveyqa_validation_data(use_system_prompt: bool = True, use
 
 if __name__ == "__main__":
     # data = upload_scholarqabench_data(use_system_prompt=True)
-    data = upload_longform_sqa_train_data(use_system_prompt=True, use_new_mcp_system_prompt=False, reward_type="averaged_outcome", rubric_type="searcharena_rubrics_web_augmented")
+    data = upload_longform_sqa_train_data(use_system_prompt=True, use_new_mcp_system_prompt=True, reward_type="rubrics_only", rubric_type="searcharena_rubrics_web_augmented")
     # data = upload_longform_surveyqa_validation_data(use_system_prompt=True, reward_type="finegrained")
