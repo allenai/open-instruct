@@ -66,6 +66,38 @@ Please provide the rating first, followed by the analysis, in the format "Rating
 </snippet>"""
 
 
+def extract_claims_and_corresponding_citation_ids(response: str) -> Dict[str, List[str]]:
+    """
+    Example response:
+    "The Great Wall of China, one of the most iconic structures in human history, stretches approximately 13,000 miles across northern China. <cite id=a1b2c3d4>Construction of the Great Wall began during the 7th century BC under various warring states, but the most famous sections were built during the Ming Dynasty (1368-1644).</cite> The wall was primarily constructed as a defensive fortification to protect Chinese states from invasions by nomadic groups from the north. <cite id=e5f6g7h8>The wall incorporates various materials including stone, brick, tamped earth, wood, and other materials, with different sections built using locally available resources.</cite> Contrary to popular belief, <cite id=i9j0k1l2>the Great Wall is not visible from space with the naked eye, a myth that has been debunked by astronauts and satellite imagery.</cite>"
+    """
+    claims = {}
+
+    # Use findall to get all cite tags and their content
+    cite_pattern = r"<cite id=([\"\']?)([^\"\'>\s]+)\1[^>]*>([^<]+)</cite>"
+    cite_matches = re.findall(cite_pattern, response)
+    
+    # Split the response by cite tags to get non-cited text
+    cite_tag_pattern = r"<cite id=[\"\']?[^\"\'>\s]+[\"\']?[^>]*>[^<]+</cite>"
+    non_cited_parts = re.split(cite_tag_pattern, response)
+    
+    # Add non-cited text (parts between cite tags)
+    for part in non_cited_parts:
+        part = part.strip()
+        if part:
+            claims[part] = []
+    
+    # Add cited text with their citation IDs
+    for _, citation_ids, cited_text in cite_matches:
+        cited_text = cited_text.strip()
+        if cited_text:
+            # When there are multiple citations (e.g., <cite id="a1b2c3d4,e5f6g7h8">), separately record the citations
+            for citation_id in citation_ids.split(","):
+                claims[cited_text] = [citation_id]
+
+    return claims
+    
+    
 def score_in_context_citations(question: str, response: str, citations: Dict[str, str]) -> Dict[str, float]:
     """
     Compute the cumulative weighted score for a system response such that the final score is between 0 and 1.
@@ -73,36 +105,6 @@ def score_in_context_citations(question: str, response: str, citations: Dict[str
     :param citations:
     :return: final weighted score with and without the static components
     """
-
-    def extract_claims_and_corresponding_citation_ids(response: str) -> Dict[str, List[str]]:
-        """
-        Example response:
-        "The Great Wall of China, one of the most iconic structures in human history, stretches approximately 13,000 miles across northern China. <cite id=a1b2c3d4>Construction of the Great Wall began during the 7th century BC under various warring states, but the most famous sections were built during the Ming Dynasty (1368-1644).</cite> The wall was primarily constructed as a defensive fortification to protect Chinese states from invasions by nomadic groups from the north. <cite id=e5f6g7h8>The wall incorporates various materials including stone, brick, tamped earth, wood, and other materials, with different sections built using locally available resources.</cite> Contrary to popular belief, <cite id=i9j0k1l2>the Great Wall is not visible from space with the naked eye, a myth that has been debunked by astronauts and satellite imagery.</cite>"
-        """
-        claims = {}
-
-        # Use findall to get all cite tags and their content
-        cite_pattern = r"<cite id=([\"\']?)([^\"\'>\s]+)\1[^>]*>([^<]+)</cite>"
-        cite_matches = re.findall(cite_pattern, response)
-        
-        # Split the response by cite tags to get non-cited text
-        cite_tag_pattern = r"<cite id=[\"\']?[^\"\'>\s]+[\"\']?[^>]*>[^<]+</cite>"
-        non_cited_parts = re.split(cite_tag_pattern, response)
-        
-        # Add non-cited text (parts between cite tags)
-        for part in non_cited_parts:
-            part = part.strip()
-            if part:
-                claims[part] = []
-        
-        # Add cited text with their citation IDs
-        for _, citation_id, cited_text in cite_matches:
-            cited_text = cited_text.strip()
-            if cited_text:
-                claims[cited_text] = [citation_id]
-
-        return claims
-
     def concatenate_citations(citation_ids: List[str], citations: Dict[str, str]) -> str:
         if len(citation_ids) == 0:
             return ""
@@ -354,35 +356,6 @@ async def score_in_context_citations_async(
     Async version of score_in_context_citations that runs LLM calls in parallel.
     """
 
-    def extract_claims_and_corresponding_citation_ids(response: str) -> Dict[str, List[str]]:
-        """
-        Example response:
-        "The Great Wall of China, one of the most iconic structures in human history, stretches approximately 13,000 miles across northern China. <cite id=a1b2c3d4>Construction of the Great Wall began during the 7th century BC under various warring states, but the most famous sections were built during the Ming Dynasty (1368-1644).</cite> The wall was primarily constructed as a defensive fortification to protect Chinese states from invasions by nomadic groups from the north. <cite id=e5f6g7h8>The wall incorporates various materials including stone, brick, tamped earth, wood, and other materials, with different sections built using locally available resources.</cite> Contrary to popular belief, <cite id=i9j0k1l2>the Great Wall is not visible from space with the naked eye, a myth that has been debunked by astronauts and satellite imagery.</cite>"
-        """
-        claims = {}
-
-        # Use findall to get all cite tags and their content
-        cite_pattern = r"<cite id=([\"\']?)([^\"\'>\s]+)\1[^>]*>([^<]+)</cite>"
-        cite_matches = re.findall(cite_pattern, response)
-        
-        # Split the response by cite tags to get non-cited text
-        cite_tag_pattern = r"<cite id=[\"\']?[^\"\'>\s]+[\"\']?[^>]*>[^<]+</cite>"
-        non_cited_parts = re.split(cite_tag_pattern, response)
-        
-        # Add non-cited text (parts between cite tags)
-        for part in non_cited_parts:
-            part = part.strip()
-            if part:
-                claims[part] = []
-        
-        # Add cited text with their citation IDs
-        for _, citation_id, cited_text in cite_matches:
-            cited_text = cited_text.strip()
-            if cited_text:
-                claims[cited_text] = [citation_id]
-
-        return claims
-
     def concatenate_citations(citation_ids: List[str], citations: Dict[str, str]) -> str:
         if len(citation_ids) == 0:
             return ""
@@ -415,156 +388,6 @@ def score_in_context_citations_async_wrapper(
     Use this when you want to run the async version from synchronous code.
     """
     return asyncio.run(score_in_context_citations_async(question, response, citations))
-
-
-if __name__ == "__main__":
-    # Test the extraction function
-    def test_extraction():
-        test_response = "The Great Wall of China, one of the most iconic structures in human history, stretches approximately 13,000 miles across northern China. <cite id=a1b2c3d4>Construction of the Great Wall began during the 7th century BC under various warring states, but the most famous sections were built during the Ming Dynasty (1368-1644).</cite> The wall was primarily constructed as a defensive fortification to protect Chinese states from invasions by nomadic groups from the north. <cite id=e5f6g7h8>The wall incorporates various materials including stone, brick, tamped earth, wood, and other materials, with different sections built using locally available resources.</cite> Contrary to popular belief, <cite id=i9j0k1l2>the Great Wall is not visible from space with the naked eye, a myth that has been debunked by astronauts and satellite imagery.</cite>"
-        
-        # Test the extraction function
-        def extract_claims_and_corresponding_citation_ids(response: str) -> Dict[str, List[str]]:
-            claims = {}
-            
-            # Use findall to get all cite tags and their content
-            cite_pattern = r"<cite id=([^>]+)>([^<]+)</cite>"
-            cite_matches = re.findall(cite_pattern, response)
-            
-            # Split the response by cite tags to get non-cited text
-            cite_tag_pattern = r"<cite id=[^>]+>[^<]+</cite>"
-            non_cited_parts = re.split(cite_tag_pattern, response)
-            
-            # Add non-cited text (parts between cite tags)
-            for part in non_cited_parts:
-                part = part.strip()
-                if part:
-                    claims[part] = []
-            
-            # Add cited text with their citation IDs
-            for citation_id, cited_text in cite_matches:
-                cited_text = cited_text.strip()
-                if cited_text:
-                    claims[cited_text] = [citation_id]
-            
-            return claims
-        
-        claims = extract_claims_and_corresponding_citation_ids(test_response)
-        print("Extracted claims:")
-        for claim, citation_ids in claims.items():
-            print(f"Claim: '{claim}'")
-            print(f"Citation IDs: {citation_ids}")
-            print("-" * 50)
-        
-        # Verify no extra keys from regex capture groups
-        print(f"Total number of claims: {len(claims)}")
-        print("All claim keys are valid text segments (no regex artifacts)")
-    
-    test_extraction()
-    
-    # Simple test case for citation scoring functions
-    example_response = "The Great Wall of China, one of the most iconic structures in human history, stretches approximately 13,000 miles across northern China. <cite id=a1b2c3d4>Construction of the Great Wall began during the 7th century BC under various warring states, but the most famous sections were built during the Ming Dynasty (1368-1644).</cite> The wall was primarily constructed as a defensive fortification to protect Chinese states from invasions by nomadic groups from the north. <cite id=e5f6g7h8>The wall incorporates various materials including stone, brick, tamped earth, wood, and other materials, with different sections built using locally available resources.</cite> Contrary to popular belief, <cite id=i9j0k1l2>the Great Wall is not visible from space with the naked eye, a myth that has been debunked by astronauts and satellite imagery.</cite>"
-
-    # Create a simple test citations dictionary
-    test_citations = {
-        "a1b2c3d4": "The Great Wall of China is a series of fortifications built across the historical northern borders of ancient Chinese states. While walls were built as early as the 7th century BC by various warring states, the most famous sections of the wall were constructed during the Ming Dynasty between 1368 and 1644.",
-        "e5f6g7h8": "The Great Wall was constructed using a variety of materials depending on the local terrain and available resources. In mountainous areas, stone was the primary material, while in desert regions, tamped earth and sand were used.",
-        "i9j0k1l2": "The claim that the Great Wall of China is visible from space with the naked eye is a widespread myth that has been repeatedly debunked. NASA and various astronauts have confirmed that the Great Wall is not visible to the naked eye from low Earth orbit without aid.",
-    }
-
-    test_question = "What is the history and construction of the Great Wall of China?"
-
-    # Test the original synchronous scoring function
-    print("Testing synchronous version...")
-    score_sync = score_in_context_citations(test_question, example_response, test_citations)
-    print(f"Synchronous citation score: {score_sync}")
-
-    # Test the async scoring function
-    print("\nTesting async version...")
-    score_async = score_in_context_citations_async_wrapper(test_question, example_response, test_citations)
-    print(f"Async citation score: {score_async}")
-
-    print("\nTest completed successfully!")
-
-    async def test_async_scoring():
-        """Test the async scoring function in an async context"""
-        example_response = "The Great Wall of China, one of the most iconic structures in human history, stretches approximately 13,000 miles across northern China. <cite id=a1b2c3d4>Construction of the Great Wall began during the 7th century BC under various warring states, but the most famous sections were built during the Ming Dynasty (1368-1644).</cite>"
-
-        test_citations = {
-            "a1b2c3d4": "The Great Wall of China is a series of fortifications built across the historical northern borders of ancient Chinese states. While walls were built as early as the 7th century BC by various warring states, the most famous sections of the wall were constructed during the Ming Dynasty between 1368 and 1644.",
-        }
-
-        test_question = "What is the history and construction of the Great Wall of China?"
-
-        print("Testing async version in async context...")
-        score = await score_in_context_citations_async(test_question, example_response, test_citations)
-        print(f"Async citation score: {score}")
-        print("Async test completed successfully!")
-
-    # Uncomment the line below to run the async test
-    # asyncio.run(test_async_scoring())
-
-    def example_usage():
-        """
-        Example showing how to use both synchronous and asynchronous versions
-        of the citation scoring functions.
-        """
-        print("=== Citation Scoring Example ===\n")
-
-        # Example data
-        question = "What are the health benefits of exercise?"
-        response = "Regular exercise has numerous health benefits. <cite id=ref1>Exercise can reduce the risk of heart disease by up to 30%.</cite> Additionally, <cite id=ref2>physical activity helps maintain healthy body weight and improves mental health.</cite>"
-
-        citations = {
-            "ref1": "Studies have shown that regular physical activity can reduce the risk of cardiovascular disease by approximately 30% when compared to sedentary lifestyles.",
-            "ref2": "Exercise plays a crucial role in weight management and has been linked to improved mental health outcomes, including reduced symptoms of depression and anxiety.",
-        }
-
-        print("Question:", question)
-        print("Response:", response)
-        print("Citations:", citations)
-        print("\n" + "=" * 50 + "\n")
-
-        # Synchronous version (original)
-        print("1. Using synchronous version (sequential API calls):")
-        import time
-
-        start_time = time.time()
-        score_sync = score_in_context_citations(question, response, citations)
-        sync_time = time.time() - start_time
-        print(f"   Score: {score_sync:.4f}")
-        print(f"   Time: {sync_time:.2f} seconds")
-
-        print("\n2. Using asynchronous version (parallel API calls):")
-        start_time = time.time()
-        score_async = score_in_context_citations_async_wrapper(question, response, citations)
-        async_time = time.time() - start_time
-        print(f"   Score: {score_async:.4f}")
-        print(f"   Time: {async_time:.2f} seconds")
-
-        if async_time < sync_time:
-            speedup = sync_time / async_time
-            print(f"   Speedup: {speedup:.2f}x faster")
-        else:
-            print("   Note: Async version may be slower for single examples due to overhead")
-
-        print("\n3. Using async version in async context:")
-
-        async def demo_async():
-            start_time = time.time()
-            score = await score_in_context_citations_async(question, response, citations)
-            async_time = time.time() - start_time
-            print(f"   Score: {score:.4f}")
-            print(f"   Time: {async_time:.2f} seconds")
-
-        # Run the async demo
-        asyncio.run(demo_async())
-
-        print("\n" + "=" * 50)
-        print("Note: The async version is most beneficial when processing multiple examples")
-        print("or when you have multiple claims that need to be evaluated simultaneously.")
-
-    # Uncomment the line below to run the example
-    # example_usage()
 
 
 def score_num_in_context_search_turns(context: str, upper_bound: int = 3) -> float:

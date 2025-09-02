@@ -37,12 +37,12 @@ from open_instruct.math_utils import (
     remove_boxed,
 )
 from open_instruct.search_rewards.openscholar_rewards import compute_paper_reward
-from open_instruct.search_rewards.reasoning_model_rewards import compute_hle_reward
-from open_instruct.search_rewards.rubric_rewards import compute_rubric_reward
+from open_instruct.search_rewards.longform_hle_rewards import compute_hle_reward
+from open_instruct.search_rewards.longform_rubric_only_rewards import compute_rubric_reward
 from open_instruct.search_rewards.finegrained_rewards import compute_finegrained_reward
 from open_instruct.search_rewards.longform_averaged_outcome_rewards import compute_longform_averaged_outcome_reward
 from open_instruct.search_rewards.longform_finegrained_rewards_v1 import compute_longform_finegrained_reward
-from open_instruct.search_rewards.find_reward_spans import FinegrainedScore 
+from open_instruct.search_rewards.utils.find_reward_spans import FinegrainedScore 
 from open_instruct.search_rewards.toy_case_multi_dataset_reward import compute_multi_question_reward
 from open_instruct.utils import extract_final_answer
 from open_instruct.IFEvalG import instructions_registry

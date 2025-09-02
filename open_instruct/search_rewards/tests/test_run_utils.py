@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 # Add parent directory to path to import run_utils
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from ..run_utils import extract_json_from_response, run_chatopenai
+from ..utils.run_utils import extract_json_from_response, run_chatopenai
 
 
 class TestRunUtils(unittest.TestCase):

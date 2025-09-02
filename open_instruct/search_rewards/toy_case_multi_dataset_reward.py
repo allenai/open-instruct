@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Tuple, Optional, Union
 import json
 import string
 
-from open_instruct.search_rewards.find_reward_spans import FinegrainedScore
+from open_instruct.search_rewards.utils.find_reward_spans import FinegrainedScore
 
 LOGGER = logging.getLogger(__name__)
 

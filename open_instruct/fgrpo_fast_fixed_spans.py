@@ -129,7 +129,7 @@ from open_instruct.utils import (
     sync_gs_bucket,
 )
 from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
-from open_instruct.search_rewards.span_convertion import (
+from open_instruct.search_rewards.utils.span_convertion import (
     message_span_aware_tokenization,
     convert_string_spans_to_token_spans
 )
@@ -1370,7 +1370,7 @@ def data_preparation_thread(
         if args.log_advantage_visualization and training_step % args.advantage_vis_frequency == 0:
             try:
                 print(f"🔫 Logging advantage visualization for step {training_step}")
-                from open_instruct.search_rewards.advantage_visualization import log_advantage_examples, log_advantage_statistics
+                from open_instruct.search_rewards.utils.advantage_visualization import log_advantage_examples, log_advantage_statistics
                 
                 # Log examples based on user settings
                 if len(all_finegrained_rewards) > 0:
