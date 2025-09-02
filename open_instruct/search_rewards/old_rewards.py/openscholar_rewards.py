@@ -5,7 +5,7 @@ from typing import Any, Dict
 from open_instruct.search_rewards.openscholar_rewards_utils import (
     RubricCorpusQaGenericMetric,
 )
-from open_instruct.search_rewards.format_utils import extract_answer_context_citations
+from open_instruct.search_rewards.utils.format_utils import extract_answer_context_citations
 
 LOGGER = logging.getLogger(__name__)
 

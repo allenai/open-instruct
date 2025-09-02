@@ -3,9 +3,9 @@ from typing import Any, Dict
 import json
 import logging
 import litellm
-from open_instruct.search_rewards.format_utils import extract_answer_context_citations
-from open_instruct.search_rewards.run_utils import extract_json_from_response, run_litellm
-from open_instruct.search_rewards.citation_rewards_utils import score_num_in_context_search_turns
+from open_instruct.search_rewards.utils.format_utils import extract_answer_context_citations
+from open_instruct.search_rewards.utils.run_utils import extract_json_from_response, run_litellm
+from open_instruct.search_rewards.utils.citation_rewards_utils import score_num_in_context_search_turns
 
 LOGGER = logging.getLogger(__name__)
 
