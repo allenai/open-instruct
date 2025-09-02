@@ -355,6 +355,8 @@ class Args:
     # Experiment tracking
     verbose: bool = False
     """If toggled, debug output will be shown"""
+    update_progress_every: int = 10
+    """How often to update the progress bar (in steps)."""
     with_tracking: bool = False
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
@@ -1878,7 +1880,6 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
             tags=[args.exp_name] + get_wandb_tags(),
         )
         wandb_url = wandb.run.get_url()
-        logger.info(f"Initial Beaker description update with wandb_url: {wandb_url}")
         maybe_update_beaker_description(wandb_url=wandb_url)
 
     return beaker_config, wandb_url
@@ -2662,10 +2663,9 @@ def run_training(
 
         if (
             training_step == resume_training_step
-            or training_step % 10 == 0
+            or training_step % args.update_progress_every == 0
             or training_step == args.num_training_steps
         ):
-            logger.info(f"Progress update for Beaker description: step {training_step}/{args.num_training_steps}")
             maybe_update_beaker_description(
                 current_step=training_step,
                 total_steps=args.num_training_steps,
