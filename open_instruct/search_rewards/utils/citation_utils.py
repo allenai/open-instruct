@@ -1,14 +1,9 @@
-import asyncio
 import re
 import os
 from typing import Dict, List
 
-# Handle imports for both direct execution and module import
-try:
-    from .run_utils import run_litellm, run_litellm_async
-except ImportError:
-    # When running the file directly, use absolute import
-    from open_instruct.search_rewards.utils.run_utils import run_litellm, run_litellm_async
+from open_instruct.search_rewards.utils.run_utils import run_litellm
+
 
 citation_recall_has_citation_prompt = """You are an expert in evaluating text quality. You will receive a user's question about an uploaded document, a factual statement from an AI assistant's response based on that document, and a snippet from the document (since the document is too long to display in full). Your task is to carefully assess whether this statement is supported by the snippet. Please use the following scale to generate your rating:
 - [[Fully supported]] - Most information in the statement is supported by or extracted from the snippet. This applies only to cases where the statement and parts of the snippet are almost identical.
@@ -265,129 +260,6 @@ def run_llm_judge(user_prompt: str, model_name: str = "gpt-4.1", deployment: str
         presence_penalty=0.0,
     )
     return response
-
-
-async def run_llm_judge_async(
-    user_prompt: str, model_name: str = "gpt-4.1", deployment: str = "gpt-4.1-standard"
-) -> str:
-    response = await run_litellm_async(
-        model_name,
-        system_prompt=None,
-        user_prompt=user_prompt,
-        max_tokens=800,
-        top_p=1.0,
-        frequency_penalty=0.0,
-        presence_penalty=0.0,
-    )
-    return response
-
-
-async def score_citation_f1_async(question: str, claim: str, concatenated_citations: str, full_response: str) -> float:
-    # Run recall and precision calculations in parallel
-    if len(concatenated_citations) == 0:
-        recall_task = score_no_citation_recall_async(question, claim, full_response)
-        precision_task = asyncio.create_task(asyncio.sleep(0))  # Precision is 1 for empty citations
-        recall, precision = await asyncio.gather(recall_task, precision_task)
-        precision = 1.0  # Set precision to 1 for empty citations
-    else:
-        recall_task = score_with_citation_recall_async(question, claim, concatenated_citations)
-        precision_task = score_citation_precision_async(question, claim, concatenated_citations)
-        recall, precision = await asyncio.gather(recall_task, precision_task)
-
-    f1 = 2 * (recall * precision) / (recall + precision) if (recall + precision) > 0 else 0
-    return f1
-
-
-async def score_with_citation_recall_async(question: str, claim: str, concatenated_citations: str) -> float:
-    user_prompt = citation_recall_has_citation_prompt.format(
-        question=question, statement=claim, concatenated_cited_snippets=concatenated_citations
-    )
-    response = await run_litellm_async(
-        model_name=os.environ.get("CITATION_JUDGE_MODEL", "gpt-4o-mini"),
-        system_prompt=None,
-        user_prompt=user_prompt,
-        max_tokens=800,
-        top_p=1.0,
-        frequency_penalty=0.0,
-        presence_penalty=0.0,
-    )
-    return extract_recall_rating_from_response(response)
-
-
-async def score_no_citation_recall_async(question: str, claim: str, full_response: str) -> float:
-    user_prompt = citation_recall_no_citation_prompt.format(
-        question=question, statement=claim, full_response=full_response
-    )
-    response = await run_litellm_async(
-        model_name=os.environ.get("CITATION_JUDGE_MODEL", "gpt-4o-mini"),
-        system_prompt=None,
-        user_prompt=user_prompt,
-        max_tokens=800,
-        top_p=1.0,
-        frequency_penalty=0.0,
-        presence_penalty=0.0,
-    )
-    # "yes" means it is a factual claim, but no citation is provided.
-    return 1 - extract_yes_no_from_response(response)
-
-
-async def score_citation_precision_async(question: str, claim: str, concatenated_citations: str) -> float:
-    if len(concatenated_citations) == 0:
-        return 1
-    user_prompt = citation_precision_prompt.format(
-        question=question, statement=claim, concatenated_cited_snippets=concatenated_citations
-    )
-    response = await run_litellm_async(
-        model_name=os.environ.get("CITATION_JUDGE_MODEL", "gpt-4o-mini"),
-        system_prompt=None,
-        user_prompt=user_prompt,
-        max_tokens=800,
-        top_p=1.0,
-        frequency_penalty=0.0,
-        presence_penalty=0.0,
-    )
-    return extract_relevant_rating_from_response(response)
-
-
-async def score_in_context_citations_async(
-    question: str, response: str, citations: Dict[str, str]
-) -> Dict[str, float]:
-    """
-    Async version of score_in_context_citations that runs LLM calls in parallel.
-    """
-
-    def concatenate_citations(citation_ids: List[str], citations: Dict[str, str]) -> str:
-        if len(citation_ids) == 0:
-            return ""
-        return "\n\n".join([citations[citation_id] for citation_id in citation_ids])
-
-    claims = extract_claims_and_corresponding_citation_ids(response)
-    citation_format_reward = score_citation_format(claims, citations)
-
-    # Create tasks for all F1 calculations to run in parallel
-    f1_tasks = []
-    for claim_text, citation_ids in claims.items():
-        concatenated_citations = concatenate_citations(citation_ids, citations)
-        task = score_citation_f1_async(question, claim_text, concatenated_citations, response)
-        f1_tasks.append(task)
-
-    # Wait for all F1 calculations to complete
-    f1_scores = await asyncio.gather(*f1_tasks)
-
-    # Calculate average F1 score
-    avg_f1 = sum(f1_scores) / len(f1_scores) if f1_scores else 0
-
-    return 0.6 * avg_f1 + 0.4 * citation_format_reward
-
-
-def score_in_context_citations_async_wrapper(
-    question: str, response: str, citations: Dict[str, str]
-) -> Dict[str, float]:
-    """
-    Synchronous wrapper for the async scoring function.
-    Use this when you want to run the async version from synchronous code.
-    """
-    return asyncio.run(score_in_context_citations_async(question, response, citations))
 
 
 def score_num_in_context_search_turns(context: str, upper_bound: int = 3) -> float:
