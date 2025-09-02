@@ -154,7 +154,9 @@ class TestGrpoFastBase(unittest.TestCase):
             dataset_index=dataset_indices,
         )
 
-    def setup_and_split_batch(self, queries, ground_truths, datasets, raw_queries, indices, num_engines, training_step=1):
+    def setup_and_split_batch(
+        self, queries, ground_truths, datasets, raw_queries, indices, num_engines, training_step=1
+    ):
         """Setup queues and split batch - common pattern."""
         param_prompt_Q = ray_queue.Queue(maxsize=num_engines * 2)
         inference_results_Q = ray_queue.Queue(maxsize=num_engines * 2)
@@ -164,11 +166,7 @@ class TestGrpoFastBase(unittest.TestCase):
         self._ray_queues.extend([param_prompt_Q, inference_results_Q])
 
         batch = model_utils.Batch(
-            queries=queries,
-            ground_truths=ground_truths,
-            datasets=datasets,
-            raw_queries=raw_queries,
-            indices=indices,
+            queries=queries, ground_truths=ground_truths, datasets=datasets, raw_queries=raw_queries, indices=indices
         )
 
         # Create a mock generation_config for testing
@@ -670,11 +668,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         self._ray_queues.append(param_prompt_Q)
 
         batch = model_utils.Batch(
-            queries=queries,
-            ground_truths=ground_truths,
-            datasets=datasets,
-            raw_queries=raw_queries,
-            indices=indices,
+            queries=queries, ground_truths=ground_truths, datasets=datasets, raw_queries=raw_queries, indices=indices
         )
 
         # Create a mock generation_config
@@ -721,11 +715,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         self._ray_queues.append(param_prompt_Q)
 
         batch = model_utils.Batch(
-            queries=queries,
-            ground_truths=ground_truths,
-            datasets=datasets,
-            raw_queries=raw_queries,
-            indices=indices,
+            queries=queries, ground_truths=ground_truths, datasets=datasets, raw_queries=raw_queries, indices=indices
         )
 
         # Create a mock generation_config
