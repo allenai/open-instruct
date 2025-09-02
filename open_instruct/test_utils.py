@@ -104,9 +104,9 @@ class TestBeakerDescription(unittest.TestCase):
     """Test the beaker description update function."""
 
     @mock.patch.dict(os.environ, {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"})
-    @mock.patch("open_instruct.utils.is_beaker_job")
     @mock.patch("beaker.Beaker.from_env")
-    def test_description_does_not_accumulate(self, mock_beaker_from_env, mock_is_beaker_job):
+    @mock.patch("open_instruct.utils.is_beaker_job")
+    def test_description_does_not_accumulate(self, mock_is_beaker_job, mock_beaker_from_env):
         """Test that the description doesn't accumulate git info and wandb URLs on repeated calls."""
         mock_client, mock_spec, description_history = _setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, "Beaker-Mason job."
@@ -158,9 +158,9 @@ class TestBeakerDescription(unittest.TestCase):
             self.assertIn(f"% complete (step {(i + 1) * 10}/100)", desc)
 
     @mock.patch.dict(os.environ, {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "def456", "GIT_BRANCH": "dev"})
-    @mock.patch("open_instruct.utils.is_beaker_job")
     @mock.patch("beaker.Beaker.from_env")
-    def test_description_without_progress(self, mock_beaker_from_env, mock_is_beaker_job):
+    @mock.patch("open_instruct.utils.is_beaker_job")
+    def test_description_without_progress(self, mock_is_beaker_job, mock_beaker_from_env):
         """Test description updates without progress information."""
         mock_client, mock_spec, description_history = _setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, "Initial job description"
