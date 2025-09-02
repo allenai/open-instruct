@@ -12,9 +12,8 @@ uv run python mason.py \
        --cluster ai2/ceres-cirrascale \
        --image "$BEAKER_IMAGE" \
        --pure_docker_mode \
-       --workspace ai2/tulu-thinker \
-       --priority high \
-       --preemptible \
+       --workspace ai2/open-instruct-dev \
+       --priority urgent \
        --num_nodes 1 \
        --max_retries 0 \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
