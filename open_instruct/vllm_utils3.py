@@ -317,6 +317,41 @@ def init_process_group(
     return pg
 
 
+def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, request_metadata: dict):
+    """Add a request to the LLM engine."""
+    prefix = "eval" if request.is_eval else "train"
+
+    for batch_idx, prompt in enumerate(request.prompts):
+        dataset_idx = request.dataset_index[batch_idx]
+
+        request_id = f"{prefix}_{request.training_step}_{dataset_idx}"
+        metadata = {
+            "is_eval": request.is_eval,
+            "dataset_index": dataset_idx,
+            "training_step": request.training_step,
+            "sampling_params": request.generation_config,
+        }
+
+        tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=request_id)
+
+        # We *have* to manually duplicate requests to properly handle tool tracking,
+        # so we always do it to only have one code path.
+        # Create sampling params with n=1 for individual tracking
+        sampling_params = copy.deepcopy(request.generation_config)
+        sampling_params.n = 1
+        metadata["sampling_params"] = sampling_params
+        metadata["generation_config"] = request.generation_config
+        request_metadata[request_id] = metadata
+        for j in range(request.generation_config.n):
+            sub_request_id = f"{request_id}-{j}"
+            # Create a fresh copy of sampling_params for each sub-request
+            sub_sampling_params = copy.deepcopy(sampling_params)
+            if request.generation_config.seed is not None:
+                # We need to seed each sub-request differently to avoid getting the same output.
+                sub_sampling_params.seed = request.generation_config.seed + j
+            llm_engine.add_request(sub_request_id, tokens_prompt, sub_sampling_params)
+
+
 class LLMRayActor:
     """Ray actor for LLM generation with optional tool support."""
 
@@ -384,6 +419,15 @@ class LLMRayActor:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
 
+    def _insert_result_to_queue(self, result, is_eval: bool):
+        """Insert result into the appropriate queue with error handling."""
+        try:
+            results_queue = self.eval_results_queue if is_eval else self.results_queue
+            results_queue.put(result, timeout=10)
+        except queue.Full:
+            queue_name = "eval" if is_eval else "train"
+            self.logger.warning(f"{queue_name} results queue is full, discarding result.")
+
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
@@ -401,37 +445,19 @@ class LLMRayActor:
 
             result = self._process_request(request)
 
-            try:
-                if request.is_eval:
-                    self.eval_results_queue.put(result, timeout=10)
-                else:
-                    self.results_queue.put(result, timeout=10)
-                return 1  # Successfully processed one request
-            except queue.Full:
-                self.logger.warning("Results queue is full, discarding result.")
-                return 0
+            return self._insert_result_to_queue(result, is_eval=request.is_eval)
 
     def _process_request(self, request):
         """Unified processing for both tool and non-tool generation."""
-        prompts = request.prompts
-        sampling_params = request.generation_config
-        start_time = request.start_time
 
-        self.logger.info(f"[LLMRayActor] Processing request with {len(prompts)} prompts, tools={bool(self.tools)}")
+        self.logger.info(
+            f"[LLMRayActor] Processing request with {len(request.prompts)} prompts, tools={bool(self.tools)}"
+        )
 
-        if self.tools:
-            # Need n=1 for individual tool tracking
-            sampling_params = copy.deepcopy(sampling_params)
-            original_n = request.generation_config.n
-            sampling_params.n = 1
-            tracking = _init_tool_tracking()
-            tokenizer = self.llm_engine.tokenizer
-        else:
-            original_n = 1
-            tracking = None
-            tokenizer = None
+        tracking = _init_tool_tracking() if self.tools else None
+        tokenizer = self.llm_engine.tokenizer
 
-        self._add_initial_requests(prompts, sampling_params, original_n, request.training_step)
+        add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
 
         outputs = []
         iteration = 0
@@ -441,18 +467,17 @@ class LLMRayActor:
 
             # Poll tool futures first (matching ToolUseLLM order)
             if tracking and tracking.get("pending_tool_futures"):
-                self._poll_tool_futures(tracking, sampling_params, tokenizer)
+                self._poll_tool_futures(tracking, request.sampling_params, tokenizer)
 
             # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
             if self.llm_engine.has_unfinished_requests():
-                step_outputs = list(self.llm_engine.step())
+                step_outputs = [o for o in self.llm_engine.step() if o.finished]
                 for output in step_outputs:
-                    if output.finished:
-                        result = _handle_output(
-                            output, self.tools, tracking, sampling_params, self.max_tool_calls, self.executor
-                        )
-                        if result is not None:
-                            outputs.append(result)
+                    result = _handle_output(
+                        output, self.tools, tracking, request.sampling_params, self.max_tool_calls, self.executor
+                    )
+                    if result is not None:
+                        outputs.append(result)
 
             # Check termination condition (matching ToolUseLLM exactly)
             pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
@@ -490,7 +515,7 @@ class LLMRayActor:
                 num_response_tokens=total_generation_tokens,
                 generation_time=generation_time,
             ),
-            start_time=start_time,
+            start_time=request.start_time,
         )
         return result
 
