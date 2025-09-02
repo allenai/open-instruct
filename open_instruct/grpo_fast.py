@@ -1503,22 +1503,6 @@ def data_preparation_thread(
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
                 return
 
-            # Debug: Log shapes of accumulate_inference_batches results
-            logger.info(f"[DEBUG] accumulate_inference_batches results for training_step {training_step}:")
-            logger.info(f"  result.responses shape: {len(result.responses)} responses")
-            if result.responses:
-                logger.info(f"    First response length: {len(result.responses[0])} tokens")
-            logger.info(f"  result.finish_reasons length: {len(result.finish_reasons)}")
-            logger.info(f"  result.masks shape: {len(result.masks)} masks")
-            if result.masks:
-                logger.info(f"    First mask length: {len(result.masks[0])}")
-            logger.info(f"  result.infos: {len(result.infos)} info tuples")
-            logger.info(f"  batch.queries shape: {len(batch.queries)} queries")
-            if batch.queries:
-                logger.info(f"    First query length: {len(batch.queries[0])} tokens")
-            logger.info(f"  batch.ground_truths length: {len(batch.ground_truths)}")
-            logger.info(f"  batch.datasets length: {len(batch.datasets)}")
-
         getting_response_time = timer.duration
 
         # Log first 100 characters of each prompt after receiving
