@@ -324,39 +324,23 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         dataset_idx = request.dataset_index[batch_idx]
 
         request_id = f"{prefix}_{request.training_step}_{dataset_idx}"
-        metadata = {
+        request_metadata[request_id] = {
             "is_eval": request.is_eval,
             "dataset_index": dataset_idx,
             "training_step": request.training_step,
             "sampling_params": request.generation_config,
+            "prompt_tokens": len(prompt),
+            "start_time": time.perf_counter(),
+            "order": batch_idx,
         }
 
         tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=request_id)
 
-        # Create sampling params with n=1 for individual tracking
-        sampling_params = request.generation_config.clone()
-        sampling_params.n = 1
-        metadata["sampling_params"] = sampling_params
-        metadata["generation_config"] = request.generation_config
-        metadata["prompt_tokens"] = len(prompt)
-        metadata["start_time"] = time.perf_counter()
-        metadata["order"] = batch_idx
-        request_metadata[request_id] = metadata
         for j in range(request.generation_config.n):
             sub_request_id = f"{request_id}_{j}"
-            # Track order for sub-requests too
-            request_metadata[sub_request_id] = {"order": batch_idx}
-            # Create a fresh copy of sampling_params for each sub-request
             sub_sampling_params = sampling_params.clone()
-            del sub_sampling_params.seed  # Remove seed to avoid vLLM warning
             if request.generation_config.seed is not None:
-                # Use a deterministic RNG to generate diverse seeds for each sample
-                rng = random.Random(request.generation_config.seed + dataset_idx * 1_009 + j)
-                sub_sampling_params.seed = rng.randint(0, 2**31 - 1)
-            else:
-                # Keep existing logic for unseeded case
-                base_seed = int((request.training_step * 1_000_003) + (dataset_idx * 1_009)) & 0x7FFFFFFF
-                sub_sampling_params.seed = int(base_seed + j + 1)
+                sub_sampling_params.seed = sampling_params.seed + j
             llm_engine.add_request(sub_request_id, tokens_prompt, sub_sampling_params)
 
 
