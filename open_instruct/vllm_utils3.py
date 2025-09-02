@@ -203,7 +203,8 @@ def _process_outputs_with_tools(
 def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=None, start_time=None):
     """Prepare final outputs based on whether tools were used."""
     if not tools:
-        outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
+        # request_id is prefix _ training_step _ dataset_idx _ sub_idx.
+        outputs.sort(key=lambda x: int(x.request_id.split("_")[2]))
         return _process_outputs(
             outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
         )
@@ -343,7 +344,7 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         metadata["generation_config"] = request.generation_config
         request_metadata[request_id] = metadata
         for j in range(request.generation_config.n):
-            sub_request_id = f"{request_id}-{j}"
+            sub_request_id = f"{request_id}_{j}"
             # Create a fresh copy of sampling_params for each sub-request
             sub_sampling_params = copy.deepcopy(sampling_params)
             if request.generation_config.seed is not None:
@@ -476,6 +477,7 @@ class LLMRayActor:
                     result = _handle_output(
                         output, self.tools, tracking, request.generation_config, self.max_tool_calls, self.executor
                     )
+                    # Result is None when we do more tool processing.
                     if result is not None:
                         outputs.append(result)
 
@@ -490,21 +492,22 @@ class LLMRayActor:
         total_generation_tokens = 0
         earliest_start_time = float("inf")
 
+        # Now, we combine outputs:
+        combined_outputs = defaultdict(list)
         for output in outputs:
-            request_id = output.request_id
-            if request_id in self.request_metadata:
-                metadata = self.request_metadata[request_id]
-                total_prompt_tokens += metadata["prompt_tokens"]
-                earliest_start_time = min(earliest_start_time, metadata["start_time"])
-
-                for completion in output.outputs:
-                    total_generation_tokens += len(completion.token_ids)
-
+            # Remove the sub_idx.
+            request_id = "".join(output.request_id.split("_")[:-1])
+            combined_outputs[request_id].append(output)
+        outputs = []
+        for request_id, outs in combined_outputs.items():
+            assert len(outs) == request.generation_config.n
+            outputs.append(vllm.RequestOutput(request_id=request_id, outputs=outs))
+            metadata = self.request_metadata.pop(request_id)
+            total_prompt_tokens += metadata["prompt_tokens"]
+            earliest_start_time = min(earliest_start_time, metadata["start_time"])
+            for completion in outs:
+                total_generation_tokens += len(completion.token_ids)
         generation_time = end_time - earliest_start_time
-
-        for output in outputs:
-            self.request_metadata.pop(output.request_id, None)
-
         result = _finalize_outputs(
             outputs,
             tracking,
