@@ -10,6 +10,7 @@ uv run python mason.py \
 	--pure_docker_mode \
         --workspace ai2/open-instruct-dev \
         --priority urgent \
+	--preemptible \
         --num_nodes 2 \
         --description "rlvr ace fn and og ocr stdio from base with perf penalty" \
         --max_retries 0 \
