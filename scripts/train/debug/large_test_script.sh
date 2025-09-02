@@ -11,6 +11,7 @@ uv run python mason.py \
         --workspace ai2/open-instruct-dev \
         --priority urgent \
         --num_nodes 2 \
+	--preemptible \
         --description "rlvr ace fn and og ocr stdio from base with perf penalty" \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
