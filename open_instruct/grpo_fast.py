@@ -1505,12 +1505,6 @@ def data_preparation_thread(
 
         getting_response_time = timer.duration
 
-        # Log first 100 characters of each prompt after receiving
-        logger.info("Prompts after receiving from accumulation:")
-        decoded_initial = tokenizer.batch_decode(batch.queries, skip_special_tokens=True)
-        for i, prompt in enumerate(decoded_initial[:5]):  # Show first 5 prompts
-            logger.info(f"  Prompt {i}: {prompt[:100]}...")
-
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
         if args.num_samples_per_prompt_rollout > 1:
@@ -1521,11 +1515,6 @@ def data_preparation_thread(
                 indices=repeat_each(batch.indices, args.num_samples_per_prompt_rollout) if batch.indices else None,
             )
 
-            # Log first 100 characters after multiple sampling
-            logger.info(f"After duplicating for {args.num_samples_per_prompt_rollout} samples per prompt:")
-            decoded_duplicated = tokenizer.batch_decode(batch.queries[:10], skip_special_tokens=True)  # Show first 10
-            for i, prompt in enumerate(decoded_duplicated):
-                logger.info(f"  Sample {i}: {prompt[:100]}...")
             good_outputs = [
                 len(result.request_info.tool_outputs[i]) > 0
                 and result.request_info.tool_calleds[i]
@@ -2876,6 +2865,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             actor_manager,
             checkpoint_state,
         )
+    except Exception as e:
+        logger.error(f"Error in run_training: {e}", exc_info=True)
     finally:
         cleanup_training_resources(
             stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q], actor_manager

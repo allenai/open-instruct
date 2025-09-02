@@ -17,7 +17,6 @@
 
 import os
 import queue
-import random
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -331,16 +330,15 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
             "sampling_params": request.generation_config,
             "prompt_tokens": len(prompt),
             "start_time": time.perf_counter(),
-            "order": batch_idx,
         }
 
         tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=request_id)
 
         for j in range(request.generation_config.n):
             sub_request_id = f"{request_id}_{j}"
-            sub_sampling_params = sampling_params.clone()
+            sub_sampling_params = request.generation_config.clone()
             if request.generation_config.seed is not None:
-                sub_sampling_params.seed = sampling_params.seed + j
+                sub_sampling_params.seed = request.generation_config.seed + j
             llm_engine.add_request(sub_request_id, tokens_prompt, sub_sampling_params)
 
 
@@ -490,12 +488,9 @@ class LLMRayActor:
             # Remove the sub_idx.
             request_id = "_".join(output.request_id.split("_")[:-1])
             combined_outputs[request_id].append(output)
-        outputs = []
-        ordered_ids = (
-            sorted(combined_outputs.keys(), key=lambda rid: self.request_metadata[rid]["order"])
-            if self.request_metadata
-            else list(combined_outputs.keys())
-        )
+        # Preserve original order from request.dataset_index
+        prefix = "eval" if request.is_eval else "train"
+        ordered_ids = [f"{prefix}_{request.training_step}_{dataset_idx}" for dataset_idx in request.dataset_index]
         for request_id in ordered_ids:
             outs = combined_outputs[request_id]
             assert len(outs) == request.generation_config.n
