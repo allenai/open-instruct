@@ -1185,7 +1185,6 @@ def rlvr_tokenize_v1(
         prompt = row[sft_messages_key]
     else:
         prompt = row[sft_messages_key][:-1]
-
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])

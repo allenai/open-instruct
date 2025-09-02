@@ -38,7 +38,7 @@ from open_instruct.utils import extract_final_answer
 
 logger = logger_utils.setup_logger(__name__)
 
-
+# remove excessive logging from liteLLM
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 logging.getLogger("litellm").setLevel(logging.ERROR)
 logging.getLogger("litellm.cost_calculator").setLevel(logging.CRITICAL)
