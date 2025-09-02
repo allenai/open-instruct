@@ -55,6 +55,7 @@ class MCPTool(Tool):
         # basically, we want to defer as much as possible to the mcp tool.
         # this 'tool' actually just passes everything down to the mcp tool.
         self.mcp_tool = mcp_tool_cls(
+            name=mcp_tool_name,
             tool_parser=parser_name,
             transport_type="StreamableHttpTransport",  # for now, we only support streamable http transport.
             **filtered_kwargs,
