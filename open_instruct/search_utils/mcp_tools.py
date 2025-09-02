@@ -4,7 +4,7 @@ A wrapper and registry for tools in rl-rag-mcp.
 import inspect
 import asyncio
 
-from mcp_agents.tool_interface.mcp_tools import MassiveServeSearchTool, SemanticScholarSnippetSearchTool, SerperSearchTool
+from mcp_agents.tool_interface.mcp_tools import MassiveServeSearchTool, SemanticScholarSnippetSearchTool, SerperSearchTool, SerperBrowseTool
 
 from open_instruct.search_rewards.format_utils import generate_snippet_id
 from open_instruct.tool_utils.tool_vllm import Tool, ToolOutput
