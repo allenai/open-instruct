@@ -522,7 +522,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
             mock_args,
             training_step=1,
             generation_config=mock_generation_config,
-            expected_num_prompts=num_prompts,
+            num_prompts=num_prompts,
         )
 
         # Verify results work correctly even with out-of-order processing
@@ -616,7 +616,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                     mock_args,
                     training_step=1,
                     generation_config=mock_generation_config,
-                    expected_num_prompts=num_prompts,
+                    num_prompts=num_prompts,
                 )
                 completed.set()
             except Exception:

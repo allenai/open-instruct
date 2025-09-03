@@ -1344,20 +1344,20 @@ def accumulate_inference_batches(
     pending_queries_map: PendingQueriesMap,
     args: Args,
     training_step: int,
-    generation_config: vllm.SamplingParams,
-    expected_num_prompts: int,
-    actor_manager: Optional[ActorManager] = None,
+    generation_config,
+    num_prompts: int,
+    actor_manager=None,
     timeout: Optional[float] = None,
 ) -> tuple[GenerationResult, Batch]:
     """Accumulate multiple inference results into a single training batch.
 
     Args:
-        inference_results_Q: Queue containing GenerationResult objects
+        inference_results_Q: Queue containing individual GenerationResult objects (one per prompt)
         pending_queries_map: PendingQueriesMap instance for thread-safe query tracking
-        args: Arguments containing vllm_num_engines
+        args: Arguments containing vllm_num_engines and batch size info
         training_step: Current training step for error reporting
         generation_config: Generation config containing n (number of samples per prompt)
-        expected_num_prompts: Number of prompts to accumulate
+        num_prompts: Number of prompts to accumulate
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
 
     Raises:
@@ -1366,15 +1366,15 @@ def accumulate_inference_batches(
     Returns:
         Tuple of (combined_result, Batch with queries, ground_truths, datasets) or (ShutdownSentinel, None) if shutdown signal received
     """
-    # Collect results from all engines with non-blocking progress bar
     results = []
     all_queries = []
     all_ground_truths = []
     all_datasets = []
+
     for i in tqdm(
-        range(expected_num_prompts),
-        total=expected_num_prompts,
-        desc=f"Accumulating {expected_num_prompts} individual results",
+        range(num_prompts),
+        total=num_prompts,
+        desc=f"Accumulating {num_prompts} results (each with {generation_config.n} completions)",
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     ):
@@ -1479,8 +1479,8 @@ def data_preparation_thread(
                 args,
                 training_step,
                 generation_config,
-                args.num_unique_prompts_rollout,
-                actor_manager,
+                num_prompts=args.num_unique_prompts_rollout,
+                actor_manager=actor_manager,
             )
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
@@ -2283,8 +2283,8 @@ def maybe_evaluate(
             eval_pending_queries_map,
             args,
             training_step,
-            generation_config=eval_generation_config,
-            expected_num_prompts=args.num_eval_samples,
+            eval_generation_config,
+            num_prompts=args.num_eval_samples,
             actor_manager=actor_manager,
             timeout=timeout,
         )
