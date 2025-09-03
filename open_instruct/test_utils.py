@@ -13,13 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Copied from https://github.com/huggingface/alignment-handbook/blob/main/tests/test_data.py
+import time
 import unittest
+from unittest import mock
 
 import pytest
 from dateutil import parser
 from parameterized import parameterized
 
-from open_instruct.utils import get_datasets, repeat_each
+from open_instruct import utils
 
 
 class GetDatasetsTest(unittest.TestCase):
@@ -31,7 +33,7 @@ class GetDatasetsTest(unittest.TestCase):
             "HuggingFaceH4/testing_self_instruct_small": 0.3,
             "HuggingFaceH4/testing_codealpaca_small": 0.2,
         }
-        datasets = get_datasets(dataset_mixer, columns_to_keep=["prompt", "completion"])
+        datasets = utils.get_datasets(dataset_mixer, columns_to_keep=["prompt", "completion"])
         self.assertEqual(len(datasets["train"]), 100)
         self.assertEqual(len(datasets["test"]), 300)
 
@@ -41,24 +43,24 @@ class GetDatasetsTest(unittest.TestCase):
             "HuggingFaceH4/testing_self_instruct_small": 1.0,
             "HuggingFaceH4/testing_codealpaca_small": 1.0,
         }
-        datasets = get_datasets(dataset_mixer, columns_to_keep=["prompt", "completion"])
+        datasets = utils.get_datasets(dataset_mixer, columns_to_keep=["prompt", "completion"])
         self.assertEqual(len(datasets["train"]), 300)
         self.assertEqual(len(datasets["test"]), 300)
 
     def test_loading_with_fractions_greater_than_unity(self):
         dataset_mixer = {"HuggingFaceH4/testing_alpaca_small": 0.7, "HuggingFaceH4/testing_self_instruct_small": 0.4}
-        datasets = get_datasets(dataset_mixer, columns_to_keep=["prompt", "completion"])
+        datasets = utils.get_datasets(dataset_mixer, columns_to_keep=["prompt", "completion"])
         self.assertEqual(len(datasets["train"]), 70 + 40)
         self.assertEqual(len(datasets["test"]), 200)
 
     def test_loading_fails_with_negative_fractions(self):
         dataset_mixer = {"HuggingFaceH4/testing_alpaca_small": 0.7, "HuggingFaceH4/testing_self_instruct_small": -0.3}
         with pytest.raises(ValueError, match=r"Dataset fractions / lengths cannot be negative."):
-            get_datasets(dataset_mixer, columns_to_keep=["prompt", "completion"])
+            utils.get_datasets(dataset_mixer, columns_to_keep=["prompt", "completion"])
 
     def test_loading_single_split_with_unit_fractions(self):
         dataset_mixer = {"HuggingFaceH4/testing_alpaca_small": 1.0}
-        datasets = get_datasets(dataset_mixer, splits=["test"], columns_to_keep=["prompt", "completion"])
+        datasets = utils.get_datasets(dataset_mixer, splits=["test"], columns_to_keep=["prompt", "completion"])
         self.assertEqual(len(datasets["test"]), 100)
         self.assertRaises(KeyError, lambda: datasets["train"])
 
@@ -67,13 +69,124 @@ class GetDatasetsTest(unittest.TestCase):
             "ai2-adapt-dev/ultrafeedback-small": 1000,
             "ai2-adapt-dev/summarize_from_feedback_small": 1000,
         }
-        pref_datasets = get_datasets(dataset_mixer, splits=["train"], columns_to_keep=["chosen", "rejected"])
+        pref_datasets = utils.get_datasets(dataset_mixer, splits=["train"], columns_to_keep=["chosen", "rejected"])
         self.assertEqual(len(pref_datasets["train"]), 2000)
 
     def test_time_parser_used_in_get_beaker_dataset_ids(self):
         # two special cases which beaker uses
         self.assertTrue(parser.parse("2024-09-16T19:03:02.31502Z"))
         self.assertTrue(parser.parse("0001-01-01T00:00:00Z"))
+
+
+def _setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, initial_description):
+    """Shared mock setup for beaker tests."""
+    mock_is_beaker_job.return_value = True
+
+    mock_client = mock.MagicMock()
+    mock_beaker_from_env.return_value = mock_client
+
+    mock_spec = mock.MagicMock()
+    mock_spec.description = initial_description
+    mock_client.experiment.get.return_value = mock_spec
+
+    description_history = []
+
+    def track_description(exp_id, desc):
+        description_history.append(desc)
+
+    mock_client.experiment.set_description.side_effect = track_description
+
+    return mock_client, mock_spec, description_history
+
+
+class TestBeakerDescription(unittest.TestCase):
+    """Test the beaker description update function."""
+
+    @mock.patch("os.environ.get")
+    @mock.patch("beaker.Beaker.from_env")
+    @mock.patch("open_instruct.utils.is_beaker_job")
+    def test_description_does_not_accumulate(self, mock_is_beaker_job, mock_beaker_from_env, mock_environ_get):
+        """Test that the description doesn't accumulate git info and wandb URLs on repeated calls."""
+        # Configure os.environ.get mock
+        env_values = {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"}
+        mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
+
+        mock_client, mock_spec, description_history = _setup_beaker_mocks(
+            mock_beaker_from_env, mock_is_beaker_job, "Beaker-Mason job."
+        )
+
+        wandb_url = "https://wandb.ai/ai2-llm/open_instruct_internal/runs/1f3ow3oh"
+        start_time = time.time()
+
+        original_descriptions = {}
+
+        for step in [10, 20, 30]:
+            utils.maybe_update_beaker_description(
+                current_step=step,
+                total_steps=100,
+                start_time=start_time,
+                wandb_url=wandb_url,
+                original_descriptions=original_descriptions,
+            )
+            if description_history:
+                mock_spec.description = description_history[-1]
+
+        self.assertEqual(len(description_history), 3)
+
+        for i, desc in enumerate(description_history):
+            git_commit_count = desc.count("git_commit:")
+            git_branch_count = desc.count("git_branch:")
+            wandb_count = desc.count(wandb_url)
+
+            self.assertEqual(
+                git_commit_count,
+                1,
+                f"Step {(i + 1) * 10}: git_commit should appear once, but appears {git_commit_count} times in: {desc}",
+            )
+            self.assertEqual(
+                git_branch_count,
+                1,
+                f"Step {(i + 1) * 10}: git_branch should appear once, but appears {git_branch_count} times in: {desc}",
+            )
+            self.assertEqual(
+                wandb_count,
+                1,
+                f"Step {(i + 1) * 10}: wandb URL should appear once, but appears {wandb_count} times in: {desc}",
+            )
+
+            self.assertIn("Beaker-Mason job.", desc)
+            self.assertIn("git_commit: abc123", desc)
+            self.assertIn("git_branch: main", desc)
+            self.assertIn(wandb_url, desc)
+            self.assertIn(f"% complete (step {(i + 1) * 10}/100)", desc)
+
+    @mock.patch("os.environ.get")
+    @mock.patch("beaker.Beaker.from_env")
+    @mock.patch("open_instruct.utils.is_beaker_job")
+    def test_description_without_progress(self, mock_is_beaker_job, mock_beaker_from_env, mock_environ_get):
+        """Test description updates without progress information."""
+        # Configure os.environ.get mock
+        env_values = {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "def456", "GIT_BRANCH": "dev"}
+        mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
+
+        mock_client, mock_spec, description_history = _setup_beaker_mocks(
+            mock_beaker_from_env, mock_is_beaker_job, "Initial job description"
+        )
+
+        original_descriptions = {}
+
+        utils.maybe_update_beaker_description(
+            wandb_url="https://wandb.ai/team/project/runs/xyz789", original_descriptions=original_descriptions
+        )
+
+        self.assertEqual(len(description_history), 1)
+        desc = description_history[0]
+
+        self.assertIn("Initial job description", desc)
+        self.assertIn("git_commit: def456", desc)
+        self.assertIn("git_branch: dev", desc)
+        self.assertIn("https://wandb.ai/team/project/runs/xyz789", desc)
+        self.assertNotIn("% complete", desc)
 
 
 class TestUtilityFunctions(unittest.TestCase):
@@ -92,14 +205,14 @@ class TestUtilityFunctions(unittest.TestCase):
     )
     def test_repeat_each(self, name, sequence, k, expected):
         """Test the repeat_each function with various inputs."""
-        result = repeat_each(sequence, k)
+        result = utils.repeat_each(sequence, k)
         self.assertEqual(result, expected)
 
     def test_repeat_each_mutation_isolation(self):
         """Test that mutating a sequence item after repeat_each doesn't change the repeated versions."""
         original_list = [1, 2]
         sequence = [original_list, ["a", "b"], [True, False]]
-        result = repeat_each(sequence, 2)
+        result = utils.repeat_each(sequence, 2)
 
         # Result should be: [[1, 2], [1, 2], ["a", "b"], ["a", "b"], [True, False], [True, False]]
         self.assertEqual(len(result), 6)

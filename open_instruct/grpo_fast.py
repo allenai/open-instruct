@@ -87,6 +87,7 @@ from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
+    RAW_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
@@ -119,7 +120,6 @@ from open_instruct.utils import (
     calibrate_checkpoint_state_dir,
     clean_last_n_checkpoints_deepspeed,
     download_latest_checkpoint_from_gs,
-    extract_user_query,
     get_beaker_whoami,
     get_eval_ds_config,
     get_optimizer_grouped_parameters,
@@ -357,6 +357,8 @@ class Args:
     # Experiment tracking
     verbose: bool = False
     """If toggled, debug output will be shown"""
+    update_progress_every: int = 10
+    """How often to update the progress bar (in steps)."""
     with_tracking: bool = False
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
@@ -489,6 +491,7 @@ def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
         queries=data_next[INPUT_IDS_PROMPT_KEY],
         ground_truths=data_next[GROUND_TRUTHS_KEY],
         datasets=data_next[VERIFIER_SOURCE_KEY],
+        raw_queries=data_next[RAW_PROMPT_KEY],
         indices=dataset_indices,
     )
 
@@ -1281,28 +1284,46 @@ class PendingQueriesMap:
         self._map = {}  # dataset_idx -> (query, ground_truth, dataset, count)
         self._lock = threading.Lock()
 
-    def insert(self, dataset_idx, query, ground_truth, dataset):
+    def insert(self, dataset_idx, query, ground_truth, dataset, raw_query):
         """Insert or increment count for a dataset index."""
         with self._lock:
             if dataset_idx in self._map:
                 # Already exists - just increment count
-                existing_query, existing_ground_truth, existing_dataset, count = self._map[dataset_idx]
-                self._map[dataset_idx] = (existing_query, existing_ground_truth, existing_dataset, count + 1)
+                existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count = self._map[
+                    dataset_idx
+                ]
+                self._map[dataset_idx] = (
+                    existing_query,
+                    existing_ground_truth,
+                    existing_dataset,
+                    existing_raw_query,
+                    count + 1,
+                )
             else:
                 # New entry - count starts at 1
-                self._map[dataset_idx] = (query, ground_truth, dataset, 1)
+                self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, 1)
 
-    def insert_many(self, dataset_indices, queries, ground_truths, datasets):
+    def insert_many(self, dataset_indices, queries, ground_truths, datasets, raw_queries):
         """Insert or increment count for multiple dataset indices at once."""
         with self._lock:
             for i, dataset_idx in enumerate(dataset_indices):
+                current_raw_query = raw_queries[i]
+
                 if dataset_idx in self._map:
                     # Already exists - just increment count
-                    existing_query, existing_ground_truth, existing_dataset, count = self._map[dataset_idx]
-                    self._map[dataset_idx] = (existing_query, existing_ground_truth, existing_dataset, count + 1)
+                    existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count = self._map[
+                        dataset_idx
+                    ]
+                    self._map[dataset_idx] = (
+                        existing_query,
+                        existing_ground_truth,
+                        existing_dataset,
+                        existing_raw_query,
+                        count + 1,
+                    )
                 else:
                     # New entry - count starts at 1
-                    self._map[dataset_idx] = (queries[i], ground_truths[i], datasets[i], 1)
+                    self._map[dataset_idx] = (queries[i], ground_truths[i], datasets[i], current_raw_query, 1)
 
     def pop(self, dataset_idx):
         """Retrieve data and decrement count. Removes entry when count reaches 0."""
@@ -1310,16 +1331,16 @@ class PendingQueriesMap:
             if dataset_idx not in self._map:
                 raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
 
-            query, ground_truth, dataset, count = self._map[dataset_idx]
+            query, ground_truth, dataset, raw_query, count = self._map[dataset_idx]
 
             if count > 1:
                 # More results expected - just decrement
-                self._map[dataset_idx] = (query, ground_truth, dataset, count - 1)
+                self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, count - 1)
             else:
                 # Last result - remove entry
                 del self._map[dataset_idx]
 
-            return query, ground_truth, dataset
+            return query, ground_truth, dataset, raw_query
 
     def __len__(self):
         """Return the number of entries in the map."""
@@ -1373,7 +1394,7 @@ def accumulate_inference_batches(
     all_queries = []
     all_ground_truths = []
     all_datasets = []
-
+    all_raw_queries = []
     for i in tqdm(
         range(num_prompts),
         total=num_prompts,
@@ -1386,12 +1407,13 @@ def accumulate_inference_batches(
         if isinstance(result, ShutdownSentinel):
             return result, None
 
-        query, ground_truth, dataset = pending_queries_map.pop(result.dataset_index)
+        query, ground_truth, dataset, raw_query = pending_queries_map.pop(result.dataset_index)
 
         results.append(result)
         all_queries.append(query)
         all_ground_truths.append(ground_truth)
         all_datasets.append(dataset)
+        all_raw_queries.append(raw_query)
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1453,6 +1475,7 @@ def accumulate_inference_batches(
         queries=all_queries,
         ground_truths=all_ground_truths,
         datasets=all_datasets,
+        raw_queries=all_raw_queries,
         indices=None,  # Not meaningful for combined results
     )
     return combined_result, batch
@@ -1495,6 +1518,7 @@ def data_preparation_thread(
                 queries=repeat_each(batch.queries, args.num_samples_per_prompt_rollout),
                 ground_truths=repeat_each(batch.ground_truths, args.num_samples_per_prompt_rollout),
                 datasets=repeat_each(batch.datasets, args.num_samples_per_prompt_rollout),
+                raw_queries=repeat_each(batch.raw_queries, args.num_samples_per_prompt_rollout),
                 indices=repeat_each(batch.indices, args.num_samples_per_prompt_rollout) if batch.indices else None,
             )
             good_outputs = [
@@ -1516,8 +1540,7 @@ def data_preparation_thread(
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
-            decoded_queries = tokenizer.batch_decode(batch.queries, skip_special_tokens=True)
-            decoded_queries = [extract_user_query(query) for query in decoded_queries]
+            decoded_queries = batch.raw_queries
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
                 result.finish_reasons
             )
@@ -1560,6 +1583,16 @@ def data_preparation_thread(
             real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
             expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
             non_zero_gradient_index = np.where(expanded_mask)[0]
+
+            # Log zero-gradient filtering statistics
+            num_zero_std_prompts = (~non_zero_std_mask).sum()
+            num_filtered_responses = len(scores) - len(non_zero_gradient_index)
+            if num_filtered_responses > 0:
+                logger.info(
+                    f"[Zero-gradient filtering] Filtered {num_zero_std_prompts} prompts with zero std "
+                    f"({num_filtered_responses} responses). Retention rate: {len(non_zero_gradient_index) / len(scores):.2%}"
+                )
+
             advantages = advantages[non_zero_gradient_index]
             original_batch_size = len(scores)
             scores = scores[non_zero_gradient_index]
@@ -1569,6 +1602,12 @@ def data_preparation_thread(
             finish_reasons = [result.finish_reasons[i] for i in non_zero_gradient_index]
             if args.mask_truncated_completions:
                 stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
+                num_truncated = len(finish_reasons) - len(stop_idxes)
+                if num_truncated > 0:
+                    logger.info(
+                        f"[Truncated completions filtering] Filtered {num_truncated} responses that didn't finish with 'stop'. "
+                        f"Retention rate: {len(stop_idxes) / len(finish_reasons):.2%}"
+                    )
                 scores = scores[stop_idxes]
                 advantages = advantages[stop_idxes]
                 responses = [responses[i] for i in stop_idxes]
@@ -1588,6 +1627,11 @@ def data_preparation_thread(
                         scores_matrix = scores.reshape(current_prompt_cnt, k)
                         stds = scores_matrix.std(axis=1) + 1e-8
                         probs = stds / stds.sum()
+
+                        logger.info(
+                            f"[Refill completions] Need to fill {need_to_fill_prompt} prompts to maintain batch size. "
+                            f"Original: {original_prompt_cnt}, Current: {current_prompt_cnt}"
+                        )
 
                         sampled_prompt_ids = np.random.choice(
                             current_prompt_cnt, size=need_to_fill_prompt, replace=True, p=probs
@@ -1614,9 +1658,17 @@ def data_preparation_thread(
 
                         finish_reasons += [finish_reasons[i] for i in sampled_indices]
 
-                        print(
+                        logger.info(
                             f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses"
                         )
+
+            # Count groups with all zero rewards
+            all_zero_groups = (scores_per_prompt == 0).all(axis=-1).sum()
+            total_groups = len(scores_per_prompt)
+            logger.info(
+                f"[Reward Summary] Groups with all zero rewards: {all_zero_groups}/{total_groups} "
+                f"({all_zero_groups / total_groups:.1%})"
+            )
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
@@ -1729,11 +1781,18 @@ def data_preparation_thread(
             sequence_length_unsolved = (
                 np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
             )
+
+            # Use the already calculated reward summary metrics for wandb
+            all_zero_groups_ratio = all_zero_groups / total_groups if total_groups > 0 else 0
+
             metrics = {
                 "scores": np.array(scores).mean(),
                 "real_batch_size_ratio": real_batch_size_ratio,
                 "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
                 "packed_ratio": len(packed_sequences.query_responses) / len(responses) if len(responses) > 0 else 0,
+                "val/all_zero_reward_groups": all_zero_groups,
+                "val/all_zero_reward_groups_ratio": all_zero_groups_ratio,
+                "val/total_reward_groups": total_groups,
                 "val/sequence_lengths": sequence_lengths.mean(),
                 "val/sequence_lengths_min": sequence_lengths.min(),
                 "val/sequence_lengths_max": sequence_lengths.max(),
@@ -1840,7 +1899,6 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
             tags=[args.exp_name] + get_wandb_tags(),
         )
         wandb_url = wandb.run.get_url()
-        logger.info(f"Initial Beaker description update with wandb_url: {wandb_url}")
         maybe_update_beaker_description(wandb_url=wandb_url)
 
     return beaker_config, wandb_url
@@ -2020,8 +2078,8 @@ def split_and_insert_batch(
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
     # Insert each dataset_index with reference count = generation_config.n (number of samples per prompt)
-    for idx, query, ground_truth, dataset in zip(batch.indices, batch.queries, batch.ground_truths, batch.datasets):
-        pending_queries_map.insert(idx, query, ground_truth, dataset)
+    for idx, query, ground_truth, dataset, raw_query in zip(batch.indices, batch.queries, batch.ground_truths, batch.datasets, batch.raw_queries):
+        pending_queries_map.insert(idx, query, ground_truth, dataset, raw_query)
         param_prompt_Q.put(
             PromptRequest(
                 prompt=query,
@@ -2583,10 +2641,9 @@ def run_training(
 
         if (
             training_step == resume_training_step
-            or training_step % 10 == 0
+            or training_step % args.update_progress_every == 0
             or training_step == args.num_training_steps
         ):
-            logger.info(f"Progress update for Beaker description: step {training_step}/{args.num_training_steps}")
             maybe_update_beaker_description(
                 current_step=training_step,
                 total_steps=args.num_training_steps,
