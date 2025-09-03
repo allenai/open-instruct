@@ -323,11 +323,13 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         dataset_idx = request.dataset_index[batch_idx]
 
         request_id = f"{prefix}_{request.training_step}_{dataset_idx}"
+        sampling_params = request.generation_config.clone()
+        sampling_params.n = 1  # Use n=1 for tool processing
         request_metadata[request_id] = {
             "is_eval": request.is_eval,
             "dataset_index": dataset_idx,
             "training_step": request.training_step,
-            "sampling_params": request.generation_config,
+            "sampling_params": sampling_params,
             "prompt_tokens": len(prompt),
             "start_time": time.perf_counter(),
         }
@@ -336,8 +338,7 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
 
         for j in range(request.generation_config.n):
             sub_request_id = f"{request_id}_{j}"
-            sub_sampling_params = request.generation_config.clone()
-            sub_sampling_params.n = 1  # Each sub-request generates exactly 1 sample
+            sub_sampling_params = sampling_params.clone()  # Already has n=1
             if request.generation_config.seed is not None:
                 sub_sampling_params.seed = request.generation_config.seed + j
             llm_engine.add_request(sub_request_id, tokens_prompt, sub_sampling_params)
