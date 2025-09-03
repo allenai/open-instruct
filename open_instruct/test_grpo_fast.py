@@ -436,6 +436,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
 
             combined_responses.extend(result.responses)
             combined_queries.append(q)
+            combined_raw_queries.append(raw_q)
             combined_ground_truths.append(gt)
             combined_datasets.append(d)
 
