@@ -2012,57 +2012,25 @@ def create_generation_configs(args: Args):
 
 def split_and_insert_batch(
     batch: Batch,
-    training_step,
-    vllm_num_engines,
+    training_step: int,
     pending_queries_map: PendingQueriesMap,
-    param_prompt_Q,
+    param_prompt_Q: ray_queue.Queue,
     generation_config,
-    args: Args,
-    is_eval: bool = False,
+    is_eval: bool,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
     # Insert each dataset_index with reference count = generation_config.n (number of samples per prompt)
     for idx, query, ground_truth, dataset in zip(batch.indices, batch.queries, batch.ground_truths, batch.datasets):
-        for _ in range(generation_config.n):
-            pending_queries_map.insert(idx, query, ground_truth, dataset)
-
-    for i, prompt in enumerate(batch.queries):
+        pending_queries_map.insert(idx, query, ground_truth, dataset)
         param_prompt_Q.put(
             PromptRequest(
-                prompt=prompt,
+                prompt=query,
                 generation_config=generation_config,
                 training_step=training_step,
-                dataset_index=batch.indices[i],
+                dataset_index=idx,
                 is_eval=is_eval,
             )
         )
-
-
-def prepare_prompts(
-    training_step: int,
-    args: Args,
-    train_dataset: Any,
-    iter_dataloader: Iterator[List[int]],
-    pending_queries_map: PendingQueriesMap,
-    param_prompt_Q: ray_queue.Queue,
-    generation_configs: Dict[str, vllm.SamplingParams],
-    weight_sync_trigger_event: threading.Event,
-) -> Batch:
-    """Trigger weight sync and prepare the next batch of prompts for vLLM."""
-    dataset_indices = next(iter_dataloader)
-    batch = next_batch(dataset_indices, train_dataset)
-
-    split_and_insert_batch(
-        batch,
-        training_step,
-        args.vllm_num_engines,
-        pending_queries_map,
-        param_prompt_Q,
-        generation_configs["train"],
-        args,
-    )
-
-    return batch
 
 
 def load_data_from_packing_thread(
@@ -2633,16 +2601,11 @@ def run_training(
         weight_sync_trigger_event.set()
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-        prepare_prompts(
-            training_step,
-            args,
-            train_dataset,
-            iter_dataloader,
-            pending_queries_map,
-            param_prompt_Q,
-            generation_configs,
-            weight_sync_trigger_event,
+        batch = next_batch(next(iter_dataloader), train_dataset)
+        split_and_insert_batch(
+            batch, training_step, pending_queries_map, param_prompt_Q, generation_configs["train"], is_eval=False
         )
+
         if (
             training_step % args.local_eval_every == 0
             and eval_batch is not None
@@ -2651,11 +2614,9 @@ def run_training(
             split_and_insert_batch(
                 eval_batch,
                 training_step,
-                args.vllm_num_engines,
                 eval_pending_queries_map,
                 param_prompt_Q,
                 generation_configs["eval"],
-                args,
                 is_eval=True,
             )
 
