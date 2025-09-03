@@ -563,15 +563,10 @@ class LLMRayActor:
     def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step, dataset_indices):
         """Add initial requests to the engine."""
         for i, prompt in enumerate(prompts):
-            # Use dataset index if available, otherwise use local index for uniqueness
-            if dataset_indices and i < len(dataset_indices) and dataset_indices[i] is not None:
-                idx = dataset_indices[i]
-            else:
-                # Fallback to local index if dataset_index is None or not available
-                idx = i
-
-            request_id = f"{training_step}_{idx}"
+            request_id = f"{training_step}_{i}"
+            self.request_metadata[request_id] = {"prompt_tokens": len(prompt), "start_time": time.time()}
             if self.tools:
+                # Create individual requests for each sample when using tools
                 for j in range(n_samples):
                     sample_request_id = f"{request_id}-{j}"
                     tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=sample_request_id)
