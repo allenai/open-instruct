@@ -2623,11 +2623,10 @@ def run_training(
         split_and_insert_batch(
             batch,
             resume_training_step,
-            args.vllm_num_engines,
             pending_queries_map,
             param_prompt_Q,
             generation_configs["train"],
-            args,
+            is_eval=False,
         )
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
         num_total_tokens = checkpoint_state["num_total_tokens"]
