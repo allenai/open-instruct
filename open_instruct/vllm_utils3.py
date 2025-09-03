@@ -221,14 +221,14 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=
     # Merge n completions into the same outputs
     merged_outputs = {}
     for req_id in tracking["concat_outputs"]:
-        real_req_id, _ = req_id.split("-")
+        real_req_id = "_".join(req_id.split("_")[:-1])
         if real_req_id not in merged_outputs:
             merged_outputs[real_req_id] = tracking["concat_outputs"][req_id]
         else:
             merged_outputs[real_req_id].outputs.append(tracking["concat_outputs"][req_id].outputs[0])
 
     final_outputs = sorted(
-        merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1]))
+        merged_outputs.values(), key=lambda x: (int(x.request_id.split("_")[1]), int(x.request_id.split("_")[2]))
     )
 
     return _process_outputs_with_tools(
@@ -460,7 +460,7 @@ class LLMRayActor:
 
             # Poll tool futures first (matching ToolUseLLM order)
             if tracking and tracking.get("pending_tool_futures"):
-                self._poll_tool_futures(tracking, tokenizer)
+                outputs.extend(self._poll_tool_futures(tracking, tokenizer))
 
             # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
             if self.llm_engine.has_unfinished_requests():
@@ -499,7 +499,7 @@ class LLMRayActor:
         final_outputs = []
         for request_id in ordered_ids:
             outs = combined_outputs[request_id]
-            assert len(outs) == request.generation_config.n
+            assert len(outs) == request.generation_config.n, f"{len(outs)=} != {request.generation_config.n=}"
             final_outputs.append(
                 vllm.RequestOutput(
                     request_id=request_id,
@@ -534,9 +534,10 @@ class LLMRayActor:
     def _poll_tool_futures(self, tracking, tokenizer):
         """Poll and handle completed tool executions."""
         if not self.tools or not tracking["pending_tool_futures"]:
-            return
+            return []
 
         dict_keys_to_delete = []
+        completed_outputs = []
 
         for req_id, (future, last_o, last_output) in tracking["pending_tool_futures"].items():
             if not future.done():
@@ -594,11 +595,16 @@ class LLMRayActor:
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
                     self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
+            else:
+                # If we can't make a new request, this tool execution is complete
+                completed_outputs.append(tracking["concat_outputs"][req_id])
 
             dict_keys_to_delete.append(req_id)
 
         for req_id in dict_keys_to_delete:
             tracking["pending_tool_futures"].pop(req_id, None)
+
+        return completed_outputs
 
     def init_process_group(
         self,
