@@ -664,6 +664,7 @@ class TokenizerConfig:
 INPUT_IDS_KEY = "input_ids"
 ATTENTION_MASK_KEY = "attention_mask"
 LABELS_KEY = "labels"
+DATASET_ORIGIN_KEY = "dataset_source"
 TOKENIZED_SFT_DATASET_KEYS = [
     INPUT_IDS_KEY,
     ATTENTION_MASK_KEY,
@@ -1149,6 +1150,14 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     tokenizer = tc.tokenizer
     dataset = dc.dataset
+
+    # add dataset source information
+    dataset = dataset.map(
+        lambda example: {**example, DATASET_ORIGIN_KEY: dc.dataset_name},
+        num_proc=num_proc,
+        desc=f"Adding dataset source field for {dc.dataset_name}",
+    )
+
     for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
         fn, fn_type = TRANSFORM_FNS[fn_name]
         # always pass in tokenizer and other args if needed
@@ -1157,6 +1166,10 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
         # perform the transformation
         target_columns = dataset.column_names if dc.target_columns is None else dc.target_columns
+        # Always preserve dataset_source if it exists
+        if DATASET_ORIGIN_KEY in dataset.column_names and DATASET_ORIGIN_KEY not in target_columns:
+            target_columns = target_columns + [DATASET_ORIGIN_KEY]
+
         if fn_type == "map":
             dataset = dataset.map(
                 fn,
