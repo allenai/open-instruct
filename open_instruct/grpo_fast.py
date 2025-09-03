@@ -1632,12 +1632,12 @@ def data_preparation_thread(
                             f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses"
                         )
 
-            # Log filtering summary
-            final_batch_size = len(scores)
+            # Count groups with all zero rewards
+            all_zero_groups = (scores_per_prompt == 0).all(axis=-1).sum()
+            total_groups = len(scores_per_prompt)
             logger.info(
-                f"[Filtering Summary] Original batch size: {original_batch_size}, "
-                f"Final batch size: {final_batch_size}, "
-                f"Overall retention rate: {final_batch_size / original_batch_size:.2%}"
+                f"[Reward Summary] Groups with all zero rewards: {all_zero_groups}/{total_groups} "
+                f"({all_zero_groups / total_groups:.1%})"
             )
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
