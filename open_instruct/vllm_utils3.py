@@ -320,26 +320,27 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
     """Add a request to the LLM engine."""
     prefix = "eval" if request.is_eval else "train"
 
-    for batch_idx, prompt in enumerate(request.prompts):
-        request_id = f"{prefix}_{request.training_step}_{batch_idx}"
-        sampling_params = request.generation_config.clone()
-        sampling_params.n = 1  # Use n=1 for tool processing
-        request_metadata[request_id] = {
-            "is_eval": request.is_eval,
-            "dataset_index": request.dataset_index[batch_idx],
-            "training_step": request.training_step,
-            "sampling_params": sampling_params,
-            "prompt_tokens": len(prompt),
-            "start_time": time.perf_counter(),
-        }
+    # PromptRequest now has a single prompt field
+    prompt = request.prompt
+    request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
+    sampling_params = request.generation_config.clone()
+    sampling_params.n = 1  # Use n=1 for tool processing
+    request_metadata[request_id] = {
+        "is_eval": request.is_eval,
+        "dataset_index": request.dataset_index,
+        "training_step": request.training_step,
+        "sampling_params": sampling_params,
+        "prompt_tokens": len(prompt),
+        "start_time": time.perf_counter(),
+    }
 
-        tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=request_id)
+    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=request_id)
 
-        for j in range(request.generation_config.n):
-            sub_sampling_params = sampling_params.clone()  # Already has n=1
-            if request.generation_config.seed is not None:
-                sub_sampling_params.seed = request.generation_config.seed + j
-            llm_engine.add_request(f"{request_id}_{j}", tokens_prompt, sub_sampling_params)
+    for j in range(request.generation_config.n):
+        sub_sampling_params = sampling_params.clone()  # Already has n=1
+        if request.generation_config.seed is not None:
+            sub_sampling_params.seed = request.generation_config.seed + j
+        llm_engine.add_request(f"{request_id}_{j}", tokens_prompt, sub_sampling_params)
 
 
 class LLMRayActor:
@@ -441,80 +442,15 @@ class LLMRayActor:
                 # If no requests at all, return
                 return num_processed
 
-        self.logger.info(f"[LLMRayActor] Collected {len(requests)} individual prompts for batch processing")
+        self.logger.info(f"[LLMRayActor] Collected {len(requests)} individual prompts for direct processing")
 
-        # Combine individual requests into a single batch
-        # Each individual request has prompt=single_prompt
-        combined_prompts = []
-        combined_indices = []
-        combined_training_step = requests[0].training_step
-        combined_is_eval = requests[0].is_eval
-        combined_generation_config = requests[0].generation_config
-        combined_start_time = requests[0].start_time
+        # Process each individual request directly without batching
+        for request in requests:
+            # Add the individual request directly to the LLM engine
+            add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
 
-        for req in requests:
-            combined_prompts.append(req.prompt)  # Each req.prompt is a single prompt
-            combined_indices.append(req.dataset_index)  # Always append to maintain alignment
-
-        # Create a BatchRequest with multiple prompts for processing
-        # Note: _process_request expects prompts (plural) so we create a synthetic batch
-        class BatchRequest:
-            def __init__(self):
-                self.prompts = combined_prompts
-                self.generation_config = combined_generation_config
-                self.training_step = combined_training_step
-                self.dataset_index = combined_indices if combined_indices else None
-                self.is_eval = combined_is_eval
-                self.start_time = combined_start_time
-
-        batch_request = BatchRequest()
-
-        # Process the batch request using existing logic
-        batch_result = self._process_request(batch_request)
-
-        # Split the batched result into individual results
-        # Each prompt gets generation_config.n responses
-        n = combined_generation_config.n
-        num_prompts = len(combined_prompts)
-
-        for i in range(num_prompts):
-            # Extract responses for this prompt
-            start_idx = i * n
-            end_idx = (i + 1) * n
-
-            result = GenerationResult(
-                responses=batch_result.responses[start_idx:end_idx],
-                finish_reasons=batch_result.finish_reasons[start_idx:end_idx],
-                masks=batch_result.masks[start_idx:end_idx],
-                request_info=RequestInfo(
-                    num_calls=batch_result.request_info.num_calls[start_idx:end_idx],
-                    timeouts=batch_result.request_info.timeouts[start_idx:end_idx],
-                    tool_errors=batch_result.request_info.tool_errors[start_idx:end_idx],
-                    tool_outputs=batch_result.request_info.tool_outputs[start_idx:end_idx],
-                    tool_runtimes=batch_result.request_info.tool_runtimes[start_idx:end_idx],
-                    tool_calleds=batch_result.request_info.tool_calleds[start_idx:end_idx],
-                ),
-                dataset_index=combined_indices[i] if combined_indices else None,
-                training_step=combined_training_step,
-                start_time=combined_start_time,
-            )
-
-            self._insert_result_to_queue(result, is_eval=combined_is_eval)
-
-        return num_prompts
-
-    def _process_request(self, request):
-        """Unified processing for both tool and non-tool generation."""
-
-        self.logger.info(
-            f"[LLMRayActor] Processing request with {len(request.prompts)} prompts, tools={bool(self.tools)}"
-        )
-
+        # Process all requests until completion
         tracking = _init_tool_tracking() if self.tools else None
-        tokenizer = self.llm_engine.tokenizer
-
-        add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
-
         outputs = []
         iteration = 0
 
@@ -523,48 +459,45 @@ class LLMRayActor:
 
             # Poll tool futures first (matching ToolUseLLM order)
             if tracking and tracking.get("pending_tool_futures"):
-                outputs.extend(self._poll_tool_futures(tracking, tokenizer))
+                outputs.extend(self._poll_tool_futures(tracking, self.llm_engine.tokenizer))
 
-            # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
+            # Process engine steps - ONLY if there are unfinished requests
             if self.llm_engine.has_unfinished_requests():
                 step_outputs = [o for o in self.llm_engine.step() if o.finished]
                 for output in step_outputs:
-                    self.logger.info(f"{len(output.outputs)=}")
                     result = _handle_output(
-                        output, self.tools, tracking, request.generation_config, self.max_tool_calls, self.executor
+                        output, self.tools, tracking, requests[0].generation_config, self.max_tool_calls, self.executor
                     )
                     # Result is None when we do more tool processing.
                     if result is not None:
                         outputs.append(result)
 
-            # Check termination condition (matching ToolUseLLM exactly)
+            # Check termination condition
             pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
             if not self.llm_engine.has_unfinished_requests() and pending_count == 0:
                 self.logger.info(f"[LLMRayActor] Terminating after {iteration} iterations with {len(outputs)} outputs")
                 break
 
+        # Process outputs and send individual results
         end_time = time.time()
-        total_prompt_tokens = 0
-        total_generation_tokens = 0
-        earliest_start_time = float("inf")
 
-        # Now, we combine outputs:
-        combined_outputs = defaultdict(list)
+        # Group outputs by request
+        request_outputs = defaultdict(list)
         for output in outputs:
-            # Remove the sub_idx.
+            # Remove the sub_idx to get base request ID
             request_id = "_".join(output.request_id.split("_")[:-1])
-            combined_outputs[request_id].append(output)
-        # Preserve original order from request.dataset_index
-        prefix = "eval" if request.is_eval else "train"
-        # request_id is batch_num _ training_step _ within_batch_idx _ repetition_idx.
-        # we order by within_batch_idx.
-        ordered_ids = [f"{prefix}_{request.training_step}_{batch_idx}" for batch_idx in range(len(request.prompts))]
-        final_outputs = []
-        for request_id in ordered_ids:
-            outs = combined_outputs[request_id]
-            assert len(outs) == request.generation_config.n, f"{len(outs)=} != {request.generation_config.n=}"
-            final_outputs.append(
-                vllm.RequestOutput(
+            request_outputs[request_id].append(output)
+
+        # Send results for each original request
+        for request in requests:
+            prefix = "eval" if request.is_eval else "train"
+            request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
+
+            if request_id in request_outputs:
+                outs = request_outputs[request_id]
+
+                # Create final output combining all sub-requests
+                final_output = vllm.RequestOutput(
                     request_id=request_id,
                     prompt=outs[0].prompt,
                     prompt_token_ids=outs[0].prompt_token_ids,
@@ -572,27 +505,40 @@ class LLMRayActor:
                     outputs=[completion for out in outs for completion in out.outputs],
                     finished=outs[0].finished,
                 )
-            )
-            metadata = self.request_metadata.pop(request_id)
-            total_prompt_tokens += metadata["prompt_tokens"]
-            earliest_start_time = min(earliest_start_time, metadata["start_time"])
-            for output in outs:
-                for completion in output.outputs:
-                    total_generation_tokens += len(completion.token_ids)
-        generation_time = end_time - earliest_start_time
-        result = _finalize_outputs(
-            final_outputs,
-            tracking,
-            request.dataset_index,
-            self.tools,
-            token_statistics=TokenStatistics(
-                num_prompt_tokens=total_prompt_tokens,
-                num_response_tokens=total_generation_tokens,
-                generation_time=generation_time,
-            ),
-            start_time=request.start_time,
-        )
-        return result
+
+                # Calculate token statistics for this request
+                metadata = self.request_metadata.pop(request_id)
+                total_prompt_tokens = metadata["prompt_tokens"]
+                total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
+                generation_time = end_time - metadata["start_time"]
+
+                # Create result using the appropriate processing function
+                if self.tools:
+                    result = _process_outputs_with_tools(
+                        [final_output],
+                        dataset_index=request.dataset_index,
+                        token_statistics=TokenStatistics(
+                            num_prompt_tokens=total_prompt_tokens,
+                            num_response_tokens=total_generation_tokens,
+                            generation_time=generation_time,
+                        ),
+                        start_time=request.start_time,
+                    )
+                else:
+                    result = _process_outputs(
+                        [final_output],
+                        dataset_index=request.dataset_index,
+                        token_statistics=TokenStatistics(
+                            num_prompt_tokens=total_prompt_tokens,
+                            num_response_tokens=total_generation_tokens,
+                            generation_time=generation_time,
+                        ),
+                        start_time=request.start_time,
+                    )
+
+                self._insert_result_to_queue(result, is_eval=request.is_eval)
+
+        return len(requests)
 
     def _poll_tool_futures(self, tracking, tokenizer):
         """Poll and handle completed tool executions."""
