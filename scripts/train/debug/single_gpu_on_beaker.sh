@@ -11,6 +11,7 @@ uv run python mason.py \
        --cluster ai2/saturn-cirrascale \
        --cluster ai2/ceres-cirrascale \
        --image "$BEAKER_IMAGE" \
+       --description "Single GPU on Beaker test script." \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
        --priority urgent \
