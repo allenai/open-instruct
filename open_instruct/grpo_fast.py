@@ -1796,11 +1796,18 @@ def data_preparation_thread(
             sequence_length_unsolved = (
                 np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
             )
+
+            # Use the already calculated reward summary metrics for wandb
+            all_zero_groups_ratio = all_zero_groups / total_groups if total_groups > 0 else 0
+
             metrics = {
                 "scores": np.array(scores).mean(),
                 "real_batch_size_ratio": real_batch_size_ratio,
                 "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
                 "packed_ratio": len(packed_sequences.query_responses) / len(responses) if len(responses) > 0 else 0,
+                "val/all_zero_reward_groups": all_zero_groups,
+                "val/all_zero_reward_groups_ratio": all_zero_groups_ratio,
+                "val/total_reward_groups": total_groups,
                 "val/sequence_lengths": sequence_lengths.mean(),
                 "val/sequence_lengths_min": sequence_lengths.min(),
                 "val/sequence_lengths_max": sequence_lengths.max(),
