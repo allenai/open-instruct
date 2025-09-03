@@ -2077,7 +2077,6 @@ def split_and_insert_batch(
     is_eval: bool,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    # Insert each dataset_index with reference count = generation_config.n (number of samples per prompt)
     for idx, query, ground_truth, dataset, raw_query in zip(
         batch.indices, batch.queries, batch.ground_truths, batch.datasets, batch.raw_queries
     ):
@@ -2664,7 +2663,6 @@ def run_training(
         split_and_insert_batch(
             batch, training_step, pending_queries_map, param_prompt_Q, generation_configs["train"], is_eval=False
         )
-
         if (
             training_step % args.local_eval_every == 0
             and eval_batch is not None
@@ -2817,10 +2815,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     packed_sequences_Q = Queue(maxsize=args.async_steps)
     pending_queries_map = PendingQueriesMap()
     eval_pending_queries_map = PendingQueriesMap()
-
-    # End-to-end flow assertions: Ensure maps are initially empty
-    assert len(pending_queries_map) == 0, f"Map not empty at start: {len(pending_queries_map)} entries"
-    assert len(eval_pending_queries_map) == 0, f"Eval map not empty at start: {len(eval_pending_queries_map)} entries"
     generate_metrics_Q = Queue(maxsize=args.async_steps)
     weight_sync_metrics_Q = Queue(maxsize=args.async_steps)
 
