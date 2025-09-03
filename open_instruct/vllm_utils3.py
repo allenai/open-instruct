@@ -481,7 +481,7 @@ class LLMRayActor:
             start_idx = i * n
             end_idx = (i + 1) * n
 
-            individual_result = GenerationResult(
+            result = GenerationResult(
                 responses=batch_result.responses[start_idx:end_idx],
                 finish_reasons=batch_result.finish_reasons[start_idx:end_idx],
                 masks=batch_result.masks[start_idx:end_idx],
@@ -498,8 +498,9 @@ class LLMRayActor:
                 start_time=combined_start_time,
             )
 
-            self._insert_result_to_queue(result, is_eval=request.is_eval)
-            return num_prompts
+            self._insert_result_to_queue(result, is_eval=combined_is_eval)
+
+        return num_prompts
 
     def _process_request(self, request):
         """Unified processing for both tool and non-tool generation."""
