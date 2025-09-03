@@ -92,7 +92,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     if not tools:
         return output
 
-    assert len(output.outputs) <= 1  # In tool mode, sampling_params.n == 1
+    assert len(output.outputs) <= 1, f"{len(output.outputs)=}"  # In tool mode, sampling_params.n == 1
     o = output.outputs[0]
 
     # Update concatenated outputs
@@ -460,12 +460,13 @@ class LLMRayActor:
 
             # Poll tool futures first (matching ToolUseLLM order)
             if tracking and tracking.get("pending_tool_futures"):
-                self._poll_tool_futures(tracking, request.generation_config, tokenizer)
+                self._poll_tool_futures(tracking, tokenizer)
 
             # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
             if self.llm_engine.has_unfinished_requests():
                 step_outputs = [o for o in self.llm_engine.step() if o.finished]
                 for output in step_outputs:
+                    self.logger.info(f"{len(output.outputs)=}")
                     result = _handle_output(
                         output, self.tools, tracking, request.generation_config, self.max_tool_calls, self.executor
                     )
@@ -530,7 +531,7 @@ class LLMRayActor:
         )
         return result
 
-    def _poll_tool_futures(self, tracking, sampling_params, tokenizer):
+    def _poll_tool_futures(self, tracking, tokenizer):
         """Poll and handle completed tool executions."""
         if not self.tools or not tracking["pending_tool_futures"]:
             return
@@ -543,6 +544,11 @@ class LLMRayActor:
 
             # Tool future is done, process it
             tool_result = future.result()  # Get the tool result
+
+            # Get sampling params from request metadata for this request
+            # Extract the base request ID by removing the sub-request suffix
+            base_req_id = "_".join(req_id.split("_")[:-1])
+            sampling_params = self.request_metadata[base_req_id]["sampling_params"]
 
             last_prompt_token_ids = last_output.prompt_token_ids
             last_token_ids = last_o.token_ids
