@@ -12,6 +12,7 @@ from transformers import AutoTokenizer
 from vllm import SamplingParams
 
 from open_instruct import grpo_fast, model_utils, utils
+from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo
 from open_instruct.vllm_utils3 import create_vllm_engines
 
@@ -883,6 +884,38 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         # Verify total responses
         self.assertEqual(total_responses, num_prompts * num_samples)
         self.assertEqual(len(pending_queries_map), 0)
+
+
+class TestDatasetIteration(TestGrpoFastBase):
+    def test_real_dataset_iteration_for_keyerror(self):
+        tc = TokenizerConfig(
+            tokenizer_name_or_path="Qwen/Qwen3-1.7B", chat_template_name="r1_simple_chat_postpend_think"
+        )
+
+
+        train_dataset = get_cached_dataset_tulu(
+            dataset_mixer_list=["ai2-adapt-dev/rlvr_gsm8k_zs", "64"],
+            dataset_mixer_list_splits=["train"],
+            tc=tc,
+            dataset_transform_fn=["rlvr_tokenize_v1", "rlvr_filter_v1"],
+            transform_fn_args=[{}, {"max_token_length": 512, "max_prompt_token_length": 512}],
+            target_columns=None,
+            dataset_cache_mode="local",
+            hf_entity=None,
+            dataset_local_cache_dir="test_cache",
+            dataset_skip_cache=True,
+        )
+
+        batch_size = 2
+        for batch_num in range(10):
+            start_idx = batch_num * batch_size
+            end_idx = min(start_idx + batch_size, len(train_dataset))
+            dataset_indices = list(range(start_idx, end_idx))
+
+            if end_idx > len(train_dataset):
+                break
+
+            grpo_fast.next_batch(dataset_indices, train_dataset)
 
 
 class TestShufflingIterator(unittest.TestCase):
