@@ -473,7 +473,6 @@ class LLMRayActor:
                 self.fill_engine(timeout=0)
 
             if self.llm_engine.get_num_unfinished_requests() + len(tracking["pending_tool_futures"]) == 0:
-                self.logger.info(f"[LLMRayActor] Terminating with {len(outputs)} outputs")
                 break
 
         end_time = time.time()
