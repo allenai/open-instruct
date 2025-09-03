@@ -391,38 +391,33 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
-        individual_requests = []
-        while len(individual_requests) < (self.inference_batch_size or 1):
+        requests = []
+        num_processed = 0
+        while len(requests) < self.inference_batch_size:
             if self._should_stop():
-                return 0
+                return num_processed
 
             try:
-                # Use a shorter timeout for subsequent requests to avoid long waits
-                current_timeout = timeout if len(individual_requests) == 0 else 1.0
-                request = self.prompt_queue.get(timeout=current_timeout)
-                individual_requests.append(request)
+                requests.append(self.prompt_queue.get(timeout=timeout))
             except queue.Empty:
                 # If we have some requests, process them
-                if individual_requests:
+                if requests:
                     break
                 # If no requests at all, return
-                return 0
+                return num_processed
 
-        if not individual_requests:
-            return 0
-
-        self.logger.info(f"[LLMRayActor] Collected {len(individual_requests)} individual prompts for batch processing")
+        self.logger.info(f"[LLMRayActor] Collected {len(requests)} individual prompts for batch processing")
 
         # Combine individual requests into a single batch
         # Each individual request has prompt=single_prompt
         combined_prompts = []
         combined_indices = []
-        combined_training_step = individual_requests[0].training_step
-        combined_is_eval = individual_requests[0].is_eval
-        combined_generation_config = individual_requests[0].generation_config
-        combined_start_time = individual_requests[0].start_time
+        combined_training_step = requests[0].training_step
+        combined_is_eval = requests[0].is_eval
+        combined_generation_config = requests[0].generation_config
+        combined_start_time = requests[0].start_time
 
-        for req in individual_requests:
+        for req in requests:
             combined_prompts.append(req.prompt)  # Each req.prompt is a single prompt
             combined_indices.append(req.dataset_index)  # Always append to maintain alignment
 

@@ -213,6 +213,8 @@ class Args:
     """RUNTIME VALUE: The number of training_steps to train"""
     local_eval_every: int = 100
     """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup. Set to -1 to disable."""
+    num_eval_samples: int = 32
+    """Number of samples to use for in-loop (local) evals. Actual number of evals done is min(num_eval_samples, eval_dataset_size)."""
     save_freq: int = 200
     """How many train steps to save the model"""
     allow_world_padding: bool = False
@@ -1347,9 +1349,9 @@ def accumulate_inference_batches(
     pending_queries_map: PendingQueriesMap,
     args: Args,
     training_step: int,
-    generation_config,
+    generation_config: vllm.SamplingParams,
     expected_num_prompts: int,
-    actor_manager=None,
+    actor_manager: Optional[ActorManager] = None,
     timeout: Optional[float] = None,
 ) -> tuple[GenerationResult, Batch]:
     """Accumulate multiple inference results into a single training batch.
@@ -2040,7 +2042,7 @@ def split_and_insert_batch(
                 prompt=prompt,
                 generation_config=generation_config,
                 training_step=training_step,
-                dataset_index=batch.indices[i] if batch.indices else None,
+                dataset_index=batch.indices[i],
                 is_eval=is_eval,
             )
         )
@@ -2272,7 +2274,6 @@ def maybe_evaluate(
     training_step: int,
     evaluation_inference_results_Q: ray_queue.Queue,  # Ray queue
     tokenizer,
-    eval_batch: Optional[Batch],
     reward_fn,
     episode,
     eval_pending_queries_map: PendingQueriesMap,
@@ -2292,9 +2293,9 @@ def maybe_evaluate(
             eval_pending_queries_map,
             args,
             training_step,
-            eval_generation_config,
-            len(eval_batch.queries),
-            actor_manager,
+            generation_config=eval_generation_config,
+            expected_num_prompts=args.num_eval_samples,
+            actor_manager=actor_manager,
             timeout=timeout,
         )
 
@@ -2731,7 +2732,6 @@ def run_training(
             training_step,
             evaluation_inference_results_Q,
             tokenizer,
-            eval_batch,
             reward_fn,
             episode,
             eval_pending_queries_map,
@@ -2746,7 +2746,7 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
-def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_samples: int = 32):
+def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
@@ -2766,8 +2766,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     queue_size = (args.async_steps + 1) * args.num_unique_prompts_rollout
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
-    # Evaluation queue should handle all eval samples with 2x buffer for smooth processing
-    evaluation_inference_results_Q = ray_queue.Queue(maxsize=num_eval_samples * 2)
+    # Queue is sized to allow for up to 2 steps to be enqueued simultaneously.
+    evaluation_inference_results_Q = ray_queue.Queue(maxsize=args.num_eval_samples * 2)
 
     policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
         create_model_and_optimizer(
@@ -2813,7 +2813,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     if eval_dataset is None:
         eval_batch = None
     else:
-        eval_dataset_indices = list(range(min(num_eval_samples, len(eval_dataset))))
+        eval_dataset_indices = list(range(min(args.num_eval_samples, len(eval_dataset))))
         eval_batch = next_batch(eval_dataset_indices, eval_dataset)
     reward_fn = make_reward_fn(args)
 
