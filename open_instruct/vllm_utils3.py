@@ -335,13 +335,10 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=request_id)
 
         for j in range(request.generation_config.n):
-            sub_request_id = f"{request_id}_{j}"
             sub_sampling_params = sampling_params.clone()  # Already has n=1
-            assert sub_sampling_params.n == 1, "Tool mode only supports n=1"
-            assert request_metadata[request_id]["sampling_params"].n == 1, "Tool mode only supports n=1"
             if request.generation_config.seed is not None:
                 sub_sampling_params.seed = request.generation_config.seed + j
-            llm_engine.add_request(sub_request_id, tokens_prompt, sub_sampling_params)
+            llm_engine.add_request(f"{request_id}_{j}", tokens_prompt, sub_sampling_params)
 
 
 class LLMRayActor:
