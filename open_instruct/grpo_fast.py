@@ -1856,6 +1856,12 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
             tags=[args.exp_name] + get_wandb_tags(),
         )
         run.define_metric("*", step_metric="episode")
+        run.define_metric("episode")
+        run.define_metric("training_step", step_metric="episode")
+        run.define_metric("val/*", step_metric="episode")
+        run.define_metric("objective/*", step_metric="episode")
+        run.define_metric("time/*", step_metric="episode")
+        run.define_metric("eval/*", step_metric="episode")
         wandb_url = wandb.run.get_url()
         maybe_update_beaker_description(wandb_url=wandb_url)
 
@@ -2260,7 +2266,6 @@ def one_training_step(
     total_time = time.perf_counter() - start_time
     metrics = {
         "episode": episode,
-        "global_step": episode,
         "training_step": training_step,
         "val/num_total_tokens": num_total_tokens,
         "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
