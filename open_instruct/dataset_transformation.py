@@ -763,6 +763,7 @@ GET_TOKENIZER_FN = {
 DEFAULT_SFT_MESSAGES_KEY = "messages"
 GROUND_TRUTHS_KEY = "ground_truth"
 VERIFIER_SOURCE_KEY = "dataset"
+RAW_PROMPT_KEY = "prompt"
 
 
 @dataclass
@@ -814,8 +815,14 @@ INPUT_IDS_KEY = "input_ids"
 ATTENTION_MASK_KEY = "attention_mask"
 LABELS_KEY = "labels"
 DATASET_ORIGIN_KEY = "dataset_source"  # just 'dataset' clashes with RLVR stuff (see VERIFIER_SOURCE_KEY)
-TOKENIZED_SFT_DATASET_KEYS = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY]
-TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY, DATASET_ORIGIN_KEY]
+TOKENIZED_SFT_DATASET_KEYS = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY, RAW_PROMPT_KEY]
+TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE = [
+    INPUT_IDS_KEY,
+    ATTENTION_MASK_KEY,
+    LABELS_KEY,
+    DATASET_ORIGIN_KEY,
+    RAW_PROMPT_KEY,
+]
 
 
 def remove_dataset_source_field(dataset: Dataset) -> Dataset:
@@ -1185,6 +1192,8 @@ def rlvr_tokenize_v1(
     row[LABELS_KEY] = labels
     row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
     row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
+    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
+    row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
     return row
 
 
@@ -1212,6 +1221,10 @@ def rlvr_tokenize_v2(
     row[LABELS_KEY] = labels
     row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
     row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
+    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
+    # row[DEFAULT_SFT_MESSAGES_KEY] = prompt
+    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
+    row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
     # some basic transformations:
     # if ground truths is a string, make it a list
     if isinstance(row[ground_truths_key], str):
@@ -1673,7 +1686,6 @@ def get_cached_dataset_tulu_with_statistics(
                 frac_or_num_samples = float(frac_or_num_samples)
             else:
                 frac_or_num_samples = int(frac_or_num_samples)
-
             dataset_config = DatasetConfig(
                 dataset_name=dataset_name,
                 dataset_split=dataset_mixer_list_splits[i],
