@@ -327,7 +327,7 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         "dataset_index": request.dataset_index,
         "training_step": request.training_step,
         "sampling_params": sampling_params,
-        "prompt_tokens": len(prompt),
+        "prompt_tokens": len(request.prompt),
         "start_time": time.perf_counter(),
     }
 
