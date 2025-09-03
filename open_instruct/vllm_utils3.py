@@ -437,23 +437,6 @@ class LLMRayActor:
             except queue.Empty:
                 return None
 
-    def _initialize_new_request(self, request):
-        """Initialize state for a new request.
-
-        Returns:
-            tuple: (tracking, tokenizer, outputs, iteration)
-        """
-        tracking = _init_tool_tracking()
-        tokenizer = self.llm_engine.tokenizer
-        add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
-        outputs = []
-        iteration = 0
-        return tracking, tokenizer, outputs, iteration
-
-    def _reset_request_state(self):
-        """Reset state after completing a request."""
-        return None  # Will be assigned to request
-
     def _step_engine(self, request, tracking, outputs):
         """Process engine step outputs and handle tool processing.
 
@@ -527,37 +510,6 @@ class LLMRayActor:
 
         return total_prompt_tokens, total_generation_tokens, earliest_start_time
 
-    def _finalize_and_queue_result(
-        self, final_outputs, tracking, request, total_prompt_tokens, total_generation_tokens, earliest_start_time
-    ):
-        """Create final result and queue it."""
-        end_time = time.time()
-        generation_time = end_time - earliest_start_time
-
-        result = _finalize_outputs(
-            final_outputs,
-            tracking,
-            request.dataset_index,
-            self.tools,
-            token_statistics=TokenStatistics(
-                num_prompt_tokens=total_prompt_tokens,
-                num_response_tokens=total_generation_tokens,
-                generation_time=generation_time,
-            ),
-            start_time=request.start_time,
-        )
-
-        self._insert_result_to_queue(result, is_eval=request.is_eval)
-
-    def _is_request_complete(self, tracking):
-        """Check if current request processing is complete.
-
-        Returns:
-            bool: True if request is complete
-        """
-        pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
-        return not self.llm_engine.has_unfinished_requests() and pending_count == 0
-
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
@@ -576,7 +528,11 @@ class LLMRayActor:
         if request is None:
             return requests_processed
 
-        tracking, tokenizer, outputs, iteration = self._initialize_new_request(request)
+        tracking = _init_tool_tracking()
+        tokenizer = self.llm_engine.tokenizer
+        add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
+        outputs = []
+        iteration = 0
 
         while True:
             iteration += 1
@@ -589,7 +545,8 @@ class LLMRayActor:
                 outputs = self._step_engine(request, tracking, outputs)
 
             # Check termination condition for current request (matching ToolUseLLM exactly)
-            if self._is_request_complete(tracking):
+            pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
+            if not self.llm_engine.has_unfinished_requests() and pending_count == 0:
                 self.logger.info(
                     f"[LLMRayActor] Terminating request after {iteration} iterations with {len(outputs)} outputs"
                 )
@@ -601,9 +558,23 @@ class LLMRayActor:
                 )
 
                 # Finalize and queue result
-                self._finalize_and_queue_result(
-                    final_outputs, tracking, request, total_prompt_tokens, total_generation_tokens, earliest_start_time
+                end_time = time.time()
+                generation_time = end_time - earliest_start_time
+
+                result = _finalize_outputs(
+                    final_outputs,
+                    tracking,
+                    request.dataset_index,
+                    self.tools,
+                    token_statistics=TokenStatistics(
+                        num_prompt_tokens=total_prompt_tokens,
+                        num_response_tokens=total_generation_tokens,
+                        generation_time=generation_time,
+                    ),
+                    start_time=request.start_time,
                 )
+
+                self._insert_result_to_queue(result, is_eval=request.is_eval)
 
                 requests_processed += 1
 
@@ -612,7 +583,11 @@ class LLMRayActor:
                 if request is None:
                     return requests_processed
 
-                tracking, tokenizer, outputs, iteration = self._initialize_new_request(request)
+                tracking = _init_tool_tracking()
+                tokenizer = self.llm_engine.tokenizer
+                add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
+                outputs = []
+                iteration = 0
 
     def _poll_tool_futures(self, tracking, tokenizer):
         """Poll and handle completed tool executions."""
