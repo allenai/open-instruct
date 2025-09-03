@@ -1283,12 +1283,7 @@ class PendingQueriesMap:
 
     def insert(self, dataset_idx, query, ground_truth, dataset):
         """Insert or increment count for a dataset index."""
-        assert isinstance(dataset_idx, int) and dataset_idx >= 0, f"Invalid dataset_idx: {dataset_idx}"
-        assert query is not None and ground_truth is not None and dataset is not None, "None values not allowed"
-
         with self._lock:
-            old_count = self._map[dataset_idx][3] if dataset_idx in self._map else 0
-
             if dataset_idx in self._map:
                 # Already exists - just increment count
                 existing_query, existing_ground_truth, existing_dataset, count = self._map[dataset_idx]
@@ -1296,9 +1291,6 @@ class PendingQueriesMap:
             else:
                 # New entry - count starts at 1
                 self._map[dataset_idx] = (query, ground_truth, dataset, 1)
-
-            new_count = self._map[dataset_idx][3]
-            assert new_count == old_count + 1, f"Count not incremented properly: {old_count} -> {new_count}"
 
     def insert_many(self, dataset_indices, queries, ground_truths, datasets):
         """Insert or increment count for multiple dataset indices at once."""
@@ -1314,40 +1306,18 @@ class PendingQueriesMap:
 
     def pop(self, dataset_idx):
         """Retrieve data and decrement count. Removes entry when count reaches 0."""
-        assert isinstance(dataset_idx, int) and dataset_idx >= 0, f"Invalid dataset_idx: {dataset_idx}"
-
         with self._lock:
             if dataset_idx not in self._map:
-                # Enhanced error message with debugging info
-                current_keys = list(self._map.keys())
-                current_counts = {k: v[3] for k, v in self._map.items()}
-                total_entries = len(self._map)
-                logger.error(f"[PENDING_QUERIES] Dataset index {dataset_idx} not found in pending_queries_map")
-                logger.error(f"[PENDING_QUERIES] Current map state: {total_entries} entries")
-                logger.error(f"[PENDING_QUERIES] Available keys: {current_keys}")
-                logger.error(f"[PENDING_QUERIES] Reference counts: {current_counts}")
-                raise RuntimeError(
-                    f"Dataset index {dataset_idx} not found in pending_queries_map. "
-                    f"Available keys: {current_keys}, total entries: {total_entries}, "
-                    f"reference counts: {current_counts}"
-                )
-            query, ground_truth, dataset, count = self._map[dataset_idx]
-            old_count = count
-            assert old_count > 0, f"Invalid count {old_count} for dataset_idx {dataset_idx}"
+                raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
 
-            logger.debug(f"[PENDING_QUERIES] Popping dataset_index {dataset_idx}, current count: {count}")
+            query, ground_truth, dataset, count = self._map[dataset_idx]
+
             if count > 1:
                 # More results expected - just decrement
                 self._map[dataset_idx] = (query, ground_truth, dataset, count - 1)
-                new_count = self._map[dataset_idx][3]
-                assert new_count == old_count - 1, f"Count not decremented properly: {old_count} -> {new_count}"
-                assert new_count > 0, f"Count became non-positive: {new_count}"
-                logger.debug(f"[PENDING_QUERIES] Decremented count for dataset_index {dataset_idx} to {count - 1}")
             else:
                 # Last result - remove entry
-                assert old_count == 1, f"Item removed but count was {old_count}, not 1"
                 del self._map[dataset_idx]
-                logger.debug(f"[PENDING_QUERIES] Removed dataset_index {dataset_idx} from map (count reached 0)")
             return query, ground_truth, dataset
 
     def __len__(self):
@@ -1369,22 +1339,6 @@ class PendingQueriesMap:
         """Return a view of the keys in the map."""
         with self._lock:
             return list(self._map.keys())
-
-    def assert_integrity(self):
-        """Assert the integrity of the map data structure."""
-        with self._lock:
-            for dataset_idx, (query, ground_truth, dataset, count) in self._map.items():
-                assert isinstance(dataset_idx, int) and dataset_idx >= 0, f"Invalid key: {dataset_idx}"
-                assert count > 0, f"Non-positive count {count} for dataset_idx {dataset_idx}"
-                assert query is not None and ground_truth is not None and dataset is not None, (
-                    f"None values for dataset_idx {dataset_idx}"
-                )
-                assert isinstance(count, int), f"Count not integer: {type(count)} for dataset_idx {dataset_idx}"
-                assert isinstance(query, str), f"Query not string: {type(query)} for dataset_idx {dataset_idx}"
-                assert isinstance(ground_truth, str), (
-                    f"Ground truth not string: {type(ground_truth)} for dataset_idx {dataset_idx}"
-                )
-                assert isinstance(dataset, str), f"Dataset not string: {type(dataset)} for dataset_idx {dataset_idx}"
 
 
 def accumulate_inference_batches(
@@ -1419,13 +1373,10 @@ def accumulate_inference_batches(
     all_ground_truths = []
     all_datasets = []
 
-    # Track processed indices to detect duplicates (race condition detection)
-    processed_indices = set()
-
     for i in tqdm(
         range(num_prompts),
         total=num_prompts,
-        desc=f"Accumulating {num_prompts} results (each with {generation_config.n} completions)",
+        desc=f"Accumulating results from {num_prompts} prompts",
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     ):
@@ -1434,41 +1385,7 @@ def accumulate_inference_batches(
         if isinstance(result, ShutdownSentinel):
             return result, None
 
-        assert len(result.responses) == generation_config.n, (
-            f"Result {i} has {len(result.responses)} responses, expected {generation_config.n}"
-        )
-
-        # Pre-pop validation assertions
-        assert hasattr(result, "dataset_index"), "GenerationResult missing dataset_index"
-        assert hasattr(result, "responses"), "GenerationResult missing responses"
-        assert isinstance(result.dataset_index, int), f"Invalid dataset_index type: {type(result.dataset_index)}"
-        assert result.dataset_index >= 0, f"Negative dataset_index: {result.dataset_index}"
-        assert len(pending_queries_map) > 0, f"Attempting to pop from empty pending_queries_map at step {i}"
-        assert result.dataset_index in pending_queries_map, (
-            f"Dataset index {result.dataset_index} not in map. Available: {pending_queries_map.keys()}"
-        )
-
-        logger.debug(
-            f"[PENDING_QUERIES] Before pop: dataset_index={result.dataset_index}, map_size={len(pending_queries_map)}, keys={pending_queries_map.keys()}"
-        )
         query, ground_truth, dataset = pending_queries_map.pop(result.dataset_index)
-        logger.debug(
-            f"[PENDING_QUERIES] After pop: dataset_index={result.dataset_index}, map_size={len(pending_queries_map)}"
-        )
-
-        # Post-pop validation assertions
-        assert query is not None, f"Got None query for dataset_index {result.dataset_index}"
-        assert ground_truth is not None, f"Got None ground_truth for dataset_index {result.dataset_index}"
-        assert dataset is not None, f"Got None dataset for dataset_index {result.dataset_index}"
-        assert isinstance(query, str), f"Query not string: {type(query)}"
-        assert isinstance(ground_truth, str), f"Ground truth not string: {type(ground_truth)}"
-        assert isinstance(dataset, str), f"Dataset not string: {type(dataset)}"
-
-        # Race condition detection: check for duplicate processing
-        assert result.dataset_index not in processed_indices, (
-            f"Duplicate processing of dataset_index {result.dataset_index}"
-        )
-        processed_indices.add(result.dataset_index)
 
         results.append(result)
         all_queries.append(query)
@@ -1922,7 +1839,6 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
             tags=[args.exp_name] + get_wandb_tags(),
         )
         wandb_url = wandb.run.get_url()
-        logger.info(f"Initial Beaker description update with wandb_url: {wandb_url}")
         maybe_update_beaker_description(wandb_url=wandb_url)
 
     return beaker_config, wandb_url
@@ -2103,38 +2019,10 @@ def split_and_insert_batch(
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    # Input validation assertions
-    assert len(batch.indices) == len(batch.queries) == len(batch.ground_truths) == len(batch.datasets), (
-        f"Batch size mismatch: indices={len(batch.indices)}, queries={len(batch.queries)}, ground_truths={len(batch.ground_truths)}, datasets={len(batch.datasets)}"
-    )
-    assert generation_config.n > 0, f"Invalid generation_config.n: {generation_config.n}"
-    assert all(isinstance(idx, int) and idx >= 0 for idx in batch.indices), f"Invalid dataset indices: {batch.indices}"
-    assert all(q is not None for q in batch.queries), "None values found in batch.queries"
-    assert all(gt is not None for gt in batch.ground_truths), "None values found in batch.ground_truths"
-    assert all(d is not None for d in batch.datasets), "None values found in batch.datasets"
-
     # Insert each dataset_index with reference count = generation_config.n (number of samples per prompt)
-    logger.debug(
-        f"[PENDING_QUERIES] Inserting batch with {len(batch.indices)} indices, n={generation_config.n} samples per prompt"
-    )
     for idx, query, ground_truth, dataset in zip(batch.indices, batch.queries, batch.ground_truths, batch.datasets):
-        logger.debug(f"[PENDING_QUERIES] Inserting dataset_index {idx} with count {generation_config.n}")
         for _ in range(generation_config.n):
             pending_queries_map.insert(idx, query, ground_truth, dataset)
-    logger.debug(
-        f"[PENDING_QUERIES] After insertion, map contains {len(pending_queries_map)} entries: {pending_queries_map.keys()}"
-    )
-
-    # Post-insertion verification assertions
-    for idx in batch.indices:
-        assert idx in pending_queries_map, f"Dataset index {idx} not found after insertion"
-        _, _, _, count = pending_queries_map[idx]
-        assert count == generation_config.n, f"Dataset index {idx} has count {count}, expected {generation_config.n}"
-
-    expected_unique_indices = len(set(batch.indices))
-    assert len(pending_queries_map) >= expected_unique_indices, (
-        f"Map size {len(pending_queries_map)} < expected unique indices {expected_unique_indices}"
-    )
 
     for i, prompt in enumerate(batch.queries):
         param_prompt_Q.put(
@@ -2698,13 +2586,6 @@ def run_training(
     # setup health check function to check that everything is still alive
     def health_check_fn():
         [f.result() for f in [packing_future, generation_future, weight_sync_thread_future] if f.done()]
-        # Periodic integrity checks
-        try:
-            pending_queries_map.assert_integrity()
-            eval_pending_queries_map.assert_integrity()
-        except AssertionError as e:
-            logger.error(f"[HEALTH_CHECK] Map integrity check failed: {e}")
-            raise
 
     # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps):
@@ -2735,7 +2616,6 @@ def run_training(
             or training_step % 10 == 0
             or training_step == args.num_training_steps
         ):
-            logger.info(f"Progress update for Beaker description: step {training_step}/{args.num_training_steps}")
             maybe_update_beaker_description(
                 current_step=training_step,
                 total_steps=args.num_training_steps,

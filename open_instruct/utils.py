@@ -957,12 +957,7 @@ def maybe_update_beaker_description(
         wandb_url: Optional wandb URL to include
         original_descriptions: Cache of original descriptions for progress updates
     """
-    logger.info(
-        f"maybe_update_beaker_description called with: current_step={current_step}, total_steps={total_steps}, wandb_url={wandb_url}"
-    )
-
     if not is_beaker_job():
-        logger.info("Not a Beaker job, returning early")
         return
 
     experiment_id = os.environ.get("BEAKER_WORKLOAD_ID")
