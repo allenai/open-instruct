@@ -54,7 +54,6 @@ class Batch:
     queries: List[List[int]]
     ground_truths: List[List[int]]
     datasets: List[str]
-    raw_queries: Optional[List[str]]
     indices: Optional[List[int]]
 
     def __getitem__(self, key: Union[slice, int, List[int]]) -> "Batch":
@@ -65,7 +64,6 @@ class Batch:
                 queries=self.queries[key],
                 ground_truths=self.ground_truths[key],
                 datasets=self.datasets[key],
-                raw_queries=self.raw_queries[key],
                 indices=self.indices[key] if self.indices else None,
             )
         elif isinstance(key, int):
@@ -74,7 +72,6 @@ class Batch:
                 queries=[self.queries[key]],
                 ground_truths=[self.ground_truths[key]],
                 datasets=[self.datasets[key]],
-                raw_queries=[self.raw_queries[key]],
                 indices=[self.indices[key]] if self.indices else None,
             )
         else:
@@ -83,7 +80,6 @@ class Batch:
                 queries=[self.queries[i] for i in key],
                 ground_truths=[self.ground_truths[i] for i in key],
                 datasets=[self.datasets[i] for i in key],
-                raw_queries=[self.raw_queries[i] for i in key],
                 indices=[self.indices[i] for i in key] if self.indices else None,
             )
 
