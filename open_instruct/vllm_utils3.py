@@ -418,21 +418,26 @@ class LLMRayActor:
             self.logger.warning(f"{queue_name} results queue is full, discarding result.")
 
     def fill_engine(self, timeout: float = 60.0):
-        """Get a request from the prompt queue with timeout handling.
+        """Loop until we get a request or should stop.
 
         Returns:
-            PromptRequest or None: The request if available, None if timeout or queue empty
+            PromptRequest or None: The request if available, None if should stop or timeout
         """
-        try:
-            current_request = self.prompt_queue.get(timeout=timeout)
-            self.logger.info(
-                f"[LLMRayActor] Processing request with {len(current_request.prompts)} prompts, tools={bool(self.tools)}"
-            )
-            return current_request
-        except queue.Empty:
-            return None
+        while True:
+            # Check if we should stop accepting new requests
+            if self._should_stop():
+                return None
 
-    def _initialize_new_request(self, current_request):
+            try:
+                request = self.prompt_queue.get(timeout=timeout)
+                self.logger.info(
+                    f"[LLMRayActor] Processing request with {len(request.prompts)} prompts, tools={bool(self.tools)}"
+                )
+                return request
+            except queue.Empty:
+                return None
+
+    def _initialize_new_request(self, request):
         """Initialize state for a new request.
 
         Returns:
@@ -440,16 +445,16 @@ class LLMRayActor:
         """
         tracking = _init_tool_tracking()
         tokenizer = self.llm_engine.tokenizer
-        add_request(current_request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
+        add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
         outputs = []
         iteration = 0
         return tracking, tokenizer, outputs, iteration
 
     def _reset_request_state(self):
         """Reset state after completing a request."""
-        return None  # Will be assigned to current_request
+        return None  # Will be assigned to request
 
-    def _process_engine_outputs(self, current_request, tracking, outputs):
+    def _step_engine(self, request, tracking, outputs):
         """Process engine step outputs and handle tool processing.
 
         Returns:
@@ -459,14 +464,14 @@ class LLMRayActor:
         for output in step_outputs:
             self.logger.info(f"{len(output.outputs)=}")
             result = _handle_output(
-                output, self.tools, tracking, current_request.generation_config, self.max_tool_calls, self.executor
+                output, self.tools, tracking, request.generation_config, self.max_tool_calls, self.executor
             )
             # Result is None when we do more tool processing.
             if result is not None:
                 outputs.append(result)
         return outputs
 
-    def _combine_request_outputs(self, outputs, current_request):
+    def _combine_request_outputs(self, outputs, request):
         """Combine outputs from multiple sub-requests into final format.
 
         Returns:
@@ -479,20 +484,15 @@ class LLMRayActor:
             combined_outputs[request_id].append(output)
 
         # Preserve original order from request.dataset_index
-        prefix = "eval" if current_request.is_eval else "train"
+        prefix = "eval" if request.is_eval else "train"
         # request_id is batch_num _ training_step _ within_batch_idx _ repetition_idx.
         # we order by within_batch_idx.
-        ordered_ids = [
-            f"{prefix}_{current_request.training_step}_{batch_idx}"
-            for batch_idx in range(len(current_request.prompts))
-        ]
+        ordered_ids = [f"{prefix}_{request.training_step}_{batch_idx}" for batch_idx in range(len(request.prompts))]
 
         final_outputs = []
         for request_id in ordered_ids:
             outs = combined_outputs[request_id]
-            assert len(outs) == current_request.generation_config.n, (
-                f"{len(outs)=} != {current_request.generation_config.n=}"
-            )
+            assert len(outs) == request.generation_config.n, f"{len(outs)=} != {request.generation_config.n=}"
             final_outputs.append(
                 vllm.RequestOutput(
                     request_id=request_id,
@@ -506,7 +506,7 @@ class LLMRayActor:
 
         return combined_outputs, ordered_ids, final_outputs
 
-    def _calculate_token_statistics(self, combined_outputs, ordered_ids, current_request):
+    def _calculate_token_statistics(self, combined_outputs, ordered_ids, request):
         """Calculate token statistics for the completed request.
 
         Returns:
@@ -528,13 +528,7 @@ class LLMRayActor:
         return total_prompt_tokens, total_generation_tokens, earliest_start_time
 
     def _finalize_and_queue_result(
-        self,
-        final_outputs,
-        tracking,
-        current_request,
-        total_prompt_tokens,
-        total_generation_tokens,
-        earliest_start_time,
+        self, final_outputs, tracking, request, total_prompt_tokens, total_generation_tokens, earliest_start_time
     ):
         """Create final result and queue it."""
         end_time = time.time()
@@ -543,17 +537,17 @@ class LLMRayActor:
         result = _finalize_outputs(
             final_outputs,
             tracking,
-            current_request.dataset_index,
+            request.dataset_index,
             self.tools,
             token_statistics=TokenStatistics(
                 num_prompt_tokens=total_prompt_tokens,
                 num_response_tokens=total_generation_tokens,
                 generation_time=generation_time,
             ),
-            start_time=current_request.start_time,
+            start_time=request.start_time,
         )
 
-        self._insert_result_to_queue(result, is_eval=current_request.is_eval)
+        self._insert_result_to_queue(result, is_eval=request.is_eval)
 
     def _is_request_complete(self, tracking):
         """Check if current request processing is complete.
@@ -571,64 +565,54 @@ class LLMRayActor:
             int: Number of requests processed
         """
         requests_processed = 0
-        current_request = None
+        request = None
         tracking = None
         tokenizer = None
         outputs = []
         iteration = 0
 
+        # Get initial request
+        request = self.fill_engine(timeout)
+        if request is None:
+            return requests_processed
+
+        tracking, tokenizer, outputs, iteration = self._initialize_new_request(request)
+
         while True:
-            # If we don't have a current request, try to get one
-            if current_request is None:
-                # Check if we should stop accepting new requests
-                if self._should_stop():
+            iteration += 1
+
+            # Poll tool futures first (matching ToolUseLLM order)
+            outputs.extend(self._poll_tool_futures(tracking, tokenizer))
+
+            # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
+            if self.llm_engine.has_unfinished_requests():
+                outputs = self._step_engine(request, tracking, outputs)
+
+            # Check termination condition for current request (matching ToolUseLLM exactly)
+            if self._is_request_complete(tracking):
+                self.logger.info(
+                    f"[LLMRayActor] Terminating request after {iteration} iterations with {len(outputs)} outputs"
+                )
+
+                # Combine outputs and calculate statistics
+                combined_outputs, ordered_ids, final_outputs = self._combine_request_outputs(outputs, request)
+                total_prompt_tokens, total_generation_tokens, earliest_start_time = self._calculate_token_statistics(
+                    combined_outputs, ordered_ids, request
+                )
+
+                # Finalize and queue result
+                self._finalize_and_queue_result(
+                    final_outputs, tracking, request, total_prompt_tokens, total_generation_tokens, earliest_start_time
+                )
+
+                requests_processed += 1
+
+                # Get next request
+                request = self.fill_engine(timeout)
+                if request is None:
                     return requests_processed
 
-                current_request = self.fill_engine(timeout)
-                if current_request is None:
-                    # No new requests available, continue to check for work or stop condition
-                    continue
-
-                tracking, tokenizer, outputs, iteration = self._initialize_new_request(current_request)
-
-            # Process the current request
-            if current_request is not None:
-                iteration += 1
-
-                # Poll tool futures first (matching ToolUseLLM order)
-                outputs.extend(self._poll_tool_futures(tracking, tokenizer))
-
-                # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
-                if self.llm_engine.has_unfinished_requests():
-                    outputs = self._process_engine_outputs(current_request, tracking, outputs)
-
-                # Check termination condition for current request (matching ToolUseLLM exactly)
-                if self._is_request_complete(tracking):
-                    self.logger.info(
-                        f"[LLMRayActor] Terminating request after {iteration} iterations with {len(outputs)} outputs"
-                    )
-
-                    # Combine outputs and calculate statistics
-                    combined_outputs, ordered_ids, final_outputs = self._combine_request_outputs(
-                        outputs, current_request
-                    )
-                    total_prompt_tokens, total_generation_tokens, earliest_start_time = (
-                        self._calculate_token_statistics(combined_outputs, ordered_ids, current_request)
-                    )
-
-                    # Finalize and queue result
-                    self._finalize_and_queue_result(
-                        final_outputs,
-                        tracking,
-                        current_request,
-                        total_prompt_tokens,
-                        total_generation_tokens,
-                        earliest_start_time,
-                    )
-
-                    # Reset for next request
-                    current_request = self._reset_request_state()
-                    requests_processed += 1
+                tracking, tokenizer, outputs, iteration = self._initialize_new_request(request)
 
     def _poll_tool_futures(self, tracking, tokenizer):
         """Poll and handle completed tool executions."""
