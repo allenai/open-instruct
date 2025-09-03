@@ -1318,6 +1318,7 @@ class PendingQueriesMap:
             else:
                 # Last result - remove entry
                 del self._map[dataset_idx]
+
             return query, ground_truth, dataset
 
     def __len__(self):
@@ -1325,15 +1326,15 @@ class PendingQueriesMap:
         with self._lock:
             return len(self._map)
 
-    def __contains__(self, key):
-        """Check if a dataset_idx key is in the map."""
+    def __contains__(self, dataset_idx):
+        """Check if a dataset index is in the map."""
         with self._lock:
-            return key in self._map
+            return dataset_idx in self._map
 
-    def __getitem__(self, key):
-        """Get the value for a dataset_idx key."""
+    def __getitem__(self, dataset_idx):
+        """Get the value for a dataset index."""
         with self._lock:
-            return self._map[key]
+            return self._map[dataset_idx]
 
     def keys(self):
         """Return a view of the keys in the map."""
@@ -1839,6 +1840,7 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
             tags=[args.exp_name] + get_wandb_tags(),
         )
         wandb_url = wandb.run.get_url()
+        logger.info(f"Initial Beaker description update with wandb_url: {wandb_url}")
         maybe_update_beaker_description(wandb_url=wandb_url)
 
     return beaker_config, wandb_url
@@ -2616,6 +2618,7 @@ def run_training(
             or training_step % 10 == 0
             or training_step == args.num_training_steps
         ):
+            logger.info(f"Progress update for Beaker description: step {training_step}/{args.num_training_steps}")
             maybe_update_beaker_description(
                 current_step=training_step,
                 total_steps=args.num_training_steps,

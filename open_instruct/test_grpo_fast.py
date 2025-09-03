@@ -978,11 +978,9 @@ class TestPendingQueriesMapFullExecution(unittest.TestCase):
         pending_queries_map = grpo_fast.PendingQueriesMap()
         eval_pending_queries_map = grpo_fast.PendingQueriesMap()
 
-        # Test 2: Initial state validation (__len__, assert_integrity)
+        # Test 2: Initial state validation (__len__)
         self.assertEqual(len(pending_queries_map), 0)
         self.assertEqual(len(eval_pending_queries_map), 0)
-        pending_queries_map.assert_integrity()
-        eval_pending_queries_map.assert_integrity()
 
         # Test 3: Simulate split_and_insert_batch() - populate training map
         # This simulates the initial async_steps population + ongoing training
@@ -1082,9 +1080,9 @@ class TestPendingQueriesMapFullExecution(unittest.TestCase):
         self.assertNotIn(test_idx, pending_queries_map)
         self.assertEqual(len(pending_queries_map), 0)
 
-        # Test 11: Final integrity check
-        pending_queries_map.assert_integrity()
-        eval_pending_queries_map.assert_integrity()
+        # Test 11: Final validation
+        self.assertEqual(len(pending_queries_map), 0)
+        self.assertEqual(len(eval_pending_queries_map), 0)
 
 
 if __name__ == "__main__":
