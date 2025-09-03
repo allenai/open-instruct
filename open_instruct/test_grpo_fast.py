@@ -888,33 +888,50 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
 class TestDatasetIteration(TestGrpoFastBase):
     def test_real_dataset_iteration_for_keyerror(self):
-        tc = TokenizerConfig(
-            tokenizer_name_or_path="Qwen/Qwen3-1.7B", chat_template_name="r1_simple_chat_postpend_think"
-        )
-
-
-        train_dataset = get_cached_dataset_tulu(
+        from open_instruct.grpo_fast import Args
+        
+        args = Args(
             dataset_mixer_list=["ai2-adapt-dev/rlvr_gsm8k_zs", "64"],
             dataset_mixer_list_splits=["train"],
-            tc=tc,
-            dataset_transform_fn=["rlvr_tokenize_v1", "rlvr_filter_v1"],
-            transform_fn_args=[{}, {"max_token_length": 512, "max_prompt_token_length": 512}],
-            target_columns=None,
-            dataset_cache_mode="local",
-            hf_entity=None,
-            dataset_local_cache_dir="test_cache",
-            dataset_skip_cache=True,
+            dataset_mixer_eval_list=["ai2-adapt-dev/rlvr_gsm8k_zs", "16"],
+            dataset_mixer_eval_list_splits=["train"],
+            max_token_length=512,
+            max_prompt_token_length=512,
+            response_length=512,
+            pack_length=1024,
+            per_device_train_batch_size=1,
+            num_unique_prompts_rollout=8,
+            num_samples_per_prompt_rollout=4,
+            stop_strings=["</answer>"],
+            temperature=0.7,
+            learning_rate=3e-7,
+            total_episodes=200,
+            num_epochs=1,
+            beta=0.01,
+            seed=3,
+            local_eval_every=1,
         )
-
+        
+        tc = TokenizerConfig(
+            tokenizer_name_or_path="Qwen/Qwen3-1.7B",
+            chat_template_name="r1_simple_chat_postpend_think",
+            ground_truths_key="ground_truth"
+        )
+        
+        model_config = model_utils.ModelConfig(model_name_or_path="Qwen/Qwen3-1.7B")
+        
+        tokenizer = grpo_fast.make_tokenizer(tc, model_config)
+        train_dataset, eval_dataset = grpo_fast.setup_datasets(args, tc, tokenizer)
+        
         batch_size = 2
         for batch_num in range(10):
             start_idx = batch_num * batch_size
             end_idx = min(start_idx + batch_size, len(train_dataset))
             dataset_indices = list(range(start_idx, end_idx))
-
+            
             if end_idx > len(train_dataset):
                 break
-
+            
             grpo_fast.next_batch(dataset_indices, train_dataset)
 
 
