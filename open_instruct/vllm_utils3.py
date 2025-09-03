@@ -230,8 +230,9 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=
             merged_outputs[real_req_id].outputs.append(tracking["concat_outputs"][req_id].outputs[0])
 
     # Sort by dataset index (extracted from request_id format: "{training_step}_{idx}")
-    final_outputs = sorted(merged_outputs.values(), key=lambda x: int(x.request_id.split("_")[1].split("-")[0]))
-
+    final_outputs = sorted(
+        merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1]))
+    )
     return _process_outputs_with_tools(
         final_outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
     )
