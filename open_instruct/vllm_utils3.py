@@ -337,6 +337,7 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         for j in range(request.generation_config.n):
             sub_request_id = f"{request_id}_{j}"
             sub_sampling_params = request.generation_config.clone()
+            sub_sampling_params.n = 1  # Each sub-request generates exactly 1 sample
             if request.generation_config.seed is not None:
                 sub_sampling_params.seed = request.generation_config.seed + j
             llm_engine.add_request(sub_request_id, tokens_prompt, sub_sampling_params)
