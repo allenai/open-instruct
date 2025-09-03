@@ -430,14 +430,12 @@ class LLMRayActor:
         while self.llm_engine.get_num_unfinished_requests() < self.inference_batch_size:
             if self._should_stop():
                 break
-
             try:
                 request = self.prompt_queue.get(timeout=timeout)
                 add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
                 num_added += 1
             except queue.Empty:
                 break
-        self.logger.info(f"[LLMRayActor] Added {num_added} requests to engine queue")
         return num_added
 
     def process_from_queue(self, timeout: float = 60.0):
