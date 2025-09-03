@@ -2021,7 +2021,11 @@ def split_and_insert_batch(
     is_eval: bool = False,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    pending_queries_map.insert_many(batch.indices, batch.queries, batch.ground_truths, batch.datasets)
+    # Insert each dataset_index with reference count = generation_config.n (number of samples per prompt)
+    for idx, query, ground_truth, dataset in zip(batch.indices, batch.queries, batch.ground_truths, batch.datasets):
+        for _ in range(generation_config.n):
+            pending_queries_map.insert(idx, query, ground_truth, dataset)
+
     for i, prompt in enumerate(batch.queries):
         param_prompt_Q.put(
             PromptRequest(
