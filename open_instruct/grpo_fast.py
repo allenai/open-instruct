@@ -1309,16 +1309,13 @@ class PendingQueriesMap:
         with self._lock:
             if dataset_idx not in self._map:
                 raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
-
             query, ground_truth, dataset, count = self._map[dataset_idx]
-
             if count > 1:
                 # More results expected - just decrement
                 self._map[dataset_idx] = (query, ground_truth, dataset, count - 1)
             else:
                 # Last result - remove entry
                 del self._map[dataset_idx]
-
             return query, ground_truth, dataset
 
     def __len__(self):
@@ -1326,15 +1323,15 @@ class PendingQueriesMap:
         with self._lock:
             return len(self._map)
 
-    def __contains__(self, dataset_idx):
-        """Check if a dataset index is in the map."""
+    def __contains__(self, key):
+        """Check if a dataset_idx key is in the map."""
         with self._lock:
-            return dataset_idx in self._map
+            return key in self._map
 
-    def __getitem__(self, dataset_idx):
-        """Get the value for a dataset index."""
+    def __getitem__(self, key):
+        """Get the value for a dataset_idx key."""
         with self._lock:
-            return self._map[dataset_idx]
+            return self._map[key]
 
     def keys(self):
         """Return a view of the keys in the map."""
@@ -1374,7 +1371,6 @@ def accumulate_inference_batches(
     all_queries = []
     all_ground_truths = []
     all_datasets = []
-
     for i in tqdm(
         range(expected_num_prompts),
         total=expected_num_prompts,
@@ -1387,18 +1383,10 @@ def accumulate_inference_batches(
         if isinstance(result, ShutdownSentinel):
             return result, None
 
-        dataset_index = result.dataset_index
-
-        if dataset_index is None:
-            raise RuntimeError(f"Dataset index is None for result {i}")
-
-        # Each result now represents a single prompt with generation_config.n responses
         assert len(result.responses) == generation_config.n, (
             f"Result {i} has {len(result.responses)} responses, expected {generation_config.n}"
         )
-
-        # Get corresponding query, ground_truth, dataset for this prompt
-        query, ground_truth, dataset = pending_queries_map.pop(dataset_index)
+        query, ground_truth, dataset = pending_queries_map.pop(result.dataset_index)
 
         results.append(result)
         all_queries.append(query)

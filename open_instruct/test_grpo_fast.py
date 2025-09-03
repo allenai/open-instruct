@@ -151,6 +151,7 @@ class TestGrpoFastBase(unittest.TestCase):
                 tool_calleds=[False] * total_responses,
             ),
             dataset_index=dataset_indices,
+            training_step=training_step,
         )
 
     def setup_and_split_batch(self, queries, ground_truths, datasets, indices, num_engines, training_step=1):
