@@ -231,6 +231,7 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=
     final_outputs = sorted(
         merged_outputs.values(), key=lambda x: (int(x.request_id.split("_")[1]), int(x.request_id.split("_")[2]))
     )
+
     return _process_outputs_with_tools(
         final_outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
     )
