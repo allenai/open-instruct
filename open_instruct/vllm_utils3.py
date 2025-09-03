@@ -319,9 +319,6 @@ def init_process_group(
 def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, request_metadata: dict):
     """Add a request to the LLM engine."""
     prefix = "eval" if request.is_eval else "train"
-
-    # PromptRequest now has a single prompt field
-    prompt = request.prompt
     request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
     sampling_params = request.generation_config.clone()
     sampling_params.n = 1  # Use n=1 for tool processing
@@ -334,8 +331,7 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         "start_time": time.perf_counter(),
     }
 
-    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt, cache_salt=request_id)
-
+    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
     for j in range(request.generation_config.n):
         sub_sampling_params = sampling_params.clone()  # Already has n=1
         if request.generation_config.seed is not None:
@@ -431,7 +427,6 @@ class LLMRayActor:
             int: Number of requests added to the engine
         """
         num_added = 0
-
         while self.llm_engine.get_num_unfinished_requests() < self.inference_batch_size:
             if self._should_stop():
                 break
@@ -442,10 +437,7 @@ class LLMRayActor:
                 num_added += 1
             except queue.Empty:
                 break
-
-        if num_added > 0:
-            self.logger.info(f"[LLMRayActor] Added {num_added} requests to engine queue")
-
+        self.logger.info(f"[LLMRayActor] Added {num_added} requests to engine queue")
         return num_added
 
     def process_from_queue(self, timeout: float = 60.0):
@@ -459,88 +451,62 @@ class LLMRayActor:
         if num_processed == 0:
             return num_processed
 
-        # Process all requests until completion
-        tracking = _init_tool_tracking() if self.tools else None
+        tracking = _init_tool_tracking()
         outputs = []
-        iteration = 0
-
         while True:
-            iteration += 1
+            outputs.extend(self._poll_tool_futures(tracking, self.llm_engine.tokenizer))
 
-            # Poll tool futures first (matching ToolUseLLM order)
-            if tracking and tracking.get("pending_tool_futures"):
-                outputs.extend(self._poll_tool_futures(tracking, self.llm_engine.tokenizer))
-
-            # Process engine steps - ONLY if there are unfinished requests
+            # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
             if self.llm_engine.has_unfinished_requests():
                 step_outputs = [o for o in self.llm_engine.step() if o.finished]
                 for output in step_outputs:
-                    # Get sampling params from request metadata for this output
                     base_req_id = "_".join(output.request_id.split("_")[:-1])
-                    sampling_params = self.request_metadata[base_req_id]["sampling_params"]
-
                     result = _handle_output(
-                        output, self.tools, tracking, sampling_params, self.max_tool_calls, self.executor
+                        output,
+                        self.tools,
+                        tracking,
+                        self.request_metadata[base_req_id]["sampling_params"],
+                        self.max_tool_calls,
+                        self.executor,
                     )
                     # Result is None when we do more tool processing.
                     if result is not None:
                         outputs.append(result)
+                self.fill_engine(timeout=0)
 
-                # Fill up the queue again after processing
-                self.fill_engine(timeout=timeout)
-
-            # Check termination condition
-            pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
-            if not self.llm_engine.has_unfinished_requests() and pending_count == 0:
-                self.logger.info(f"[LLMRayActor] Terminating after {iteration} iterations with {len(outputs)} outputs")
+            if self.llm_engine.get_num_unfinished_requests() + len(tracking["pending_tool_futures"]) == 0:
+                self.logger.info(f"[LLMRayActor] Terminating with {len(outputs)} outputs")
                 break
 
-        # Process outputs and send individual results
         end_time = time.time()
-
-        # Group outputs by request
         request_outputs = defaultdict(list)
         for output in outputs:
-            # Remove the sub_idx to get base request ID
             request_id = "_".join(output.request_id.split("_")[:-1])
             request_outputs[request_id].append(output)
-
-        # Send results for each original request
         for request_id, outs in request_outputs.items():
-            if request_id in self.request_metadata:
-                metadata = self.request_metadata.pop(request_id)
-
-                # Create final output combining all sub-requests
-                final_output = vllm.RequestOutput(
-                    request_id=request_id,
-                    prompt=outs[0].prompt,
-                    prompt_token_ids=outs[0].prompt_token_ids,
-                    prompt_logprobs=outs[0].prompt_logprobs,
-                    outputs=[completion for out in outs for completion in out.outputs],
-                    finished=outs[0].finished,
-                )
-
-                # Calculate token statistics for this request
-                total_prompt_tokens = metadata["prompt_tokens"]
-                total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
-                generation_time = end_time - metadata["start_time"]
-
-                # Create result using _finalize_outputs
-                result = _finalize_outputs(
-                    [final_output],
-                    tracking,
-                    metadata["dataset_index"],
-                    self.tools,
-                    token_statistics=TokenStatistics(
-                        num_prompt_tokens=total_prompt_tokens,
-                        num_response_tokens=total_generation_tokens,
-                        generation_time=generation_time,
-                    ),
-                    start_time=metadata["start_time"],
-                )
-
-                self._insert_result_to_queue(result, is_eval=metadata["is_eval"])
-
+            final_output = vllm.RequestOutput(
+                request_id=request_id,
+                prompt=outs[0].prompt,
+                prompt_token_ids=outs[0].prompt_token_ids,
+                prompt_logprobs=outs[0].prompt_logprobs,
+                outputs=[completion for out in outs for completion in out.outputs],
+                finished=outs[0].finished,
+            )
+            total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
+            metadata = self.request_metadata.pop(request_id)
+            result = _finalize_outputs(
+                [final_output],
+                tracking,
+                metadata["dataset_index"],
+                self.tools,
+                token_statistics=TokenStatistics(
+                    num_prompt_tokens=metadata["prompt_tokens"],
+                    num_response_tokens=total_generation_tokens,
+                    generation_time=end_time - metadata["start_time"],
+                ),
+                start_time=metadata["start_time"],
+            )
+            self._insert_result_to_queue(result, is_eval=metadata["is_eval"])
         return len(request_outputs)
 
     def _poll_tool_futures(self, tracking, tokenizer):
