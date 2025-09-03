@@ -12,7 +12,7 @@ uv run python mason.py \
         --priority urgent \
 	--preemptible \
         --num_nodes 2 \
-        --description "rlvr ace fn and og ocr stdio from base with perf penalty" \
+	--description "Large (multi-node) test script." \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         --budget ai2/oe-adapt \
@@ -39,7 +39,7 @@ uv run python mason.py \
         --stop_strings "</answer>" \
         --non_stop_penalty False \
         --temperature 1.0 \
-	--verbose False \
+        --verbose False \
         --ground_truths_key ground_truth \
         --sft_messages_key messages \
         --total_episodes 10_000 \

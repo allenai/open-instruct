@@ -14,6 +14,7 @@ uv run python mason.py \
        --cluster ai2/augusta-google-1 \
        --cluster ai2/saturn-cirrascale \
        --image "$BEAKER_IMAGE" \
+       --description "Single GPU on Beaker with tool use test script." \
        --pure_docker_mode \
        --workspace ai2/tulu-thinker \
        --priority high \
