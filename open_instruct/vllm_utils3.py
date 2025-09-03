@@ -320,14 +320,12 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
     prefix = "eval" if request.is_eval else "train"
 
     for batch_idx, prompt in enumerate(request.prompts):
-        dataset_idx = request.dataset_index[batch_idx]
-
-        request_id = f"{prefix}_{request.training_step}_{dataset_idx}"
+        request_id = f"{prefix}_{request.training_step}_{batch_idx}"
         sampling_params = request.generation_config.clone()
         sampling_params.n = 1  # Use n=1 for tool processing
         request_metadata[request_id] = {
             "is_eval": request.is_eval,
-            "dataset_index": dataset_idx,
+            "dataset_index": request.dataset_index[batch_idx],
             "training_step": request.training_step,
             "sampling_params": sampling_params,
             "prompt_tokens": len(prompt),
@@ -339,6 +337,8 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         for j in range(request.generation_config.n):
             sub_request_id = f"{request_id}_{j}"
             sub_sampling_params = sampling_params.clone()  # Already has n=1
+            assert sub_sampling_params.n == 1, "Tool mode only supports n=1"
+            assert request_metadata[request_id]["sampling_params"].n == 1, "Tool mode only supports n=1"
             if request.generation_config.seed is not None:
                 sub_sampling_params.seed = request.generation_config.seed + j
             llm_engine.add_request(sub_request_id, tokens_prompt, sub_sampling_params)
@@ -492,7 +492,9 @@ class LLMRayActor:
             combined_outputs[request_id].append(output)
         # Preserve original order from request.dataset_index
         prefix = "eval" if request.is_eval else "train"
-        ordered_ids = [f"{prefix}_{request.training_step}_{dataset_idx}" for dataset_idx in request.dataset_index]
+        # request_id is batch_num _ training_step _ within_batch_idx _ repetition_idx.
+        # we order by within_batch_idx.
+        ordered_ids = [f"{prefix}_{request.training_step}_{batch_idx}" for batch_idx in range(len(request.prompts))]
         final_outputs = []
         for request_id in ordered_ids:
             outs = combined_outputs[request_id]
