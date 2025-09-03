@@ -45,7 +45,7 @@ uv run python mason.py \
     --sft_messages_key messages \
     --exp_name 0605_general_tool_use_without_good_outputs \
     --learning_rate 5e-7 \
-    --total_episodes 500_000 \
+    --total_episodes 3_200 \
     --deepspeed_stage 2 \
     --with_tracking \
     --num_epochs 1 \
