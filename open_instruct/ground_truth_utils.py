@@ -38,14 +38,6 @@ from open_instruct.utils import extract_final_answer
 
 logger = logger_utils.setup_logger(__name__)
 
-# remove excessive logging from liteLLM
-logging.getLogger("LiteLLM").setLevel(logging.WARNING)
-logging.getLogger("litellm").setLevel(logging.ERROR)
-logging.getLogger("litellm.cost_calculator").setLevel(logging.CRITICAL)
-logging.getLogger("litellm._client").setLevel(logging.CRITICAL)
-logging.getLogger("cost_calculator").setLevel(logging.WARNING)
-logging.getLogger("httpx").setLevel(logging.WARNING)
-
 
 @dataclass
 class VerifierConfig:
@@ -671,7 +663,8 @@ class LMJudgeVerifier(VerifierFunction):
         for attempt in range(max_retries):
             # judges the quality of a response
             try:
-                messages = build_messages(prompt)
+                system_prompt = "Do not generate text between the <think> and </think> tags."  # "You are a concise assistant who gives very short explanations before giving a quality score."
+                messages = build_messages(prompt, system_prompt)
 
                 # Faeze: check if the request would exceed context window
                 # Import the context window checker
