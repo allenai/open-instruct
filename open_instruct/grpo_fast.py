@@ -1598,6 +1598,16 @@ def data_preparation_thread(
             real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
             expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
             non_zero_gradient_index = np.where(expanded_mask)[0]
+
+            # Log zero-gradient filtering statistics
+            num_zero_std_prompts = (~non_zero_std_mask).sum()
+            num_filtered_responses = len(scores) - len(non_zero_gradient_index)
+            if num_filtered_responses > 0:
+                logger.info(
+                    f"[Zero-gradient filtering] Filtered {num_zero_std_prompts} prompts with zero std "
+                    f"({num_filtered_responses} responses). Retention rate: {len(non_zero_gradient_index) / len(scores):.2%}"
+                )
+
             advantages = advantages[non_zero_gradient_index]
             original_batch_size = len(scores)
             scores = scores[non_zero_gradient_index]
@@ -1607,6 +1617,12 @@ def data_preparation_thread(
             finish_reasons = [result.finish_reasons[i] for i in non_zero_gradient_index]
             if args.mask_truncated_completions:
                 stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
+                num_truncated = len(finish_reasons) - len(stop_idxes)
+                if num_truncated > 0:
+                    logger.info(
+                        f"[Truncated completions filtering] Filtered {num_truncated} responses that didn't finish with 'stop'. "
+                        f"Retention rate: {len(stop_idxes) / len(finish_reasons):.2%}"
+                    )
                 scores = scores[stop_idxes]
                 advantages = advantages[stop_idxes]
                 responses = [responses[i] for i in stop_idxes]
@@ -1626,6 +1642,11 @@ def data_preparation_thread(
                         scores_matrix = scores.reshape(current_prompt_cnt, k)
                         stds = scores_matrix.std(axis=1) + 1e-8
                         probs = stds / stds.sum()
+
+                        logger.info(
+                            f"[Refill completions] Need to fill {need_to_fill_prompt} prompts to maintain batch size. "
+                            f"Original: {original_prompt_cnt}, Current: {current_prompt_cnt}"
+                        )
 
                         sampled_prompt_ids = np.random.choice(
                             current_prompt_cnt, size=need_to_fill_prompt, replace=True, p=probs
@@ -1652,9 +1673,17 @@ def data_preparation_thread(
 
                         finish_reasons += [finish_reasons[i] for i in sampled_indices]
 
-                        print(
+                        logger.info(
                             f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses"
                         )
+
+            # Count groups with all zero rewards
+            all_zero_groups = (scores_per_prompt == 0).all(axis=-1).sum()
+            total_groups = len(scores_per_prompt)
+            logger.info(
+                f"[Reward Summary] Groups with all zero rewards: {all_zero_groups}/{total_groups} "
+                f"({all_zero_groups / total_groups:.1%})"
+            )
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
@@ -1767,11 +1796,18 @@ def data_preparation_thread(
             sequence_length_unsolved = (
                 np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
             )
+
+            # Use the already calculated reward summary metrics for wandb
+            all_zero_groups_ratio = all_zero_groups / total_groups if total_groups > 0 else 0
+
             metrics = {
                 "scores": np.array(scores).mean(),
                 "real_batch_size_ratio": real_batch_size_ratio,
                 "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
                 "packed_ratio": len(packed_sequences.query_responses) / len(responses) if len(responses) > 0 else 0,
+                "val/all_zero_reward_groups": all_zero_groups,
+                "val/all_zero_reward_groups_ratio": all_zero_groups_ratio,
+                "val/total_reward_groups": total_groups,
                 "val/sequence_lengths": sequence_lengths.mean(),
                 "val/sequence_lengths_min": sequence_lengths.min(),
                 "val/sequence_lengths_max": sequence_lengths.max(),
