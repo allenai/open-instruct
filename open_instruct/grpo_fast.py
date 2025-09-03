@@ -87,7 +87,6 @@ from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
-    RAW_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
@@ -120,6 +119,7 @@ from open_instruct.utils import (
     calibrate_checkpoint_state_dir,
     clean_last_n_checkpoints_deepspeed,
     download_latest_checkpoint_from_gs,
+    extract_user_query,
     get_beaker_whoami,
     get_eval_ds_config,
     get_optimizer_grouped_parameters,
@@ -487,7 +487,6 @@ def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
         queries=data_next[INPUT_IDS_PROMPT_KEY],
         ground_truths=data_next[GROUND_TRUTHS_KEY],
         datasets=data_next[VERIFIER_SOURCE_KEY],
-        raw_queries=data_next[RAW_PROMPT_KEY],
         indices=dataset_indices,
     )
 
@@ -1280,46 +1279,28 @@ class PendingQueriesMap:
         self._map = {}  # dataset_idx -> (query, ground_truth, dataset, count)
         self._lock = threading.Lock()
 
-    def insert(self, dataset_idx, query, ground_truth, dataset, raw_query):
+    def insert(self, dataset_idx, query, ground_truth, dataset):
         """Insert or increment count for a dataset index."""
         with self._lock:
             if dataset_idx in self._map:
                 # Already exists - just increment count
-                existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count = self._map[
-                    dataset_idx
-                ]
-                self._map[dataset_idx] = (
-                    existing_query,
-                    existing_ground_truth,
-                    existing_dataset,
-                    existing_raw_query,
-                    count + 1,
-                )
+                existing_query, existing_ground_truth, existing_dataset, count = self._map[dataset_idx]
+                self._map[dataset_idx] = (existing_query, existing_ground_truth, existing_dataset, count + 1)
             else:
                 # New entry - count starts at 1
-                self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, 1)
+                self._map[dataset_idx] = (query, ground_truth, dataset, 1)
 
-    def insert_many(self, dataset_indices, queries, ground_truths, datasets, raw_queries):
+    def insert_many(self, dataset_indices, queries, ground_truths, datasets):
         """Insert or increment count for multiple dataset indices at once."""
         with self._lock:
             for i, dataset_idx in enumerate(dataset_indices):
-                current_raw_query = raw_queries[i]
-
                 if dataset_idx in self._map:
                     # Already exists - just increment count
-                    existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count = self._map[
-                        dataset_idx
-                    ]
-                    self._map[dataset_idx] = (
-                        existing_query,
-                        existing_ground_truth,
-                        existing_dataset,
-                        existing_raw_query,
-                        count + 1,
-                    )
+                    existing_query, existing_ground_truth, existing_dataset, count = self._map[dataset_idx]
+                    self._map[dataset_idx] = (existing_query, existing_ground_truth, existing_dataset, count + 1)
                 else:
                     # New entry - count starts at 1
-                    self._map[dataset_idx] = (queries[i], ground_truths[i], datasets[i], current_raw_query, 1)
+                    self._map[dataset_idx] = (queries[i], ground_truths[i], datasets[i], 1)
 
     def pop(self, dataset_idx):
         """Retrieve data and decrement count. Removes entry when count reaches 0."""
@@ -1327,16 +1308,16 @@ class PendingQueriesMap:
             if dataset_idx not in self._map:
                 raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
 
-            query, ground_truth, dataset, raw_query, count = self._map[dataset_idx]
+            query, ground_truth, dataset, count = self._map[dataset_idx]
 
             if count > 1:
                 # More results expected - just decrement
-                self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, count - 1)
+                self._map[dataset_idx] = (query, ground_truth, dataset, count - 1)
             else:
                 # Last result - remove entry
                 del self._map[dataset_idx]
 
-            return query, ground_truth, dataset, raw_query
+            return query, ground_truth, dataset
 
     def __len__(self):
         """Return the number of entries in the map."""
@@ -1389,7 +1370,6 @@ def accumulate_inference_batches(
     all_queries = []
     all_ground_truths = []
     all_datasets = []
-    all_raw_queries = []
     for i in tqdm(
         range(args.vllm_num_engines),
         total=args.vllm_num_engines,
@@ -1421,20 +1401,17 @@ def accumulate_inference_batches(
         batch_queries = []
         batch_ground_truths = []
         batch_datasets = []
-        batch_raw_queries = []
 
         for dataset_idx in dataset_indices:
-            query, ground_truth, dataset, raw_query = pending_queries_map.pop(dataset_idx)
+            query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
             batch_queries.append(query)
             batch_ground_truths.append(ground_truth)
             batch_datasets.append(dataset)
-            batch_raw_queries.append(raw_query)
 
         results.append(result)
         all_queries.extend(batch_queries)
         all_ground_truths.extend(batch_ground_truths)
         all_datasets.extend(batch_datasets)
-        all_raw_queries.extend(batch_raw_queries)
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1496,7 +1473,6 @@ def accumulate_inference_batches(
         queries=all_queries,
         ground_truths=all_ground_truths,
         datasets=all_datasets,
-        raw_queries=all_raw_queries,
         indices=None,  # Not meaningful for combined results
     )
     return combined_result, batch
@@ -1533,7 +1509,6 @@ def data_preparation_thread(
                 queries=repeat_each(batch.queries, args.num_samples_per_prompt_rollout),
                 ground_truths=repeat_each(batch.ground_truths, args.num_samples_per_prompt_rollout),
                 datasets=repeat_each(batch.datasets, args.num_samples_per_prompt_rollout),
-                raw_queries=repeat_each(batch.raw_queries, args.num_samples_per_prompt_rollout),
                 indices=repeat_each(batch.indices, args.num_samples_per_prompt_rollout) if batch.indices else None,
             )
             good_outputs = [
@@ -1555,7 +1530,8 @@ def data_preparation_thread(
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
-            decoded_queries = batch.raw_queries
+            decoded_queries = tokenizer.batch_decode(batch.queries, skip_special_tokens=True)
+            decoded_queries = [extract_user_query(query) for query in decoded_queries]
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
                 result.finish_reasons
             )
@@ -2071,7 +2047,7 @@ def split_and_insert_batch(
 
         # Store prompts in the map using thread-safe insert_many
         pending_queries_map.insert_many(
-            sub_batch.indices, sub_batch.queries, sub_batch.ground_truths, sub_batch.datasets, sub_batch.raw_queries
+            sub_batch.indices, sub_batch.queries, sub_batch.ground_truths, sub_batch.datasets
         )
 
         # Use PromptRequest for Ray queue with batch-specific dataset_index list
