@@ -1847,7 +1847,7 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
 
     wandb_url = None
     if args.with_tracking:
-        wandb.init(
+        run = wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
             config=all_configs,
@@ -1855,6 +1855,7 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
             save_code=True,
             tags=[args.exp_name] + get_wandb_tags(),
         )
+        run.define_metric("*", step_metric="episode")
         wandb_url = wandb.run.get_url()
         maybe_update_beaker_description(wandb_url=wandb_url)
 
