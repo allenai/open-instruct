@@ -417,6 +417,21 @@ class LLMRayActor:
             queue_name = "eval" if is_eval else "train"
             self.logger.warning(f"{queue_name} results queue is full, discarding result.")
 
+    def fill_engine(self, timeout: float = 60.0):
+        """Get a request from the prompt queue with timeout handling.
+
+        Returns:
+            PromptRequest or None: The request if available, None if timeout or queue empty
+        """
+        try:
+            current_request = self.prompt_queue.get(timeout=timeout)
+            self.logger.info(
+                f"[LLMRayActor] Processing request with {len(current_request.prompts)} prompts, tools={bool(self.tools)}"
+            )
+            return current_request
+        except queue.Empty:
+            return None
+
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
@@ -437,23 +452,18 @@ class LLMRayActor:
                 if self._should_stop():
                     return requests_processed
 
-                try:
-                    current_request = self.prompt_queue.get(timeout=timeout)
-                    self.logger.info(
-                        f"[LLMRayActor] Processing request with {len(current_request.prompts)} prompts, tools={bool(self.tools)}"
-                    )
-
-                    tracking = _init_tool_tracking()
-                    tokenizer = self.llm_engine.tokenizer
-
-                    add_request(current_request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
-
-                    outputs = []
-                    iteration = 0
-
-                except queue.Empty:
+                current_request = self.fill_engine(timeout)
+                if current_request is None:
                     # No new requests available, continue to check for work or stop condition
                     continue
+
+                tracking = _init_tool_tracking()
+                tokenizer = self.llm_engine.tokenizer
+
+                add_request(current_request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
+
+                outputs = []
+                iteration = 0
 
             # Process the current request
             if current_request is not None:
