@@ -19,11 +19,14 @@ model_name_or_path="hamishivi/qwen2_5_openthoughts2" \
 
 gantry run \
        --name open_instruct-benchmark_generators \
-       --workspace ai2/tulu-thinker \
+       --workspace ai2/open-instruct-dev \
        --gpus 1 \
        --description "Running benchmark with response length of $response_length at commit $git_hash on branch $git_branch with model $model_name_or_path." \
        --beaker-image nathanl/open_instruct_auto \
-       --cluster ai2/prior-elanding \
+       --priority urgent \
+       --cluster ai2/augusta \
+       --cluster ai2/jupiter \
+       --cluster ai2/ceres \
        --budget ai2/oe-adapt \
        --install 'uv sync' \
        -- uv run python -m open_instruct.benchmark_generators \
@@ -47,5 +50,4 @@ gantry run \
     --seed 42 \
     --dataset_local_cache_dir "benchmark_cache" \
     --dataset_cache_mode "local" \
-    --dataset_transform_fn "rlvr_tokenize_v1" "rlvr_filter_v1" \
-    "$@"
+    --dataset_transform_fn "rlvr_tokenize_v1" "rlvr_filter_v1"

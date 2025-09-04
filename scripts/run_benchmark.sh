@@ -34,5 +34,4 @@ uv run python -m open_instruct.benchmark_generators \
     --seed 42 \
     --dataset_local_cache_dir "benchmark_cache" \
     --dataset_cache_mode "local" \
-    --dataset_transform_fn "rlvr_tokenize_v1" "rlvr_filter_v1" \
-    "$@"
+    --dataset_transform_fn "rlvr_tokenize_v1" "rlvr_filter_v1"
