@@ -872,7 +872,6 @@ def sft_tokenize_v1(
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
-    # drop the raw_prompt key if it exists
     row.pop(RAW_PROMPT_KEY, None)
     return row
 
