@@ -1795,14 +1795,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     evaluation_inference_results_Q = Queue(maxsize=1)
     packed_sequences_Q = Queue(maxsize=args.async_steps)
     queries_prompt_Q = Queue(maxsize=args.async_steps)
-    num_eval_samples = 32
 
     eval_prompt_token_ids = None
     eval_ground_truths = None
     if eval_dataset is not None:
-        eval_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
-        eval_ground_truths = eval_dataset[:num_eval_samples][GROUND_TRUTHS_KEY]
-        eval_dataset_names = eval_dataset[:num_eval_samples][DATASET_SOURCE_KEY]
+        eval_prompt_token_ids = eval_dataset[INPUT_IDS_PROMPT_KEY]
+        eval_ground_truths = eval_dataset[GROUND_TRUTHS_KEY]
+        eval_dataset_names = eval_dataset[DATASET_SOURCE_KEY]
     thread = threading.Thread(
         target=vllm_generate_thread,
         args=(
@@ -1997,12 +1996,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 )
 
                 # get and log evaluation metrics
-                # try to get original dataset names if present; else fall back to verifier dataset tags
-                try:
-                    eval_original_dataset_names = eval_dataset[:num_eval_samples][DATASET_ORIGIN_KEY]
-                except Exception:
-                    eval_original_dataset_names = eval_dataset_names
+                eval_original_dataset_names = eval_dataset[DATASET_ORIGIN_KEY]
 
+                
                 eval_scores, eval_reward_metrics = asyncio.run(
                     reward_fn(
                         eval_responses,
