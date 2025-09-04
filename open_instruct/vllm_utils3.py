@@ -346,6 +346,7 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         if request.generation_config.seed is not None:
             sub_sampling_params.seed = request.generation_config.seed + j
         llm_engine.add_request(f"{request_id}_{j}", tokens_prompt, sub_sampling_params)
+    return request.generation_config.n
 
 
 class LLMRayActor:
@@ -440,9 +441,8 @@ class LLMRayActor:
             if self._should_stop():
                 break
             try:
-                request = self.prompt_queue.get(timeout=timeout if num_added == 0 else 0)
-                add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
-                num_added += 1
+                request = self.prompt_queue.get(timeout=timeout)
+                num_added += add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
             except queue.Empty:
                 break
         return num_added

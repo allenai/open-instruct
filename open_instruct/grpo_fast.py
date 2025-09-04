@@ -449,7 +449,8 @@ class Args:
         if self.stop_strings is None:
             self.stop_strings = []
         if self.inference_batch_size is None:
-            self.inference_batch_size = max(1, math.ceil(self.num_unique_prompts_rollout / self.vllm_num_engines))
+            total_prompts = self.num_samples_per_prompt_rollout * self.num_unique_prompts_rollout
+            self.inference_batch_size = max(1, math.ceil(total_prompts / self.vllm_num_engines))
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
@@ -1390,7 +1391,7 @@ def accumulate_inference_batches(
     Returns:
         Tuple of (combined_result, Batch with queries, ground_truths, datasets) or (ShutdownSentinel, None) if shutdown signal received
     """
-    total_timer = Timer("accumulate_inference_batches total")
+    total_timer = Timer("accumulate_inference_batches total", noop=True)
     queue_wait_time = 0.0
     processing_time = 0.0
 
@@ -1407,7 +1408,7 @@ def accumulate_inference_batches(
         disable=not args.verbose,
     ):
         # Time the queue get operation
-        queue_timer = Timer("queue_get")
+        queue_timer = Timer("queue_get", noop=True)
         result = inference_results_Q.get(timeout=timeout)
         queue_wait_time += queue_timer.duration
 
@@ -1415,7 +1416,7 @@ def accumulate_inference_batches(
             return result, None
 
         # Time the processing operations
-        process_timer = Timer("processing")
+        process_timer = Timer("processing", noop=True)
         query, ground_truth, dataset, raw_query = pending_queries_map.pop(result.dataset_index)
 
         results.append(result)
@@ -1426,7 +1427,7 @@ def accumulate_inference_batches(
         processing_time += process_timer.duration
 
     # Combine all results into a single GenerationResult
-    combining_timer = Timer("combining_results")
+    combining_timer = Timer("combining_results", noop=True)
     combined_responses = []
     combined_finish_reasons = []
     combined_masks = []
