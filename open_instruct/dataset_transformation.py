@@ -872,24 +872,8 @@ def sft_tokenize_v1(
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
-    return row
-
-
-def sft_tokenize_v1_2(
-    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
-):
-    if len(row[sft_messages_key]) == 1:
-        prompt = row[sft_messages_key]
-    else:
-        prompt = row[sft_messages_key][:-1]
-
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
-    row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
-    labels = copy.deepcopy(row[INPUT_IDS_KEY])
-    row[LABELS_KEY] = labels
     # drop the raw_prompt key if it exists
-    row.pop(RAW_PROMPT_KEY)
+    row.pop(RAW_PROMPT_KEY, None)
     return row
 
 
@@ -1269,7 +1253,7 @@ def rlvr_filter_v1(
 
 
 TRANSFORM_FNS = {
-    "sft_tokenize_v1": (sft_tokenize_v1_2, "map"),
+    "sft_tokenize_v1": (sft_tokenize_v1, "map"),
     "sft_tokenize_mask_out_prompt_v1": (sft_tokenize_mask_out_prompt_v1, "map"),
     "sft_filter_v1": (sft_filter_v1, "filter"),
     "sft_tulu_tokenize_and_truncate_v1": (sft_tulu_tokenize_and_truncate_v1, "map"),
