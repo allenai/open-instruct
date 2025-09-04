@@ -96,14 +96,18 @@ def extract_citations_from_context(context: str) -> Dict[str, str]:
 
 def extract_search_tool_calls(context: str, mcp_parser_name: Optional[str] = None) -> List[str]:
     if not mcp_parser_name:
-        return [match[1] for match in re.findall(r"<search>(.*?)</search>", context, re.DOTALL)]
+        matches = re.findall(r"<search>(.*?)</search>", context, re.DOTALL)
     elif mcp_parser_name == "unified":
-        return [match[1] for match in re.findall(r"<tool name=(.*?)>(.*?)</tool>", context, re.DOTALL)]
+        matches = re.findall(r"<tool name=(.*?)>(.*?)</tool>", context, re.DOTALL)
     elif mcp_parser_name == "v20250824":
-        queries = [match[1] for match in re.findall(r"<call_tool name=(.*?)>(.*?)</call_tool>", context, re.DOTALL)]
-        if not queries:
-            queries = [match[1] for match in re.findall(r"<call_tool name=(.*?)>(.*?)</call>", context, re.DOTALL)]
-        return queries
+        matches = re.findall(r"<call_tool name=(.*?)>(.*?)</call_tool>", context, re.DOTALL)
+        if not matches:
+            matches = re.findall(r"<call_tool name=(.*?)>(.*?)</call>", context, re.DOTALL)
     else:
         raise ValueError(f"Unsupported MCP parser name: {mcp_parser_name}")
+    
+    if matches:
+        return [match[1] for match in matches]
+    else:
+        return []
     
