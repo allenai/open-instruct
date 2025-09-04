@@ -340,12 +340,12 @@ def load_model_dims(model_name: str) -> Optional[ModelDims]:
     try:
         cfg = transformers.AutoConfig.from_pretrained(model_name, trust_remote_code=True)
         logger.info(f"HF config is: {cfg}.")
-        
+
         # Handle different attribute names across model types
         num_kv_heads = getattr(cfg, "num_key_value_heads", None)
         if num_kv_heads is None:
             num_kv_heads = getattr(cfg, "num_attention_heads", None)
-        
+
         model_dims = ModelDims(
             num_layers=cfg.num_hidden_layers,
             hidden_size=cfg.hidden_size,
@@ -354,10 +354,10 @@ def load_model_dims(model_name: str) -> Optional[ModelDims]:
             num_attn_heads=cfg.num_attention_heads,
             num_kv_heads=num_kv_heads,
         )
-        
+
         if model_dims.intermediate_size is None:
             model_dims.intermediate_size = 4 * model_dims.hidden_size
-            
+
         return model_dims
     except Exception as e:
         logger.warning(f"Could not load model config from Hugging Face for '{model_name}': {e}")
@@ -616,10 +616,10 @@ def run_benchmark(
 
             save_completion_lengths([result_dict], timestamp, batch_idx)
             results.append(result_dict)
-            
+
             # Format MFU for display
             mfu_display = f"{result_dict['mfu']:.2f}%" if result_dict["mfu"] != "n/a" else result_dict["mfu"]
-            
+
             logger.info(
                 f"Batch {batch_idx}/{num_batches - 1}: "
                 f"{result_dict['tokens_per_second']:.2f} new tokens/sec, "
@@ -653,10 +653,10 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "response_lengths": [],
         "prompt_lengths": [],
     }
-    
+
     # Track if any MFU values are n/a
     mfu_has_na = False
-    
+
     for result in results:
         for key, value in result.items():
             if key == "mfu":
@@ -682,13 +682,13 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         if aggregated_results["total_generation_time"] > 0
         else 0
     )
-    
+
     # Set average to n/a if any individual result was n/a
     if mfu_has_na:
         aggregated_results["avg_mfu"] = "n/a"
     else:
         aggregated_results["avg_mfu"] = aggregated_results["total_mfu"] / num_results
-    
+
     aggregated_results["avg_generation_time"] = aggregated_results["total_generation_time"] / num_results
     return aggregated_results
 
@@ -717,10 +717,10 @@ def print_summary(
     print("-" * 60)
     print(f"Average results over {len(results)} main benchmark batches:")
     print(f"Average tokens/second: {agg_results['avg_tokens_per_second']:.2f}")
-    
+
     # Format MFU for display
-    avg_mfu_display = f"{agg_results['avg_mfu']:.2f}%" if agg_results['avg_mfu'] != "n/a" else agg_results['avg_mfu']
-    
+    avg_mfu_display = f"{agg_results['avg_mfu']:.2f}%" if agg_results["avg_mfu"] != "n/a" else agg_results["avg_mfu"]
+
     print(f"Average MFU: {avg_mfu_display}")
     print(f"Average generation time per batch: {agg_results['avg_generation_time']:.2f}s")
     print(f"Average new tokens per sample: {avg_new_tokens_per_sample:.2f} tokens")

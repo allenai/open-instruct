@@ -678,9 +678,7 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
 
 def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
     config = AutoConfig.from_pretrained(
-        tc.tokenizer_name_or_path, 
-        revision=tc.tokenizer_revision,
-        trust_remote_code=tc.trust_remote_code
+        tc.tokenizer_name_or_path, revision=tc.tokenizer_revision, trust_remote_code=tc.trust_remote_code
     )
     # @vwxyzjn: "olmo" handles both `olmo2` and `olmoe`.
     if "olmo" in config.model_type:
