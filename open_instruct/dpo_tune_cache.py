@@ -359,6 +359,10 @@ class FlatArguments:
     """The beaker evaluation tasks to launch"""
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
+    eval_workspace: Optional[str] = "tulu-3-results"
+    """The workspace to launch evaluation jobs on"""
+    eval_priority: Optional[str] = "high"
+    """The priority of auto-launched evaluation jobs"""
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -1013,6 +1017,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             wandb_url=wandb_tracker.run.get_url(),
             oe_eval_tasks=args.oe_eval_tasks,
             gs_bucket_path=args.gs_bucket_path,
+            workspace=args.eval_workspace,
+            eval_priority=args.eval_priority,
         )
     if args.push_to_hub:
         push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
