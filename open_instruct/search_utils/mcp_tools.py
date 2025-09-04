@@ -90,27 +90,29 @@ class MCPTool(Tool):
         print(f"trunc_prompt: {trunc_prompt}")
         # work out which mcp tool to call.
         document_tool_output = None
-        for mcp_tool in self.mcp_tools:
-            if mcp_tool.tool_parser.has_calls(trunc_prompt, mcp_tool.name):
-                document_tool_output = asyncio.run(mcp_tool(trunc_prompt))
-                break
+        error = None
+        found_tool = False
+        text_output = ""
+        try:
+            for mcp_tool in self.mcp_tools:
+                if mcp_tool.tool_parser.has_calls(trunc_prompt, mcp_tool.name):
+                    document_tool_output = asyncio.run(mcp_tool(trunc_prompt))
+                    # first format the output
+                    text_output = mcp_tool._format_output(document_tool_output)
+                    # wrap in the tags
+                    text_output = mcp_tool.tool_parser.format_result(text_output, document_tool_output)
+                    found_tool = True
+                    break
+        except Exception as e:
+            error = str(e)
+        if error is None and not found_tool:
+            error = "No valid tool calls found."
         if document_tool_output is None:
             print(f"No mcp tool found for tunc. prompt: {trunc_prompt}")      
             return ToolOutput(
-                output="Error calling tool. Incorrect tool call format!",
+                output=error,
                 called=False,
-                error="Error calling tool. Incorrect tool call format!",
-                timeout=False,
-                runtime=0,
-                start_str="<snippet id=" + generate_snippet_id() + ">\n",
-                end_str="\n</snippet>",
-            )
-        # mcp tool return is Optional[DocumentToolOutput]
-        if document_tool_output is None:
-            return ToolOutput(
-                output="Error calling tool.",
-                called=False,
-                error="Error calling tool.",
+                error=error,
                 timeout=False,
                 runtime=0,
                 start_str="<snippet id=" + generate_snippet_id() + ">\n",
@@ -119,13 +121,13 @@ class MCPTool(Tool):
 
         # munge into format that open-instruct likes.
         return ToolOutput(
-            output=document_tool_output.output,
+            output=text_output,
             called=True,
             error=document_tool_output.error,
             timeout=document_tool_output.timeout,
             runtime=document_tool_output.runtime,
-            start_str="<snippet id=" + generate_snippet_id() + ">\n",
-            end_str="\n</snippet>",
+            start_str="\n",
+            end_str="\n\n",
         )
 
 
