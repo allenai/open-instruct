@@ -27,8 +27,8 @@ def score_query_redundancy(context: str) -> float:
     Score is between 0 and 1, which is unique_queries / total_queries
     """
     queries = extract_search_tool_calls(context)
-    # check if there are any duplicate queries
-    return len(set(queries)) / len(queries)
+    
+    return 1.0 if len(queries) == 0 else len(set(queries)) / len(queries)
 
 
 def score_query_quality_in_a_row(context: str) -> float:
