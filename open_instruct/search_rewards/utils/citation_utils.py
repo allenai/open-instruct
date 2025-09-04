@@ -61,7 +61,11 @@ Please provide the rating first, followed by the analysis, in the format "Rating
 </snippet>"""
 
 
-def extract_claims_and_corresponding_citation_ids(response: str) -> Dict[str, List[str]]:
+def extract_claims_and_corresponding_citation_ids(
+    response: str, 
+    split_non_cited_parts_by_newlines: bool = True,
+    split_non_cited_parts_by_sentences: bool = True,
+    ) -> Dict[str, List[str]]:
     """
     Example response:
     "The Great Wall of China, one of the most iconic structures in human history, stretches approximately 13,000 miles across northern China. <cite id=a1b2c3d4>Construction of the Great Wall began during the 7th century BC under various warring states, but the most famous sections were built during the Ming Dynasty (1368-1644).</cite> The wall was primarily constructed as a defensive fortification to protect Chinese states from invasions by nomadic groups from the north. <cite id=e5f6g7h8>The wall incorporates various materials including stone, brick, tamped earth, wood, and other materials, with different sections built using locally available resources.</cite> Contrary to popular belief, <cite id=i9j0k1l2>the Great Wall is not visible from space with the naked eye, a myth that has been debunked by astronauts and satellite imagery.</cite>"
@@ -75,6 +79,20 @@ def extract_claims_and_corresponding_citation_ids(response: str) -> Dict[str, Li
     # Split the response by cite tags to get non-cited text
     cite_tag_pattern = r"<cite id=[\"\']?[^\"\'>\s]+[\"\']?[^>]*>[^<]+</cite>"
     non_cited_parts = re.split(cite_tag_pattern, response)
+    
+    # Further split non-cited parts by newlines if requested
+    if split_non_cited_parts_by_newlines:
+        further_split_parts = []
+        for part in non_cited_parts:
+            further_split_parts.extend(re.split(r"\n", part))
+        non_cited_parts = further_split_parts
+    
+    # Further split non-cited parts by sentences if requested
+    if split_non_cited_parts_by_sentences:
+        further_split_parts = []
+        for part in non_cited_parts:
+            further_split_parts.extend(re.split(r"[.!?]", part))
+        non_cited_parts = further_split_parts
     
     # Add non-cited text (parts between cite tags)
     for part in non_cited_parts:
