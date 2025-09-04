@@ -84,6 +84,7 @@ from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
 from open_instruct.dataset_transformation import (
+    DATASET_ORIGIN_KEY,
     DATASET_SOURCE_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -1799,14 +1800,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     evaluation_inference_results_Q = Queue(maxsize=1)
     packed_sequences_Q = Queue(maxsize=args.async_steps)
     queries_prompt_Q = Queue(maxsize=args.async_steps)
-    num_eval_samples = 32
 
     eval_prompt_token_ids = None
     eval_ground_truths = None
     if eval_dataset is not None:
-        eval_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
-        eval_ground_truths = eval_dataset[:num_eval_samples][GROUND_TRUTHS_KEY]
-        eval_dataset_names = eval_dataset[:num_eval_samples][DATASET_SOURCE_KEY]
+        eval_prompt_token_ids = eval_dataset[INPUT_IDS_PROMPT_KEY]
+        eval_ground_truths = eval_dataset[GROUND_TRUTHS_KEY]
+        eval_dataset_names = eval_dataset[DATASET_SOURCE_KEY]
     thread = threading.Thread(
         target=vllm_generate_thread,
         args=(
@@ -2001,6 +2001,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 )
 
                 # get and log evaluation metrics
+                eval_original_dataset_names = eval_dataset[DATASET_ORIGIN_KEY]
+
+                
                 eval_scores, eval_reward_metrics = asyncio.run(
                     reward_fn(
                         eval_responses,
@@ -2009,6 +2012,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                         eval_dataset_names,
                         eval_finish_reasons,
                         eval_infos,
+                        source_datasets=eval_original_dataset_names,
                     )
                 )
                 eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
@@ -2171,6 +2175,7 @@ if __name__ == "__main__":
         finish_reasons: List[str],
         infos: List[List[int]],
         queries: Optional[List[str]] = None,
+        source_datasets: Optional[List[str]] = None,
     ) -> List[float]:
         num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
         good_outputs = [
@@ -2240,6 +2245,16 @@ if __name__ == "__main__":
                     np_value = np.array(value)
                     metrics[f"objective/{key}_reward"] = np_value.mean()
                     metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
+                
+                # log per original source dataset, if provided
+                if source_datasets is not None and len(source_datasets) == len(verifiable_rewards):
+                    source_to_values = defaultdict(list)
+                    for src, val in zip(source_datasets, verifiable_rewards):
+                        source_to_values[src].append(val)
+                    for src, vals in source_to_values.items():
+                        arr = np.array(vals)
+                        metrics[f"objective/source/{src}_verifiable_reward"] = arr.mean()
+                        metrics[f"objective/source/{src}_verifiable_correct_rate"] = (arr > 0.0).mean()
                 
                 # log direction agreement
                 if args.log_direction_agreement:
