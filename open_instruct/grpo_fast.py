@@ -1528,15 +1528,8 @@ def data_preparation_thread(
                 and not result.request_info.tool_errors[i]
                 for i in range(len(result.request_info.tool_outputs))
             ]
-            for i in range(len(result.finish_reasons)):
-                # edge case: sometimes it outputs eos immediately, and we get an empty response
-                # in that case, we need to add the eos token to the response
-                # note that this also adds eos to the end of reponses that stopped for other reasons.
-                if result.finish_reasons[i] == "stop" and (
-                    len(result.responses[i]) == 0 or result.responses[i][-1] != tokenizer.eos_token_id
-                ):
-                    result.responses[i].append(tokenizer.eos_token_id)
-                    result.masks[i].append(1)  # never mask the eos token for now?
+            # EOS token handling is now done at the individual result processing level
+            # in vllm_utils3.py to avoid response/mask length mismatches in single-prompt flow
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
@@ -1644,6 +1637,11 @@ def data_preparation_thread(
 
                         advantages = np.concatenate([advantages, advantages[sampled_indices]])
                         scores = np.concatenate([scores, scores[sampled_indices]])
+                        # Validate alignment before duplication
+                        for idx in sampled_indices:
+                            assert len(responses[idx]) == len(masks[idx]), (
+                                f"Before duplication - index {idx}: response len={len(responses[idx])} vs mask len={len(masks[idx])}"
+                            )
                         responses += [responses[i] for i in sampled_indices]
                         masks += [masks[i] for i in sampled_indices]
 
@@ -1671,6 +1669,11 @@ def data_preparation_thread(
             )
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
+            # Validate response/mask alignment before packing
+            for i, (resp, mask) in enumerate(zip(responses, masks)):
+                assert len(resp) == len(mask), (
+                    f"Before pack_sequences - batch item {i}: response len={len(resp)} vs mask len={len(mask)}"
+                )
             packed_sequences = pack_sequences(
                 queries=batch.queries,
                 responses=responses,

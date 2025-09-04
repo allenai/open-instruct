@@ -170,6 +170,11 @@ def _process_outputs_with_tools(
     finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
 
     masks = [out.mask for output in outputs for out in output.outputs]
+
+    # Validate response/mask alignment
+    assert len(response_ids) == len(masks), f"Length mismatch: {len(response_ids)} responses vs {len(masks)} masks"
+    for i, (resp, mask) in enumerate(zip(response_ids, masks)):
+        assert len(resp) == len(mask), f"Output {i}: response len={len(resp)} vs mask len={len(mask)}"
     num_calls = [out.num_calls for output in outputs for out in output.outputs]
     timeouts = [out.timeout for output in outputs for out in output.outputs]
     tool_errors = [out.tool_error for output in outputs for out in output.outputs]
@@ -211,6 +216,10 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=
         assert req_id in tracking["concat_outputs"], f"req_id {req_id} not in concat_outputs!"
         output = tracking["concat_outputs"][req_id].outputs[0]
         setattr(output, "mask", tracking["masks"][req_id])
+        # Validate response/mask alignment
+        assert len(output.token_ids) == len(tracking["masks"][req_id]), (
+            f"Request {req_id}: token_ids len={len(output.token_ids)} vs mask len={len(tracking['masks'][req_id])}"
+        )
         setattr(output, "num_calls", tracking["num_calls"][req_id])
         setattr(output, "timeout", tracking["timeout"][req_id])
         setattr(output, "tool_error", tracking["tool_error"][req_id])
@@ -470,7 +479,6 @@ class LLMRayActor:
                     # Result is None when we do more tool processing.
                     if result is not None:
                         outputs.append(result)
-                self.fill_engine(timeout=0)
 
             if self.llm_engine.get_num_unfinished_requests() + len(tracking["pending_tool_futures"]) == 0:
                 break

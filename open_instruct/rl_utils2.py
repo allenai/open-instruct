@@ -105,7 +105,7 @@ def pack_sequences(
         # remove padding (but using vllm so this should not be needed, but just in case)
         query_tool_mask = [1 for t in query if t != pad_token_id]
         query = [t for t in query if t != pad_token_id]
-        response_tool_mask = [t for i, t in enumerate(mask) if response[i] != pad_token_id]
+        response_tool_mask = [m for r, m in zip(response, mask) if r != pad_token_id]
         response = [t for t in response if t != pad_token_id]
         query_response = query + response
         mask = query_tool_mask + response_tool_mask
