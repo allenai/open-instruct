@@ -2933,10 +2933,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         and is_beaker_job()
         and len(beaker_config.beaker_dataset_id_urls) > 0
         and args.output_dir.rstrip("/") != "/output"
+        and os.path.isdir(args.output_dir)
     ):
-        # sometimes the job finishes before we have an output directory.
-        if os.path.isdir(args.output_dir):
-            shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
+        shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
     logger.info("finished training")
 
     accelerator = Namespace()
