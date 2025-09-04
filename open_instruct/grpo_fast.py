@@ -1391,10 +1391,6 @@ def accumulate_inference_batches(
     Returns:
         Tuple of (combined_result, Batch with queries, ground_truths, datasets) or (ShutdownSentinel, None) if shutdown signal received
     """
-    total_timer = Timer("accumulate_inference_batches total", noop=True)
-    queue_wait_time = 0.0
-    processing_time = 0.0
-
     results = []
     all_queries = []
     all_ground_truths = []
@@ -1407,16 +1403,11 @@ def accumulate_inference_batches(
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     ):
-        # Time the queue get operation
-        queue_timer = Timer("queue_get", noop=True)
         result = inference_results_Q.get(timeout=timeout)
-        queue_wait_time += queue_timer.duration
 
         if isinstance(result, ShutdownSentinel):
             return result, None
 
-        # Time the processing operations
-        process_timer = Timer("processing", noop=True)
         query, ground_truth, dataset, raw_query = pending_queries_map.pop(result.dataset_index)
 
         results.append(result)
@@ -1424,10 +1415,8 @@ def accumulate_inference_batches(
         all_ground_truths.append(ground_truth)
         all_datasets.append(dataset)
         all_raw_queries.append(raw_query)
-        processing_time += process_timer.duration
 
     # Combine all results into a single GenerationResult
-    combining_timer = Timer("combining_results", noop=True)
     combined_responses = []
     combined_finish_reasons = []
     combined_masks = []
@@ -1458,7 +1447,6 @@ def accumulate_inference_batches(
             accumulated_stats.generation_time = max(
                 accumulated_stats.generation_time, result.token_statistics.generation_time
             )
-    combining_time = combining_timer.duration
 
     # Create combined RequestInfo
     combined_request_info = RequestInfo(
@@ -1490,15 +1478,6 @@ def accumulate_inference_batches(
         datasets=all_datasets,
         raw_queries=all_raw_queries,
         indices=None,  # Not meaningful for combined results
-    )
-
-    # Log timing breakdown
-    total_time = total_timer.duration
-    logger.info(
-        f"accumulate_inference_batches completed in {total_time:.3f}s for {num_prompts} prompts: "
-        f"queue_wait={queue_wait_time:.3f}s ({queue_wait_time / total_time * 100:.1f}%), "
-        f"processing={processing_time:.3f}s ({processing_time / total_time * 100:.1f}%), "
-        f"combining={combining_time:.3f}s ({combining_time / total_time * 100:.1f}%)"
     )
 
     return combined_result, batch

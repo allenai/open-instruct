@@ -20,8 +20,6 @@ class Timer:
     def __init__(self, description: str, noop: bool = False):
         self.description = description
         self.noop = noop
-        self.start_time = time.perf_counter()
-        self._duration = None
 
     def __enter__(self):
         self.start_time = time.perf_counter()
@@ -29,16 +27,9 @@ class Timer:
 
     def __exit__(self, type, value, traceback):
         self.end_time = time.perf_counter()
-        self._duration = self.end_time - self.start_time
+        self.duration = self.end_time - self.start_time
         if not self.noop:
-            logger.info(f"{self.description}: {self._duration:.3f} seconds")
-
-    @property
-    def duration(self):
-        """Return the final duration if available, else the current elapsed time"""
-        if self._duration is not None:
-            return self._duration
-        return time.perf_counter() - self.start_time
+            logger.info(f"{self.description}: {self.duration:.3f} seconds")
 
 
 @dataclass

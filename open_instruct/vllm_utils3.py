@@ -453,20 +453,13 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
-        total_start = time.perf_counter()
-
-        # Timer 1: fill_engine
-        fill_engine_start = time.perf_counter()
         num_processed = self.fill_engine(timeout=timeout)
-        fill_engine_time = time.perf_counter() - fill_engine_start
 
         if num_processed == 0:
             return num_processed
 
-        # Timer 2: main_loop
         tracking = _init_tool_tracking()
         outputs = []
-        main_loop_start = time.perf_counter()
         while True:
             outputs.extend(self._poll_tool_futures(tracking, self.llm_engine.tokenizer))
 
@@ -489,18 +482,13 @@ class LLMRayActor:
 
             if self.llm_engine.get_num_unfinished_requests() + len(tracking["pending_tool_futures"]) == 0:
                 break
-        main_loop_time = time.perf_counter() - main_loop_start
 
-        # Timer 3: processing
-        processing_start = time.perf_counter()
         end_time = time.time()
         request_outputs = defaultdict(list)
         for output in outputs:
             request_id = "_".join(output.request_id.split("_")[:-1])
             request_outputs[request_id].append(output)
 
-        # Timer 4: insert_result_to_queue
-        insert_queue_start = time.perf_counter()
         for request_id, outs in request_outputs.items():
             final_output = vllm.RequestOutput(
                 request_id=request_id,
@@ -525,19 +513,6 @@ class LLMRayActor:
                 start_time=metadata["start_time"],
             )
             self._insert_result_to_queue(result, is_eval=metadata["is_eval"])
-        insert_queue_time = time.perf_counter() - insert_queue_start
-        processing_time = time.perf_counter() - processing_start
-
-        total_time = time.perf_counter() - total_start
-
-        # Print timing report
-        self.logger.info(
-            f"process_from_queue completed in {total_time:.3f}s, generating {len(request_outputs)} prompts: "
-            f"fill_engine={fill_engine_time:.3f}s ({fill_engine_time / total_time * 100:.1f}%), "
-            f"main_loop={main_loop_time:.3f}s ({main_loop_time / total_time * 100:.1f}%), "
-            f"processing={processing_time:.3f}s ({processing_time / total_time * 100:.1f}%), "
-            f"insert_queue={insert_queue_time:.3f}s ({insert_queue_time / total_time * 100:.1f}%)"
-        )
 
         return len(request_outputs)
 
