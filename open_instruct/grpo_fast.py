@@ -478,7 +478,6 @@ class Args:
                 if tool not in ["search", "code"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
-        self.checkpoint_dir = f"{self.output_dir}_checkpoints"
 
 
 def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
@@ -2292,7 +2291,8 @@ def one_training_step(
     save_time = 0
     if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
         with Timer("[Main Thread] 🗡️ Saving model") as timer:
-            step_dir = os.path.join(args.checkpoint_dir, f"step_{training_step}")
+            checkpoint_dir = f"{args.output_dir}_checkpoints"
+            step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
             logger.info(f"Saving model at step {training_step} to {step_dir}")
             ray_get_with_progress(
                 [
