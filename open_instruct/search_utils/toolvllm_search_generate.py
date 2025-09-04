@@ -89,7 +89,8 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
             continue
         # j is exclusive; iterate up to and including len(answer_sections)
         for j in range(i + 1, len(answer_sections) + 1):
-            if answer_sections[j].strip() == "":
+            # j is exclusive, so check the last included section (j - 1)
+            if answer_sections[j - 1].strip() == "":
                 continue
             citations = re.findall(r"<cite id=\"(\w+)\">((\n|.)*?)</cite>", "\n".join(answer_sections[i:j]))
             citations += re.findall(r"<cite id=(\w+)>((\n|.)*?)</cite>", "\n".join(answer_sections[i:j]))
