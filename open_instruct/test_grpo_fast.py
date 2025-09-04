@@ -158,8 +158,10 @@ class TestGrpoFastBase(unittest.TestCase):
         self, queries, ground_truths, datasets, raw_queries, indices, num_engines, training_step=1
     ):
         """Setup queues and split batch - common pattern."""
-        param_prompt_Q = ray_queue.Queue(maxsize=num_engines * 2)
-        inference_results_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        # Queue size must be at least as large as the number of queries to avoid blocking
+        queue_size = max(len(queries), num_engines * 2)
+        param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
+        inference_results_Q = ray_queue.Queue(maxsize=queue_size)
         pending_queries_map = grpo_fast.PendingQueriesMap()
 
         # Track queues for cleanup
@@ -403,6 +405,14 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
             queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices, vllm_num_engines
         )
 
+        # For multiple samples, we need to add additional references to the pending_queries_map
+        # The first reference is already added by setup_and_split_batch
+        for _ in range(num_samples_per_prompt - 1):
+            for idx, query, ground_truth, dataset, raw_query in zip(
+                dataset_indices, queries_next, ground_truths_next, datasets_next, raw_queries_next
+            ):
+                pending_queries_map.insert(idx, query, ground_truth, dataset, raw_query)
+
         # Simulate vLLM processing with multiple samples
         batch_idx = 0
         while not param_prompt_Q.empty():
@@ -422,17 +432,11 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
             result = inference_results_Q.get()
             dataset_index = result.dataset_index
 
+            # Pop the query data for this specific result - pop multiple times for multiple samples
             q, gt, d, raw_q = pending_queries_map.pop(dataset_index)
-            batch_queries = []
-            batch_raw_queries = []
-            batch_ground_truths = []
-            batch_datasets = []
-            for idx in dataset_indices:
-                q, gt, d, raw_q = pending_queries_map.pop(idx)
-                batch_queries.append(q)
-                batch_raw_queries.append(raw_q)
-                batch_ground_truths.append(gt)
-                batch_datasets.append(d)
+            # Pop additional times to handle multiple samples per prompt
+            for _ in range(num_samples_per_prompt - 1):
+                pending_queries_map.pop(dataset_index)
 
             combined_responses.extend(result.responses)
             combined_queries.append(q)
@@ -604,7 +608,9 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         num_prompts = 16
 
         # Setup with results from only 3 engines
-        inference_results_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        # Queue size must be large enough for all results being put before accumulation starts
+        expected_results = 3 * (num_prompts // num_engines)  # 3 engines * 4 results each = 12
+        inference_results_Q = ray_queue.Queue(maxsize=max(expected_results, num_engines * 2))
 
         # Track queue for cleanup
         self._ray_queues.append(inference_results_Q)
@@ -859,11 +865,10 @@ class TestStreamingAccumulation(TestGrpoFastBase):
             self.assertEqual(len(result.responses), expected_responses)
             total_responses += len(result.responses)
 
-            # Clean up pending_queries_map
+            # Pop multiple times to match the number of samples (reference counting)
             idx = result.dataset_index
             for _ in range(num_samples):
-                if idx in pending_queries_map:
-                    pending_queries_map.pop(idx)
+                pending_queries_map.pop(idx)
 
         # Verify total responses
         self.assertEqual(total_responses, num_prompts * num_samples)
