@@ -532,7 +532,7 @@ class LLMRayActor:
 
         # Print timing report
         self.logger.info(
-            f"process_from_queue completed in {total_time:.3f}s: "
+            f"process_from_queue completed in {total_time:.3f}s, generating {len(request_outputs)} prompts: "
             f"fill_engine={fill_engine_time:.3f}s ({fill_engine_time / total_time * 100:.1f}%), "
             f"main_loop={main_loop_time:.3f}s ({main_loop_time / total_time * 100:.1f}%), "
             f"processing={processing_time:.3f}s ({processing_time / total_time * 100:.1f}%), "
