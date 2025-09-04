@@ -236,7 +236,7 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=
         else:
             merged_outputs[real_req_id].outputs.append(tracking["concat_outputs"][req_id].outputs[0])
 
-    # Sort by dataset index (extracted from request_id format: "{training_step}_{idx}")
+    # Sort by dataset index (extracted from request_id format: "{prefix}_{training_step}_{dataset_index}")
     final_outputs = sorted(
         merged_outputs.values(), key=lambda x: (int(x.request_id.split("_")[1]), int(x.request_id.split("_")[2]))
     )
@@ -336,6 +336,7 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         "dataset_index": request.dataset_index,
         "training_step": request.training_step,
         "sampling_params": sampling_params,
+        "original_sampling_params": request.generation_config,
         "prompt_tokens": len(request.prompt),
         "start_time": time.perf_counter(),
     }
@@ -488,7 +489,10 @@ class LLMRayActor:
         for output in outputs:
             request_id = "_".join(output.request_id.split("_")[:-1])
             request_outputs[request_id].append(output)
-
+        for request_id, outputs in request_outputs.items():
+            assert len(outputs) == self.request_metadata[request_id].n, (
+                f"{len(outputs)=} != {self.request_metadata[request_id].n=}"
+            )
         for request_id, outs in request_outputs.items():
             final_output = vllm.RequestOutput(
                 request_id=request_id,
@@ -500,6 +504,9 @@ class LLMRayActor:
             )
             total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
             metadata = self.request_metadata.pop(request_id)
+            assert len(final_output.outputs) == metadata["original_sampling_params"].n, (
+                f'{len(final_output.outputs)=} != {metadata["original_sampling_params"].n=}'
+            )
             result = _finalize_outputs(
                 [final_output],
                 tracking,
@@ -511,6 +518,9 @@ class LLMRayActor:
                     generation_time=end_time - metadata["start_time"],
                 ),
                 start_time=metadata["start_time"],
+            )
+            assert len(result.responses) == metadata["original_sampling_params"].n, (
+                f'{len(result.responses)=} == {metadata["original_sampling_params"].n=}'
             )
             self._insert_result_to_queue(result, is_eval=metadata["is_eval"])
 

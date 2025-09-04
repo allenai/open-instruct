@@ -57,7 +57,7 @@ class PackedSequences(Generic[T]):
     """packed sequence lengths (batch_size, pack_length)"""
     dones: Optional[np.ndarray] = None
     """packed dones (batch_size, pack_length), specifies the sequence boundaries
-    E.g., [0, 0, 0, 0, 1, 0, 0, 0, 0, 2] means the first sequence ends at index 4, and the 
+    E.g., [0, 0, 0, 0, 1, 0, 0, 0, 0, 2] means the first sequence ends at index 4, and the
     second sequence ends at index 9
     """
     rewards: Optional[np.ndarray] = None
@@ -105,7 +105,7 @@ def pack_sequences(
         # remove padding (but using vllm so this should not be needed, but just in case)
         query_tool_mask = [1 for t in query if t != pad_token_id]
         query = [t for t in query if t != pad_token_id]
-        response_tool_mask = [m for r, m in zip(response, mask) if r != pad_token_id]
+        response_tool_mask = [t for i, t in enumerate(mask) if response[i] != pad_token_id]
         response = [t for t in response if t != pad_token_id]
         query_response = query + response
         mask = query_tool_mask + response_tool_mask

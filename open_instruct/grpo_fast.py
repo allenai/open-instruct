@@ -1369,7 +1369,7 @@ def accumulate_inference_batches(
     pending_queries_map: PendingQueriesMap,
     args: Args,
     training_step: int,
-    generation_config,
+    generation_config: vllm.SamplingParams,
     num_prompts: int,
     actor_manager=None,
     timeout: Optional[float] = None,
@@ -1407,6 +1407,13 @@ def accumulate_inference_batches(
 
         if isinstance(result, ShutdownSentinel):
             return result, None
+
+        # Validate that each individual result has the expected number of responses
+        assert len(result.responses) == generation_config.n, (
+            f"Mismatch: individual prompt result has {len(result.responses)} responses "
+            f"but expected {generation_config.n} samples per prompt. "
+            f"Dataset index: {result.dataset_index}, Training step: {training_step}"
+        )
 
         query, ground_truth, dataset, raw_query = pending_queries_map.pop(result.dataset_index)
 
@@ -1530,8 +1537,28 @@ def data_preparation_thread(
                 and not result.request_info.tool_errors[i]
                 for i in range(len(result.request_info.tool_outputs))
             ]
-            # EOS token handling is now done at the individual result processing level
-            # in vllm_utils3.py to avoid response/mask length mismatches in single-prompt flow
+
+        # Assert that responses and masks have matching lengths before EOS token handling
+        for i in range(len(result.responses)):
+            assert len(result.responses[i]) == len(result.masks[i]), (
+                f"Before EOS handling - index {i}: response len={len(result.responses[i])} vs mask len={len(result.masks[i])}"
+            )
+
+        for i in range(len(result.finish_reasons)):
+            # edge case: sometimes it outputs eos immediately, and we get an empty response
+            # in that case, we need to add the eos token to the response
+            # note that this also adds eos to the end of reponses that stopped for other reasons.
+            if result.finish_reasons[i] == "stop" and (
+                len(result.responses[i]) == 0 or result.responses[i][-1] != tokenizer.eos_token_id
+            ):
+                result.responses[i].append(tokenizer.eos_token_id)
+                result.masks[i].append(1)  # never mask the eos token for
+
+        # Assert that responses and masks have matching lengths after EOS token handling
+        for i in range(len(result.responses)):
+            assert len(result.responses[i]) == len(result.masks[i]), (
+                f"After EOS handling - index {i}: response len={len(result.responses[i])} vs mask len={len(result.masks[i])}"
+            )
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
