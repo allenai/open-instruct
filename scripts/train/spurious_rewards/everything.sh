@@ -20,8 +20,8 @@ EXP_NAME=${EXP_NAME:-${exp_name}}
 
 
 # cluster
-cluster=ai2/augusta-google-1
-# cluster=ai2/jupiter-cirrascale-2
+# cluster=ai2/augusta-google-1
+cluster=ai2/jupiter-cirrascale-2
 # cluster=ai2/ceres-cirrascale
 # cluster=ai2/neptune-cirrascale
 
@@ -35,7 +35,7 @@ python mason.py \
     --pure_docker_mode \
     --image stellal/open_instruct_dev \
     --preemptible \
-    --num_nodes 4 \
+    --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gs_model_name $gs_model_name \
@@ -69,8 +69,8 @@ python open_instruct/grpo_fast.py \
     --temperature 1.0 \
     --total_episodes 1024000 \
     --deepspeed_stage 3 \
-    --num_learners_per_node 8 \
-    --vllm_num_engines 24 \
+    --num_learners_per_node 4 \
+    --vllm_num_engines 4 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \

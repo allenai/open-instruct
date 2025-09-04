@@ -31,7 +31,11 @@ dependencies = [
     "flash-attn>=2.8.0.post2; platform_system != 'Darwin'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
     "flashinfer-python==0.2.8; platform_system == 'Linux' and platform_machine == 'x86_64'",
+<<<<<<< HEAD
     "vllm" # installed locally with git clone because otherwise errors
+=======
+    "vllm==0.9.1",
+>>>>>>> 593fefb9b3fffbd849a701dfe3cfbbb7181f8a56
 ]
 
 [build-system]
@@ -46,6 +50,7 @@ flash-attn = [{ requirement = "torch", match-runtime = true }]
 
 [tool.uv.extra-build-variables]
 flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
+<<<<<<< HEAD
 vllm = { VLLM_USE_PRECOMPILED = "1" }
 
 # pytorch related setups
@@ -54,6 +59,8 @@ torch = [
   { index = "pytorch-cu128", marker = "platform_system != 'Darwin'"},
 ]
 vllm = { path = "vllm_olmo2.5", editable = true }
+=======
+>>>>>>> 593fefb9b3fffbd849a701dfe3cfbbb7181f8a56
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
