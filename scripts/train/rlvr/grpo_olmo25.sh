@@ -35,9 +35,9 @@ python mason.py \
     --workspace ai2/tulu-thinker \
     --priority high \
     --pure_docker_mode \
-    --image michaeln/open_instruct_olmo2_retrofit \
+    --image ${1:-michaeln/open_instruct_olmo2_retrofit} \
     --preemptible \
-    --num_nodes 4 \
+    --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gs_model_name $gs_model_name \
@@ -71,8 +71,8 @@ python open_instruct/grpo_fast.py \
     --temperature 1.0 \
     --total_episodes 1024000 \
     --deepspeed_stage 3 \
-    --num_learners_per_node 8 \
-    --vllm_num_engines 24 \
+    --num_learners_per_node 4 \
+    --vllm_num_engines 4 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
@@ -88,4 +88,4 @@ python open_instruct/grpo_fast.py \
     --oe_eval_max_length 8192 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --oe_eval_tasks ${evals} \
-    --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto $@
+    --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto
