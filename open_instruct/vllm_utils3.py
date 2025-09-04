@@ -43,7 +43,6 @@ from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
-from open_instruct.rl_utils2 import Timer
 from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
@@ -455,7 +454,7 @@ class LLMRayActor:
             int: Number of requests processed
         """
         total_start = time.perf_counter()
-        
+
         # Timer 1: fill_engine
         fill_engine_start = time.perf_counter()
         num_processed = self.fill_engine(timeout=timeout)
@@ -499,7 +498,7 @@ class LLMRayActor:
         for output in outputs:
             request_id = "_".join(output.request_id.split("_")[:-1])
             request_outputs[request_id].append(output)
-        
+
         # Timer 4: insert_result_to_queue
         insert_queue_start = time.perf_counter()
         for request_id, outs in request_outputs.items():
@@ -528,18 +527,18 @@ class LLMRayActor:
             self._insert_result_to_queue(result, is_eval=metadata["is_eval"])
         insert_queue_time = time.perf_counter() - insert_queue_start
         processing_time = time.perf_counter() - processing_start
-        
+
         total_time = time.perf_counter() - total_start
-        
+
         # Print timing report
         self.logger.info(
             f"process_from_queue completed in {total_time:.3f}s: "
-            f"fill_engine={fill_engine_time:.3f}s ({fill_engine_time/total_time*100:.1f}%), "
-            f"main_loop={main_loop_time:.3f}s ({main_loop_time/total_time*100:.1f}%), "
-            f"processing={processing_time:.3f}s ({processing_time/total_time*100:.1f}%), "
-            f"insert_queue={insert_queue_time:.3f}s ({insert_queue_time/total_time*100:.1f}%)"
+            f"fill_engine={fill_engine_time:.3f}s ({fill_engine_time / total_time * 100:.1f}%), "
+            f"main_loop={main_loop_time:.3f}s ({main_loop_time / total_time * 100:.1f}%), "
+            f"processing={processing_time:.3f}s ({processing_time / total_time * 100:.1f}%), "
+            f"insert_queue={insert_queue_time:.3f}s ({insert_queue_time / total_time * 100:.1f}%)"
         )
-        
+
         return len(request_outputs)
 
     def _poll_tool_futures(self, tracking, tokenizer):
