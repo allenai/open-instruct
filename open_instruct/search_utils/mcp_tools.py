@@ -5,9 +5,13 @@ from typing import List
 import inspect
 import asyncio
 
-from mcp_agents.tool_interface.mcp_tools import MassiveServeSearchTool, SemanticScholarSnippetSearchTool, SerperSearchTool, Crawl4AIBrowseTool
+try:
+    from mcp_agents.tool_interface.mcp_tools import MassiveServeSearchTool, SemanticScholarSnippetSearchTool, SerperSearchTool, Crawl4AIBrowseTool
+except ImportError as e:
+    print(f"Failed to import mcp_agents. Please install from the source code:\n{e}")
+    raise e
 
-from open_instruct.search_rewards.format_utils import generate_snippet_id
+from open_instruct.search_rewards.utils.format_utils import generate_snippet_id
 from open_instruct.tool_utils.tool_vllm import Tool, ToolOutput
 
 MCP_TOOL_REGISTRY = {
