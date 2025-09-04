@@ -2937,6 +2937,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         # sometimes the job finishes before we have an output directory.
         if os.path.isdir(args.output_dir):
             shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
+        # also copy the checkpoints
+        if os.path.isdir(args.checkpoint_dir):
+            shutil.copytree(args.checkpoint_dir, "/output/checkpoints", dirs_exist_ok=True)
     logger.info("finished training")
 
     accelerator = Namespace()
