@@ -45,6 +45,7 @@ except Exception:
 import asyncio
 import atexit
 import json
+import logging
 import math
 import os
 import shutil
@@ -55,7 +56,6 @@ import sys
 import threading
 import time
 import traceback
-import wandb
 from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
@@ -84,7 +84,6 @@ from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
 from open_instruct.dataset_transformation import (
-    DATASET_ORIGIN_KEY,
     DATASET_SOURCE_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -96,11 +95,11 @@ from open_instruct.ground_truth_utils import (
     build_all_verifiers,
     cleanup_all_llm_judge_clients,
     soft_format_reward_func,
-    is_a_good_rl_rag_response,
 )
 from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
+    apply_finegrained_reward,
     disable_dropout_in_model,
     log_softmax_and_gather,
     print_rich_single_line_metrics,
@@ -130,7 +129,10 @@ from open_instruct.utils import (
     sync_gs_bucket,
 )
 from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
-from open_instruct.search_utils.mcp_tools import MCP_TOOL_REGISTRY, MCPTool
+from open_instruct.search_rewards.utils.span_convertion import (
+    message_span_aware_tokenization,
+    convert_string_spans_to_token_spans
+)
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -251,12 +253,30 @@ class Args:
     """
     ref_policy_update_freq: Optional[int] = None
     """How many training steps to take before updating the reference policy."""
-    advantage_normalization_type: Literal["standard", "centered"] = "standard"
+    advantage_normalization_type: Literal["standard", "centered", "finegrained"] = "finegrained"
     """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
     divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
     mask_truncated_completions: bool = False
     """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
+    
+    # Advantage visualization settings
+    log_advantage_visualization: bool = False
+    """Whether to log advantage visualization examples during training."""
+    advantage_vis_frequency: int = 1
+    """Log advantage visualization every N steps (1 = every step, 10 = every 10 steps)."""
+    advantage_vis_num_examples: int = 5
+    """Number of examples to show in advantage visualization."""
+    advantage_vis_show_token_details: bool = False
+    """Whether to show detailed token breakdown in advantage visualization."""
+
+    # Training rollout logging
+    log_training_rollouts: bool = False
+    """Whether to log training rollouts to wandb"""
+    log_training_rollouts_freq: int = 10
+    """How often to log training rollouts (every N training steps)"""
+    num_training_rollouts_to_log: int = 16
+    """Number of training rollouts to log to wandb"""
 
     # Reward
     # -- r1 style format reward
@@ -264,14 +284,16 @@ class Args:
     """whether to add the R1 style format reward"""
     r1_style_format_reward: float = 1.0
     """the reward value for R1 style format reward"""
-    apply_rl_rag_format_reward: bool = False
-    """whether to add the RL-RAG style format reward--only responses with a valid answer and at least one valid query will be rewarded"""
     additive_format_reward: bool = False
     """whether to add the format reward to the final reward"""
 
     # -- verifiable reward
-    apply_verifiable_reward: bool = True
+    apply_verifiable_reward: bool = False
     """whether to apply verifiable reward"""
+    apply_finegrained_reward: bool = True
+    """whether to apply finegrained reward"""
+    finegrained_reward: float = 10.0
+    """the reward value for finegrained reward"""
     verification_reward: float = 10.0
     """the reward value for verifiable responses"""
 
@@ -370,16 +392,6 @@ class Args:
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
 
-    # Training rollout logging
-    log_training_rollouts: bool = False
-    """Whether to log training rollouts to wandb"""
-    log_training_rollouts_freq: int = 10
-    """How often to log training rollouts (every N training steps)"""
-    num_training_rollouts_to_log: int = 16
-    """Number of training rollouts to log each time"""
-    log_direction_agreement: bool = False
-    """Whether to log direction agreement between fine-grained rewards and global reward"""
-
     # Tool settings
     tools: Optional[List[str]] = None
     """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
@@ -391,21 +403,19 @@ class Args:
     """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
     use_mcp_tools: bool = False
     """Whether to use MCP tools. For now if you use the MCP tools, you need to run an MCP server on the background."""
-    mcp_tool_names: Optional[str] = "s2"
-    """The names (comma separated) of the MCP tool to use."""
-    mcp_parser_name: Optional[str] = "unified"
-    """The name of the MCP parser to use."""
+    mcp_tool_name: Optional[str] = "s2"
+    """The name of the MCP tool to use. For now only supports `s2` and `serper`."""
     mcp_server_command: Optional[str] = None
-    """Command to run MCP server subprocess when use_mcp_tools is enabled. Example: 'uv run python -m rl-rag-mcp.mcp_agents.mcp_backend.main --transport http --port 8000 --host 0.0.0.0 --path /mcp'"""
+    """Command to run MCP server subprocess when use_mcp_tools is enabled. Example: 'fastmcp run rag_mcp/main.py:mcp --transport streamable-http --port 8000'"""
 
 
-    # rl-rag tool settings. These are shared across different tools.
+    # rl-rag specific settngs
     number_documents_to_search: int = 3
     """The maximum number of documents to retrieve for each query."""
     search_api_endpoint: Optional[str] = None
     """The API endpoint for the search engine."""
     use_massive_ds: bool = False
-    """Whether to use massive ds for search. Only matters for non-MCP search tool."""
+    """Whether to use massive ds for search."""
 
     # code-tool specific settings
     code_tool_api_endpoint: Optional[str] = None
@@ -413,17 +423,13 @@ class Args:
     # Reward function override
     overwrite_reward_fn_tag: Optional[str] = None
     """If set, force all datasets to use this specific reward function type instead of dataset-based selection"""
-    use_general_rubric: bool = False
-    """Whether to use the general rubric for evaluation instead of specific rubrics"""
-    evaluate_closed_book_answer: bool = False
-    """Whether to evaluate the closed book answer"""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             print("WARNING: num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE. ")
         assert (
-            self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
+            self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty or self.apply_finegrained_reward
         ), "At least one reward must be applied!"
         assert (
             self.pack_length >= self.max_prompt_token_length + self.response_length
@@ -442,13 +448,6 @@ class Args:
             download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
         if self.checkpoint_state_dir is not None:
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
-        if self.use_mcp_tools:
-            if self.mcp_tool_names is None:
-                raise ValueError("mcp_tool_names must be provided when use_mcp_tools is True")
-            self.mcp_tool_names = self.mcp_tool_names.split(",")
-            for mcp_tool_name in self.mcp_tool_names:
-                if mcp_tool_name not in MCP_TOOL_REGISTRY:
-                    raise ValueError(f"MCP tool {mcp_tool_name} is not supported. Supported tools are: {', '.join(MCP_TOOL_REGISTRY.keys())}")
         if self.tools is not None and len(self.tools) > 0:
             for tool in self.tools:
                 if tool not in ["search", "code"]:
@@ -854,7 +853,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     mb_ref_logprob = collated_ref_logprobs[i]
                     mb_query_responses = collated_query_responses[i]
                     mb_tool_mask = collated_tool_masks[i]
-                    mb_advantages = collated_advantages[i]
+                    # todo: make sure the advantages return these stats
+                    mb_advantages_list = [collated_advantages[i]]  # Wrap in list for compatibility
                     mb_response_masks = collated_response_masks[i]
                     mb_response_masks_bool = mb_response_masks[:, 1:].bool()
                     # if masking snippets, do it here.
@@ -870,42 +870,45 @@ class PolicyTrainerRayProcess(RayProcess):
                         pad_token_id,
                         args.temperature,
                     )
-                    mb_new_logprobs = torch.masked_fill(mb_new_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
+                    # For fgrpo, we don't need to mask logprobs since zero advantages naturally contribute zero gradient
+                    mb_new_logprobs_list = [mb_new_logprobs for j in range(len(mb_advantages_list))]
 
                     # Cache the old logprobs
                     with torch.no_grad():
                         if epoch_idx == 0:
-                            old_logprobs[i] = mb_new_logprobs
-                        mb_old_logprobs = old_logprobs[i].detach()
+                            old_logprobs[i] = mb_new_logprobs_list
+                        mb_old_logprobs_list = [old_logprobs[i][j].detach() for j in range(len(mb_advantages_list))]
 
                     # Calculate the policy's loss
-                    logprobs_diff = mb_new_logprobs - mb_old_logprobs
-                    ratio = torch.exp(logprobs_diff)
-                    pg_losses = -mb_advantages[:, 1:] * ratio
-                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(
-                        ratio, 1.0 - args.clip_lower, 1.0 + args.clip_higher
-                    )
-                    pg_loss_max = torch.max(pg_losses, pg_losses2)
+                    logprobs_diff_list = [mb_new_logprobs_list[j] - mb_old_logprobs_list[j] for j in range(len(mb_advantages_list))]
+                    ratio_list = [torch.exp(logprobs_diff_list[j]) for j in range(len(mb_advantages_list))]
+                    
+                    pg_losses_list = [-mb_advantages_list[j][:, 1:] * ratio_list[j] for j in range(len(mb_advantages_list))]
+                    pg_losses2_list = [-mb_advantages_list[j][:, 1:] * torch.clamp(
+                        ratio_list[j], 1.0 - args.clip_lower, 1.0 + args.clip_higher
+                    ) for j in range(len(mb_advantages_list))]
+                    pg_loss_max_list = [torch.max(pg_losses_list[j], pg_losses2_list[j]) for j in range(len(mb_advantages_list))]
 
                     # Here we recalculate kl: we want the KL loss to backpropagate through the model
                     # We also clamp the KL loss to avoid numerical instability
                     # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
-                    ref_logprobs_diff = (mb_new_logprobs - mb_ref_logprob).clamp(-40.0, 40.0)
-                    kl1 = ref_logprobs_diff
-                    kl2 = (ref_logprobs_diff) ** 2 / 2
-                    kl3 = torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff  # this is more numerically stable
-                    kl4 = ratio * ref_logprobs_diff
+                    ref_logprobs_diff_list = [(mb_new_logprobs_list[j] - mb_ref_logprob).clamp(-40.0, 40.0) for j in range(len(mb_advantages_list))]
+                    kl1_list = [ref_logprobs_diff_list[j] for j in range(len(mb_advantages_list))]
+                    kl2_list = [(ref_logprobs_diff_list[j]) ** 2 / 2 for j in range(len(mb_advantages_list))]
+                    kl3_list = [torch.expm1(-ref_logprobs_diff_list[j]) + ref_logprobs_diff_list[j] for j in range(len(mb_advantages_list))] # this is more numerically stable
+                    kl4_list = [ratio_list[j] * ref_logprobs_diff_list[j] for j in range(len(mb_advantages_list))]
                     if args.kl_estimator == "kl1":
-                        kl = kl1
+                        kl_list = kl1_list
                     elif args.kl_estimator == "kl2":
-                        kl = kl2
+                        kl_list = kl2_list
                     elif args.kl_estimator == "kl3":
-                        kl = kl3
+                        kl_list = kl3_list
                     elif args.kl_estimator == "kl4":
-                        kl = kl4
+                        kl_list = kl4_list
 
                     # grpo change: directly subtract KL in loss (add)
-                    loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
+                    loss_list = [masked_mean(pg_loss_max_list[j] + (args.beta * kl_list[j]), mb_response_masks_bool, args.masked_mean_axis) for j in range(len(mb_advantages_list))]
+                    loss = torch.mean(torch.stack(loss_list))
                     loss = loss / accumulation_steps
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
@@ -913,24 +916,16 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_step += 1
                     with torch.no_grad():
                         # NOTE: in packed implementation, kl calculation are averages over response tokens
-                        kl1_stats[i] = masked_mean(kl1, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, args.masked_mean_axis).float()
-                        if args.kl_estimator == "kl1":
-                            kl_loss_stats[i] = kl1_stats[i] * args.beta
-                        elif args.kl_estimator == "kl2":
-                            kl_loss_stats[i] = kl2_stats[i] * args.beta
-                        elif args.kl_estimator == "kl3":
-                            kl_loss_stats[i] = kl3_stats[i] * args.beta
-                        elif args.kl_estimator == "kl4":
-                            kl_loss_stats[i] = kl4_stats[i] * args.beta
-                        pg_clipfrac_stats[i] = masked_mean(
-                            (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
-                        )
-                        pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
-                        loss_stats[i] = loss
-                        ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
+                        kl1_stats = torch.mean(torch.stack([masked_mean(kl1_list[j], mb_response_masks_bool, args.masked_mean_axis).float() for j in range(len(mb_advantages_list))]))
+                        kl2_stats = torch.mean(torch.stack([masked_mean(kl2_list[j], mb_response_masks_bool, args.masked_mean_axis).float() for j in range(len(mb_advantages_list))]))
+                        kl3_stats = torch.mean(torch.stack([masked_mean(kl3_list[j], mb_response_masks_bool, args.masked_mean_axis).float() for j in range(len(mb_advantages_list))]))
+                        kl4_stats = torch.mean(torch.stack([masked_mean(kl4_list[j], mb_response_masks_bool, args.masked_mean_axis).float() for j in range(len(mb_advantages_list))]))
+                        kl_loss_stats = torch.mean(torch.stack([kl1_stats * args.beta, kl2_stats * args.beta, kl3_stats * args.beta, kl4_stats * args.beta]))
+                        pg_clipfrac_stats = torch.mean(torch.stack([masked_mean(
+                            (pg_losses2_list[j] > pg_losses_list[j]).float(), mb_response_masks_bool, args.masked_mean_axis) for j in range(len(mb_advantages_list))]))
+                        pg_loss_stats = torch.mean(torch.stack([masked_mean(pg_loss_max_list[j], mb_response_masks_bool, args.masked_mean_axis) for j in range(len(mb_advantages_list))]))
+                        loss_stats = torch.mean(torch.stack([loss_list[j] for j in range(len(mb_advantages_list))]))
+                        ratio_stats = torch.mean(torch.stack([masked_mean(ratio_list[j], mb_response_masks_bool, args.masked_mean_axis) for j in range(len(mb_advantages_list))]))
 
             with torch.no_grad():
                 self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
@@ -1207,34 +1202,195 @@ def data_preparation_thread(
             decoded_queries = tokenizer.batch_decode(queries, skip_special_tokens=True)
             decoded_queries = [extract_user_query(query) for query in decoded_queries]
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
-            
-            # DEBUG: Log a few sample responses to check for answer tags
-            if training_step % 10 == 0 and args.log_training_rollouts:  # Log every 10 steps
-                print(f"[DEBUG] Sample responses at step {training_step}:")
-                for i in range(min(3, len(decoded_responses))):
-                    print(f"  Response {i}: {decoded_responses[i][:200]}...{decoded_responses[i][-200:]}")
-                    has_answer_tags = any(tag in decoded_responses[i] for tag in ['</answer0>', '</answer1>', '</answer>', '<answer>'])
-                    print(f"  Has answer tags: {has_answer_tags}")
-                print()
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
-            scores, reward_metrics = asyncio.run(
+            # fine-grained rewards are a list of FinegrainedScore objects of length num responses
+            # each finegrained_score is a FinegrainedScore object including attributes: score, effective_spans, reward_group_id, query_idx, advantage
+            all_finegrained_rewards, reward_metrics = asyncio.run(
                 reward_fn(
                     responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries
                 )
             )
-            scores = np.array(scores)
-            scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
-            mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
-            mean_grouped_rewards = np.repeat(mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
-            std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            std_grouped_rewards = np.repeat(std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
-            if args.advantage_normalization_type == "standard":
-                advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
-            elif args.advantage_normalization_type == "centered":
-                advantages = scores - mean_grouped_rewards
-            else:
-                raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
+            print("Number of finegrained score outputs: ", len(all_finegrained_rewards))  # should be number of responses
+            print("Number of responses: ", len(responses)) 
+            
+        with Timer("🔄 [Data Preparation Thread] Converting string spans to token spans"):
+            def convert_string_span_to_token_span(effective_spans, decoded_resp, token_resp, tokenizer):
+                """
+                Convert character spans to token spans and create a mask for training.
+                Uses the span conversion logic from open_instruct/search_rewards/span_convertion.py
+                
+                Args:
+                    effective_spans: List of tuples (start_char, end_char) in decoded response
+                    decoded_resp: Decoded string response
+                    token_resp: Tokenized response (list of token IDs)
+                    tokenizer: Tokenizer used to decode the responses
+                
+                Returns:
+                    Tuple of (mask, span_mapping_stats) where:
+                    - mask: List of integers where 1 means the token should be trained on, 0 means masked
+                    - span_mapping_stats: Dict with mapping quality statistics
+                """
+
+                
+                logger = logging.getLogger(__name__)
+                
+                # Initialize statistics tracking
+                span_stats = {
+                    "total_spans": len(effective_spans) if effective_spans else 0,
+                    "valid_start_mappings": 0,
+                    "valid_end_mappings": 0,
+                    "fallback_start_mappings": 0,
+                    "fallback_end_mappings": 0,
+                }
+                
+                if not effective_spans or len(token_resp) == 0:
+                    # If no effective spans or no tokens, mask everything except last EOS
+                    mask = [0] * len(token_resp)
+                    if len(token_resp) > 0 and token_resp[-1] == tokenizer.eos_token_id:
+                        mask[-1] = 1
+                    return mask, span_stats
+                
+                # Use the span conversion utilities directly without creating dummy messages
+                # We'll tokenize the decoded response directly and get offset mappings
+                tokenized_resp = tokenizer(
+                    decoded_resp,
+                    return_tensors="pt",
+                    return_offsets_mapping=True,
+                    add_special_tokens=False,
+                )
+                
+                # Check for empty tokenization
+                if len(tokenized_resp["input_ids"][0]) == 0:
+                    logger.warning(f"Empty tokenization for decoded_resp: '{decoded_resp[:100]}...'")
+                    # Return all-masked except EOS
+                    mask = [0] * len(token_resp)
+                    if len(token_resp) > 0 and token_resp[-1] == tokenizer.eos_token_id:
+                        mask[-1] = 1
+                    return mask, span_stats
+                
+                # Create a simple tokenized_input structure that the conversion function expects
+                tokenized_input = {
+                    "offset_mapping": tokenized_resp["offset_mapping"][0],  # Remove batch dimension
+                    "message_token_spans": {0: [0, len(tokenized_resp["input_ids"][0])]},  # Single message spanning all tokens
+                }
+                
+                # Convert string spans to token spans using the utility function
+                token_spans = convert_string_spans_to_token_spans(
+                    tokenized_input,
+                    effective_spans,
+                    target_message_span_index=0
+                )
+                
+                # Initialize mask - everything masked by default
+                mask = [0] * len(token_resp)
+                
+                # Update statistics and create mask
+                for span_idx, (token_start, token_end) in enumerate(token_spans):
+                    if token_start is not None and token_end is not None:
+                        span_stats["valid_start_mappings"] += 1
+                        span_stats["valid_end_mappings"] += 1
+                        
+                        # Clamp to valid token range for our response
+                        token_start = max(0, min(token_start, len(token_resp)))
+                        token_end = max(token_start, min(token_end, len(token_resp)))
+                        
+                        # Unmask tokens in this span
+                        for token_idx in range(token_start, token_end):
+                            if token_idx < len(mask):
+                                mask[token_idx] = 1
+                    else:
+                        span_stats["fallback_start_mappings"] += 1
+                        span_stats["fallback_end_mappings"] += 1
+                        logger.warning(f"Span {span_idx} could not be converted to token span. No reward will be applied.")
+                
+                # Always keep the last EOS token unmasked if it exists
+                if len(token_resp) > 0 and token_resp[-1] == tokenizer.eos_token_id:
+                    mask[-1] = 1
+                
+                return mask, span_stats
+            
+            # Calculate per-token advantages by averaging advantages from all effective spans that cover each token
+            advantages = []
+            # Collect span mapping statistics across all responses
+            total_span_stats = {
+                "total_spans": 0,
+                "valid_start_mappings": 0,
+                "valid_end_mappings": 0,
+                "fallback_start_mappings": 0,
+                "fallback_end_mappings": 0,
+            }
+            
+            for i, (token_resp, decoded_resp, finegrained_rewards) in enumerate(zip(responses, decoded_responses, all_finegrained_rewards)):                
+                # Initialize per-token advantage array
+                token_advantage = np.zeros(len(token_resp), dtype=np.float32)
+                token_advantage_count = np.zeros(len(token_resp), dtype=np.int32)
+                
+                for score_obj in finegrained_rewards.finegrained_scores:
+                    # Get token mask for this finegrained score's spans
+                    span_mask, span_stats = convert_string_span_to_token_span(
+                        score_obj.effective_spans, decoded_resp, token_resp, tokenizer
+                    )
+                    
+                    # Accumulate statistics
+                    for key in total_span_stats:
+                        total_span_stats[key] += span_stats[key]
+                    
+                    # Add this advantage to all tokens covered by the spans
+                    for token_idx, is_covered in enumerate(span_mask):
+                        if is_covered == 1:
+                            token_advantage[token_idx] += score_obj.advantage
+                            token_advantage_count[token_idx] += 1
+                    
+                # Calculate average advantages
+                for token_idx in range(len(token_resp)):
+                    if token_advantage_count[token_idx] > 0:
+                        token_advantage[token_idx] /= token_advantage_count[token_idx]
+                    
+                # print(f"🔫 Token response decoded: {tokenizer.batch_decode(token_resp, skip_special_tokens=True)}")
+                # print(f"🔫 Token advantage: {token_advantage}")
+                # print(f"🔫 Token advantage count: {token_advantage_count}")
+                advantages.append(token_advantage)
+            # Note: advantages is a list of variable-length arrays, not converted to numpy array
+            
+            # Log span mapping statistics
+            if total_span_stats["total_spans"] > 0:
+                valid_start_ratio = total_span_stats["valid_start_mappings"] / total_span_stats["total_spans"]
+                valid_end_ratio = total_span_stats["valid_end_mappings"] / total_span_stats["total_spans"]
+                fallback_start_ratio = total_span_stats["fallback_start_mappings"] / total_span_stats["total_spans"]
+                fallback_end_ratio = total_span_stats["fallback_end_mappings"] / total_span_stats["total_spans"]
+                
+                print(f"📊 [Span Mapping Stats] Total spans: {total_span_stats['total_spans']}")
+                print(f"📊 [Span Mapping Stats] Valid start mappings: {total_span_stats['valid_start_mappings']} ({valid_start_ratio:.1%})")
+                print(f"📊 [Span Mapping Stats] Valid end mappings: {total_span_stats['valid_end_mappings']} ({valid_end_ratio:.1%})")
+                print(f"📊 [Span Mapping Stats] Fallback start mappings: {total_span_stats['fallback_start_mappings']} ({fallback_start_ratio:.1%})")
+                print(f"📊 [Span Mapping Stats] Fallback end mappings: {total_span_stats['fallback_end_mappings']} ({fallback_end_ratio:.1%})")
+            
+        # Log advantage visualization examples for monitoring
+        if args.log_advantage_visualization and training_step % args.advantage_vis_frequency == 0:
+            try:
+                print(f"🔫 Logging advantage visualization for step {training_step}")
+                from open_instruct.search_rewards.utils.advantage_visualization import log_advantage_examples, log_advantage_statistics
+                
+                # Log examples based on user settings
+                if len(all_finegrained_rewards) > 0:
+                    log_advantage_examples(
+                        responses=responses,
+                        decoded_responses=decoded_responses,
+                        all_finegrained_rewards=all_finegrained_rewards,
+                        tokenizer=tokenizer,
+                        step=training_step,
+                        num_examples=args.advantage_vis_num_examples,
+                        show_token_details=args.advantage_vis_show_token_details
+                    )
+                    
+                    log_advantage_statistics(
+                        all_finegrained_rewards=all_finegrained_rewards,
+                        step=training_step
+                    )
+                print(f"🔫 Logged advantage visualization for step {training_step}")
+            except Exception as e:
+                print(f"Warning: Failed to log advantage visualization: {e}")
 
         # Log training rollouts if enabled
         training_rollouts_data = None
@@ -1246,33 +1402,74 @@ def data_preparation_thread(
             if num_to_log > 0:
                 indices_to_log = np.random.choice(len(responses), size=num_to_log, replace=False)
                 
+                # Prepare detailed training rollout data with token-level information
+                rollout_entries = []
+                for idx in indices_to_log:
+                    i = int(idx)  # Convert numpy int to Python int
+                    token_resp = responses[i]
+                    decoded_resp = decoded_responses[i]
+                    finegrained_rewards = all_finegrained_rewards[i]
+                    token_advantages = advantages[i]
+                    
+                    # Decode tokens for visualization
+                    token_texts = []
+                    for token_id in token_resp:
+                        token_text = tokenizer.decode([token_id], skip_special_tokens=True)
+                        token_texts.append(token_text)
+                    
+                    # Collect all spans and their rewards for this response
+                    spans_info = []
+                    total_score = 0
+                    for score_obj in finegrained_rewards.finegrained_scores:
+                        spans_info.append({
+                            "spans": score_obj.effective_spans,
+                            "score": score_obj.score,
+                            "advantage": score_obj.advantage,
+                            "reward_group_id": score_obj.reward_group_id,
+                        })
+                        total_score += score_obj.score
+                    
+                    # Create token-level details
+                    token_details = []
+                    for token_idx, (token_id, token_text, token_adv) in enumerate(zip(token_resp, token_texts, token_advantages)):
+                        token_details.append({
+                            "token_idx": token_idx,
+                            "token_id": int(token_id),
+                            "token_text": token_text,
+                            "advantage": float(token_adv),
+                        })
+                    
+                    rollout_entry = {
+                        "prompt": extract_user_query(tokenizer.decode(queries[i], skip_special_tokens=True)) or tokenizer.decode(queries[i], skip_special_tokens=True),
+                        "response": decoded_resp,
+                        "total_score": float(total_score),
+                        "ground_truth": str(ground_truths[i]),
+                        "finish_reason": finish_reasons[i],
+                        "dataset": datasets[i],
+                        "training_step": training_step,
+                        "spans_info": spans_info,
+                        "token_details": token_details,
+                        "num_tokens": len(token_resp),
+                        "avg_advantage": float(np.mean(token_advantages)) if len(token_advantages) > 0 else 0.0,
+                        "advantage_std": float(np.std(token_advantages)) if len(token_advantages) > 0 else 0.0,
+                    }
+                    rollout_entries.append(rollout_entry)
+                
                 training_rollouts_data = {
-                    "prompt": [extract_user_query(tokenizer.decode(queries[i], skip_special_tokens=True)) for i in indices_to_log],
-                    "response": [decoded_responses[i] for i in indices_to_log],
-                    "scores": [float(scores[i]) for i in indices_to_log],
-                    "advantages": [float(advantages[i]) for i in indices_to_log],
-                    "ground_truth": [str(ground_truths[i]) for i in indices_to_log],
-                    "finish_reason": [finish_reasons[i] for i in indices_to_log],
-                    "dataset": [datasets[i] for i in indices_to_log],
+                    "rollout_entries": rollout_entries,
                     "training_step": training_step,
+                    "num_samples": len(rollout_entries),
                 }
 
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
-            # Here we get the max possible score for each prompt, and see how many prompts are unsolved
-            max_possible_score = 0
-            if args.apply_verifiable_reward:
-                max_possible_score += args.verification_reward
-            if args.apply_r1_style_format_reward and args.additive_format_reward:
-                max_possible_score += args.r1_style_format_reward
-            unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
-            # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
-            # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
-            non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
-            real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
-            expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
-            non_zero_gradient_index = np.where(expanded_mask)[0]
-            advantages = advantages[non_zero_gradient_index]
-            scores = scores[non_zero_gradient_index]
+            # For finegrained rewards, we simply filter out responses where all advantages are zero
+            # This is different from GRPO where we check std=0 across prompt groups
+            # Here we just need to remove rollouts with all-zero advantages
+            non_zero_advantage_mask = np.array([(adv != 0).any() for adv in advantages])
+            non_zero_gradient_index = np.where(non_zero_advantage_mask)[0]
+            
+            real_batch_size_ratio = len(non_zero_gradient_index) / len(advantages)
+            advantages = [advantages[i] for i in non_zero_gradient_index]
             responses = [responses[i] for i in non_zero_gradient_index]
             masks = [masks[i] for i in non_zero_gradient_index]
             queries = [queries[i] for i in non_zero_gradient_index]
@@ -1282,7 +1479,7 @@ def data_preparation_thread(
             if args.mask_truncated_completions:
                 stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
                 scores = scores[stop_idxes]
-                advantages = advantages[stop_idxes]
+                advantages = [advantages[i] for i in stop_idxes]
                 responses = [responses[i] for i in stop_idxes]
                 masks = [masks[i] for i in stop_idxes]
                 queries = [queries[i] for i in stop_idxes]
@@ -1299,14 +1496,28 @@ def data_preparation_thread(
                 pad_token_id=tokenizer.pad_token_id,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
-            # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
-            # and each value is the corresponding advantage score: index 0 is set to 0 since response masks start from 1 (1-indexed)
-            lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
-            lookup_advantages[1:] = advantages
-            packed_advantages = [
-                torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
-                for packed_mask in packed_sequences.response_masks
-            ]
+            # For finegrained rewards, we need to map per-token advantages to packed sequences
+            # Each response has variable-length per-token advantages
+            packed_advantages = []
+            for packed_mask in packed_sequences.response_masks:
+                packed_adv = np.zeros(len(packed_mask), dtype=np.float32)
+                # Optimize: track position counters for each response_id to avoid O(n²) complexity
+                response_positions = {}
+                for token_idx, response_id in enumerate(packed_mask):
+                    if response_id > 0:  # response_id is 1-indexed, 0 means query token
+                        response_idx = response_id - 1  # convert to 0-indexed
+                        if response_idx < len(advantages):
+                            # Initialize position counter for this response_id if not seen
+                            if response_id not in response_positions:
+                                response_positions[response_id] = 0
+                            
+                            response_token_pos = response_positions[response_id]
+                            if response_token_pos < len(advantages[response_idx]):
+                                packed_adv[token_idx] = advantages[response_idx][response_token_pos]
+                            
+                            # Increment position counter for this response_id
+                            response_positions[response_id] += 1
+                packed_advantages.append(torch.tensor(packed_adv, dtype=torch.float32))
             packed_sequences.advantages = packed_advantages
 
         # if we have less batches than world size, we need to pad out so each world is fine
@@ -1339,90 +1550,96 @@ def data_preparation_thread(
                 len(packed_sequences.query_responses) // args.world_size
             )  # essentially doing `drop_last=True`, which is fine.
             collated_data = []
-            for i in range(args.world_size):
-                per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
-                per_device_packed_tool_masks = packed_sequences.tool_masks[B * i : B * (i + 1)]
-                per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
-                per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
-                per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
-                per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
+            
+            # Handle B=0 case like GRPO does
+            if B == 0:
+                # Create empty collated data for each worker
+                for i in range(args.world_size):
+                    collated_data.append({
+                        "collated_query_responses": [],
+                        "collated_tool_masks": [],
+                        "collated_attention_masks": [],
+                        "collated_position_ids": [],
+                        "collated_advantages": [],
+                        "collated_response_masks": [],
+                    })
+            else:
+                for i in range(args.world_size):
+                    per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
+                    per_device_packed_tool_masks = packed_sequences.tool_masks[B * i : B * (i + 1)]
+                    per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
+                    per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
+                    per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
+                    per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
 
-                # Shuffle the batch and collate the data
-                b_inds = np.random.permutation(len(per_device_packed_query_responses))
-                collated_query_responses = []
-                collated_tool_masks = []
-                collated_attention_masks = []
-                collated_position_ids = []
-                collated_response_masks = []
-                collated_advantages = []
-                for j in range(0, len(per_device_packed_query_responses), args.per_device_train_batch_size):
-                    micro_range = b_inds[j : j + args.per_device_train_batch_size]
-                    collated_query_responses.append(
-                        collate_fn(
-                            [per_device_packed_query_responses[idx] for idx in micro_range], tokenizer.pad_token_id
+                    # Shuffle the batch and collate the data
+                    b_inds = np.random.permutation(len(per_device_packed_query_responses))
+                    collated_query_responses = []
+                    collated_tool_masks = []
+                    collated_attention_masks = []
+                    collated_position_ids = []
+                    collated_response_masks = []
+                    collated_advantages = []
+                    for j in range(0, len(per_device_packed_query_responses), args.per_device_train_batch_size):
+                        micro_range = b_inds[j : j + args.per_device_train_batch_size]
+                        collated_query_responses.append(
+                            collate_fn(
+                                [per_device_packed_query_responses[idx] for idx in micro_range], tokenizer.pad_token_id
+                            )
                         )
+                        collated_tool_masks.append(
+                            collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0)
+                        )
+                        collated_attention_masks.append(
+                            collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0)
+                        )
+                        collated_position_ids.append(
+                            collate_fn([per_device_packed_position_ids[idx] for idx in micro_range], 0)
+                        )
+                        collated_response_masks.append(
+                            collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0)
+                        )
+                        # For fgrpo, just use the advantages directly - no need for masking
+                        collated_advs = collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0)
+                        collated_advantages.append(collated_advs)
+                    collated_data.append(
+                        {
+                            "collated_query_responses": collated_query_responses,
+                            "collated_tool_masks": collated_tool_masks,
+                            "collated_attention_masks": collated_attention_masks,
+                            "collated_position_ids": collated_position_ids,
+                            "collated_advantages": collated_advantages,
+                            "collated_response_masks": collated_response_masks,
+                        }
                     )
-                    collated_tool_masks.append(
-                        collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0)
-                    )
-                    collated_attention_masks.append(
-                        collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0)
-                    )
-                    collated_position_ids.append(
-                        collate_fn([per_device_packed_position_ids[idx] for idx in micro_range], 0)
-                    )
-                    collated_response_masks.append(
-                        collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0)
-                    )
-                    collated_advantages.append(
-                        collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0)
-                    )
-                collated_data.append(
-                    {
-                        "collated_query_responses": collated_query_responses,
-                        "collated_tool_masks": collated_tool_masks,
-                        "collated_attention_masks": collated_attention_masks,
-                        "collated_position_ids": collated_position_ids,
-                        "collated_advantages": collated_advantages,
-                        "collated_response_masks": collated_response_masks,
-                    }
-                )
 
         # Create a result package with metrics and data
         sequence_lengths = np.array([len(response) for response in responses])
-        sequence_length_solved = (
-            np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == max_possible_score])
-        )
-        sequence_length_unsolved = (
-            np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
-        )
         if len(responses) > 0:
+            # Calculate span mapping ratios for wandb logging
+            span_mapping_metrics = {}
+            if total_span_stats["total_spans"] > 0:
+                span_mapping_metrics = {
+                    "span_mapping/total_spans": total_span_stats["total_spans"],
+                    "span_mapping/valid_start_ratio": total_span_stats["valid_start_mappings"] / total_span_stats["total_spans"],
+                    "span_mapping/valid_end_ratio": total_span_stats["valid_end_mappings"] / total_span_stats["total_spans"],
+                    "span_mapping/fallback_start_ratio": total_span_stats["fallback_start_mappings"] / total_span_stats["total_spans"],
+                    "span_mapping/fallback_end_ratio": total_span_stats["fallback_end_mappings"] / total_span_stats["total_spans"],
+                }
+            
             metrics = {
-                "scores": np.array(scores).mean(),
                 "real_batch_size_ratio": real_batch_size_ratio,
-                "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
                 "packed_ratio": len(packed_sequences.query_responses) / len(responses),
                 "val/sequence_lengths": sequence_lengths.mean(),
                 "val/sequence_lengths_min": sequence_lengths.min(),
                 "val/sequence_lengths_max": sequence_lengths.max(),
-                "val/sequence_lengths_unsolved": (
-                    0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean()
-                ),
-                "val/sequence_lengths_solved": 0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean(),
-                "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
-                "val/sequence_lengths_solved_hist": sequence_length_solved,
                 "val/stop_rate": stop_rate,
-                "val/advantages_mean": advantages.mean(),
-                "val/advantages_min": advantages.min(),
-                "val/advantages_max": advantages.max(),
-                "val/advantages_hist": advantages,
-                "val/num_calls_rate": np.array(num_calls).mean(),
-                "val/timeouts_rate": np.array(timeouts).mean(),
-                "val/tool_errors_rate": np.array([len(item) > 0 for item in tool_errors]).mean(),
-                "val/good_outputs_rate": np.array(good_outputs).mean(),
-                "val/tool_runtimes_rate": np.array(tool_runtimes).mean(),
-                "val/tool_calleds_rate": np.array(tool_calleds).mean(),
+                "val/advantages_mean": np.concatenate(advantages).mean() if len(advantages) > 0 else 0.0,
+                "val/advantages_min": np.concatenate(advantages).min() if len(advantages) > 0 else 0.0,
+                "val/advantages_max": np.concatenate(advantages).max() if len(advantages) > 0 else 0.0,
+                "val/advantages_hist": np.concatenate(advantages) if len(advantages) > 0 else np.array([]),
                 **reward_metrics,
+                **span_mapping_metrics,
             }
         else:
             print("No responses to evaluate. Not logging any metrics. We will end up skipping this step.")
@@ -1430,7 +1647,7 @@ def data_preparation_thread(
 
         if args.save_traces:
             traces = {
-                "scores": scores.tolist(),
+                "advantages": [adv.tolist() for adv in advantages],
                 "finish_reasons": finish_reasons,
                 "responses": responses,
                 "queries": queries,
@@ -1458,17 +1675,21 @@ def data_preparation_thread(
         )
 
 
-def launch_mcp_subprocess(run_mcp_command: str, output_dir: str) -> Optional[subprocess.Popen]:
+def launch_mcp_subprocess(use_mcp_tools: bool, run_mcp_command: str, output_dir: str) -> Optional[subprocess.Popen]:
     """
     Launch MCP server subprocess if use_mcp_tools is enabled.
     
     Args:
+        use_mcp_tools: Whether to launch MCP server
         run_mcp_command: Command to run MCP server
         output_dir: Base output directory for logs
         
     Returns:
         Popen object if launched, None otherwise
     """
+    if not use_mcp_tools:
+        return None
+        
     print(f"🚀 Launching MCP server subprocess: {run_mcp_command}")
     
     # Debug: Check if fastmcp command exists
@@ -1598,7 +1819,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     if args.with_tracking:
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
-    args.tool_use = (args.tools is not None and len(args.tools) > 0) or args.use_mcp_tools
+    args.tool_use = args.tools is not None and len(args.tools) > 0
 
     # ------------------------------------------------------------
     # Setup experiment tracking and seeds
@@ -1609,6 +1830,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         all_configs.update(vars(beaker_config))
     all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config))
     if args.with_tracking:
+        import wandb
+
         wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
@@ -1677,7 +1900,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         if args.mcp_server_command is None:
             print("mcp_server_command is not provided when use_mcp_tools is True; please make sure to launch the MCP server manually.")
         else:
-            mcp_process = launch_mcp_subprocess(args.mcp_server_command, args.output_dir)
+            mcp_process = launch_mcp_subprocess(args.use_mcp_tools, args.mcp_server_command, args.output_dir)
             if mcp_process is None:
                 raise RuntimeError("Failed to launch MCP server subprocess")
 
@@ -1707,20 +1930,40 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     max_len = args.max_prompt_token_length + args.response_length
     # make tool list
     tool_objects = {}
-    # first, handle the "regular" tools of search and code.
     if args.tools:
         for tool in args.tools:
             if tool.lower() == "search":
-                from open_instruct.search_utils.search_tool import SearchTool
+                if args.use_mcp_tools:
+                    from open_instruct.tool_utils.tool_mcp import (
+                        SemanticScholarSnippetSearchTool,
+                        SerperSearchTool,
+                    )
 
-                tool = SearchTool(
-                    start_str="<search>",
-                    end_str="</search>",
-                    use_massive_ds=args.use_massive_ds,
-                    api_endpoint=args.search_api_endpoint,
-                    number_documents_to_search=args.number_documents_to_search,
-                )
+                    if args.mcp_tool_name == "s2":
+                        tool = SemanticScholarSnippetSearchTool(
+                            start_str="<search>",
+                            end_str="</search>",
+                        )
+                    elif args.mcp_tool_name == "serper":
+                        tool = SerperSearchTool(
+                            start_str="<search>",
+                            end_str="</search>",
+                        )
+                    else:
+                        raise ValueError(f"Unknown MCP tool: {args.mcp_tool_name}")
+                else:
+                    from open_instruct.search_utils.search_tool import SearchTool
+
+                    tool = SearchTool(
+                        start_str="<search>",
+                        end_str="</search>",
+                        use_massive_ds=args.use_massive_ds,
+                        api_endpoint=args.search_api_endpoint,
+                        number_documents_to_search=args.number_documents_to_search,
+                    )
+                
                 tool_objects[tool.end_str] = tool
+                
             elif tool.lower() == "code":
                 from open_instruct.tool_utils.tool_vllm import PythonCodeTool
 
@@ -1732,16 +1975,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 tool_objects[tool.end_str] = tool
             else:
                 raise ValueError(f"Unknown tool: {tool}")
-    if args.use_mcp_tools:
-        tool = MCPTool(
-            mcp_tool_names=args.mcp_tool_names,
-            parser_name=args.mcp_parser_name,
-            number_documents_to_search=args.number_documents_to_search,
-            base_url=args.search_api_endpoint,
-        )
-        # mcp tools can have multiple end strings.
-        for end_str in tool.get_stop_strings():
-            tool_objects[end_str] = tool
 
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
@@ -1800,13 +2033,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     evaluation_inference_results_Q = Queue(maxsize=1)
     packed_sequences_Q = Queue(maxsize=args.async_steps)
     queries_prompt_Q = Queue(maxsize=args.async_steps)
+    num_eval_samples = 32
 
     eval_prompt_token_ids = None
     eval_ground_truths = None
     if eval_dataset is not None:
-        eval_prompt_token_ids = eval_dataset[INPUT_IDS_PROMPT_KEY]
-        eval_ground_truths = eval_dataset[GROUND_TRUTHS_KEY]
-        eval_dataset_names = eval_dataset[DATASET_SOURCE_KEY]
+        eval_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
+        eval_ground_truths = eval_dataset[:num_eval_samples][GROUND_TRUTHS_KEY]
+        eval_dataset_names = eval_dataset[:num_eval_samples][DATASET_SOURCE_KEY]
     thread = threading.Thread(
         target=vllm_generate_thread,
         args=(
@@ -1885,7 +2119,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
             # ------------------------------------------------------------------------------------------------
             # Get the packed sequences with advantages from the packing thread
-            skip_batch = False
             with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
                 packed_data = packed_sequences_Q.get()
                 data_thread_metrics = packed_data["metrics"]
@@ -1894,90 +2127,141 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 num_total_tokens += packed_data["num_new_tokens"]
                 training_rollouts_data = packed_data.get("training_rollouts_data")
                 if B == 0:
-                    print("[Main Thread] 🤡 After packing, there is not enough data to train. Will save though.")
-                    skip_batch = True
+                    print("[Main Thread] 🤡 After packing, there is not enough data to train")
+                    continue
 
             # ------------------------------------------------------------------------------------------------
             # Train the model
             update_ref_policy_future = []
-            if not skip_batch:
-                with Timer("[Main Thread] 🗡️ Training"):
-                    metrics_list: List[dict[str, float]] = ray.get(
-                        [
-                            policy_group.models[i].train.remote(
-                                **collated_data[i],
-                                pad_token_id=tokenizer.pad_token_id,
-                                num_mini_batches=args.num_mini_batches,
-                            )
-                            for i in range(args.world_size)
-                        ]
-                    )
-                    if (
-                        args.ref_policy_update_freq is not None
-                        and training_step % args.ref_policy_update_freq == 0
-                        and args.alpha > 0
-                    ):
-                        update_ref_policy_future.extend(
-                            [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
+            with Timer("[Main Thread] 🗡️ Training"):
+                metrics_list: List[dict[str, float]] = ray.get(
+                    [
+                        policy_group.models[i].train.remote(
+                            **collated_data[i],
+                            pad_token_id=tokenizer.pad_token_id,
+                            num_mini_batches=args.num_mini_batches,
                         )
-
-                    average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
-                    metrics = {
-                        "episode": episode,
-                        "training_step": training_step,
-                        "val/num_total_tokens": num_total_tokens,
-                        "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
-                        "tokens_per_second": num_total_tokens / (time.time() - start_time),
-                        **data_thread_metrics,
-                        **average_metrics,
-                    }
-                    scalar_metrics = {}
-                    for key, value in metrics.items():
-                        if isinstance(value, float) or isinstance(value, int):
-                            writer.add_scalar(key, value, episode)
-                            scalar_metrics[key] = value
-                        if isinstance(value, np.ndarray) or isinstance(value, list):
-                            if len(value) > 0:
-                                writer.add_histogram(key, value, episode)
-                    print_rich_single_line_metrics(scalar_metrics)
-
-            # Log training rollouts if available (thread-safe logging in main thread)
-            if training_rollouts_data is not None and args.with_tracking:
-                print(f"[Main Thread] 📊 Logging {len(training_rollouts_data['prompt'])} training rollouts to wandb")
-                train_df = pd.DataFrame(training_rollouts_data)
-                if args.with_tracking:
-                    wandb.log({"training_rollouts": wandb.Table(dataframe=train_df)}, step=episode)
-
-            if args.save_freq > 0 and training_step % args.save_freq == 0:
-                with Timer("[Main Thread] 🗡️ Saving model"):
-                    checkpoint_dir = f"{args.output_dir}_checkpoints"
-                    step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-                    print(f"Saving model at step {training_step} to {step_dir}")
-                    ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
-                    if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
-                        leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
-                        for i in range(args.world_size):
-                            policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                                step_dir, leaderboard_name, wandb_url, training_step
-                            )
-                if skip_batch:
-                    continue
-            if (
-                args.checkpoint_state_freq > 0
-                and training_step % args.checkpoint_state_freq == 0
-                and args.checkpoint_state_dir is not None
-            ):
-                with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
-                    client_state = {"training_step": training_step}
-                    ray.get(
-                        [
-                            policy_group.models[i].save_checkpoint_state.remote(
-                                args.checkpoint_state_dir, client_state
-                            )
-                            for i in range(args.world_size)
-                        ]
+                        for i in range(args.world_size)
+                    ]
+                )
+                if (
+                    args.ref_policy_update_freq is not None
+                    and training_step % args.ref_policy_update_freq == 0
+                    and args.alpha > 0
+                ):
+                    update_ref_policy_future.extend(
+                        [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
                     )
-                    print(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
+
+                average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
+                metrics = {
+                    "episode": episode,
+                    "training_step": training_step,
+                    "val/num_total_tokens": num_total_tokens,
+                    "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
+                    "tokens_per_second": num_total_tokens / (time.time() - start_time),
+                    **data_thread_metrics,
+                    **average_metrics,
+                }
+                scalar_metrics = {}
+                for key, value in metrics.items():
+                    if isinstance(value, float) or isinstance(value, int):
+                        writer.add_scalar(key, value, episode)
+                        scalar_metrics[key] = value
+                    if isinstance(value, np.ndarray) or isinstance(value, list):
+                        if len(value) > 0:
+                            writer.add_histogram(key, value, episode)
+                print_rich_single_line_metrics(scalar_metrics)
+
+                # Log training rollouts if available (thread-safe logging in main thread)
+                if training_rollouts_data is not None and args.with_tracking:
+                    print(f"[Main Thread] 📊 Logging {training_rollouts_data['num_samples']} training rollouts to wandb")
+                    
+                    # Create a simplified table for wandb with key information
+                    rollout_table_data = []
+                    for entry in training_rollouts_data["rollout_entries"]:
+                        # Create a summary of spans for display
+                        spans_summary = []
+                        for span_info in entry["spans_info"]:
+                            spans_text = []
+                            for start, end in span_info["spans"]:
+                                if start < len(entry["response"]) and end <= len(entry["response"]):
+                                    span_text = entry["response"][start:end]
+                                    spans_text.append(f'"{span_text}"')
+                            spans_summary.append({
+                                "spans_text": " | ".join(spans_text),
+                                "score": span_info["score"],
+                                "advantage": span_info["advantage"],
+                                "reward_group_id": span_info["reward_group_id"],
+                            })
+                        
+                        # Create token advantage summary (show only non-zero advantages)
+                        nonzero_token_advs = [(td["token_text"], td["advantage"]) 
+                                            for td in entry["token_details"] 
+                                            if abs(td["advantage"]) > 1e-6]
+                        token_adv_summary = " | ".join([f'"{text}": {adv:.3f}' 
+                                                      for text, adv in nonzero_token_advs[:10]])  # Limit to first 10
+                        if len(nonzero_token_advs) > 10:
+                            token_adv_summary += f" ... (+{len(nonzero_token_advs) - 10} more)"
+                        
+                        rollout_table_data.append({
+                            "prompt": entry["prompt"][:200] + "..." if len(entry["prompt"]) > 200 else entry["prompt"],
+                            "response": entry["response"][:300] + "..." if len(entry["response"]) > 300 else entry["response"],
+                            "total_score": entry["total_score"],
+                            "avg_advantage": entry["avg_advantage"],
+                            "advantage_std": entry["advantage_std"],
+                            "num_tokens": entry["num_tokens"],
+                            "finish_reason": entry["finish_reason"],
+                            "dataset": entry["dataset"],
+                            "spans_summary": str(spans_summary)[:500] + "..." if len(str(spans_summary)) > 500 else str(spans_summary),
+                            "token_advantages": token_adv_summary[:500] + "..." if len(token_adv_summary) > 500 else token_adv_summary,
+                        })
+                    
+                    # Log to wandb
+                    train_df = pd.DataFrame(rollout_table_data)
+                    wandb.log({"training_rollouts": wandb.Table(dataframe=train_df)}, step=episode)
+                    
+                    # Also log detailed rollout data as a JSON artifact for deeper analysis
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                        json.dump(training_rollouts_data, f, indent=2)
+                        temp_path = f.name
+                    
+                    artifact = wandb.Artifact(f"training_rollouts_step_{training_step}", type="training_data")
+                    artifact.add_file(temp_path, name=f"rollouts_step_{training_step}.json")
+                    wandb.log_artifact(artifact)
+                    
+                    # Clean up temp file
+                    os.unlink(temp_path)
+
+                if args.save_freq > 0 and training_step % args.save_freq == 0:
+                    with Timer("[Main Thread] 🗡️ Saving model"):
+                        checkpoint_dir = f"{args.output_dir}_checkpoints"
+                        step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
+                        print(f"Saving model at step {training_step} to {step_dir}")
+                        ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
+                        if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
+                            leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
+                            for i in range(args.world_size):
+                                policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                                    step_dir, leaderboard_name, wandb_url, training_step
+                                )
+                if (
+                    args.checkpoint_state_freq > 0
+                    and training_step % args.checkpoint_state_freq == 0
+                    and args.checkpoint_state_dir is not None
+                ):
+                    with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
+                        client_state = {"training_step": training_step}
+                        ray.get(
+                            [
+                                policy_group.models[i].save_checkpoint_state.remote(
+                                    args.checkpoint_state_dir, client_state
+                                )
+                                for i in range(args.world_size)
+                            ]
+                        )
+                        print(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
             if len(update_ref_policy_future) > 0:
                 with Timer("[Main Thread] 🔃 Updating reference policy"):
@@ -2001,9 +2285,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 )
 
                 # get and log evaluation metrics
-                eval_original_dataset_names = eval_dataset[DATASET_ORIGIN_KEY]
-
-                
                 eval_scores, eval_reward_metrics = asyncio.run(
                     reward_fn(
                         eval_responses,
@@ -2012,54 +2293,27 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                         eval_dataset_names,
                         eval_finish_reasons,
                         eval_infos,
-                        source_datasets=eval_original_dataset_names,
                     )
                 )
                 eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
-                
-                # Calculate per-dataset eval scores
-                per_dataset_scores = {}
-                if eval_dataset_names is not None:
-                    from collections import defaultdict
-                    dataset_scores = defaultdict(list)
-                    
-                    # Debug: Print the actual dataset names we're seeing
-                    print(f"[DEBUG] eval_dataset_names type: {type(eval_dataset_names)}")
-                    print(f"[DEBUG] First few eval_dataset_names: {eval_dataset_names[:5] if len(eval_dataset_names) > 0 else 'empty'}")
-                    unique_names = set()
-                    for name in eval_dataset_names:
-                        if isinstance(name, list):
-                            unique_names.add("_".join(str(x) for x in name))
-                        else:
-                            unique_names.add(str(name))
-                    print(f"[DEBUG] Unique dataset names found: {unique_names}")
-                    
-                    for score, dataset_name in zip(eval_scores, eval_dataset_names):
-                        # Convert dataset_name to string if it's a list
-                        if isinstance(dataset_name, list):
-                            dataset_name_str = "_".join(str(x) for x in dataset_name)
-                        else:
-                            dataset_name_str = str(dataset_name)
-                        dataset_scores[dataset_name_str].append(score)
-                    
-                    dataset_means = []
-                    for dataset_name, scores in dataset_scores.items():
-                        dataset_mean = np.array(scores).mean()
-                        per_dataset_scores[f"eval/scores_{dataset_name}"] = dataset_mean
-                        dataset_means.append(dataset_mean)
-                    
-                    # Add macro average (equal weight to each test set)
-                    if dataset_means:
-                        per_dataset_scores["eval/scores_macro"] = np.array(dataset_means).mean()
+                # Extract scalar scores from FinegrainedRewardOutput objects
+                scalar_eval_scores = []
+                for score_output in eval_scores:
+                    if hasattr(score_output, 'finegrained_scores'):
+                        # Sum all finegrained scores for this response
+                        total_score = sum(score_obj.score for score_obj in score_output.finegrained_scores)
+                        scalar_eval_scores.append(total_score)
+                    else:
+                        # Fallback for scalar scores
+                        scalar_eval_scores.append(float(score_output))
                 
                 eval_metrics = {
-                    "eval/scores": np.array(eval_scores).mean(),
+                    "eval/scores": np.array(scalar_eval_scores).mean() if scalar_eval_scores else 0.0,
                     "eval/sequence_lengths": eval_sequence_lengths.mean(),
                     "eval/sequence_lengths_min": eval_sequence_lengths.min(),
                     "eval/sequence_lengths_max": eval_sequence_lengths.max(),
                     "eval/stop_rate": eval_stop_rate,
                     **eval_reward_metrics,
-                    **per_dataset_scores,
                 }
                 print_rich_single_line_metrics(eval_metrics)
                 for key, value in eval_metrics.items():
@@ -2068,10 +2322,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
                 table["response"] = eval_decoded_responses
                 table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
-                table["scores"] = eval_scores
+                table["scores"] = scalar_eval_scores
                 table["ground_truth"] = eval_ground_truths
-                if eval_dataset_names is not None:
-                    table["dataset"] = eval_dataset_names
                 df = pd.DataFrame(table)
                 if args.with_tracking:
                     wandb.log({"sample_completions": wandb.Table(dataframe=df)})
@@ -2158,6 +2410,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         )
 
 
+
 if __name__ == "__main__":
     parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
@@ -2175,103 +2428,55 @@ if __name__ == "__main__":
         finish_reasons: List[str],
         infos: List[List[int]],
         queries: Optional[List[str]] = None,
-        source_datasets: Optional[List[str]] = None,
-    ) -> List[float]:
+    ):
         num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
         good_outputs = [
-            len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
+            len(tool_outputs[i]) > 0 and tool_calleds[i]
             for i in range(len(tool_outputs))
         ]
-        scores = [0] * len(decoded_responses)
+        
+        # Check if we need finegrained rewards
+        assert args.apply_finegrained_reward, "Finegrained rewards are not applied"
+        # For finegrained rewards, we need to return (finegrained_scores, metrics)
         metrics = {}
-
-        if args.apply_r1_style_format_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
-                format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
-                if len(format_scores) != len(scores):
-                    raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
-                for i in range(len(format_scores)):
-                    scores[i] = format_scores[i] + scores[i]
-                metrics["val/format_scores"] = np.array(format_scores).mean()
-        elif args.apply_rl_rag_format_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating RL-RAG format reward"):
-                rl_rag_format_scores = is_a_good_rl_rag_response(decoded_responses)
-                if len(rl_rag_format_scores) != len(scores):
-                    raise ValueError(f"{len(rl_rag_format_scores)=} != {len(scores)=}")
-                for i in range(len(rl_rag_format_scores)):
-                    scores[i] = rl_rag_format_scores[i] + scores[i]
-                metrics["val/rl_rag_format_scores"] = np.array(rl_rag_format_scores).mean()
-
-        if args.apply_verifiable_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
-                verifiable_rewards, per_func_rewards, log_values = await apply_verifiable_reward(
-                    reward_fn_mapping,
-                    responses,
-                    decoded_responses,
-                    ground_truths,
-                    datasets,
-                    reward_mult=args.verification_reward,
-                    queries=queries,
-                    overwrite_reward_fn_tag=args.overwrite_reward_fn_tag,
-                )
-                if len(verifiable_rewards) != len(scores):
-                    raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
-                # slightly complex combo of good outputs and additive format reward
-                for i in range(len(verifiable_rewards)):
-                    if not args.only_reward_good_outputs or (good_outputs[i] and args.only_reward_good_outputs):
-                        if (args.apply_r1_style_format_reward or args.apply_rl_rag_format_reward) and args.additive_format_reward:
-                            scores[i] = verifiable_rewards[i] + scores[i]
-                        elif (args.apply_r1_style_format_reward or args.apply_rl_rag_format_reward) and not args.additive_format_reward:
-                            # Check which format reward was applied
-                            if args.apply_r1_style_format_reward:
-                                scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
-                            elif args.apply_rl_rag_format_reward:
-                                scores[i] = verifiable_rewards[i] if rl_rag_format_scores[i] == 1 else 0
-                        else:
-                            scores[i] = verifiable_rewards[i]
-                np_verifiable_rewards = np.array(verifiable_rewards)
-                metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
-                metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
-                # log anything additional
-                for key, value in log_values.items():
-                    metrics[f"objective/reward_log_values/{key}"] = np.array(value).mean()
-                # reshuffle around per_func rewards
-                per_func_lists = defaultdict(list)
-                for reward_dict in per_func_rewards:
-                    for key, value in reward_dict.items():
-                        per_func_lists[key].append(value)
-                # log per function rewards
-                for key, value in per_func_lists.items():
-                    np_value = np.array(value)
-                    metrics[f"objective/{key}_reward"] = np_value.mean()
-                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
-                
-                # log per original source dataset, if provided
-                if source_datasets is not None and len(source_datasets) == len(verifiable_rewards):
-                    source_to_values = defaultdict(list)
-                    for src, val in zip(source_datasets, verifiable_rewards):
-                        source_to_values[src].append(val)
-                    for src, vals in source_to_values.items():
-                        arr = np.array(vals)
-                        metrics[f"objective/source/{src}_verifiable_reward"] = arr.mean()
-                        metrics[f"objective/source/{src}_verifiable_correct_rate"] = (arr > 0.0).mean()
-                
-                # log direction agreement
-                if args.log_direction_agreement:
-                    from open_instruct.search_rewards.utils._direction_agreement import compute_direction_agreement
-                    with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating direction agreement"):
-                        direction_agreement_dict = compute_direction_agreement(log_values, verifiable_rewards)
-                        for key, value in direction_agreement_dict.items():
-                            metrics[f"analysis/direction_agreement/{key}"] = value
-
-        # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
-        if args.non_stop_penalty:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty"):
-                assert len(finish_reasons) == len(scores)
-                for i in range(len(finish_reasons)):
-                    if finish_reasons[i] != "stop":
-                        scores[i] = args.non_stop_penalty_value
-
-        return scores, metrics
+        
+        with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying finegrained reward"):
+            finegrained_rewards, log_values = await apply_finegrained_reward(
+                reward_fn_mapping,
+                responses,
+                decoded_responses,
+                ground_truths,
+                datasets,
+                reward_mult=args.finegrained_reward,
+                queries=queries,
+                overwrite_reward_fn_tag=args.overwrite_reward_fn_tag,
+                num_samples_per_prompt_rollout=args.num_samples_per_prompt_rollout,
+            )
+            
+            # log finegrained reward log values
+            for key, value in log_values.items():
+                metrics[f"objective/reward_log_values/{key}"] = value
+            
+            # Directly compute advantages in the reward function
+            scores_by_query_and_reward_group = defaultdict(lambda: defaultdict(list))
+            for finegrained_reward in finegrained_rewards:
+                for score_obj in finegrained_reward.finegrained_scores:
+                    # score_obj is a FinegrainedScore object including attributes: score, effective_spans, reward_group_id, query_idx
+                    scores_by_query_and_reward_group[score_obj.query_idx][score_obj.reward_group_id].append(score_obj.score)
+            
+            # Calculate average score per response for metrics
+            reward_stats_by_query_and_reward_group = defaultdict(lambda: defaultdict(float))
+            for query_idx, reward_group_id_to_scores in scores_by_query_and_reward_group.items():
+                for reward_group_id, scores in reward_group_id_to_scores.items():
+                    mean, std = np.mean(scores), np.std(scores) + 1e-8
+                    reward_stats_by_query_and_reward_group[query_idx][reward_group_id] = (mean, std)
+            
+            # Calculate advantages
+            for finegrained_reward in finegrained_rewards:
+                for score_obj in finegrained_reward.finegrained_scores:
+                    mean, std = reward_stats_by_query_and_reward_group[score_obj.query_idx][score_obj.reward_group_id]
+                    score_obj.advantage = (score_obj.score - mean) / std
+            
+        return finegrained_rewards, metrics
 
     main(args, tokenizer_config, model_config, reward_fn)

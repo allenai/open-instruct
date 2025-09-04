@@ -7,8 +7,8 @@ import sys
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from open_instruct.search_rewards.openscholar_rewards import compute_paper_reward
-from open_instruct.search_rewards.reasoning_model_rewards import compute_hle_reward
+from open_instruct.search_rewards.old_rewards.openscholar_rewards import compute_paper_reward
+from open_instruct.search_rewards.longform_hle_rewards import compute_hle_reward
 
 # Import the example from formatted_test_answer.py
 from open_instruct.search_rewards.tests.formatted_test_answer import example_answer

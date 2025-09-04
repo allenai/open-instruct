@@ -94,7 +94,7 @@ def extract_citations_from_context(context: str) -> Dict[str, str]:
     return citations
 
 
-def extract_mcp_tool_calls(context: str, mcp_parser_name: Optional[str] = None) -> List[str]:
+def extract_search_tool_calls(context: str, mcp_parser_name: Optional[str] = None) -> List[str]:
     if not mcp_parser_name:
         return [match[1] for match in re.findall(r"<search>(.*?)</search>", context, re.DOTALL)]
     elif mcp_parser_name == "unified":
@@ -106,3 +106,4 @@ def extract_mcp_tool_calls(context: str, mcp_parser_name: Optional[str] = None) 
         return queries
     else:
         raise ValueError(f"Unsupported MCP parser name: {mcp_parser_name}")
+    

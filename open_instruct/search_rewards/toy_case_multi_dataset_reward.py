@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Tuple, Optional, Union
 import json
 import string
 
-from open_instruct.search_rewards.find_reward_spans import FinegrainedScore
+from open_instruct.search_rewards.utils.find_reward_spans import FinegrainedScore
 
 LOGGER = logging.getLogger(__name__)
 
@@ -28,6 +28,7 @@ def split_response_and_get_spans(response: str, num_questions: int) -> Tuple[Lis
     
     sub_responses = []
     spans = []
+    num_valid_spans = 0
     
     # Find split points using </answer{i}> tags
     start_char = 0
@@ -38,17 +39,21 @@ def split_response_and_get_spans(response: str, num_questions: int) -> Tuple[Lis
             end_char = start_char + match.end()
             sub_responses.append(response[start_char:end_char])
             spans.append([(start_char, end_char)])
+            num_valid_spans += 1
             start_char = end_char
         elif i == num_questions:
             sub_responses.append(response[start_char:])
             spans.append([(start_char, len(response))])
             break
         else:
-            # Otherwise, apply to the full response and continue
-            sub_responses.append(response)
-            spans.append([(0, len(response))])
+            # # Otherwise, return invalid spans that will trigger the fallback mechanism to use the entire response
+            # sub_responses.append(response)
+            # spans.append([(-1, -1)])
+            # Or, penalize the entire response and return empty sub_response
+            sub_responses.append("")
+            spans.append([(-1, -1)])
         
-    return sub_responses, spans
+    return sub_responses, spans, num_valid_spans
 
 
 def extract_ground_truth_per_question(ground_truth: str) -> List[str]:
@@ -187,19 +192,20 @@ def compute_multi_question_reward(
     num_questions = len(ground_truth_per_question)
     
     # Split the response into individual question components for span generation
-    sub_responses, spans = split_response_and_get_spans(response, num_questions)
+    sub_responses, spans, num_valid_spans = split_response_and_get_spans(response, num_questions)
     
     # Compute finegrained scores for each question
     finegrained_scores = []
     for i, (sub_response, gt, span) in enumerate(zip(sub_responses, ground_truth_per_question, spans)):
         sub_score = verify_one_question(sub_response, gt, use_exact_match)
-    
+
+        group_id = 0  # rulin: assume the same group for all questions
         finegrained_scores.append(
             FinegrainedScore(
                 score=sub_score,
                 effective_spans=span,
-                reward_group_id=i,
-                reward_group_name=f"question_{i}",
+                reward_group_id=group_id,  
+                reward_group_name=f"question_{group_id}",
             )
         )
     
@@ -210,6 +216,7 @@ def compute_multi_question_reward(
         **{f"question_{i}_accuracy": item.score for i, item in enumerate(finegrained_scores)},
         "num_questions": num_questions,
         "averaged_accuracy": averaged_score,
+        "num_valid_spans": num_valid_spans,
     }
     
     if reward_type == "finegrained":

@@ -816,11 +816,11 @@ if __name__ == "__main__":
     tqa_2q_datasets = create_multi_question_dataset_from_tqa(
         num_examples=-1,
         seed=42,
-        num_questions=2,  # 2 questions per example
+        num_questions=10,  # 2 questions per example
         push_to_hub=True,  # Set to True to push to hub
-        hub_id="rulins/multi_question_synthetic_single_source_tqa_2q",
+        hub_id="rulins/multi_question_synthetic_single_source_tqa_10q",
         dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
-        val_size=300  # 300 examples for validation
+        val_size=100  # 300 examples for validation
     )
     
     # Create dataset with 5 questions per example from TQA (maximum possible examples)
@@ -828,11 +828,11 @@ if __name__ == "__main__":
     tqa_5q_datasets = create_multi_question_dataset_from_tqa(
         num_examples=-1,  # Generate maximum possible examples until no more samples
         seed=42,
-        num_questions=5,  # 5 questions per example
+        num_questions=15,  # 5 questions per example
         push_to_hub=True,  # Set to True to push to hub
-        hub_id="rulins/multi_question_synthetic_single_source_tqa_5q",
+        hub_id="rulins/multi_question_synthetic_single_source_tqa_15q",
         dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
-        val_size=300  # 300 examples for validation
+        val_size=100  # 300 examples for validation
     )
     
     print(f"\n=== TQA Dataset Summary ===")
@@ -857,11 +857,11 @@ if __name__ == "__main__":
     wiki2_2q_datasets = create_multi_question_dataset_from_2wiki(
         num_examples=-1,
         seed=42,
-        num_questions=2,  # 2 questions per example
+        num_questions=10,  # 2 questions per example
         push_to_hub=True,  # Set to True to push to hub
-        hub_id="rulins/multi_question_synthetic_single_source_2wiki_2q",
+        hub_id="rulins/multi_question_synthetic_single_source_2wiki_10q",
         dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
-        val_size=300  # 300 examples for validation
+        val_size=100  # 300 examples for validation
     )
     
     # Create dataset with 5 questions per example from 2Wiki (maximum possible examples)
@@ -869,11 +869,11 @@ if __name__ == "__main__":
     wiki2_5q_datasets = create_multi_question_dataset_from_2wiki(
         num_examples=-1,  # Generate maximum possible examples until no more samples
         seed=42,
-        num_questions=5,  # 5 questions per example
+        num_questions=15,  # 5 questions per example
         push_to_hub=True,  # Set to True to push to hub
-        hub_id="rulins/multi_question_synthetic_single_source_2wiki_5q",
+        hub_id="rulins/multi_question_synthetic_single_source_2wiki_15q",
         dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
-        val_size=300  # 300 examples for validation
+        val_size=100  # 300 examples for validation
     )
     
     print(f"\n=== 2Wiki Dataset Summary ===")

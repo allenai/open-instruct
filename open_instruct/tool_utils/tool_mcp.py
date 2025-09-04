@@ -9,7 +9,7 @@ from typing import Optional, Union
 from fastmcp import Client
 from mcp.types import CallToolResult
 
-from open_instruct.search_rewards.format_utils import generate_snippet_id
+from open_instruct.search_rewards.utils.format_utils import generate_snippet_id
 from open_instruct.tool_utils.tool_vllm import Tool, ToolOutput
 
 

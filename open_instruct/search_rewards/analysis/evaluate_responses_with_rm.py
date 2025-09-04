@@ -14,7 +14,7 @@ from scipy import stats
 current_dir = os.getcwd()
 sys.path.insert(0, current_dir)
 
-from open_instruct.search_rewards.reasoning_model_rewards import compute_hle_reward
+from open_instruct.search_rewards.longform_hle_rewards import compute_hle_reward
 from open_instruct.search_rewards.openscholar_rewards import compute_paper_reward
 
 # Set up logging

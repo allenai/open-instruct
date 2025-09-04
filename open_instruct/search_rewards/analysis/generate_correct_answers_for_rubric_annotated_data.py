@@ -15,7 +15,7 @@ import sys
 
 # Add the parent directory to the path to import run_utils
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from run_utils import run_litellm
+from open_instruct.search_rewards.utils.run_utils import run_litellm
 
 
 def load_data(file_path: str) -> List[Dict[str, Any]]:

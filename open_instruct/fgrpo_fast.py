@@ -1377,7 +1377,7 @@ def data_preparation_thread(
         if args.log_advantage_visualization and training_step % args.advantage_vis_frequency == 0:
             try:
                 print(f"🔫 Logging advantage visualization for step {training_step}")
-                from open_instruct.search_rewards.advantage_visualization import log_advantage_examples, log_advantage_statistics
+                from open_instruct.search_rewards.utils.advantage_visualization import log_advantage_examples, log_advantage_statistics
                 
                 # Log examples based on user settings
                 if len(all_finegrained_rewards) > 0:
@@ -2024,7 +2024,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         stop=stop_strings,
     )
     eval_generation_config = SamplingParams(
-        temperature=0.0,
+        temperature=0.6,
         top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
