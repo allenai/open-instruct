@@ -20,21 +20,22 @@ EXP_NAME=${EXP_NAME:-${exp_name}}
 
 
 # cluster
-# cluster=ai2/augusta-google-1
-cluster=ai2/jupiter-cirrascale-2
+cluster=ai2/augusta-google-1
+# cluster=ai2/jupiter-cirrascale-2
 # cluster=ai2/ceres-cirrascale
-cluster=ai2/neptune-cirrascale
+# cluster=ai2/neptune-cirrascale
 
-NUM_GPUS=${NUM_GPUS:-4}
+NUM_GPUS=${NUM_GPUS:-8}
 
 python mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
     --workspace ai2/tulu-thinker \
     --priority high \
-    --image michaeln/open_instruct_olmo2_retrofit \
+    --pure_docker_mode \
+    --image stellal/open_instruct_dev \
     --preemptible \
-    --num_nodes 1 \
+    --num_nodes 4 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gs_model_name $gs_model_name \
@@ -67,9 +68,9 @@ python open_instruct/grpo_fast.py \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 1024000 \
-    --deepspeed_stage 2 \
-    --num_learners_per_node 2 \
-    --vllm_num_engines 2 \
+    --deepspeed_stage 3 \
+    --num_learners_per_node 8 \
+    --vllm_num_engines 24 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
