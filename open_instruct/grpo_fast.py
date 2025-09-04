@@ -52,7 +52,6 @@ import json
 import math
 import random
 import shutil
-import signal
 import socket
 import threading
 import time
@@ -2555,22 +2554,9 @@ def make_reward_fn(args: Args) -> Callable:
 
 
 def cleanup_judge_clients():
-    """Cleans up all LLM judge clients and shutdown Ray."""
+    """Cleans up all LLM judge clients."""
     asyncio.run(cleanup_all_llm_judge_clients())
     logger.info("✅ LLM judge clients cleaned up")
-
-    # Coordinate Ray shutdown across all distributed processes
-    if dist.is_initialized():
-        try:
-            # Use a barrier to ensure all processes reach shutdown simultaneously
-            logger.info("Synchronizing Ray shutdown across all processes...")
-            dist.barrier(timeout=timedelta(seconds=30))
-            logger.info("✅ All processes synchronized for Ray shutdown")
-        except Exception as e:
-            logger.warning(f"Failed to synchronize Ray shutdown: {e}")
-
-    ray.shutdown()
-    logger.info("✅ Ray shut down")
 
 
 def cleanup_training_resources(
@@ -2605,6 +2591,19 @@ def cleanup_training_resources(
 
     # Clean up judge clients
     cleanup_judge_clients()
+
+    # Coordinate Ray shutdown across all distributed processes
+    if dist.is_initialized():
+        try:
+            # Use a barrier to ensure all processes reach shutdown simultaneously
+            logger.info("Synchronizing Ray shutdown across all processes...")
+            dist.barrier(timeout=timedelta(seconds=30))
+            logger.info("✅ All processes synchronized for Ray shutdown")
+        except Exception as e:
+            logger.warning(f"Failed to synchronize Ray shutdown: {e}")
+
+    ray.shutdown()
+    logger.info("✅ Ray shut down")
 
     # Clean up distributed process group if it was initialized
     if dist.is_initialized():
@@ -2962,35 +2961,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
 
 if __name__ == "__main__":
-    # Global flag to track if we're in the middle of shutdown
-    shutdown_in_progress = False
-
-    def signal_handler(signum, frame):
-        """Handle termination signals gracefully"""
-        global shutdown_in_progress
-        if shutdown_in_progress:
-            return
-        shutdown_in_progress = True
-
-        logger.info(f"Received signal {signum}, initiating graceful shutdown...")
-
-        # Try to shutdown Ray if it's running
-        try:
-            if ray.is_initialized():
-                logger.info("Shutting down Ray due to signal...")
-                ray.shutdown()
-                logger.info("✅ Ray shut down due to signal")
-        except Exception as e:
-            logger.warning(f"Error shutting down Ray: {e}")
-
-        # Exit with code 0 for clean shutdown
-        logger.info("Exiting gracefully")
-        exit(0)
-
-    # Register signal handlers
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
-
     parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
     assert isinstance(args, Args)
