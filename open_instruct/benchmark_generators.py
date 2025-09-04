@@ -27,8 +27,20 @@ import transformers
 import vllm
 from ray.util import queue as ray_queue
 
+<<<<<<< HEAD
 from open_instruct import dataset_transformation, grpo_fast, logger_utils, model_utils, utils, vllm_utils3
 from open_instruct.actor_manager import ActorManager
+=======
+from open_instruct import (
+    actor_manager,
+    dataset_transformation,
+    grpo_fast,
+    logger_utils,
+    model_utils,
+    utils,
+    vllm_utils3,
+)
+>>>>>>> abc270c4 (Changes to clean up benchmark.)
 from open_instruct.queue_types import PromptRequest
 
 # For FLOPS, we assume bf16 and ignore sparsity.
@@ -614,7 +626,7 @@ def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation
 
 def setup_vllm_engines(
     args: grpo_fast.Args, model_config: model_utils.ModelConfig, max_model_len: int = 20480
-) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue]:
+) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue, ray.actor.ActorHandle]:
     """Set up vLLM engines and queues."""
     logger.info("Setting up vLLM engines...")
 
@@ -630,8 +642,8 @@ def setup_vllm_engines(
     param_prompt_Q = ray_queue.Queue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
 
-    queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
-    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
+    queues_to_monitor = {"param_prompt_Q": param_prompt_Q, "inference_results_Q": inference_results_Q}
+    actor_manager_remote = ray.remote(actor_manager.ActorManager).remote(queues_to_monitor, args)
 
     vllm_engines = vllm_utils3.create_vllm_engines(
         num_engines=args.vllm_num_engines,
@@ -650,12 +662,12 @@ def setup_vllm_engines(
         max_tool_calls=[0],
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
-        actor_manager=actor_manager,
+        actor_manager=actor_manager_remote,
     )
 
     logger.info("vLLM engines ready")
 
-    return vllm_engines, param_prompt_Q, inference_results_Q, actor_manager
+    return vllm_engines, param_prompt_Q, inference_results_Q, actor_manager_remote
 
 
 def generate_thread(vllm_engines: list[ray.actor.ActorHandle], stop_event: threading.Event) -> None:
