@@ -144,7 +144,7 @@ class ToolUseLLM(LLM):
         self.tools = tools
         # Convert max_tool_calls to a dict if it's an int
         if isinstance(max_tool_calls, int):
-            self.max_tool_calls = {tool.end_str: max_tool_calls for tool in tools.values()} if tools else {}
+            self.max_tool_calls = {k: max_tool_calls for k in tools.keys()} if tools else {}
         else:
             self.max_tool_calls = max_tool_calls
         # Initialize executor and store for pending tool calls

@@ -4,12 +4,14 @@ Used for astabench
 
 python open_instruct/search_utils/toolvllm_search_generate_mcp.py \
     --json_path rubrics_v2_recomputed.json \
-    --model_path ai2-adapt-dev/tulu_3_long_finetune_qwen_7b_reg \
-    --output_dir baseline_tulu_3_qwen25_7b_reg_asta_naive_rag \
+    --model_path 0409_rl_rag_sft_mcp__1__1757043824_checkpoints/step_200 \
+    --output_dir 0409_rl_rag_sft_mcp__1__1757043824_checkpoints/step_200/astabench \
     --max_eval_samples 1000 \
     --offset 0 \
     --num_docs 3 \
     --search_api_endpoint https://api.semanticscholar.org/graph/v1/snippet/search \
+    --use_astabench_format \
+    --mcp_tool_names 'snippet_search,google_search,browse_webpage' \
     --mcp_server_command 'python -m rl-rag-mcp.mcp_agents.mcp_backend.main --transport http --port 8000 --host 0.0.0.0 --path /mcp'
 """
 
@@ -30,7 +32,7 @@ from open_instruct.search_utils.mcp_tools import MCPTool
 from open_instruct.grpo_fast import launch_mcp_subprocess
 
 # load system prompt from a dataset to make my life easier.
-ds = load_dataset("rulins/rl_rag_no_retrieval_1k_longform_rubrics_only_with_system_prompt", split="train")
+ds = load_dataset("rl-rag/rl_rag_sqa_searcharena_rubrics_web_augmented_rubrics_only_call_tool", split="train")
 assert ds[0]["messages"][0]["role"] == "system"
 SYSTEM_PROMPT = ds[0]["messages"][0]["content"]
 
@@ -47,12 +49,18 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
     answer_sections = answer_section.split("\n")
     seen_citations = set()
     text_seen_so_far = ""
+    # map each answer line index to its corresponding section index (or None if empty)
+    answer_idx_to_section_idx = {}
     for i, section in enumerate(answer_sections):
+        if section.strip() == "":
+            answer_idx_to_section_idx[i] = None
+            continue
         sections.append({
             "title": f"Section {i+1}",
-            "text": section,
+            "text": section.strip(),
             "citations": [],
         })
+        answer_idx_to_section_idx[i] = len(sections) - 1
         # if there are citations inside the text, extract them
         citations = re.findall(r"<cite id=\"(\w+)\">((\n|.)*?)</cite>", section)
         citations += re.findall(r"<cite id=(\w+)>((\n|.)*?)</cite>", section)
@@ -60,8 +68,8 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
         for j, citation in enumerate(citations):
             citation_id = citation[0]
             seen_citations.add(citation_id)
-            # find corresponding snippet
-            snippet = re.findall(r"<snippet id=" + citation_id + r">((\n|.)*?)</snippet>", thinking_section)
+            # find corresponding snippet (support both <snippet> and <snippets>)
+            snippet = re.findall(r"<snippet? id=" + re.escape(citation_id) + r">((\n|.)*?)</snippet?>", thinking_section)
             if not snippet:
                 print(f"Snippet {citation_id} not found in thinking section, but it was cited in the answer section. Hallucination?")
                 snippet_text = ""
@@ -77,7 +85,13 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
     # so I'm going to support it anyway. Hopefully not too costly.
     # note that since we slowly grow the sections, we should add the citation to the minimal section it spans.
     for i in range(len(answer_sections)):
-        for j in range(i+1, len(answer_sections)+1):
+        if answer_sections[i].strip() == "":
+            continue
+        # j is exclusive; iterate up to and including len(answer_sections)
+        for j in range(i + 1, len(answer_sections) + 1):
+            # j is exclusive, so check the last included section (j - 1)
+            if answer_sections[j - 1].strip() == "":
+                continue
             citations = re.findall(r"<cite id=\"(\w+)\">((\n|.)*?)</cite>", "\n".join(answer_sections[i:j]))
             citations += re.findall(r"<cite id=(\w+)>((\n|.)*?)</cite>", "\n".join(answer_sections[i:j]))
             
@@ -87,22 +101,25 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
                     continue
                 seen_citations.add(citation_id)
                 # find corresponding snippet
-                snippet = re.findall(r"<snippet id=" + citation_id + r">((\n|.)*?)</snippet>", thinking_section)
+                snippet = re.findall(r"<snippet? id=" + re.escape(citation_id) + r">((\n|.)*?)</snippet?>", thinking_section)
                 if not snippet:
                     print(f"Snippet {citation_id} not found in thinking section, but it was cited in the answer section. Hallucination?")
                     snippet_text = ""
                 else:
-                    snippet_text = snippet[0]
+                    snippet_text = snippet[0][0]
                 citation_title = citation[1]  # use the query as the title
                 # add to all sections it spans
                 for k in range(i, j):
-                    sections[k]["citations"].append({
+                    section_idx = answer_idx_to_section_idx.get(k)
+                    if section_idx is None:
+                        continue
+                    sections[section_idx]["citations"].append({
                         "id": citation_id,
                         "title": citation_title,
                         "snippets": [snippet_text],
                     })
 
-    return {"section": sections}
+    return {"response": {"section": sections}}
     
 
 def main():
@@ -124,6 +141,7 @@ def main():
         parser.add_argument("--dont_use_system_prompt", action="store_true", help="Don't use the system prompt.")
         parser.add_argument("--mcp_tool_names", type=str, default="semantic_scholar,serper", help="MCP tool names.")
         parser.add_argument("--mcp_server_command", type=str, default="fastmcp run rl-rag-mcp/rag_mcp/main.py:mcp --transport streamable-http --port 8008", help="MCP server command.")
+        parser.add_argument("--mcp_parser_name", type=str, default="v20250824", help="MCP parser name.")
         args = parser.parse_args()
 
         if 'port' in args.mcp_server_command:
@@ -156,15 +174,15 @@ def main():
 
         # load mcp tools
         tool_objects = {}
-        for mcp_tool_name in args.mcp_tool_names.split(","):
-            tool = MCPTool(
-                mcp_tool_name=mcp_tool_name,
-                number_documents_to_search=args.num_docs,
-                base_url=args.search_api_endpoint,
-            )
-            # mcp tools can have multiple end strings.
-            for end_str in tool.stop_strings:
-                tool_objects[end_str] = tool
+        tool = MCPTool(
+            mcp_tool_names=args.mcp_tool_names.split(","),
+            parser_name=args.mcp_parser_name,
+            number_documents_to_search=args.num_docs,
+            base_url=args.search_api_endpoint,
+        )
+        # mcp tools can have multiple end strings.
+        for end_str in tool.get_stop_strings():
+            tool_objects[end_str] = tool
 
         if not args.dont_use_system_prompt:
             initial_message = [{"role": "system", "content": SYSTEM_PROMPT}]
