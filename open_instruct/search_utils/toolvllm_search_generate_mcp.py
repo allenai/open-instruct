@@ -232,8 +232,24 @@ def main():
         generations = [x.outputs[0].token_ids for x in result]
         generations = [tokenizer.decode(x, skip_special_tokens=True) for x in generations]
         # parse out answer
-        predictions = [x.split("<answer>")[-1].replace("</answer>", "") for x in generations]
-
+        predictions = []
+        extracted_count = 0
+        for generation in generations:
+            final_answer = ""
+            # first, try to find stuff between <answer> and </answer>
+            answer = re.search(r"<answer>(.*?)</answer>", generation)
+            if answer:
+                final_answer = answer.group(1).strip()
+                extracted_count += 1
+            # second, anything after <answer>, and strip the tags
+            answer = generation.split("<answer>")[-1].replace("</answer>", "")
+            final_answer = answer.strip()
+            if answer != generation.strip():                
+                final_answer = answer.strip()
+                extracted_count += 1
+            predictions.append(final_answer)
+        # stat: print extracted predictions
+        print(f"Extracted {extracted_count} predictions out of {len(generations)}, thats {extracted_count / len(generations) * 100:.2f}%")
         # save predictions with sample data.
         os.makedirs(args.output_dir, exist_ok=True)
         with open(f"{args.output_dir}/predictions.jsonl", "w") as f:
