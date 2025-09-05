@@ -77,7 +77,7 @@ class TestVllmUtils3(unittest.TestCase):
 
         # Call the function under test
         result = _finalize_outputs(
-            outputs=[mock_request_output1],  # Need at least one output to get the base request_id
+            output=mock_request_output1,  # Single output to get the base request_id
             tracking=tracking,
             dataset_index=43039,
             tools={"some_tool": {}},  # Tools enabled
@@ -137,7 +137,7 @@ class TestVllmUtils3(unittest.TestCase):
             tracking["tool_called"][sample_req_id] = True
 
         result = _finalize_outputs(
-            outputs=mock_outputs,
+            output=mock_outputs[0],
             tracking=tracking,
             dataset_index=100,  # Single dataset index for this request
             tools={"some_tool": {}},

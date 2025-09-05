@@ -120,14 +120,14 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
 
 def _process_outputs(
-    outputs: List[vllm.RequestOutput],
+    output: vllm.RequestOutput,
     dataset_index: Optional[List[int]] = None,
     token_statistics: Optional[TokenStatistics] = None,
     start_time: Optional[float] = None,
 ) -> "GenerationResult":
-    """Process vLLM RequestOutputs into GenerationResult format."""
-    response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
-    finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
+    """Process vLLM RequestOutput into GenerationResult format."""
+    response_ids = [list(out.token_ids) for out in output.outputs]
+    finish_reasons = [out.finish_reason for out in output.outputs]
 
     masks = [[1] * len(resp) for resp in response_ids]
     num_calls = [0] * len(response_ids)
@@ -200,11 +200,22 @@ def _process_outputs_with_tools(
     return result
 
 
-def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=None, start_time=None):
+def _extract_base_request_id(full_request_id: str) -> str:
+    """Extract base request ID by removing the sample suffix.
+
+    >>> _extract_base_request_id("train_1_43039_0")
+    'train_1_43039'
+    >>> _extract_base_request_id("eval_5_12345_2")
+    'eval_5_12345'
+    """
+    return "_".join(full_request_id.split("_")[:-1])
+
+
+def _finalize_outputs(output, tracking, dataset_index, tools, token_statistics=None, start_time=None):
     """Prepare final outputs based on whether tools were used."""
     if not tools:
         return _process_outputs(
-            outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
+            output, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
         )
 
     # Tool mode: add metadata and merge completions
@@ -220,10 +231,10 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=
         setattr(output, "tool_called", tracking["tool_called"][req_id])
 
     # Merge n completions into the same outputs
-    # Filter tracking data to only include the current requests
-    output_request_ids = {output.request_id for output in outputs}
+    # Filter tracking data to only include the current request
+    output_request_id = output.request_id
     relevant_outputs = {
-        k: v for k, v in tracking["concat_outputs"].items() if "_".join(k.split("_")[:-1]) in output_request_ids
+        k: v for k, v in tracking["concat_outputs"].items() if "_".join(k.split("_")[:-1]) == output_request_id
     }
 
     merged_outputs = {}
@@ -460,7 +471,7 @@ class LLMRayActor:
         total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
         metadata = self.request_metadata.pop(request_id)
         result = _finalize_outputs(
-            [final_output],
+            final_output,
             tracking,
             metadata["dataset_index"],
             self.tools,
@@ -472,6 +483,26 @@ class LLMRayActor:
             start_time=metadata["start_time"],
         )
         return result, metadata["is_eval"]
+
+    def _maybe_process_and_insert(
+        self,
+        request_id: str,
+        request_outputs: Dict[str, List[vllm.RequestOutput]],
+        tracking: Dict[str, Any],
+        current_time: float,
+    ) -> int:
+        """Check if we have N requests for request_id, process them, and insert results in queue.
+
+        Returns:
+            int: Number of requests processed (0 or 1).
+        """
+        expected_n = self.request_metadata[request_id]["original_sampling_params"].n
+        if len(request_outputs[request_id]) == expected_n:
+            outs = request_outputs.pop(request_id)
+            result, is_eval = self._process_completed_request(request_id, outs, tracking, current_time)
+            self._insert_result_to_queue(result, is_eval=is_eval)
+            return 1
+        return 0
 
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
@@ -489,26 +520,19 @@ class LLMRayActor:
         total_processed = 0
 
         while True:
-            # Process completed tool futures and add to request_outputs
             tool_outputs = self._poll_tool_futures(tracking, self.llm_engine.tokenizer)
             current_time = time.time()
             for output in tool_outputs:
-                request_id = "_".join(output.request_id.split("_")[:-1])
+                request_id = _extract_base_request_id(output.request_id)
                 request_outputs[request_id].append(output)
 
-                # Check if we have N requests for this request_id
-                expected_n = self.request_metadata[request_id]["original_sampling_params"].n
-                if len(request_outputs[request_id]) == expected_n:
-                    outs = request_outputs.pop(request_id)
-                    result, is_eval = self._process_completed_request(request_id, outs, tracking, current_time)
-                    self._insert_result_to_queue(result, is_eval=is_eval)
-                    total_processed += 1
+                total_processed += self._maybe_process_and_insert(request_id, request_outputs, tracking, current_time)
 
             # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
             if self.llm_engine.has_unfinished_requests():
                 step_outputs = [o for o in self.llm_engine.step() if o.finished]
                 for output in step_outputs:
-                    base_req_id = "_".join(output.request_id.split("_")[:-1])
+                    base_req_id = _extract_base_request_id(output.request_id)
                     result = _handle_output(
                         output,
                         self.tools,
@@ -519,16 +543,12 @@ class LLMRayActor:
                     )
                     # Result is None when we do more tool processing.
                     if result is not None:
-                        request_id = "_".join(result.request_id.split("_")[:-1])
+                        request_id = _extract_base_request_id(result.request_id)
                         request_outputs[request_id].append(result)
 
-                        # Check if we have N requests for this request_id
-                        expected_n = self.request_metadata[request_id]["original_sampling_params"].n
-                        if len(request_outputs[request_id]) == expected_n:
-                            outs = request_outputs.pop(request_id)
-                            result, is_eval = self._process_completed_request(request_id, outs, tracking, current_time)
-                            self._insert_result_to_queue(result, is_eval=is_eval)
-                            total_processed += 1
+                        total_processed += self._maybe_process_and_insert(
+                            request_id, request_outputs, tracking, current_time
+                        )
 
                 # Fill engine with new requests after processing step outputs
                 self.fill_engine(timeout=timeout)
