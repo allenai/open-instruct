@@ -67,6 +67,7 @@ uv run python mason.py \
     --num_mini_batches 1 \
     --lr_scheduler_type constant \
     --save_freq 100 \
+    --update_progress_every 1 \
     --try_launch_beaker_eval_jobs_on_weka False \
     --vllm_num_engines 1 \
     --max_tool_calls 5 \
