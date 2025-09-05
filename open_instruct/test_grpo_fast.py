@@ -786,7 +786,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_prompts)
 
         # Create queues and maps
-        inference_results_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        inference_results_Q = ray_queue.Queue(maxsize=num_prompts)
         pending_queries_map = grpo_fast.PendingQueriesMap()
 
         # Track queue for cleanup
@@ -839,7 +839,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_prompts)
 
         # Create queues and maps
-        inference_results_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        inference_results_Q = ray_queue.Queue(maxsize=num_prompts)
         pending_queries_map = grpo_fast.PendingQueriesMap()
 
         # Track queue for cleanup
