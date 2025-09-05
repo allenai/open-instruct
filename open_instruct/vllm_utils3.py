@@ -95,7 +95,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     assert len(output.outputs) <= 1, f"{len(output.outputs)=}"  # In tool mode, sampling_params.n == 1
     o = output.outputs[0]
 
-    # Update concatenated outputs
+    # Update concatenated outputs - always maintain tracking consistency
     if output.request_id in tracking["concat_outputs"]:
         tracking["concat_outputs"][output.request_id].outputs[0].token_ids.extend(o.token_ids)
     else:
@@ -235,8 +235,13 @@ def _finalize_outputs(output, tracking, dataset_index, tools, token_statistics=N
     # Merge n completions into the same outputs
     # Filter tracking data to only include the current request
     relevant_outputs = {
-        k: v for k, v in tracking["concat_outputs"].items() if "_".join(k.split("_")[:-1]) == output_request_id
+        k: v for k, v in tracking["concat_outputs"].items() if _extract_base_request_id(k) == output_request_id
     }
+
+    # Validate we have the expected number of outputs for this request
+    expected_samples = len([k for k in relevant_outputs.keys() if "_".join(k.split("_")[:-1]) == output_request_id])
+    if expected_samples == 0:
+        raise ValueError(f"No outputs found in tracking['concat_outputs'] for request {output_request_id}")
 
     merged_outputs = {}
     for req_id, output in relevant_outputs.items():
@@ -498,6 +503,15 @@ class LLMRayActor:
             int: Number of requests processed (0 or 1).
         """
         expected_n = self.request_metadata[request_id]["original_sampling_params"].n
+
+        # For tool mode, also verify tracking["concat_outputs"] consistency
+        if self.tools:
+            concat_outputs_count = sum(
+                1 for k in tracking["concat_outputs"].keys() if "_".join(k.split("_")[:-1]) == request_id
+            )
+            if concat_outputs_count < expected_n:
+                return 0  # Not all samples ready yet
+
         if len(request_outputs[request_id]) == expected_n:
             outs = request_outputs.pop(request_id)
             result, is_eval = self._process_completed_request(request_id, outs, tracking, current_time)
@@ -550,8 +564,7 @@ class LLMRayActor:
                         total_processed += self._maybe_process_and_insert(
                             request_id, request_outputs, tracking, current_time
                         )
-                self.fill_engine(timeout=timeout)
-
+            self.fill_engine(timeout=0.01)
             if self.llm_engine.get_num_unfinished_requests() + len(tracking["pending_tool_futures"]) == 0:
                 break
 
