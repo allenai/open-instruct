@@ -676,7 +676,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         num_queries = 4
 
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_queries)
-        param_prompt_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        param_prompt_Q = ray_queue.Queue(maxsize=num_queries)
         pending_queries_map = grpo_fast.PendingQueriesMap()
 
         # Track queue for cleanup
@@ -729,7 +729,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         num_queries = 7  # 7/3 = ceil(2.33) = 3, so distribution should be [3, 3, 1]
 
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_queries)
-        param_prompt_Q = ray_queue.Queue(maxsize=num_engines * 2)
+        param_prompt_Q = ray_queue.Queue(maxsize=num_queries)
         pending_queries_map = grpo_fast.PendingQueriesMap()
 
         # Track queue for cleanup
@@ -758,24 +758,19 @@ class TestStreamingAccumulation(TestGrpoFastBase):
             is_eval=False,
         )
 
-        # Verify all batches have content and check distribution
-        batch_sizes = []
+        # With single-prompt architecture, verify we have the right number of individual requests
+        request_count = 0
         while not param_prompt_Q.empty():
             request = param_prompt_Q.get()
-            self.assertGreater(len(request.prompts), 0, "Found empty batch in queue!")
-            batch_sizes.append(len(request.prompts))
+            self.assertIsInstance(request, PromptRequest)
+            self.assertIsNotNone(request.prompt, "Each request should have a prompt")
+            request_count += 1
 
-        # Check the expected distribution
-        self.assertEqual(sum(batch_sizes), num_queries, "Total queries should match")
-        self.assertEqual(len(batch_sizes), num_engines, "Should have one batch per engine")
-
-        # The distribution should be [3, 3, 1] for 7 queries across 3 engines with ceiling division
-        expected_distribution = [3, 3, 1]
-        self.assertEqual(
-            sorted(batch_sizes, reverse=True),
-            expected_distribution,
-            f"Expected distribution {expected_distribution}, got {sorted(batch_sizes, reverse=True)}",
-        )
+        # Check that total requests equal total queries
+        self.assertEqual(request_count, num_queries, "Total requests should match total queries")
+        
+        # With individual prompts, we should have exactly num_queries requests
+        self.assertEqual(request_count, num_queries, f"Should have {num_queries} individual PromptRequests")
 
     def test_streaming_accumulation_basic(self):
         """Test basic streaming accumulation with in-order results."""
