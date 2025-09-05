@@ -636,7 +636,14 @@ class LLMRayActor:
         """Get KV cache max concurrency from the vLLM engine."""
         kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
         kv_cache_spec = kv_cache_specs[0]
-        grouped_layer_names = [list(kv_cache_spec.keys())]
+        # Group layers by their attention type (type_id) to handle models
+        # with sliding attention in some layers but not others
+        type_groups = defaultdict(list)
+        for layer_name, layer_spec in kv_cache_spec.items():
+            type_groups[layer_spec.type_id].append(layer_name)
+
+        grouped_layer_names = list(type_groups.values())
+
         page_size = kv_cache_utils.get_uniform_page_size(kv_cache_spec)
 
         vllm_config = self.llm_engine.vllm_config
@@ -704,6 +711,7 @@ def create_vllm_engines(
     eval_results_queue=None,
     actor_manager=None,
     inference_batch_size: Optional[int] = None,
+    use_fp8_kv_cache=False,
 ) -> list[LLMRayActor]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
@@ -785,6 +793,8 @@ def create_vllm_engines(
                 tools=tools,
                 max_tool_calls=max_tool_calls_dict,
                 inference_batch_size=inference_batch_size,
+                kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
+                calculate_kv_scales=use_fp8_kv_cache,
             )
         )
 

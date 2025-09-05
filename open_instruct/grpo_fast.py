@@ -234,6 +234,8 @@ class Args:
     stop_strings: Optional[List[str]] = None
     """List of strings that stop the generation when they are generated.
     The returned output will not contain the stop strings."""
+    use_fp8_kv_cache: bool = False
+    """Whether to use fp8 kv cache. This is useful for larger models or olmo."""
 
     # Algorithm
     async_steps: int = 1
@@ -2042,6 +2044,7 @@ def create_model_and_optimizer(
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
         inference_batch_size=args.inference_batch_size,
+        use_fp8_kv_cache=args.use_fp8_kv_cache,
     )
 
     resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
@@ -2049,9 +2052,13 @@ def create_model_and_optimizer(
     logger.info("======== ✅ all models and vLLM engines initialized =========")
 
     # Get and set KV cache max concurrency from the first engine (all engines have the same config)
-    if vllm_engines:
+    # fp8 kv cache for now forces v0 engine and breaks this.
+    if vllm_engines and not args.use_fp8_kv_cache:
         kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
+    else:
+        # dummy value
+        ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
 
     ray_get_with_progress(
         [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
@@ -2886,6 +2893,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         and is_beaker_job()
         and len(beaker_config.beaker_dataset_id_urls) > 0
         and args.output_dir.rstrip("/") != "/output"
+        and os.path.isdir(args.output_dir)
     ):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
     logger.info("finished training")
