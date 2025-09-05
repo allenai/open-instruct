@@ -386,9 +386,9 @@ class LLMRayActor:
             self.logger.info(f"creating LLM with bundle_indices={bundle_indices}")
 
         # Debug: Check what's in /weka/oe-training-default
-        contents = os.listdir('/weka/oe-training-default')
+        contents = os.listdir("/weka/oe-training-default")
         self.logger.info(f"Contents of /weka/oe-training-default: {contents}")
-        
+
         self.llm_engine = vllm.LLMEngine.from_engine_args(vllm.EngineArgs(*args, **kwargs))
 
         self.prompt_queue = prompt_queue
