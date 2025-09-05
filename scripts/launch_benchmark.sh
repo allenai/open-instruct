@@ -1,17 +1,22 @@
 #!/bin/bash
 # Runs benchmarks for one or more models with a specified response length using mason.py.
-# Usage: ./mason_run_benchmark.sh <response_length> <model1> [model2] ...
-# E.g. $ ./mason_run_benchmark.sh 64000 hamishivi/qwen2_5_openthoughts2 another/model
+# Usage: ./launch_benchmark.sh <image_name> <response_length> <model1> [model2] ...
+# E.g. $ ./launch_benchmark.sh nathanl/open_instruct_auto 64000 hamishivi/qwen2_5_openthoughts2 another/model
+# E.g. $ ./launch_benchmark.sh user/custom_image 64 /path/to/model
 set -e
 
-# Check if at least 2 arguments are provided
-if [ "$#" -lt 2 ]; then
-    echo "Usage: $0 <response_length> <model1> [model2] ..."
-    echo "Example: $0 64000 hamishivi/qwen2_5_openthoughts2 another/model"
+# Check if at least 3 arguments are provided
+if [ "$#" -lt 3 ]; then
+    echo "Usage: $0 <image_name> <response_length> <model1> [model2] ..."
+    echo "Example: $0 nathanl/open_instruct_auto 64000 hamishivi/qwen2_5_openthoughts2 another/model"
     exit 1
 fi
 
-# First argument is the response length
+# First argument is the image name
+image_name="$1"
+shift
+
+# Second argument is the response length
 response_length="$1"
 shift
 
@@ -38,7 +43,7 @@ for model_name_or_path in "$@"; do
         --cluster ai2/jupiter \
         --cluster ai2/augusta \
         --cluster ai2/saturn \
-        --image nathanl/open_instruct_auto \
+        --image "$image_name" \
         --description "Running benchmark with response length of $response_length at commit $git_hash on branch $git_branch with model $model_name_or_path." \
         --pure_docker_mode \
         --workspace ai2/open-instruct-dev \
