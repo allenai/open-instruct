@@ -54,6 +54,7 @@ for model_name_or_path in "$@"; do
         --budget ai2/oe-adapt \
         --gpus 1 \
         --secret HF_TOKEN=finbarrt_HF_TOKEN \
+        --mount oe-training-default:/weka/oe-training-default/ \
         --task_name open_instruct-benchmark_generators \
         -- uv run python -m open_instruct.benchmark_generators \
         --model_name_or_path "$model_name_or_path" \
