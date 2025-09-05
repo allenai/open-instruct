@@ -213,8 +213,6 @@ class Args:
     """RUNTIME VALUE: The number of training_steps to train"""
     local_eval_every: int = 100
     """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup. Set to -1 to disable."""
-    num_eval_samples: int = 32
-    """Number of samples to use for in-loop (local) evals. Actual number of evals done is min(num_eval_samples, eval_dataset_size)."""
     save_freq: int = 200
     """How many train steps to save the model"""
     allow_world_padding: bool = False
@@ -2310,6 +2308,7 @@ def maybe_evaluate(
     eval_pending_queries_map: PendingQueriesMap,
     eval_generation_config,
     generate_metrics_Q: Queue,
+    num_eval_prompts: int,
     actor_manager=None,
 ):
     """Optionally evaluate the model."""
@@ -2325,7 +2324,7 @@ def maybe_evaluate(
             args,
             training_step,
             eval_generation_config,
-            num_prompts=args.num_eval_samples,
+            num_prompts=num_eval_prompts,
             actor_manager=actor_manager,
             timeout=timeout,
         )
@@ -2758,6 +2757,7 @@ def run_training(
             eval_pending_queries_map,
             generation_configs["eval"],
             generate_metrics_Q,
+            len(eval_batch.queries) if eval_batch else 0,
             actor_manager,
         )
 
@@ -2788,7 +2788,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
     # Queue is sized to allow for up to 2 steps to be enqueued simultaneously.
-    evaluation_inference_results_Q = ray_queue.Queue(maxsize=args.num_eval_samples * 2)
+    evaluation_inference_results_Q = ray_queue.Queue(maxsize=len(eval_dataset) * 2 if eval_dataset else 0)
 
     policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
         create_model_and_optimizer(
@@ -2834,7 +2834,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     if eval_dataset is None:
         eval_batch = None
     else:
-        eval_dataset_indices = list(range(min(args.num_eval_samples, len(eval_dataset))))
+        eval_dataset_indices = list(range(len(eval_dataset)))
         eval_batch = next_batch(eval_dataset_indices, eval_dataset)
     reward_fn = make_reward_fn(args)
 
