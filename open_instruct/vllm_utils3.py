@@ -219,6 +219,8 @@ def _finalize_outputs(output, tracking, dataset_index, tools, token_statistics=N
         )
 
     # Tool mode: add metadata and merge completions
+    # Store the original request_id before output gets overwritten
+    output_request_id = output.request_id
     for req_id in tracking["masks"]:
         assert req_id in tracking["concat_outputs"], f"req_id {req_id} not in concat_outputs!"
         output = tracking["concat_outputs"][req_id].outputs[0]
@@ -232,7 +234,6 @@ def _finalize_outputs(output, tracking, dataset_index, tools, token_statistics=N
 
     # Merge n completions into the same outputs
     # Filter tracking data to only include the current request
-    output_request_id = output.request_id
     relevant_outputs = {
         k: v for k, v in tracking["concat_outputs"].items() if "_".join(k.split("_")[:-1]) == output_request_id
     }
