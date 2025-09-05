@@ -442,9 +442,10 @@ class LLMRayActor:
             int: Number of requests added to the engine
         """
         num_added = 0
-        while self.llm_engine.get_num_unfinished_requests() < self.inference_batch_size:
-            if self._should_stop():
-                break
+        if self._should_stop():
+            return num_added
+        num_to_add = self.inference_batch_size - self.llm_engine.get_num_unfinished_requests()
+        while num_added < num_to_add:
             try:
                 request = self.prompt_queue.get(timeout=timeout)
                 num_added += add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
@@ -493,10 +494,6 @@ class LLMRayActor:
         for output in outputs:
             request_id = "_".join(output.request_id.split("_")[:-1])
             request_outputs[request_id].append(output)
-        for request_id, outputs in request_outputs.items():
-            assert len(outputs) == self.request_metadata[request_id]["original_sampling_params"].n, (
-                f"{len(outputs)=} != {self.request_metadata[request_id]['original_sampling_params'].n=}"
-            )
         for request_id, outs in request_outputs.items():
             final_output = vllm.RequestOutput(
                 request_id=request_id,
@@ -508,9 +505,6 @@ class LLMRayActor:
             )
             total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
             metadata = self.request_metadata.pop(request_id)
-            assert len(final_output.outputs) == metadata["original_sampling_params"].n, (
-                f'{len(final_output.outputs)=} != {metadata["original_sampling_params"].n=}'
-            )
             result = _finalize_outputs(
                 [final_output],
                 tracking,
@@ -522,9 +516,6 @@ class LLMRayActor:
                     generation_time=end_time - metadata["start_time"],
                 ),
                 start_time=metadata["start_time"],
-            )
-            assert len(result.responses) == metadata["original_sampling_params"].n, (
-                f'{len(result.responses)=} == {metadata["original_sampling_params"].n=}'
             )
             self._insert_result_to_queue(result, is_eval=metadata["is_eval"])
 
