@@ -20,6 +20,7 @@ import queue
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -69,6 +70,20 @@ class EngineConfig:
     DEFAULT_SEED = 42  # Default random seed
     DEFAULT_MAX_MODEL_LEN = 1024  # Default maximum model length
     ACTOR_TIMEOUT_MINUTES = 120  # Actor creation timeout in minutes
+
+
+@dataclass
+class RequestState:
+    """Encapsulates the processing state for a single request.
+
+    This dataclass replaces the tuple return from _initialize_request to provide
+    better type safety and code clarity.
+    """
+
+    tracking: Dict[str, Any]  # Tool tracking dictionary
+    tokenizer: Any  # Tokenizer for encoding/decoding
+    outputs: List[vllm.RequestOutput]  # Accumulated outputs from the request
+    iteration: int  # Current iteration count in processing loop
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -552,21 +567,21 @@ class LLMRayActor:
 
         return total_prompt_tokens, total_generation_tokens, earliest_start_time
 
-    def _initialize_request(self, request: PromptRequest) -> Tuple[Dict[str, Any], Any, List[vllm.RequestOutput], int]:
+    def _initialize_request(self, request: PromptRequest) -> RequestState:
         """Initialize tracking and engine for a new request.
 
         Args:
             request: The prompt request to initialize
 
         Returns:
-            Tuple of (tracking, tokenizer, outputs, iteration)
+            RequestState containing all processing variables for the request
         """
         tracking = _init_tool_tracking()
         tokenizer = self.llm_engine.tokenizer
         add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
         outputs: List[vllm.RequestOutput] = []
         iteration = 0
-        return tracking, tokenizer, outputs, iteration
+        return RequestState(tracking=tracking, tokenizer=tokenizer, outputs=outputs, iteration=iteration)
 
     def _finalize_and_queue_request(
         self, request: PromptRequest, tracking: Dict[str, Any], outputs: List[vllm.RequestOutput], iteration: int
@@ -636,22 +651,22 @@ class LLMRayActor:
             return requests_processed
 
         # Initialize processing variables for the request
-        tracking, tokenizer, outputs, iteration = self._initialize_request(request)
+        state = self._initialize_request(request)
 
         while True:
-            iteration += 1
+            state.iteration += 1
 
             # Poll tool futures first (matching ToolUseLLM order)
-            outputs.extend(self._poll_tool_futures(tracking, tokenizer))
+            state.outputs.extend(self._poll_tool_futures(state.tracking, state.tokenizer))
 
             # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
             if self.llm_engine.has_unfinished_requests():
-                outputs = self._step_engine(request, tracking, outputs)
+                state.outputs = self._step_engine(request, state.tracking, state.outputs)
 
             # Check termination condition for current request (matching ToolUseLLM exactly)
-            if self._is_request_complete(tracking):
+            if self._is_request_complete(state.tracking):
                 # Finalize and queue the completed request
-                self._finalize_and_queue_request(request, tracking, outputs, iteration)
+                self._finalize_and_queue_request(request, state.tracking, state.outputs, state.iteration)
                 requests_processed += 1
 
                 # Get next request
@@ -660,17 +675,36 @@ class LLMRayActor:
                     return requests_processed
 
                 # Initialize processing variables for the next request
-                tracking, tokenizer, outputs, iteration = self._initialize_request(request)
+                state = self._initialize_request(request)
 
     def _poll_tool_futures(self, tracking: Dict[str, Any], tokenizer: Any) -> List[vllm.RequestOutput]:
         """Poll and handle completed tool executions.
 
+        This method manages the complex lifecycle of tool execution within the generation loop.
+        It handles two critical edge cases to ensure proper token management:
+
+        **Edge Case 1: Model Context Length Clipping**
+        When combining the original prompt, previously generated tokens, and new tool output,
+        the total may exceed the model's maximum context length. In this case, we truncate
+        the tool output from the end to fit within the model's constraints.
+
+        **Edge Case 2: Per-Request max_tokens Clipping**
+        Each request has a max_tokens limit that constrains total generation length.
+        We clip tool output to ensure we don't exceed this per-request limit, and
+        calculate remaining tokens available for future generation.
+
+        The method also tracks comprehensive tool execution metadata including:
+        - Call counts, timeouts, errors, outputs, and runtime statistics
+        - Token masking to distinguish user-generated vs tool-generated content
+        - Request continuation logic based on available token budget
+
         Args:
-            tracking: Tool tracking dictionary
-            tokenizer: The tokenizer for encoding tool outputs
+            tracking: Tool tracking dictionary containing pending futures and metadata
+            tokenizer: The tokenizer for encoding tool outputs into token IDs
 
         Returns:
-            List of completed outputs
+            List of completed request outputs that have finished all tool processing
+            and cannot continue generation (either due to token limits or completion)
         """
         if not self.tools or not tracking["pending_tool_futures"]:
             return []
