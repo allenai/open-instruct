@@ -228,13 +228,17 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=
         setattr(output, "tool_called", tracking["tool_called"][req_id])
 
     # Merge n completions into the same outputs
+    # Filter tracking data to only include the current request
+    request_id = outputs[0].request_id
+    relevant_outputs = {k: v for k, v in tracking["concat_outputs"].items() if k.startswith(request_id + "_")}
+
     merged_outputs = {}
-    for req_id in tracking["concat_outputs"]:
+    for req_id, output in relevant_outputs.items():
         real_req_id = "_".join(req_id.split("_")[:-1])
         if real_req_id not in merged_outputs:
-            merged_outputs[real_req_id] = tracking["concat_outputs"][req_id]
+            merged_outputs[real_req_id] = output
         else:
-            merged_outputs[real_req_id].outputs.append(tracking["concat_outputs"][req_id].outputs[0])
+            merged_outputs[real_req_id].outputs.extend(output.outputs)
 
     # Sort by dataset index (extracted from request_id format: "{prefix}_{training_step}_{dataset_index}")
     final_outputs = sorted(
@@ -490,8 +494,8 @@ class LLMRayActor:
             request_id = "_".join(output.request_id.split("_")[:-1])
             request_outputs[request_id].append(output)
         for request_id, outputs in request_outputs.items():
-            assert len(outputs) == self.request_metadata[request_id].n, (
-                f"{len(outputs)=} != {self.request_metadata[request_id].n=}"
+            assert len(outputs) == self.request_metadata[request_id]["original_sampling_params"].n, (
+                f"{len(outputs)=} != {self.request_metadata[request_id]['original_sampling_params'].n=}"
             )
         for request_id, outs in request_outputs.items():
             final_output = vllm.RequestOutput(
