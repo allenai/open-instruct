@@ -71,12 +71,10 @@ def compute_longform_finegrained_reward(response: str, ground_truth: Dict[str, A
     finegrained_scores = combine_all_reward_spans(
         response=response,
         extracted_context=extracted_context,
-        extracted_answer=extracted_answer,
-        extracted_citations=extracted_citations,
-        format_reward=format_reward,
         num_search_turns_reward=num_search_turns_reward,
         rubric_reward=rubric_reward,
-        citation_reward=citation_reward
+        citation_reward=citation_reward,
+        format_reward=format_reward,
     )
     
     # Create log values for tracking

@@ -94,3 +94,58 @@ def _score_rubric(response: str, ground_truth: Dict[str, Any], use_general_rubri
         raise ValueError(f"Unsupported rubric format found in ground truth: {ground_truth}")
     
     return rubric_scores
+
+
+
+def _score_property_with_spans(response: str, question: str, prop: str) -> float:
+    """
+    Score the response as per the annotation rubric/criterion represented here by ``prop``.
+    The score is calculated by asking an LLM to judge the response for satisfaction of the rubric/criterion
+    on a scale of 0-2. 
+    In addition, output the spans of the response that are judged as satisfying the criterion.
+    :param response: the response to be scored
+    :param question: the question for which the response is being scored
+    :param prop: the rubric/criterion to be satisfied
+    :return in a json format: 
+        score (int) between 0 and 1 after normalizing the LLM score
+        spans (list of strings) of the verbatim response that are judged as satisfying the criterion
+    """
+    system_prompt = """You will be given a question someone asked (in <question></question> tags) and the corresponding response (in <response></response> tags) given to them by an assistant.  You will then be given a specific criterion of the response to evaluate (in <criterion></criterion> tags).
+Return a score on a scale of 0 to 2 indicating how appropriate the response is based on the given criterion. Judge only the specified aspect(s), not any other qualities of the answer. In addition, output the spans of the response that are judged as satisfying the criterion. You should output the spans in the format of verbatim snippets from the response that are judged as satisfying the criterion. Output JSON in the format: {{"score": x, "spans": [y]}}."""
+    user_prompt = (
+        f"""<question>{question}</question>\n<response>{response}</response>\n<criterion>{prop}</criterion>"""
+    )
+
+    # wrap in try-except to handle litellm API errors
+    # these might just be ephemeral, so we don't want to crash the whole training job.
+    try:
+        resp = run_litellm(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model_name=os.environ.get("RUBRIC_JUDGE_MODEL", "gpt-4.1"),
+        )
+
+        obj = extract_json_from_response(resp)
+        if not obj:
+            return 0.0, []
+        
+        # Validate that obj is a dictionary and has the expected structure
+        if not isinstance(obj, dict) or "score" not in obj:
+            LOGGER.warning(f"Invalid JSON structure in response: {obj}")
+            return 0.0, []
+            
+        # Validate that score is a number
+        try:
+            score = float(obj["score"])
+            spans = obj["spans"]
+            for span in spans:
+                print("Span included in the response: ", span in response)
+            print("Tagged response ratio: ", len(" ".join(spans)) / len(response))
+            return score / 2.0, spans
+        except (ValueError, TypeError) as e:
+            LOGGER.warning(f"Invalid score value in response: {obj['score']}, error: {e}")
+            return 0.0, []
+            
+    except Exception as e:
+        LOGGER.warning(f"Error scoring rubric: {e}")
+        return 0.0, []
