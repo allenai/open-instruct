@@ -14,7 +14,8 @@ dist/
 build/
 *.egg
 local_dataset_cache/
-
+benchmark_cache/
+output/
 
 # Virtual environments
 .venv/
