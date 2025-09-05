@@ -9,23 +9,23 @@ dataset_mix="hamishivi/rlvr_orz_math_57k_collected 56878"
 evals="minerva_math::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,aime:zs_cot_r1::pass_at_32_2024_temp1,aime:zs_cot_r1::pass_at_32_2025_temp1"
 
 # all I've changed with the checkpoints is the config.json, model_type=olmo3 and architectures is OLMo3ForCausalLM 
-# model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round5-100B-olmo25_7b-anneal-2T-f07e3111/step47684-hf"
-# gs_model_name="olmo2.5-2T-midtraining-round5-100B"
+model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round5-100B-olmo25_7b-anneal-2T-f07e3111/step47684-hf"
+gs_model_name="olmo2.5-2T-midtraining-round5-100B"
 #
 # model_name_or_path="/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/olmo3-hparam-search/olmo2.5-LC-R3-olmo2-tulu3-mix-num_3"
 # gs_model_name="olmo2.5-lc-r3-jacobsft-mix3"
 #
 
-model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/lucas/olmo25_7b_lc_64k_2T_M100B_r5-midtrain_round3_qwenlike_s2pdf_gzip2080_10B-b4b8fe01/step2385-hf"
-gs_model_name="olmo2.5-2T-R5100B-R3LC10B"
+# model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/lucas/olmo25_7b_lc_64k_2T_M100B_r5-midtrain_round3_qwenlike_s2pdf_gzip2080_10B-b4b8fe01/step2385-hf"
+# gs_model_name="olmo2.5-2T-R5100B-R3LC10B"
 
 exp_name="grpo_mathonly_1m_${gs_model_name}"
 EXP_NAME=${EXP_NAME:-${exp_name}}
 
 
 # cluster
-cluster=ai2/augusta-google-1
-# cluster=ai2/jupiter-cirrascale-2
+# cluster=ai2/augusta
+cluster=ai2/jupiter
 
 NUM_GPUS=${NUM_GPUS:-8}
 
@@ -50,7 +50,7 @@ python open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
     --num_samples_per_prompt_rollout 16 \
-    --num_unique_prompts_rollout 128 \
+    --num_unique_prompts_rollout 8 \
     --num_mini_batches 4 \
     --num_epochs 1 \
     --learning_rate 1e-6 \
@@ -60,10 +60,10 @@ python open_instruct/grpo_fast.py \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k 32 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 18432 \
+    --max_token_length 8192 \
     --max_prompt_token_length 2048 \
-    --response_length 16384 \
-    --pack_length 32768 \
+    --response_length 6000 \
+    --pack_length 8192 \
     --model_name_or_path ${model_name_or_path} \
     --chat_template_name olmo_thinker_r1_style \
     --stop_strings "</answer>" \
@@ -88,4 +88,4 @@ python open_instruct/grpo_fast.py \
     --oe_eval_max_length 8192 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --oe_eval_tasks ${evals} \
-    --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto
+    --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto --verbose

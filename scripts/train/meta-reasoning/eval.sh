@@ -1,22 +1,24 @@
 # /weka/oe-adapt-default/allennlp/deletable_checkpoint/stellal/grpo_mathonly_1m_olmo3-meta-fvi-noisy-5b-5b-5b__1__1755969330_checkpoints
 # /weka/oe-adapt-default/allennlp/deletable_checkpoint/stellal/grpo_mathonly_1m_olmo3-meta-noisy-fvi-5b-5b-5b__1__1755969488_checkpoints
 
-
+model_id=grpo_mathonly_1m_olmo2.5-2T-everything-r19-random__1__1756580755
+location=/weka/oe-adapt-default/allennlp/deletable_checkpoint/stellal/${model_id}_checkpoints
 
 steps=(
-  100 200 300 400 500 600 700 800 900 1000 1200 1300
+  50 100 150 200 250 300 350 400 450 500
 )
+
 length=8192
 for step in "${steps[@]}"; do
 
   echo "Running eval for $path"
   # model name to be the second to last part of the path
-  model_name=$(basename $(dirname $path))_$(basename $path)
-  echo "Model name: $model_name"
+  # model_name=$(basename $(dirname $path))_$(basename $path)
+  # echo "Model name: $model_name"
   python scripts/submit_eval_jobs.py \
-        --model_name olmo3_10b_microanneal_metareasoning_13639_math_code_rl__1__1753343950_step_${step} \
-        --location gs://ai2-llm/post-training//faezeb//output/olmo3_10b_microanneal_metareasoning_13639_math_code_rl__1__1753343950_checkpoints/step_${step} \
-        --cluster ai2/augusta-google-1 \
+        --model_name ${model_id}_step_${step} \
+        --location ${location}/step_${step} \
+        --cluster ai2/jupiter-cirrascale-2 \
         --workspace "ai2/tulu-3-results" \
         --priority high \
         --preemptible \
