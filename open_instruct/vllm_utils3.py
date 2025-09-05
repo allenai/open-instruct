@@ -20,8 +20,9 @@ import queue
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import ray
 import torch
@@ -47,6 +48,42 @@ from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
+
+
+# Configuration constants
+class ProcessingConfig:
+    """Configuration constants for request processing."""
+
+    QUEUE_INSERT_TIMEOUT_SECONDS = 10  # Timeout for inserting results into queue
+    RAY_WAIT_TIMEOUT_SECONDS = 0.1  # Timeout for ray.wait operations
+    TOOL_EXECUTOR_MAX_WORKERS = 20  # Maximum workers for tool execution ThreadPoolExecutor
+    ENGINE_INITIALIZATION_TIMEOUT_SECONDS = 300  # Timeout for engine initialization
+    DEFAULT_REQUEST_TIMEOUT_SECONDS = 60.0  # Default timeout for request processing
+    TOOL_PROCESSING_N_VALUE = 1  # Number of completions for tool processing
+
+
+class EngineConfig:
+    """Configuration constants for engine setup."""
+
+    HYBRID_ENGINE_GPU_FRACTION = 0.2  # GPU allocation for hybrid engines
+    FULL_ENGINE_GPU_COUNT = 1  # GPU count for full engines
+    DEFAULT_SEED = 42  # Default random seed
+    DEFAULT_MAX_MODEL_LEN = 1024  # Default maximum model length
+    ACTOR_TIMEOUT_MINUTES = 120  # Actor creation timeout in minutes
+
+
+@dataclass
+class RequestState:
+    """Encapsulates the processing state for a single request.
+
+    This dataclass replaces the tuple return from _initialize_request to provide
+    better type safety and code clarity.
+    """
+
+    tracking: Dict[str, Any]  # Tool tracking dictionary
+    tokenizer: Any  # Tokenizer for encoding/decoding
+    outputs: List[vllm.RequestOutput]  # Accumulated outputs from the request
+    iteration: int  # Current iteration count in processing loop
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -322,7 +359,7 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
     for batch_idx, prompt in enumerate(request.prompts):
         request_id = f"{prefix}_{request.training_step}_{batch_idx}"
         sampling_params = request.generation_config.clone()
-        sampling_params.n = 1  # Use n=1 for tool processing
+        sampling_params.n = ProcessingConfig.TOOL_PROCESSING_N_VALUE  # Use n=1 for tool processing
         request_metadata[request_id] = {
             "is_eval": request.is_eval,
             "dataset_index": request.dataset_index[batch_idx],
@@ -362,7 +399,7 @@ class LLMRayActor:
         self.request_metadata = {}
 
         if self.tools:
-            self.executor = ThreadPoolExecutor(max_workers=20)
+            self.executor = ThreadPoolExecutor(max_workers=ProcessingConfig.TOOL_EXECUTOR_MAX_WORKERS)
         else:
             self.executor = None
 
@@ -400,7 +437,7 @@ class LLMRayActor:
     def _should_stop(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
             should_stop_ref = self.actor_manager.should_stop.remote()
-            ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
+            ready_refs, _ = ray.wait([should_stop_ref], timeout=ProcessingConfig.RAY_WAIT_TIMEOUT_SECONDS)
             if ready_refs:
                 self._should_stop_value = ray.get(ready_refs[0])
                 self._last_should_stop_update = time.perf_counter()
@@ -412,87 +449,79 @@ class LLMRayActor:
         """Insert result into the appropriate queue with error handling."""
         try:
             results_queue = self.eval_results_queue if is_eval else self.results_queue
-            results_queue.put(result, timeout=10)
+            results_queue.put(result, timeout=ProcessingConfig.QUEUE_INSERT_TIMEOUT_SECONDS)
         except queue.Full:
             queue_name = "eval" if is_eval else "train"
             self.logger.warning(f"{queue_name} results queue is full, discarding result.")
 
-    def process_from_queue(self, timeout: float = 60.0):
-        """Run generation loop using LLMEngine directly, with optional tool support.
+    def fill_engine(self, timeout: float = ProcessingConfig.DEFAULT_REQUEST_TIMEOUT_SECONDS):
+        """Loop until we get a request or should stop.
 
         Returns:
-            int: Number of requests processed (0 or 1)
+            PromptRequest or None: The request if available, None if should stop or timeout
         """
         while True:
+            # Check if we should stop accepting new requests
             if self._should_stop():
-                return 0
+                return None
 
             try:
                 request = self.prompt_queue.get(timeout=timeout)
+                self.logger.info(
+                    f"[LLMRayActor] Processing request with {len(request.prompts)} prompts, tools={bool(self.tools)}"
+                )
+                return request
             except queue.Empty:
-                return 0
+                return None
 
-            result = self._process_request(request)
+    def _step_engine(
+        self, request: PromptRequest, tracking: Dict[str, Any], outputs: List[vllm.RequestOutput]
+    ) -> List[vllm.RequestOutput]:
+        """Process engine step outputs and handle tool processing.
 
-            self._insert_result_to_queue(result, is_eval=request.is_eval)
-            return 1
+        Args:
+            request: The prompt request being processed
+            tracking: Tool tracking dictionary
+            outputs: Current list of outputs
 
-    def _process_request(self, request):
-        """Unified processing for both tool and non-tool generation."""
+        Returns:
+            Updated outputs list
+        """
+        step_outputs = [o for o in self.llm_engine.step() if o.finished]
+        for output in step_outputs:
+            self.logger.info(f"{len(output.outputs)=}")
+            result = _handle_output(
+                output, self.tools, tracking, request.generation_config, self.max_tool_calls, self.executor
+            )
+            # Result is None when we do more tool processing.
+            if result is not None:
+                outputs.append(result)
+        return outputs
 
-        self.logger.info(
-            f"[LLMRayActor] Processing request with {len(request.prompts)} prompts, tools={bool(self.tools)}"
-        )
+    def _combine_request_outputs(
+        self, outputs: List[vllm.RequestOutput], request: PromptRequest
+    ) -> Tuple[Dict[str, List[vllm.RequestOutput]], List[str], List[vllm.RequestOutput]]:
+        """Combine outputs from multiple sub-requests into final format.
 
-        tracking = _init_tool_tracking() if self.tools else None
-        tokenizer = self.llm_engine.tokenizer
+        Args:
+            outputs: List of request outputs to combine
+            request: The original prompt request
 
-        add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
-
-        outputs = []
-        iteration = 0
-
-        while True:
-            iteration += 1
-
-            # Poll tool futures first (matching ToolUseLLM order)
-            if tracking and tracking.get("pending_tool_futures"):
-                outputs.extend(self._poll_tool_futures(tracking, tokenizer))
-
-            # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
-            if self.llm_engine.has_unfinished_requests():
-                step_outputs = [o for o in self.llm_engine.step() if o.finished]
-                for output in step_outputs:
-                    self.logger.info(f"{len(output.outputs)=}")
-                    result = _handle_output(
-                        output, self.tools, tracking, request.generation_config, self.max_tool_calls, self.executor
-                    )
-                    # Result is None when we do more tool processing.
-                    if result is not None:
-                        outputs.append(result)
-
-            # Check termination condition (matching ToolUseLLM exactly)
-            pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
-            if not self.llm_engine.has_unfinished_requests() and pending_count == 0:
-                self.logger.info(f"[LLMRayActor] Terminating after {iteration} iterations with {len(outputs)} outputs")
-                break
-
-        end_time = time.time()
-        total_prompt_tokens = 0
-        total_generation_tokens = 0
-        earliest_start_time = float("inf")
-
-        # Now, we combine outputs:
+        Returns:
+            Tuple of (combined_outputs, ordered_ids, final_outputs)
+        """
         combined_outputs = defaultdict(list)
         for output in outputs:
             # Remove the sub_idx.
             request_id = "_".join(output.request_id.split("_")[:-1])
             combined_outputs[request_id].append(output)
+
         # Preserve original order from request.dataset_index
         prefix = "eval" if request.is_eval else "train"
         # request_id is batch_num _ training_step _ within_batch_idx _ repetition_idx.
         # we order by within_batch_idx.
         ordered_ids = [f"{prefix}_{request.training_step}_{batch_idx}" for batch_idx in range(len(request.prompts))]
+
         final_outputs = []
         for request_id in ordered_ids:
             outs = combined_outputs[request_id]
@@ -507,13 +536,76 @@ class LLMRayActor:
                     finished=outs[0].finished,
                 )
             )
+
+        return combined_outputs, ordered_ids, final_outputs
+
+    def _calculate_token_statistics(
+        self, combined_outputs: Dict[str, List[vllm.RequestOutput]], ordered_ids: List[str], request: PromptRequest
+    ) -> Tuple[int, int, float]:
+        """Calculate token statistics for the completed request.
+
+        Args:
+            combined_outputs: Dictionary of combined outputs by request ID
+            ordered_ids: List of request IDs in order
+            request: The original prompt request
+
+        Returns:
+            Tuple of (total_prompt_tokens, total_generation_tokens, earliest_start_time)
+        """
+        total_prompt_tokens = 0
+        total_generation_tokens = 0
+        earliest_start_time = float("inf")
+
+        for request_id in ordered_ids:
+            outs = combined_outputs[request_id]
             metadata = self.request_metadata.pop(request_id)
             total_prompt_tokens += metadata["prompt_tokens"]
             earliest_start_time = min(earliest_start_time, metadata["start_time"])
             for output in outs:
                 for completion in output.outputs:
                     total_generation_tokens += len(completion.token_ids)
+
+        return total_prompt_tokens, total_generation_tokens, earliest_start_time
+
+    def _initialize_request(self, request: PromptRequest) -> RequestState:
+        """Initialize tracking and engine for a new request.
+
+        Args:
+            request: The prompt request to initialize
+
+        Returns:
+            RequestState containing all processing variables for the request
+        """
+        tracking = _init_tool_tracking()
+        tokenizer = self.llm_engine.tokenizer
+        add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
+        outputs: List[vllm.RequestOutput] = []
+        iteration = 0
+        return RequestState(tracking=tracking, tokenizer=tokenizer, outputs=outputs, iteration=iteration)
+
+    def _finalize_and_queue_request(
+        self, request: PromptRequest, tracking: Dict[str, Any], outputs: List[vllm.RequestOutput], iteration: int
+    ) -> None:
+        """Finalize a completed request and add it to the appropriate queue.
+
+        Args:
+            request: The completed prompt request
+            tracking: Tool tracking dictionary
+            outputs: List of outputs from the request
+            iteration: Number of processing iterations
+        """
+        self.logger.info(f"[LLMRayActor] Terminating request after {iteration} iterations with {len(outputs)} outputs")
+
+        # Combine outputs and calculate statistics
+        combined_outputs, ordered_ids, final_outputs = self._combine_request_outputs(outputs, request)
+        total_prompt_tokens, total_generation_tokens, earliest_start_time = self._calculate_token_statistics(
+            combined_outputs, ordered_ids, request
+        )
+
+        # Finalize and queue result
+        end_time = time.time()
         generation_time = end_time - earliest_start_time
+
         result = _finalize_outputs(
             final_outputs,
             tracking,
@@ -526,10 +618,94 @@ class LLMRayActor:
             ),
             start_time=request.start_time,
         )
-        return result
 
-    def _poll_tool_futures(self, tracking, tokenizer):
-        """Poll and handle completed tool executions."""
+        self._insert_result_to_queue(result, is_eval=request.is_eval)
+
+    def _is_request_complete(self, tracking: Dict[str, Any]) -> bool:
+        """Check if current request processing is complete.
+
+        Args:
+            tracking: Tool tracking dictionary
+
+        Returns:
+            True if request is complete, False otherwise
+        """
+        has_pending_tools = bool(tracking and tracking.get("pending_tool_futures"))
+        has_unfinished_requests = self.llm_engine.has_unfinished_requests()
+        return not has_unfinished_requests and not has_pending_tools
+
+    def process_from_queue(self, timeout: float = ProcessingConfig.DEFAULT_REQUEST_TIMEOUT_SECONDS) -> int:
+        """Run generation loop using LLMEngine directly, with optional tool support.
+
+        Args:
+            timeout: Maximum time to wait for a request from the queue
+
+        Returns:
+            Number of requests processed
+        """
+        requests_processed = 0
+
+        # Get initial request
+        request = self.fill_engine(timeout)
+        if request is None:
+            return requests_processed
+
+        # Initialize processing variables for the request
+        state = self._initialize_request(request)
+
+        while True:
+            state.iteration += 1
+
+            # Poll tool futures first (matching ToolUseLLM order)
+            state.outputs.extend(self._poll_tool_futures(state.tracking, state.tokenizer))
+
+            # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
+            if self.llm_engine.has_unfinished_requests():
+                state.outputs = self._step_engine(request, state.tracking, state.outputs)
+
+            # Check termination condition for current request (matching ToolUseLLM exactly)
+            if self._is_request_complete(state.tracking):
+                # Finalize and queue the completed request
+                self._finalize_and_queue_request(request, state.tracking, state.outputs, state.iteration)
+                requests_processed += 1
+
+                # Get next request
+                request = self.fill_engine(timeout)
+                if request is None:
+                    return requests_processed
+
+                # Initialize processing variables for the next request
+                state = self._initialize_request(request)
+
+    def _poll_tool_futures(self, tracking: Dict[str, Any], tokenizer: Any) -> List[vllm.RequestOutput]:
+        """Poll and handle completed tool executions.
+
+        This method manages the complex lifecycle of tool execution within the generation loop.
+        It handles two critical edge cases to ensure proper token management:
+
+        **Edge Case 1: Model Context Length Clipping**
+        When combining the original prompt, previously generated tokens, and new tool output,
+        the total may exceed the model's maximum context length. In this case, we truncate
+        the tool output from the end to fit within the model's constraints.
+
+        **Edge Case 2: Per-Request max_tokens Clipping**
+        Each request has a max_tokens limit that constrains total generation length.
+        We clip tool output to ensure we don't exceed this per-request limit, and
+        calculate remaining tokens available for future generation.
+
+        The method also tracks comprehensive tool execution metadata including:
+        - Call counts, timeouts, errors, outputs, and runtime statistics
+        - Token masking to distinguish user-generated vs tool-generated content
+        - Request continuation logic based on available token budget
+
+        Args:
+            tracking: Tool tracking dictionary containing pending futures and metadata
+            tokenizer: The tokenizer for encoding tool outputs into token IDs
+
+        Returns:
+            List of completed request outputs that have finished all tool processing
+            and cannot continue generation (either due to token limits or completion)
+        """
         if not self.tools or not tracking["pending_tool_futures"]:
             return []
 
@@ -612,7 +788,7 @@ class LLMRayActor:
         group_name,
         backend,
         use_ray=False,
-        timeout_minutes=120,
+        timeout_minutes=EngineConfig.ACTOR_TIMEOUT_MINUTES,
     ):
         return self.llm_engine.collective_rpc(
             "init_process_group",
@@ -789,7 +965,9 @@ def create_vllm_engines(
                 max_model_len=max_model_len,
                 gpu_memory_utilization=vllm_gpu_memory_utilization,
                 bundle_indices=bundle_indices,
-                num_gpus=0.2 if use_hybrid_engine else 1,
+                num_gpus=EngineConfig.HYBRID_ENGINE_GPU_FRACTION
+                if use_hybrid_engine
+                else EngineConfig.FULL_ENGINE_GPU_COUNT,
                 enable_sleep_mode=vllm_enable_sleep,
                 noset_visible_devices=ray_noset_visible_devices(),
                 prompt_queue=prompt_queue,
@@ -806,7 +984,9 @@ def create_vllm_engines(
     # Verify engines initialized successfully
     try:
         ray_get_with_progress(
-            [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300
+            [engine.ready.remote() for engine in vllm_engines],
+            "Initializing vLLM engines",
+            timeout=ProcessingConfig.ENGINE_INITIALIZATION_TIMEOUT_SECONDS,
         )
     except TimeoutError as e:
         logger.error(f"vLLM engines failed to initialize: {e}")
@@ -856,9 +1036,9 @@ if __name__ == "__main__":
         enforce_eager=True,
         pretrain="facebook/opt-125m",
         revision="main",
-        seed=42,
+        seed=EngineConfig.DEFAULT_SEED,
         enable_prefix_caching=False,
-        max_model_len=1024,
+        max_model_len=EngineConfig.DEFAULT_MAX_MODEL_LEN,
     )
     llm = vllm_engines[0]
     from vllm.utils import get_ip, get_open_port
