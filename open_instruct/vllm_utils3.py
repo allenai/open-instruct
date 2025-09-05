@@ -495,7 +495,7 @@ class LLMRayActor:
             for output in tool_outputs:
                 request_id = "_".join(output.request_id.split("_")[:-1])
                 request_outputs[request_id].append(output)
-                
+
                 # Check if we have N requests for this request_id
                 expected_n = self.request_metadata[request_id]["original_sampling_params"].n
                 if len(request_outputs[request_id]) == expected_n:
@@ -521,7 +521,7 @@ class LLMRayActor:
                     if result is not None:
                         request_id = "_".join(result.request_id.split("_")[:-1])
                         request_outputs[request_id].append(result)
-                        
+
                         # Check if we have N requests for this request_id
                         expected_n = self.request_metadata[request_id]["original_sampling_params"].n
                         if len(request_outputs[request_id]) == expected_n:
