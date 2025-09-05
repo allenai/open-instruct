@@ -768,13 +768,12 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         # Check that total requests equal total queries
         self.assertEqual(request_count, num_queries, "Total requests should match total queries")
-        
+
         # With individual prompts, we should have exactly num_queries requests
         self.assertEqual(request_count, num_queries, f"Should have {num_queries} individual PromptRequests")
 
     def test_streaming_accumulation_basic(self):
         """Test basic streaming accumulation with in-order results."""
-        num_engines = 2
         num_prompts = 8
 
         # Create test data
@@ -826,7 +825,6 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
     def test_streaming_with_multiple_samples(self):
         """Test streaming accumulation with multiple samples per prompt."""
-        num_engines = 2
         num_prompts = 4
         num_samples = 3
 
