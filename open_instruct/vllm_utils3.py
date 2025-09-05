@@ -522,28 +522,33 @@ class LLMRayActor:
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
+        Runs continuously until should_stop is set, periodically adding new requests
+        and yielding control to allow weight synchronization.
+
         Returns:
             int: Number of requests processed
         """
-        num_processed = self.fill_engine(timeout=timeout)
-
-        if num_processed == 0:
-            return num_processed
-
         tracking = _init_tool_tracking()
         request_outputs = defaultdict(list)
         total_processed = 0
+        last_fill_time = 0
+        fill_interval = 1.0  # Fill engine every 1 second
 
-        while True:
-            tool_outputs = self._poll_tool_futures(tracking, self.llm_engine.tokenizer)
+        while not self._should_stop():
             current_time = time.time()
+
+            # Periodically fill the engine with new requests
+            if current_time - last_fill_time > fill_interval:
+                self.fill_engine(timeout=0.1)  # Short timeout to avoid blocking
+                last_fill_time = current_time
+
+            tool_outputs = self._poll_tool_futures(tracking, self.llm_engine.tokenizer)
             for output in tool_outputs:
                 request_id = _extract_base_request_id(output.request_id)
                 request_outputs[request_id].append(output)
-
                 total_processed += self._maybe_process_and_insert(request_id, request_outputs, tracking, current_time)
 
-            # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
+            # Process engine steps - ONLY if there are unfinished requests
             if self.llm_engine.has_unfinished_requests():
                 step_outputs = [o for o in self.llm_engine.step() if o.finished]
                 for output in step_outputs:
@@ -560,10 +565,12 @@ class LLMRayActor:
                     if result is not None:
                         request_id = _extract_base_request_id(result.request_id)
                         request_outputs[request_id].append(result)
-
                         total_processed += self._maybe_process_and_insert(
                             request_id, request_outputs, tracking, current_time
                         )
+
+            # If no work to do, break to yield control back to generate_thread,
+            # allowing weight_sync_thread to acquire the LLMRayActor lock
             if self.llm_engine.get_num_unfinished_requests() + len(tracking["pending_tool_futures"]) == 0:
                 break
 
