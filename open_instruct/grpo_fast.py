@@ -2177,84 +2177,72 @@ def load_data_from_packing_thread(
     return collated_data, data_thread_metrics, num_total_tokens
 
 
-def weight_sync_thread(
-    args: Args,
+def sync_and_generate_thread(
+    args,
+    vllm_engines,
     stop_event: threading.Event,
     weight_sync_trigger_event: threading.Event,
-    start_generate_trigger_event: threading.Event,
     policy_group: ModelGroup,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
-    resume_training_step: int = 1,
+    generate_metrics_Q: Queue,
 ):
-    """Thread function that handles weight sync operations and actor manager coordination."""
-    logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
-    if resume_training_step > 1:
-        weight_sync_trigger_event.set()
+    """Combined thread that handles both weight sync and generation operations."""
+    logger.info("[Sync & Generate Thread] 🚀 Starting sync and generate thread")
 
     while not stop_event.is_set():
-        # Wait for weight sync trigger from main thread
-        if not weight_sync_trigger_event.wait(timeout=1.0):
-            continue
+        # Check if we should do weight sync
+        if weight_sync_trigger_event.wait(timeout=1.0):
+            with Timer("[Weight Sync]") as timer:
+                logger.debug("[Sync & Generate Thread] Starting weight sync")
 
-        with Timer("[Weight Sync]") as timer:
-            logger.debug("[Weight Sync Thread] Starting weight sync")
+                # Set actors to stop during weight sync
+                ray.get(actor_manager.set_should_stop.remote(True))
+                logger.debug("[Sync & Generate Thread] Set should_stop to True for weight sync")
 
-            # Set actors to stop
-            ray.get(actor_manager.set_should_stop.remote(True))
-            start_generate_trigger_event.clear()
-            logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
+                # Broadcast weights to vLLM engines
+                weight_broadcast_futures: List[ray.ObjectRef] = [
+                    m.broadcast_to_vllm.remote() for m in policy_group.models
+                ]
 
-            # Broadcast weights to vLLM engines
-            # First get the futures
-            weight_broadcast_futures: List[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+                # Wait for all weight updates to complete
+                ray_get_with_progress(
+                    weight_broadcast_futures,
+                    desc="[Sync & Generate Thread] Waiting for weight updates to complete",
+                    enable=args.verbose,
+                )
 
-            # Wait for all weight updates to complete
-            ray_get_with_progress(
-                weight_broadcast_futures,
-                desc="[Weight Sync Thread] Waiting for weight updates to complete",
-                enable=args.verbose,
-            )
+                # Allow actors to resume
+                ray.get(actor_manager.set_should_stop.remote(False))
+                logger.debug("[Sync & Generate Thread] Set should_stop to False after weight sync")
 
-            # Allow actors to resume
-            ray.get(actor_manager.set_should_stop.remote(False))
-            logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
+            try:
+                weight_sync_metrics_Q.put_nowait({"time/weight_sync": timer.duration})
+            except Full:
+                logger.warning("[Sync & Generate Thread] weight sync metrics queue full, skipping metric")
 
-        try:
-            weight_sync_metrics_Q.put_nowait({"time/weight_sync": timer.duration})
-        except Full:
-            logger.warning("[Weight Sync Thread] weight sync metrics queue full, skipping metric")
+            # Clear the trigger event and reset sync flag
+            weight_sync_trigger_event.clear()
 
-        # Clear the event for next iteration
-        weight_sync_trigger_event.clear()
-        start_generate_trigger_event.set()
-
-    logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
-
-
-def generate_thread(
-    args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q, start_generate_trigger_event
-):
-    """Thread function that repeatedly calls process_from_queue on vllm engines."""
-    logger.info("[Generate Thread] 🚀 Starting generation thread")
-    while not stop_event.is_set():
-        start_generate_trigger_event.wait()
+        # Perform generation
         with Timer("🔥 Generation time") as timer:
             processed_results = ray_get_with_progress(
                 [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
-                desc="[Generate Thread] Waiting for vLLM engines to process",
+                desc="[Sync & Generate Thread] Waiting for vLLM engines to process",
                 enable=args.verbose,
             )
             num_processed = sum(int(result) for result in processed_results)
             # Suppress timing output if nothing was processed
             if num_processed == 0:
                 timer.noop = True
+
         if num_processed > 0:
             try:
                 generate_metrics_Q.put_nowait({"time/generation": timer.duration})
             except Full:
-                logger.warning("[Generate Thread] generate metrics queue full, skipping metric")
-    logger.info("[Generate Thread] 🛑 Stopping generation thread")
+                logger.warning("[Sync & Generate Thread] generate metrics queue full, skipping metric")
+
+    logger.info("[Sync & Generate Thread] 🛑 Stopping sync and generate thread")
 
 
 def one_training_step(
@@ -2637,19 +2625,21 @@ def run_training(
     if resume_training_step > 1:
         logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
 
-    logger.info("======== ✅ weight sync thread starts =========")
+    logger.info("======== ✅ sync and generate thread starts =========")
     weight_sync_trigger_event = threading.Event()
-    start_generate_trigger_event = threading.Event()
-    weight_sync_thread_future = executor.submit(
-        weight_sync_thread,
+    # if we're resuming, let's sync the vllm engines
+    if resume_training_step > 1:
+        weight_sync_trigger_event.set()
+    sync_and_generate_future = executor.submit(
+        sync_and_generate_thread,
         args,
+        vllm_engines,
         stop_event,
         weight_sync_trigger_event,
-        start_generate_trigger_event,
         policy_group,
         actor_manager,
         weight_sync_metrics_Q,
-        resume_training_step,
+        generate_metrics_Q,
     )
 
     """Run the main training loop with worker threads."""
@@ -2672,21 +2662,9 @@ def run_training(
         actor_manager,
     )
 
-    logger.info("======== ✅ generation thread starts =========")
-    generation_future = executor.submit(
-        generate_thread,
-        args,
-        vllm_engines,
-        resume_training_step,
-        stop_event,
-        generate_metrics_Q,
-        start_generate_trigger_event,
-    )
-    start_generate_trigger_event.set()
-
     # setup health check function to check that everything is still alive
     def health_check_fn():
-        [f.result() for f in [packing_future, generation_future, weight_sync_thread_future] if f.done()]
+        [f.result() for f in [packing_future, sync_and_generate_future] if f.done()]
 
     # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps):
@@ -2729,10 +2707,6 @@ def run_training(
 
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
         weight_sync_trigger_event.set()
-
-        while weight_sync_trigger_event.is_set():
-            time.sleep(0.5)
-        logger.debug(f"[Main Thread] Weight sync completed for step {training_step}")
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         prepare_prompts(
