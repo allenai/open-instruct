@@ -242,8 +242,9 @@ def main():
 
         if args.use_astabench_format:
             predictions = [format_citation_data_into_sqa_format(x) for x in generations]
+            samples = [{**sample, **original_sample} for sample, original_sample in zip(ds, original_dataset)]
             with open(f"{args.output_dir}/astabench_formatted_predictions.json", "w") as f:
-                json.dump(predictions, f)
+                json.dump(samples, f)
     except Exception as e:
         print(f"Error: {e}")
         try:
