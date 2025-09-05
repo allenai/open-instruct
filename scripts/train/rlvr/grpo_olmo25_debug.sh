@@ -6,7 +6,8 @@ dataset_mix="hamishivi/rlvr_orz_math_57k_collected 56878"
 # all evals
 # evals="minerva_math::hamish_zs_reasoning,gsm8k::zs_cot_latex,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,ifeval::hamish_zs_reasoning,popqa::hamish_zs_reasoning,mmlu:cot::hamish_zs_reasoning,alpaca_eval_v3::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,mbppplus:0-shot-chat::tulu-thinker,codex_humanevalplus:0-shot-chat-v1::tulu-thinker"
 # math evals
-evals="minerva_math::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,aime:zs_cot_r1::pass_at_32_2024_temp1,aime:zs_cot_r1::pass_at_32_2025_temp1"
+# evals="minerva_math::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,aime:zs_cot_r1::pass_at_32_2024_temp1,aime:zs_cot_r1::pass_at_32_2025_temp1"
+\
 
 # all I've changed with the checkpoints is the config.json, model_type=olmo3 and architectures is OLMo3ForCausalLM 
 model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round5-100B-olmo25_7b-anneal-2T-f07e3111/step47684-hf"
@@ -24,8 +25,8 @@ EXP_NAME=${EXP_NAME:-${exp_name}}
 
 
 # cluster
-# cluster=ai2/augusta
-cluster=ai2/jupiter
+cluster=ai2/augusta
+# cluster=ai2/jupiter
 
 NUM_GPUS=${NUM_GPUS:-8}
 
@@ -58,8 +59,6 @@ python open_instruct/grpo_fast.py \
     --kl_estimator kl3 \
     --dataset_mixer_list ${dataset_mix} \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k 32 \
-    --dataset_mixer_eval_list_splits train \
     --max_token_length 8192 \
     --max_prompt_token_length 2048 \
     --response_length 6000 \
@@ -69,23 +68,21 @@ python open_instruct/grpo_fast.py \
     --stop_strings "</answer>" \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 1024000 \
+    --total_episodes 25600 \
     --deepspeed_stage 3 \
     --num_learners_per_node 4 \
     --vllm_num_engines 4 \
     --vllm_tensor_parallel_size 1 \
+    --vllm_gpu_memory_utilization 0.7 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --local_eval_every 25 \
-    --save_freq 25 \
-    --checkpoint_state_freq 25 \
+    --local_eval_every 50 \
+    --save_freq 50 \
+    --checkpoint_state_freq 50 \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
     --mask_truncated_completions True \
-    --oe_eval_max_length 8192 \
-    --try_launch_beaker_eval_jobs_on_weka True \
-    --oe_eval_tasks ${evals} \
-    --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto --verbose
+    --verbose

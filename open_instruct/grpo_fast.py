@@ -2196,9 +2196,6 @@ def weight_sync_thread(
         if not weight_sync_trigger_event.wait(timeout=1.0):
             continue
 
-        # Clear the event for next iteration
-        weight_sync_trigger_event.clear()
-
         with Timer("[Weight Sync]") as timer:
             logger.debug("[Weight Sync Thread] Starting weight sync")
 
@@ -2225,6 +2222,9 @@ def weight_sync_thread(
             weight_sync_metrics_Q.put_nowait({"time/weight_sync": timer.duration})
         except Full:
             logger.warning("[Weight Sync Thread] weight sync metrics queue full, skipping metric")
+
+        # Clear the event for next iteration
+        weight_sync_trigger_event.clear()
 
     logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
 
@@ -2714,6 +2714,10 @@ def run_training(
 
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
         weight_sync_trigger_event.set()
+
+        while weight_sync_trigger_event.is_set():
+            time.sleep(0.5)
+        logger.debug(f"[Main Thread] Weight sync completed for step {training_step}")
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         prepare_prompts(
