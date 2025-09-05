@@ -96,7 +96,7 @@ class RubricVerifierConfig(VerifierConfig):
     """Whether to use the general rubric for evaluation instead of specific rubrics"""
     evaluate_closed_book_answer: bool = False
     """Whether to evaluate the closed book answer"""
-    mcp_parser_name: Optional[str] = "unified"
+    mcp_parser_name: Optional[str] = None
     """The name of the MCP parser to use."""
 
 @dataclass
@@ -977,6 +977,13 @@ class RLRAGLongFormAveragedOutcomeVerifier(VerifierFunction):
     def __init__(self, verifier_config: Optional[RubricVerifierConfig] = None) -> None:
         super().__init__("rl_rag_longform_averaged_outcome", verifier_config=verifier_config, weight=1.0)
 
+    @classmethod
+    def get_config_class(cls) -> type:
+        """
+        Return the configuration class for this verifier.
+        """
+        return RubricVerifierConfig
+
     def __call__(
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> VerificationResult:
@@ -1010,6 +1017,13 @@ class RLRAGLongFormFinegrainedVerifier(VerifierFunction):
     def __init__(self, verifier_config: Optional[RubricVerifierConfig] = None) -> None:
         super().__init__("rl_rag_longform_finegrained", verifier_config=verifier_config, weight=1.0)
 
+    @classmethod
+    def get_config_class(cls) -> type:
+        """
+        Return the configuration class for this verifier.
+        """
+        return RubricVerifierConfig
+    
     def __call__(
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> FinegrainedRewardOutput:

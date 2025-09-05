@@ -403,6 +403,8 @@ class Args:
     """The name of the MCP tool to use. For now only supports `s2` and `serper`."""
     mcp_server_command: Optional[str] = None
     """Command to run MCP server subprocess when use_mcp_tools is enabled. Example: 'fastmcp run rag_mcp/main.py:mcp --transport streamable-http --port 8000'"""
+    mcp_parser_name: Optional[str] = None
+    """The name of the MCP parser to use."""
 
 
     # rl-rag specific settngs
