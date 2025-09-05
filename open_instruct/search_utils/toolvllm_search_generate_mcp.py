@@ -64,7 +64,6 @@ def format_citation_data_into_sqa_format(response: str) -> dict:
         # if there are citations inside the text, extract them
         citations = re.findall(r"<cite id=\"(\w+)\">((\n|.)*?)</cite>", section)
         citations += re.findall(r"<cite id=(\w+)>((\n|.)*?)</cite>", section)
-        print(citations)
         for j, citation in enumerate(citations):
             citation_id = citation[0]
             seen_citations.add(citation_id)
