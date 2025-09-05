@@ -1634,6 +1634,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     if args.system_prompt_file is not None:
         with open(args.system_prompt_file, "r") as f:
             system_prompt_text = f.read()  # note the lack of strip.
+        logger.info(f"Using system prompt from {args.system_prompt_file}:\n############\n{system_prompt_text}\n############\n")
     transform_fn_args = [
         {
             "system_prompt_text": system_prompt_text,
