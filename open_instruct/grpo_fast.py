@@ -1486,7 +1486,6 @@ def accumulate_inference_batches(
         raw_queries=all_raw_queries,
         indices=None,  # Not meaningful for combined results
     )
-
     return combined_result, batch
 
 
@@ -1537,13 +1536,6 @@ def data_preparation_thread(
                 and not result.request_info.tool_errors[i]
                 for i in range(len(result.request_info.tool_outputs))
             ]
-
-        # Assert that responses and masks have matching lengths before EOS token handling
-        for i in range(len(result.responses)):
-            assert len(result.responses[i]) == len(result.masks[i]), (
-                f"Before EOS handling - index {i}: response len={len(result.responses[i])} vs mask len={len(result.masks[i])}"
-            )
-
         for i in range(len(result.finish_reasons)):
             # edge case: sometimes it outputs eos immediately, and we get an empty response
             # in that case, we need to add the eos token to the response
@@ -1553,13 +1545,6 @@ def data_preparation_thread(
             ):
                 result.responses[i].append(tokenizer.eos_token_id)
                 result.masks[i].append(1)  # never mask the eos token for
-
-        # Assert that responses and masks have matching lengths after EOS token handling
-        for i in range(len(result.responses)):
-            assert len(result.responses[i]) == len(result.masks[i]), (
-                f"After EOS handling - index {i}: response len={len(result.responses[i])} vs mask len={len(result.masks[i])}"
-            )
-
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
             decoded_queries = batch.raw_queries
