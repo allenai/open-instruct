@@ -35,12 +35,16 @@ for model_name_or_path in "$@"; do
 
     gantry run \
            --name open_instruct-benchmark_generators \
-           --workspace ai2/tulu-thinker \
+           --workspace ai2/open-instruct-dev \
+	   --priority urgent \
            --gpus 1 \
 	   --weka='oe-training-default:/weka/oe-training-default/' \
            --description "Running benchmark with response length of $response_length at commit $git_hash on branch $git_branch with model $model_name_or_path." \
 	   --beaker-image nathanl/open_instruct_auto \
-	   --cluster ai2/prior-elanding \
+	   --cluster ai2/ceres \
+	   --cluster ai2/jupiter \
+	   --cluster ai2/augusta \
+	   --cluster ai2/saturn \
            --budget ai2/oe-adapt \
            --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
            --env-secret="HF_TOKEN=finbarrt_HF_TOKEN" \
