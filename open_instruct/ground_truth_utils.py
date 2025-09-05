@@ -150,18 +150,13 @@ class FinegrainedRewardOutput:
                 if start_char < 0 or end_char < start_char:
                     raise ValueError(f"Invalid effective_span {effective_span} in finegrained_scores[{i}].effective_spans[{j}]")
             
-            # Check for overlapping spans within this FinegrainedScore
+            # Check for overlapping spans within this FinegrainedScore and merge them
             # Note: Adjacent spans (where end of one equals start of next) are allowed
             if len(effective_spans) > 1:
-                # Sort spans by start position for overlap checking
-                sorted_spans = sorted(effective_spans, key=lambda x: x[0])
-                for k in range(len(sorted_spans) - 1):
-                    current_start, current_end = sorted_spans[k]
-                    next_start, next_end = sorted_spans[k + 1]
-                    
-                    # Check if current span overlaps with next span (current_end > next_start means overlap)
-                    if current_end > next_start:
-                        raise ValueError(f"Overlapping spans in finegrained_scores[{i}]: {sorted_spans[k]} and {sorted_spans[k + 1]}")
+                merged_spans = self._merge_overlapping_spans(effective_spans, i)
+                if len(merged_spans) != len(effective_spans):
+                    # Update the effective_spans with merged spans
+                    item.effective_spans = merged_spans
             
             reward_group_id = item.reward_group_id
             query_idx = item.query_idx
@@ -171,6 +166,47 @@ class FinegrainedRewardOutput:
             
             if query_idx is not None and query_idx < 0:
                 raise ValueError(f"query_idx must be >= 0 in finegrained_scores[{i}]")
+    
+    def _merge_overlapping_spans(self, effective_spans: List[Tuple[int, int]], score_index: int) -> List[Tuple[int, int]]:
+        """
+        Merge overlapping spans and print warnings when overlaps are found.
+        
+        Args:
+            effective_spans: List of (start_char, end_char) tuples
+            score_index: Index of the finegrained score for warning messages
+            
+        Returns:
+            List of merged non-overlapping spans
+        """
+        if len(effective_spans) <= 1:
+            return effective_spans
+        
+        # Sort spans by start position
+        sorted_spans = sorted(effective_spans, key=lambda x: x[0])
+        merged = []
+        current_start, current_end = sorted_spans[0]
+        
+        for i in range(1, len(sorted_spans)):
+            next_start, next_end = sorted_spans[i]
+            
+            # Check if current span overlaps with next span (current_end > next_start means overlap)
+            if current_end > next_start:
+                # Print warning about overlapping spans
+                logging.warning(f"Overlapping spans in finegrained_scores[{score_index}]: "
+                              f"({current_start}, {current_end}) and ({next_start}, {next_end}). "
+                              f"Merging into single span.")
+                
+                # Merge the spans by extending the current span to cover both
+                current_end = max(current_end, next_end)
+            else:
+                # No overlap, add the current span to merged list and move to next
+                merged.append((current_start, current_end))
+                current_start, current_end = next_start, next_end
+        
+        # Add the final span
+        merged.append((current_start, current_end))
+        
+        return merged
     
     def unpack_for_fgrpo(self) -> Tuple[List[Tuple[float, Tuple[int, int], int, int]], Dict[str, float]]:
         """
