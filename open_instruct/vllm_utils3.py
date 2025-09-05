@@ -564,7 +564,6 @@ class LLMRayActor:
                         total_processed += self._maybe_process_and_insert(
                             request_id, request_outputs, tracking, current_time
                         )
-            self.fill_engine(timeout=0.01)
             if self.llm_engine.get_num_unfinished_requests() + len(tracking["pending_tool_futures"]) == 0:
                 break
 
