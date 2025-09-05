@@ -37,6 +37,7 @@ for model_name_or_path in "$@"; do
            --name open_instruct-benchmark_generators \
            --workspace ai2/tulu-thinker \
            --gpus 1 \
+	   --weka='oe-training-default:/weka/oe-training-default/' \
            --description "Running benchmark with response length of $response_length at commit $git_hash on branch $git_branch with model $model_name_or_path." \
 	   --beaker-image nathanl/open_instruct_auto \
 	   --cluster ai2/prior-elanding \
