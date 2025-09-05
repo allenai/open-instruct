@@ -111,3 +111,31 @@ def extract_search_tool_calls(context: str, mcp_parser_name: Optional[str] = Non
     else:
         return []
     
+    
+def compute_format_reward(response: str, mcp_parser_name: Optional[str] = None) -> float:
+    # check if response contains final answer between <answer></answer> tags
+    answer_pattern = r"<answer>.*?</answer>"
+    answer_match = re.search(answer_pattern, response, re.DOTALL)
+    if answer_match:
+        answer_format_reward = 1.0
+    else:
+        answer_format_reward = 0.0
+    
+    # check if response contains citations between <cite></cite> tags
+    citation_pattern = r"<cite id=[\"\']?[^\"\'>\s]+[\"\']?[^>]*>[^<]+</cite>"
+    citation_match = re.search(citation_pattern, response, re.DOTALL)
+    if citation_match:
+        citation_format_reward = 1.0
+    else:
+        citation_format_reward = 0.0
+    
+    # check if response contains at least one valid query between <query></query> tags
+    queries = extract_search_tool_calls(response, mcp_parser_name=mcp_parser_name)
+    if queries:
+        query_format_reward = 1.0
+    else:
+        query_format_reward = 0.0
+    
+    # compute weighted average of format rewards
+    format_reward = 0.5 * answer_format_reward + 0.3 * citation_format_reward + 0.2 * query_format_reward
+    return format_reward
