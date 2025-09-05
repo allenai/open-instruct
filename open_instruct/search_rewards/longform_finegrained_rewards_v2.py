@@ -68,7 +68,14 @@ def compute_longform_finegrained_reward_v2(response: str, ground_truth: Dict[str
     # score rubric
     rubric_rewards = []
     for rubric in ground_truth["Answer Critical"]:
-        rubric_reward, rubric_spans = _score_property_with_spans(extracted_answer, question, rubric["Ingredient"])
+        rubric_reward, rubric_spans_text = _score_property_with_spans(extracted_answer, question, rubric["Ingredient"])
+        # get the start and end indices of the span
+        rubric_spans = []
+        for span_text in rubric_spans_text:
+            if span_text in response:
+                start_idx = response.find(span_text)
+                end_idx = start_idx + len(span_text)
+                rubric_spans.append((start_idx, end_idx))
         finegrained_scores.append(FinegrainedScore(
             score=rubric_reward,
             effective_spans=rubric_spans,

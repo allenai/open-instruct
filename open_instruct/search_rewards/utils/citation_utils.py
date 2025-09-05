@@ -118,6 +118,9 @@ def score_in_context_citations(question: str, response: str, citations: Dict[str
     :param citations:
     :return: final weighted score with and without the static components
     """
+    if not citations:
+        return 0
+    
     def concatenate_citations(citation_ids: List[str], citations: Dict[str, str]) -> str:
         if len(citation_ids) == 0:
             return ""
@@ -126,6 +129,7 @@ def score_in_context_citations(question: str, response: str, citations: Dict[str
     claims = extract_claims_and_corresponding_citation_ids(response)
 
     citation_format_reward = score_citation_format(claims, citations)
+    
 
     avg_f1 = 0
     for claim_text, citation_ids in claims.items():
