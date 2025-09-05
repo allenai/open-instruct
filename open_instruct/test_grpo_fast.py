@@ -823,7 +823,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         # Combine in order
         combined_queries = []
         for i in range(num_prompts):
-            q, _, _ = queries_list[i]
+            q, _, _, _ = queries_list[i]
             combined_queries.append(q)
 
         # Verify order is preserved
