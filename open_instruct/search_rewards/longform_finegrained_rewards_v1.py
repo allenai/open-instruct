@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from open_instruct.search_rewards.utils.format_utils import extract_answer_context_citations
 from open_instruct.search_rewards.utils.rubric_utils import _score_rubric
@@ -48,8 +48,8 @@ def compute_format_reward(response: str) -> float:
     format_reward = 0.5 * answer_format_reward + 0.3 * citation_format_reward + 0.2 * query_format_reward
     return format_reward
 
-def compute_longform_finegrained_reward(response: str, ground_truth: Dict[str, Any], question: str) -> Dict[str, Any]:
-    """
+def compute_longform_finegrained_reward(response: str, ground_truth: Dict[str, Any], question: str, mcp_parser_name: Optional[str] = None) -> Dict[str, Any]:
+    """ 
     Compute longform finegrained reward with spans.
     
     Returns:
@@ -73,7 +73,7 @@ def compute_longform_finegrained_reward(response: str, ground_truth: Dict[str, A
     result["format_reward"] = format_reward
     
     # score num search turns
-    num_search_turns_reward, num_search_turns = score_num_in_context_search_turns(extracted_context)
+    num_search_turns_reward, num_search_turns = score_num_in_context_search_turns(extracted_context, mcp_parser_name=mcp_parser_name)
     result["num_search_turns_reward"] = num_search_turns_reward
     
     # Initialize rewards for span calculation

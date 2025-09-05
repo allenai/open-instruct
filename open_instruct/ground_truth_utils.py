@@ -973,14 +973,14 @@ class RLRAGLongFormAveragedOutcomeVerifier(VerifierFunction):
     Verifier that computes the RL-RAG (long form) score between the prediction and the label.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: Optional[RubricVerifierConfig] = None) -> None:
         super().__init__("rl_rag_longform_averaged_outcome", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> VerificationResult:
         test_case = json.loads(label)
-        result = compute_longform_averaged_outcome_reward(prediction, test_case, query)
+        result = compute_longform_averaged_outcome_reward(prediction, test_case, query, mcp_parser_name=self.verifier_config.mcp_parser_name)
         score = result["reward"]
         return VerificationResult(score=score, log_values=result)
 
@@ -1006,14 +1006,14 @@ class RLRAGLongFormFinegrainedVerifier(VerifierFunction):
     Verifier that computes the RL-RAG (long form) score between the prediction and the label.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: Optional[RubricVerifierConfig] = None) -> None:
         super().__init__("rl_rag_longform_finegrained", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> FinegrainedRewardOutput:
         test_case = json.loads(label)
-        result = compute_longform_finegrained_reward(prediction, test_case, query)
+        result = compute_longform_finegrained_reward(prediction, test_case, query, mcp_parser_name=self.verifier_config.mcp_parser_name)
         return FinegrainedRewardOutput(
             finegrained_scores=result["finegrained_scores"],
             log_values=result["log_values"],

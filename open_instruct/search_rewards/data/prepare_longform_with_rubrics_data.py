@@ -20,6 +20,7 @@ from datasets import load_dataset
 }
 """
 
+TOOL_TOKEN = "call_tool"
 
 system_prompt = """You are a research assistant that answers questions through iterative reasoning and research.
 
@@ -58,18 +59,18 @@ You are a research assistant who answers questions through iterative reasoning a
 
 ## PROCESS:
 - Use <think></think> tags to show your reasoning at any point.
-- Use <tool name="...">query</tool> when you need information (see tools below).
+- Use <{TOOL_TOKEN} name="...">query</{TOOL_TOKEN}> when you need information (see tools below).
 - You can alternate between thinking and searching multiple times.
-- Only provide <answer></answer> tags when you have enough information for a complete response. If the problem asks for a specific, short-form answer, you can also put the answer string in the \boxed{} format. 
+- Only provide <answer></answer> tags when you have enough information for a complete response. If the problem asks for a specific, short-form answer, you can also put the answer string in the \boxed{{}} format. 
 - Support every non-trivial claim with retrieved evidence. Wrap the exact claim span in <cite id="ID1,ID2">...</cite>, where id are snippet IDs from searched results (comma-separated if multiple). Use only returned snippets; never invent IDs. Avoid citing filler text - cite just the factual claim.
 
 
-## SEARCH TOOLS (<tool name="...">query</tool>)
+## SEARCH TOOLS (<{TOOL_TOKEN} name="...">query</{TOOL_TOKEN}>)
 - You can use the following tools:
 
 1. google_search 
 - Purpose: general web search.
-- Input via: <tool name="google_search">your query</tool>
+- Input via: <{TOOL_TOKEN} name="google_search">your query</{TOOL_TOKEN}>
 - Output: web search snippets (see SEARCH RESULTS).
 - Optional parameters 
     - gl: geolocation
@@ -77,14 +78,14 @@ You are a research assistant who answers questions through iterative reasoning a
 
 2. browse_webpage 
 - Purpose: open a specific URL (typically one returned by google_search) and extract readable page text as snippets. 
-- Input via: <tool name="browse_webpage">https://example.com/article</tool>
+- Input via: <{TOOL_TOKEN} name="browse_webpage">https://example.com/article</{TOOL_TOKEN}>
 - Output: webpage (see SEARCH RESULTS). 
 
 3. snippet_search 
 - Purpose: focused snippet retrieval from scientific papers
-- Input via: <tool name="snippet_search">your query</tool>
+- Input via: <{TOOL_TOKEN} name="snippet_search">your query</{TOOL_TOKEN}>
 - Output: snippets from existing papers (see SEARCH RESULTS). 
-- Examples: <tool name="snippet_search" limit="8" year="2021-2025" fieldsOfStudy="Computer Science, Medicine">large language model retrieval evaluation</tool>
+- Examples: <{TOOL_TOKEN} name="snippet_search" limit="8" year="2021-2025" fieldsOfStudy="Computer Science, Medicine">large language model retrieval evaluation</{TOOL_TOKEN}>
 - Optional parameters 
     - limit: number of snippets to retrieve
     - year: publication year; you can use a single number (e.g., 2024) or a range (e.g., 2022-2025)
@@ -101,12 +102,12 @@ You are a research assistant who answers questions through iterative reasoning a
 ## ANSWER AND CITATION FORMAT (<answer></answer>,<cite></cite>)
 
 - Once you collect all of the necessary information, generate the final answer, and mark your answer with answer tags: <answer></answer>. 
-- If your answer is short (e.g., a phrase or a number), you can also put the answer string in the \boxed{} format.
+- If your answer is short (e.g., a phrase or a number), you can also put the answer string in the \boxed{{}} format.
 - In your answer, wrap the supported text in <cite id="SNIPPET_ID"> ... </cite>. You have to use the exact ID from a returned <snippet id=...>...</snippet>.
 - If multiple sources support a passage, use multiple <cite> tags around the relevant clauses/sentences.
 - Examples 
 <cite id="S17">LLMs often hallucinate on long-tail facts.</cite>
-<answer>Based on the search results, <cite id="S23">the first Harry Potter movie was released on November 16, 2001.</cite>Therefore, the final answer is \boxed{November 16, 2001}.</answer>
+<answer>Based on the search results, <cite id="S23">the first Harry Potter movie was released on November 16, 2001.</cite>Therefore, the final answer is \boxed{{November 16, 2001}}.</answer>
 
 ## WORKFLOW EXAMPLE:
 
@@ -115,18 +116,18 @@ Below is a simple example that demonstrates the process and the correct use of t
 Question: Give a concise update on 2024 renewable energy market trends and current commercial solar efficiency benchmarks. 
 
 <think>I need to understand the current market trends first</think>
-<tool name="google_search">2024 renewable energy market trends</tool>
+<{TOOL_TOKEN} name="google_search">2024 renewable energy market trends</{TOOL_TOKEN}>
 <tool_output>[results provided as <snippet id=S_a1B9xQ2>...</snippet>, <snippet id=S_p0Zr41Q>...</snippet>]</tool_output>
 
 <think>Now I need specific data on solar panel efficiency</think>
-<tool name="snippet_search" limit="5" year="2023-2025" fieldsOfStudy="Engineering, Materials Science">latest solar panel efficiency 2024</tool>
+<{TOOL_TOKEN} name="snippet_search" limit="5" year="2023-2025" fieldsOfStudy="Engineering, Materials Science">latest solar panel efficiency 2024</{TOOL_TOKEN}>
 <tool_output>[results provided as <snippet id=S_x4xU7dU>...</snippet>, <snippet id=S_GxA2ZLh>...</snippet>]</tool_output>
 
 <think>I have enough to answer succinctly</think>
 <answer>
 Global renewables expanded rapidly in 2024, <cite ids="S_p0Zr41Q,S_GxA2ZLh">driven primarily by the growth of solar and wind energy.</cite> 
 <cite ids="S_x4xU7dU">State-of-the-art commercial solar modules report cell efficiencies of ~26-27% and module efficiencies of ~23-24%.</cite>
-\boxed{Solar leads 2024 renewables; top commercial module efficiency ~ 23-24\%}
+\boxed{{Solar leads 2024 renewables; top commercial module efficiency ~ 23-24%}}
 </answer>
 
 
@@ -136,7 +137,7 @@ Global renewables expanded rapidly in 2024, <cite ids="S_p0Zr41Q,S_GxA2ZLh">driv
 - Cite all claims from search results using exact snippet IDs
 
 Now, please try to think and search iteratively to find the answer to the following question: 
-"""
+""".format(TOOL_TOKEN=TOOL_TOKEN)
 
 
 
@@ -222,11 +223,11 @@ def upload_longform_sqa_train_data(use_system_prompt: bool = True, use_new_mcp_s
             dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_sqa_{rubric_type}_finegrained_with_system_prompt")
     elif use_new_mcp_system_prompt:
         if reward_type == "rubrics_only":
-            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_sqa_{rubric_type}_rubrics_only_with_new_mcp_system_prompt")
+            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_sqa_{rubric_type}_rubrics_only_{TOOL_TOKEN}")
         elif reward_type == "averaged_outcome":
-            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_sqa_{rubric_type}_outcome_with_new_mcp_system_prompt")
+            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_sqa_{rubric_type}_outcome_{TOOL_TOKEN}")
         elif reward_type == "finegrained":
-            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_sqa_{rubric_type}_finegrained_with_new_mcp_system_prompt")
+            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_sqa_{rubric_type}_finegrained_{TOOL_TOKEN}")
     else:
         raise ValueError("Invalid system prompt and new MCP system prompt combination")
     
@@ -266,11 +267,11 @@ def upload_longform_surveyqa_validation_data(use_system_prompt: bool = True, use
             dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_surveyqa_validation_longform_finegrained_with_system_prompt")
     elif use_new_mcp_system_prompt:
         if reward_type == "rubrics_only":
-            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_surveyqa_validation_longform_rubrics_only_with_new_mcp_system_prompt")
+            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_surveyqa_validation_longform_rubrics_only_{TOOL_TOKEN}")
         elif reward_type == "averaged_outcome":
-            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_surveyqa_validation_longform_averaged_outcome_with_new_mcp_system_prompt")
+            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_surveyqa_validation_longform_averaged_outcome_{TOOL_TOKEN}")
         elif reward_type == "finegrained":
-            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_surveyqa_validation_longform_finegrained_with_new_mcp_system_prompt")
+            dataset.push_to_hub(f"{HF_USERNAME}/rl_rag_surveyqa_validation_longform_finegrained_{TOOL_TOKEN}")
     else:
         raise ValueError("Invalid system prompt and new MCP system prompt combination")
     return formatted_data

@@ -107,7 +107,7 @@ def extract_search_tool_calls(context: str, mcp_parser_name: Optional[str] = Non
         raise ValueError(f"Unsupported MCP parser name: {mcp_parser_name}")
     
     if matches:
-        return [match[1] for match in matches]
+        return [match[1] for match in matches if match[1].strip()]
     else:
         return []
     

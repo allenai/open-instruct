@@ -1275,7 +1275,7 @@ def data_preparation_thread(
                     "message_token_spans": {0: [0, len(tokenized_resp["input_ids"][0])]},  # Single message spanning all tokens
                 }
                 
-                # Convert string spans to token spans using the utility function
+                # Convert string spans to token spans
                 token_spans = convert_string_spans_to_token_spans(
                     tokenized_input,
                     effective_spans,
