@@ -2181,6 +2181,7 @@ def weight_sync_thread(
     args: Args,
     stop_event: threading.Event,
     weight_sync_trigger_event: threading.Event,
+    start_generate_trigger_event: threading.Event,
     policy_group: ModelGroup,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
@@ -2201,6 +2202,7 @@ def weight_sync_thread(
 
             # Set actors to stop
             ray.get(actor_manager.set_should_stop.remote(True))
+            start_generate_trigger_event.clear()
             logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
 
             # Broadcast weights to vLLM engines
@@ -2225,14 +2227,18 @@ def weight_sync_thread(
 
         # Clear the event for next iteration
         weight_sync_trigger_event.clear()
+        start_generate_trigger_event.set()
 
     logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
 
 
-def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q):
+def generate_thread(
+    args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q, start_generate_trigger_event
+):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
     while not stop_event.is_set():
+        start_generate_trigger_event.wait()
         with Timer("🔥 Generation time") as timer:
             processed_results = ray_get_with_progress(
                 [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
@@ -2633,11 +2639,13 @@ def run_training(
 
     logger.info("======== ✅ weight sync thread starts =========")
     weight_sync_trigger_event = threading.Event()
+    start_generate_trigger_event = threading.Event()
     weight_sync_thread_future = executor.submit(
         weight_sync_thread,
         args,
         stop_event,
         weight_sync_trigger_event,
+        start_generate_trigger_event,
         policy_group,
         actor_manager,
         weight_sync_metrics_Q,
@@ -2666,8 +2674,15 @@ def run_training(
 
     logger.info("======== ✅ generation thread starts =========")
     generation_future = executor.submit(
-        generate_thread, args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q
+        generate_thread,
+        args,
+        vllm_engines,
+        resume_training_step,
+        stop_event,
+        generate_metrics_Q,
+        start_generate_trigger_event,
     )
+    start_generate_trigger_event.set()
 
     # setup health check function to check that everything is still alive
     def health_check_fn():
