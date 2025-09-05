@@ -1653,11 +1653,6 @@ def data_preparation_thread(
 
                         advantages = np.concatenate([advantages, advantages[sampled_indices]])
                         scores = np.concatenate([scores, scores[sampled_indices]])
-                        # Validate alignment before duplication
-                        for idx in sampled_indices:
-                            assert len(responses[idx]) == len(masks[idx]), (
-                                f"Before duplication - index {idx}: response len={len(responses[idx])} vs mask len={len(masks[idx])}"
-                            )
                         responses += [responses[i] for i in sampled_indices]
                         masks += [masks[i] for i in sampled_indices]
 
@@ -1685,11 +1680,6 @@ def data_preparation_thread(
             )
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
-            # Validate response/mask alignment before packing
-            for i, (resp, mask) in enumerate(zip(responses, masks)):
-                assert len(resp) == len(mask), (
-                    f"Before pack_sequences - batch item {i}: response len={len(resp)} vs mask len={len(mask)}"
-                )
             packed_sequences = pack_sequences(
                 queries=batch.queries,
                 responses=responses,
