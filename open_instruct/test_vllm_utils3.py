@@ -75,10 +75,6 @@ class TestVllmUtils3(unittest.TestCase):
         tracking["tool_called"][req_id_1] = True
         tracking["tool_called"][req_id_2] = True
 
-        # Create mock output to represent the base request
-        mock_base_output = MagicMock(spec=vllm.RequestOutput)
-        mock_base_output.request_id = "train_1_43039"
-
         # Call the function under test
         result = _finalize_outputs(
             outputs=[mock_request_output1],  # Need at least one output to get the base request_id
