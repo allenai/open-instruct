@@ -485,11 +485,24 @@ class LLMRayActor:
             return num_processed
 
         tracking = _init_tool_tracking()
-        outputs = []
+        request_outputs = defaultdict(list)
         total_processed = 0
 
         while True:
-            outputs.extend(self._poll_tool_futures(tracking, self.llm_engine.tokenizer))
+            # Process completed tool futures and add to request_outputs
+            tool_outputs = self._poll_tool_futures(tracking, self.llm_engine.tokenizer)
+            current_time = time.time()
+            for output in tool_outputs:
+                request_id = "_".join(output.request_id.split("_")[:-1])
+                request_outputs[request_id].append(output)
+                
+                # Check if we have N requests for this request_id
+                expected_n = self.request_metadata[request_id]["original_sampling_params"].n
+                if len(request_outputs[request_id]) == expected_n:
+                    outs = request_outputs.pop(request_id)
+                    result, is_eval = self._process_completed_request(request_id, outs, tracking, current_time)
+                    self._insert_result_to_queue(result, is_eval=is_eval)
+                    total_processed += 1
 
             # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
             if self.llm_engine.has_unfinished_requests():
@@ -506,35 +519,18 @@ class LLMRayActor:
                     )
                     # Result is None when we do more tool processing.
                     if result is not None:
-                        outputs.append(result)
+                        request_id = "_".join(result.request_id.split("_")[:-1])
+                        request_outputs[request_id].append(result)
+                        
+                        # Check if we have N requests for this request_id
+                        expected_n = self.request_metadata[request_id]["original_sampling_params"].n
+                        if len(request_outputs[request_id]) == expected_n:
+                            outs = request_outputs.pop(request_id)
+                            result, is_eval = self._process_completed_request(request_id, outs, tracking, current_time)
+                            self._insert_result_to_queue(result, is_eval=is_eval)
+                            total_processed += 1
 
-            # Check if any prompts have finished and process them immediately
-            current_time = time.time()
-            request_outputs = defaultdict(list)
-            for output in outputs:
-                request_id = "_".join(output.request_id.split("_")[:-1])
-                request_outputs[request_id].append(output)
-
-            # Process completed requests and add them to results queue
-            completed_request_ids = []
-            for request_id, outs in request_outputs.items():
-                # Check if all sub-requests for this request are completed
-                expected_n = self.request_metadata[request_id]["original_sampling_params"].n
-                if len(outs) == expected_n:
-                    result, is_eval = self._process_completed_request(request_id, outs, tracking, current_time)
-                    self._insert_result_to_queue(result, is_eval=is_eval)
-                    completed_request_ids.append(request_id)
-                    total_processed += 1
-
-            # Remove completed outputs from the pending list
-            outputs = [
-                output
-                for output in outputs
-                if "_".join(output.request_id.split("_")[:-1]) not in completed_request_ids
-            ]
-
-            # Fill engine with new requests after processing completed ones
-            if completed_request_ids:
+                # Fill engine with new requests after processing step outputs
                 self.fill_engine(timeout=timeout)
 
             if self.llm_engine.get_num_unfinished_requests() + len(tracking["pending_tool_futures"]) == 0:
