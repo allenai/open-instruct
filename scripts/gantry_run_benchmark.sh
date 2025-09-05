@@ -38,8 +38,8 @@ for model_name_or_path in "$@"; do
            --workspace ai2/tulu-thinker \
            --gpus 1 \
            --description "Running benchmark with response length of $response_length at commit $git_hash on branch $git_branch with model $model_name_or_path." \
-	   --beaker-image oe-eval-beaker/oe_eval_olmo2_retrofit_auto \
-           --cluster ai2/prior-elanding \
+	   --beaker-image nathanl/open_instruct_auto \
+	   --cluster ai2/prior-elanding \
            --budget ai2/oe-adapt \
            --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
            --env-secret="HF_TOKEN=finbarrt_HF_TOKEN" \
