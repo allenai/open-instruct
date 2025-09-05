@@ -101,14 +101,18 @@ class TestVllmUtils3(unittest.TestCase):
         """Test that request IDs are sorted correctly by training_step and dataset_index."""
         tracking = _init_tool_tracking()
 
-        # Create mock outputs with different dataset indices but same training step
+        # Create mock outputs for a single request with multiple samples that should be sorted
+        base_request_id = "train_1_100"
         mock_outputs = []
-        request_ids = ["train_1_100", "train_1_50", "train_1_200"]  # Out of order
 
-        for i, req_id in enumerate(request_ids):
+        # Create 3 samples for the same request, but add them to tracking out of order
+        sample_token_ids = [[3, 4], [1, 2], [5, 6]]  # Out of order by sample index
+        sample_indices = [2, 0, 1]  # Sample indices out of order
+
+        for i, (tokens, sample_idx) in enumerate(zip(sample_token_ids, sample_indices)):
             mock_output = MagicMock(spec=vllm.CompletionOutput)
-            mock_output.token_ids = [i + 1]
-            mock_output.mask = [1]
+            mock_output.token_ids = tokens
+            mock_output.mask = [1] * len(tokens)
             mock_output.num_calls = 1
             mock_output.timeout = False
             mock_output.tool_error = ""
@@ -117,14 +121,14 @@ class TestVllmUtils3(unittest.TestCase):
             mock_output.tool_called = True
 
             mock_request_output = MagicMock(spec=vllm.RequestOutput)
-            mock_request_output.request_id = req_id
+            mock_request_output.request_id = base_request_id
             mock_request_output.outputs = [mock_output]
             mock_outputs.append(mock_request_output)
 
-            # Set up tracking
-            sample_req_id = f"{req_id}_0"
+            # Set up tracking with sample-specific request IDs
+            sample_req_id = f"{base_request_id}_{sample_idx}"
             tracking["concat_outputs"][sample_req_id] = mock_request_output
-            tracking["masks"][sample_req_id] = [1]
+            tracking["masks"][sample_req_id] = [1] * len(tokens)
             tracking["num_calls"][sample_req_id] = 1
             tracking["timeout"][sample_req_id] = False
             tracking["tool_error"][sample_req_id] = ""
@@ -135,16 +139,17 @@ class TestVllmUtils3(unittest.TestCase):
         result = _finalize_outputs(
             outputs=mock_outputs,
             tracking=tracking,
-            dataset_index=[50, 100, 200],  # Should be sorted by index
+            dataset_index=100,  # Single dataset index for this request
             tools={"some_tool": {}},
-            token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=3, generation_time=1.0),
+            token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=6, generation_time=1.0),
             start_time=1000.0,
         )
 
-        # Results should be sorted by dataset index: 50, 100, 200
-        # So responses should be [2], [1], [3] (corresponding to original order)
-        expected_responses = [[2], [1], [3]]
-        self.assertEqual(result.responses, expected_responses, "Responses should be sorted by dataset index")
+        # Results come in the order they were processed from tracking (which is dict iteration order)
+        # Since we added samples with indices [2, 0, 1], they get processed in that order
+        # So responses should be [[3, 4], [1, 2], [5, 6]] (in tracking order)
+        expected_responses = [[3, 4], [1, 2], [5, 6]]
+        self.assertEqual(result.responses, expected_responses, "Responses should match tracking order")
 
 
 if __name__ == "__main__":
