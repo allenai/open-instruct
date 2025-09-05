@@ -216,8 +216,8 @@ def main():
         )
         # use greedy decoding
         sampling_params = SamplingParams(
-            temperature=0.6,
-            top_p=0.95,
+            temperature=0.7,
+            top_p=1.0,
             max_tokens=args.model_len,
             include_stop_str_in_output=True,
             n=1,
