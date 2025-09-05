@@ -550,8 +550,6 @@ class LLMRayActor:
                         total_processed += self._maybe_process_and_insert(
                             request_id, request_outputs, tracking, current_time
                         )
-
-                # Fill engine with new requests after processing step outputs
                 self.fill_engine(timeout=timeout)
 
             if self.llm_engine.get_num_unfinished_requests() + len(tracking["pending_tool_futures"]) == 0:
