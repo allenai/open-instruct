@@ -166,6 +166,10 @@ class Args:
     max_prompt_token_length: int = 256
     """The maximum prompt token length to use for the dataset"""
 
+    # Dataset system prompt injection
+    system_prompt_file: Optional[str] = None
+    """If set, add or replace system prompts in the dataset with the given system prompt."""
+
     # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
@@ -1626,8 +1630,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
     # ------------------------------------------------------------
     # Set up datasets
+    system_prompt_text = None
+    if args.system_prompt_file is not None:
+        with open(args.system_prompt_file, "r") as f:
+            system_prompt_text = f.read()  # note the lack of strip.
+        print(f"Using system prompt from {args.system_prompt_file}:\n############\n{system_prompt_text}\n############\n")
     transform_fn_args = [
-        {},
+        {
+            "system_prompt_text": system_prompt_text,
+        },
         {
             "max_token_length": args.max_token_length,
             "max_prompt_token_length": args.max_prompt_token_length,

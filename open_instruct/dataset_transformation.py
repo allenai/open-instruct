@@ -983,19 +983,28 @@ def rlvr_tokenize_v3(
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     dataset_source_key: str = DATASET_SOURCE_KEY,
+    system_prompt_text: Optional[str] = None,
 ):
+    # Optionally inject/override a system prompt into the conversation
+    messages = row[sft_messages_key]
+    if system_prompt_text is not None and str(system_prompt_text).strip():
+        if len(messages) > 0 and isinstance(messages[0], dict) and messages[0].get("role") == "system":
+            messages[0]["content"] = system_prompt_text
+        else:
+            messages = [{"role": "system", "content": system_prompt_text}] + messages
+
     # only truncate last message if it's not an assistant message
-    if len(row[sft_messages_key]) == 1:
-        prompt = row[sft_messages_key]
-    elif row[sft_messages_key][-1]["role"] != "assistant":
-        prompt = row[sft_messages_key]
+    if len(messages) == 1:
+        prompt = messages
+    elif messages[-1]["role"] != "assistant":
+        prompt = messages[:-1]
     else:
-        prompt = row[sft_messages_key][:-1]
+        prompt = messages[:-1]
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,
         add_generation_prompt=True,
     )
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(messages)
     # weird issue with qwen: sometimes the padding token ends up in the input ids?
     # ill look into this more later, for now this guard should be enough
     if tokenizer.pad_token_id in row[INPUT_IDS_KEY]:
