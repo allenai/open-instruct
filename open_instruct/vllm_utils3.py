@@ -418,12 +418,24 @@ class LLMRayActor:
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
 
+        # In production, actor_manager is required for proper coordination
+        # In tests, it can be None if no coordination is needed
+        if prompt_queue is not None and results_queue is not None:
+            assert self.actor_manager is not None, (
+                "actor_manager cannot be None when using queue-based processing. "
+                "Provide a valid actor_manager for coordination."
+            )
+
         # For caching should_stop status.
         self._last_should_stop_update = float("-inf")
         self._should_stop_value = False
         self._should_stop_timeout_s = 5
 
     def _should_stop(self) -> bool:
+        # If no actor_manager (e.g., in tests), never stop automatically
+        if self.actor_manager is None:
+            return False
+
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
@@ -454,14 +466,32 @@ class LLMRayActor:
         """
         num_added = 0
         if self._should_stop():
+            self.logger.debug("fill_engine: stopping requested, returning 0 requests added")
             return num_added
-        num_to_add = self.inference_batch_size - self.llm_engine.get_num_unfinished_requests()
+
+        current_unfinished = self.llm_engine.get_num_unfinished_requests()
+        num_to_add = self.inference_batch_size - current_unfinished
+
+        self.logger.debug(
+            f"fill_engine: batch_size={self.inference_batch_size}, "
+            f"unfinished={current_unfinished}, need_to_add={num_to_add}"
+        )
+
         while num_added < num_to_add:
             try:
                 request = self.prompt_queue.get(timeout=timeout)
-                num_added += add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
+                samples_added = add_request(
+                    request, self.llm_engine, self.tools, request_metadata=self.request_metadata
+                )
+                num_added += samples_added
+                self.logger.debug(
+                    f"fill_engine: added request with {samples_added} samples (total_added={num_added}/{num_to_add})"
+                )
             except queue.Empty:
+                self.logger.debug(f"fill_engine: queue empty after {timeout}s timeout, stopping early")
                 break
+
+        self.logger.debug(f"fill_engine: completed, added {num_added} total requests")
         return num_added
 
     def _process_completed_request(self, request_id, outs, tracking, current_time):
@@ -505,7 +535,7 @@ class LLMRayActor:
         expected_n = self.request_metadata[request_id]["original_sampling_params"].n
 
         # For tool mode, also verify tracking["concat_outputs"] consistency
-        if self.tools:
+        if self.tools and len(request_outputs[request_id]) < expected_n:
             concat_outputs_count = sum(
                 1 for k in tracking["concat_outputs"].keys() if "_".join(k.split("_")[:-1]) == request_id
             )
@@ -528,21 +558,18 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
+        num_processed = self.fill_engine(timeout=timeout)
+
+        if num_processed == 0:
+            return num_processed
+
         tracking = _init_tool_tracking()
         request_outputs = defaultdict(list)
         total_processed = 0
-        last_fill_time = 0
-        fill_interval = 1.0  # Fill engine every 1 second
 
         while not self._should_stop():
-            current_time = time.time()
-
-            # Periodically fill the engine with new requests
-            if current_time - last_fill_time > fill_interval:
-                self.fill_engine(timeout=0.1)  # Short timeout to avoid blocking
-                last_fill_time = current_time
-
             tool_outputs = self._poll_tool_futures(tracking, self.llm_engine.tokenizer)
+            current_time = time.time()
             for output in tool_outputs:
                 request_id = _extract_base_request_id(output.request_id)
                 request_outputs[request_id].append(output)
@@ -569,11 +596,13 @@ class LLMRayActor:
                             request_id, request_outputs, tracking, current_time
                         )
 
+                # Fill engine with new requests after processing step outputs
+                self.fill_engine(timeout=timeout)
+
             # If no work to do, break to yield control back to generate_thread,
             # allowing weight_sync_thread to acquire the LLMRayActor lock
             if self.llm_engine.get_num_unfinished_requests() + len(tracking["pending_tool_futures"]) == 0:
                 break
-
         return total_processed
 
     def _poll_tool_futures(self, tracking, tokenizer):
