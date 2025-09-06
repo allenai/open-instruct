@@ -2132,56 +2132,29 @@ def load_data_from_packing_thread(
     return collated_data, data_thread_metrics, num_total_tokens
 
 
-def weight_sync_thread(
-    args: Args,
-    stop_event: threading.Event,
-    weight_sync_trigger_event: threading.Event,
-    policy_group: ModelGroup,
-    actor_manager: ActorManager,
-    weight_sync_metrics_Q: Queue,
-    resume_training_step: int = 1,
-):
+def weight_sync(policy_group: ModelGroup, actor_manager: ActorManager, verbose=False):
     """Thread function that handles weight sync operations and actor manager coordination."""
-    logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
-    if resume_training_step > 1:
-        weight_sync_trigger_event.set()
+    with Timer("[Weight Sync]") as timer:
+        logger.debug("[Weight Sync] Starting weight sync")
 
-    while not stop_event.is_set():
-        # Wait for weight sync trigger from main thread
-        if not weight_sync_trigger_event.wait(timeout=1.0):
-            continue
+        # Set actors to stop
+        ray.get(actor_manager.set_should_stop.remote(True))
+        logger.debug("[Weight Sync] Set should_stop to True for weight sync")
 
-        # Clear the event for next iteration
-        weight_sync_trigger_event.clear()
+        # Broadcast weights to vLLM engines
+        # First get the futures
+        weight_broadcast_futures: List[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
 
-        with Timer("[Weight Sync]") as timer:
-            logger.debug("[Weight Sync Thread] Starting weight sync")
+        # Wait for all weight updates to complete
+        ray_get_with_progress(
+            weight_broadcast_futures, desc="[Weight Sync] Waiting for weight updates to complete", enable=verbose
+        )
 
-            # Set actors to stop
-            ray.get(actor_manager.set_should_stop.remote(True))
-            logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
+        # Allow actors to resume
+        ray.get(actor_manager.set_should_stop.remote(False))
+        logger.debug("[Weight Sync] Set should_stop to False after weight sync")
 
-            # Broadcast weights to vLLM engines
-            # First get the futures
-            weight_broadcast_futures: List[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
-
-            # Wait for all weight updates to complete
-            ray_get_with_progress(
-                weight_broadcast_futures,
-                desc="[Weight Sync Thread] Waiting for weight updates to complete",
-                enable=args.verbose,
-            )
-
-            # Allow actors to resume
-            ray.get(actor_manager.set_should_stop.remote(False))
-            logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
-
-        try:
-            weight_sync_metrics_Q.put_nowait({"time/weight_sync": timer.duration})
-        except Full:
-            logger.warning("[Weight Sync Thread] weight sync metrics queue full, skipping metric")
-
-    logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
+    return {"time/weight_sync": timer.duration}
 
 
 def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q):
@@ -2580,25 +2553,12 @@ def run_training(
     pending_queries_map,
     eval_pending_queries_map,
     generate_metrics_Q,
-    weight_sync_metrics_Q,
     actor_manager: ActorManager,
     checkpoint_state=None,
 ):
     if resume_training_step > 1:
         logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
-
-    logger.info("======== ✅ weight sync thread starts =========")
-    weight_sync_trigger_event = threading.Event()
-    weight_sync_thread_future = executor.submit(
-        weight_sync_thread,
-        args,
-        stop_event,
-        weight_sync_trigger_event,
-        policy_group,
-        actor_manager,
-        weight_sync_metrics_Q,
-        resume_training_step,
-    )
+        weight_sync(policy_group, actor_manager, args.verbose)
 
     """Run the main training loop with worker threads."""
     ray_get_with_progress(
@@ -2627,7 +2587,7 @@ def run_training(
 
     # setup health check function to check that everything is still alive
     def health_check_fn():
-        [f.result() for f in [packing_future, generation_future, weight_sync_thread_future] if f.done()]
+        [f.result() for f in [packing_future, generation_future] if f.done()]
 
     # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps):
@@ -2668,7 +2628,7 @@ def run_training(
         health_check_fn()
 
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
-        weight_sync_trigger_event.set()
+        weight_sync_metrics = weight_sync(policy_group, actor_manager, args.verbose)
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         batch = next_batch(next(iter_dataloader), train_dataset)
@@ -2696,11 +2656,13 @@ def run_training(
         if collated_data is None:
             continue
 
-        for metrics_Q in [generate_metrics_Q, weight_sync_metrics_Q]:
+        for metrics_Q in [generate_metrics_Q]:
             try:
                 data_thread_metrics |= metrics_Q.get_nowait()
             except Empty:
                 logger.info("[Main Thread] didn't get train generation metrics")
+
+        data_thread_metrics |= weight_sync_metrics
 
         one_training_step(
             args,
@@ -2829,7 +2791,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     pending_queries_map = PendingQueriesMap()
     eval_pending_queries_map = PendingQueriesMap()
     generate_metrics_Q = Queue(maxsize=args.async_steps)
-    weight_sync_metrics_Q = Queue(maxsize=args.async_steps)
 
     if eval_dataset is None:
         eval_batch = None
@@ -2865,7 +2826,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             pending_queries_map,
             eval_pending_queries_map,
             generate_metrics_Q,
-            weight_sync_metrics_Q,
             actor_manager,
             checkpoint_state,
         )
