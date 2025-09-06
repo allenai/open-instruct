@@ -47,6 +47,7 @@ for model_name_or_path in "$@"; do
         --description "Running benchmark with response length of $response_length at commit $git_hash on branch $git_branch with model $model_name_or_path." \
         --pure_docker_mode \
         --workspace ai2/open-instruct-dev \
+	--preemptible \
         --priority urgent \
         --num_nodes 1 \
         --max_retries 0 \
@@ -56,7 +57,7 @@ for model_name_or_path in "$@"; do
         --secret HF_TOKEN=finbarrt_HF_TOKEN \
         --mount oe-training-default:/weka/oe-training-default/ \
         --task_name open_instruct-benchmark_generators \
-        -- uv run python -m open_instruct.benchmark_generators \
+        -- python -m open_instruct.benchmark_generators \
         --model_name_or_path "$model_name_or_path" \
         --tokenizer_name_or_path "allenai/OLMo-2-1124-7B" \
         --dataset_mixer_list "hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2" "1.0" \
