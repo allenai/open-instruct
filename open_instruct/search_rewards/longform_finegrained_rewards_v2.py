@@ -68,6 +68,8 @@ def compute_longform_finegrained_reward_v2(response: str, ground_truth: Dict[str
     # score rubric
     rubric_rewards = []
     rubric_key = "Answer Critical" if "Answer Critical" in ground_truth else "rubric"
+    valid_rubrics_count = 0
+    total_rubrics_count = 0
     for rubric in ground_truth[rubric_key]:
         rubric_text = rubric["Ingredient"] if "Ingredient" in rubric else rubric["rubric_item"]
         rubric_reward, rubric_spans_text = _score_property_with_spans(extracted_answer, question, rubric_text)
@@ -78,6 +80,9 @@ def compute_longform_finegrained_reward_v2(response: str, ground_truth: Dict[str
                 start_idx = response.find(span_text)
                 end_idx = start_idx + len(span_text)
                 rubric_spans.append((start_idx, end_idx))
+                total_rubrics_count += 1
+                if rubric_spans:
+                    valid_rubrics_count += 1
         finegrained_scores.append(FinegrainedScore(
             score=rubric_reward,
             effective_spans=rubric_spans,
@@ -118,6 +123,7 @@ def compute_longform_finegrained_reward_v2(response: str, ground_truth: Dict[str
         "answer_extracted": extracted_answer is not None,
         "num_citations": len(extracted_citations) if extracted_citations else 0,
         "num_search_turns": num_search_turns,
+        "valid_rubric_spans_ratio": valid_rubrics_count / total_rubrics_count if total_rubrics_count > 0 else 0,
     }
     
     return {

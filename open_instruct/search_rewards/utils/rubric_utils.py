@@ -127,11 +127,12 @@ Return a score on a scale of 0 to 2 indicating how appropriate the response is b
 
         obj = extract_json_from_response(resp)
         if not obj:
+            LOGGER.warning(f"No JSON object found in rubric span tag response: {resp}")
             return 0.0, []
         
         # Validate that obj is a dictionary and has the expected structure
-        if not isinstance(obj, dict) or "score" not in obj:
-            LOGGER.warning(f"Invalid JSON structure in response: {obj}")
+        if not isinstance(obj, dict) or "score" not in obj or "spans" not in obj:
+            LOGGER.warning(f"Invalid JSON structure in rubric span tag response: {obj}")
             return 0.0, []
             
         # Validate that score is a number
@@ -143,7 +144,7 @@ Return a score on a scale of 0 to 2 indicating how appropriate the response is b
             print("Tagged response ratio: ", len(" ".join(spans)) / len(response))
             return score / 2.0, spans
         except (ValueError, TypeError) as e:
-            LOGGER.warning(f"Invalid score value in response: {obj['score']}, error: {e}")
+            LOGGER.warning(f"Invalid score value in rubric span tag response: {obj['score']}, error: {e}")
             return 0.0, []
             
     except Exception as e:
