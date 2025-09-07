@@ -12,6 +12,7 @@ uv run python mason.py \
         --priority urgent \
 	--preemptible \
         --num_nodes 2 \
+	--timeout "1h" \
 	--description "Large (multi-node) test script." \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \

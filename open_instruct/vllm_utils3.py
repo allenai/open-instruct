@@ -455,7 +455,7 @@ class LLMRayActor:
             queue_name = "eval" if is_eval else "train"
             self.logger.warning(f"{queue_name} results queue is full, discarding result.")
 
-    def fill_engine(self, timeout: float):
+    def fill_engine(self, timeout: float, blocking: bool = True):
         """Fill the LLM engine queue with requests until inference_batch_size is reached.
 
         Args:
@@ -479,7 +479,10 @@ class LLMRayActor:
 
         while num_added < num_to_add:
             try:
-                request = self.prompt_queue.get(timeout=timeout)
+                if blocking:
+                    request = self.prompt_queue.get(timeout=timeout)
+                else:
+                    request = self.prompt_queue.get_nowait()
                 samples_added = add_request(
                     request, self.llm_engine, self.tools, request_metadata=self.request_metadata
                 )
@@ -558,6 +561,17 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
+        function_start_time = time.perf_counter()
+        timing_data = {
+            "initial_setup": 0.0,
+            "tool_processing": 0.0,
+            "engine_steps": 0.0,
+            "completion_processing": 0.0,
+            "engine_refill": 0.0,
+        }
+
+        # Initial setup timing
+        setup_start = time.perf_counter()
         num_processed = self.fill_engine(timeout=timeout)
 
         if num_processed == 0:
@@ -566,17 +580,27 @@ class LLMRayActor:
         tracking = _init_tool_tracking()
         request_outputs = defaultdict(list)
         total_processed = 0
+        timing_data["initial_setup"] += time.perf_counter() - setup_start
 
         while not self._should_stop():
+            # Tool processing timing
+            tool_start = time.perf_counter()
             tool_outputs = self._poll_tool_futures(tracking, self.llm_engine.tokenizer)
             current_time = time.time()
+            timing_data["tool_processing"] += time.perf_counter() - tool_start
+
+            # Tool output completion processing timing
+            completion_start = time.perf_counter()
             for output in tool_outputs:
                 request_id = _extract_base_request_id(output.request_id)
                 request_outputs[request_id].append(output)
                 total_processed += self._maybe_process_and_insert(request_id, request_outputs, tracking, current_time)
+            timing_data["completion_processing"] += time.perf_counter() - completion_start
 
             # Process engine steps - ONLY if there are unfinished requests
             if self.llm_engine.has_unfinished_requests():
+                # Engine step processing timing
+                engine_start = time.perf_counter()
                 step_outputs = [o for o in self.llm_engine.step() if o.finished]
                 for output in step_outputs:
                     base_req_id = _extract_base_request_id(output.request_id)
@@ -595,14 +619,32 @@ class LLMRayActor:
                         total_processed += self._maybe_process_and_insert(
                             request_id, request_outputs, tracking, current_time
                         )
+                timing_data["engine_steps"] += time.perf_counter() - engine_start
 
-                # Fill engine with new requests after processing step outputs
-                self.fill_engine(timeout=timeout)
+                # Engine refill timing
+                refill_start = time.perf_counter()
+                self.fill_engine(timeout=0, blocking=False)
+                timing_data["engine_refill"] += time.perf_counter() - refill_start
 
             # If no work to do, break to yield control back to generate_thread,
             # allowing weight_sync_thread to acquire the LLMRayActor lock
             if self.llm_engine.get_num_unfinished_requests() + len(tracking["pending_tool_futures"]) == 0:
                 break
+
+        # Log timing summary
+        total_time = time.perf_counter() - function_start_time
+        if total_time > 0.001:  # Only log if function took more than 1ms
+            timing_percentages = {k: (v / total_time) * 100 for k, v in timing_data.items()}
+            self.logger.info(
+                f"process_from_queue timing: "
+                f"initial_setup={timing_percentages['initial_setup']:.1f}% ({timing_data['initial_setup']:.3f}s), "
+                f"tool_processing={timing_percentages['tool_processing']:.1f}% ({timing_data['tool_processing']:.3f}s), "
+                f"engine_steps={timing_percentages['engine_steps']:.1f}% ({timing_data['engine_steps']:.3f}s), "
+                f"completion_processing={timing_percentages['completion_processing']:.1f}% ({timing_data['completion_processing']:.3f}s), "
+                f"engine_refill={timing_percentages['engine_refill']:.1f}% ({timing_data['engine_refill']:.3f}s), "
+                f"total={total_time:.3f}s"
+            )
+
         return total_processed
 
     def _poll_tool_futures(self, tracking, tokenizer):
