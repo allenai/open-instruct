@@ -41,7 +41,7 @@ def find_free_port():
 class ActorManager:
     """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
 
-    def __init__(self, queues: dict, args):
+    def __init__(self, queues: dict, args, vllm_engines=None):
         self._should_stop = False
         self._last_updated = datetime.now()
         self._dashboard_port = None
@@ -56,6 +56,17 @@ class ActorManager:
         self._generation_batch_history = collections.deque(maxlen=self._sample_window)
         self._kv_cache_max_concurrency = None
         self._args = args
+        self._vllm_engines = vllm_engines or []
+        self._last_metrics_collection_time = 0
+        # Cache for static token rates (updated only on new batch completion)
+        self._cached_token_rates = {"prefill_tokens_per_sec": 0, "decode_tokens_per_sec": 0, "last_update_count": 0}
+        # Training progress tracking
+        self._current_training_step = 0
+        self._total_training_steps = getattr(args, "num_training_steps", None)
+        self._training_start_time = None
+        # MFU/MBU tracking
+        self._model_utilization_history = collections.deque(maxlen=self._sample_window)
+        self._memory_usage_stats = {"total_gpu_memory_used": 0, "average_kv_cache_size": 0, "peak_memory_usage": 0}
         if self._args.enable_queue_dashboard:
             self._setup_queue_monitoring()
             self._start_dashboard()
@@ -71,12 +82,76 @@ class ActorManager:
         self._poll_thread.start()
 
     def _poll_queue_sizes(self):
-        """Background thread to poll queue sizes."""
+        """Background thread to poll queue sizes and collect vLLM metrics."""
         while self._polling_active:
+            # Poll queue sizes
             for queue_name, info in self._queue_info.items():
                 current_size = info["queue"].size()
                 self._queue_sizes[queue_name] = current_size
+
+            # Collect vLLM metrics every 10 seconds
+            current_time = time.time()
+            if (current_time - self._last_metrics_collection_time) >= 10.0:
+                self._collect_vllm_metrics()
+                self._last_metrics_collection_time = current_time
+
             time.sleep(0.5)
+
+    def _collect_vllm_metrics(self):
+        """Collect metrics from all vLLM engines."""
+        if not self._vllm_engines:
+            return
+
+        try:
+            # Collect metrics from all engines asynchronously
+            import ray
+
+            metrics_futures = []
+            for engine in self._vllm_engines:
+                try:
+                    future = engine.get_engine_metrics.remote()
+                    metrics_futures.append(future)
+                except Exception as e:
+                    logger = logger_utils.setup_logger(__name__)
+                    logger.warning(f"Error getting metrics from engine: {e}")
+
+            if metrics_futures:
+                # Get all metrics with a short timeout to avoid blocking
+                try:
+                    all_metrics = ray.get(metrics_futures, timeout=5.0)
+
+                    # Aggregate metrics across all engines
+                    total_gpu_memory = 0
+                    total_kv_cache_memory = 0
+                    total_mfu = 0
+                    total_mbu = 0
+                    valid_engines = 0
+
+                    for metrics in all_metrics:
+                        if metrics and isinstance(metrics, dict):
+                            total_gpu_memory += metrics.get("gpu_memory_reserved_gb", 0)
+                            total_kv_cache_memory += metrics.get("gpu_memory_allocated_gb", 0)  # Approximation
+                            total_mfu += metrics.get("mfu_estimate", 0)
+                            total_mbu += metrics.get("mbu_estimate", 0)
+                            valid_engines += 1
+
+                    if valid_engines > 0:
+                        # Report aggregated metrics
+                        avg_mfu = total_mfu / valid_engines
+                        avg_mbu = total_mbu / valid_engines
+                        self.report_model_utilization(avg_mfu, avg_mbu)
+                        self.report_memory_usage(total_gpu_memory, total_kv_cache_memory)
+
+                except ray.exceptions.GetTimeoutError:
+                    logger = logger_utils.setup_logger(__name__)
+                    logger.warning("Timeout collecting vLLM metrics")
+                except Exception as e:
+                    logger = logger_utils.setup_logger(__name__)
+                    logger.warning(f"Error processing vLLM metrics: {e}")
+
+        except Exception as e:
+            logger = logger_utils.setup_logger(__name__)
+            logger.warning(f"Error in _collect_vllm_metrics: {e}")
 
     def _start_dashboard(self):
         """Start the FastAPI dashboard server in a background thread."""
@@ -110,6 +185,9 @@ class ActorManager:
                 "queues": queues_data,
                 "token_stats": self.get_token_stats(),
                 "timing_stats": self.get_timing_stats(),
+                "training_progress": self.get_training_progress(),
+                "utilization_stats": self.get_utilization_stats(),
+                "memory_stats": self.get_memory_stats(),
                 "kv_cache_max_concurrency": self._kv_cache_max_concurrency,
                 # This is less confusing to users.
                 "inference_batch_size": self._args.inference_batch_size * self._args.num_samples_per_prompt_rollout,
@@ -161,19 +239,34 @@ class ActorManager:
             }
         )
 
-        self._generation_batch_history.append(token_stats.generation_time)
+        # Report batch generation time (avoid double reporting via report_batch_generation_time)
+        # Add validation to prevent extreme outliers (e.g., > 300 seconds)
+        if 0 < token_stats.generation_time < 300:
+            self._generation_batch_history.append(token_stats.generation_time)
 
     def report_training_step_time(self, duration: float):
         """Report the time taken for a training step."""
         self._training_step_history.append(duration)
 
+    def update_training_step(self, step: int):
+        """Update the current training step."""
+        if self._training_start_time is None:
+            self._training_start_time = time.time()
+        self._current_training_step = step
+
     def report_batch_generation_time(self, duration: float):
         """Report the time taken to generate a batch of data."""
-        self._generation_batch_history.append(duration)
+        # Add validation to prevent extreme outliers (e.g., > 300 seconds)
+        if 0 < duration < 300:
+            self._generation_batch_history.append(duration)
 
     def set_kv_cache_max_concurrency(self, max_concurrency: int):
         """Set the KV cache max concurrency value."""
         self._kv_cache_max_concurrency = max_concurrency
+
+    def set_vllm_engines(self, vllm_engines):
+        """Set the vLLM engines for metrics collection."""
+        self._vllm_engines = vllm_engines or []
 
     def get_token_stats(self):
         """Calculate and return current token statistics."""
@@ -181,32 +274,41 @@ class ActorManager:
             return {
                 "total_prefill_tokens": self._total_prefill_tokens,
                 "total_decode_tokens": self._total_decode_tokens,
-                "prefill_tokens_per_sec": 0,
-                "decode_tokens_per_sec": 0,
+                "prefill_tokens_per_sec": self._cached_token_rates["prefill_tokens_per_sec"],
+                "decode_tokens_per_sec": self._cached_token_rates["decode_tokens_per_sec"],
                 "sample_count": 0,
             }
 
-        current_time = time.time()
+        # Only update rates if we have new token history entries
+        current_sample_count = len(self._token_history)
+        if current_sample_count > self._cached_token_rates["last_update_count"]:
+            current_time = time.time()
 
-        window_prompt_tokens = 0
-        window_generation_tokens = 0
-        oldest_timestamp = self._token_history[0]["timestamp"]
+            window_prompt_tokens = 0
+            window_generation_tokens = 0
+            oldest_timestamp = self._token_history[0]["timestamp"]
 
-        for entry in self._token_history:
-            window_prompt_tokens += entry["prompt_tokens"]
-            window_generation_tokens += entry["generation_tokens"]
+            for entry in self._token_history:
+                window_prompt_tokens += entry["prompt_tokens"]
+                window_generation_tokens += entry["generation_tokens"]
 
-        time_span = current_time - oldest_timestamp if len(self._token_history) > 1 else 1
+            time_span = current_time - oldest_timestamp if len(self._token_history) > 1 else 1
 
-        prompt_tokens_per_sec = window_prompt_tokens / time_span if time_span > 0 else 0
-        generation_tokens_per_sec = window_generation_tokens / time_span if time_span > 0 else 0
+            # Update cached rates
+            self._cached_token_rates["prefill_tokens_per_sec"] = (
+                window_prompt_tokens / time_span if time_span > 0 else 0
+            )
+            self._cached_token_rates["decode_tokens_per_sec"] = (
+                window_generation_tokens / time_span if time_span > 0 else 0
+            )
+            self._cached_token_rates["last_update_count"] = current_sample_count
 
         return {
             "total_prefill_tokens": self._total_prefill_tokens,
             "total_decode_tokens": self._total_decode_tokens,
-            "prefill_tokens_per_sec": prompt_tokens_per_sec,
-            "decode_tokens_per_sec": generation_tokens_per_sec,
-            "sample_count": len(self._token_history),
+            "prefill_tokens_per_sec": self._cached_token_rates["prefill_tokens_per_sec"],
+            "decode_tokens_per_sec": self._cached_token_rates["decode_tokens_per_sec"],
+            "sample_count": current_sample_count,
         }
 
     def get_timing_stats(self):
@@ -227,6 +329,80 @@ class ActorManager:
             "training_step_count": len(self._training_step_history),
             "batch_generation_count": len(self._generation_batch_history),
         }
+
+    def get_training_progress(self):
+        """Calculate and return training progress and ETA."""
+        if not self._total_training_steps or self._current_training_step <= 0:
+            return {
+                "current_step": self._current_training_step,
+                "total_steps": self._total_training_steps,
+                "progress_percent": 0,
+                "eta_seconds": None,
+                "eta_formatted": "N/A",
+            }
+
+        progress_percent = (self._current_training_step / self._total_training_steps) * 100
+        eta_seconds = None
+        eta_formatted = "N/A"
+
+        if self._training_start_time and self._current_training_step > 0:
+            elapsed_time = time.time() - self._training_start_time
+            avg_time_per_step = elapsed_time / self._current_training_step
+            remaining_steps = self._total_training_steps - self._current_training_step
+            eta_seconds = remaining_steps * avg_time_per_step
+
+            if eta_seconds > 0:
+                hours = int(eta_seconds // 3600)
+                minutes = int((eta_seconds % 3600) // 60)
+                if hours > 0:
+                    eta_formatted = f"{hours}h {minutes}m"
+                else:
+                    eta_formatted = f"{minutes}m"
+
+        return {
+            "current_step": self._current_training_step,
+            "total_steps": self._total_training_steps,
+            "progress_percent": progress_percent,
+            "eta_seconds": eta_seconds,
+            "eta_formatted": eta_formatted,
+        }
+
+    def report_model_utilization(self, mfu: float, mbu: float):
+        """Report MFU (Model FLOPs Utilization) and MBU (Memory Bandwidth Utilization)."""
+        current_time = time.time()
+        # Validate and clamp values to reasonable ranges
+        mfu = max(0, min(100, mfu))
+        mbu = max(0, min(100, mbu))
+
+        self._model_utilization_history.append({"timestamp": current_time, "mfu": mfu, "mbu": mbu})
+
+    def report_memory_usage(self, gpu_memory_used: float, kv_cache_size: float):
+        """Report memory usage statistics."""
+        self._memory_usage_stats["total_gpu_memory_used"] = gpu_memory_used
+        self._memory_usage_stats["average_kv_cache_size"] = kv_cache_size
+        self._memory_usage_stats["peak_memory_usage"] = max(
+            self._memory_usage_stats["peak_memory_usage"], gpu_memory_used
+        )
+
+    def get_utilization_stats(self):
+        """Calculate and return current utilization statistics."""
+        if not self._model_utilization_history:
+            return {"mfu": 0, "mbu": 0, "sample_count": 0}
+
+        # Calculate averages over the sample window
+        total_mfu = sum(entry["mfu"] for entry in self._model_utilization_history)
+        total_mbu = sum(entry["mbu"] for entry in self._model_utilization_history)
+        count = len(self._model_utilization_history)
+
+        return {
+            "mfu": total_mfu / count if count > 0 else 0,
+            "mbu": total_mbu / count if count > 0 else 0,
+            "sample_count": count,
+        }
+
+    def get_memory_stats(self):
+        """Return current memory usage statistics."""
+        return self._memory_usage_stats.copy()
 
     def get_dashboard_port(self):
         """Get the port number where the dashboard is running."""

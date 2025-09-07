@@ -2054,6 +2054,10 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ model update group setup successfully =========")
 
+    # Set vLLM engines in ActorManager for metrics collection
+    ray.get(actor_manager.set_vllm_engines.remote(vllm_engines))
+    logger.info("======== ✅ vLLM engines set in ActorManager for metrics collection =========")
+
     return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager
 
 
@@ -2269,6 +2273,7 @@ def one_training_step(
             ray_get_with_progress(update_ref_policy_future, desc="Updating reference policy")
 
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
+    ray.get(actor_manager.update_training_step.remote(training_step))
 
     average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
     total_time = time.perf_counter() - start_time

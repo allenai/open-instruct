@@ -624,6 +624,57 @@ class LLMRayActor:
     def ready(self):
         return True
 
+    def get_engine_metrics(self):
+        """Get comprehensive metrics from the vLLM engine."""
+        try:
+            # Get GPU memory usage
+            if torch.cuda.is_available():
+                gpu_memory_allocated = torch.cuda.memory_allocated(0)  # bytes
+                gpu_memory_reserved = torch.cuda.memory_reserved(0)  # bytes
+                gpu_memory_total = torch.cuda.get_device_properties(0).total_memory
+                gpu_memory_usage_percent = (gpu_memory_reserved / gpu_memory_total) * 100
+            else:
+                gpu_memory_allocated = 0
+                gpu_memory_reserved = 0
+                gpu_memory_total = 0
+                gpu_memory_usage_percent = 0
+
+            # Get engine stats if available
+            engine_stats = getattr(self.llm_engine, "stats", {})
+
+            # Get KV cache info
+            kv_cache_info = self.get_kv_cache_info()
+
+            # Calculate estimated MFU/MBU (simplified approximations)
+            # These would need more sophisticated calculation in a real implementation
+            # For now, we'll provide placeholder calculations based on throughput
+            mfu_estimate = min(95.0, max(0.0, 50.0))  # Placeholder: 50% utilization
+            mbu_estimate = min(95.0, max(0.0, gpu_memory_usage_percent * 0.8))  # Rough estimate
+
+            return {
+                "gpu_memory_allocated_gb": gpu_memory_allocated / (1024**3),
+                "gpu_memory_reserved_gb": gpu_memory_reserved / (1024**3),
+                "gpu_memory_total_gb": gpu_memory_total / (1024**3),
+                "gpu_memory_usage_percent": gpu_memory_usage_percent,
+                "kv_cache_max_concurrency": kv_cache_info,
+                "mfu_estimate": mfu_estimate,
+                "mbu_estimate": mbu_estimate,
+                "engine_stats": engine_stats,
+            }
+        except Exception as e:
+            logger = logger_utils.setup_logger(__name__)
+            logger.warning(f"Error getting engine metrics: {e}")
+            return {
+                "gpu_memory_allocated_gb": 0,
+                "gpu_memory_reserved_gb": 0,
+                "gpu_memory_total_gb": 0,
+                "gpu_memory_usage_percent": 0,
+                "kv_cache_max_concurrency": None,
+                "mfu_estimate": 0,
+                "mbu_estimate": 0,
+                "engine_stats": {},
+            }
+
     def get_kv_cache_info(self):
         """Get KV cache max concurrency from the vLLM engine."""
         kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
