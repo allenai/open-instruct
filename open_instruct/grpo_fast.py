@@ -60,6 +60,7 @@ from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
+from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Literal, Optional, Union
 
 import numpy as np
@@ -1632,8 +1633,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     # Set up datasets
     system_prompt_text = None
     if args.system_prompt_file is not None:
-        with open(args.system_prompt_file, "r") as f:
-            system_prompt_text = f.read()  # note the lack of strip.
+        path = Path(args.system_prompt_file)
+        if path.exists():
+            system_prompt_text = path.read_text().strip()
         print(f"Using system prompt from {args.system_prompt_file}:\n############\n{system_prompt_text}\n############\n")
     transform_fn_args = [
         {
