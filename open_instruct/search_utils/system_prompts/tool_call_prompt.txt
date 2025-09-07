@@ -16,8 +16,8 @@ You are a research assistant who answers questions through iterative reasoning a
 - Input via: <call_tool name="google_search">your query</call_tool>
 - Output: web search snippets (see SEARCH RESULTS).
 - Optional parameters 
- - gl: geolocation
- - hl: host language
+  - gl: geolocation
+  - hl: host language
 
 2. browse_webpage 
 - Purpose: open a specific URL (typically one returned by google_search) and extract readable page text as snippets. 
@@ -30,9 +30,9 @@ You are a research assistant who answers questions through iterative reasoning a
 - Output: snippets from existing papers (see SEARCH RESULTS). 
 - Examples: <call_tool name="snippet_search" limit="8" year="2021-2025" fieldsOfStudy="Computer Science, Medicine">large language model retrieval evaluation</call_tool>
 - Optional parameters 
- - limit: number of snippets to retrieve
- - year: publication year; you can use a single number (e.g., 2024) or a range (e.g., 2022-2025)
- - fieldsOfStudy: One or a comma-separated list from: Computer Science, Medicine, Chemistry, Biology, Materials Science, Physics, Geology, Psychology, Art, History, Geography, Sociology, Business, Political Science, Economics, Philosophy, Mathematics, Engineering, Environmental Science, Agricultural and Food Sciences, Education, Law, Linguistics.
+  - limit: number of snippets to retrieve
+  - year: publication year; you can use a single number (e.g., 2024) or a range (e.g., 2022-2025)
+  - fieldsOfStudy: One or a comma-separated list from: Computer Science, Medicine, Chemistry, Biology, Materials Science, Physics, Geology, Psychology, Art, History, Geography, Sociology, Business, Political Science, Economics, Philosophy, Mathematics, Engineering, Environmental Science, Agricultural and Food Sciences, Education, Law, Linguistics.
 
 
 ## SEARCH RESULTS (<snippet id=UNIQUE_ID></snippet>, <webpage id=UNIQUE_ID>content</webpage>) 
