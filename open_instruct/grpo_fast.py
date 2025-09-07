@@ -2109,17 +2109,29 @@ def load_data_from_packing_thread(
 ):
     """Get the packed sequences with advantages from the packing thread."""
     with Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
+        start_wait_time = time.time()
+        max_wait_time = 600.0  # 10 minutes in seconds
+        
         while True:
             if stop_event.is_set():
                 logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
                 return None, {}, num_total_tokens
+            
+            # Check if we've been waiting too long
+            elapsed_wait_time = time.time() - start_wait_time
+            if elapsed_wait_time > max_wait_time:
+                logger.error(f"[Main Thread] Waited {elapsed_wait_time:.1f}s for packed sequences (> {max_wait_time:.0f}s limit). Setting stop event.")
+                stop_event.set()
+                return None, {}, num_total_tokens
+            
             try:
                 packed_data = packed_sequences_Q.get(timeout=30.0)
                 break
             except Empty:
                 # check that everything is still alive
                 health_check_fn()
-                logger.warning("[Main Thread] Timeout waiting for packed sequences. Retrying...")
+                logger.warning(f"[Main Thread] Timeout waiting for packed sequences (waited {elapsed_wait_time:.1f}s total). Retrying...")
+        
         data_thread_metrics = packed_data["metrics"]
         B = packed_data["B"]
         collated_data = packed_data["collated_data"]

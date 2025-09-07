@@ -563,24 +563,33 @@ class LLMRayActor:
         """
         function_start_time = time.perf_counter()
         timing_data = {
-            "initial_setup": 0.0,
+            "fill_engine_initial": 0.0,
+            "tool_tracking_init": 0.0,
+            "request_outputs_init": 0.0,
             "tool_processing": 0.0,
             "engine_steps": 0.0,
             "completion_processing": 0.0,
             "engine_refill": 0.0,
         }
 
-        # Initial setup timing
-        setup_start = time.perf_counter()
+        # Fill engine timing
+        fill_start = time.perf_counter()
         num_processed = self.fill_engine(timeout=timeout)
+        timing_data["fill_engine_initial"] += time.perf_counter() - fill_start
 
         if num_processed == 0:
             return num_processed
 
+        # Tool tracking initialization timing
+        tracking_start = time.perf_counter()
         tracking = _init_tool_tracking()
+        timing_data["tool_tracking_init"] += time.perf_counter() - tracking_start
+        
+        # Request outputs initialization timing
+        outputs_start = time.perf_counter()
         request_outputs = defaultdict(list)
         total_processed = 0
-        timing_data["initial_setup"] += time.perf_counter() - setup_start
+        timing_data["request_outputs_init"] += time.perf_counter() - outputs_start
 
         while not self._should_stop():
             # Tool processing timing
