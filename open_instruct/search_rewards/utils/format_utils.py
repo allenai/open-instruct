@@ -97,6 +97,11 @@ def extract_citations_from_context(context: str) -> Dict[str, str]:
 def extract_search_tool_calls(context: str, mcp_parser_name: Optional[str] = None) -> List[str]:
     if not mcp_parser_name:
         matches = re.findall(r"<search>(.*?)</search>", context, re.DOTALL)
+        # For the simple case, matches are strings, not tuples
+        if matches:
+            return [match.strip() for match in matches if match.strip()]
+        else:
+            return []
     elif mcp_parser_name == "unified":
         matches = re.findall(r"<tool name=(.*?)>(.*?)</tool>", context, re.DOTALL)
     elif mcp_parser_name == "v20250824":
@@ -106,6 +111,7 @@ def extract_search_tool_calls(context: str, mcp_parser_name: Optional[str] = Non
     else:
         raise ValueError(f"Unsupported MCP parser name: {mcp_parser_name}")
     
+    # For MCP parser cases, matches are tuples, so we access match[1]
     if matches:
         return [match[1] for match in matches if match[1].strip()]
     else:
