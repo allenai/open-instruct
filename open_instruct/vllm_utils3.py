@@ -584,7 +584,7 @@ class LLMRayActor:
         tracking_start = time.perf_counter()
         tracking = _init_tool_tracking()
         timing_data["tool_tracking_init"] += time.perf_counter() - tracking_start
-        
+
         # Request outputs initialization timing
         outputs_start = time.perf_counter()
         request_outputs = defaultdict(list)
@@ -646,7 +646,9 @@ class LLMRayActor:
             timing_percentages = {k: (v / total_time) * 100 for k, v in timing_data.items()}
             self.logger.info(
                 f"process_from_queue timing: "
-                f"initial_setup={timing_percentages['initial_setup']:.1f}% ({timing_data['initial_setup']:.3f}s), "
+                f"fill_engine_initial={timing_percentages['fill_engine_initial']:.1f}% ({timing_data['fill_engine_initial']:.3f}s), "
+                f"tool_tracking_init={timing_percentages['tool_tracking_init']:.1f}% ({timing_data['tool_tracking_init']:.3f}s), "
+                f"request_outputs_init={timing_percentages['request_outputs_init']:.1f}% ({timing_data['request_outputs_init']:.3f}s), "
                 f"tool_processing={timing_percentages['tool_processing']:.1f}% ({timing_data['tool_processing']:.3f}s), "
                 f"engine_steps={timing_percentages['engine_steps']:.1f}% ({timing_data['engine_steps']:.3f}s), "
                 f"completion_processing={timing_percentages['completion_processing']:.1f}% ({timing_data['completion_processing']:.3f}s), "
