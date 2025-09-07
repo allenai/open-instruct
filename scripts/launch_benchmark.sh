@@ -38,11 +38,11 @@ for model_name_or_path in "$@"; do
     echo ""
     echo "Launching benchmark for model: $model_name_or_path"
 
-    uv run python mason.py \
+    python mason.py \
         --cluster ai2/ceres \
         --cluster ai2/jupiter \
-        --cluster ai2/augusta \
         --cluster ai2/saturn \
+	--non_resumable \
         --image "$image_name" \
         --description "Running benchmark with response length of $response_length at commit $git_hash on branch $git_branch with model $model_name_or_path." \
         --pure_docker_mode \
@@ -55,31 +55,29 @@ for model_name_or_path in "$@"; do
         --budget ai2/oe-adapt \
         --gpus 1 \
         --secret HF_TOKEN=finbarrt_HF_TOKEN \
-        --mount oe-training-default:/weka/oe-training-default/ \
-        --task_name open_instruct-benchmark_generators \
-        -- python -m open_instruct.benchmark_generators \
-        --model_name_or_path "$model_name_or_path" \
-        --tokenizer_name_or_path "allenai/OLMo-2-1124-7B" \
-        --dataset_mixer_list "hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2" "1.0" \
-        --dataset_mixer_list_splits "train" \
-        --max_token_length 10240 \
-        --max_prompt_token_length 2048 \
-        --temperature 1.0 \
-        --response_length "$response_length" \
-        --vllm_top_p 0.9 \
-        --num_unique_prompts_rollout 4 \
-        --num_samples_per_prompt_rollout 16 \
-        --vllm_num_engines 1 \
-        --vllm_tensor_parallel_size 1 \
-        --vllm_gpu_memory_utilization 0.9 \
-        --pack_length 40000 \
-        --chat_template_name "tulu_thinker" \
-        --trust_remote_code \
-        --seed 42 \
-        --add_bos \
-        --dataset_local_cache_dir "benchmark_cache" \
-        --dataset_cache_mode "local" \
-        --dataset_transform_fn "rlvr_tokenize_v1" "rlvr_filter_v1"
+        --task_name open_instruct-benchmark_generators -- python -m open_instruct.benchmark_generators \
+            --model_name_or_path "$model_name_or_path" \
+            --tokenizer_name_or_path "allenai/OLMo-2-1124-7B" \
+            --dataset_mixer_list "hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2" "1.0" \
+            --dataset_mixer_list_splits "train" \
+            --max_token_length 10240 \
+            --max_prompt_token_length 2048 \
+            --temperature 1.0 \
+            --response_length "$response_length" \
+            --vllm_top_p 0.9 \
+            --num_unique_prompts_rollout 4 \
+            --num_samples_per_prompt_rollout 16 \
+            --vllm_num_engines 1 \
+            --vllm_tensor_parallel_size 1 \
+            --vllm_gpu_memory_utilization 0.9 \
+            --pack_length 40000 \
+            --chat_template_name "tulu_thinker" \
+            --trust_remote_code \
+            --seed 42 \
+            --add_bos \
+            --dataset_local_cache_dir "benchmark_cache" \
+            --dataset_cache_mode "local" \
+            --dataset_transform_fn "rlvr_tokenize_v1" "rlvr_filter_v1"
 
     echo "Launched benchmark for model: $model_name_or_path"
     echo "----------------------------------------"
