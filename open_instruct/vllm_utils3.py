@@ -16,6 +16,7 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 import os
+import json
 import queue
 import time
 from collections import defaultdict
@@ -82,7 +83,15 @@ def _init_tool_tracking():
     }
 
 
-def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, executor):
+def _handle_output(
+    output,
+    tools,
+    tracking,
+    sampling_params,
+    max_tool_calls,
+    executor,
+    tool_context: Optional[str] = None,
+):
     """
     Handle a finished output. Returns the output if it should be added to results,
     or None if it's being held for tool processing.
@@ -111,7 +120,15 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
             else:
                 tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
 
-            future = executor.submit(tool, o.text)
+            # Append hidden tool context for tools that can consume it (e.g., CodeViewTool)
+            augmented_text = o.text
+            if tool_context:
+                try:
+                    augmented_text = o.text + f"\n<!--tool_context:{json.dumps(tool_context)}-->"
+                except Exception:
+                    augmented_text = o.text
+
+            future = executor.submit(tool, augmented_text)
             tracking["pending_tool_futures"][output.request_id] = (future, o, output)
 
             return None  # Output is being held for tool processing
@@ -337,6 +354,12 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         "start_time": time.perf_counter(),
     }
 
+    # Preserve optional tool contexts for this request so tools can access them later
+    try:
+        request_metadata[request_id]["tool_contexts"] = getattr(request, "tool_contexts", None)
+    except Exception:
+        request_metadata[request_id]["tool_contexts"] = None
+
     tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
     for j in range(request.generation_config.n):
         sub_sampling_params = sampling_params.clone()  # Already has n=1
@@ -466,6 +489,10 @@ class LLMRayActor:
                 step_outputs = [o for o in self.llm_engine.step() if o.finished]
                 for output in step_outputs:
                     base_req_id = "_".join(output.request_id.split("_")[:-1])
+                    # Extract optional tool context for this request (single prompt per request)
+                    ctx = self.request_metadata[base_req_id].get("tool_contexts")
+                    if isinstance(ctx, list):
+                        ctx = ctx[0] if ctx else None
                     result = _handle_output(
                         output,
                         self.tools,
@@ -473,6 +500,7 @@ class LLMRayActor:
                         self.request_metadata[base_req_id]["sampling_params"],
                         self.max_tool_calls,
                         self.executor,
+                        tool_context=ctx,
                     )
                     # Result is None when we do more tool processing.
                     if result is not None:
@@ -536,13 +564,28 @@ class LLMRayActor:
             last_prompt_token_ids = last_output.prompt_token_ids
             last_token_ids = last_o.token_ids
             tool_output_token_ids = tokenizer.encode(
-                "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+                "<tool_response>\n" + tool_result.output + "</tool_response>\n", add_special_tokens=False
             )
             tracking["timeout"][req_id] = tool_result.timeout
             tracking["tool_error"][req_id] += "" if tool_result.error is None else tool_result.error
             tracking["tool_output"][req_id] += tool_result.output
             tracking["tool_runtime"][req_id] += tool_result.runtime
             tracking["tool_called"][req_id] = True
+
+            # Check if tool requested termination (e.g., MaxCallsExceededTool)
+            if hasattr(tool_result, "terminate") and tool_result.terminate:
+                # Add the tool output to response and mark as finished without continuing
+                tracking["concat_outputs"][req_id].outputs[0].token_ids.extend(tool_output_token_ids)
+                tracking["masks"][req_id].extend([0] * len(tool_output_token_ids))
+                # Mark as finished by setting finish reason
+                tracking["concat_outputs"][req_id].outputs[0].finish_reason = "stop"
+                # Abort the request in the vLLM engine to stop generation immediately
+                try:
+                    self.llm_engine.abort_request(req_id)
+                except Exception as e:
+                    self.logger.warning(f"Failed to abort request {req_id}: {e}")
+                dict_keys_to_delete.append(req_id)
+                continue
 
             # Edge case 1: clip against model context length
             prompt_and_tool_output_token = last_prompt_token_ids + last_token_ids + tool_output_token_ids

@@ -3,6 +3,7 @@ python open_instruct/tool_utils/tool_vllm.py
 """
 
 import copy
+import json
 import re
 import time
 import traceback
@@ -22,6 +23,12 @@ from vllm.model_executor.guided_decoding.guided_fields import GuidedDecodingRequ
 from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sampling_params import RequestOutputKind
 
+from open_instruct.tool_utils.swe_tool_parser import Argument as SWEArgument
+from open_instruct.tool_utils.swe_tool_parser import Command as SWECommand
+
+# SWE-agent style function calling parser (minimal local deps included in repo)
+from open_instruct.tool_utils.swe_tool_parser import FunctionCallingParser
+
 
 @dataclass
 class ToolOutput:
@@ -30,8 +37,9 @@ class ToolOutput:
     error: str
     timeout: bool
     runtime: float
-    start_str: str = "<output>\n"
-    end_str: str = "\n</output>"
+    terminate: bool = False  # If True, terminate generation immediately
+    start_str: str = "<tool_response>\n"
+    end_str: str = "\n</tool_response>"
 
 
 class Tool:
@@ -45,7 +53,14 @@ class Tool:
 
 class MaxCallsExceededTool(Tool):
     def __call__(self, prompt: str) -> ToolOutput:
-        return ToolOutput(output="Max tool calls exceeded.", called=False, error="", timeout=False, runtime=0)
+        return ToolOutput(
+            output="Max tool calls exceeded. Terminating generation.",
+            called=True,
+            error="",
+            timeout=False,
+            runtime=0,
+            terminate=True,  # Signal to terminate generation immediately
+        )
 
 
 class PythonCodeTool(Tool):
@@ -131,6 +146,301 @@ class PythonCodeTool(Tool):
         )
 
 
+class CodeViewTool(Tool):
+    def __init__(self, api_endpoint: str, repo_name: str = None, *args, **kwargs):
+        # api_endpoint is the full endpoint for view_file. We'll derive base URL for /run_bash
+        self.api_endpoint = api_endpoint
+        # Compute base URL (strip trailing path like /view_file)
+        try:
+            if api_endpoint.endswith("/view_file"):
+                self.base_api = api_endpoint[: -len("/view_file")]
+            else:
+                self.base_api = api_endpoint.rsplit("/", 1)[0]
+        except Exception:
+            self.base_api = api_endpoint
+        self.repo_name = repo_name
+        super().__init__(*args, **kwargs)
+
+    def __call__(self, prompt: str) -> ToolOutput:
+        """
+        Use the code view tool to view files of a repo.
+        The prompt will contain tool calls with file paths to view.
+
+        Expected formats:
+        <tool_call>
+        {"name": "str_replace_editor", "arguments": {"command": "view", "path": "/testbed/starlette/config.py", "view_range": [121, 138], "repo_name": "encode/starlette"}}
+        </tool_call>
+
+        or
+
+        <tool_call>
+        {"name": "str_replace_editor", "arguments": {"command": "view", "path": "/testbed/starlette/config.py", "repo_name": "encode/starlette"}}
+        </tool_call>
+
+        The repo_name should be provided in the tool call. If not provided, will fallback to "testbed".
+        """
+
+        # Extract optional hidden per-request tool context appended by the engine
+        # Pattern: <!--tool_context:{...}-->
+        ctx_match = re.search(r"<!--tool_context:(.*?)-->", prompt, re.DOTALL)
+        tool_ctx = {}
+        if ctx_match:
+            try:
+                tool_ctx = json.loads(ctx_match.group(1))
+            except Exception:
+                tool_ctx = {}
+
+        # Find tool calls in the prompt
+        tool_call_pattern = r"<tool_call>\s*(.*?)\s*</tool_call>"
+        tool_calls = re.findall(tool_call_pattern, prompt, re.DOTALL)
+        # Fallback: support XML-style self-closing tags like
+        # <str_replace_editor command="view" path="/testbed/file.py" />
+        if not tool_calls:
+            xml_calls = re.findall(r"<([a-zA-Z_][\w]*)\s+([^/>]*?)\s*/>", prompt)
+            # Convert to pseudo JSON strings for unified processing below
+            for name, attrs in xml_calls:
+                kvs = dict(re.findall(r"([a-zA-Z_][\w]*)=\"([^\"]*)\"", attrs))
+                tool_calls.append(json.dumps({"name": name, "arguments": kvs}))
+
+        if not tool_calls:
+            return ToolOutput(output="", called=False, error="", timeout=False, runtime=0)
+
+        all_outputs = []
+        error = ""
+        start_time = time.time()
+        timeout = False
+
+        # Prepare parser and command schemas (bash + str_replace_editor)
+        parser = FunctionCallingParser()
+        bash_cmd_schema = SWECommand(
+            name="bash",
+            docstring="runs the given command directly in bash",
+            arguments=[
+                SWEArgument(name="command", type="string", description="The bash command to execute.", required=True),
+                SWEArgument(name="path", type="string", description="Optional working dir", required=False),
+                SWEArgument(name="cwd", type="string", description="Optional working dir", required=False),
+                SWEArgument(name="repo_name", type="string", description="Optional repo name", required=False),
+                SWEArgument(name="base_commit", type="string", description="Optional base commit", required=False),
+                SWEArgument(
+                    name="patches",
+                    type="array",
+                    description="Optional patches",
+                    required=False,
+                    items={"type": "string"},
+                ),
+            ],
+        )
+        str_replace_editor_schema = SWECommand(
+            name="str_replace_editor",
+            docstring=(
+                "Custom tool for viewing/editing files. If path is a file, view displays cat -n. "
+                "If path is a directory, view lists non-hidden files/dirs up to 2 levels."
+            ),
+            arguments=[
+                SWEArgument(
+                    name="command",
+                    type="string",
+                    description="The command to run",
+                    required=True,
+                    enum=["view", "create", "str_replace", "insert", "undo_edit"],
+                ),
+                SWEArgument(
+                    name="path", type="string", description="Absolute path to file or directory", required=True
+                ),
+                SWEArgument(
+                    name="view_range",
+                    type="array",
+                    description="[start,end] when viewing a file",
+                    required=False,
+                    items={"type": "integer"},
+                ),
+                SWEArgument(name="file_text", type="string", description="File contents for create", required=False),
+                SWEArgument(name="old_str", type="string", description="Old string for replace", required=False),
+                SWEArgument(
+                    name="new_str", type="string", description="New string for replace/insert", required=False
+                ),
+                SWEArgument(
+                    name="insert_line", type="integer", description="Insertion line (0-indexed)", required=False
+                ),
+                SWEArgument(name="repo_name", type="string", description="Optional repo name", required=False),
+                SWEArgument(name="base_commit", type="string", description="Optional base commit", required=False),
+                SWEArgument(
+                    name="patches",
+                    type="array",
+                    description="Optional patches",
+                    required=False,
+                    items={"type": "string"},
+                ),
+            ],
+        )
+        submit_schema = SWECommand(
+            name="submit", docstring="Signal that the task is complete and submit the solution.", arguments=[]
+        )
+
+        for tool_call_str in tool_calls:
+            try:
+                # Parse the JSON tool call
+                tool_call = json.loads(tool_call_str)
+
+                # Build a LiteLLM-style wrapper and validate with FunctionCallingParser
+                model_response = {
+                    "message": prompt,
+                    "tool_calls": [
+                        {"function": {"name": tool_call.get("name"), "arguments": tool_call.get("arguments", {})}}
+                    ],
+                }
+                name = tool_call.get("name", "")
+                if name == "bash":
+                    _thought, _action = parser(model_response, commands=[bash_cmd_schema], strict=True)
+                elif name == "submit":
+                    _thought, _action = parser(model_response, commands=[submit_schema], strict=True)
+                else:
+                    # default to str_replace_editor schema
+                    _thought, _action = parser(model_response, commands=[str_replace_editor_schema], strict=True)
+
+                args = tool_call.get("arguments", {})
+                # Normalize key variants for bash
+                if name == "bash" and "cmd" in args and "command" not in args:
+                    args["command"] = args["cmd"]
+                command = args.get("command")
+
+                # Extract common arguments
+                path = args.get("path", "")
+                view_range = args.get("view_range", None)
+                patches = args.get("patches", None)
+                base_commit = args.get("base_commit", None)
+                bash_cmd = args.get("command") or args.get("cmd")
+                cwd = args.get("cwd")
+
+                # Keep the path as-is - the API will handle normalization
+                # We don't strip /testbed anymore since API expects testbed/... paths
+
+                # Extract repo_name from the tool call arguments or fallback to context
+                repo_name = args.get("repo_name") or tool_ctx.get("repo_name")
+
+                # Fallback to instance variable if not in tool call
+                if not repo_name:
+                    repo_name = self.repo_name
+
+                # For instances from sample data, extract repo name from extra_fields if available
+                if not repo_name and "extra_fields" in tool_call.get("arguments", {}):
+                    repo_name = tool_call["arguments"]["extra_fields"].get("repo_name")
+
+                if not repo_name:
+                    # Try to infer from the prompt or use a default
+                    repo_name = "testbed"
+
+                # If not provided in the call, fallback to context for base_commit and patches
+                if base_commit is None:
+                    base_commit = tool_ctx.get("base_commit")
+                if patches is None:
+                    patches = tool_ctx.get("patches")
+
+                timeout_seconds = 60
+                if name == "bash":
+                    if not bash_cmd:
+                        raise ValueError("Missing 'command' for bash function call")
+
+                    # Retry logic for API gateway errors
+                    max_retries = 2
+                    response = None
+                    for attempt in range(max_retries):
+                        try:
+                            response = requests.post(
+                                f"{self.base_api}/run_bash",
+                                json={
+                                    "repo_name": repo_name,
+                                    "cmd": bash_cmd,
+                                    "cwd": path or cwd,
+                                    "base_commit": base_commit,
+                                    "patches": patches,
+                                    "timeout_seconds": timeout_seconds,
+                                },
+                                timeout=timeout_seconds,
+                            )
+                            if response.status_code in [502, 503, 504]:
+                                if attempt < max_retries - 1:
+                                    time.sleep(1)  # Brief pause before retry
+                                    continue
+                                else:
+                                    # Return a cleaner error message instead of HTML
+                                    content = f"OBSERVATION:\nAPI error (status {response.status_code}): Gateway timeout or service unavailable. Please try again.\n"
+                                    all_outputs.append(content)
+                                    response = None  # Mark as failed
+                            break
+                        except requests.exceptions.RequestException as e:
+                            if attempt < max_retries - 1:
+                                time.sleep(1)
+                                continue
+                            else:
+                                content = f"OBSERVATION:\nAPI connection error: {str(e)}\n"
+                                all_outputs.append(content)
+                                response = None  # Mark as failed
+                elif name == "submit":
+                    # Submit should terminate generation immediately
+                    content = "OBSERVATION:\nSubmission received. Task marked as complete.\n"
+                    all_outputs.append(content)
+                    # Set terminate flag to stop generation
+                    return ToolOutput(
+                        output="\n\n".join(all_outputs) if all_outputs else content,
+                        called=True,
+                        error="",
+                        timeout=False,
+                        runtime=time.time() - start_time,
+                        terminate=True,  # Signal to terminate generation
+                    )
+                else:
+                    # str_replace_editor commands routed to /edit_file (including view)
+                    payload = {
+                        "repo_name": repo_name,
+                        "command": command,
+                        "path": path,
+                        "view_range": view_range,
+                        "file_text": args.get("file_text"),
+                        "old_str": args.get("old_str"),
+                        "new_str": args.get("new_str"),
+                        "insert_line": args.get("insert_line"),
+                        "base_commit": base_commit,
+                        "patches": patches,
+                    }
+                    response = requests.post(f"{self.base_api}/edit_file", json=payload, timeout=timeout_seconds)
+
+                # Only process response if we have one
+                if response is not None:
+                    if response.status_code == 200:
+                        result = response.json()
+                        content = result.get("content", "")
+                        all_outputs.append(content)
+                    else:
+                        error_msg = f"API error (status {response.status_code}): {response.text}"
+                        all_outputs.append(error_msg)
+                        error = error_msg
+
+            except requests.Timeout:
+                all_outputs.append("Timeout viewing file")
+                timeout = True
+                break
+            except json.JSONDecodeError as e:
+                error_msg = f"Invalid JSON in tool call: {e}"
+                all_outputs.append(error_msg)
+                error = error_msg
+            except Exception as e:
+                error_msg = f"Error processing tool call: {str(e)}"
+                all_outputs.append(error_msg)
+                error = error_msg
+
+        runtime = time.time() - start_time
+        called = len(tool_calls) > 0
+
+        return ToolOutput(
+            output="\n\n".join(all_outputs) if all_outputs else "",
+            called=called,
+            error=error,
+            timeout=timeout,
+            runtime=runtime,
+        )
+
+
 class ToolUseLLM(LLM):
     def __init__(self, tools: dict[str, Tool] = None, max_tool_calls: Union[int, dict[str, int]] = 4, *args, **kwargs):
         self.tools = tools
@@ -142,7 +452,13 @@ class ToolUseLLM(LLM):
         # Initialize executor and store for pending tool calls
         self.executor = ThreadPoolExecutor(max_workers=20)
         self.pending_tool_futures = {}
+        # Optional per-request context strings, aligned with prompts order
+        self._tool_contexts: Optional[list[Optional[str]]] = None
         super().__init__(*args, **kwargs)
+
+    # Allow the actor to set per-request tool contexts that tools can access if needed
+    def set_tool_contexts(self, tool_contexts: Optional[list[Optional[str]]]):
+        self._tool_contexts = tool_contexts
 
     def _validate_and_add_requests(
         self,
@@ -238,58 +554,80 @@ class ToolUseLLM(LLM):
             for req_id, (future, last_o, last_output) in self.pending_tool_futures.items():
                 if future.done():
                     tool_result = future.result()
-                    last_prompt_token_ids = last_output.prompt_token_ids
-                    last_token_ids = last_o.token_ids
-                    tool_output_token_ids = tokenizer.encode(
-                        "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
-                    )
                     timeout[req_id] = tool_result.timeout
                     tool_error[req_id] += "" if tool_result.error is None else tool_result.error
-                    tool_output[req_id] += tool_result.output
                     tool_runtime[req_id] += tool_result.runtime
-                    tool_called[req_id] = True
-                    # Edge case 1: clip against model context length
-                    prompt_and_tool_output_token = last_prompt_token_ids + last_token_ids + tool_output_token_ids
-                    num_calls[req_id] += 1
-                    excess = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len
-                    if excess > 0:
-                        tool_output_token_ids = tool_output_token_ids[:-excess]
-                        can_make_new_request = False
-                    else:
-                        can_make_new_request = True
 
-                    # Edge case 2: clip against per-request max_tokens
-                    remaining = self.single_n_sampling_params.max_tokens - len(masks[req_id])
-                    if remaining <= 0:
-                        tool_output_token_ids = []
-                    elif len(tool_output_token_ids) > remaining:
-                        tool_output_token_ids = tool_output_token_ids[:remaining]
-                    concat_outputs[req_id].outputs[0].token_ids.extend(tool_output_token_ids)
-                    if len(concat_outputs[req_id].outputs[0].token_ids) > self.single_n_sampling_params.max_tokens:
-                        breakpoint()
-                        raise ValueError(
-                            f"ToolUseLLM generated more response tokens than max_tokens! "
-                            f"len(concat_outputs[req_id].outputs[0].token_ids): {len(concat_outputs[req_id].outputs[0].token_ids)}"
+                    # Check if tool requested termination
+                    if tool_result.terminate:
+                        # Add the tool output to response and mark as finished without continuing
+                        tool_called[req_id] = True
+                        last_token_ids = last_o.token_ids
+                        tool_output_token_ids = tokenizer.encode(
+                            "<tool_response>\n" + tool_result.output + "</tool_response>\n", add_special_tokens=False
                         )
-                    masks[req_id].extend([0] * len(tool_output_token_ids))
-                    new_sample_tokens = self.single_n_sampling_params.max_tokens - len(masks[req_id])
-                    can_make_new_request = can_make_new_request and new_sample_tokens > 0
-                    if can_make_new_request:
-                        try:
-                            new_sampling_params = copy.deepcopy(self.single_n_sampling_params)
-                            new_sampling_params.max_tokens = new_sample_tokens
-                            self.llm_engine.add_request(
-                                req_id,
-                                TokensPrompt(prompt_token_ids=prompt_and_tool_output_token),
-                                new_sampling_params,
+                        concat_outputs[req_id].outputs[0].token_ids.extend(tool_output_token_ids)
+                        concat_outputs[req_id].outputs[0].text = tokenizer.decode(
+                            concat_outputs[req_id].outputs[0].token_ids, skip_special_tokens=False
+                        )
+                        concat_outputs[req_id].outputs[0].finish_reason = "stop"  # Mark as properly finished
+                        outputs.append(concat_outputs[req_id])
+                        dict_keys_to_delete.append(req_id)
+                        # Abort the request in the vLLM engine to stop generation immediately
+                        self.llm_engine.abort_request(req_id)
+                        continue
+
+                    if tool_result.called:
+                        tool_called[req_id] = True
+                        last_prompt_token_ids = last_output.prompt_token_ids
+                        last_token_ids = last_o.token_ids
+                        tool_output_token_ids = tokenizer.encode(
+                            "<tool_response>\n" + tool_result.output + "</tool_response>\n", add_special_tokens=False
+                        )
+                        # Edge case 1: clip against model context length
+                        prompt_and_tool_output_token = last_prompt_token_ids + last_token_ids + tool_output_token_ids
+                        num_calls[req_id] += 1
+                        excess = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len
+                        if excess > 0:
+                            tool_output_token_ids = tool_output_token_ids[:-excess]
+                            can_make_new_request = False
+                        else:
+                            can_make_new_request = True
+
+                        # Edge case 2: clip against per-request max_tokens
+                        remaining = self.single_n_sampling_params.max_tokens - len(masks[req_id])
+                        if remaining <= 0:
+                            tool_output_token_ids = []
+                        elif len(tool_output_token_ids) > remaining:
+                            tool_output_token_ids = tool_output_token_ids[:remaining]
+                        concat_outputs[req_id].outputs[0].token_ids.extend(tool_output_token_ids)
+                        if len(concat_outputs[req_id].outputs[0].token_ids) > self.single_n_sampling_params.max_tokens:
+                            breakpoint()
+                            raise ValueError(
+                                f"ToolUseLLM generated more response tokens than max_tokens! "
+                                f"len(concat_outputs[req_id].outputs[0].token_ids): {len(concat_outputs[req_id].outputs[0].token_ids)}"
                             )
-                        except Exception as e:
-                            print("Error:", e)
-                            print("prompt_and_tool_output_token:", prompt_and_tool_output_token)
-                            print("last_prompt_token_ids:", last_prompt_token_ids)
-                            print("last_token_ids:", last_token_ids)
-                            print("tool_output_token_ids:", tool_output_token_ids)
-                            print("end")
+                        masks[req_id].extend([0] * len(tool_output_token_ids))
+                        new_sample_tokens = self.single_n_sampling_params.max_tokens - len(masks[req_id])
+                        can_make_new_request = can_make_new_request and new_sample_tokens > 0
+                        if can_make_new_request:
+                            try:
+                                new_sampling_params = copy.deepcopy(self.single_n_sampling_params)
+                                new_sampling_params.max_tokens = new_sample_tokens
+                                self.llm_engine.add_request(
+                                    req_id,
+                                    TokensPrompt(prompt_token_ids=prompt_and_tool_output_token),
+                                    new_sampling_params,
+                                )
+                            except Exception as e:
+                                print("Error:", e)
+                                print("prompt_and_tool_output_token:", prompt_and_tool_output_token)
+                                print("last_prompt_token_ids:", last_prompt_token_ids)
+                                print("last_token_ids:", last_token_ids)
+                                print("tool_output_token_ids:", tool_output_token_ids)
+                                print("end")
+                    else:
+                        tool_called[req_id] = False
                     dict_keys_to_delete.append(req_id)
             for req_id in dict_keys_to_delete:
                 del self.pending_tool_futures[req_id]
@@ -327,7 +665,19 @@ class ToolUseLLM(LLM):
                             ):
                                 # Schedule tool call asynchronously
                                 tool = self.tools[stop_str]
-                                future = self.executor.submit(tool, o.text)
+                                # If the tool supports context via prompt augmentation, attach context
+                                augmented_text = o.text
+                                try:
+                                    if self._tool_contexts is not None:
+                                        real_req_id, _ = last_output.request_id.split("-")
+                                        idx = int(real_req_id)
+                                        ctx = self._tool_contexts[idx]
+                                        if ctx:
+                                            # Append a hidden JSON block the tool can parse if needed
+                                            augmented_text = o.text + f"\n<!--tool_context:{json.dumps(ctx)}-->"
+                                except Exception:
+                                    pass
+                                future = self.executor.submit(tool, augmented_text)
                                 self.pending_tool_futures[output.request_id] = (future, o, output)
                                 output_processed = True
                                 break
@@ -336,8 +686,7 @@ class ToolUseLLM(LLM):
                                 and stop_str in self.tools
                                 and num_calls[output.request_id] > self.max_tool_calls[stop_str]
                             ):
-                                # If the tool has been called too many times, we tell the model it has exceeded the limit.
-                                # use a dummy tool object to keep things simple.
+                                # Max tool calls exceeded - terminate generation immediately
                                 tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
                                 future = self.executor.submit(tool, o.text)
                                 self.pending_tool_futures[output.request_id] = (future, o, output)
@@ -415,7 +764,7 @@ You could run python code by putting your code between <code> and </code> tags. 
 <code>
 print("Hello, world!")
 </code>
-and you will get the output between the <output> and </output> tags.
+and you will get the output between the <tool_response> and </tool_response> tags.
 """
 
     console.print(f"system_prompt: {system_prompt}")

@@ -50,5 +50,6 @@ class PromptRequest:
     generation_config: Any
     training_step: Optional[int] = None
     dataset_index: Optional[int] = None
+    tool_contexts: Optional[List[Optional[str]]] = None
     is_eval: bool = False
     start_time: Optional[float] = None

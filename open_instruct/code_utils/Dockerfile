@@ -5,13 +5,13 @@ FROM python:3.10-slim
 WORKDIR /app
 
 # Copy requirements first to leverage Docker cache
-COPY open_instruct/code/requirements.txt requirements.txt
+COPY open_instruct/code_utils/requirements.txt requirements.txt
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application
-COPY open_instruct/code/ .
+COPY open_instruct/code_utils/ .
 
 # Create cache directory for code execution
 RUN mkdir -p cache && chmod 777 cache
