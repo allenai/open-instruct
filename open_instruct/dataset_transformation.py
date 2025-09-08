@@ -1035,7 +1035,7 @@ def rlvr_tokenize_rl_rag_v1(
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     dataset_source_key: str = DATASET_SOURCE_KEY,
-    question_type_key: str = DEFAULT_QUESTION_TYPE_KEY,
+    question_type_key: str = RL_RAG_QUESTION_TYPE_KEY,
     system_prompt_text: Optional[str] = None,
     rl_rag_additional_question_instructions: Optional[Dict[str, str]] = None,
 ):
