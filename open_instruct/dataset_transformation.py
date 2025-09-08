@@ -998,7 +998,7 @@ def rlvr_tokenize_v3(
     if len(messages) == 1:
         prompt = messages
     elif messages[-1]["role"] != "assistant":
-        prompt = messages[:-1]
+        prompt = messages
     else:
         prompt = messages[:-1]
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
@@ -1062,7 +1062,7 @@ def rlvr_tokenize_rl_rag_v1(
     if len(messages) == 1:
         prompt = messages
     elif messages[-1]["role"] != "assistant":
-        prompt = messages[:-1]
+        prompt = messages
     else:
         prompt = messages[:-1]
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
