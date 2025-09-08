@@ -15,14 +15,12 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
-import cProfile
 import os
 import queue
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
-from functools import wraps
 from typing import Any, Dict, List, Optional, Union
 
 import ray
@@ -49,85 +47,6 @@ from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
-
-# Global timeout for hanging operation warnings (in seconds)
-HANGING_OPERATION_WARNING_TIMEOUT_S = 5.0
-
-
-class ProfilerContext:
-    """Context manager to make operations visible in CPU profilers."""
-
-    def __init__(self, operation_name: str, enable_profiling: bool = True):
-        self.operation_name = operation_name
-        self.enable_profiling = enable_profiling
-        self.profiler = None
-
-    def __enter__(self):
-        if self.enable_profiling:
-            self.profiler = cProfile.Profile()
-            self.profiler.enable()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.profiler:
-            self.profiler.disable()
-            # We don't save stats here as that would be expensive,
-            # but the profiler will have captured the call stack
-
-    def cpu_intensive_operation(self):
-        """Perform a small CPU-intensive operation to make this visible in profilers."""
-        # A minimal CPU operation that will show up in profilers
-        # without significantly impacting performance
-        for _ in range(10):
-            hash(self.operation_name)
-
-
-def warn_if_slow(threshold_ms: float = 500.0):
-    """Decorator to log warnings when methods take longer than threshold_ms milliseconds."""
-
-    def decorator(func):
-        @wraps(func)
-        def wrapper(self, *args, **kwargs):
-            start_time = time.perf_counter()
-            try:
-                result = func(self, *args, **kwargs)
-                return result
-            finally:
-                duration_ms = (time.perf_counter() - start_time) * 1000
-                if duration_ms > threshold_ms:
-                    self.logger.warning(f"{func.__name__} took {duration_ms:.1f}ms (> {threshold_ms:.0f}ms threshold)")
-
-        return wrapper
-
-    return decorator
-
-
-def warn_if_slow_hanging_operation(operation_name: str):
-    """Decorator to log warnings when operations that could hang take longer than the global timeout.
-
-    Args:
-        operation_name: Human-readable name for the operation being wrapped
-    """
-
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            start_time = time.perf_counter()
-            try:
-                result = func(*args, **kwargs)
-                return result
-            finally:
-                duration = time.perf_counter() - start_time
-                if duration > HANGING_OPERATION_WARNING_TIMEOUT_S:
-                    logger.warning(
-                        f"Potential hanging operation: {operation_name} took {duration:.3f}s "
-                        f"(> {HANGING_OPERATION_WARNING_TIMEOUT_S:.1f}s threshold). "
-                        f"This could indicate a hang in distributed/multithreaded systems."
-                    )
-
-        return wrapper
-
-    return decorator
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -176,7 +95,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     assert len(output.outputs) <= 1, f"{len(output.outputs)=}"  # In tool mode, sampling_params.n == 1
     o = output.outputs[0]
 
-    # Update concatenated outputs - always maintain tracking consistency
+    # Update concatenated outputs
     if output.request_id in tracking["concat_outputs"]:
         tracking["concat_outputs"][output.request_id].outputs[0].token_ids.extend(o.token_ids)
     else:
@@ -201,14 +120,14 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
 
 def _process_outputs(
-    output: vllm.RequestOutput,
+    outputs: List[vllm.RequestOutput],
     dataset_index: Optional[List[int]] = None,
     token_statistics: Optional[TokenStatistics] = None,
     start_time: Optional[float] = None,
 ) -> "GenerationResult":
-    """Process vLLM RequestOutput into GenerationResult format."""
-    response_ids = [list(out.token_ids) for out in output.outputs]
-    finish_reasons = [out.finish_reason for out in output.outputs]
+    """Process vLLM RequestOutputs into GenerationResult format."""
+    response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
+    finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
 
     masks = [[1] * len(resp) for resp in response_ids]
     num_calls = [0] * len(response_ids)
@@ -281,27 +200,14 @@ def _process_outputs_with_tools(
     return result
 
 
-def _extract_base_request_id(full_request_id: str) -> str:
-    """Extract base request ID by removing the sample suffix.
-
-    >>> _extract_base_request_id("train_1_43039_0")
-    'train_1_43039'
-    >>> _extract_base_request_id("eval_5_12345_2")
-    'eval_5_12345'
-    """
-    return "_".join(full_request_id.split("_")[:-1])
-
-
-def _finalize_outputs(output, tracking, dataset_index, tools, token_statistics=None, start_time=None):
+def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=None, start_time=None):
     """Prepare final outputs based on whether tools were used."""
     if not tools:
         return _process_outputs(
-            output, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
+            outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
         )
 
     # Tool mode: add metadata and merge completions
-    # Store the original request_id before output gets overwritten
-    output_request_id = output.request_id
     for req_id in tracking["masks"]:
         assert req_id in tracking["concat_outputs"], f"req_id {req_id} not in concat_outputs!"
         output = tracking["concat_outputs"][req_id].outputs[0]
@@ -315,14 +221,8 @@ def _finalize_outputs(output, tracking, dataset_index, tools, token_statistics=N
 
     # Merge n completions into the same outputs
     # Filter tracking data to only include the current request
-    relevant_outputs = {
-        k: v for k, v in tracking["concat_outputs"].items() if _extract_base_request_id(k) == output_request_id
-    }
-
-    # Validate we have the expected number of outputs for this request
-    expected_samples = len([k for k in relevant_outputs.keys() if "_".join(k.split("_")[:-1]) == output_request_id])
-    if expected_samples == 0:
-        raise ValueError(f"No outputs found in tracking['concat_outputs'] for request {output_request_id}")
+    request_id = outputs[0].request_id
+    relevant_outputs = {k: v for k, v in tracking["concat_outputs"].items() if k.startswith(request_id + "_")}
 
     merged_outputs = {}
     for req_id, output in relevant_outputs.items():
@@ -438,25 +338,12 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
     }
 
     tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
-    accepted_total = 0
-    unaccepted_total = 0
-
     for j in range(request.generation_config.n):
         sub_sampling_params = sampling_params.clone()  # Already has n=1
         if request.generation_config.seed is not None:
             sub_sampling_params.seed = request.generation_config.seed + j
-
-        before = llm_engine.get_num_unfinished_requests()
         llm_engine.add_request(f"{request_id}_{j}", tokens_prompt, sub_sampling_params)
-        after = llm_engine.get_num_unfinished_requests()
-
-        if after > before:
-            accepted_total += 1
-        else:
-            unaccepted_total += 1
-
-    request_metadata[request_id]["accepted"] = accepted_total
-    return accepted_total, unaccepted_total, request.generation_config.n
+    return request.generation_config.n
 
 
 class LLMRayActor:
@@ -497,8 +384,7 @@ class LLMRayActor:
             # We need to set CUDA_VISIBLE_DEVICES to the ray assigned GPU
             # when the distributed_executor_backend is not ray and
             # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
-            gpu_ids = warn_if_slow_hanging_operation("ray.get_gpu_ids")(self._ray_get_gpu_ids)()
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_ids[0])
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
 
         num_gpus = kwargs.pop("num_gpus")
         if bundle_indices is not None:
@@ -513,446 +399,73 @@ class LLMRayActor:
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
 
-        # Enhanced logging: Queue connection verification
-        prompt_queue_size = "unknown"
-        try:
-            prompt_queue_size = prompt_queue.qsize() if prompt_queue else "None"
-        except Exception as e:
-            prompt_queue_size = f"error: {e}"
-
-        self.logger.info(
-            f"LLMRayActor initialized: prompt_queue_id={id(prompt_queue)}, "
-            f"prompt_queue_size={prompt_queue_size}, inference_batch_size={inference_batch_size}, "
-            f"results_queue_id={id(results_queue)}, eval_results_queue_id={id(eval_results_queue)}"
-        )
-
-        # In production, actor_manager is required for proper coordination
-        # In tests, it can be None if no coordination is needed
-        if prompt_queue is not None and results_queue is not None:
-            assert self.actor_manager is not None, (
-                "actor_manager cannot be None when using queue-based processing. "
-                "Provide a valid actor_manager for coordination."
-            )
-
         # For caching should_stop status.
         self._last_should_stop_update = float("-inf")
         self._should_stop_value = False
         self._should_stop_timeout_s = 5
 
-        # Track dropped results for monitoring
-        self.dropped_results = getattr(self, "dropped_results", 0)
-
-        # Accumulated timing state for fill_engine granular tracking
-        self._fill_engine_timing = {
-            "should_stop_check": 0.0,
-            "unfinished_requests_check": 0.0,
-            "batch_size_calculation": 0.0,
-            "queue_get": 0.0,
-            "add_request": 0.0,
-        }
-
-        # Accumulated timing state for engine_steps granular tracking
-        self._engine_steps_timing = {
-            "engine_step_call": 0.0,
-            "handle_output": 0.0,
-            "extract_base_request_id": 0.0,
-            "maybe_process_insert": 0.0,
-        }
-
-    # Named wrapper functions for profiler visibility - these replace lambda functions
-    def _ray_get_gpu_ids(self):
-        """Named function for ray.get_gpu_ids - visible in profiler."""
-        return ray.get_gpu_ids()
-
-    def _llm_engine_get_num_unfinished_requests(self):
-        """Named function for llm_engine.get_num_unfinished_requests - visible in profiler."""
-        return self.llm_engine.get_num_unfinished_requests()
-
-    def _llm_engine_has_unfinished_requests(self):
-        """Named function for llm_engine.has_unfinished_requests - visible in profiler."""
-        return self.llm_engine.has_unfinished_requests()
-
-    def _llm_engine_step(self):
-        """Named function for llm_engine.step - visible in profiler."""
-        return self.llm_engine.step()
-
-    def _prompt_queue_get_blocking(self, timeout):
-        """Named function for prompt_queue.get blocking - visible in profiler."""
-        return self.prompt_queue.get(timeout=timeout)
-
-    def _prompt_queue_get_nowait(self):
-        """Named function for prompt_queue.get_nowait - visible in profiler."""
-        return self.prompt_queue.get_nowait()
-
-    def _future_done(self, future):
-        """Named function for future.done - visible in profiler."""
-        return future.done()
-
-    def _future_result(self, future):
-        """Named function for future.result - visible in profiler."""
-        return future.result()
-
-    def _tokenizer_encode_tool_output(self, tokenizer, tool_output):
-        """Named function for tokenizer.encode tool output - visible in profiler."""
-        return tokenizer.encode("<output>\n" + tool_output + "</output>\n", add_special_tokens=False)
-
-    def _llm_engine_add_request_tool_continuation(self, req_id, prompt_token_ids, sampling_params):
-        """Named function for llm_engine.add_request tool continuation - visible in profiler."""
-        return self.llm_engine.add_request(
-            req_id, vllm.TokensPrompt(prompt_token_ids=prompt_token_ids), sampling_params
-        )
-
-    def _llm_engine_collective_rpc_init_process_group(
-        self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes
-    ):
-        """Named function for llm_engine.collective_rpc init_process_group - visible in profiler."""
-        return self.llm_engine.collective_rpc(
-            "init_process_group",
-            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
-        )
-
-    def _llm_engine_collective_rpc_update_weight(self, name, dtype, shape, empty_cache):
-        """Named function for llm_engine.collective_rpc update_weight - visible in profiler."""
-        return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
-
-    def _reset_fill_engine_timing(self):
-        """Reset the accumulated fill_engine timing state."""
-        for key in self._fill_engine_timing:
-            self._fill_engine_timing[key] = 0.0
-
-    def _reset_engine_steps_timing(self):
-        """Reset the accumulated engine_steps timing state."""
-        for key in self._engine_steps_timing:
-            self._engine_steps_timing[key] = 0.0
-
-    def _ray_wait_should_stop_check(self, should_stop_ref):
-        """Named function for ray.wait should_stop check - visible in profiler."""
-        return ray.wait([should_stop_ref], timeout=0.1)
-
-    def _ray_get_should_stop_result(self, ready_ref):
-        """Named function for ray.get should_stop result - visible in profiler."""
-        return ray.get(ready_ref)
-
-    def _ray_cancel_should_stop(self, should_stop_ref):
-        """Named function for ray.cancel should_stop - visible in profiler."""
-        return ray.cancel(should_stop_ref)
-
     def _should_stop(self) -> bool:
-        # If no actor_manager (e.g., in tests), never stop automatically
-        if self.actor_manager is None:
-            return False
-
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
             should_stop_ref = self.actor_manager.should_stop.remote()
-            ready_refs, _ = warn_if_slow_hanging_operation("ray.wait (should_stop check)")(
-                self._ray_wait_should_stop_check
-            )(should_stop_ref)
+            ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
             if ready_refs:
-                self._should_stop_value = warn_if_slow_hanging_operation("ray.get (should_stop result)")(
-                    self._ray_get_should_stop_result
-                )(ready_refs[0])
+                self._should_stop_value = ray.get(ready_refs[0])
                 self._last_should_stop_update = time.perf_counter()
             else:
-                warn_if_slow_hanging_operation("ray.cancel (should_stop)")(self._ray_cancel_should_stop)(
-                    should_stop_ref
-                )
+                ray.cancel(should_stop_ref)
         return self._should_stop_value
-
-    def _queue_put_result(self, results_queue, result):
-        """Named function for queue.put - visible in profiler."""
-        return results_queue.put(result, timeout=10)
 
     def _insert_result_to_queue(self, result, is_eval: bool):
         """Insert result into the appropriate queue with error handling."""
         try:
             results_queue = self.eval_results_queue if is_eval else self.results_queue
-            queue_name = "eval_results_queue" if is_eval else "results_queue"
-            warn_if_slow_hanging_operation(f"queue.put ({queue_name})")(self._queue_put_result)(results_queue, result)
+            results_queue.put(result, timeout=10)
         except queue.Full:
-            self.dropped_results += 1
-            if self.dropped_results % 10 == 1:
-                self.logger.warning(f"Results dropped so far: {self.dropped_results}")
             queue_name = "eval" if is_eval else "train"
             self.logger.warning(f"{queue_name} results queue is full, discarding result.")
 
-    @warn_if_slow(500.0)
-    def fill_engine(self, timeout: float, blocking: bool = True):
+    def fill_engine(self, timeout: float):
         """Fill the LLM engine queue with requests until inference_batch_size is reached.
 
         Args:
             timeout: Timeout for getting requests from the queue
 
         Returns:
-            int: Number of successfully accepted requests
+            int: Number of requests added to the engine
         """
-        num_accepted = 0
-        num_unaccepted = 0
-
-        # Should stop check timing
-        stop_check_start = time.perf_counter()
+        num_added = 0
         if self._should_stop():
-            self._fill_engine_timing["should_stop_check"] += time.perf_counter() - stop_check_start
-            self.logger.debug("fill_engine: stopping requested, returning 0 requests added")
-            return num_accepted
-        self._fill_engine_timing["should_stop_check"] += time.perf_counter() - stop_check_start
-
-        # Unfinished requests check timing
-        unfinished_start = time.perf_counter()
-        current_unfinished = warn_if_slow_hanging_operation("llm_engine.get_num_unfinished_requests")(
-            self._llm_engine_get_num_unfinished_requests
-        )()
-        self._fill_engine_timing["unfinished_requests_check"] += time.perf_counter() - unfinished_start
-
-        # Batch size calculation timing
-        calc_start = time.perf_counter()
-        num_to_add = self.inference_batch_size - current_unfinished
-        self._fill_engine_timing["batch_size_calculation"] += time.perf_counter() - calc_start
-
-        # Enhanced logging: Add queue size information and more detailed state
-        queue_size = "unknown"
-        try:
-            queue_size = self.prompt_queue.qsize()
-        except Exception as e:
-            queue_size = f"error: {e}"
-
-        self.logger.info(
-            f"fill_engine: batch_size={self.inference_batch_size}, "
-            f"unfinished={current_unfinished}, need_to_add={num_to_add}, "
-            f"queue_size={queue_size}, queue_id={id(self.prompt_queue)}, "
-            f"timeout={timeout}, blocking={blocking}"
-        )
-
-        # If num_to_add <= 0, log why we're not adding anything
-        if num_to_add <= 0:
-            self.logger.warning(
-                f"fill_engine: engine already has {current_unfinished} unfinished requests "
-                f"(>= batch_size {self.inference_batch_size}), skipping queue processing"
-            )
-
-        while num_accepted < num_to_add:
+            return num_added
+        num_to_add = self.inference_batch_size - self.llm_engine.get_num_unfinished_requests()
+        while num_added < num_to_add:
             try:
-                # Queue get timing
-                queue_start = time.perf_counter()
-                if blocking:
-                    request = warn_if_slow_hanging_operation("queue.get (prompt_queue blocking)")(
-                        self._prompt_queue_get_blocking
-                    )(timeout)
-                else:
-                    request = warn_if_slow_hanging_operation("queue.get_nowait (prompt_queue)")(
-                        self._prompt_queue_get_nowait
-                    )()
-                self._fill_engine_timing["queue_get"] += time.perf_counter() - queue_start
-
-                # Add request timing
-                add_start = time.perf_counter()
-                accepted, unaccepted, total_requested = add_request(
-                    request, self.llm_engine, self.tools, request_metadata=self.request_metadata
-                )
-                self._fill_engine_timing["add_request"] += time.perf_counter() - add_start
-
-                num_accepted += accepted
-                num_unaccepted += unaccepted
-                self.logger.debug(
-                    f"fill_engine: added request with {accepted} accepted/{unaccepted} unaccepted "
-                    f"out of {total_requested} requested (total_accepted={num_accepted}/{num_to_add})"
-                )
+                request = self.prompt_queue.get(timeout=timeout)
+                num_added += add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
             except queue.Empty:
-                # Enhanced logging: More context about queue timeout
-                queue_size_now = "unknown"
-                try:
-                    queue_size_now = self.prompt_queue.qsize()
-                except Exception as e:
-                    queue_size_now = f"error: {e}"
-
-                self.logger.warning(
-                    f"fill_engine: queue.Empty exception after {timeout}s timeout, "
-                    f"queue_size_now={queue_size_now}, queue_id={id(self.prompt_queue)}, "
-                    f"accepted_so_far={num_accepted}, still_needed={num_to_add - num_accepted}"
-                )
                 break
-
-        self.logger.debug(
-            f"fill_engine: completed, accepted {num_accepted} requests, "
-            f"unaccepted {num_unaccepted} requests (total attempted: {num_accepted + num_unaccepted})"
-        )
-        return num_accepted
-
-    @warn_if_slow(500.0)
-    def _process_completed_request(self, request_id, outs, tracking, current_time):
-        """Process a completed request with all its samples and return the result."""
-        final_output = vllm.RequestOutput(
-            request_id=request_id,
-            prompt=outs[0].prompt,
-            prompt_token_ids=outs[0].prompt_token_ids,
-            prompt_logprobs=outs[0].prompt_logprobs,
-            outputs=[completion for out in outs for completion in out.outputs],
-            finished=outs[0].finished,
-        )
-        total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
-        metadata = self.request_metadata.pop(request_id)
-        result = _finalize_outputs(
-            final_output,
-            tracking,
-            metadata["dataset_index"],
-            self.tools,
-            token_statistics=TokenStatistics(
-                num_prompt_tokens=metadata["prompt_tokens"],
-                num_response_tokens=total_generation_tokens,
-                generation_time=current_time - metadata["start_time"],
-            ),
-            start_time=metadata["start_time"],
-        )
-        return result, metadata["is_eval"]
-
-    @warn_if_slow(500.0)
-    def _maybe_process_and_insert(
-        self,
-        request_id: str,
-        request_outputs: Dict[str, List[vllm.RequestOutput]],
-        tracking: Dict[str, Any],
-        current_time: float,
-    ) -> int:
-        """Check if we have N requests for request_id, process them, and insert results in queue.
-
-        Returns:
-            int: Number of requests processed (0 or 1).
-        """
-        expected_n = self.request_metadata[request_id]["original_sampling_params"].n
-
-        # For tool mode, also verify tracking["concat_outputs"] consistency
-        if self.tools and len(request_outputs[request_id]) < expected_n:
-            concat_outputs_count = sum(
-                1 for k in tracking["concat_outputs"].keys() if "_".join(k.split("_")[:-1]) == request_id
-            )
-            if concat_outputs_count < expected_n:
-                return 0  # Not all samples ready yet
-
-        if len(request_outputs[request_id]) == expected_n:
-            outs = request_outputs.pop(request_id)
-            result, is_eval = self._process_completed_request(request_id, outs, tracking, current_time)
-            self._insert_result_to_queue(result, is_eval=is_eval)
-            return 1
-        return 0
+        return num_added
 
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
-        Runs continuously until should_stop is set, periodically adding new requests
-        and yielding control to allow weight synchronization.
-
         Returns:
             int: Number of requests processed
         """
-        function_start_time = time.perf_counter()
-        # Reset timing accumulation at the start of each process_from_queue call
-        self._reset_fill_engine_timing()
-        self._reset_engine_steps_timing()
-
-        timing_data = {
-            "fill_engine_initial": 0.0,
-            "tool_tracking_init": 0.0,
-            "request_outputs_init": 0.0,
-            "tool_processing": 0.0,
-            "engine_steps": 0.0,
-            "completion_processing": 0.0,
-            "engine_refill": 0.0,
-        }
-
-        # Fill engine timing
-        fill_start = time.perf_counter()
         num_processed = self.fill_engine(timeout=timeout)
-        total_requests_added = num_processed
-        timing_data["fill_engine_initial"] += time.perf_counter() - fill_start
 
         if num_processed == 0:
-            # Enhanced logging: Log why nothing was processed, but continue to process existing requests
-            should_stop = self._should_stop()
-            current_unfinished = self._llm_engine_get_num_unfinished_requests()
-            queue_size = "unknown"
-            try:
-                queue_size = self.prompt_queue.qsize()
-            except Exception as e:
-                queue_size = f"error: {e}"
+            return num_processed
 
-            self.logger.info(
-                f"Nothing added by fill_engine, but continuing to process existing requests. "
-                f"num_processed={num_processed}, should_stop={should_stop}, "
-                f"unfinished_requests={current_unfinished}, inference_batch_size={self.inference_batch_size}, "
-                f"queue_size={queue_size}, timeout={timeout}"
-            )
-
-        # Tool tracking initialization timing
-        tracking_start = time.perf_counter()
         tracking = _init_tool_tracking()
-        timing_data["tool_tracking_init"] += time.perf_counter() - tracking_start
+        outputs = []
+        while True:
+            outputs.extend(self._poll_tool_futures(tracking, self.llm_engine.tokenizer))
 
-        # Request outputs initialization timing
-        outputs_start = time.perf_counter()
-        request_outputs = defaultdict(list)
-        total_processed = 0
-        total_requests_added = 0
-        iteration_count = 0
-        timing_data["request_outputs_init"] += time.perf_counter() - outputs_start
-
-        exit_reason = "unknown"
-        while not self._should_stop():
-            iteration_count += 1
-
-            # Return every 10k iterations to allow weight synchronization
-            if iteration_count % 10000 == 0:
-                exit_reason = "10k iteration limit reached"
-                self.logger.info(f"process_from_queue exiting: {exit_reason}")
-                return total_processed
-
-            # Log progress every 100 iterations
-            if iteration_count % 100 == 0:
-                unfinished = warn_if_slow_hanging_operation("llm_engine.get_num_unfinished_requests (logging)")(
-                    self._llm_engine_get_num_unfinished_requests
-                )()
-                pending_tools = len(tracking["pending_tool_futures"])
-                self.logger.info(
-                    f"process_from_queue iteration {iteration_count}: "
-                    f"processed={total_processed}, unfinished={unfinished}, "
-                    f"inference_batch_size={self.inference_batch_size}, "
-                    f"total_requests_added={total_requests_added}, "
-                    f"dropped_results={self.dropped_results}, "
-                    f"pending_tools={pending_tools}"
-                )
-
-            # Tool processing timing
-            tool_start = time.perf_counter()
-            tool_outputs = self._poll_tool_futures(tracking, self.llm_engine.tokenizer)
-            current_time = time.time()
-            timing_data["tool_processing"] += time.perf_counter() - tool_start
-
-            # Tool output completion processing timing
-            completion_start = time.perf_counter()
-            for output in tool_outputs:
-                request_id = _extract_base_request_id(output.request_id)
-                request_outputs[request_id].append(output)
-                total_processed += self._maybe_process_and_insert(request_id, request_outputs, tracking, current_time)
-            timing_data["completion_processing"] += time.perf_counter() - completion_start
-
-            # Process engine steps - ONLY if there are unfinished requests
-            if warn_if_slow_hanging_operation("llm_engine.has_unfinished_requests")(
-                self._llm_engine_has_unfinished_requests
-            )():
-                # Engine step processing timing
-                engine_start = time.perf_counter()
-
-                # Time the actual engine step call
-                step_call_start = time.perf_counter()
-                step_outputs = self._engine_step()
-                self._engine_steps_timing["engine_step_call"] += time.perf_counter() - step_call_start
-
+            # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
+            if self.llm_engine.has_unfinished_requests():
+                step_outputs = [o for o in self.llm_engine.step() if o.finished]
                 for output in step_outputs:
-                    # Time extracting base request ID
-                    extract_start = time.perf_counter()
-                    base_req_id = _extract_base_request_id(output.request_id)
-                    self._engine_steps_timing["extract_base_request_id"] += time.perf_counter() - extract_start
-
-                    # Time handle_output call
-                    handle_start = time.perf_counter()
+                    base_req_id = "_".join(output.request_id.split("_")[:-1])
                     result = _handle_output(
                         output,
                         self.tools,
@@ -961,103 +474,45 @@ class LLMRayActor:
                         self.max_tool_calls,
                         self.executor,
                     )
-                    self._engine_steps_timing["handle_output"] += time.perf_counter() - handle_start
-
                     # Result is None when we do more tool processing.
                     if result is not None:
-                        request_id = _extract_base_request_id(result.request_id)
-                        request_outputs[request_id].append(result)
+                        outputs.append(result)
 
-                        # Time maybe_process_and_insert call
-                        process_start = time.perf_counter()
-                        total_processed += self._maybe_process_and_insert(
-                            request_id, request_outputs, tracking, current_time
-                        )
-                        self._engine_steps_timing["maybe_process_insert"] += time.perf_counter() - process_start
-
-                timing_data["engine_steps"] += time.perf_counter() - engine_start
-
-                # Engine refill timing - only refill when at 30% capacity
-                refill_start = time.perf_counter()
-                low = int(0.3 * self.inference_batch_size)
-                unfinished = warn_if_slow_hanging_operation("llm_engine.get_num_unfinished_requests (refill check)")(
-                    self._llm_engine_get_num_unfinished_requests
-                )()
-                if unfinished <= low:
-                    requests_added = self.fill_engine(timeout=0.001, blocking=False)
-                    total_requests_added += requests_added
-                timing_data["engine_refill"] += time.perf_counter() - refill_start
-
-            # If no work to do, break to yield control back to generate_thread,
-            # allowing weight_sync_thread to acquire the LLMRayActor lock
-            final_unfinished = warn_if_slow_hanging_operation("llm_engine.get_num_unfinished_requests (final check)")(
-                self._llm_engine_get_num_unfinished_requests
-            )()
-            if final_unfinished + len(tracking["pending_tool_futures"]) == 0:
-                exit_reason = "no work remaining"
+            if self.llm_engine.get_num_unfinished_requests() + len(tracking["pending_tool_futures"]) == 0:
                 break
 
-        # Check if we exited due to should_stop
-        if self._should_stop() and exit_reason == "unknown":
-            exit_reason = "should_stop requested"
-
-        self.logger.info(f"process_from_queue exiting: {exit_reason}")
-
-        # Log timing summary
-        total_time = time.perf_counter() - function_start_time
-        if total_time > 0.001:  # Only log if function took more than 1ms
-            timing_percentages = {k: (v / total_time) * 100 for k, v in timing_data.items()}
-
-            # Calculate breakdown percentages within their respective subsystems
-            fill_total = sum(self._fill_engine_timing.values())
-            engine_steps_total = sum(self._engine_steps_timing.values())
-
-            fill_timing_percentages = {
-                k: (v / fill_total) * 100 if fill_total > 0 else 0 for k, v in self._fill_engine_timing.items()
-            }
-            engine_steps_timing_percentages = {
-                k: (v / engine_steps_total) * 100 if engine_steps_total > 0 else 0
-                for k, v in self._engine_steps_timing.items()
-            }
-
-            self.logger.info(
-                f"process_from_queue timing: "
-                f"fill_engine_initial={timing_percentages['fill_engine_initial']:.1f}% ({timing_data['fill_engine_initial']:.3f}s), "
-                f"tool_tracking_init={timing_percentages['tool_tracking_init']:.1f}% ({timing_data['tool_tracking_init']:.3f}s), "
-                f"request_outputs_init={timing_percentages['request_outputs_init']:.1f}% ({timing_data['request_outputs_init']:.3f}s), "
-                f"tool_processing={timing_percentages['tool_processing']:.1f}% ({timing_data['tool_processing']:.3f}s), "
-                f"engine_steps={timing_percentages['engine_steps']:.1f}% ({timing_data['engine_steps']:.3f}s), "
-                f"completion_processing={timing_percentages['completion_processing']:.1f}% ({timing_data['completion_processing']:.3f}s), "
-                f"engine_refill={timing_percentages['engine_refill']:.1f}% ({timing_data['engine_refill']:.3f}s), "
-                f"total={total_time:.3f}s"
+        end_time = time.time()
+        request_outputs = defaultdict(list)
+        for output in outputs:
+            request_id = "_".join(output.request_id.split("_")[:-1])
+            request_outputs[request_id].append(output)
+        for request_id, outs in request_outputs.items():
+            final_output = vllm.RequestOutput(
+                request_id=request_id,
+                prompt=outs[0].prompt,
+                prompt_token_ids=outs[0].prompt_token_ids,
+                prompt_logprobs=outs[0].prompt_logprobs,
+                outputs=[completion for out in outs for completion in out.outputs],
+                finished=outs[0].finished,
             )
+            total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
+            metadata = self.request_metadata.pop(request_id)
+            result = _finalize_outputs(
+                [final_output],
+                tracking,
+                metadata["dataset_index"],
+                self.tools,
+                token_statistics=TokenStatistics(
+                    num_prompt_tokens=metadata["prompt_tokens"],
+                    num_response_tokens=total_generation_tokens,
+                    generation_time=end_time - metadata["start_time"],
+                ),
+                start_time=metadata["start_time"],
+            )
+            self._insert_result_to_queue(result, is_eval=metadata["is_eval"])
 
-            # Log detailed fill_engine breakdown
-            if fill_total > 0.001:  # Only log fill_engine breakdown if it took more than 1ms
-                self.logger.info(
-                    f"fill_engine breakdown: "
-                    f"should_stop_check={fill_timing_percentages['should_stop_check']:.1f}% ({self._fill_engine_timing['should_stop_check']:.3f}s), "
-                    f"unfinished_requests_check={fill_timing_percentages['unfinished_requests_check']:.1f}% ({self._fill_engine_timing['unfinished_requests_check']:.3f}s), "
-                    f"batch_size_calculation={fill_timing_percentages['batch_size_calculation']:.1f}% ({self._fill_engine_timing['batch_size_calculation']:.3f}s), "
-                    f"queue_get={fill_timing_percentages['queue_get']:.1f}% ({self._fill_engine_timing['queue_get']:.3f}s), "
-                    f"add_request={fill_timing_percentages['add_request']:.1f}% ({self._fill_engine_timing['add_request']:.3f}s), "
-                    f"fill_total={fill_total:.3f}s"
-                )
+        return len(request_outputs)
 
-            # Log detailed engine_steps breakdown
-            if engine_steps_total > 0.001:  # Only log engine_steps breakdown if it took more than 1ms
-                self.logger.info(
-                    f"engine_steps breakdown: "
-                    f"engine_step_call={engine_steps_timing_percentages['engine_step_call']:.1f}% ({self._engine_steps_timing['engine_step_call']:.3f}s), "
-                    f"handle_output={engine_steps_timing_percentages['handle_output']:.1f}% ({self._engine_steps_timing['handle_output']:.3f}s), "
-                    f"extract_base_request_id={engine_steps_timing_percentages['extract_base_request_id']:.1f}% ({self._engine_steps_timing['extract_base_request_id']:.3f}s), "
-                    f"maybe_process_insert={engine_steps_timing_percentages['maybe_process_insert']:.1f}% ({self._engine_steps_timing['maybe_process_insert']:.3f}s), "
-                    f"engine_steps_total={engine_steps_total:.3f}s"
-                )
-
-        return total_processed
-
-    @warn_if_slow(500.0)
     def _poll_tool_futures(self, tracking, tokenizer):
         """Poll and handle completed tool executions."""
         if not self.tools or not tracking["pending_tool_futures"]:
@@ -1067,13 +522,11 @@ class LLMRayActor:
         completed_outputs = []
 
         for req_id, (future, last_o, last_output) in tracking["pending_tool_futures"].items():
-            if not warn_if_slow_hanging_operation("future.done (tool execution check)")(self._future_done)(future):
+            if not future.done():
                 continue
 
             # Tool future is done, process it
-            tool_result = warn_if_slow_hanging_operation("future.result (tool execution result)")(self._future_result)(
-                future
-            )  # Get the tool result
+            tool_result = future.result()  # Get the tool result
 
             # Get sampling params from request metadata for this request
             # Extract the base request ID by removing the sub-request suffix
@@ -1082,9 +535,9 @@ class LLMRayActor:
 
             last_prompt_token_ids = last_output.prompt_token_ids
             last_token_ids = last_o.token_ids
-            tool_output_token_ids = warn_if_slow_hanging_operation("tokenizer.encode (tool output)")(
-                self._tokenizer_encode_tool_output
-            )(tokenizer, tool_result.output)
+            tool_output_token_ids = tokenizer.encode(
+                "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+            )
             tracking["timeout"][req_id] = tool_result.timeout
             tracking["tool_error"][req_id] += "" if tool_result.error is None else tool_result.error
             tracking["tool_output"][req_id] += tool_result.output
@@ -1118,9 +571,9 @@ class LLMRayActor:
                 new_sampling_params.max_tokens = new_sample_tokens
 
                 try:
-                    warn_if_slow_hanging_operation("llm_engine.add_request (tool continuation)")(
-                        self._llm_engine_add_request_tool_continuation
-                    )(req_id, prompt_and_tool_output_token, new_sampling_params)
+                    self.llm_engine.add_request(
+                        req_id, vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token), new_sampling_params
+                    )
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
                     self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
@@ -1135,12 +588,6 @@ class LLMRayActor:
 
         return completed_outputs
 
-    @warn_if_slow(500.0)
-    def _engine_step(self):
-        """Wrapper for llm_engine.step() to enable timing monitoring."""
-        step_outputs = warn_if_slow_hanging_operation("llm_engine.step")(self._llm_engine_step)()
-        return [o for o in step_outputs if o.finished]
-
     def init_process_group(
         self,
         master_address,
@@ -1152,21 +599,18 @@ class LLMRayActor:
         use_ray=False,
         timeout_minutes=120,
     ):
-        return warn_if_slow_hanging_operation("llm_engine.collective_rpc (init_process_group)")(
-            self._llm_engine_collective_rpc_init_process_group
-        )(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes)
+        return self.llm_engine.collective_rpc(
+            "init_process_group",
+            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
+        )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        return warn_if_slow_hanging_operation("llm_engine.collective_rpc (update_weight)")(
-            self._llm_engine_collective_rpc_update_weight
-        )(name, dtype, shape, empty_cache)
+        return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        return warn_if_slow_hanging_operation("llm_engine.collective_rpc (update_weight_cuda_ipc)")(
-            lambda: self.llm_engine.collective_rpc(
-                "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
-            )
-        )()
+        return self.llm_engine.collective_rpc(
+            "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
+        )
 
     def reset_prefix_cache(self):
         self.llm_engine.reset_prefix_cache()
