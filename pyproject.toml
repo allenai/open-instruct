@@ -24,7 +24,6 @@ dependencies = [
     "tensorboard>=2.18.0",
     "torch>=2.7.0,<2.8",
     "transformers @ git+https://github.com/2015aroras/transformers.git@shanea/olmo2-retrofit",
-    "vllm==0.9.1",
     "wandb==0.18.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
@@ -32,6 +31,7 @@ dependencies = [
     "flash-attn>=2.8.0.post2; platform_system != 'Darwin'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
     "flashinfer-python==0.2.8; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "vllm"
 ]
 
 [build-system]
