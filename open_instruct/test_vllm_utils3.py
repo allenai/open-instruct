@@ -1,11 +1,13 @@
 import logging
 import queue
+import threading
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
 import vllm
 
-from open_instruct.queue_types import TokenStatistics
+from open_instruct.queue_types import PromptRequest, TokenStatistics
 from open_instruct.vllm_utils3 import LLMRayActor, _finalize_outputs, _init_tool_tracking
 
 
@@ -206,6 +208,140 @@ class TestVllmUtils3(unittest.TestCase):
                 f"SUCCESS: Bug is fixed! should_stop called {mock_should_stop.call_count} times. "
                 f"This means we entered the main processing loop instead of exiting early.",
             )
+
+    def test_prefetch_thread_pause_resume_on_should_stop(self):
+        """Test that the prefetch thread pauses when should_stop=True and resumes when should_stop=False.
+
+        This simulates a weight synchronization scenario where the prefetch thread
+        should pause during sync but not exit, then resume afterwards.
+        """
+        # Create a mock LLMRayActor without calling __init__ to avoid ray dependencies
+        actor = LLMRayActor.__new__(LLMRayActor)
+
+        # Set up mock dependencies
+        actor.prompt_queue = queue.Queue()
+        actor.inference_batch_size = 64
+        actor.logger = MagicMock()
+
+        # Mock LLM engine
+        mock_engine = MagicMock()
+        mock_engine.get_num_unfinished_requests.return_value = 0
+        actor.llm_engine = mock_engine
+
+        # Mock actor manager with controllable should_stop
+        mock_actor_manager = MagicMock()
+        actor.actor_manager = mock_actor_manager
+
+        # Set up should_stop caching attributes
+        actor._last_should_stop_update = float("-inf")
+        actor._should_stop_value = False
+        actor._should_stop_timeout_s = 5
+
+        # Set up prefetch components
+        actor._prefetch_buffer = []
+        actor._prefetch_cv = threading.Condition()
+        actor._buffered_samples = 0
+
+        # Create a mock generation config for test requests
+        mock_gen_config = MagicMock()
+        mock_gen_config.n = 1
+
+        # Events to coordinate test timing
+        prefetch_started = threading.Event()
+        should_stop_checked = threading.Event()
+        resume_ready = threading.Event()
+
+        # Track should_stop calls to verify pause behavior
+        should_stop_call_count = 0
+        should_stop_values = [False, False, True, True, False, False]  # Normal -> Pause -> Resume
+
+        def mock_should_stop():
+            nonlocal should_stop_call_count
+            should_stop_call_count += 1
+            prefetch_started.set()
+
+            if should_stop_call_count == 3:  # First time returning True
+                should_stop_checked.set()
+            elif should_stop_call_count == 5:  # After resume
+                resume_ready.set()
+
+            if should_stop_call_count <= len(should_stop_values):
+                return should_stop_values[should_stop_call_count - 1]
+            return False  # Default to False after our test sequence
+
+        # Mock the should_stop method
+        actor._should_stop = mock_should_stop
+
+        # Add a test request to the queue
+        test_request = MagicMock(spec=PromptRequest)
+        test_request.generation_config = mock_gen_config
+        actor.prompt_queue.put(test_request)
+
+        # Track prefetch activity
+        requests_processed = threading.Event()
+
+        def check_buffer():
+            """Helper to check if request was processed"""
+            if actor._prefetch_buffer:
+                requests_processed.set()
+
+        # Start the prefetch thread
+        prefetch_thread = threading.Thread(target=actor._prefetch_worker, daemon=True)
+        prefetch_thread.start()
+
+        try:
+            # Wait for prefetch thread to start
+            self.assertTrue(prefetch_started.wait(timeout=2.0), "Prefetch thread should start")
+
+            # Give thread a moment to process the request during normal operation
+            time.sleep(0.2)
+
+            # Wait for the should_stop=True to be checked (pause condition)
+            self.assertTrue(should_stop_checked.wait(timeout=2.0), "Should stop condition should be checked")
+
+            # At this point, thread should be paused, verify it doesn't exit
+            # by checking that should_stop continues to be called (indicating thread is alive and waiting)
+            time.sleep(0.2)  # Give some time for the pause to take effect
+
+            # Thread should still be alive (not exited)
+            self.assertTrue(prefetch_thread.is_alive(), "Prefetch thread should still be alive during pause")
+
+            # Wait for resume condition
+            self.assertTrue(resume_ready.wait(timeout=3.0), "Resume condition should be reached")
+
+            # Add another request to verify thread can resume processing
+            test_request2 = MagicMock(spec=PromptRequest)
+            test_request2.generation_config = mock_gen_config
+            actor.prompt_queue.put(test_request2)
+
+            # Give thread time to process after resume
+            time.sleep(0.3)
+
+            # Verify thread is still alive and functioning
+            self.assertTrue(prefetch_thread.is_alive(), "Prefetch thread should still be alive after resume")
+
+            # Verify that should_stop was called multiple times, indicating the thread
+            # continued to check the condition rather than exiting
+            self.assertGreaterEqual(
+                should_stop_call_count,
+                4,
+                f"should_stop should be called multiple times during pause/resume, got {should_stop_call_count}",
+            )
+
+        finally:
+            # Clean up: force thread to exit by making should_stop return True permanently
+            actor._should_stop = lambda: True
+
+            # Add a properly formed request to unblock any queue.get() calls
+            cleanup_request = MagicMock(spec=PromptRequest)
+            cleanup_request.generation_config = mock_gen_config
+            try:
+                actor.prompt_queue.put_nowait(cleanup_request)
+            except queue.Full:
+                pass
+
+            # Give thread time to clean up
+            prefetch_thread.join(timeout=1.0)
 
 
 if __name__ == "__main__":

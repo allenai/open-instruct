@@ -451,17 +451,21 @@ class LLMRayActor:
     def _prefetch_worker(self):
         """Background worker that prefetches requests until we have enough buffered."""
         while True:
-            # Calculate how many requests we need
             with self._prefetch_cv:
+                # If you truly have a separate shutdown flag, check it here and break.
+                # if self._shutdown: break
+
+                # Pause on should_stop instead of exiting.
                 if self._should_stop():
-                    break
+                    # Sleep on the CV so we release the lock and avoid busy-wait.
+                    self._prefetch_cv.wait(timeout=0.1)
+                    continue
 
                 current_unfinished = self.llm_engine.get_num_unfinished_requests()
                 total_capacity = current_unfinished + self._buffered_samples
 
-                if total_capacity >= self.inference_batch_size:
-                    # We have enough, wait for notification
-                    self._prefetch_cv.wait(timeout=1.0)
+                if self.inference_batch_size is not None and total_capacity >= self.inference_batch_size:
+                    self._prefetch_cv.wait(timeout=0.1)  # shorter wait is OK
                     continue
 
             # Fetch one more request
@@ -470,7 +474,10 @@ class LLMRayActor:
                 with self._prefetch_cv:
                     self._prefetch_buffer.append(request)
                     self._buffered_samples += request.generation_config.n
+                    # Wake any waiters (and speed up refilling)
+                    self._prefetch_cv.notify_all()
             except queue.Empty:
+                # Nothing available right now; loop around.
                 continue
 
     def _insert_result_to_queue(self, result, is_eval: bool):
