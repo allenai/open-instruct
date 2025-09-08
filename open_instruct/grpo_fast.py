@@ -1643,14 +1643,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             print(f"Using system prompt from {args.system_prompt_file}:\n############\n{system_prompt_text}\n############\n")
         elif args.system_prompt_file.endswith(".yaml"):
             assert Path(args.system_prompt_file).exists()
-            with open(file_path, "r", encoding="utf-8") as file:
+            with open(args.system_prompt_file, "r", encoding="utf-8") as file:
                 prompt = yaml.safe_load(file)
                 system_prompt_text = prompt["system_prompt"]
                 additional_question_instructions = prompt["additional_instructions"]
                 print(f"Using system prompt from {args.system_prompt_file}:\n############\n{system_prompt_text}\n############\n")
                 print(f"Using additional question instructions from {args.system_prompt_file}:\n############\n{additional_question_instructions}\n############\n")
-            else:
-                raise ValueError(f"System prompt file {args.system_prompt_file} does not exist or is not a yaml/txt file.")
+        else:
+            raise ValueError(f"System prompt file {args.system_prompt_file} does not exist or is not a yaml/txt file.")
     transform_fn_args = [
         {
             "system_prompt_text": system_prompt_text,
