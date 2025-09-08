@@ -16,7 +16,7 @@ import pathlib
 import threading
 import time
 from concurrent import futures
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional, Sequence
 
 import datasets
 import numpy as np
@@ -28,15 +28,17 @@ import vllm
 from ray.util import queue as ray_queue
 
 from open_instruct import dataset_transformation, grpo_fast, logger_utils, model_utils, utils, vllm_utils3
+from open_instruct.actor_manager import ActorManager
 from open_instruct.queue_types import PromptRequest
 
 # For FLOPS, we assume bf16 and ignore sparsity.
+# Memory bandwidth values are peak theoretical bandwidth.
 GPU_SPECS = {
-    "a100": {"flops": 312e12, "memory_size": 80e9},
-    "b200": {"flops": 2250e12, "memory_size": 192e9},
-    "h100": {"flops": 990e12, "memory_size": 80e9},
-    "a6000": {"flops": 155e12, "memory_size": 48e9},
-    "l40s": {"flops": 362e12, "memory_size": 48e9},
+    "a100": {"flops": 312e12, "memory_size": 80e9, "memory_bandwidth": 1.6e12},  # 1.6 TB/s HBM2e
+    "b200": {"flops": 2250e12, "memory_size": 192e9, "memory_bandwidth": 8e12},  # 8 TB/s HBM3e
+    "h100": {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12},  # 3.35 TB/s HBM3
+    "a6000": {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9},  # 768 GB/s GDDR6
+    "l40s": {"flops": 362e12, "memory_size": 48e9, "memory_bandwidth": 864e9},  # 864 GB/s GDDR6
 }
 
 
@@ -129,14 +131,9 @@ def save_benchmark_results_to_csv(
 ) -> None:
     """Save benchmark results to CSV file."""
     git_commit = get_git_commit()
+    agg_results = aggregate_results(results)
     csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
 
-    # Calculate aggregated metrics for main benchmark batches only
-    avg_results = average_results(results)
-    total_tokens = sum(r["num_new_tokens"] for r in results)
-    total_generation_time = sum(r["generation_time"] for r in results)
-
-    # Prepare row data
     row_data = {
         "git_commit": git_commit,
         "model": model_config.model_name_or_path,
@@ -146,34 +143,26 @@ def save_benchmark_results_to_csv(
         "num_samples_per_prompt_rollout": args.num_samples_per_prompt_rollout,
         "response_length": args.response_length,
         "total_time": total_time,
-        "total_generation_time": total_generation_time,
-        "generation_time_percentage": (total_generation_time / total_time) * 100,
-        "total_tokens": total_tokens,
-        "avg_tokens_per_second": avg_results["tokens_per_second"],
-        "avg_mfu": avg_results["mfu"],
-        "avg_generation_time_per_batch": avg_results["generation_time"],
-        "avg_new_tokens_per_sample": avg_results["num_new_tokens"],
+        "total_generation_time": agg_results["total_generation_time"],
+        "generation_time_percentage": (agg_results["total_generation_time"] / total_time) * 100,
+        "total_tokens": agg_results["total_num_new_tokens"],
+        "avg_tokens_per_second": agg_results["avg_tokens_per_second"],
+        "avg_mfu": agg_results["avg_mfu"],
+        "avg_mbu": agg_results["avg_mbu"],
+        "avg_generation_time_per_batch": agg_results["avg_generation_time"],
+        "avg_new_tokens_per_sample": agg_results["total_num_new_tokens"]
+        / (len(results) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout),
     }
 
-    # Check if file exists to determine if we need to write headers
-    file_exists = pathlib.Path(csv_path).exists()
-
-    # Create directory if it doesn't exist
+    csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
     csv_dir = csv_path.parent
     csv_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write to CSV
     with csv_path.open("a", newline="") as csvfile:
-        fieldnames = list(row_data.keys())
-
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
-        # Write header if file is new
-        if not file_exists:
+        writer = csv.DictWriter(csvfile, fieldnames=list(row_data.keys()))
+        if not csv_path.exists():
             writer.writeheader()
-
         writer.writerow(row_data)
-
     logger.info(f"Saved benchmark results to {csv_path}")
 
 
@@ -216,29 +205,345 @@ def free_all_gpu_memory(device: int | str = 0) -> None:
     logger.info(f"[GPU {dev.index}] {free / gib:.2f} GiB free of {total / gib:.2f} GiB after cleanup")
 
 
-def calculate_model_usage_per_token(model_path: str) -> int:
-    """
-    Calculate actual FLOPs per token for a transformer model using torch FlopCounterMode.
+@dataclasses.dataclass
+class ModelDims:
+    num_layers: int
+    hidden_size: int
+    intermediate_size: int
+    vocab_size: int
+    num_attn_heads: int
+    num_kv_heads: Optional[int] = None
 
-    Args:
-        model_path: Path to the actual model for precise measurement
+    # Conventions (fixed; not switches)
+    FLOP_PER_MAC: ClassVar[int] = 2
+    # Approximate softmax cost per attention score:
+    # ~4 scalar ops/score: exp + subtract max (stabilization) + sum + divide.
+    SOFTMAX_FLOPS_PER_SCORE: ClassVar[int] = 4
 
-    Returns:
-        FLOPs per token as integer.
-    """
-    model = transformers.AutoModelForCausalLM.from_pretrained(
-        model_path, torch_dtype=torch.bfloat16, device_map="cuda", trust_remote_code=True
+    def __post_init__(self):
+        if self.num_kv_heads is None:
+            self.num_kv_heads = self.num_attn_heads
+
+        assert self.hidden_size % self.num_attn_heads == 0, "hidden_size must be divisible by num_attn_heads"
+        assert self.num_attn_heads % self.num_kv_heads == 0, (
+            "num_attn_heads must be divisible by num_kv_heads (GQA/MQA)"
+        )
+
+    @property
+    def head_dim(self) -> int:
+        return self.hidden_size // self.num_attn_heads
+
+    def attn_flops(self, query_len: int, kv_len: int) -> int:
+        """FLOPs for one layer of self-attention given query_len and kv_len.
+
+        Assumptions:
+          - 1 MAC = 2 FLOPs (FLOP_PER_MAC).
+          - Efficient GQA/MQA K/V projections with width = num_kv_heads * head_dim.
+          - Softmax ≈ 4 FLOPs per score (see SOFTMAX_FLOPS_PER_SCORE).
+          - LayerNorms and minor ops ignored (dominated by matmuls).
+        """
+        d = self.head_dim
+        mul = self.FLOP_PER_MAC
+
+        # Projections for the query_len new tokens
+        q_proj = mul * query_len * self.hidden_size * self.hidden_size
+        kv_proj = mul * 2 * query_len * self.hidden_size * (self.num_kv_heads * d)  # GQA/MQA
+
+        # Scores and attention-weighted values
+        qk = mul * self.num_attn_heads * query_len * kv_len * d
+        softmax = self.SOFTMAX_FLOPS_PER_SCORE * self.num_attn_heads * query_len * kv_len
+        av = mul * self.num_attn_heads * query_len * kv_len * d
+
+        # Output projection
+        out_proj = mul * query_len * self.hidden_size * self.hidden_size
+
+        return q_proj + kv_proj + qk + softmax + av + out_proj
+
+    def mlp_flops(self, seq_len: int) -> int:
+        """Two matmuls dominate; activation cost under-counted on purpose."""
+        mul = self.FLOP_PER_MAC
+        first = mul * seq_len * self.hidden_size * self.intermediate_size
+        act = seq_len * self.intermediate_size  # under-counted on purpose
+        second = mul * seq_len * self.intermediate_size * self.hidden_size
+        return first + act + second
+
+    def prefill_flops(self, prompt_lengths: Sequence[int]) -> int:
+        """Prefill builds the KV cache; logits are computed once after each prompt."""
+        total = 0
+        for L in prompt_lengths:
+            total += self.num_layers * (self.attn_flops(L, L) + self.mlp_flops(L))
+            # Always include a single LM head after prefill (next-token logits)
+            total += self.FLOP_PER_MAC * self.hidden_size * self.vocab_size
+        return total
+
+    def decode_flops(
+        self, prompt_lengths: Sequence[int], response_lengths: Sequence[int], samples_per_prompt: int = 1
+    ) -> int:
+        """Decode/generation FLOPs.
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+
+        Embedding lookups are ignored by design.
+        """
+        assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+            f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+        )
+
+        total = 0
+        response_idx = 0
+        for P in prompt_lengths:
+            # Process all samples for this prompt
+            for _ in range(samples_per_prompt):
+                R = response_lengths[response_idx]
+                total += R * self.num_layers * self.mlp_flops(seq_len=1)
+                for t in range(R):
+                    kv_len = P + t + 1  # prompt + generated so far + current
+                    total += self.num_layers * self.attn_flops(query_len=1, kv_len=kv_len)
+                total += R * self.FLOP_PER_MAC * self.hidden_size * self.vocab_size
+                response_idx += 1
+        return total
+
+    def flops(
+        self,
+        prompt_lengths: Sequence[int],
+        response_lengths: Optional[Sequence[int]] = None,
+        samples_per_prompt: int = 1,
+    ) -> int:
+        """Total FLOPs for prefill and (optionally) decode.
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+        """
+        total = self.prefill_flops(prompt_lengths)
+        if response_lengths is not None:
+            total += self.decode_flops(prompt_lengths, response_lengths, samples_per_prompt)
+        return total
+
+    def weight_memory_bytes(self, num_tokens: int, dtype_bytes: int = 2) -> int:
+        """Memory bytes for reading model weights for a given number of tokens.
+
+        Args:
+            num_tokens: Number of tokens to process
+            dtype_bytes: Bytes per element (2 for FP16/BF16)
+
+        Returns:
+            Total bytes for weight reads across all layers
+        """
+        num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
+        head_dim = self.hidden_size // self.num_attn_heads
+        hidden_kv = num_kv * head_dim
+
+        # Per-layer weight params (Q, K, V, O, MLP up, MLP down)
+        w_q = self.hidden_size * self.hidden_size
+        w_k = self.hidden_size * hidden_kv
+        w_v = self.hidden_size * hidden_kv
+        w_o = self.hidden_size * self.hidden_size
+        w_up = self.hidden_size * self.intermediate_size
+        w_dn = self.intermediate_size * self.hidden_size
+
+        per_layer_weight_bytes = (w_q + w_k + w_v + w_o + w_up + w_dn) * dtype_bytes
+        return self.num_layers * num_tokens * per_layer_weight_bytes
+
+    def kv_cache_write_bytes(self, num_tokens: int, dtype_bytes: int = 2) -> int:
+        """Memory bytes for writing KV cache for a given number of tokens.
+
+        Args:
+            num_tokens: Number of tokens being cached
+            dtype_bytes: Bytes per element (2 for FP16/BF16)
+
+        Returns:
+            Total bytes for KV cache writes across all layers
+        """
+        num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
+        head_dim = self.hidden_size // self.num_attn_heads
+
+        # 2x for K and V
+        kv_write_bytes_per_token = 2 * num_kv * head_dim * dtype_bytes
+        return self.num_layers * num_tokens * kv_write_bytes_per_token
+
+    def kv_cache_read_bytes(
+        self,
+        prompt_lengths: Sequence[int],
+        response_lengths: Sequence[int],
+        samples_per_prompt: int = 1,
+        dtype_bytes: int = 2,
+    ) -> int:
+        """Memory bytes for reading KV cache during decode.
+
+        For each new token generated, we read all previous tokens' KV cache.
+        When generating multiple samples per prompt, the prompt KV cache is shared.
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+            dtype_bytes: Bytes per element (2 for FP16/BF16)
+
+        Returns:
+            Total bytes for KV cache reads during decode
+        """
+        assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+            f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+        )
+
+        num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
+        head_dim = self.hidden_size // self.num_attn_heads
+
+        # For batched sampling with shared prompt KV cache:
+        # - Prompt KV is read once per new token position across ALL samples (not per sample)
+        # - Each sample has its own KV for generated tokens
+        kv_read_terms = 0
+        response_idx = 0
+
+        for P in prompt_lengths:
+            # For this prompt, collect all response lengths
+            prompt_responses = []
+            for _ in range(samples_per_prompt):
+                prompt_responses.append(response_lengths[response_idx])
+                response_idx += 1
+
+            # Prompt KV reads: In synchronized batch generation with vLLM n>1,
+            # the prompt KV cache is stored once but each sample reads it independently.
+            # At each decoding position, each sample reads the prompt KV cache.
+            # Number of positions = max response length (all generate synchronously)
+            max_response_length = max(prompt_responses) if prompt_responses else 0
+            # Each of the samples_per_prompt samples reads prompt KV at each position
+            kv_read_terms += max_response_length * samples_per_prompt * P
+
+            # Per-sample generated KV reads: Each sample reads its own previously generated tokens
+            for R in prompt_responses:
+                # Each token in this sample reads its previously generated tokens
+                # sum_{i=0}^{R-1} i = R*(R-1)/2
+                kv_read_terms += R * (R - 1) // 2
+
+        # 2x for K and V
+        kv_bytes_per_token = 2 * num_kv * head_dim * dtype_bytes
+        return self.num_layers * kv_bytes_per_token * kv_read_terms
+
+    def prefill_memory_bytes(self, prompt_lengths: Sequence[int], dtype_bytes: int = 2) -> int:
+        """Memory bytes for prefill phase.
+
+        During prefill:
+        - Read weights once for the entire batch (batched matmul)
+        - Write KV cache for each token
+
+        Args:
+            prompt_lengths: List of prompt lengths
+            dtype_bytes: Bytes per element (2 for FP16/BF16)
+
+        Returns:
+            Total memory bytes for prefill
+        """
+        # In batched prefill, weights are read once for the entire operation,
+        # not once per token. We process all prompts in a single batch.
+        num_prefill_batches = len(prompt_lengths)  # Each prompt is a "batch"
+        weight_bytes = self.weight_memory_bytes(num_prefill_batches, dtype_bytes)
+
+        # KV cache is written for every token
+        total_prefill_tokens = sum(prompt_lengths)
+        kv_write_bytes = self.kv_cache_write_bytes(total_prefill_tokens, dtype_bytes)
+        return weight_bytes + kv_write_bytes
+
+    def decode_memory_bytes(
+        self,
+        prompt_lengths: Sequence[int],
+        response_lengths: Sequence[int],
+        samples_per_prompt: int = 1,
+        dtype_bytes: int = 2,
+    ) -> int:
+        """Memory bytes for decode/generation phase.
+
+        During decode:
+        - Read weights for each new token position (shared across samples in batch)
+        - Write KV cache for each new token
+        - Read all previous KV cache for attention
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+            dtype_bytes: Bytes per element (2 for FP16/BF16)
+
+        Returns:
+            Total memory bytes for decode
+        """
+        # In synchronized batch generation, weights are read once per position,
+        # not once per token. With multiple samples per prompt generating in parallel,
+        # we only need to read weights for the number of unique positions.
+        unique_positions = 0
+        response_idx = 0
+        for _ in prompt_lengths:
+            # Get response lengths for this prompt's samples
+            prompt_responses = response_lengths[response_idx : response_idx + samples_per_prompt]
+            response_idx += samples_per_prompt
+            # In synchronized generation, all samples generate the same number of positions
+            # (up to the max length among them)
+            unique_positions += max(prompt_responses) if prompt_responses else 0
+
+        weight_bytes = self.weight_memory_bytes(unique_positions, dtype_bytes)
+
+        # KV writes happen for all tokens (each sample writes its own KV)
+        total_decode_tokens = sum(response_lengths)
+        kv_write_bytes = self.kv_cache_write_bytes(total_decode_tokens, dtype_bytes)
+
+        kv_read_bytes = self.kv_cache_read_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
+        return weight_bytes + kv_write_bytes + kv_read_bytes
+
+    def memory_bytes(
+        self,
+        prompt_lengths: Sequence[int],
+        response_lengths: Optional[Sequence[int]] = None,
+        samples_per_prompt: int = 1,
+        dtype_bytes: int = 2,
+    ) -> int:
+        """Approximate total HBM bytes moved for prefill + decode.
+
+        Returns an integer number of bytes. Divide by elapsed seconds to get B/s;
+        compare against peak bandwidth to get utilization.
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+            dtype_bytes: Bytes per element (2 for FP16/BF16)
+
+        Returns:
+            Total memory bytes moved
+
+        Assumptions:
+          - Weights are read once per token per layer (Q,K,V,O + MLP up/down)
+          - KV cache: write K/V for every token; during decode, read all past K/V per new token
+          - When batching samples, prompt KV cache is shared across samples
+          - Embedding and LM head reads are ignored (usually dominated by matmul weight traffic)
+        """
+        total = self.prefill_memory_bytes(prompt_lengths, dtype_bytes)
+
+        if response_lengths is not None:
+            assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+                f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+            )
+
+            # Pass original prompt_lengths with samples_per_prompt to correctly handle shared KV cache
+            total += self.decode_memory_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
+
+        return total
+
+
+def load_model_dims(model_name: str) -> ModelDims:
+    cfg = transformers.AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+    return ModelDims(
+        num_layers=cfg.num_hidden_layers,
+        hidden_size=cfg.hidden_size,
+        intermediate_size=cfg.intermediate_size,
+        vocab_size=cfg.vocab_size,
+        num_attn_heads=cfg.num_attention_heads,
+        num_kv_heads=getattr(cfg, "num_key_value_heads", None),
     )
-
-    # Create a single token input
-    input_ids = torch.tensor([[1]], device=model.device)  # Single token
-
-    model.eval()  # Set model to evaluation mode for consistent FLOPs counting
-    flop_counter = torch.utils.flop_counter.FlopCounterMode(display=False, depth=None)
-    with flop_counter:
-        model(input_ids)
-
-    return flop_counter.get_total_flops()
 
 
 def get_device_name(device_name: str) -> str:
@@ -303,7 +608,8 @@ def setup_vllm_engines(
     param_prompt_Q = ray_queue.Queue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
 
-    actor_manager = vllm_utils3.ActorManager.remote()
+    queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
+    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
 
     vllm_engines = vllm_utils3.create_vllm_engines(
         num_engines=args.vllm_num_engines,
@@ -330,18 +636,6 @@ def setup_vllm_engines(
     return vllm_engines, param_prompt_Q, inference_results_Q, actor_manager
 
 
-def get_batch_data(
-    dataset: datasets.Dataset, batch_size: int, batch_idx: int
-) -> tuple[list[list[int]], list[str], list[str]]:
-    """Get a batch of data from the dataset."""
-    start_idx = batch_idx * batch_size
-    end_idx = min(start_idx + batch_size, len(dataset))
-
-    batch_data = dataset[start_idx:end_idx]
-    prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
-    return prompts
-
-
 def generate_thread(vllm_engines: list[ray.actor.ActorHandle], stop_event: threading.Event) -> None:
     """Thread that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] Starting generation thread")
@@ -356,20 +650,38 @@ def generate_thread(vllm_engines: list[ray.actor.ActorHandle], stop_event: threa
 
 def submission_thread(
     param_prompt_Q: ray_queue.Queue,
-    all_prompts: list,
+    dataset: datasets.Dataset,
     generation_config: vllm.SamplingParams,
     stop_event: threading.Event,
+    batch_size: int,
+    start_batch_idx: int,
+    num_batches: int,
 ) -> None:
     """Thread that submits prompts to the queue."""
     logger.info("[Submission Thread] Starting prompt submission")
-    for batch_idx, prompts in enumerate(all_prompts):
+    for batch_idx in range(start_batch_idx, start_batch_idx + num_batches):
         if stop_event.is_set():
             logger.info("[Submission Thread] Stopped due to stop event")
             break
+
+        # Get batch data from dataset
+        start_idx = batch_idx * batch_size
+        end_idx = min(start_idx + batch_size, len(dataset))
+        batch_data = dataset[start_idx:end_idx]
+        prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+
+        # Create list of dataset indices for this batch
+        dataset_indices = list(range(start_idx, end_idx))
+
         param_prompt_Q.put(
-            PromptRequest(prompts=prompts, dataset_index=batch_idx, generation_config=generation_config)
+            PromptRequest(
+                prompts=prompts,
+                dataset_index=dataset_indices,
+                generation_config=generation_config,
+                start_time=time.perf_counter(),
+            )
         )
-    logger.info(f"[Submission Thread] All {len(all_prompts)} prompts submitted")
+    logger.info(f"[Submission Thread] All {num_batches} batches submitted")
 
 
 def run_benchmark(
@@ -380,7 +692,6 @@ def run_benchmark(
     args: grpo_fast.Args,
     model_config: model_utils.ModelConfig,
     timestamp: int,
-    flops_per_token: int,
     num_batches: int = 5,
 ) -> list[dict[str, Any]]:
     """Run the full benchmark."""
@@ -394,6 +705,11 @@ def run_benchmark(
         max_tokens=args.response_length,
         top_p=args.vllm_top_p,
         n=args.num_samples_per_prompt_rollout,
+        # IMPORTANT: Set output_kind to FINAL_ONLY to ensure vLLM V1 properly handles n>1
+        # With the default CUMULATIVE mode, vLLM V1 returns separate outputs for each
+        # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode
+        # ensures all n completions are returned together in a single output.
+        output_kind=vllm.sampling_params.RequestOutputKind.FINAL_ONLY,
     )
 
     stop_event = threading.Event()
@@ -404,37 +720,50 @@ def run_benchmark(
     results = []
     device_name = get_device_name(torch.cuda.get_device_name(0))
     device_flops = GPU_SPECS[device_name]["flops"]
-
-    logger.info(f"Preparing {num_batches} batches...")
-    all_prompts = [
-        get_batch_data(dataset, args.num_unique_prompts_rollout, batch_idx) for batch_idx in range(num_batches)
-    ]
+    device_memory_bandwidth = GPU_SPECS[device_name]["memory_bandwidth"]
 
     # Submit warmup batch first
     logger.info("Submitting warmup batch...")
-    warmup_prompts = all_prompts[0]
-    param_prompt_Q.put(PromptRequest(prompts=warmup_prompts, dataset_index=0, generation_config=generation_config))
+    warmup_start_idx = 0
+    warmup_end_idx = min(args.num_unique_prompts_rollout, len(dataset))
+    warmup_data = dataset[warmup_start_idx:warmup_end_idx]
+    warmup_prompts = warmup_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+    warmup_dataset_indices = list(range(warmup_start_idx, warmup_end_idx))
+    param_prompt_Q.put(
+        PromptRequest(
+            prompts=warmup_prompts,
+            dataset_index=warmup_dataset_indices,
+            generation_config=generation_config,
+            start_time=time.perf_counter(),
+        )
+    )
+    model_dims = load_model_dims(model_config.model_name_or_path)
 
     try:
         logger.info("Running warmup batch...")
 
-        _ = inference_results_Q.get()
-        logger.info("Warmup batch completed")
+        warmup_result = inference_results_Q.get()
+        logger.info(f"Warmup batch completed with {len(warmup_result.responses)} responses")
         logger.info(f"Submitting {num_batches - 1} batches for main benchmark...")
         submission_future = executor.submit(
-            submission_thread, param_prompt_Q, all_prompts[1:], generation_config, stop_event
+            submission_thread,
+            param_prompt_Q,
+            dataset,
+            generation_config,
+            stop_event,
+            args.num_unique_prompts_rollout,
+            1,
+            num_batches - 1,
         )
-        last_completion_time = time.time()
-
         # Process remaining batches with timing
         for batch_idx in range(1, num_batches):
             # Quick health check!
             [future.result() for future in [submission_future, generation_future] if future.done()]
             result = inference_results_Q.get()
 
-            completion_time = time.time()
-            batch_generation_time = completion_time - last_completion_time
-            last_completion_time = completion_time
+            completion_time = time.perf_counter()
+            # Calculate generation time from when the request was enqueued
+            batch_generation_time = completion_time - result.start_time if result.start_time else 0
 
             new_tokens = sum(len(response) for response in result.responses)
             tokens_per_second = new_tokens / batch_generation_time if batch_generation_time > 0 else 0
@@ -445,17 +774,42 @@ def run_benchmark(
                 "num_new_tokens": new_tokens,
                 "finish_reasons": collections.Counter(result.finish_reasons),
                 "response_lengths": [len(response) for response in result.responses],
-                "batch_idx": result.dataset_index,
+                "dataset_indices": result.dataset_index,
             }
-            result_dict["mfu"] = 100 * result_dict["tokens_per_second"] * flops_per_token / device_flops
+            # Get prompt lengths using dataset indices from the result
+            prompt_data = dataset[result.dataset_index]
+            prompts = prompt_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+            prompt_lengths = [len(prompt) for prompt in prompts]
+            response_lengths = [len(response) for response in result.responses]
 
-            save_completion_lengths([result_dict], timestamp, result.dataset_index)
+            # Calculate total FLOPs for all prompts and responses in the batch
+            # No need to expand prompt_lengths - the flops method now handles samples_per_prompt
+            model_flops = model_dims.flops(
+                prompt_lengths, response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
+            )
+
+            # MFU = (FLOPs / time) / peak_FLOPS * 100
+            model_flops_per_second = model_flops / batch_generation_time if batch_generation_time > 0 else 0
+            result_dict["mfu"] = 100 * model_flops_per_second / device_flops
+
+            # Calculate total memory bytes for all prompts and responses in the batch
+            model_memory_bytes = model_dims.memory_bytes(
+                prompt_lengths, response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
+            )
+
+            # MBU = (Memory bytes / time) / peak_bandwidth * 100
+            model_bytes_per_second = model_memory_bytes / batch_generation_time if batch_generation_time > 0 else 0
+            result_dict["mbu"] = 100 * model_bytes_per_second / device_memory_bandwidth
+
+            save_completion_lengths([result_dict], timestamp, batch_idx)
             results.append(result_dict)
             logger.info(
                 f"Batch {batch_idx}/{num_batches - 1}: "
                 f"{result_dict['tokens_per_second']:.2f} new tokens/sec, "
                 f"MFU: {result_dict['mfu']:.2f}%, "
-                f"generation time: {batch_generation_time:.2f}s"
+                f"MBU: {result_dict['mbu']:.2f}%, "
+                f"generation time: {batch_generation_time:.2f}s, "
+                f"total new tokens: {new_tokens}"
             )
 
         # Calculate total time for main benchmark only
@@ -470,29 +824,46 @@ def run_benchmark(
         logger.info("Threads cleaned up")
 
 
-def average_results(results: list[dict[str, Any]]) -> dict[str, Any]:
-    """Calculate average metrics from results."""
-    averaged_results = {
-        "mfu": 0.0,
-        "tokens_per_second": 0.0,
-        "generation_time": 0.0,
-        "num_new_tokens": 0,
+def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Calculate total and aggregated metrics from results."""
+    aggregated_results = {
+        "total_mfu": 0.0,
+        "total_mbu": 0.0,
+        "total_tokens_per_second": 0.0,
+        "total_generation_time": 0.0,
+        "total_num_new_tokens": 0,
         "finish_reasons": collections.defaultdict(int),
         "response_lengths": [],
         "prompt_lengths": [],
     }
     for result in results:
         for key, value in result.items():
-            if key in ["mfu", "tokens_per_second", "generation_time", "num_new_tokens"]:
-                averaged_results[key] += value
+            if key == "mfu":
+                aggregated_results["total_mfu"] += value
+            elif key == "mbu":
+                aggregated_results["total_mbu"] += value
+            elif key == "tokens_per_second":
+                aggregated_results["total_tokens_per_second"] += value
+            elif key == "generation_time":
+                aggregated_results["total_generation_time"] += value
+            elif key == "num_new_tokens":
+                aggregated_results["total_num_new_tokens"] += value
             elif key == "finish_reasons":
                 for reason, count in value.items():
-                    averaged_results["finish_reasons"][reason] += count
-            elif key == "response_lengths":
-                averaged_results["response_lengths"].extend(value)
-            elif key == "prompt_lengths":
-                averaged_results["prompt_lengths"].extend(value)
-    return {k: v / len(results) if isinstance(v, (int, float)) else v for k, v in averaged_results.items()}
+                    aggregated_results["finish_reasons"][reason] += count
+            elif key in ["response_lengths", "prompt_lengths"]:
+                aggregated_results[key].extend(value)
+
+    num_results = len(results)
+    aggregated_results["avg_tokens_per_second"] = (
+        aggregated_results["total_num_new_tokens"] / aggregated_results["total_generation_time"]
+        if aggregated_results["total_generation_time"] > 0
+        else 0
+    )
+    aggregated_results["avg_mfu"] = aggregated_results["total_mfu"] / num_results
+    aggregated_results["avg_mbu"] = aggregated_results["total_mbu"] / num_results
+    aggregated_results["avg_generation_time"] = aggregated_results["total_generation_time"] / num_results
+    return aggregated_results
 
 
 def print_summary(
@@ -500,12 +871,9 @@ def print_summary(
 ) -> None:
     """Print benchmark summary statistics."""
 
-    # Calculate metrics only for the main benchmark batches (excluding warmup)
-    total_tokens = sum(r["num_new_tokens"] for r in results)
-    total_generation_time = sum(r["generation_time"] for r in results)
-
-    # Average over the main benchmark results only
-    avg_results = average_results(results)
+    agg_results = aggregate_results(results)
+    total_samples = len(results) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+    avg_new_tokens_per_sample = agg_results["total_num_new_tokens"] / total_samples
 
     print("\n" + "=" * 60)
     print("BENCHMARK SUMMARY")
@@ -517,17 +885,18 @@ def print_summary(
     print(f"Num rollouts: {args.num_samples_per_prompt_rollout}")
     print(f"Max tokens: {args.response_length}")
     print("-" * 60)
-    print(f"Total time (main benchmark): {total_generation_time:.2f}s")
-    print(f"Total new tokens generated: {total_tokens}")
+    print(f"Total time (main benchmark): {agg_results['total_generation_time']:.2f}s")
+    print(f"Total new tokens generated: {agg_results['total_num_new_tokens']}")
     print("-" * 60)
-    print("Average results over 4 main benchmark batches:")
-    print(f"Average tokens/second: {avg_results['tokens_per_second']:.2f}")
-    print(f"Average MFU: {avg_results['mfu']:.2f}%")
-    print(f"Average generation time per batch: {avg_results['generation_time']:.2f}s")
-    print(f"Average new tokens per sample: {avg_results['num_new_tokens']} tokens")
+    print(f"Average results over {len(results)} main benchmark batches:")
+    print(f"Average tokens/second: {agg_results['avg_tokens_per_second']:.2f}")
+    print(f"Average MFU: {agg_results['avg_mfu']:.2f}%")
+    print(f"Average MBU: {agg_results['avg_mbu']:.2f}%")
+    print(f"Average generation time per batch: {agg_results['avg_generation_time']:.2f}s")
+    print(f"Average new tokens per sample: {avg_new_tokens_per_sample:.2f} tokens")
 
-    max_length = np.max(avg_results["response_lengths"])
-    mean_length = np.mean(avg_results["response_lengths"])
+    max_length = np.max(agg_results["response_lengths"])
+    mean_length = np.mean(agg_results["response_lengths"])
     wasted_compute = (max_length - mean_length) / max_length
     print(f"Wasted compute % (variable response length): {wasted_compute:.2%}")
 
@@ -537,24 +906,25 @@ def print_summary(
     print(f"GPU device: {torch.cuda.get_device_name(0)}")
     print(f"GPU peak FLOPs: {gpu_specs['flops'] / 1e12:.0f} TFLOPs")
     print(f"GPU memory size: {gpu_specs['memory_size'] / 1e9:.0f} GB")
+    print(f"GPU memory bandwidth: {gpu_specs['memory_bandwidth'] / 1e12:.2f} TB/s")
 
     print("-" * 60)
     print("COMPLETION LENGTH STATISTICS:")
-    print(f"Total completions: {len(avg_results['response_lengths'])}")
+    print(f"Total completions: {len(agg_results['response_lengths'])}")
     print("\nResponse lengths:")
-    print(f"- Min: {min(avg_results['response_lengths'])} tokens")
-    print(f"- Max: {max(avg_results['response_lengths'])} tokens")
-    print(f"- Mean: {np.mean(avg_results['response_lengths']):.2f} tokens")
-    print(f"- Median: {np.median(avg_results['response_lengths']):.2f} tokens")
+    print(f"- Min: {min(agg_results['response_lengths'])} tokens")
+    print(f"- Max: {max(agg_results['response_lengths'])} tokens")
+    print(f"- Mean: {np.mean(agg_results['response_lengths']):.2f} tokens")
+    print(f"- Median: {np.median(agg_results['response_lengths']):.2f} tokens")
 
     # Calculate percentiles for valid tokens
     print("\nResponse length percentiles:")
-    print(f"- 25th percentile: {np.percentile(avg_results['response_lengths'], 25):.2f} tokens")
-    print(f"- 50th percentile: {np.percentile(avg_results['response_lengths'], 50):.2f} tokens")
-    print(f"- 75th percentile: {np.percentile(avg_results['response_lengths'], 75):.2f} tokens")
-    print(f"- 90th percentile: {np.percentile(avg_results['response_lengths'], 90):.2f} tokens")
-    print(f"- 95th percentile: {np.percentile(avg_results['response_lengths'], 95):.2f} tokens")
-    print(f"- 99th percentile: {np.percentile(avg_results['response_lengths'], 99):.2f} tokens")
+    print(f"- 25th percentile: {np.percentile(agg_results['response_lengths'], 25):.2f} tokens")
+    print(f"- 50th percentile: {np.percentile(agg_results['response_lengths'], 50):.2f} tokens")
+    print(f"- 75th percentile: {np.percentile(agg_results['response_lengths'], 75):.2f} tokens")
+    print(f"- 90th percentile: {np.percentile(agg_results['response_lengths'], 90):.2f} tokens")
+    print(f"- 95th percentile: {np.percentile(agg_results['response_lengths'], 95):.2f} tokens")
+    print(f"- 99th percentile: {np.percentile(agg_results['response_lengths'], 99):.2f} tokens")
 
     print("=" * 60)
 
@@ -592,8 +962,6 @@ def main() -> None:
 
     # Calculate flops per token before starting vLLM
     logger.info("Calculating model FLOPs per token...")
-    flops_per_token = calculate_model_usage_per_token(model_config.model_name_or_path)
-    logger.info(f"Model FLOPs per token: {flops_per_token:,}")
 
     # Free GPU memory after calculating FLOPs and before starting vLLM
     logger.info("Freeing GPU memory before starting vLLM...")
@@ -605,9 +973,7 @@ def main() -> None:
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
     save_config(args, tokenizer_config, model_config, timestamp)
-    run_benchmark(
-        dataset, vllm_engines, param_prompt_Q, inference_results_Q, args, model_config, timestamp, flops_per_token
-    )
+    run_benchmark(dataset, vllm_engines, param_prompt_Q, inference_results_Q, args, model_config, timestamp)
 
     cleanup(vllm_engines, actor_manager)
 

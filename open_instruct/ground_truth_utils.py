@@ -42,6 +42,14 @@ from open_instruct.utils import extract_final_answer
 
 logger = logger_utils.setup_logger(__name__)
 
+# remove excessive logging from liteLLM
+logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+logging.getLogger("litellm").setLevel(logging.ERROR)
+logging.getLogger("litellm.cost_calculator").setLevel(logging.CRITICAL)
+logging.getLogger("litellm._client").setLevel(logging.CRITICAL)
+logging.getLogger("cost_calculator").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 
 @dataclass
 class VerifierConfig:
@@ -91,6 +99,11 @@ class VerificationResult:
     score: float
     cost: float = 0.0
     reasoning: Optional[str] = None
+
+
+@dataclass
+class MaxLengthVerifierConfig(VerifierConfig):
+    max_length_verifier_max_length: int
 
 
 class VerifierFunction(ABC):
@@ -544,8 +557,17 @@ class MaxLenVerifier(VerifierFunction):
         # return absolute difference between the length of the prediction and the max length
         # make sure to disallow negative rewards
         length_diff = abs(len(tokenized_prediction) - desired_length)
-        score = 1 - (length_diff / 8192)
+        score = 1 - (length_diff / self.verifier_config.max_length_verifier_max_length)
         return VerificationResult(score=score)
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        """
+        Return the configuration class for this verifier.
+        Returns:
+            type: The VerifierConfig class or its subclass
+        """
+        return MaxLengthVerifierConfig
 
 
 class UpToMaxLenVerifier(VerifierFunction):
@@ -568,8 +590,17 @@ class UpToMaxLenVerifier(VerifierFunction):
             return VerificationResult(score=1.0)
         # if we were too long, return the difference
         # make sure to disallow negative rewards
-        score = 1 - (length_diff / 8192)
+        score = 1 - (length_diff / self.verifier_config.max_length_verifier_max_length)
         return VerificationResult(score=score)
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        """
+        Return the configuration class for this verifier.
+        Returns:
+            type: The VerifierConfig class or its subclass
+        """
+        return MaxLengthVerifierConfig
 
 
 class LMJudgeVerifier(VerifierFunction):
@@ -644,8 +675,7 @@ class LMJudgeVerifier(VerifierFunction):
         for attempt in range(max_retries):
             # judges the quality of a response
             try:
-                system_prompt = "Do not generate text between the <think> and </think> tags."  # "You are a concise assistant who gives very short explanations before giving a quality score."
-                messages = build_messages(prompt, system_prompt)
+                messages = build_messages(prompt)
 
                 # Faeze: check if the request would exceed context window
                 # Import the context window checker
@@ -667,7 +697,7 @@ class LMJudgeVerifier(VerifierFunction):
                         max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                         model_name=self.verifier_config.llm_judge_model,
                         max_context_length=self.verifier_config.llm_judge_max_context_length,  # Adjust based on your model
-                        safety_margin=100,
+                        safety_margin=150,
                     ):
                         # Try to truncate messages to fit
                         messages = truncate_messages_to_fit_context(
@@ -675,7 +705,7 @@ class LMJudgeVerifier(VerifierFunction):
                             max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                             model_name=self.verifier_config.llm_judge_model,
                             max_context_length=self.verifier_config.llm_judge_max_context_length,
-                            safety_margin=100,
+                            safety_margin=200,
                         )
 
                         # Check again after truncation
@@ -684,7 +714,7 @@ class LMJudgeVerifier(VerifierFunction):
                             max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                             model_name=self.verifier_config.llm_judge_model,
                             max_context_length=self.verifier_config.llm_judge_max_context_length,
-                            safety_margin=10,
+                            safety_margin=150,
                         ):
                             logger.error("Cannot fit request within context window even after truncation.")
                             return VerificationResult(score=0.0, cost=0.0, reasoning="Error: Context window exceeded")

@@ -809,6 +809,7 @@ GET_TOKENIZER_FN = {
 DEFAULT_SFT_MESSAGES_KEY = "messages"
 GROUND_TRUTHS_KEY = "ground_truth"
 VERIFIER_SOURCE_KEY = "dataset"
+RAW_PROMPT_KEY = "prompt"
 
 
 @dataclass
@@ -919,6 +920,7 @@ def sft_tokenize_v1(
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
+    row.pop(RAW_PROMPT_KEY, None)
     return row
 
 
@@ -1237,6 +1239,8 @@ def rlvr_tokenize_v1(
     row[LABELS_KEY] = labels
     row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
     row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
+    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
+    row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
     return row
 
 
@@ -1288,6 +1292,10 @@ def rlvr_tokenize_v2(
     row[LABELS_KEY] = labels
     row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
     row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
+    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
+    # row[DEFAULT_SFT_MESSAGES_KEY] = prompt
+    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
+    row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
     # some basic transformations:
     # if ground truths is a string, make it a list
     if isinstance(row[ground_truths_key], str):
@@ -1749,7 +1757,6 @@ def get_cached_dataset_tulu_with_statistics(
                 frac_or_num_samples = float(frac_or_num_samples)
             else:
                 frac_or_num_samples = int(frac_or_num_samples)
-
             dataset_config = DatasetConfig(
                 dataset_name=dataset_name,
                 dataset_split=dataset_mixer_list_splits[i],

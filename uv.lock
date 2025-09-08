@@ -238,19 +238,21 @@ wheels = [
 
 [[package]]
 name = "beaker-py"
-version = "1.34.3"
+version = "1.36.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "docker" },
+    { name = "grpcio" },
     { name = "packaging" },
+    { name = "protobuf" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "requests" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b8/08/091009148b47b09e1c60b4b41a53c125125a0be4c3dace633aac9d5f1cd5/beaker_py-1.34.3.tar.gz", hash = "sha256:f4bd5b43edb6075ba54a411f79d208e73151ee6cfb2f14b140750660f7d3e0b9", size = 74489, upload-time = "2025-04-15T16:19:08.088Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/05/10/526ccf25572e442844fb545bec273ebcfd1360e2a711f542610ac3222877/beaker_py-1.36.4.tar.gz", hash = "sha256:d958d702ff5ac6f4de4fa7c50db7e25a68cb68a2ab245a0f137adf6d2ba7d648", size = 118807, upload-time = "2025-07-16T22:30:46.998Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fc/e4/bb35ab880250fccb521ff82efa9cf0009369dea75ffc595f9ec8d9483e6c/beaker_py-1.34.3-py3-none-any.whl", hash = "sha256:bcaff058e852cf36c9616b500f1e2cb5108fc21000b4d7d0710ee9fa0adc27ab", size = 88020, upload-time = "2025-04-15T16:19:06.08Z" },
+    { url = "https://files.pythonhosted.org/packages/7a/e4/01a69c51892dc8af740dad911899b308de8462a1ba7cfc4061a850221ea9/beaker_py-1.36.4-py3-none-any.whl", hash = "sha256:b7370ceeb1ddeb631d4c2c2b3d5335a51d65117e6a38b03b7cf2ddfbbefd4520", size = 132650, upload-time = "2025-07-16T22:30:45.167Z" },
 ]
 
 [[package]]
@@ -2311,7 +2313,7 @@ requires-dist = [
     { name = "immutabledict", specifier = "==1.2.0" },
     { name = "langdetect", specifier = "==1.0.9" },
     { name = "liger-kernel", marker = "sys_platform != 'darwin'", specifier = ">=0.5.4" },
-    { name = "litellm", specifier = ">=1.72.0" },
+    { name = "litellm", specifier = ">=1.72.0,<1.75.2" },
     { name = "matplotlib", specifier = ">=3.9.3" },
     { name = "nltk", specifier = ">=3.9.1" },
     { name = "numpy", specifier = "<2" },

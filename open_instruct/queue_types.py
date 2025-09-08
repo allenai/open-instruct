@@ -3,6 +3,15 @@ from typing import Any, List, Optional
 
 
 @dataclass
+class TokenStatistics:
+    """Container for token statistics from inference."""
+
+    num_prompt_tokens: int
+    num_response_tokens: int
+    generation_time: float
+
+
+@dataclass
 class RequestInfo:
     """Container for tool usage information used in queue payloads."""
 
@@ -22,8 +31,10 @@ class GenerationResult:
     finish_reasons: List[str]
     masks: List[List[int]]
     request_info: RequestInfo
-    dataset_index: Optional[List[int]] = None
+    dataset_index: Optional[int] = None
     training_step: Optional[int] = None
+    token_statistics: Optional[TokenStatistics] = None
+    start_time: Optional[float] = None
 
 
 @dataclass
@@ -35,9 +46,10 @@ class PromptRequest:
     `_QueueActor`.
     """
 
-    prompts: List[List[int]]
+    prompt: List[int]
     generation_config: Any
     training_step: Optional[int] = None
-    dataset_index: Optional[List[int]] = None
+    dataset_index: Optional[int] = None
     tool_contexts: Optional[List[Optional[str]]] = None
     is_eval: bool = False
+    start_time: Optional[float] = None

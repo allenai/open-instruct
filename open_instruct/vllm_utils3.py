@@ -15,9 +15,10 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
-import copy
 import os
+import json
 import queue
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -38,13 +39,33 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+from vllm.v1 import kv_cache_interface
+from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
-from open_instruct.queue_types import GenerationResult, RequestInfo
+from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
+
+
+# Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
+# Turns out Ray doesnt necessarily place bundles together,
+# so this function is used to get the bundle indices of a placement group
+# and ensure that the bundles placed on the same node are grouped together.
+# avoids unnecessary communication for TP>1 with vllm.
+def get_bundle_indices_list(placement_group: ray.util.placement_group) -> List[int]:
+    pg_infos = ray.util.placement_group_table(placement_group)
+
+    node_id_to_bundles = defaultdict(list)
+    for bundle, node_id in pg_infos["bundles_to_node_id"].items():
+        node_id_to_bundles[node_id].append(bundle)
+
+    flattened_bundle_indices = []
+    for node_id, bundles in node_id_to_bundles.items():
+        flattened_bundle_indices.extend(bundles)
+    return flattened_bundle_indices
 
 
 def _init_tool_tracking():
@@ -62,7 +83,15 @@ def _init_tool_tracking():
     }
 
 
-def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, executor):
+def _handle_output(
+    output,
+    tools,
+    tracking,
+    sampling_params,
+    max_tool_calls,
+    executor,
+    tool_context: Optional[str] = None,
+):
     """
     Handle a finished output. Returns the output if it should be added to results,
     or None if it's being held for tool processing.
@@ -72,7 +101,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     if not tools:
         return output
 
-    assert len(output.outputs) <= 1  # In tool mode, sampling_params.n == 1
+    assert len(output.outputs) <= 1, f"{len(output.outputs)=}"  # In tool mode, sampling_params.n == 1
     o = output.outputs[0]
 
     # Update concatenated outputs
@@ -91,7 +120,15 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
             else:
                 tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
 
-            future = executor.submit(tool, o.text)
+            # Append hidden tool context for tools that can consume it (e.g., CodeViewTool)
+            augmented_text = o.text
+            if tool_context:
+                try:
+                    augmented_text = o.text + f"\n<!--tool_context:{json.dumps(tool_context)}-->"
+                except Exception:
+                    augmented_text = o.text
+
+            future = executor.submit(tool, augmented_text)
             tracking["pending_tool_futures"][output.request_id] = (future, o, output)
 
             return None  # Output is being held for tool processing
@@ -100,7 +137,10 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
 
 def _process_outputs(
-    outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None
+    outputs: List[vllm.RequestOutput],
+    dataset_index: Optional[List[int]] = None,
+    token_statistics: Optional[TokenStatistics] = None,
+    start_time: Optional[float] = None,
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -129,19 +169,25 @@ def _process_outputs(
         masks=masks,
         request_info=request_info,
         dataset_index=dataset_index,
+        token_statistics=token_statistics,
+        start_time=start_time,
     )
 
     return result
 
 
 def _process_outputs_with_tools(
-    outputs: List[vllm.RequestOutput], dataset_index: Optional[List[int]] = None
+    outputs: List[vllm.RequestOutput],
+    dataset_index: Optional[List[int]] = None,
+    token_statistics: Optional[TokenStatistics] = None,
+    start_time: Optional[float] = None,
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format with tool information."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
     finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
 
     masks = [out.mask for output in outputs for out in output.outputs]
+
     num_calls = [out.num_calls for output in outputs for out in output.outputs]
     timeouts = [out.timeout for output in outputs for out in output.outputs]
     tool_errors = [out.tool_error for output in outputs for out in output.outputs]
@@ -164,16 +210,19 @@ def _process_outputs_with_tools(
         masks=masks,
         request_info=request_info,
         dataset_index=dataset_index,
+        token_statistics=token_statistics,
+        start_time=start_time,
     )
 
     return result
 
 
-def _finalize_outputs(outputs, tracking, dataset_index, tools):
+def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=None, start_time=None):
     """Prepare final outputs based on whether tools were used."""
     if not tools:
-        outputs.sort(key=lambda x: int(x.request_id.split("_")[-1]))
-        return _process_outputs(outputs, dataset_index=dataset_index)
+        return _process_outputs(
+            outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
+        )
 
     # Tool mode: add metadata and merge completions
     for req_id in tracking["masks"]:
@@ -188,19 +237,26 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools):
         setattr(output, "tool_called", tracking["tool_called"][req_id])
 
     # Merge n completions into the same outputs
-    merged_outputs = {}
-    for req_id in tracking["concat_outputs"]:
-        real_req_id, _ = req_id.split("-")
-        if real_req_id not in merged_outputs:
-            merged_outputs[real_req_id] = tracking["concat_outputs"][req_id]
-        else:
-            merged_outputs[real_req_id].outputs.append(tracking["concat_outputs"][req_id].outputs[0])
+    # Filter tracking data to only include the current request
+    request_id = outputs[0].request_id
+    relevant_outputs = {k: v for k, v in tracking["concat_outputs"].items() if k.startswith(request_id + "_")}
 
+    merged_outputs = {}
+    for req_id, output in relevant_outputs.items():
+        real_req_id = "_".join(req_id.split("_")[:-1])
+        if real_req_id not in merged_outputs:
+            merged_outputs[real_req_id] = output
+        else:
+            merged_outputs[real_req_id].outputs.extend(output.outputs)
+
+    # Sort by dataset index (extracted from request_id format: "{prefix}_{training_step}_{dataset_index}")
     final_outputs = sorted(
-        merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1]))
+        merged_outputs.values(), key=lambda x: (int(x.request_id.split("_")[1]), int(x.request_id.split("_")[2]))
     )
 
-    return _process_outputs_with_tools(final_outputs, dataset_index=dataset_index)
+    return _process_outputs_with_tools(
+        final_outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
+    )
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -282,20 +338,35 @@ def init_process_group(
     return pg
 
 
-@ray.remote
-class ActorManager:
-    """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
+def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, request_metadata: dict):
+    """Add a request to the LLM engine."""
+    prefix = "eval" if request.is_eval else "train"
+    request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
+    sampling_params = request.generation_config.clone()
+    sampling_params.n = 1  # Use n=1 for tool processing
+    request_metadata[request_id] = {
+        "is_eval": request.is_eval,
+        "dataset_index": request.dataset_index,
+        "training_step": request.training_step,
+        "sampling_params": sampling_params,
+        "original_sampling_params": request.generation_config,
+        "prompt_tokens": len(request.prompt),
+        "start_time": time.perf_counter(),
+    }
 
-    def __init__(self):
-        self._should_stop = False
+    # Preserve optional tool contexts for this request so tools can access them later
+    try:
+        request_metadata[request_id]["tool_contexts"] = getattr(request, "tool_contexts", None)
+    except Exception:
+        request_metadata[request_id]["tool_contexts"] = None
 
-    def set_should_stop(self, should_stop: bool):
-        """Set whether actors should stop processing."""
-        self._should_stop = should_stop
-
-    def should_stop(self) -> bool:
-        """Check if actors should stop processing."""
-        return self._should_stop
+    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
+    for j in range(request.generation_config.n):
+        sub_sampling_params = sampling_params.clone()  # Already has n=1
+        if request.generation_config.seed is not None:
+            sub_sampling_params.seed = request.generation_config.seed + j
+        llm_engine.add_request(f"{request_id}_{j}", tokens_prompt, sub_sampling_params)
+    return request.generation_config.n
 
 
 class LLMRayActor:
@@ -311,11 +382,14 @@ class LLMRayActor:
         results_queue=None,
         eval_results_queue=None,
         actor_manager=None,
+        inference_batch_size: Optional[int] = None,
         **kwargs,
     ):
         self.logger = logger_utils.setup_logger(__name__)
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
+        self.inference_batch_size = inference_batch_size
+        self.request_metadata = {}
 
         if self.tools:
             self.executor = ThreadPoolExecutor(max_workers=20)
@@ -348,180 +422,132 @@ class LLMRayActor:
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
 
+        # For caching should_stop status.
+        self._last_should_stop_update = float("-inf")
+        self._should_stop_value = False
+        self._should_stop_timeout_s = 5
+
+    def _should_stop(self) -> bool:
+        if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
+            should_stop_ref = self.actor_manager.should_stop.remote()
+            ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
+            if ready_refs:
+                self._should_stop_value = ray.get(ready_refs[0])
+                self._last_should_stop_update = time.perf_counter()
+            else:
+                ray.cancel(should_stop_ref)
+        return self._should_stop_value
+
+    def _insert_result_to_queue(self, result, is_eval: bool):
+        """Insert result into the appropriate queue with error handling."""
+        try:
+            results_queue = self.eval_results_queue if is_eval else self.results_queue
+            results_queue.put(result, timeout=10)
+        except queue.Full:
+            queue_name = "eval" if is_eval else "train"
+            self.logger.warning(f"{queue_name} results queue is full, discarding result.")
+
+    def fill_engine(self, timeout: float):
+        """Fill the LLM engine queue with requests until inference_batch_size is reached.
+
+        Args:
+            timeout: Timeout for getting requests from the queue
+
+        Returns:
+            int: Number of requests added to the engine
+        """
+        num_added = 0
+        if self._should_stop():
+            return num_added
+        num_to_add = self.inference_batch_size - self.llm_engine.get_num_unfinished_requests()
+        while num_added < num_to_add:
+            try:
+                request = self.prompt_queue.get(timeout=timeout)
+                num_added += add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
+            except queue.Empty:
+                break
+        return num_added
+
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
         Returns:
-            int: Number of requests processed (0 or 1)
+            int: Number of requests processed
         """
-        while True:
-            # Non-blocking check for should_stop using ray.wait
-            should_stop_ref = self.actor_manager.should_stop.remote()
-            ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
-            if ready_refs and ray.get(ready_refs[0]):
-                return 0
+        num_processed = self.fill_engine(timeout=timeout)
 
-            try:
-                request = self.prompt_queue.get(timeout=timeout)
-            except queue.Empty:
-                return 0
+        if num_processed == 0:
+            return num_processed
 
-            result = self._process_request(request)
-
-            try:
-                if request.is_eval:
-                    self.eval_results_queue.put(result, timeout=10)
-                else:
-                    self.results_queue.put(result, timeout=10)
-                return 1  # Successfully processed one request
-            except queue.Full:
-                self.logger.warning("Results queue is full, discarding result.")
-                return 0
-
-    def _process_request(self, request):
-        """Unified processing for both tool and non-tool generation."""
-        prompts = request.prompts
-        sampling_params = request.generation_config
-        tool_contexts = getattr(request, "tool_contexts", None)
-
-        self.logger.info(f"[LLMRayActor] Processing request with {len(prompts)} prompts, tools={bool(self.tools)}")
-
-        # If tool contexts are provided and tools support them, set before generate
-        if self.tools and tool_contexts is not None:
-            try:
-                for tool in self.tools.values():
-                    if hasattr(tool, "set_tool_contexts"):
-                        tool.set_tool_contexts(tool_contexts)
-            except Exception as e:
-                self.logger.warning(f"Failed to set tool contexts: {e}")
-
-        if self.tools:
-            # Need n=1 for individual tool tracking
-            sampling_params = copy.deepcopy(sampling_params)
-            original_n = request.generation_config.n
-            sampling_params.n = 1
-            tracking = _init_tool_tracking()
-            tokenizer = self.llm_engine.tokenizer
-        else:
-            original_n = 1
-            tracking = None
-            tokenizer = None
-
-        self._add_initial_requests(prompts, sampling_params, original_n, request.training_step)
-
+        tracking = _init_tool_tracking()
         outputs = []
-        iteration = 0
-
         while True:
-            iteration += 1
-
-            # Poll tool futures first (matching ToolUseLLM order)
-            if tracking and tracking.get("pending_tool_futures"):
-                self._poll_tool_futures(tracking, sampling_params, tokenizer)
+            outputs.extend(self._poll_tool_futures(tracking, self.llm_engine.tokenizer))
 
             # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
             if self.llm_engine.has_unfinished_requests():
-                try:
-                    step_outputs = list(self.llm_engine.step())
-                except AssertionError:
-                    # Handle race condition where requests finish between check and step
-                    step_outputs = []
+                step_outputs = [o for o in self.llm_engine.step() if o.finished]
                 for output in step_outputs:
-                    if output.finished:
-                        result = _handle_output(
-                            output, self.tools, tracking, sampling_params, self.max_tool_calls, self.executor
-                        )
-                        if result is not None:
-                            outputs.append(result)
+                    base_req_id = "_".join(output.request_id.split("_")[:-1])
+                    # Extract optional tool context for this request (single prompt per request)
+                    ctx = self.request_metadata[base_req_id].get("tool_contexts")
+                    if isinstance(ctx, list):
+                        ctx = ctx[0] if ctx else None
+                    result = _handle_output(
+                        output,
+                        self.tools,
+                        tracking,
+                        self.request_metadata[base_req_id]["sampling_params"],
+                        self.max_tool_calls,
+                        self.executor,
+                        tool_context=ctx,
+                    )
+                    # Result is None when we do more tool processing.
+                    if result is not None:
+                        outputs.append(result)
 
-            # Check termination condition (matching ToolUseLLM exactly)
-            pending_count = len(tracking["pending_tool_futures"]) if tracking else 0
-            if not self.llm_engine.has_unfinished_requests() and pending_count == 0:
-                self.logger.info(f"[LLMRayActor] Terminating after {iteration} iterations with {len(outputs)} outputs")
+            if self.llm_engine.get_num_unfinished_requests() + len(tracking["pending_tool_futures"]) == 0:
                 break
 
-        result = _finalize_outputs(outputs, tracking, request.dataset_index, self.tools)
-        return result
+        end_time = time.time()
+        request_outputs = defaultdict(list)
+        for output in outputs:
+            request_id = "_".join(output.request_id.split("_")[:-1])
+            request_outputs[request_id].append(output)
+        for request_id, outs in request_outputs.items():
+            final_output = vllm.RequestOutput(
+                request_id=request_id,
+                prompt=outs[0].prompt,
+                prompt_token_ids=outs[0].prompt_token_ids,
+                prompt_logprobs=outs[0].prompt_logprobs,
+                outputs=[completion for out in outs for completion in out.outputs],
+                finished=outs[0].finished,
+            )
+            total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
+            metadata = self.request_metadata.pop(request_id)
+            result = _finalize_outputs(
+                [final_output],
+                tracking,
+                metadata["dataset_index"],
+                self.tools,
+                token_statistics=TokenStatistics(
+                    num_prompt_tokens=metadata["prompt_tokens"],
+                    num_response_tokens=total_generation_tokens,
+                    generation_time=end_time - metadata["start_time"],
+                ),
+                start_time=metadata["start_time"],
+            )
+            self._insert_result_to_queue(result, is_eval=metadata["is_eval"])
 
-    def _generate_batch(
-        self,
-        prompts: List[List[int]],
-        sampling_params,
-        dataset_index: Optional[List[int]] = None,
-        training_step: Optional[int] = None,
-        tool_contexts: Optional[List[Optional[str]]] = None,
-    ) -> GenerationResult:
-        """Generate responses for a batch of prompts."""
-        # If tool contexts are provided and the underlying LLM supports them, set before generate
-        try:
-            if self.tool_use and tool_contexts is not None and hasattr(self.llm, "set_tool_contexts"):
-                # Pass per-request context to the ToolUseLLM so tools can access it
-                self.llm.set_tool_contexts(tool_contexts)
-        except Exception:
-            pass
+        return len(request_outputs)
 
-        outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
-
-        # Process outputs
-        response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
-        finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
-
-        if self.tool_use:
-            masks = [out.mask for output in outputs for out in output.outputs]
-            num_calls = [out.num_calls for output in outputs for out in output.outputs]
-            timeouts = [out.timeout for output in outputs for out in output.outputs]
-            tool_errors = [out.tool_error for output in outputs for out in output.outputs]
-            tool_outputs = [out.tool_output for output in outputs for out in output.outputs]
-            tool_runtimes = [out.tool_runtime for output in outputs for out in output.outputs]
-            tool_calleds = [out.tool_called for output in outputs for out in output.outputs]
-        else:
-            masks = [[1] * len(resp) for resp in response_ids]
-            num_calls = [0] * len(response_ids)
-            timeouts = [0] * len(response_ids)
-            tool_errors = [""] * len(response_ids)
-            tool_outputs = [""] * len(response_ids)
-            tool_runtimes = [0] * len(response_ids)
-            tool_calleds = [False] * len(response_ids)
-
-        request_info = RequestInfo(
-            num_calls=num_calls,
-            timeouts=timeouts,
-            tool_errors=tool_errors,
-            tool_outputs=tool_outputs,
-            tool_runtimes=tool_runtimes,
-            tool_calleds=tool_calleds,
-        )
-
-        result = GenerationResult(
-            responses=response_ids,
-            finish_reasons=finish_reasons,
-            masks=masks,
-            request_info=request_info,
-            dataset_index=dataset_index,
-        )
-        return result
-
-    def _add_initial_requests(self, prompts, sampling_params, n_samples, training_step):
-        """Add initial requests to the engine."""
-        for i, prompt in enumerate(prompts):
-            if self.tools:
-                # Create individual requests for each sample when using tools
-                for j in range(n_samples):
-                    request_id = f"{training_step}_{i}-{j}"
-                    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
-                    self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
-            else:
-                # Standard request format for non-tool mode
-                request_id = f"batch_{training_step}_{i}"
-                tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt)
-                self.llm_engine.add_request(request_id, tokens_prompt, sampling_params)
-
-    def _poll_tool_futures(self, tracking, sampling_params, tokenizer):
+    def _poll_tool_futures(self, tracking, tokenizer):
         """Poll and handle completed tool executions."""
         if not self.tools or not tracking["pending_tool_futures"]:
-            return
+            return []
 
         dict_keys_to_delete = []
+        completed_outputs = []
 
         for req_id, (future, last_o, last_output) in tracking["pending_tool_futures"].items():
             if not future.done():
@@ -529,6 +555,11 @@ class LLMRayActor:
 
             # Tool future is done, process it
             tool_result = future.result()  # Get the tool result
+
+            # Get sampling params from request metadata for this request
+            # Extract the base request ID by removing the sub-request suffix
+            base_req_id = "_".join(req_id.split("_")[:-1])
+            sampling_params = self.request_metadata[base_req_id]["sampling_params"]
 
             last_prompt_token_ids = last_output.prompt_token_ids
             last_token_ids = last_o.token_ids
@@ -579,7 +610,7 @@ class LLMRayActor:
             can_make_new_request = can_make_new_request and new_sample_tokens > 0
 
             if can_make_new_request:
-                new_sampling_params = copy.deepcopy(sampling_params)
+                new_sampling_params = sampling_params.clone()
                 new_sampling_params.max_tokens = new_sample_tokens
 
                 try:
@@ -589,12 +620,16 @@ class LLMRayActor:
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
                     self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
+            else:
+                # If we can't make a new request, this tool execution is complete
+                completed_outputs.append(tracking["concat_outputs"][req_id])
 
             dict_keys_to_delete.append(req_id)
 
         for req_id in dict_keys_to_delete:
-            if req_id in tracking["pending_tool_futures"]:
-                del tracking["pending_tool_futures"][req_id]
+            tracking["pending_tool_futures"].pop(req_id, None)
+
+        return completed_outputs
 
     def init_process_group(
         self,
@@ -631,6 +666,44 @@ class LLMRayActor:
 
     def ready(self):
         return True
+
+    def get_kv_cache_info(self):
+        """Get KV cache max concurrency from the vLLM engine."""
+        kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
+        kv_cache_spec = kv_cache_specs[0]
+        # Group layers by their attention type (type_id) to handle models
+        # with sliding attention in some layers but not others
+        type_groups = defaultdict(list)
+        for layer_name, layer_spec in kv_cache_spec.items():
+            type_groups[layer_spec.type_id].append(layer_name)
+
+        grouped_layer_names = list(type_groups.values())
+
+        page_size = kv_cache_utils.get_uniform_page_size(kv_cache_spec)
+
+        vllm_config = self.llm_engine.vllm_config
+        gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
+        total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
+        available_memory = int(gpu_memory_utilization * total_gpu_memory)
+
+        num_blocks = kv_cache_utils.get_num_blocks(vllm_config, len(kv_cache_spec), available_memory, page_size)
+
+        per_layer_size = page_size * num_blocks
+        kv_cache_tensors = [
+            kv_cache_interface.KVCacheTensor(size=per_layer_size, shared_by=[layer_name])
+            for layer_name in kv_cache_spec
+        ]
+
+        kv_cache_config = kv_cache_interface.KVCacheConfig(
+            num_blocks=num_blocks,
+            kv_cache_tensors=kv_cache_tensors,
+            kv_cache_groups=kv_cache_utils.create_kv_cache_group_specs(kv_cache_spec, grouped_layer_names),
+        )
+        max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(
+            self.llm_engine.vllm_config, kv_cache_config
+        )
+
+        return int(max_concurrency)
 
 
 def get_cuda_arch_list() -> str:
@@ -672,6 +745,8 @@ def create_vllm_engines(
     results_queue=None,
     eval_results_queue=None,
     actor_manager=None,
+    inference_batch_size: Optional[int] = None,
+    use_fp8_kv_cache=False,
 ) -> list[LLMRayActor]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
@@ -703,15 +778,17 @@ def create_vllm_engines(
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
+    # ensure we use bundles on the same node where possible if tp>1.
+    bundle_indices_list = get_bundle_indices_list(pg)
+
     for i in range(num_engines):
         bundle_indices = None
-        if tensor_parallel_size > 1:
-            bundle_indices = list(range(i * tensor_parallel_size, (i + 1) * tensor_parallel_size))
+        bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
 
         scheduling_strategy = PlacementGroupSchedulingStrategy(
             placement_group=pg,
             placement_group_capture_child_tasks=True,
-            placement_group_bundle_index=i * tensor_parallel_size,
+            placement_group_bundle_index=bundle_indices[0],
         )
 
         vllm_engines.append(
@@ -750,6 +827,9 @@ def create_vllm_engines(
                 actor_manager=actor_manager,
                 tools=tools,
                 max_tool_calls=max_tool_calls_dict,
+                inference_batch_size=inference_batch_size,
+                kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
+                calculate_kv_scales=use_fp8_kv_cache,
             )
         )
 
