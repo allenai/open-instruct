@@ -1037,7 +1037,7 @@ def rlvr_tokenize_rl_rag_v1(
     dataset_source_key: str = DATASET_SOURCE_KEY,
     question_type_key: str = RL_RAG_QUESTION_TYPE_KEY,
     system_prompt_text: Optional[str] = None,
-    rl_rag_additional_question_instructions: Optional[Dict[str, str]] = None,
+    additional_question_instructions: Optional[Dict[str, str]] = None,
 ):
     # Optionally inject/override a system prompt into the conversation
     messages = row[sft_messages_key]
@@ -1048,7 +1048,7 @@ def rlvr_tokenize_rl_rag_v1(
             messages = [{"role": "system", "content": system_prompt_text}] + messages
     
     # RL-rag specific logic: add a question instruction.
-    if rl_rag_additional_question_instructions is not None:
+    if additional_question_instructions is not None:
         question_type = row[question_type_key].strip().lower()
         if len(messages) > 1:
             original_question = messages[1]["content"]
@@ -1056,7 +1056,7 @@ def rlvr_tokenize_rl_rag_v1(
         else:
             original_question = messages[0]["content"]
             assert messages[0]["role"] == "user"
-        messages[1]["content"] = original_question + "\n\n" + rl_rag_additional_question_instructions[question_type]
+        messages[1]["content"] = original_question + "\n\n" + additional_question_instructions[question_type]
 
     # only truncate last message if it's not an assistant message
     if len(messages) == 1:
