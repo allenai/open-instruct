@@ -206,6 +206,20 @@ class ActorManager:
 
         logger = logger_utils.setup_logger(__name__)
         logger.info(f"Dashboard server started at http://{hostname}:{self._dashboard_port}")
+        
+        # Give server a moment to start, then test if it's responding
+        import time
+        time.sleep(1)
+        try:
+            import socket as sock
+            test_sock = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
+            test_sock.settimeout(2)
+            result = test_sock.connect_ex(("127.0.0.1", self._dashboard_port))
+            test_sock.close()
+            if result != 0:
+                logger.warning("❌ Dashboard server is not responding on localhost")
+        except Exception as e:
+            logger.warning(f"Could not test dashboard server connectivity: {e}")
 
     def set_should_stop(self, should_stop: bool):
         """Set whether actors should stop processing."""
