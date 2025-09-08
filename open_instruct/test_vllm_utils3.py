@@ -182,12 +182,10 @@ class TestVllmUtils3(unittest.TestCase):
         with (
             patch.object(actor, "fill_engine", return_value=0) as mock_fill_engine,
             patch.object(actor, "_should_stop", side_effect=[False, True, False]) as mock_should_stop,
-            patch.object(actor, "_llm_engine_get_num_unfinished_requests", return_value=61),
-            patch.object(actor, "_reset_fill_engine_timing"),
-            patch.object(actor, "_reset_engine_steps_timing"),
+            patch.object(actor.llm_engine, "get_num_unfinished_requests", return_value=61),
             patch.object(actor, "_poll_tool_futures", return_value=[]),
-            patch.object(actor, "_llm_engine_has_unfinished_requests", return_value=True),
-            patch.object(actor, "_engine_step", return_value=[]),
+            patch.object(actor.llm_engine, "has_unfinished_requests", return_value=True),
+            patch.object(actor.llm_engine, "step", return_value=[]),
             patch.object(actor, "_maybe_process_and_insert", return_value=0),
         ):
             # This should not return 0 (early exit) when there are unfinished requests

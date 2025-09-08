@@ -200,37 +200,45 @@ def _process_outputs_with_tools(
     return result
 
 
-def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=None, start_time=None):
+def _finalize_outputs(output, tracking, dataset_index, tools, token_statistics=None, start_time=None):
     """Prepare final outputs based on whether tools were used."""
     if not tools:
         return _process_outputs(
-            outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
+            [output], dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
         )
 
     # Tool mode: add metadata and merge completions
+    # Store the original request_id before output gets overwritten
+    output_request_id = output.request_id
     for req_id in tracking["masks"]:
         assert req_id in tracking["concat_outputs"], f"req_id {req_id} not in concat_outputs!"
-        output = tracking["concat_outputs"][req_id].outputs[0]
-        setattr(output, "mask", tracking["masks"][req_id])
-        setattr(output, "num_calls", tracking["num_calls"][req_id])
-        setattr(output, "timeout", tracking["timeout"][req_id])
-        setattr(output, "tool_error", tracking["tool_error"][req_id])
-        setattr(output, "tool_output", tracking["tool_output"][req_id])
-        setattr(output, "tool_runtime", tracking["tool_runtime"][req_id])
-        setattr(output, "tool_called", tracking["tool_called"][req_id])
+        output_obj = tracking["concat_outputs"][req_id].outputs[0]
+        setattr(output_obj, "mask", tracking["masks"][req_id])
+        setattr(output_obj, "num_calls", tracking["num_calls"][req_id])
+        setattr(output_obj, "timeout", tracking["timeout"][req_id])
+        setattr(output_obj, "tool_error", tracking["tool_error"][req_id])
+        setattr(output_obj, "tool_output", tracking["tool_output"][req_id])
+        setattr(output_obj, "tool_runtime", tracking["tool_runtime"][req_id])
+        setattr(output_obj, "tool_called", tracking["tool_called"][req_id])
 
     # Merge n completions into the same outputs
     # Filter tracking data to only include the current request
-    request_id = outputs[0].request_id
-    relevant_outputs = {k: v for k, v in tracking["concat_outputs"].items() if k.startswith(request_id + "_")}
+    relevant_outputs = {
+        k: v for k, v in tracking["concat_outputs"].items() if _extract_base_request_id(k) == output_request_id
+    }
+
+    # Validate we have the expected number of outputs for this request
+    expected_samples = len([k for k in relevant_outputs.keys() if "_".join(k.split("_")[:-1]) == output_request_id])
+    if expected_samples == 0:
+        raise ValueError(f"No outputs found in tracking['concat_outputs'] for request {output_request_id}")
 
     merged_outputs = {}
-    for req_id, output in relevant_outputs.items():
-        real_req_id = "_".join(req_id.split("_")[:-1])
+    for req_id, output_obj in relevant_outputs.items():
+        real_req_id = _extract_base_request_id(req_id)
         if real_req_id not in merged_outputs:
-            merged_outputs[real_req_id] = output
+            merged_outputs[real_req_id] = output_obj
         else:
-            merged_outputs[real_req_id].outputs.extend(output.outputs)
+            merged_outputs[real_req_id].outputs.extend(output_obj.outputs)
 
     # Sort by dataset index (extracted from request_id format: "{prefix}_{training_step}_{dataset_index}")
     final_outputs = sorted(
@@ -240,6 +248,17 @@ def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=
     return _process_outputs_with_tools(
         final_outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
     )
+
+
+def _extract_base_request_id(full_request_id: str) -> str:
+    """Extract base request ID by removing the sample suffix.
+
+    >>> _extract_base_request_id("train_1_43039_0")
+    'train_1_43039'
+    >>> _extract_base_request_id("eval_5_12345_2")
+    'eval_5_12345'
+    """
+    return "_".join(full_request_id.split("_")[:-1])
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -424,11 +443,12 @@ class LLMRayActor:
             queue_name = "eval" if is_eval else "train"
             self.logger.warning(f"{queue_name} results queue is full, discarding result.")
 
-    def fill_engine(self, timeout: float):
+    def fill_engine(self, timeout: float, blocking: bool = True):
         """Fill the LLM engine queue with requests until inference_batch_size is reached.
 
         Args:
             timeout: Timeout for getting requests from the queue
+            blocking: Whether to use blocking queue operations
 
         Returns:
             int: Number of requests added to the engine
@@ -439,7 +459,10 @@ class LLMRayActor:
         num_to_add = self.inference_batch_size - self.llm_engine.get_num_unfinished_requests()
         while num_added < num_to_add:
             try:
-                request = self.prompt_queue.get(timeout=timeout)
+                if blocking:
+                    request = self.prompt_queue.get(timeout=timeout)
+                else:
+                    request = self.prompt_queue.get_nowait()
                 num_added += add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
             except queue.Empty:
                 break
@@ -448,24 +471,70 @@ class LLMRayActor:
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
+        Runs continuously until should_stop is set, periodically adding new requests
+        and yielding control to allow weight synchronization.
+
         Returns:
             int: Number of requests processed
         """
         num_processed = self.fill_engine(timeout=timeout)
 
         if num_processed == 0:
-            return num_processed
+            # Enhanced logging: Log why nothing was processed, but continue to process existing requests
+            should_stop = self._should_stop()
+            current_unfinished = self.llm_engine.get_num_unfinished_requests()
+            queue_size = "unknown"
+            try:
+                queue_size = self.prompt_queue.qsize()
+            except Exception as e:
+                queue_size = f"error: {e}"
+
+            self.logger.info(
+                f"Nothing added by fill_engine, but continuing to process existing requests. "
+                f"num_processed={num_processed}, should_stop={should_stop}, "
+                f"unfinished_requests={current_unfinished}, inference_batch_size={self.inference_batch_size}, "
+                f"queue_size={queue_size}, timeout={timeout}"
+            )
 
         tracking = _init_tool_tracking()
-        outputs = []
-        while True:
-            outputs.extend(self._poll_tool_futures(tracking, self.llm_engine.tokenizer))
+        request_outputs = defaultdict(list)
+        total_processed = 0
+        iteration_count = 0
 
-            # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
+        exit_reason = "unknown"
+        while not self._should_stop():
+            iteration_count += 1
+
+            # Return every 10k iterations to allow weight synchronization
+            if iteration_count % 10000 == 0:
+                exit_reason = "10k iteration limit reached"
+                self.logger.info(f"process_from_queue exiting: {exit_reason}")
+                return total_processed
+
+            # Log progress every 100 iterations
+            if iteration_count % 100 == 0:
+                unfinished = self.llm_engine.get_num_unfinished_requests()
+                pending_tools = len(tracking["pending_tool_futures"])
+                self.logger.info(
+                    f"process_from_queue iteration {iteration_count}: "
+                    f"processed={total_processed}, unfinished={unfinished}, "
+                    f"inference_batch_size={self.inference_batch_size}, "
+                    f"pending_tools={pending_tools}"
+                )
+
+            # Process tool futures
+            tool_outputs = self._poll_tool_futures(tracking, self.llm_engine.tokenizer)
+            current_time = time.time()
+            for output in tool_outputs:
+                request_id = _extract_base_request_id(output.request_id)
+                request_outputs[request_id].append(output)
+                total_processed += self._maybe_process_and_insert(request_id, request_outputs, tracking, current_time)
+
+            # Process engine steps - ONLY if there are unfinished requests
             if self.llm_engine.has_unfinished_requests():
                 step_outputs = [o for o in self.llm_engine.step() if o.finished]
                 for output in step_outputs:
-                    base_req_id = "_".join(output.request_id.split("_")[:-1])
+                    base_req_id = _extract_base_request_id(output.request_id)
                     result = _handle_output(
                         output,
                         self.tools,
@@ -476,42 +545,86 @@ class LLMRayActor:
                     )
                     # Result is None when we do more tool processing.
                     if result is not None:
-                        outputs.append(result)
+                        request_id = _extract_base_request_id(result.request_id)
+                        request_outputs[request_id].append(result)
+                        total_processed += self._maybe_process_and_insert(
+                            request_id, request_outputs, tracking, current_time
+                        )
 
-            if self.llm_engine.get_num_unfinished_requests() + len(tracking["pending_tool_futures"]) == 0:
+                # Engine refill - only refill when at 30% capacity
+                low = int(0.3 * self.inference_batch_size)
+                unfinished = self.llm_engine.get_num_unfinished_requests()
+                if unfinished <= low:
+                    self.fill_engine(timeout=0.001, blocking=False)
+
+            # If no work to do, break to yield control back to generate_thread,
+            # allowing weight_sync_thread to acquire the LLMRayActor lock
+            final_unfinished = self.llm_engine.get_num_unfinished_requests()
+            if final_unfinished + len(tracking["pending_tool_futures"]) == 0:
+                exit_reason = "no work remaining"
                 break
 
-        end_time = time.time()
-        request_outputs = defaultdict(list)
-        for output in outputs:
-            request_id = "_".join(output.request_id.split("_")[:-1])
-            request_outputs[request_id].append(output)
-        for request_id, outs in request_outputs.items():
-            final_output = vllm.RequestOutput(
-                request_id=request_id,
-                prompt=outs[0].prompt,
-                prompt_token_ids=outs[0].prompt_token_ids,
-                prompt_logprobs=outs[0].prompt_logprobs,
-                outputs=[completion for out in outs for completion in out.outputs],
-                finished=outs[0].finished,
-            )
-            total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
-            metadata = self.request_metadata.pop(request_id)
-            result = _finalize_outputs(
-                [final_output],
-                tracking,
-                metadata["dataset_index"],
-                self.tools,
-                token_statistics=TokenStatistics(
-                    num_prompt_tokens=metadata["prompt_tokens"],
-                    num_response_tokens=total_generation_tokens,
-                    generation_time=end_time - metadata["start_time"],
-                ),
-                start_time=metadata["start_time"],
-            )
-            self._insert_result_to_queue(result, is_eval=metadata["is_eval"])
+        # Check if we exited due to should_stop
+        if self._should_stop() and exit_reason == "unknown":
+            exit_reason = "should_stop requested"
 
-        return len(request_outputs)
+        self.logger.info(f"process_from_queue exiting: {exit_reason}")
+        return total_processed
+
+    def _process_completed_request(self, request_id, outs, tracking, current_time):
+        """Process a completed request with all its samples and return the result."""
+        final_output = vllm.RequestOutput(
+            request_id=request_id,
+            prompt=outs[0].prompt,
+            prompt_token_ids=outs[0].prompt_token_ids,
+            prompt_logprobs=outs[0].prompt_logprobs,
+            outputs=[completion for out in outs for completion in out.outputs],
+            finished=outs[0].finished,
+        )
+        total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
+        metadata = self.request_metadata.pop(request_id)
+        result = _finalize_outputs(
+            final_output,
+            tracking,
+            metadata["dataset_index"],
+            self.tools,
+            token_statistics=TokenStatistics(
+                num_prompt_tokens=metadata["prompt_tokens"],
+                num_response_tokens=total_generation_tokens,
+                generation_time=current_time - metadata["start_time"],
+            ),
+            start_time=metadata["start_time"],
+        )
+        return result, metadata["is_eval"]
+
+    def _maybe_process_and_insert(
+        self,
+        request_id: str,
+        request_outputs: Dict[str, List[vllm.RequestOutput]],
+        tracking: Dict[str, Any],
+        current_time: float,
+    ) -> int:
+        """Check if we have N requests for request_id, process them, and insert results in queue.
+
+        Returns:
+            int: Number of requests processed (0 or 1).
+        """
+        expected_n = self.request_metadata[request_id]["original_sampling_params"].n
+
+        # For tool mode, also verify tracking["concat_outputs"] consistency
+        if self.tools and len(request_outputs[request_id]) < expected_n:
+            concat_outputs_count = sum(
+                1 for k in tracking["concat_outputs"].keys() if "_".join(k.split("_")[:-1]) == request_id
+            )
+            if concat_outputs_count < expected_n:
+                return 0  # Not all samples ready yet
+
+        if len(request_outputs[request_id]) == expected_n:
+            outs = request_outputs.pop(request_id)
+            result, is_eval = self._process_completed_request(request_id, outs, tracking, current_time)
+            self._insert_result_to_queue(result, is_eval=is_eval)
+            return 1
+        return 0
 
     def _poll_tool_futures(self, tracking, tokenizer):
         """Poll and handle completed tool executions."""
@@ -530,7 +643,7 @@ class LLMRayActor:
 
             # Get sampling params from request metadata for this request
             # Extract the base request ID by removing the sub-request suffix
-            base_req_id = "_".join(req_id.split("_")[:-1])
+            base_req_id = _extract_base_request_id(req_id)
             sampling_params = self.request_metadata[base_req_id]["sampling_params"]
 
             last_prompt_token_ids = last_output.prompt_token_ids
