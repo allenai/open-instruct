@@ -23,6 +23,7 @@ dependencies = [
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch>=2.7.0,<2.8",
+    "transformers @ git+https://github.com/2015aroras/transformers.git@4f2fbde7eaa7253b1ca977e294da6c9fcddfa345",
     "vllm @ git+https://github.com/2015aroras/vllm.git@be33c078b2421b663d359545eb56811cfd1de6c9",
     "wandb==0.18.1",
     "langdetect==1.0.9",
