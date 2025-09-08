@@ -15,8 +15,10 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
+import collections
 import os
 import queue
+import threading
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -394,6 +396,12 @@ class LLMRayActor:
         else:
             self.executor = None
 
+        # Prefetch buffer components
+        self._prefetch_buffer = collections.deque()
+        self._prefetch_cv = threading.Condition()
+        self._prefetch_thread = None
+        self._buffered_samples = 0
+
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
@@ -425,6 +433,10 @@ class LLMRayActor:
         self._should_stop_value = False
         self._should_stop_timeout_s = 5
 
+        # Start prefetch thread
+        self._prefetch_thread = threading.Thread(target=self._prefetch_worker, daemon=True)
+        self._prefetch_thread.start()
+
     def _should_stop(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
             should_stop_ref = self.actor_manager.should_stop.remote()
@@ -435,6 +447,32 @@ class LLMRayActor:
             else:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
+
+    def _prefetch_worker(self):
+        """Background worker that prefetches requests until we have enough buffered."""
+        while True:
+            # Calculate how many requests we need
+            with self._prefetch_cv:
+                if self._should_stop():
+                    break
+
+                current_unfinished = self.llm_engine.get_num_unfinished_requests()
+                total_capacity = current_unfinished + self._buffered_samples
+
+                if total_capacity >= self.inference_batch_size:
+                    # We have enough, wait for notification
+                    self._prefetch_cv.wait(timeout=1.0)
+                    continue
+
+            # Fetch one more request
+            try:
+                request = self.prompt_queue.get(timeout=0.1)
+                with self._prefetch_cv:
+                    self._prefetch_buffer.append(request)
+                    self._buffered_samples += request.generation_config.n
+                    self._prefetch_cv.notify()
+            except queue.Empty:
+                continue
 
     def _insert_result_to_queue(self, result, is_eval: bool):
         """Insert result into the appropriate queue with error handling."""
@@ -459,15 +497,24 @@ class LLMRayActor:
         if self._should_stop():
             return num_added
         num_to_add = self.inference_batch_size - self.llm_engine.get_num_unfinished_requests()
-        while num_added < num_to_add:
-            try:
-                if blocking:
-                    request = self.prompt_queue.get(timeout=timeout)
-                else:
-                    request = self.prompt_queue.get_nowait()
-                num_added += add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
-            except queue.Empty:
-                break
+
+        # Get requests from prefetch buffer
+        with self._prefetch_cv:
+            # Get up to num_to_add requests from buffer
+            requests_to_process = []
+            for _ in range(min(num_to_add, len(self._prefetch_buffer))):
+                request = self._prefetch_buffer.popleft()
+                requests_to_process.append(request)
+                self._buffered_samples -= request.generation_config.n
+
+            # Notify prefetch worker that buffer has space
+            if requests_to_process:
+                self._prefetch_cv.notify()
+
+        # Add the requests to the engine
+        for request in requests_to_process:
+            num_added += add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
+
         return num_added
 
     def process_from_queue(self, timeout: float = 60.0):
