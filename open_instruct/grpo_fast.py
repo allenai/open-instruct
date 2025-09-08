@@ -2121,9 +2121,8 @@ def load_data_from_packing_thread(
             elapsed_wait_time = time.time() - start_wait_time
             if elapsed_wait_time > max_wait_time:
                 logger.error(
-                    f"[Main Thread] Waited {elapsed_wait_time:.1f}s for packed sequences (> {max_wait_time:.0f}s limit). Setting stop event."
+                    f"[Main Thread] Waited {elapsed_wait_time:.1f}s for packed sequences (> {max_wait_time:.0f}s limit)."
                 )
-                stop_event.set()
                 return None, {}, num_total_tokens
 
             try:
@@ -2200,14 +2199,14 @@ def weight_sync_thread(
     logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
 
 
-def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q):
+def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q, actor_manager):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
     while not stop_event.is_set():
         with Timer("🔥 Generation time") as timer:
             processed_results = ray_get_with_progress(
                 [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
-                desc="[Generate Thread] Waiting for vLLM engines to process",
+                desc=f"[Generate Thread] Waiting for vLLM engines to process (should_stop={ray.get(actor_manager.should_stop.remote())})",
                 enable=args.verbose,
             )
             num_processed = sum(int(result) for result in processed_results)
@@ -2638,7 +2637,7 @@ def run_training(
 
     logger.info("======== ✅ generation thread starts =========")
     generation_future = executor.submit(
-        generate_thread, args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q
+        generate_thread, args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q, actor_manager
     )
 
     # setup health check function to check that everything is still alive

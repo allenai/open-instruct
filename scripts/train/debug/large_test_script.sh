@@ -16,6 +16,7 @@ uv run python mason.py \
 	--description "Large (multi-node) test script." \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+        --env PYTHONUNBUFFERED=1 \
         --budget ai2/oe-adapt \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
@@ -53,6 +54,7 @@ uv run python mason.py \
         --code_api_url \$CODE_API_URL/test_program \
         --seed 1 \
         --local_eval_every 1 \
+	--verbose True \
         --gradient_checkpointing \
         --try_launch_beaker_eval_jobs_on_weka True \
         --with_tracking \
