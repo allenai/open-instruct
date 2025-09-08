@@ -2587,7 +2587,6 @@ def run_training(
 
     # setup health check function to check that everything is still alive
     def health_check_fn():
-        logger.debug(torch.cuda.memory_summary())
         [f.result() for f in [packing_future, generation_future] if f.done()]
 
     # Send initial data to ensure we have a N-step offset.
