@@ -2120,7 +2120,6 @@ def load_data_from_packing_thread(
                 # check that everything is still alive
                 health_check_fn()
                 logger.warning("[Main Thread] Timeout waiting for packed sequences. Retrying...")
-
         data_thread_metrics = packed_data["metrics"]
         B = packed_data["B"]
         collated_data = packed_data["collated_data"]
@@ -2872,7 +2871,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         )
     except Exception as e:
         logger.error(f"Error in run_training: {e}", exc_info=True)
-        raise  # Re-raise the exception to ensure non-zero exit code
     finally:
         cleanup_training_resources(
             stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q], actor_manager
