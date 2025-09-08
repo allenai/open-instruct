@@ -2320,6 +2320,7 @@ dependencies = [
     { name = "tensorboard" },
     { name = "torch", version = "2.7.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.7.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform != 'darwin'" },
+    { name = "transformers" },
     { name = "vllm" },
     { name = "wandb" },
 ]
@@ -2373,6 +2374,7 @@ requires-dist = [
     { name = "tensorboard", specifier = ">=2.18.0" },
     { name = "torch", marker = "sys_platform != 'darwin'", specifier = ">=2.7.0,<2.8", index = "https://download.pytorch.org/whl/cu128" },
     { name = "torch", marker = "sys_platform == 'darwin'", specifier = ">=2.7.0,<2.8" },
+    { name = "transformers", git = "https://github.com/2015aroras/transformers.git?rev=4f2fbde7eaa7253b1ca977e294da6c9fcddfa345" },
     { name = "uvicorn", marker = "extra == 'code'", specifier = ">=0.20.0" },
     { name = "vllm", git = "https://github.com/2015aroras/vllm.git?rev=be33c078b2421b663d359545eb56811cfd1de6c9" },
     { name = "wandb", specifier = "==0.18.1" },
@@ -4082,8 +4084,8 @@ wheels = [
 
 [[package]]
 name = "transformers"
-version = "4.55.4"
-source = { registry = "https://pypi.org/simple" }
+version = "4.54.0.dev0"
+source = { git = "https://github.com/2015aroras/transformers.git?rev=4f2fbde7eaa7253b1ca977e294da6c9fcddfa345#4f2fbde7eaa7253b1ca977e294da6c9fcddfa345" }
 dependencies = [
     { name = "filelock" },
     { name = "huggingface-hub" },
@@ -4095,10 +4097,6 @@ dependencies = [
     { name = "safetensors" },
     { name = "tokenizers" },
     { name = "tqdm" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/2b/43/3cb831d5f28cc723516e5bb43a8c6042aca3038bb36b6bd6016b40dfd1e8/transformers-4.55.4.tar.gz", hash = "sha256:574a30559bc273c7a4585599ff28ab6b676e96dc56ffd2025ecfce2fd0ab915d", size = 9573015, upload-time = "2025-08-22T15:18:43.192Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/fa/0a/8791a6ee0529c45f669566969e99b75e2ab20eb0bfee8794ce295c18bdad/transformers-4.55.4-py3-none-any.whl", hash = "sha256:df28f3849665faba4af5106f0db4510323277c4bb595055340544f7e59d06458", size = 11269659, upload-time = "2025-08-22T15:18:40.025Z" },
 ]
 
 [[package]]
