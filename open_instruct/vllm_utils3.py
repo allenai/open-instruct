@@ -18,6 +18,7 @@
 import os
 import queue
 import time
+import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -363,10 +364,12 @@ class LLMRayActor:
         **kwargs,
     ):
         self.logger = logger_utils.setup_logger(__name__)
+        self.actor_id = str(uuid.uuid4())
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inference_batch_size = inference_batch_size
         self.request_metadata = {}
+        self._step_counter = 0
 
         if self.tools:
             self.executor = ThreadPoolExecutor(max_workers=20)
@@ -459,6 +462,18 @@ class LLMRayActor:
         tracking = _init_tool_tracking()
         outputs = []
         while True:
+            self._step_counter += 1
+
+            # Log actor status every 1000 steps
+            if self._step_counter % 1000 == 0 and self.actor_manager is not None:
+                unfinished_requests = self.llm_engine.get_num_unfinished_requests()
+                try:
+                    self.actor_manager.report_actor_status.remote(
+                        self.actor_id, unfinished_requests, self.inference_batch_size
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Failed to report actor status: {e}")
+
             outputs.extend(self._poll_tool_futures(tracking, self.llm_engine.tokenizer))
 
             # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)

@@ -79,6 +79,16 @@
                 </div>
             </div>
         </div>
+        <h2>🎭 Actor Status</h2>
+        <div id="actor-status-container">
+            <div class="token-card" style="border-left-color: #2196F3;">
+                <div class="token-grid">
+                    <div class="token-stat">
+                        <div class="token-label">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
     <script>
         async function updateStatus() {
@@ -323,6 +333,84 @@
                 `;
 
                 document.getElementById('kv-cache-container').innerHTML = kvCacheHtml;
+            }
+
+            // Update actor status
+            if (data.actor_status) {
+                const actors = data.actor_status;
+                const actorCount = Object.keys(actors).length;
+
+                if (actorCount === 0) {
+                    document.getElementById('actor-status-container').innerHTML = `
+                        <div class="token-card" style="border-left-color: #2196F3;">
+                            <div class="token-grid">
+                                <div class="token-stat">
+                                    <div class="token-label">No Active Actors</div>
+                                    <div class="token-value" style="color: #2196F3;">0</div>
+                                    <div class="token-rate">Waiting for actors to report status</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    let actorHtml = '<div class="token-card" style="border-left-color: #2196F3;"><div class="token-grid">';
+                    
+                    // Summary stats
+                    let totalUnfinished = 0;
+                    let activeCount = 0;
+                    for (const [actorId, status] of Object.entries(actors)) {
+                        totalUnfinished += status.unfinished_requests;
+                        if (status.is_active) activeCount++;
+                    }
+
+                    actorHtml += `
+                        <div class="token-stat">
+                            <div class="token-label">Total Actors</div>
+                            <div class="token-value" style="color: #2196F3;">${actorCount}</div>
+                            <div class="token-rate">${activeCount} active • ${actorCount - activeCount} idle</div>
+                        </div>
+                        <div class="token-stat">
+                            <div class="token-label">Total Unfinished Requests</div>
+                            <div class="token-value" style="color: #2196F3;">${totalUnfinished}</div>
+                            <div class="token-rate">Across all actors</div>
+                        </div>
+                    `;
+                    
+                    actorHtml += '</div></div>';
+
+                    // Individual actor cards
+                    for (const [actorId, status] of Object.entries(actors)) {
+                        const statusColor = status.is_active ? '#4CAF50' : '#9E9E9E';
+                        const statusText = status.is_active ? 'Active' : 'Idle';
+                        const timeSinceUpdate = Math.floor((Date.now() / 1000) - status.last_update);
+                        
+                        actorHtml += `
+                            <div class="queue-card" style="margin-top: 10px;">
+                                <div class="queue-name">Actor ${status.actor_id_short}</div>
+                                <div class="queue-stats" style="color: ${statusColor};">
+                                    ${statusText} • ${status.unfinished_requests} unfinished • Batch size: ${status.inference_batch_size}
+                                </div>
+                                <div class="token-rate" style="font-size: 0.8em; color: #666;">
+                                    Updated ${timeSinceUpdate}s ago
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    document.getElementById('actor-status-container').innerHTML = actorHtml;
+                }
+            } else {
+                document.getElementById('actor-status-container').innerHTML = `
+                    <div class="token-card" style="border-left-color: #2196F3;">
+                        <div class="token-grid">
+                            <div class="token-stat">
+                                <div class="token-label">Actor Status</div>
+                                <div class="token-value" style="color: #2196F3;">Collecting...</div>
+                                <div class="token-rate">Waiting for actor status reports</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
             }
         }
 

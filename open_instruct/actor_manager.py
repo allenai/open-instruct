@@ -67,6 +67,8 @@ class ActorManager:
         # MFU/MBU tracking
         self._model_utilization_history = collections.deque(maxlen=self._sample_window)
         self._memory_usage_stats = {"total_gpu_memory_used": 0, "average_kv_cache_size": 0, "peak_memory_usage": 0}
+        # Actor status tracking
+        self._actor_status = {}  # actor_id -> {unfinished_requests, inference_batch_size, last_update}
         if self._args.enable_queue_dashboard:
             self._setup_queue_monitoring()
             self._start_dashboard()
@@ -191,6 +193,7 @@ class ActorManager:
                 "kv_cache_max_concurrency": self._kv_cache_max_concurrency,
                 # This is less confusing to users.
                 "inference_batch_size": self._args.inference_batch_size * self._args.num_samples_per_prompt_rollout,
+                "actor_status": self.get_actor_status(),
             }
 
         def run_server():
@@ -212,6 +215,15 @@ class ActorManager:
     def should_stop(self) -> bool:
         """Check if actors should stop processing."""
         return self._should_stop
+
+    def report_actor_status(self, actor_id: str, unfinished_requests: int, inference_batch_size: int):
+        """Report status from an individual actor."""
+        current_time = time.time()
+        self._actor_status[actor_id] = {
+            "unfinished_requests": unfinished_requests,
+            "inference_batch_size": inference_batch_size,
+            "last_update": current_time,
+        }
 
     def report_token_stats(self, prompt_tokens: int, generation_tokens: int):
         """Report token statistics from main thread."""
@@ -403,6 +415,22 @@ class ActorManager:
     def get_memory_stats(self):
         """Return current memory usage statistics."""
         return self._memory_usage_stats.copy()
+
+    def get_actor_status(self):
+        """Return current actor status information."""
+        current_time = time.time()
+        # Filter out stale actor data (older than 60 seconds)
+        active_actors = {}
+        for actor_id, status in self._actor_status.items():
+            if current_time - status["last_update"] < 60:
+                active_actors[actor_id] = {
+                    "actor_id_short": actor_id[:8],  # Short version for display
+                    "unfinished_requests": status["unfinished_requests"],
+                    "inference_batch_size": status["inference_batch_size"],
+                    "last_update": status["last_update"],
+                    "is_active": status["unfinished_requests"] > 0,
+                }
+        return active_actors
 
     def get_dashboard_port(self):
         """Get the port number where the dashboard is running."""
