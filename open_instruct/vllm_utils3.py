@@ -379,12 +379,14 @@ class LLMRayActor:
         eval_results_queue=None,
         actor_manager=None,
         inference_batch_size: Optional[int] = None,
+        verbose: bool = False,
         **kwargs,
     ):
         self.logger = logger_utils.setup_logger(__name__)
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inference_batch_size = inference_batch_size
+        self.verbose = verbose
         self.request_metadata = {}
 
         if self.tools:
@@ -479,7 +481,7 @@ class LLMRayActor:
         """
         num_processed = self.fill_engine(timeout=timeout)
 
-        if num_processed == 0:
+        if num_processed == 0 and self.verbose:
             # Enhanced logging: Log why nothing was processed, but continue to process existing requests
             should_stop = self._should_stop()
             current_unfinished = self.llm_engine.get_num_unfinished_requests()
@@ -508,11 +510,12 @@ class LLMRayActor:
             # Return every 10k iterations to allow weight synchronization
             if iteration_count % 10000 == 0:
                 exit_reason = "10k iteration limit reached"
-                self.logger.info(f"process_from_queue exiting: {exit_reason}")
+                if self.verbose:
+                    self.logger.info(f"process_from_queue exiting: {exit_reason}")
                 return total_processed
 
             # Log progress every 100 iterations
-            if iteration_count % 100 == 0:
+            if iteration_count % 100 == 0 and self.verbose:
                 unfinished = self.llm_engine.get_num_unfinished_requests()
                 pending_tools = len(tracking["pending_tool_futures"])
                 self.logger.info(
@@ -568,7 +571,8 @@ class LLMRayActor:
         if self._should_stop() and exit_reason == "unknown":
             exit_reason = "should_stop requested"
 
-        self.logger.info(f"process_from_queue exiting: {exit_reason}")
+        if self.verbose:
+            self.logger.info(f"process_from_queue exiting: {exit_reason}")
         return total_processed
 
     def _process_completed_request(self, request_id, outs, tracking, current_time):
@@ -817,6 +821,7 @@ def create_vllm_engines(
     actor_manager=None,
     inference_batch_size: Optional[int] = None,
     use_fp8_kv_cache=False,
+    verbose: bool = False,
 ) -> list[LLMRayActor]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
@@ -900,6 +905,7 @@ def create_vllm_engines(
                 inference_batch_size=inference_batch_size,
                 kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
                 calculate_kv_scales=use_fp8_kv_cache,
+                verbose=verbose,
             )
         )
 
