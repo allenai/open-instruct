@@ -120,14 +120,14 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
 
 def _process_outputs(
-    outputs: List[vllm.RequestOutput],
+    output: vllm.RequestOutput,
     dataset_index: Optional[List[int]] = None,
     token_statistics: Optional[TokenStatistics] = None,
     start_time: Optional[float] = None,
 ) -> "GenerationResult":
-    """Process vLLM RequestOutputs into GenerationResult format."""
-    response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
-    finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
+    """Process vLLM RequestOutput into GenerationResult format."""
+    response_ids = [list(out.token_ids) for out in output.outputs]
+    finish_reasons = [out.finish_reason for out in output.outputs]
 
     masks = [[1] * len(resp) for resp in response_ids]
     num_calls = [0] * len(response_ids)
@@ -204,12 +204,11 @@ def _finalize_outputs(output, tracking, dataset_index, tools, token_statistics=N
     """Prepare final outputs based on whether tools were used."""
     if not tools:
         return _process_outputs(
-            [output], dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
+            output, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
         )
 
     # Tool mode: add metadata and merge completions
-    # Store the original request_id before output gets overwritten
-    output_request_id = output.request_id
+    request_id = output.request_id
     for req_id in tracking["masks"]:
         assert req_id in tracking["concat_outputs"], f"req_id {req_id} not in concat_outputs!"
         output_obj = tracking["concat_outputs"][req_id].outputs[0]
@@ -224,13 +223,8 @@ def _finalize_outputs(output, tracking, dataset_index, tools, token_statistics=N
     # Merge n completions into the same outputs
     # Filter tracking data to only include the current request
     relevant_outputs = {
-        k: v for k, v in tracking["concat_outputs"].items() if _extract_base_request_id(k) == output_request_id
+        k: v for k, v in tracking["concat_outputs"].items() if _extract_base_request_id(k) == request_id
     }
-
-    # Validate we have the expected number of outputs for this request
-    expected_samples = len([k for k in relevant_outputs.keys() if "_".join(k.split("_")[:-1]) == output_request_id])
-    if expected_samples == 0:
-        raise ValueError(f"No outputs found in tracking['concat_outputs'] for request {output_request_id}")
 
     merged_outputs = {}
     for req_id, output_obj in relevant_outputs.items():
@@ -479,39 +473,18 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
-        num_processed = self.fill_engine(timeout=timeout)
-
-        if num_processed == 0 and self.verbose:
-            # Enhanced logging: Log why nothing was processed, but continue to process existing requests
-            should_stop = self._should_stop()
-            current_unfinished = self.llm_engine.get_num_unfinished_requests()
-            queue_size = "unknown"
-            try:
-                queue_size = self.prompt_queue.qsize()
-            except Exception as e:
-                queue_size = f"error: {e}"
-
-            self.logger.info(
-                f"Nothing added by fill_engine, but continuing to process existing requests. "
-                f"num_processed={num_processed}, should_stop={should_stop}, "
-                f"unfinished_requests={current_unfinished}, inference_batch_size={self.inference_batch_size}, "
-                f"queue_size={queue_size}, timeout={timeout}"
-            )
+        self.fill_engine(timeout=timeout)
 
         tracking = _init_tool_tracking()
         request_outputs = defaultdict(list)
         total_processed = 0
         iteration_count = 0
 
-        exit_reason = "unknown"
         while not self._should_stop():
             iteration_count += 1
 
             # Return every 10k iterations to allow weight synchronization
             if iteration_count % 10000 == 0:
-                exit_reason = "10k iteration limit reached"
-                if self.verbose:
-                    self.logger.info(f"process_from_queue exiting: {exit_reason}")
                 return total_processed
 
             # Log progress every 100 iterations
@@ -525,7 +498,6 @@ class LLMRayActor:
                     f"pending_tools={pending_tools}"
                 )
 
-            # Process tool futures
             tool_outputs = self._poll_tool_futures(tracking, self.llm_engine.tokenizer)
             current_time = time.time()
             for output in tool_outputs:
@@ -533,7 +505,6 @@ class LLMRayActor:
                 request_outputs[request_id].append(output)
                 total_processed += self._maybe_process_and_insert(request_id, request_outputs, tracking, current_time)
 
-            # Process engine steps - ONLY if there are unfinished requests
             if self.llm_engine.has_unfinished_requests():
                 step_outputs = [o for o in self.llm_engine.step() if o.finished]
                 for output in step_outputs:
@@ -554,25 +525,19 @@ class LLMRayActor:
                             request_id, request_outputs, tracking, current_time
                         )
 
-                # Engine refill - only refill when at 30% capacity
-                low = int(0.3 * self.inference_batch_size)
-                unfinished = self.llm_engine.get_num_unfinished_requests()
-                if unfinished <= low:
-                    self.fill_engine(timeout=0.001, blocking=False)
+                # Engine refill - only refill when at 30% capacity and every 100 iterations
+                if iteration_count % 100 == 0:
+                    low = int(0.3 * self.inference_batch_size)
+                    unfinished = self.llm_engine.get_num_unfinished_requests()
+                    if unfinished <= low:
+                        self.fill_engine(timeout=0.001, blocking=False)
 
             # If no work to do, break to yield control back to generate_thread,
             # allowing weight_sync_thread to acquire the LLMRayActor lock
             final_unfinished = self.llm_engine.get_num_unfinished_requests()
             if final_unfinished + len(tracking["pending_tool_futures"]) == 0:
-                exit_reason = "no work remaining"
                 break
 
-        # Check if we exited due to should_stop
-        if self._should_stop() and exit_reason == "unknown":
-            exit_reason = "should_stop requested"
-
-        if self.verbose:
-            self.logger.info(f"process_from_queue exiting: {exit_reason}")
         return total_processed
 
     def _process_completed_request(self, request_id, outs, tracking, current_time):
@@ -615,7 +580,6 @@ class LLMRayActor:
         """
         expected_n = self.request_metadata[request_id]["original_sampling_params"].n
 
-        # For tool mode, also verify tracking["concat_outputs"] consistency
         if self.tools and len(request_outputs[request_id]) < expected_n:
             concat_outputs_count = sum(
                 1 for k in tracking["concat_outputs"].keys() if "_".join(k.split("_")[:-1]) == request_id
