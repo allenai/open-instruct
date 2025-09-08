@@ -2109,31 +2109,17 @@ def load_data_from_packing_thread(
 ):
     """Get the packed sequences with advantages from the packing thread."""
     with Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
-        start_wait_time = time.time()
-        max_wait_time = 600.0  # 10 minutes in seconds
-
         while True:
             if stop_event.is_set():
                 logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
                 return None, {}, num_total_tokens
-
-            # Check if we've been waiting too long
-            elapsed_wait_time = time.time() - start_wait_time
-            if elapsed_wait_time > max_wait_time:
-                logger.error(
-                    f"[Main Thread] Waited {elapsed_wait_time:.1f}s for packed sequences (> {max_wait_time:.0f}s limit)."
-                )
-                return None, {}, num_total_tokens
-
             try:
                 packed_data = packed_sequences_Q.get(timeout=30.0)
                 break
             except Empty:
                 # check that everything is still alive
                 health_check_fn()
-                logger.warning(
-                    f"[Main Thread] Timeout waiting for packed sequences (waited {elapsed_wait_time:.1f}s total). Retrying..."
-                )
+                logger.warning("[Main Thread] Timeout waiting for packed sequences. Retrying...")
 
         data_thread_metrics = packed_data["metrics"]
         B = packed_data["B"]
@@ -2199,15 +2185,15 @@ def weight_sync_thread(
     logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
 
 
-def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q, actor_manager):
+def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
     while not stop_event.is_set():
         with Timer("🔥 Generation time") as timer:
             processed_results = ray_get_with_progress(
                 [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
-                desc=f"[Generate Thread] Waiting for vLLM engines to process (should_stop={ray.get(actor_manager.should_stop.remote())})",
-                enable=False,
+                desc="[Generate Thread] Waiting for vLLM engines to process",
+                enable=args.verbose,
             )
             num_processed = sum(int(result) for result in processed_results)
             # Suppress timing output if nothing was processed
@@ -2637,7 +2623,7 @@ def run_training(
 
     logger.info("======== ✅ generation thread starts =========")
     generation_future = executor.submit(
-        generate_thread, args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q, actor_manager
+        generate_thread, args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q
     )
 
     # setup health check function to check that everything is still alive
