@@ -513,6 +513,19 @@ class LLMRayActor:
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
 
+        # Enhanced logging: Queue connection verification
+        prompt_queue_size = "unknown"
+        try:
+            prompt_queue_size = prompt_queue.qsize() if prompt_queue else "None"
+        except Exception as e:
+            prompt_queue_size = f"error: {e}"
+
+        self.logger.info(
+            f"LLMRayActor initialized: prompt_queue_id={id(prompt_queue)}, "
+            f"prompt_queue_size={prompt_queue_size}, inference_batch_size={inference_batch_size}, "
+            f"results_queue_id={id(results_queue)}, eval_results_queue_id={id(eval_results_queue)}"
+        )
+
         # In production, actor_manager is required for proper coordination
         # In tests, it can be None if no coordination is needed
         if prompt_queue is not None and results_queue is not None:
@@ -529,6 +542,23 @@ class LLMRayActor:
         # Track dropped results for monitoring
         self.dropped_results = getattr(self, "dropped_results", 0)
 
+        # Accumulated timing state for fill_engine granular tracking
+        self._fill_engine_timing = {
+            "should_stop_check": 0.0,
+            "unfinished_requests_check": 0.0,
+            "batch_size_calculation": 0.0,
+            "queue_get": 0.0,
+            "add_request": 0.0,
+        }
+
+        # Accumulated timing state for engine_steps granular tracking
+        self._engine_steps_timing = {
+            "engine_step_call": 0.0,
+            "handle_output": 0.0,
+            "extract_base_request_id": 0.0,
+            "maybe_process_insert": 0.0,
+        }
+
     # Named wrapper functions for profiler visibility - these replace lambda functions
     def _ray_get_gpu_ids(self):
         """Named function for ray.get_gpu_ids - visible in profiler."""
@@ -536,27 +566,19 @@ class LLMRayActor:
 
     def _llm_engine_get_num_unfinished_requests(self):
         """Named function for llm_engine.get_num_unfinished_requests - visible in profiler."""
-        with ProfilerContext("vllm_get_num_unfinished_requests") as profiler_ctx:
-            profiler_ctx.cpu_intensive_operation()  # Make visible in profiler
-            return self.llm_engine.get_num_unfinished_requests()
+        return self.llm_engine.get_num_unfinished_requests()
 
     def _llm_engine_has_unfinished_requests(self):
         """Named function for llm_engine.has_unfinished_requests - visible in profiler."""
-        with ProfilerContext("vllm_has_unfinished_requests") as profiler_ctx:
-            profiler_ctx.cpu_intensive_operation()  # Make visible in profiler
-            return self.llm_engine.has_unfinished_requests()
+        return self.llm_engine.has_unfinished_requests()
 
     def _llm_engine_step(self):
         """Named function for llm_engine.step - visible in profiler."""
-        with ProfilerContext("vllm_engine_step") as profiler_ctx:
-            profiler_ctx.cpu_intensive_operation()  # Make visible in profiler
-            return self.llm_engine.step()
+        return self.llm_engine.step()
 
     def _prompt_queue_get_blocking(self, timeout):
         """Named function for prompt_queue.get blocking - visible in profiler."""
-        with ProfilerContext("prompt_queue_get_blocking") as profiler_ctx:
-            profiler_ctx.cpu_intensive_operation()  # Make visible in profiler
-            return self.prompt_queue.get(timeout=timeout)
+        return self.prompt_queue.get(timeout=timeout)
 
     def _prompt_queue_get_nowait(self):
         """Named function for prompt_queue.get_nowait - visible in profiler."""
@@ -576,54 +598,22 @@ class LLMRayActor:
 
     def _llm_engine_add_request_tool_continuation(self, req_id, prompt_token_ids, sampling_params):
         """Named function for llm_engine.add_request tool continuation - visible in profiler."""
-        with ProfilerContext("vllm_add_request_tool_continuation") as profiler_ctx:
-            profiler_ctx.cpu_intensive_operation()  # Make visible in profiler
-            return self.llm_engine.add_request(
-                req_id, vllm.TokensPrompt(prompt_token_ids=prompt_token_ids), sampling_params
-            )
+        return self.llm_engine.add_request(
+            req_id, vllm.TokensPrompt(prompt_token_ids=prompt_token_ids), sampling_params
+        )
 
     def _llm_engine_collective_rpc_init_process_group(
         self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes
     ):
         """Named function for llm_engine.collective_rpc init_process_group - visible in profiler."""
-        with ProfilerContext("vllm_collective_rpc_init_process_group") as profiler_ctx:
-            profiler_ctx.cpu_intensive_operation()  # Make visible in profiler
-            return self.llm_engine.collective_rpc(
-                "init_process_group",
-                args=(
-                    master_address,
-                    master_port,
-                    rank_offset,
-                    world_size,
-                    group_name,
-                    backend,
-                    use_ray,
-                    timeout_minutes,
-                ),
-            )
+        return self.llm_engine.collective_rpc(
+            "init_process_group",
+            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
+        )
 
     def _llm_engine_collective_rpc_update_weight(self, name, dtype, shape, empty_cache):
         """Named function for llm_engine.collective_rpc update_weight - visible in profiler."""
-        with ProfilerContext("vllm_collective_rpc_update_weight") as profiler_ctx:
-            profiler_ctx.cpu_intensive_operation()  # Make visible in profiler
-            return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
-
-        # Accumulated timing state for fill_engine granular tracking
-        self._fill_engine_timing = {
-            "should_stop_check": 0.0,
-            "unfinished_requests_check": 0.0,
-            "batch_size_calculation": 0.0,
-            "queue_get": 0.0,
-            "add_request": 0.0,
-        }
-
-        # Accumulated timing state for engine_steps granular tracking
-        self._engine_steps_timing = {
-            "engine_step_call": 0.0,
-            "handle_output": 0.0,
-            "extract_base_request_id": 0.0,
-            "maybe_process_insert": 0.0,
-        }
+        return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     def _reset_fill_engine_timing(self):
         """Reset the accumulated fill_engine timing state."""
@@ -718,10 +708,26 @@ class LLMRayActor:
         num_to_add = self.inference_batch_size - current_unfinished
         self._fill_engine_timing["batch_size_calculation"] += time.perf_counter() - calc_start
 
-        self.logger.debug(
+        # Enhanced logging: Add queue size information and more detailed state
+        queue_size = "unknown"
+        try:
+            queue_size = self.prompt_queue.qsize()
+        except Exception as e:
+            queue_size = f"error: {e}"
+
+        self.logger.info(
             f"fill_engine: batch_size={self.inference_batch_size}, "
-            f"unfinished={current_unfinished}, need_to_add={num_to_add}"
+            f"unfinished={current_unfinished}, need_to_add={num_to_add}, "
+            f"queue_size={queue_size}, queue_id={id(self.prompt_queue)}, "
+            f"timeout={timeout}, blocking={blocking}"
         )
+
+        # If num_to_add <= 0, log why we're not adding anything
+        if num_to_add <= 0:
+            self.logger.warning(
+                f"fill_engine: engine already has {current_unfinished} unfinished requests "
+                f"(>= batch_size {self.inference_batch_size}), skipping queue processing"
+            )
 
         while num_accepted < num_to_add:
             try:
@@ -751,8 +757,18 @@ class LLMRayActor:
                     f"out of {total_requested} requested (total_accepted={num_accepted}/{num_to_add})"
                 )
             except queue.Empty:
-                # Don't time the queue.Empty exception case as it's already accounted for in queue_get timing
-                self.logger.debug(f"fill_engine: queue empty after {timeout}s timeout, stopping early")
+                # Enhanced logging: More context about queue timeout
+                queue_size_now = "unknown"
+                try:
+                    queue_size_now = self.prompt_queue.qsize()
+                except Exception as e:
+                    queue_size_now = f"error: {e}"
+
+                self.logger.warning(
+                    f"fill_engine: queue.Empty exception after {timeout}s timeout, "
+                    f"queue_size_now={queue_size_now}, queue_id={id(self.prompt_queue)}, "
+                    f"accepted_so_far={num_accepted}, still_needed={num_to_add - num_accepted}"
+                )
                 break
 
         self.logger.debug(
@@ -849,7 +865,21 @@ class LLMRayActor:
         timing_data["fill_engine_initial"] += time.perf_counter() - fill_start
 
         if num_processed == 0:
-            return num_processed
+            # Enhanced logging: Log why nothing was processed, but continue to process existing requests
+            should_stop = self._should_stop()
+            current_unfinished = self._llm_engine_get_num_unfinished_requests()
+            queue_size = "unknown"
+            try:
+                queue_size = self.prompt_queue.qsize()
+            except Exception as e:
+                queue_size = f"error: {e}"
+
+            self.logger.info(
+                f"Nothing added by fill_engine, but continuing to process existing requests. "
+                f"num_processed={num_processed}, should_stop={should_stop}, "
+                f"unfinished_requests={current_unfinished}, inference_batch_size={self.inference_batch_size}, "
+                f"queue_size={queue_size}, timeout={timeout}"
+            )
 
         # Tool tracking initialization timing
         tracking_start = time.perf_counter()
@@ -954,7 +984,7 @@ class LLMRayActor:
                     self._llm_engine_get_num_unfinished_requests
                 )()
                 if unfinished <= low:
-                    requests_added = self.fill_engine(timeout=0.001, blocking=True)
+                    requests_added = self.fill_engine(timeout=0.001, blocking=False)
                     total_requests_added += requests_added
                 timing_data["engine_refill"] += time.perf_counter() - refill_start
 
@@ -1108,10 +1138,8 @@ class LLMRayActor:
     @warn_if_slow(500.0)
     def _engine_step(self):
         """Wrapper for llm_engine.step() to enable timing monitoring."""
-        with ProfilerContext("engine_step_wrapper") as profiler_ctx:
-            profiler_ctx.cpu_intensive_operation()  # Make visible in profiler
-            step_outputs = warn_if_slow_hanging_operation("llm_engine.step")(self._llm_engine_step)()
-            return [o for o in step_outputs if o.finished]
+        step_outputs = warn_if_slow_hanging_operation("llm_engine.step")(self._llm_engine_step)()
+        return [o for o in step_outputs if o.finished]
 
     def init_process_group(
         self,

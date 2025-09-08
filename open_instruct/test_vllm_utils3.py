@@ -1,11 +1,12 @@
 import logging
+import queue
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import vllm
 
 from open_instruct.queue_types import TokenStatistics
-from open_instruct.vllm_utils3 import _finalize_outputs, _init_tool_tracking
+from open_instruct.vllm_utils3 import LLMRayActor, _finalize_outputs, _init_tool_tracking
 
 
 class TestVllmUtils3(unittest.TestCase):
@@ -150,6 +151,63 @@ class TestVllmUtils3(unittest.TestCase):
         # So responses should be [[3, 4], [1, 2], [5, 6]] (in tracking order)
         expected_responses = [[3, 4], [1, 2], [5, 6]]
         self.assertEqual(result.responses, expected_responses, "Responses should match tracking order")
+
+    def test_process_from_queue_should_not_exit_with_unfinished_requests(self):
+        """Test that process_from_queue doesn't exit early when fill_engine returns 0 but unfinished requests exist.
+
+        This reproduces the bug where the function exits early, abandoning unfinished requests.
+        """
+        # Create a mock LLMRayActor with necessary attributes
+        actor = LLMRayActor.__new__(LLMRayActor)  # Create without calling __init__
+
+        # Mock required attributes
+        actor.prompt_queue = queue.Queue()
+        actor.inference_batch_size = 64
+        actor.logger = MagicMock()
+        actor.dropped_results = 0
+
+        # Mock llm_engine with tokenizer
+        mock_engine = MagicMock()
+        mock_engine.tokenizer = MagicMock()
+        actor.llm_engine = mock_engine
+
+        # Mock timing attributes
+        actor._engine_steps_timing = {"engine_step_call": 0.0, "extract_base_request_id": 0.0, "handle_output": 0.0}
+        actor.request_metadata = {}
+        actor.max_tool_calls = 10
+        actor.executor = MagicMock()
+        actor.tools = {}
+
+        # Mock the methods that would be called
+        with (
+            patch.object(actor, "fill_engine", return_value=0) as mock_fill_engine,
+            patch.object(actor, "_should_stop", side_effect=[False, True, False]) as mock_should_stop,
+            patch.object(actor, "_llm_engine_get_num_unfinished_requests", return_value=61),
+            patch.object(actor, "_reset_fill_engine_timing"),
+            patch.object(actor, "_reset_engine_steps_timing"),
+            patch.object(actor, "_poll_tool_futures", return_value=[]),
+            patch.object(actor, "_llm_engine_has_unfinished_requests", return_value=True),
+            patch.object(actor, "_engine_step", return_value=[]),
+            patch.object(actor, "_maybe_process_and_insert", return_value=0),
+        ):
+            # This should not return 0 (early exit) when there are unfinished requests
+            # Instead, it should enter the main processing loop
+            actor.process_from_queue(timeout=20)
+
+            # Verify that fill_engine was called
+            mock_fill_engine.assert_called_once_with(timeout=20)
+
+            # The bug: function exits early when fill_engine returns 0, even with unfinished requests
+            # Expected behavior: should enter main loop and process unfinished requests
+
+            # With the bug, should_stop is called only once (during the early exit check)
+            # Without the bug, should_stop should be called multiple times (in the main loop)
+            self.assertGreater(
+                mock_should_stop.call_count,
+                1,
+                f"SUCCESS: Bug is fixed! should_stop called {mock_should_stop.call_count} times. "
+                f"This means we entered the main processing loop instead of exiting early.",
+            )
 
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -62,69 +62,122 @@ class ActorManager:
 
     def _setup_queue_monitoring(self):
         """Setup queue monitoring with background polling thread."""
-        for queue_name, q in self._queues.items():
-            self._queue_info[queue_name] = {"maxsize": q.maxsize if hasattr(q, "maxsize") else 0, "queue": q}
-            self._queue_sizes[queue_name] = 0
+        logger = logger_utils.setup_logger(__name__)
 
-        self._polling_active = True
-        self._poll_thread = threading.Thread(target=self._poll_queue_sizes, daemon=True)
-        self._poll_thread.start()
+        try:
+            for queue_name, q in self._queues.items():
+                self._queue_info[queue_name] = {"maxsize": q.maxsize if hasattr(q, "maxsize") else 0, "queue": q}
+                self._queue_sizes[queue_name] = 0
+                logger.info(
+                    f"Setup monitoring for queue '{queue_name}' with maxsize {self._queue_info[queue_name]['maxsize']}"
+                )
+
+            self._polling_active = True
+            self._poll_thread = threading.Thread(target=self._poll_queue_sizes, daemon=True)
+            self._poll_thread.start()
+            logger.info("Queue monitoring thread started successfully")
+        except Exception as e:
+            logger.error(f"Failed to setup queue monitoring: {e}")
+            raise
 
     def _poll_queue_sizes(self):
         """Background thread to poll queue sizes."""
+        logger = logger_utils.setup_logger(__name__)
+
         while self._polling_active:
-            for queue_name, info in self._queue_info.items():
-                current_size = info["queue"].size()
-                self._queue_sizes[queue_name] = current_size
-            time.sleep(0.5)
+            try:
+                for queue_name, info in self._queue_info.items():
+                    current_size = info["queue"].size()
+                    self._queue_sizes[queue_name] = current_size
+                time.sleep(0.5)
+            except Exception as e:
+                logger.error(f"Error polling queue sizes: {e}")
+                time.sleep(1.0)
 
     def _start_dashboard(self):
         """Start the FastAPI dashboard server in a background thread."""
-        if self._args.queue_dashboard_port is None:
-            self._dashboard_port = find_free_port()
-        else:
-            self._dashboard_port = self._args.queue_dashboard_port
-        app = FastAPI(title="ActorManager Dashboard")
-
-        static_dir = Path(__file__).parent / "static"
-        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-
-        @app.get("/", response_class=HTMLResponse)
-        async def dashboard():
-            """Serve the HTML dashboard."""
-            html_path = Path(__file__).parent / "static" / "dashboard.html"
-            with open(html_path, "r") as f:
-                return f.read()
-
-        @app.get("/api/status")
-        async def api_status():
-            """Return the current status as JSON."""
-            queues_data = {
-                queue_name: {"current": self._queue_sizes.get(queue_name, 0), "maxsize": info["maxsize"]}
-                for queue_name, info in self._queue_info.items()
-            }
-
-            return {
-                "should_stop": self._should_stop,
-                "last_updated": self._last_updated.isoformat(),
-                "queues": queues_data,
-                "token_stats": self.get_token_stats(),
-                "timing_stats": self.get_timing_stats(),
-                "kv_cache_max_concurrency": self._kv_cache_max_concurrency,
-                # This is less confusing to users.
-                "inference_batch_size": self._args.inference_batch_size * self._args.num_samples_per_prompt_rollout,
-            }
-
-        def run_server():
-            uvicorn.run(app, host="0.0.0.0", port=self._dashboard_port, log_level="error")
-
-        self._server_thread = threading.Thread(target=run_server, daemon=True)
-        self._server_thread.start()
-
-        hostname = socket.getfqdn()
-
         logger = logger_utils.setup_logger(__name__)
-        logger.info(f"Dashboard server started at http://{hostname}:{self._dashboard_port}")
+
+        try:
+            if self._args.queue_dashboard_port is None:
+                self._dashboard_port = find_free_port()
+                logger.info(f"Using auto-assigned port: {self._dashboard_port}")
+            else:
+                self._dashboard_port = self._args.queue_dashboard_port
+                logger.info(f"Using specified port: {self._dashboard_port}")
+
+            app = FastAPI(title="ActorManager Dashboard")
+
+            static_dir = Path(__file__).parent / "static"
+            logger.info(f"Static directory: {static_dir}")
+
+            if not static_dir.exists():
+                logger.error(f"Static directory does not exist: {static_dir}")
+                raise FileNotFoundError(f"Static directory not found: {static_dir}")
+
+            app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+            @app.get("/", response_class=HTMLResponse)
+            async def dashboard():
+                """Serve the HTML dashboard."""
+                try:
+                    html_path = Path(__file__).parent / "static" / "dashboard.html"
+                    logger.info(f"Serving dashboard from: {html_path}")
+
+                    if not html_path.exists():
+                        logger.error(f"Dashboard HTML file not found: {html_path}")
+                        raise HTTPException(status_code=404, detail="Dashboard HTML file not found")
+
+                    with open(html_path, "r") as f:
+                        content = f.read()
+                        logger.info("Dashboard HTML loaded successfully")
+                        return content
+                except Exception as e:
+                    logger.error(f"Error serving dashboard: {e}")
+                    raise HTTPException(status_code=500, detail=f"Error loading dashboard: {e}")
+
+            @app.get("/api/status")
+            async def api_status():
+                """Return the current status as JSON."""
+                try:
+                    queues_data = {
+                        queue_name: {"current": self._queue_sizes.get(queue_name, 0), "maxsize": info["maxsize"]}
+                        for queue_name, info in self._queue_info.items()
+                    }
+
+                    status_data = {
+                        "should_stop": self._should_stop,
+                        "last_updated": self._last_updated.isoformat(),
+                        "queues": queues_data,
+                        "token_stats": self.get_token_stats(),
+                        "timing_stats": self.get_timing_stats(),
+                        "kv_cache_max_concurrency": self._kv_cache_max_concurrency,
+                        "inference_batch_size": self._args.inference_batch_size
+                        * self._args.num_samples_per_prompt_rollout,
+                    }
+
+                    logger.debug(f"API status response: {len(queues_data)} queues, should_stop={self._should_stop}")
+                    return status_data
+                except Exception as e:
+                    logger.error(f"Error generating API status: {e}")
+                    raise HTTPException(status_code=500, detail=f"Error generating status: {e}")
+
+            def run_server():
+                try:
+                    logger.info(f"Starting uvicorn server on 0.0.0.0:{self._dashboard_port}")
+                    uvicorn.run(app, host="0.0.0.0", port=self._dashboard_port, log_level="error")
+                except Exception as e:
+                    logger.error(f"Failed to start uvicorn server: {e}")
+
+            self._server_thread = threading.Thread(target=run_server, daemon=True)
+            self._server_thread.start()
+
+            hostname = socket.getfqdn()
+            logger.info(f"Dashboard server started at http://{hostname}:{self._dashboard_port}")
+
+        except Exception as e:
+            logger.error(f"Failed to start dashboard: {e}")
+            raise
 
     def set_should_stop(self, should_stop: bool):
         """Set whether actors should stop processing."""

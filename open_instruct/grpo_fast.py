@@ -2207,7 +2207,7 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
             processed_results = ray_get_with_progress(
                 [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
                 desc=f"[Generate Thread] Waiting for vLLM engines to process (should_stop={ray.get(actor_manager.should_stop.remote())})",
-                enable=args.verbose,
+                enable=False,
             )
             num_processed = sum(int(result) for result in processed_results)
             # Suppress timing output if nothing was processed
@@ -2886,6 +2886,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         )
     except Exception as e:
         logger.error(f"Error in run_training: {e}", exc_info=True)
+        raise  # Re-raise the exception to ensure non-zero exit code
     finally:
         cleanup_training_resources(
             stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q], actor_manager
