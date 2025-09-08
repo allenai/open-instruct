@@ -989,7 +989,7 @@ def rlvr_tokenize_v3(
     # Optionally inject/override a system prompt into the conversation
     messages = row[sft_messages_key]
     if system_prompt_text is not None and str(system_prompt_text).strip():
-        if len(messages) > 0 and isinstance(messages[0], dict) and messages[0].get("role") == "system":
+        if len(messages) > 1 and isinstance(messages[0], dict) and messages[0].get("role") == "system":
             messages[0]["content"] = system_prompt_text
         else:
             messages = [{"role": "system", "content": system_prompt_text}] + messages
@@ -1042,7 +1042,7 @@ def rlvr_tokenize_rl_rag_v1(
     # Optionally inject/override a system prompt into the conversation
     messages = row[sft_messages_key]
     if system_prompt_text is not None and str(system_prompt_text).strip():
-        if len(messages) > 0 and isinstance(messages[0], dict) and messages[0].get("role") == "system":
+        if len(messages) > 1 and isinstance(messages[0], dict) and messages[0].get("role") == "system":
             messages[0]["content"] = system_prompt_text
         else:
             messages = [{"role": "system", "content": system_prompt_text}] + messages
