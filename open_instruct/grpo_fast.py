@@ -2209,7 +2209,7 @@ def sync_weights_and_prepare_prompts(
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q: ray_queue.Queue,
     generation_configs: Dict[str, vllm.SamplingParams],
-    actor_manager: vllm_utils3.ActorManager,
+    actor_manager: ActorManager,
 ) -> Batch:
     """Sync weights and send the next batch of prompts to vLLM."""
     dataset_indices = next(iter_dataloader)
