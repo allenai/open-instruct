@@ -54,6 +54,7 @@ import subprocess
 import sys
 import threading
 import time
+import yaml
 import traceback
 import wandb
 from argparse import Namespace
@@ -148,7 +149,7 @@ class Args:
     """The dataset splits to use for training"""
     dataset_mixer_eval_list_splits: List[str] = field(default_factory=lambda: ["test"])
     """The dataset splits to use for evaluation"""
-    dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_filter_v1"])
+    dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_rl_rag_v1", "rlvr_filter_v1"])
     """The list of transform functions to apply to the dataset."""
     dataset_cache_mode: Literal["hf", "local"] = "local"
     """The mode to use for caching the dataset."""
@@ -1632,14 +1633,28 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     # ------------------------------------------------------------
     # Set up datasets
     system_prompt_text = None
+    additional_question_instructions = None
     if args.system_prompt_file is not None:
-        path = Path(args.system_prompt_file)
-        if path.exists():
-            system_prompt_text = path.read_text().strip()
-        print(f"Using system prompt from {args.system_prompt_file}:\n############\n{system_prompt_text}\n############\n")
+        # just raw text file
+        if args.system_prompt_file.endswith(".txt"):
+            path = Path(args.system_prompt_file)
+            if path.exists():
+                system_prompt_text = path.read_text().strip()
+            print(f"Using system prompt from {args.system_prompt_file}:\n############\n{system_prompt_text}\n############\n")
+        elif args.system_prompt_file.endswith(".yaml"):
+            assert Path(args.system_prompt_file).exists()
+            with open(file_path, "r", encoding="utf-8") as file:
+                prompt = yaml.safe_load(file)
+                system_prompt_text = prompt["system_prompt"]
+                additional_question_instructions = prompt["additional_instructions"]
+                print(f"Using system prompt from {args.system_prompt_file}:\n############\n{system_prompt_text}\n############\n")
+                print(f"Using additional question instructions from {args.system_prompt_file}:\n############\n{additional_question_instructions}\n############\n")
+            else:
+                raise ValueError(f"System prompt file {args.system_prompt_file} does not exist or is not a yaml/txt file.")
     transform_fn_args = [
         {
             "system_prompt_text": system_prompt_text,
+            "additional_question_instructions": additional_question_instructions,
         },
         {
             "max_token_length": args.max_token_length,

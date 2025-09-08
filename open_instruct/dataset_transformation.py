@@ -614,6 +614,7 @@ GET_TOKENIZER_FN = {
 DEFAULT_SFT_MESSAGES_KEY = "messages"
 GROUND_TRUTHS_KEY = "ground_truth"
 DATASET_SOURCE_KEY = "dataset"
+RL_RAG_QUESTION_TYPE_KEY = "question_type"
 
 
 @dataclass
@@ -1028,6 +1029,70 @@ def rlvr_tokenize_v3(
     return row
 
 
+def rlvr_tokenize_rl_rag_v1(
+    row: Dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
+    ground_truths_key: str = GROUND_TRUTHS_KEY,
+    dataset_source_key: str = DATASET_SOURCE_KEY,
+    question_type_key: str = DEFAULT_QUESTION_TYPE_KEY,
+    system_prompt_text: Optional[str] = None,
+    rl_rag_additional_question_instructions: Optional[Dict[str, str]] = None,
+):
+    # Optionally inject/override a system prompt into the conversation
+    messages = row[sft_messages_key]
+    if system_prompt_text is not None and str(system_prompt_text).strip():
+        if len(messages) > 0 and isinstance(messages[0], dict) and messages[0].get("role") == "system":
+            messages[0]["content"] = system_prompt_text
+        else:
+            messages = [{"role": "system", "content": system_prompt_text}] + messages
+    
+    # RL-rag specific logic: add a question instruction.
+    if rl_rag_additional_question_instructions is not None:
+        question_type = row[question_type_key].strip().lower()
+        if len(messages) > 1:
+            original_question = messages[1]["content"]
+            assert messages[1]["role"] == "user"
+        else:
+            original_question = messages[0]["content"]
+            assert messages[0]["role"] == "user"
+        messages[1]["content"] = original_question + "\n\n" + rl_rag_additional_question_instructions[question_type]
+
+    # only truncate last message if it's not an assistant message
+    if len(messages) == 1:
+        prompt = messages
+    elif messages[-1]["role"] != "assistant":
+        prompt = messages[:-1]
+    else:
+        prompt = messages[:-1]
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
+        prompt,
+        add_generation_prompt=True,
+    )
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(messages)
+    # weird issue with qwen: sometimes the padding token ends up in the input ids?
+    # ill look into this more later, for now this guard should be enough
+    if tokenizer.pad_token_id in row[INPUT_IDS_KEY]:
+        row[INPUT_IDS_KEY] = [x for x in row[INPUT_IDS_KEY] if x != tokenizer.pad_token_id]
+    if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
+        row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
+    row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
+    labels = copy.deepcopy(row[INPUT_IDS_KEY])
+    row[LABELS_KEY] = labels
+    row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
+    row[DATASET_SOURCE_KEY] = row[dataset_source_key]
+    # some basic transformations:
+    # if ground truths is a string, make it a list
+    if isinstance(row[ground_truths_key], str):
+        row[ground_truths_key] = [row[ground_truths_key]]
+    # if dataset source is a string, make it a list
+    if isinstance(row[dataset_source_key], str):
+        row[dataset_source_key] = [row[dataset_source_key]]
+    # drop the messages field as it often causes issues.
+    row.pop(sft_messages_key)
+    return row
+
+
 def rlvr_filter_v1(
     row: Dict[str, Any],
     tokenizer: PreTrainedTokenizer,
@@ -1058,6 +1123,7 @@ TRANSFORM_FNS = {
     "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1, "map"),
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
     "rlvr_tokenize_v1": (rlvr_tokenize_v3, "map"),
+    "rlvr_tokenize_rl_rag_v1": (rlvr_tokenize_rl_rag_v1, "map"),
     "rlvr_filter_v1": (rlvr_filter_v1, "filter"),
 }
 
