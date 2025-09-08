@@ -635,6 +635,7 @@ class LLMRayActor:
             type_groups[layer_spec.type_id].append(layer_name)
 
         grouped_layer_names = list(type_groups.values())
+
         page_size = kv_cache_utils.get_uniform_page_size(kv_cache_spec)
 
         vllm_config = self.llm_engine.vllm_config
