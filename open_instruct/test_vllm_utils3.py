@@ -78,7 +78,7 @@ class TestVllmUtils3(unittest.TestCase):
 
         # Call the function under test
         result = _finalize_outputs(
-            output=mock_request_output1,  # Single output to get the base request_id
+            output=mock_request_output1,
             tracking=tracking,
             dataset_index=43039,
             tools={"some_tool": {}},  # Tools enabled
