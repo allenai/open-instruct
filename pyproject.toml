@@ -23,7 +23,7 @@ dependencies = [
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch>=2.7.0,<2.8",
-    "transformers @ git+https://github.com/2015aroras/transformers.git@shanea/olmo2-retrofit",
+    "transformers @ git+https://github.com/2015aroras/transformers.git@4f2fbde7eaa7253b1ca977e294da6c9fcddfa345",
     "wandb==0.18.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
@@ -31,7 +31,7 @@ dependencies = [
     "flash-attn>=2.8.0.post2; platform_system != 'Darwin'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
     "flashinfer-python==0.2.8; platform_system == 'Linux' and platform_machine == 'x86_64'",
-    "vllm"
+    "vllm @ git+https://github.com/2015aroras/vllm.git@be33c078b2421b663d359545eb56811cfd1de6c9"
 ]
 
 [build-system]
@@ -53,7 +53,6 @@ vllm = { VLLM_USE_PRECOMPILED = "1" }
 torch = [
   { index = "pytorch-cu128", marker = "platform_system != 'Darwin'"},
 ]
-vllm = { path = "./vllm_olmo2_retrofit", editable = true }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
