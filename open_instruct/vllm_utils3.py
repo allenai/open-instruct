@@ -470,7 +470,6 @@ class LLMRayActor:
                 with self._prefetch_cv:
                     self._prefetch_buffer.append(request)
                     self._buffered_samples += request.generation_config.n
-                    self._prefetch_cv.notify()
             except queue.Empty:
                 continue
 
@@ -507,13 +506,14 @@ class LLMRayActor:
                 requests_to_process.append(request)
                 self._buffered_samples -= request.generation_config.n
 
-            # Notify prefetch worker that buffer has space
-            if requests_to_process:
-                self._prefetch_cv.notify()
-
         # Add the requests to the engine
         for request in requests_to_process:
             num_added += add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
+
+        if num_added > 0:
+            self.logger.info(
+                f"fill_engine added {num_added} requests from prefetch buffer, current_unfinished={self.llm_engine.get_num_unfinished_requests()}"
+            )
 
         return num_added
 
@@ -526,9 +526,12 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
+        self.logger.info(
+            f"Starting process_from_queue with timeout={timeout}, inference_batch_size={self.inference_batch_size}"
+        )
         num_processed = self.fill_engine(timeout=timeout)
 
-        if num_processed == 0 and self.verbose:
+        if num_processed == 0:
             # Enhanced logging: Log why nothing was processed, but continue to process existing requests
             should_stop = self._should_stop()
             current_unfinished = self.llm_engine.get_num_unfinished_requests()
@@ -557,12 +560,11 @@ class LLMRayActor:
             # Return every 10k iterations to allow weight synchronization
             if iteration_count % 10000 == 0:
                 exit_reason = "10k iteration limit reached"
-                if self.verbose:
-                    self.logger.info(f"process_from_queue exiting: {exit_reason}")
+                self.logger.info(f"process_from_queue exiting: {exit_reason}")
                 return total_processed
 
             # Log progress every 100 iterations
-            if iteration_count % 100 == 0 and self.verbose:
+            if iteration_count % 100 == 0:
                 unfinished = self.llm_engine.get_num_unfinished_requests()
                 pending_tools = len(tracking["pending_tool_futures"])
                 self.logger.info(
@@ -575,6 +577,9 @@ class LLMRayActor:
             # Process tool futures
             tool_outputs = self._poll_tool_futures(tracking, self.llm_engine.tokenizer)
             current_time = time.time()
+            if tool_outputs and iteration_count % 100 == 0:
+                self.logger.info(f"Processing {len(tool_outputs)} tool outputs on iteration {iteration_count}")
+
             for output in tool_outputs:
                 request_id = _extract_base_request_id(output.request_id)
                 request_outputs[request_id].append(output)
@@ -583,6 +588,11 @@ class LLMRayActor:
             # Process engine steps - ONLY if there are unfinished requests
             if self.llm_engine.has_unfinished_requests():
                 step_outputs = [o for o in self.llm_engine.step() if o.finished]
+                if step_outputs and iteration_count % 100 == 0:
+                    self.logger.info(
+                        f"Processing {len(step_outputs)} engine step outputs on iteration {iteration_count}"
+                    )
+
                 for output in step_outputs:
                     base_req_id = _extract_base_request_id(output.request_id)
                     result = _handle_output(
@@ -605,7 +615,11 @@ class LLMRayActor:
                 low = int(0.3 * self.inference_batch_size)
                 unfinished = self.llm_engine.get_num_unfinished_requests()
                 if unfinished <= low:
-                    self.fill_engine(timeout=0.001, blocking=False)
+                    fill_result = self.fill_engine(timeout=0.001, blocking=False)
+                    if iteration_count % 100 == 0:
+                        self.logger.info(
+                            f"Engine refill: added {fill_result} requests, unfinished={unfinished}, low_threshold={low}"
+                        )
 
             # If no work to do, break to yield control back to generate_thread,
             # allowing weight_sync_thread to acquire the LLMRayActor lock
@@ -618,8 +632,7 @@ class LLMRayActor:
         if self._should_stop() and exit_reason == "unknown":
             exit_reason = "should_stop requested"
 
-        if self.verbose:
-            self.logger.info(f"process_from_queue exiting: {exit_reason}")
+        self.logger.info(f"process_from_queue exiting: {exit_reason}")
         return total_processed
 
     def _process_completed_request(self, request_id, outs, tracking, current_time):
@@ -674,6 +687,7 @@ class LLMRayActor:
             outs = request_outputs.pop(request_id)
             result, is_eval = self._process_completed_request(request_id, outs, tracking, current_time)
             self._insert_result_to_queue(result, is_eval=is_eval)
+            self.logger.info(f"Completed and inserted request {request_id} with {expected_n} samples (eval={is_eval})")
             return 1
         return 0
 
