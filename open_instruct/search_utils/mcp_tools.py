@@ -87,7 +87,6 @@ class MCPTool(Tool):
     def __call__(self, prompt: str) -> ToolOutput:
         # the one thing open-instruct needs to do: remove older tool calls.
         trunc_prompt = truncate_at_second_last_stop(prompt, self.stop_strings)
-        print(f"trunc_prompt: {trunc_prompt}")
         # work out which mcp tool to call.
         document_tool_output = None
         error = None
@@ -108,7 +107,7 @@ class MCPTool(Tool):
         if error is None and not found_tool:
             error = "No valid tool calls found."
         if document_tool_output is None:
-            print(f"No mcp tool found for tunc. prompt: {trunc_prompt}")      
+            print(f"No mcp tool found for trunc. prompt: {trunc_prompt}")      
             return ToolOutput(
                 output=error,
                 called=False,
@@ -119,6 +118,9 @@ class MCPTool(Tool):
                 end_str="\n</snippet>",
             )
 
+        if document_tool_output.error:
+            print(f"Error from mcp tool: {document_tool_output.error}")
+            print("Returning error output anyway.")
         # munge into format that open-instruct likes.
         return ToolOutput(
             output=text_output,
