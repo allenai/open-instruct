@@ -379,6 +379,8 @@ class Args:
     """number of vLLM Engines, set to 0 to disable vLLM"""
     inference_batch_size: Optional[int] = None
     """inference batch size per vLLM engine. If None, calculated as ceil(num_unique_prompts_rollout / vllm_num_engines) * num_samples_per_prompt_rollout"""
+    inference_results_timeout_s: int = 30
+    """poll interval (seconds) while waiting for inference results to periodically perform health checks (does not cause failure by itself)"""
     vllm_tensor_parallel_size: int = 1
     """tensor parallel size of vLLM Engine for multi-GPU inference"""
     vllm_enforce_eager: bool = False
@@ -1561,19 +1563,32 @@ def data_preparation_thread(
     generation_config,
     resume_training_step: int,
     actor_manager=None,
+    health_check_fn: Optional[Callable[[], None]] = None,
 ):
     for training_step in range(resume_training_step, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
-            result, batch = accumulate_inference_batches(
-                inference_results_Q,
-                pending_queries_map,
-                args,
-                training_step,
-                generation_config,
-                num_prompts=args.num_unique_prompts_rollout,
-                actor_manager=actor_manager,
-            )
+            # Keep waiting, but check health periodically to fail fast on actual crashes
+            while True:
+                try:
+                    result, batch = accumulate_inference_batches(
+                        inference_results_Q,
+                        pending_queries_map,
+                        args,
+                        training_step,
+                        generation_config,
+                        num_prompts=args.num_unique_prompts_rollout,
+                        actor_manager=actor_manager,
+                        timeout=args.inference_results_timeout_s,  # per-get poll interval
+                    )
+                    break
+                except Empty:
+                    if health_check_fn is not None:
+                        # Will raise if any worker threads have crashed
+                        health_check_fn()
+                    logger.warning(
+                        f"[Data Preparation Thread] Still waiting for inference results at step {training_step}..."
+                    )
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
                 return
@@ -2222,11 +2237,22 @@ def sync_weights_and_prepare_prompts(
         ray.get(actor_manager.set_should_stop.remote(True))
         logger.debug(f"[Main Thread] Set should_stop to True for weight sync at step {training_step}")
 
-        ray_get_with_progress(
-            [m.broadcast_to_vllm.remote() for m in policy_group.models],
+        # Request broadcasts (returns per-model lists of ObjectRefs to weight updates)
+        nested_ref_lists_refs = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+        # First wait for each model to return its list of update refs
+        ref_lists = ray_get_with_progress(
+            nested_ref_lists_refs,
             desc=f"[Main thread] Broadcasting weights to vLLM engines at training step {training_step}",
             enable=args.verbose,
         )
+        # Then flatten and wait for all update_weight RPCs to complete
+        flat_refs = [ref for sub in ref_lists for ref in sub]
+        if len(flat_refs) > 0:
+            ray_get_with_progress(
+                flat_refs,
+                desc=f"[Main thread] Waiting for vLLM engines to apply weights at training step {training_step}",
+                enable=args.verbose,
+            )
 
     # Prepare per-sample tool contexts if present in dataset items
     tool_contexts_next = None
@@ -2324,15 +2350,21 @@ def weight_sync_thread(
             logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
 
             # Broadcast weights to vLLM engines
-            # First get the futures
-            weight_broadcast_futures: List[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
-
-            # Wait for all weight updates to complete
-            ray_get_with_progress(
-                weight_broadcast_futures,
-                desc="[Weight Sync Thread] Waiting for weight updates to complete",
+            # First collect the returned lists of update refs
+            nested_ref_lists_refs = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+            ref_lists = ray_get_with_progress(
+                nested_ref_lists_refs,
+                desc="[Weight Sync Thread] Broadcasting weights to vLLM engines",
                 enable=args.verbose,
             )
+            # Then flatten and wait for all updates to complete
+            flat_refs = [ref for sub in ref_lists for ref in sub]
+            if len(flat_refs) > 0:
+                ray_get_with_progress(
+                    flat_refs,
+                    desc="[Weight Sync Thread] Waiting for weight updates to complete",
+                    enable=args.verbose,
+                )
 
             # Allow actors to resume
             ray.get(actor_manager.set_should_stop.remote(False))
@@ -2776,6 +2808,14 @@ def run_training(
         timeout=_ready_timeout,
     )
 
+    # Prepare a futures holder and health check function before starting threads
+    futures_holder = {"packing": None, "generation": None, "weight_sync": weight_sync_thread_future}
+
+    # setup health check function to check that everything is still alive
+    def health_check_fn():
+        fs = [futures_holder.get("packing"), futures_holder.get("generation"), futures_holder.get("weight_sync")]
+        [f.result() for f in fs if f and f.done()]
+
     logger.info("======== ✅ data preparation thread starts =========")
     packing_future = executor.submit(
         data_preparation_thread,
@@ -2789,16 +2829,15 @@ def run_training(
         generation_configs["train"],
         resume_training_step,
         actor_manager,
+        health_check_fn,
     )
+    futures_holder["packing"] = packing_future
 
     logger.info("======== ✅ generation thread starts =========")
     generation_future = executor.submit(
         generate_thread, args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q
     )
-
-    # setup health check function to check that everything is still alive
-    def health_check_fn():
-        [f.result() for f in [packing_future, generation_future, weight_sync_thread_future] if f.done()]
+    futures_holder["generation"] = generation_future
 
     # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps):

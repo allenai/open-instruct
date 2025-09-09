@@ -242,3 +242,29 @@ class ActorManager:
             self._polling_active = False
             # Wait for the thread to finish with a timeout
             self._poll_thread.join(timeout=2.0)
+
+    # --- Debug/status helpers usable from trainers/threads ---
+    def get_status_snapshot(self):
+        """Return a point-in-time status snapshot for debugging.
+
+        Contains queue sizes, token/timing stats, and basic config knobs
+        that help diagnose stalls (e.g., inference batch size).
+        """
+        queues_data = {
+            queue_name: {
+                "current": (self._queue_sizes.get(queue_name, 0) if hasattr(self, "_queue_sizes") else 0),
+                "maxsize": (self._queue_info.get(queue_name, {}).get("maxsize", 0) if hasattr(self, "_queue_info") else 0),
+            }
+            for queue_name in getattr(self, "_queue_info", {}).keys()
+        }
+
+        return {
+            "should_stop": self._should_stop,
+            "last_updated": self._last_updated.isoformat(),
+            "queues": queues_data,
+            "token_stats": self.get_token_stats(),
+            "timing_stats": self.get_timing_stats(),
+            "kv_cache_max_concurrency": self._kv_cache_max_concurrency,
+            # Expose effective inference batch size for visibility
+            "inference_batch_size": self._args.inference_batch_size * self._args.num_samples_per_prompt_rollout,
+        }

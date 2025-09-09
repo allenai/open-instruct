@@ -17,7 +17,7 @@ exp_name=rlvr_code_view_tool_sft
         --exp_name ${exp_name} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 8 \
-        --num_unique_prompts_rollout 32 \
+        --num_unique_prompts_rollout 64 \
         --num_mini_batches 4 \
         --num_epochs 1 \
         --learning_rate 1e-6 \
@@ -26,7 +26,7 @@ exp_name=rlvr_code_view_tool_sft
         --kl_estimator kl3 \
         --dataset_mixer_list saurabh5/rlvr-code-view-tool-new-first-turn-only-user 1.0 \
         --dataset_mixer_list_splits train \
-        --dataset_mixer_eval_list saurabh5/rlvr-code-view-tool-new-first-turn-only-user 8 \
+        --dataset_mixer_eval_list saurabh5/rlvr-code-view-tool-new-first-turn-only-user 16 \
         --dataset_mixer_eval_list_splits train \
         --max_token_length 4096 \
         --max_prompt_token_length 4096 \
@@ -59,4 +59,6 @@ exp_name=rlvr_code_view_tool_sft
         --log_rollouts_to_file True \
         --max_rollout_logs_per_step 10 \
         --dataset_skip_cache True \
-        --checkpoint_state_freq 25 
+        --checkpoint_state_freq 25 \
+        --inference_results_timeout_s 900 \
+        --allow_world_padding True

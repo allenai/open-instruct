@@ -326,9 +326,8 @@ class CodeViewTool(Tool):
                 if not repo_name and "extra_fields" in tool_call.get("arguments", {}):
                     repo_name = tool_call["arguments"]["extra_fields"].get("repo_name")
 
-                if not repo_name:
-                    # Try to infer from the prompt or use a default
-                    repo_name = "testbed"
+                # Do not force a misleading default. If still missing,
+                # let the server attempt inference based on paths/cwd.
 
                 # If not provided in the call, fallback to context for base_commit and patches
                 if base_commit is None:

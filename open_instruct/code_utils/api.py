@@ -23,7 +23,7 @@ import json
 import os
 import subprocess
 import traceback
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -211,6 +211,42 @@ def _get_repo_root(repo_name: Optional[str] = None) -> str:
     return base_dir
 
 
+def _infer_repo_from_path(path: str) -> Tuple[Optional[str], str]:
+    """Infer repo_name ("owner/repo") from a provided path.
+
+    Accepts forms like:
+    - "owner/repo/..."
+    - "/owner/repo/..."
+    - "repos/owner/repo/..."
+    - "/repos/owner/repo/..."
+
+    Returns a tuple of (repo_name or None, relative_path_within_repo_or_original).
+    If a repo is detected and exists under our repos dir, the returned path is the
+    part after the "owner/repo" prefix (or "." if empty). Otherwise, returns (None, cleaned_input).
+    """
+    try:
+        base_dir = os.path.join(os.path.dirname(__file__), "repos")
+        s = (path or "").lstrip("/")
+        if s.startswith("repos/"):
+            s = s[len("repos/") :]
+
+        parts = [p for p in s.split("/") if p not in ("", ".")]
+        if len(parts) >= 2:
+            candidate_repo = f"{parts[0]}/{parts[1]}"
+            candidate_root = os.path.join(base_dir, candidate_repo)
+            if os.path.isdir(candidate_root):
+                rel_parts = parts[2:]
+                rel_path = "/".join(rel_parts) if rel_parts else "."
+                return candidate_repo, rel_path
+
+        # No valid owner/repo prefix detected
+        return None, s or "."
+    except Exception:
+        # Be conservative on errors; do not infer
+        s = (path or "").lstrip("/")
+        return None, s or "."
+
+
 def _normalize_path(path: str, repo_name: Optional[str] = None) -> tuple[str, str]:
     """
     Normalize a path for repository access.
@@ -225,10 +261,15 @@ def _normalize_path(path: str, repo_name: Optional[str] = None) -> tuple[str, st
             - display_path: Path to show to user
     """
     # Get the repo root directory (e.g., repos/john-kurkowski/tldextract)
-    repo_root = _get_repo_root(repo_name)
+    # If repo_name is not provided, try to infer from the path like owner/repo/...
+    inferred_repo_name = None
+    if not repo_name:
+        inferred_repo_name, _ = _infer_repo_from_path(path)
+    effective_repo_name = repo_name or inferred_repo_name
+    repo_root = _get_repo_root(effective_repo_name)
 
     # Ensure the repo directory exists if repo_name is provided
-    if repo_name and not os.path.exists(repo_root):
+    if effective_repo_name and not os.path.exists(repo_root):
         os.makedirs(repo_root, exist_ok=True)
 
     # Default to empty string for None or empty path
@@ -242,6 +283,17 @@ def _normalize_path(path: str, repo_name: Optional[str] = None) -> tuple[str, st
     else:
         # Use path as-is
         full_path = path
+
+    # If we inferred a repo from the path, strip the owner/repo prefix
+    if inferred_repo_name:
+        # Normalize any optional leading repos/ prefix
+        s = full_path.lstrip("/")
+        if s.startswith("repos/"):
+            s = s[len("repos/") :]
+        # Remove the "owner/repo/" component
+        prefix = inferred_repo_name + "/"
+        if s.startswith(prefix):
+            full_path = s[len(prefix) :]
 
     # Default to current directory if empty
     if not full_path:
@@ -447,12 +499,26 @@ async def edit_file_endpoint(request: EditFileRequest):
 async def run_bash_endpoint(request: RunBashRequest):
     try:
         # For bash commands, we run from the repo root, not testbed
-        repo_root = _get_repo_root(request.repo_name)
+        # If repo_name is absent, attempt to infer from cwd like owner/repo/...
+        inferred_repo_name = None
+        if not request.repo_name and request.cwd:
+            inferred_repo_name, rel = _infer_repo_from_path(request.cwd)
+        effective_repo_name = request.repo_name or inferred_repo_name
+        repo_root = _get_repo_root(effective_repo_name)
 
         # If cwd is provided, it's relative to repo root
         if request.cwd:
             # Remove leading slash if present
             cwd_path = request.cwd[1:] if request.cwd.startswith("/") else request.cwd
+            # If we inferred a repo from cwd, strip the owner/repo prefix
+            if inferred_repo_name:
+                s = cwd_path
+                if s.startswith("repos/"):
+                    s = s[len("repos/") :]
+                prefix = inferred_repo_name + "/"
+                if s.startswith(prefix):
+                    s = s[len(prefix) :]
+                cwd_path = s or "."
             abs_cwd = os.path.join(repo_root, cwd_path)
             display_cwd = cwd_path
         else:
@@ -465,8 +531,19 @@ async def run_bash_endpoint(request: RunBashRequest):
             os.makedirs(abs_cwd, exist_ok=True)
 
         try:
+            # Translate absolute /testbed references to the current repo's testbed
+            cmd_to_run = request.cmd
+            try:
+                # Only rewrite if we have a concrete repo_root
+                testbed_abs = os.path.join(repo_root, "testbed")
+                # Simple replacement is fine; /testbed is an absolute token
+                if "/testbed" in cmd_to_run:
+                    cmd_to_run = cmd_to_run.replace("/testbed", testbed_abs)
+            except Exception:
+                pass
+
             completed = subprocess.run(
-                ["/bin/bash", "-lc", request.cmd],
+                ["/bin/bash", "-lc", cmd_to_run],
                 cwd=abs_cwd,
                 capture_output=True,
                 text=True,
@@ -474,6 +551,15 @@ async def run_bash_endpoint(request: RunBashRequest):
             )
             stdout = completed.stdout or ""
             stderr = completed.stderr or ""
+
+            # Sanitize absolute repo paths back to /testbed for model-facing output
+            try:
+                tb_abs = os.path.realpath(os.path.join(repo_root, "testbed"))
+                if tb_abs:
+                    stdout = stdout.replace(tb_abs, "/testbed")
+                    stderr = stderr.replace(tb_abs, "/testbed")
+            except Exception:
+                pass
             rc = completed.returncode
 
             # Format command display

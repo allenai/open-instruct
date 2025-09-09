@@ -41,7 +41,7 @@ from torch.distributed.distributed_c10d import (
 )
 from vllm.v1 import kv_cache_interface
 from vllm.v1.core import kv_cache_utils
-
+import warnings
 from open_instruct import logger_utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
@@ -125,7 +125,8 @@ def _handle_output(
             if tool_context:
                 try:
                     augmented_text = o.text + f"\n<!--tool_context:{json.dumps(tool_context)}-->"
-                except Exception:
+                except Exception as e:
+                    warnings.warn(f"Failed to serialize tool context: {tool_context} {e}")
                     augmented_text = o.text
 
             future = executor.submit(tool, augmented_text)
