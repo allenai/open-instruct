@@ -167,6 +167,7 @@ class TestVllmUtils3(unittest.TestCase):
         actor.inference_batch_size = 64
         actor.logger = MagicMock()
         actor.dropped_results = 0
+        actor.verbose = False
 
         # Mock llm_engine with tokenizer
         mock_engine = MagicMock()
@@ -195,7 +196,7 @@ class TestVllmUtils3(unittest.TestCase):
             actor.process_from_queue(timeout=20)
 
             # Verify that fill_engine was called
-            mock_fill_engine.assert_called_once_with(timeout=20)
+            mock_fill_engine.assert_called_once_with()
 
             # The bug: function exits early when fill_engine returns 0, even with unfinished requests
             # Expected behavior: should enter main loop and process unfinished requests

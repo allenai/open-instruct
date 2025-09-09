@@ -481,12 +481,8 @@ class LLMRayActor:
             queue_name = "eval" if is_eval else "train"
             self.logger.warning(f"{queue_name} results queue is full, discarding result.")
 
-    def fill_engine(self, timeout: float, blocking: bool = True):
+    def fill_engine(self):
         """Fill the LLM engine queue with requests until inference_batch_size is reached.
-
-        Args:
-            timeout: Timeout for getting requests from the queue
-            blocking: Whether to use blocking queue operations
 
         Returns:
             int: Number of requests added to the engine
@@ -522,7 +518,7 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
-        num_processed = self.fill_engine(timeout=timeout)
+        num_processed = self.fill_engine()
 
         if num_processed == 0 and self.verbose:
             should_stop = self._should_stop()
@@ -604,7 +600,7 @@ class LLMRayActor:
                 low = int(0.3 * self.inference_batch_size)
                 unfinished = self.llm_engine.get_num_unfinished_requests()
                 if unfinished <= low:
-                    fill_result = self.fill_engine(timeout=0.001, blocking=False)
+                    fill_result = self.fill_engine()
                     if iteration_count % 100 == 0 and self.verbose:
                         self.logger.info(
                             f"Engine refill: added {fill_result} requests, unfinished={unfinished}, low_threshold={low}"
