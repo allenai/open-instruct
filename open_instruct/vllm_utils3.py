@@ -390,6 +390,7 @@ class LLMRayActor:
         self.logger.info(f"Contents of /weka/oe-training-default: {contents}")
 
         self.llm_engine = vllm.LLMEngine.from_engine_args(vllm.EngineArgs(*args, **kwargs))
+        self.logger.info("initialized llmengine")
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
@@ -400,6 +401,9 @@ class LLMRayActor:
         self._last_should_stop_update = float("-inf")
         self._should_stop_value = False
         self._should_stop_timeout_s = 5
+
+        # Logging interval for process_from_queue
+        self.log_interval = 1000
 
     def _should_stop(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
@@ -455,9 +459,23 @@ class LLMRayActor:
 
         outputs = []
         iteration = 0
+        process_start_time = time.perf_counter()
 
         while True:
             iteration += 1
+
+            # Periodic logging
+            if iteration % self.log_interval == 0:
+                elapsed_time = time.perf_counter() - process_start_time
+                num_unfinished = self.llm_engine.get_num_unfinished_requests()
+                pending_tools = len(tracking["pending_tool_futures"]) if tracking else 0
+                self.logger.info(
+                    f"[LLMRayActor] Status update - Iteration: {iteration}, "
+                    f"Unfinished requests: {num_unfinished}, "
+                    f"Pending tool futures: {pending_tools}, "
+                    f"Outputs collected: {len(outputs)}, "
+                    f"Elapsed time: {elapsed_time:.2f}s"
+                )
 
             # Poll tool futures first (matching ToolUseLLM order)
             if tracking and tracking.get("pending_tool_futures"):

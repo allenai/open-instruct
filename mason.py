@@ -242,8 +242,6 @@ def get_env_vars(
     additional_secrets: List[Dict[str, str]],
 ):
     env_vars = []
-    if "VLLM_ATTENTION_BACKEND" not in additional_env_vars:
-        env_vars.append(beaker.EnvVar(name="VLLM_ATTENTION_BACKEND", value="FLASHINFER"))
     if "RAY_CGRAPH_get_timeout" not in additional_env_vars:
         env_vars.append(beaker.EnvVar(name="RAY_CGRAPH_get_timeout", value="300"))
     # Add user-specified environment variables first
