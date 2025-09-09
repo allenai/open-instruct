@@ -451,7 +451,7 @@ class PuzzleMatcherVerifier(VerifierFunction):
     def __call__(
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> VerificationResult:
-        # remove thinking section from the reasoning response
+        # remove thinking section from the prediction
         prediction = prediction.split("</think>")[-1]
         # remove answer tags from the prediction
         prediction = prediction.replace("<answer>", "").replace("</answer>", "")
