@@ -478,7 +478,8 @@ class LLMRayActor:
                 continue
 
     def _insert_result_to_queue(self, result, is_eval: bool):
-        """Insert result into the appropriate queue with blocking put."""
+        """Insert result into the appropriate q
+        ueue with blocking put."""
         results_queue = self.eval_results_queue if is_eval else self.results_queue
         results_queue.put(result)
 
@@ -520,8 +521,18 @@ class LLMRayActor:
             # Process engine steps - ONLY if there are unfinished requests
             if self.llm_engine.has_unfinished_requests():
                 step_outputs = [o for o in self.llm_engine.step() if o.finished]
+
                 for output in step_outputs:
                     base_req_id = _extract_base_request_id(output.request_id)
+
+                    # Check if metadata exists for this request
+                    if base_req_id not in self.request_metadata:
+                        if self.verbose:
+                            self.logger.warning(
+                                f"Missing metadata for request {base_req_id}, skipping output processing"
+                            )
+                        continue
+
                     result = _handle_output(
                         output,
                         self.tools,
@@ -564,7 +575,7 @@ class LLMRayActor:
             finished=outs[0].finished,
         )
         total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
-        metadata = self.request_metadata.pop(request_id)
+        metadata = self.request_metadata[request_id]  # Don't pop yet, _poll_tool_futures might need it
         result = _finalize_outputs(
             final_output,
             tracking,
@@ -593,24 +604,83 @@ class LLMRayActor:
         """
         expected_n = self.request_metadata[request_id]["original_sampling_params"].n
 
-        # For tool mode, also verify tracking["concat_outputs"] consistency
-        if self.tools and len(request_outputs[request_id]) < expected_n:
+        # For tool mode, we need special handling because outputs might be in concat_outputs
+        # instead of request_outputs while being processed by tools
+        if self.tools:
             concat_outputs_count = sum(
                 1 for k in tracking["concat_outputs"].keys() if "_".join(k.split("_")[:-1]) == request_id
             )
-            if concat_outputs_count < expected_n:
-                return 0  # Not all samples ready yet
+            # If we have all samples in concat_outputs but not in request_outputs,
+            # we need to wait or extract them from concat_outputs
+            if concat_outputs_count == expected_n and len(request_outputs[request_id]) < expected_n:
+                # Convert concat_outputs to request_outputs format for processing
+                for req_id, output_obj in tracking["concat_outputs"].items():
+                    if _extract_base_request_id(k) != request_id:
+                        continue
+                    request_outputs[request_id].append(output_obj)
+                    # Now, check that they all have unique ids:
+                    all_ids = [out.request_id for out in request_outputs[request_id]]
+                    unique_ids = set(all_ids)
+                    assert len(all_ids) == len(unique_ids), f"Duplicate request_ids found for {request_id}"
+
+            # Still not enough samples ready
+            if len(request_outputs[request_id]) < expected_n:
+                return 0
 
         if len(request_outputs[request_id]) == expected_n:
             outs = request_outputs.pop(request_id)
             result, is_eval = self._process_completed_request(request_id, outs, tracking, current_time)
             self._insert_result_to_queue(result, is_eval=is_eval)
+
+            # Clean up metadata and tracking for this request after enqueuing
+            self._cleanup_request_data(request_id, tracking)
+
             if self.verbose:
                 self.logger.info(
                     f"Completed and inserted request {request_id} with {expected_n} samples (eval={is_eval})"
                 )
             return 1
         return 0
+
+    def _has_pending_tool_futures_for_request(self, request_id: str, tracking: Dict[str, Any]) -> bool:
+        """Check if there are any pending tool futures for a given base request ID."""
+        if not self.tools or not tracking["pending_tool_futures"]:
+            return False
+        
+        # Check if any pending tool futures belong to this base request
+        for req_id in tracking["pending_tool_futures"]:
+            if _extract_base_request_id(req_id) == request_id:
+                return True
+        return False
+
+    def _cleanup_request_data(self, request_id: str, tracking: Dict[str, Any]):
+        """Clean up metadata and tracking data for a completed request."""
+        # Check if there are still pending tool futures for this request
+        if self._has_pending_tool_futures_for_request(request_id, tracking):
+            # Don't clean up metadata yet - tool futures still need it
+            return
+        
+        # Remove request metadata
+        self.request_metadata.pop(request_id, None)
+
+        # Clean up tracking data for all sub-requests of this request
+        if self.tools:
+            # Find all sub-request IDs that belong to this base request
+            sub_request_ids = [
+                k for k in tracking["concat_outputs"].keys() if _extract_base_request_id(k) == request_id
+            ]
+
+            for sub_req_id in sub_request_ids:
+                # Clean up tracking dictionaries
+                tracking["concat_outputs"].pop(sub_req_id, None)
+                tracking["masks"].pop(sub_req_id, None)
+                tracking["num_calls"].pop(sub_req_id, None)
+                tracking["timeout"].pop(sub_req_id, None)
+                tracking["tool_error"].pop(sub_req_id, None)
+                tracking["tool_output"].pop(sub_req_id, None)
+                tracking["tool_runtime"].pop(sub_req_id, None)
+                tracking["tool_called"].pop(sub_req_id, None)
+                # Note: pending_tool_futures should already be cleaned by _poll_tool_futures
 
     def _poll_tool_futures(self, tracking, tokenizer):
         """Poll and handle completed tool executions."""
@@ -682,8 +752,18 @@ class LLMRayActor:
 
             dict_keys_to_delete.append(req_id)
 
+        # Track which base request IDs had tool futures removed
+        processed_base_request_ids = set()
         for req_id in dict_keys_to_delete:
+            base_req_id = _extract_base_request_id(req_id)
+            processed_base_request_ids.add(base_req_id)
             tracking["pending_tool_futures"].pop(req_id, None)
+
+        # Check if any base requests no longer have pending tool futures and can be cleaned up
+        for base_req_id in processed_base_request_ids:
+            if not self._has_pending_tool_futures_for_request(base_req_id, tracking):
+                # All tool futures for this request are done, safe to clean up metadata
+                self._cleanup_request_data(base_req_id, tracking)
 
         return completed_outputs
 
