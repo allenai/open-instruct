@@ -2270,7 +2270,6 @@ dependencies = [
     { name = "pytest-xdist" },
     { name = "ray", extra = ["default"] },
     { name = "setuptools" },
-    { name = "tenacity" },
     { name = "tensorboard" },
     { name = "torch", version = "2.7.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.7.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform != 'darwin'" },
@@ -2325,7 +2324,6 @@ requires-dist = [
     { name = "ray", extras = ["default"], specifier = ">=2.44.1" },
     { name = "requests", marker = "extra == 'code'", specifier = ">=2.28.0" },
     { name = "setuptools", specifier = ">=75.6.0,<80.0.0" },
-    { name = "tenacity", specifier = ">=9.1.2" },
     { name = "tensorboard", specifier = ">=2.18.0" },
     { name = "torch", marker = "sys_platform != 'darwin'", specifier = ">=2.7.0,<2.8", index = "https://download.pytorch.org/whl/cu128" },
     { name = "torch", marker = "sys_platform == 'darwin'", specifier = ">=2.7.0,<2.8" },
@@ -3806,15 +3804,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/83/d3/803453b36afefb7c2bb238361cd4ae6125a569b4db67cd9e79846ba2d68c/sympy-1.14.0.tar.gz", hash = "sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517", size = 7793921, upload-time = "2025-04-27T18:05:01.611Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl", hash = "sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5", size = 6299353, upload-time = "2025-04-27T18:04:59.103Z" },
-]
-
-[[package]]
-name = "tenacity"
-version = "9.1.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0a/d4/2b0cd0fe285e14b36db076e78c93766ff1d529d70408bd1d2a5a84f1d929/tenacity-9.1.2.tar.gz", hash = "sha256:1169d376c297e7de388d18b4481760d478b0e99a777cad3a9c86e556f4b697cb", size = 48036, upload-time = "2025-04-02T08:25:09.966Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e5/30/643397144bfbfec6f6ef821f36f33e57d35946c44a2352d3c9f0ae847619/tenacity-9.1.2-py3-none-any.whl", hash = "sha256:f77bf36710d8b73a50b2dd155c97b870017ad21afe6ab300326b0371b3b05138", size = 28248, upload-time = "2025-04-02T08:25:07.678Z" },
 ]
 
 [[package]]
