@@ -448,11 +448,37 @@ class LLMRayActor:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
 
+    def _check_and_restart_prefetch_thread(self):
+        """Check if prefetch thread is alive and restart if necessary."""
+        if not self._prefetch_thread or not self._prefetch_thread.is_alive():
+            if self.verbose:
+                self.logger.warning(
+                    f"Prefetch thread is dead! Restarting... "
+                    f"buffer_size={len(self._prefetch_buffer)}, "
+                    f"buffered_samples={self._buffered_samples}"
+                )
+            self._prefetch_thread = threading.Thread(target=self._prefetch_worker, daemon=True)
+            self._prefetch_thread.start()
+            if self.verbose:
+                self.logger.info("Prefetch thread restarted successfully")
+
     def _prefetch_worker(self):
         """Background worker that prefetches requests until we have enough buffered."""
         while True:
             with self._prefetch_cv:
-                if self._should_stop():
+                should_stop = self._should_stop()
+                if should_stop and self.verbose:
+                    try:
+                        queue_size = self.prompt_queue.qsize()
+                    except Exception:
+                        queue_size = "unknown"
+                    self.logger.info(
+                        f"Prefetch worker: should_stop=True, waiting. "
+                        f"buffer_size={len(self._prefetch_buffer)}, "
+                        f"buffered_samples={self._buffered_samples}, "
+                        f"main_queue_size={queue_size}"
+                    )
+                if should_stop:
                     self._prefetch_cv.wait(timeout=0.1)
                     continue
 
@@ -468,6 +494,11 @@ class LLMRayActor:
                     self._prefetch_buffer.append(request)
                     self._buffered_samples += request.generation_config.n
                     self._prefetch_cv.notify_all()
+                    if self.verbose and len(self._prefetch_buffer) % 10 == 0:
+                        self.logger.info(
+                            f"Prefetch worker: fetched request, buffer_size={len(self._prefetch_buffer)}, "
+                            f"buffered_samples={self._buffered_samples}"
+                        )
             except queue.Empty:
                 # Nothing available right now; loop around.
                 continue
@@ -492,17 +523,45 @@ class LLMRayActor:
             return num_added
 
         with self._prefetch_cv:
+            # Check if prefetch thread is alive and restart if necessary
+            self._check_and_restart_prefetch_thread()
+
             requests_to_process = []
             num_to_add = self.inference_batch_size - self.llm_engine.get_num_unfinished_requests()
-            for _ in range(min(num_to_add, len(self._prefetch_buffer))):
+            available = len(self._prefetch_buffer)
+
+            if self.verbose and (available == 0 or num_to_add > available):
+                try:
+                    main_queue_size = self.prompt_queue.qsize()
+                except Exception:
+                    main_queue_size = "unknown"
+                should_stop = self._should_stop()
+                prefetch_thread_alive = (
+                    self._prefetch_thread.is_alive()
+                    if hasattr(self, "_prefetch_thread") and self._prefetch_thread
+                    else "no thread"
+                )
+
+                self.logger.info(
+                    f"fill_engine: prefetch_buffer_size={available}, num_to_add={num_to_add}, "
+                    f"main_queue_size={main_queue_size}, should_stop={should_stop}, "
+                    f"current_unfinished={self.llm_engine.get_num_unfinished_requests()}, "
+                    f"prefetch_thread_alive={prefetch_thread_alive}, buffered_samples={self._buffered_samples}"
+                )
+
+            for _ in range(min(num_to_add, available)):
                 request = self._prefetch_buffer.popleft()
                 requests_to_process.append(request)
                 self._buffered_samples -= request.generation_config.n
 
+            # Notify prefetch worker that space is available
+            if requests_to_process:
+                self._prefetch_cv.notify_all()
+
         for request in requests_to_process:
             num_added += add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
 
-        if num_added > 0:
+        if num_added > 0 and self.verbose:
             self.logger.info(
                 f"fill_engine added {num_added} requests from prefetch buffer, current_unfinished={self.llm_engine.get_num_unfinished_requests()}"
             )
@@ -524,6 +583,9 @@ class LLMRayActor:
             should_stop = self._should_stop()
             current_unfinished = self.llm_engine.get_num_unfinished_requests()
             queue_size = "unknown"
+            prefetch_buffer_size = len(self._prefetch_buffer) if hasattr(self, "_prefetch_buffer") else "no buffer"
+            buffered_samples = self._buffered_samples if hasattr(self, "_buffered_samples") else "no samples"
+
             try:
                 queue_size = self.prompt_queue.qsize()
             except Exception as e:
@@ -533,7 +595,8 @@ class LLMRayActor:
                 f"Nothing added by fill_engine, but continuing to process existing requests. "
                 f"num_processed={num_processed}, should_stop={should_stop}, "
                 f"unfinished_requests={current_unfinished}, inference_batch_size={self.inference_batch_size}, "
-                f"queue_size={queue_size}, timeout={timeout}"
+                f"queue_size={queue_size}, prefetch_buffer_size={prefetch_buffer_size}, "
+                f"buffered_samples={buffered_samples}, timeout={timeout}"
             )
 
         tracking = _init_tool_tracking()
@@ -609,7 +672,28 @@ class LLMRayActor:
             # If no work to do, break to yield control back to generate_thread,
             # allowing weight_sync_thread to acquire the LLMRayActor lock
             final_unfinished = self.llm_engine.get_num_unfinished_requests()
-            if final_unfinished + len(tracking["pending_tool_futures"]) == 0:
+            pending_tools = len(tracking["pending_tool_futures"])
+            if final_unfinished + pending_tools == 0:
+                # Enhanced diagnostics for the critical exit condition
+                if self.verbose:
+                    prefetch_buffer_size = (
+                        len(self._prefetch_buffer) if hasattr(self, "_prefetch_buffer") else "no buffer"
+                    )
+                    buffered_samples = self._buffered_samples if hasattr(self, "_buffered_samples") else "no samples"
+                    should_stop = self._should_stop()
+                    queue_size = "unknown"
+                    try:
+                        queue_size = self.prompt_queue.qsize()
+                    except Exception:
+                        queue_size = "error"
+
+                    self.logger.info(
+                        f"EXITING process_from_queue: no work remaining. "
+                        f"final_unfinished={final_unfinished}, pending_tools={pending_tools}, "
+                        f"should_stop={should_stop}, queue_size={queue_size}, "
+                        f"prefetch_buffer_size={prefetch_buffer_size}, buffered_samples={buffered_samples}, "
+                        f"total_processed={total_processed}, iteration_count={iteration_count}"
+                    )
                 exit_reason = "no work remaining"
                 break
 
