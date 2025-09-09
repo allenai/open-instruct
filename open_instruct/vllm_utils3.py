@@ -614,14 +614,16 @@ class LLMRayActor:
             # we need to wait or extract them from concat_outputs
             if concat_outputs_count == expected_n and len(request_outputs[request_id]) < expected_n:
                 # Convert concat_outputs to request_outputs format for processing
+                # Get existing request_ids to avoid duplicates
+                existing_request_ids = {out.request_id for out in request_outputs[request_id]}
+
                 for req_id, output_obj in tracking["concat_outputs"].items():
-                    if _extract_base_request_id(k) != request_id:
+                    if _extract_base_request_id(req_id) != request_id:
                         continue
-                    request_outputs[request_id].append(output_obj)
-                    # Now, check that they all have unique ids:
-                    all_ids = [out.request_id for out in request_outputs[request_id]]
-                    unique_ids = set(all_ids)
-                    assert len(all_ids) == len(unique_ids), f"Duplicate request_ids found for {request_id}"
+                    # Only append if not already present
+                    if output_obj.request_id not in existing_request_ids:
+                        request_outputs[request_id].append(output_obj)
+                        existing_request_ids.add(output_obj.request_id)
 
             # Still not enough samples ready
             if len(request_outputs[request_id]) < expected_n:
@@ -646,7 +648,7 @@ class LLMRayActor:
         """Check if there are any pending tool futures for a given base request ID."""
         if not self.tools or not tracking["pending_tool_futures"]:
             return False
-        
+
         # Check if any pending tool futures belong to this base request
         for req_id in tracking["pending_tool_futures"]:
             if _extract_base_request_id(req_id) == request_id:
@@ -659,7 +661,7 @@ class LLMRayActor:
         if self._has_pending_tool_futures_for_request(request_id, tracking):
             # Don't clean up metadata yet - tool futures still need it
             return
-        
+
         # Remove request metadata
         self.request_metadata.pop(request_id, None)
 

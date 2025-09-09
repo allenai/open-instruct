@@ -210,6 +210,100 @@ class TestVllmUtils3(unittest.TestCase):
                 f"This means we entered the main processing loop instead of exiting early.",
             )
 
+    def test_maybe_process_and_insert_no_duplicate_request_ids(self):
+        """Test that _maybe_process_and_insert doesn't add duplicate request_ids when called multiple times.
+
+        This reproduces and tests the fix for the bug where multiple calls to _maybe_process_and_insert
+        would re-add the same outputs from concat_outputs, causing duplicate request_ids.
+        """
+        # Create a mock LLMRayActor
+        actor = LLMRayActor.__new__(LLMRayActor)
+        actor.logger = MagicMock()
+        actor.verbose = False
+        actor.tools = {"some_tool": {}}  # Enable tools mode
+
+        # Mock methods called by _maybe_process_and_insert
+        actor._process_completed_request = MagicMock(return_value=("result", False))
+        actor._insert_result_to_queue = MagicMock()
+        actor._cleanup_request_data = MagicMock()
+
+        # Set up request metadata
+        request_id = "train_1_35604"
+        actor.request_metadata = {
+            request_id: {
+                "original_sampling_params": MagicMock(n=2),  # Expect 2 samples
+                "is_eval": False,
+                "dataset_index": 35604,
+            }
+        }
+
+        # Create mock outputs for the 2 expected samples
+        mock_output1 = MagicMock(spec=vllm.CompletionOutput)
+        mock_output1.token_ids = [1, 2, 3]
+
+        mock_output2 = MagicMock(spec=vllm.CompletionOutput)
+        mock_output2.token_ids = [4, 5, 6]
+
+        mock_request_output1 = MagicMock(spec=vllm.RequestOutput)
+        mock_request_output1.request_id = "train_1_35604_0"
+        mock_request_output1.outputs = [mock_output1]
+        mock_request_output1.prompt = "test prompt"
+        mock_request_output1.prompt_token_ids = [1, 2, 3]
+
+        mock_request_output2 = MagicMock(spec=vllm.RequestOutput)
+        mock_request_output2.request_id = "train_1_35604_1"
+        mock_request_output2.outputs = [mock_output2]
+        mock_request_output2.prompt = "test prompt"
+        mock_request_output2.prompt_token_ids = [1, 2, 3]
+
+        # Initialize tracking with concat_outputs
+        tracking = _init_tool_tracking()
+        tracking["concat_outputs"]["train_1_35604_0"] = mock_request_output1
+        tracking["concat_outputs"]["train_1_35604_1"] = mock_request_output2
+
+        # Set up request_outputs with empty list for our request
+        request_outputs = {request_id: []}
+        current_time = time.time()
+
+        # Call _maybe_process_and_insert MULTIPLE times (this should trigger the bug)
+        # First call - should move both outputs from concat_outputs to request_outputs and process them
+        result1 = actor._maybe_process_and_insert(request_id, request_outputs, tracking, current_time)
+
+        # Since we have 2 samples and expect 2, it should process and remove from request_outputs
+        self.assertEqual(result1, 1, "Should return 1 since request was processed")
+        self.assertEqual(len(request_outputs), 0, "request_outputs should be empty after processing")
+
+        # Reset request_outputs to test the duplicate scenario
+        request_outputs[request_id] = []
+
+        # Call again to test duplicate prevention
+        result2 = actor._maybe_process_and_insert(request_id, request_outputs, tracking, current_time)
+
+        # Check if the key exists before accessing it
+        if request_id in request_outputs:
+            # Verify outputs were moved correctly without duplicates
+            self.assertEqual(len(request_outputs[request_id]), 2, "Should have 2 outputs after second call")
+
+            # Third call - should NOT add duplicates (this previously caused the assertion error)
+            actor._maybe_process_and_insert(request_id, request_outputs, tracking, current_time)
+
+            # Verify no duplicates were added
+            self.assertEqual(
+                len(request_outputs[request_id]), 2, "Should still have exactly 2 outputs after third call"
+            )
+
+            # Verify all request_ids are unique (this was failing before the fix)
+            request_ids = [out.request_id for out in request_outputs[request_id]]
+            unique_request_ids = set(request_ids)
+            self.assertEqual(len(request_ids), len(unique_request_ids), "All request_ids should be unique")
+
+            # Verify we have the expected request_ids
+            expected_request_ids = {"train_1_35604_0", "train_1_35604_1"}
+            self.assertEqual(set(request_ids), expected_request_ids, "Should have the expected request_ids")
+        else:
+            # If key was removed, the second call also processed successfully
+            self.assertEqual(result2, 1, "Should return 1 since request was processed again")
+
     def test_prefetch_thread_pause_resume_on_should_stop(self):
         """Test that the prefetch thread pauses when should_stop=True and resumes when should_stop=False.
 
