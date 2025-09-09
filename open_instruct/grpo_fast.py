@@ -2033,6 +2033,7 @@ def create_model_and_optimizer(
         actor_manager=actor_manager,
         inference_batch_size=args.inference_batch_size,
         use_fp8_kv_cache=args.use_fp8_kv_cache,
+        verbose=args.verbose,
     )
 
     resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1

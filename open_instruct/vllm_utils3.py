@@ -82,6 +82,17 @@ def _init_tool_tracking():
     }
 
 
+def _extract_base_request_id(full_request_id: str) -> str:
+    """Extract base request ID by removing the sample suffix.
+
+    >>> _extract_base_request_id("train_1_43039_0")
+    'train_1_43039'
+    >>> _extract_base_request_id("eval_5_12345_2")
+    'eval_5_12345'
+    """
+    return "_".join(full_request_id.split("_")[:-1])
+
+
 def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, executor):
     """
     Handle a finished output. Returns the output if it should be added to results,
@@ -360,12 +371,14 @@ class LLMRayActor:
         eval_results_queue=None,
         actor_manager=None,
         inference_batch_size: Optional[int] = None,
+        verbose: bool = False,
         **kwargs,
     ):
         self.logger = logger_utils.setup_logger(__name__)
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inference_batch_size = inference_batch_size
+        self.verbose = verbose
         self.request_metadata = {}
 
         if self.tools:
@@ -390,7 +403,8 @@ class LLMRayActor:
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
-            self.logger.info(f"creating LLM with bundle_indices={bundle_indices}")
+            if self.verbose:
+                self.logger.info(f"creating LLM with bundle_indices={bundle_indices}")
 
         # for some reason log stats causes a crash in the engine at assert outputs.scheduler_stats is not None
         self.llm_engine = vllm.LLMEngine.from_engine_args(vllm.EngineArgs(*args, **kwargs, disable_log_stats=True))
@@ -418,12 +432,15 @@ class LLMRayActor:
 
     def _insert_result_to_queue(self, result, is_eval: bool):
         """Insert result into the appropriate queue with error handling."""
-        try:
-            results_queue = self.eval_results_queue if is_eval else self.results_queue
-            results_queue.put(result, timeout=10)
-        except queue.Full:
-            queue_name = "eval" if is_eval else "train"
-            self.logger.warning(f"{queue_name} results queue is full, discarding result.")
+        results_queue = self.eval_results_queue if is_eval else self.results_queue
+        timeout = 10
+        while True:
+            try:
+                results_queue.put(result, timeout=timeout)
+            except queue.Full:
+                queue_name = "eval" if is_eval else "train"
+                self.logger.warning(f"{queue_name} queue is full when trying to insert result. Retrying...")
+                continue
 
     def fill_engine(self, timeout: float):
         """Fill the LLM engine queue with requests until inference_batch_size is reached.
@@ -705,6 +722,7 @@ def create_vllm_engines(
     actor_manager=None,
     inference_batch_size: Optional[int] = None,
     use_fp8_kv_cache=False,
+    verbose: bool = False,
 ) -> list[LLMRayActor]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
@@ -788,6 +806,7 @@ def create_vllm_engines(
                 inference_batch_size=inference_batch_size,
                 kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
                 calculate_kv_scales=use_fp8_kv_cache,
+                verbose=verbose,
             )
         )
 

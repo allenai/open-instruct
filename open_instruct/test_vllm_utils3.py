@@ -3,9 +3,10 @@ import unittest
 from unittest.mock import MagicMock
 
 import vllm
+from parameterized import parameterized
 
 from open_instruct.queue_types import TokenStatistics
-from open_instruct.vllm_utils3 import _finalize_outputs, _init_tool_tracking
+from open_instruct.vllm_utils3 import _extract_base_request_id, _finalize_outputs, _init_tool_tracking
 
 
 class TestVllmUtils3(unittest.TestCase):
@@ -150,6 +151,35 @@ class TestVllmUtils3(unittest.TestCase):
         # So responses should be [[3, 4], [1, 2], [5, 6]] (in tracking order)
         expected_responses = [[3, 4], [1, 2], [5, 6]]
         self.assertEqual(result.responses, expected_responses, "Responses should match tracking order")
+
+    @parameterized.expand(
+        [
+            ("train_1_43039_0", "train_1_43039"),
+            ("eval_5_12345_2", "eval_5_12345"),
+            ("train_0_999_1", "train_0_999"),
+            ("eval_123_456_0", "eval_123_456"),
+            ("prefix_step_idx_sample", "prefix_step_idx"),
+            ("a_b_c_d", "a_b_c"),
+        ]
+    )
+    def test_extract_base_request_id(self, full_request_id, expected_base_id):
+        """Test _extract_base_request_id removes sample suffix correctly."""
+        result = _extract_base_request_id(full_request_id)
+        self.assertEqual(result, expected_base_id)
+
+    def test_extract_base_request_id_edge_cases(self):
+        """Test _extract_base_request_id with edge cases."""
+        # Single underscore case
+        result = _extract_base_request_id("a_b")
+        self.assertEqual(result, "a")
+
+        # No underscores
+        result = _extract_base_request_id("nounderscore")
+        self.assertEqual(result, "")
+
+        # Empty string
+        result = _extract_base_request_id("")
+        self.assertEqual(result, "")
 
 
 if __name__ == "__main__":
