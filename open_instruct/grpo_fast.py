@@ -1762,7 +1762,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 raise ValueError(f"Unknown tool: {tool}")
     if args.use_mcp_tools:
         # set env var so the mcp tool can find the mcp server
-        os.environ["MCP_TRANSPORT_HOST"] = os.environ.get("BEAKER_LEADER_REPLICA_IP", "localhost")
+        host = os.environ.get("BEAKER_LEADER_REPLICA_IP", "localhost")
+        # weird bug in beaker... gives 127.0.0.1\n127.0.0.1 instead of just 127.0.0.1.
+        if "127.0.0.1" in host:
+            host = "localhost"
+        os.environ["MCP_TRANSPORT_HOST"] = host
         print(f"MCP_TRANSPORT_HOST: {os.environ['MCP_TRANSPORT_HOST']}")
         tool = MCPTool(
             mcp_tool_names=args.mcp_tool_names,
