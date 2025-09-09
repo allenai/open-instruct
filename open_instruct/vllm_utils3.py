@@ -67,7 +67,7 @@ def _queue_retry_decorator(operation_name: str):
         wait=tenacity.wait_exponential(multiplier=1, min=1, max=10),
         retry=tenacity.retry_if_exception_type((queue.Empty, queue.Full, TimeoutError)),
         before_sleep=_log_queue_retry_attempt,
-        reraise=False,
+        reraise=True,
     )
 
 
