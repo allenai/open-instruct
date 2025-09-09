@@ -527,7 +527,7 @@ class LLMRayActor:
                     self._prefetch_cv.wait(timeout=0.1)  # shorter wait is OK
                     continue
             try:
-                request = _robust_queue_get(self.prompt_queue, timeout=0.1)
+                request = self.prompt_queue.get(timeout=0.1)
 
                 # Directly add request to llm_engine instead of buffering
                 num_added = add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
@@ -548,7 +548,7 @@ class LLMRayActor:
     def _insert_result_to_queue(self, result, is_eval: bool):
         """Insert result into the appropriate queue with blocking put."""
         results_queue = self.eval_results_queue if is_eval else self.results_queue
-        _robust_queue_put(results_queue, result)  # Blocking put with retries
+        results_queue.put(result)  # Blocking put
 
     def fill_engine(self):
         """Fill the LLM engine queue with requests until inference_batch_size is reached.
