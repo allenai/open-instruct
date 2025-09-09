@@ -21,7 +21,7 @@ python mason.py \
     --model_name_or_path $MODEL_NAME \
     --tokenizer_name $MODEL_NAME \
     --use_slow_tokenizer False \
-    --dataset_mixer_list scottgeng00/olmo-3-preference-mix-deltas 1.0 allenai/olmo-2-1124-7b-preference-mix 1.0\
+    --dataset_mixer_list scottgeng00/olmo-3-preference-mix-deltas 1.0 allenai/olmo-2-1124-7b-preference-mix 1.0 allenai/filtered_wc_sample_500k 1.0\
     --max_seq_length 2048 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 8 \
