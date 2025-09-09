@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import vllm
 
-from open_instruct.queue_types import PromptRequest, TokenStatistics
+from open_instruct.queue_types import TokenStatistics
 from open_instruct.vllm_utils3 import LLMRayActor, _finalize_outputs, _init_tool_tracking
 
 
@@ -276,14 +276,15 @@ class TestVllmUtils3(unittest.TestCase):
         # Mock the should_stop method
         actor._should_stop = mock_should_stop
 
-        # Add a test request to the queue
-        test_request = MagicMock(spec=PromptRequest)
-        test_request.generation_config = mock_gen_config
-        test_request.prompt = [1, 2, 3]  # Mock prompt tokens
-        test_request.is_eval = False
-        test_request.training_step = 1
-        test_request.dataset_index = 0
-        actor.prompt_queue.put(test_request)
+        # Add multiple test requests to the queue to ensure the thread keeps looping
+        for i in range(5):
+            test_request = MagicMock()  # Remove spec to avoid attribute restrictions
+            test_request.generation_config = mock_gen_config
+            test_request.prompt = [1, 2, 3]  # Mock prompt tokens
+            test_request.is_eval = False
+            test_request.training_step = 1
+            test_request.dataset_index = i
+            actor.prompt_queue.put(test_request)
 
         # Track prefetch activity
         requests_processed = threading.Event()
@@ -318,8 +319,12 @@ class TestVllmUtils3(unittest.TestCase):
             self.assertTrue(resume_ready.wait(timeout=3.0), "Resume condition should be reached")
 
             # Add another request to verify thread can resume processing
-            test_request2 = MagicMock(spec=PromptRequest)
+            test_request2 = MagicMock()
             test_request2.generation_config = mock_gen_config
+            test_request2.prompt = [1, 2, 3]
+            test_request2.is_eval = False
+            test_request2.training_step = 1
+            test_request2.dataset_index = 99
             actor.prompt_queue.put(test_request2)
 
             # Give thread time to process after resume
@@ -341,8 +346,12 @@ class TestVllmUtils3(unittest.TestCase):
             actor._should_stop = lambda: True
 
             # Add a properly formed request to unblock any queue.get() calls
-            cleanup_request = MagicMock(spec=PromptRequest)
+            cleanup_request = MagicMock()
             cleanup_request.generation_config = mock_gen_config
+            cleanup_request.prompt = [1, 2, 3]
+            cleanup_request.is_eval = False
+            cleanup_request.training_step = 1
+            cleanup_request.dataset_index = 999
             try:
                 actor.prompt_queue.put_nowait(cleanup_request)
             except queue.Full:

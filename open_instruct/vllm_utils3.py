@@ -78,6 +78,7 @@ def _robust_queue_get(q, timeout=None):
         return q.get(timeout=timeout)
     except (queue.Empty, TimeoutError) as e:
         logger.info(f"Failed to get item from queue: {e}")
+        raise
 
 
 @_queue_retry_decorator("queue_put")
