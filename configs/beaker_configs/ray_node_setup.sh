@@ -10,7 +10,8 @@ echo PATH=$PATH
 
 # python3 -c "import os, ray; print(os.path.dirname(ray.__file__))"
 
-BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk '{print $1}')
+# export so we can use it in our python code
+export BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk '{print $1}')
 
 RAY_NODE_PORT=8888
 ray stop --force
