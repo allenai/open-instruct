@@ -415,7 +415,7 @@ class LLMRayActor:
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             self.logger.info(f"creating LLM with bundle_indices={bundle_indices}")
 
-        self.llm_engine = vllm.LLMEngine.from_engine_args(vllm.EngineArgs(*args, **kwargs))
+        self.llm_engine = vllm.LLMEngine.from_engine_args(vllm.EngineArgs(*args, **kwargs, disable_log_stats=True))
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
@@ -835,8 +835,12 @@ def create_vllm_engines(
 
     # Verify engines initialized successfully
     try:
+        # Allow overriding init timeout via env var (seconds), default 900s
+        init_timeout = int(os.getenv("VLLM_ENGINE_INIT_TIMEOUT", "900"))
         ray_get_with_progress(
-            [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300
+            [engine.ready.remote() for engine in vllm_engines],
+            "Initializing vLLM engines",
+            timeout=init_timeout,
         )
     except TimeoutError as e:
         logger.error(f"vLLM engines failed to initialize: {e}")

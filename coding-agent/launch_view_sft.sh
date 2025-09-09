@@ -1,22 +1,23 @@
 exp_name=rlvr_code_view_tool_sft
     python mason.py \
         --cluster ai2/jupiter-cirrascale-2 \
-        --image saurabhs/open-coding-agent-dev \
-        --pure_docker_mode \
-        --workspace ai2/open-coding-agent \
+        --image saurabhs/open-coding-agent \
+        --workspace ai2/open-coding-agent-dev \
         --priority urgent \
-        --preemptible \
         --num_nodes 4 \
         --gs_model_name saurabhs/ethans-Qwen3-8B-nothink \
         --description "rlvr code view tool sft" \
         --max_retries 0 \
+        --auto_output_dir_path /weka/oe-adapt-default/saurabhs/repos/open-instruct-3/output \
+        --auto_checkpoint_state_dir /weka/oe-adapt-default/saurabhs/repos/open-instruct-3/checkpoints \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+        --env VLLM_ENGINE_INIT_TIMEOUT=900 \
         --budget ai2/oe-adapt \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
-        --num_samples_per_prompt_rollout 16 \
-        --num_unique_prompts_rollout 64 \
+        --num_samples_per_prompt_rollout 8 \
+        --num_unique_prompts_rollout 32 \
         --num_mini_batches 4 \
         --num_epochs 1 \
         --learning_rate 1e-6 \
@@ -58,6 +59,4 @@ exp_name=rlvr_code_view_tool_sft
         --log_rollouts_to_file True \
         --max_rollout_logs_per_step 10 \
         --dataset_skip_cache True \
-        --checkpoint_state_freq 25 \
-        --checkpoint_state_dir "/weka/oe-adapt-default/saurabhs/repos/open-instruct-3/checkpoints"
-
+        --checkpoint_state_freq 25 

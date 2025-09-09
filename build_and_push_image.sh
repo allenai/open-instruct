@@ -11,6 +11,3 @@ beaker image delete $beaker_user/$image_name || true
 
 # Create the image in the same workspace used for jobs.
 beaker image create $image_name -n $image_name -w ai2/$beaker_user
-
-# Launch the view SFT.
-bash coding-agent/launch_view_sft.sh

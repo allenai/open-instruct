@@ -20,7 +20,9 @@
       "Bash(sed:*)",
       "Bash(awk:*)",
       "WebSearch",
-      "WebFetch(domain:docs.ray.io)"
+      "WebFetch(domain:docs.ray.io)",
+      "Bash(ss:*)",
+      "Bash(uv pip:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

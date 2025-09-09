@@ -2767,8 +2767,13 @@ def run_training(
     )
 
     """Run the main training loop with worker threads."""
+    # Allow overriding ready check timeout via env var (seconds), default 900s
+    from os import getenv as _getenv
+    _ready_timeout = int(_getenv("VLLM_ENGINE_INIT_TIMEOUT", "900"))
     ray_get_with_progress(
-        [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
+        [engine.ready.remote() for engine in vllm_engines],
+        "Checking engines are ready to work",
+        timeout=_ready_timeout,
     )
 
     logger.info("======== ✅ data preparation thread starts =========")
@@ -2800,11 +2805,13 @@ def run_training(
         dataset_indices = next(iter_dataloader)
         batch = next_batch(dataset_indices, train_dataset)
         split_and_insert_batch(
-            batch,
-            resume_training_step,
-            pending_queries_map,
-            param_prompt_Q,
-            generation_configs["train"],
+            batch=batch,
+            training_step=resume_training_step,
+            vllm_num_engines=args.vllm_num_engines,
+            pending_queries_map=pending_queries_map,
+            param_prompt_Q=param_prompt_Q,
+            generation_config=generation_configs["train"],
+            tool_contexts_next=None,
             is_eval=False,
         )
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
@@ -2839,7 +2846,14 @@ def run_training(
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         batch = next_batch(next(iter_dataloader), train_dataset)
         split_and_insert_batch(
-            batch, training_step, pending_queries_map, param_prompt_Q, generation_configs["train"], is_eval=False
+            batch=batch,
+            training_step=training_step,
+            vllm_num_engines=args.vllm_num_engines,
+            pending_queries_map=pending_queries_map,
+            param_prompt_Q=param_prompt_Q,
+            generation_config=generation_configs["train"],
+            tool_contexts_next=None,
+            is_eval=False,
         )
         if (
             training_step % args.local_eval_every == 0
@@ -2847,11 +2861,13 @@ def run_training(
             and (args.eval_on_step_0 or training_step > 1)
         ):
             split_and_insert_batch(
-                eval_batch,
-                training_step,
-                eval_pending_queries_map,
-                param_prompt_Q,
-                generation_configs["eval"],
+                batch=eval_batch,
+                training_step=training_step,
+                vllm_num_engines=args.vllm_num_engines,
+                pending_queries_map=eval_pending_queries_map,
+                param_prompt_Q=param_prompt_Q,
+                generation_config=generation_configs["eval"],
+                tool_contexts_next=None,
                 is_eval=True,
             )
 
