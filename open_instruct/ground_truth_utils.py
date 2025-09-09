@@ -196,8 +196,7 @@ class GSM8KVerifier(VerifierFunction):
         extracted = numbers[-1] if numbers else response
         score = float(str(extracted).lower() == str(label).lower())
         return VerificationResult(score=score)
-
-
+        
 class MathVerifier(VerifierFunction):
     """
     Verifier for math problems.
