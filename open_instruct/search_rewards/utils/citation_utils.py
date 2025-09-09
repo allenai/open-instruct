@@ -63,8 +63,8 @@ Please provide the rating first, followed by the analysis, in the format "Rating
 
 def extract_claims_and_corresponding_citation_ids(
     response: str, 
-    split_non_cited_parts_by_newlines: bool = True,
-    split_non_cited_parts_by_sentences: bool = True,
+    split_non_cited_parts_by_newlines: bool = False,
+    split_non_cited_parts_by_sentences: bool = False,
     ) -> Dict[str, List[str]]:
     """
     Example response:
