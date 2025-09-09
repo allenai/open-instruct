@@ -76,9 +76,8 @@ def _robust_queue_get(q, timeout=None):
     """Get item from queue with retries and logging."""
     try:
         return q.get(timeout=timeout)
-    except Exception as e:
+    except queue.Empty, TimeoutError as e:
         logger.info(f"Failed to get item from queue: {e}")
-        raise
 
 
 @_queue_retry_decorator("queue_put")
@@ -86,9 +85,8 @@ def _robust_queue_put(q, item, timeout=None):
     """Put item into queue with retries and logging."""
     try:
         return q.put(item, timeout=timeout)
-    except Exception as e:
+    except queue.Full, TimeoutError as e:
         logger.info(f"Failed to put item into queue: {e}")
-        raise
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
