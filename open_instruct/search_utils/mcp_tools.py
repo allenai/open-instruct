@@ -104,19 +104,40 @@ class MCPTool(Tool):
                     break
         except Exception as e:
             error = str(e)
-        if error is None and not found_tool:
-            error = "No valid tool calls found."
         if document_tool_output is None:
-            print(f"No mcp tool found for trunc. prompt: {trunc_prompt}")      
-            return ToolOutput(
-                output=error,
-                called=False,
-                error=error,
-                timeout=False,
-                runtime=0,
-                start_str="<snippet id=" + generate_snippet_id() + ">\n",
-                end_str="\n</snippet>",
-            )
+            if error is None and not found_tool:
+                error = "No valid tool calls found."
+                print(f"No mcp tool found for trunc. prompt: {trunc_prompt}")      
+                return ToolOutput(
+                    output=error,
+                    called=False,
+                    error=error,
+                    timeout=False,
+                    runtime=0,
+                    start_str="<snippet id=" + generate_snippet_id() + ">\n",
+                    end_str="\n</snippet>",
+                )
+            elif error is not None:
+                return ToolOutput(
+                    output=error,
+                    called=False,
+                    error=error,
+                    timeout=False,
+                    runtime=0,
+                    start_str="<snippet id=" + generate_snippet_id() + ">\n",
+                    end_str="\n</snippet>",
+                )
+            else:
+                print(f"Unknown error, no MCP response and no error found.")
+                return ToolOutput(
+                    output="Unknown error, no MCP response and no error found.",
+                    called=False,
+                    error="Unknown error, no MCP response and no error found.",
+                    timeout=False,
+                    runtime=0,
+                    start_str="<snippet id=" + generate_snippet_id() + ">\n",
+                    end_str="\n</snippet>",
+                )
 
         if document_tool_output.error:
             print(f"Error from mcp tool: {document_tool_output.error}")
