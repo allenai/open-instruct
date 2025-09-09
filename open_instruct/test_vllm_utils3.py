@@ -454,6 +454,107 @@ class TestVllmUtils3(unittest.TestCase):
             # Give thread time to clean up
             prefetch_thread.join(timeout=1.0)
 
+    def test_missing_metadata_raises_critical_exception(self):
+        """Test that missing metadata raises a critical RuntimeError instead of just logging a warning.
+
+        This test prevents regression of the bug where missing metadata was only logged as a warning,
+        causing silent data corruption instead of immediate failure.
+        """
+        # Create a mock LLMRayActor
+        actor = LLMRayActor.__new__(LLMRayActor)
+        actor.logger = MagicMock()
+        actor.verbose = True
+        actor.request_metadata = {}  # Empty metadata dict to simulate missing metadata
+        actor.tools = {}
+        actor.max_tool_calls = {}
+        actor.executor = None
+
+        # Mock the LLM engine and other dependencies
+        mock_engine = MagicMock()
+        mock_engine.has_unfinished_requests.return_value = True
+        mock_engine.step.return_value = [MagicMock()]  # One finished output
+        actor.llm_engine = mock_engine
+
+        # Create a mock step output with a request ID that doesn't exist in metadata
+        mock_step_output = MagicMock()
+        mock_step_output.request_id = "train_1_35604_0"  # This matches the error logs
+        mock_step_output.finished = True
+        mock_engine.step.return_value = [mock_step_output]
+
+        # Mock other required methods
+        actor._should_stop = MagicMock(return_value=False)
+        actor._poll_tool_futures = MagicMock(return_value=[])
+
+        # The critical fix: This should raise a RuntimeError, not just log a warning
+        with self.assertRaises(RuntimeError) as context:
+            # This will call the fixed code path that should raise an exception
+            actor.process_from_queue(timeout=1.0)
+
+        # Verify the exception message contains the expected information
+        error_message = str(context.exception)
+        self.assertIn("Critical bug: Missing metadata for request", error_message)
+        self.assertIn("train_1_35604", error_message)  # The base request ID
+        self.assertIn("metadata was cleaned up prematurely", error_message)
+
+    def test_cleanup_request_data_waits_for_engine_requests(self):
+        """Test that _cleanup_request_data waits for unfinished engine requests before cleaning metadata.
+
+        This test ensures metadata is not cleaned up prematurely while sub-requests are still in the engine.
+        """
+        # Create a mock LLMRayActor
+        actor = LLMRayActor.__new__(LLMRayActor)
+        actor.logger = MagicMock()
+        actor.tools = {}
+
+        # Set up mock engine
+        mock_engine = MagicMock()
+        actor.llm_engine = mock_engine
+
+        # Mock engine state - has unfinished requests
+        mock_engine.has_unfinished_requests.return_value = True
+
+        # Mock scheduler with unfinished requests for our base request ID
+        mock_scheduler = MagicMock()
+        mock_engine.scheduler = mock_scheduler
+
+        # Create mock request objects with the same base request ID we're testing
+        mock_unfinished_request = MagicMock()
+        mock_unfinished_request.request_id = "train_1_35604_0"  # Sub-request of train_1_35604
+        mock_scheduler.waiting = [mock_unfinished_request]
+        mock_scheduler.running = []
+        mock_scheduler.swapped = []
+
+        # Set up request metadata
+        base_request_id = "train_1_35604"
+        actor.request_metadata = {base_request_id: {"test": "data"}}
+
+        # Create empty tracking dict
+        tracking = {}
+
+        # Call _cleanup_request_data - it should NOT remove metadata because engine has unfinished requests
+        actor._cleanup_request_data(base_request_id, tracking)
+
+        # Verify metadata was NOT removed (this is the fix)
+        self.assertIn(
+            base_request_id,
+            actor.request_metadata,
+            "Metadata should NOT be removed while engine has unfinished sub-requests",
+        )
+
+        # Now simulate engine having no unfinished requests
+        mock_engine.has_unfinished_requests.return_value = False
+        mock_scheduler.waiting = []
+
+        # Call _cleanup_request_data again - now it SHOULD remove metadata
+        actor._cleanup_request_data(base_request_id, tracking)
+
+        # Verify metadata was removed
+        self.assertNotIn(
+            base_request_id,
+            actor.request_metadata,
+            "Metadata SHOULD be removed when engine has no unfinished sub-requests",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

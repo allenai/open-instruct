@@ -239,6 +239,11 @@ def _finalize_outputs(output, tracking, dataset_index, tools, token_statistics=N
         if real_req_id not in merged_outputs:
             merged_outputs[real_req_id] = output_obj
         else:
+            # Each sub-request should contribute exactly one output (the final result after tool processing)
+            assert len(output_obj.outputs) == 1, (
+                f"Expected exactly 1 output per sub-request, got {len(output_obj.outputs)} for {req_id}. "
+                f"This indicates tool processing created multiple outputs instead of one final result."
+            )
             merged_outputs[real_req_id].outputs.extend(output_obj.outputs)
 
     # Sort by dataset index (extracted from request_id format: "{prefix}_{training_step}_{dataset_index}")
@@ -246,9 +251,26 @@ def _finalize_outputs(output, tracking, dataset_index, tools, token_statistics=N
         merged_outputs.values(), key=lambda x: (int(x.request_id.split("_")[1]), int(x.request_id.split("_")[2]))
     )
 
-    return _process_outputs_with_tools(
+    # Validate total response count before processing
+    total_responses = sum(len(output.outputs) for output in final_outputs)
+    logger.info(
+        f"_finalize_outputs: {len(relevant_outputs)} sub-requests merged into {len(final_outputs)} outputs with {total_responses} total responses"
+    )
+
+    result = _process_outputs_with_tools(
         final_outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
     )
+
+    # Add final validation to catch the specific error early
+    expected_response_count = len(relevant_outputs)  # Should equal generation_config.n
+    actual_response_count = len(result.responses)
+    if actual_response_count != expected_response_count:
+        raise AssertionError(
+            f"Response count mismatch in _finalize_outputs: expected {expected_response_count} responses "
+            f"but got {actual_response_count}. This indicates incorrect merging of tool-processed outputs."
+        )
+
+    return result
 
 
 def _extract_base_request_id(full_request_id: str) -> str:
@@ -527,11 +549,11 @@ class LLMRayActor:
 
                     # Check if metadata exists for this request
                     if base_req_id not in self.request_metadata:
-                        if self.verbose:
-                            self.logger.warning(
-                                f"Missing metadata for request {base_req_id}, skipping output processing"
-                            )
-                        continue
+                        raise RuntimeError(
+                            f"Critical bug: Missing metadata for request {base_req_id}. "
+                            f"This indicates metadata was cleaned up prematurely while sub-requests were still processing. "
+                            f"All available metadata keys: {list(self.request_metadata.keys())}"
+                        )
 
                     result = _handle_output(
                         output,
@@ -655,6 +677,38 @@ class LLMRayActor:
                 return True
         return False
 
+    def _has_pending_engine_requests_for_base_id(self, base_request_id: str) -> bool:
+        """Check if there are any unfinished sub-requests in the vLLM engine for a given base request ID."""
+        if not self.llm_engine.has_unfinished_requests():
+            return False
+
+        # Get all unfinished request IDs from the engine
+        try:
+            # vLLM engines have a scheduler that tracks unfinished requests
+            # We need to check if any unfinished request IDs belong to our base request
+            unfinished_request_ids = []
+
+            # Try to get unfinished request IDs from scheduler
+            if hasattr(self.llm_engine, "scheduler"):
+                if hasattr(self.llm_engine.scheduler, "waiting") and self.llm_engine.scheduler.waiting:
+                    unfinished_request_ids.extend([req.request_id for req in self.llm_engine.scheduler.waiting])
+                if hasattr(self.llm_engine.scheduler, "running") and self.llm_engine.scheduler.running:
+                    unfinished_request_ids.extend([req.request_id for req in self.llm_engine.scheduler.running])
+                if hasattr(self.llm_engine.scheduler, "swapped") and self.llm_engine.scheduler.swapped:
+                    unfinished_request_ids.extend([req.request_id for req in self.llm_engine.scheduler.swapped])
+
+            # Check if any unfinished request belongs to our base request ID
+            for req_id in unfinished_request_ids:
+                if _extract_base_request_id(req_id) == base_request_id:
+                    return True
+
+        except Exception as e:
+            # If we can't check the scheduler state, be conservative and assume there might be pending requests
+            self.logger.warning(f"Could not check engine state for base_request_id {base_request_id}: {e}")
+            return True
+
+        return False
+
     def _cleanup_request_data(self, request_id: str, tracking: Dict[str, Any]):
         """Clean up metadata and tracking data for a completed request."""
         # Check if there are still pending tool futures for this request
@@ -662,7 +716,14 @@ class LLMRayActor:
             # Don't clean up metadata yet - tool futures still need it
             return
 
-        # Remove request metadata
+        # Check if there are still unfinished sub-requests in the engine for this base request
+        if self._has_pending_engine_requests_for_base_id(request_id):
+            # Don't clean up metadata yet - engine step processing still needs it
+            return
+
+        # Remove request metadata only after both conditions are met:
+        # 1. No pending tool futures for this request
+        # 2. No unfinished sub-requests in the engine for this base request
         self.request_metadata.pop(request_id, None)
 
         # Clean up tracking data for all sub-requests of this request
