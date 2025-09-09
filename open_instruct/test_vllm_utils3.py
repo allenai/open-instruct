@@ -224,6 +224,8 @@ class TestVllmUtils3(unittest.TestCase):
         actor.inference_batch_size = 64
         actor.logger = MagicMock()
         actor.verbose = False  # Add missing verbose attribute
+        actor.tools = {}  # Add missing tools attribute
+        actor.request_metadata = {}  # Add missing request_metadata attribute
 
         # Mock LLM engine
         mock_engine = MagicMock()
@@ -242,7 +244,6 @@ class TestVllmUtils3(unittest.TestCase):
         # Set up prefetch components
         actor._prefetch_buffer = []
         actor._prefetch_cv = threading.Condition()
-        actor._buffered_samples = 0
         actor._prefetch_thread = None  # Add missing thread attribute
 
         # Create a mock generation config for test requests
@@ -278,6 +279,10 @@ class TestVllmUtils3(unittest.TestCase):
         # Add a test request to the queue
         test_request = MagicMock(spec=PromptRequest)
         test_request.generation_config = mock_gen_config
+        test_request.prompt = [1, 2, 3]  # Mock prompt tokens
+        test_request.is_eval = False
+        test_request.training_step = 1
+        test_request.dataset_index = 0
         actor.prompt_queue.put(test_request)
 
         # Track prefetch activity
