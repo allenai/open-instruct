@@ -15,7 +15,6 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
-import collections
 import os
 import queue
 import threading
@@ -26,7 +25,6 @@ from datetime import timedelta
 from typing import Any, Dict, List, Optional, Union
 
 import ray
-import tenacity
 import torch
 import torch.distributed
 import vllm
@@ -429,7 +427,6 @@ class LLMRayActor:
         self._should_stop_value = False
         self._should_stop_timeout_s = 5
 
-        self._prefetch_buffer = collections.deque()
         self._prefetch_cv = threading.Condition()
         self._prefetch_thread = threading.Thread(target=self._prefetch_worker, daemon=True)
         self._prefetch_thread.start()
@@ -455,12 +452,7 @@ class LLMRayActor:
                         queue_size = self.prompt_queue.qsize()
                     except Exception:
                         queue_size = "unknown"
-                    self.logger.info(
-                        f"Prefetch worker: should_stop=True, waiting. "
-                        f"buffer_size={len(self._prefetch_buffer)}, "
-                        f"buffer_size={len(self._prefetch_buffer)}, "
-                        f"main_queue_size={queue_size}"
-                    )
+                    self.logger.info(f"Prefetch worker: should_stop=True, waiting. main_queue_size={queue_size}")
                 if should_stop:
                     self._prefetch_cv.wait(timeout=0.1)
                     continue
@@ -490,58 +482,6 @@ class LLMRayActor:
         results_queue = self.eval_results_queue if is_eval else self.results_queue
         results_queue.put(result)
 
-    def fill_engine(self):
-        """Fill the LLM engine queue with requests until inference_batch_size is reached.
-
-        Returns:
-            int: Number of requests added to the engine
-        """
-        num_added = 0
-        if self._should_stop():
-            return num_added
-
-        with self._prefetch_cv:
-            requests_to_process = []
-            num_to_add = self.inference_batch_size - self.llm_engine.get_num_unfinished_requests()
-            available = len(self._prefetch_buffer)
-
-            if self.verbose and (available == 0 or num_to_add > available):
-                try:
-                    main_queue_size = self.prompt_queue.qsize()
-                except Exception:
-                    main_queue_size = "unknown"
-                should_stop = self._should_stop()
-                prefetch_thread_alive = (
-                    self._prefetch_thread.is_alive()
-                    if hasattr(self, "_prefetch_thread") and self._prefetch_thread
-                    else "no thread"
-                )
-
-                self.logger.info(
-                    f"fill_engine: prefetch_buffer_size={available}, num_to_add={num_to_add}, "
-                    f"main_queue_size={main_queue_size}, should_stop={should_stop}, "
-                    f"current_unfinished={self.llm_engine.get_num_unfinished_requests()}, "
-                    f"prefetch_thread_alive={prefetch_thread_alive}, buffer_size={len(self._prefetch_buffer)}"
-                )
-
-            for _ in range(min(num_to_add, available)):
-                request = self._prefetch_buffer.popleft()
-                requests_to_process.append(request)
-
-            # Notify prefetch worker that space is available
-            if requests_to_process:
-                self._prefetch_cv.notify_all()
-
-        for request in requests_to_process:
-            num_added += add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
-
-        if num_added > 0 and self.verbose:
-            self.logger.info(
-                f"fill_engine added {num_added} requests from prefetch buffer, current_unfinished={self.llm_engine.get_num_unfinished_requests()}"
-            )
-
-        return num_added
-
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
@@ -551,27 +491,6 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
-        num_processed = self.fill_engine()
-
-        if num_processed == 0 and self.verbose:
-            should_stop = self._should_stop()
-            current_unfinished = self.llm_engine.get_num_unfinished_requests()
-            queue_size = "unknown"
-            prefetch_buffer_size = len(self._prefetch_buffer) if hasattr(self, "_prefetch_buffer") else "no buffer"
-            buffer_size = len(self._prefetch_buffer) if hasattr(self, "_prefetch_buffer") else "no buffer"
-
-            try:
-                queue_size = self.prompt_queue.qsize()
-            except Exception as e:
-                queue_size = f"error: {e}"
-
-            self.logger.info(
-                f"Nothing added by fill_engine, but continuing to process existing requests. "
-                f"num_processed={num_processed}, should_stop={should_stop}, "
-                f"unfinished_requests={current_unfinished}, inference_batch_size={self.inference_batch_size}, "
-                f"queue_size={queue_size}, prefetch_buffer_size={prefetch_buffer_size}, "
-                f"buffer_size={buffer_size}, timeout={timeout}"
-            )
 
         tracking = _init_tool_tracking()
         request_outputs = defaultdict(list)
