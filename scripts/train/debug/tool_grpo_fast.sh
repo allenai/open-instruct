@@ -41,6 +41,7 @@ uv run python mason.py \
     --model_name_or_path Qwen/Qwen3-1.7B \
     --stop_strings "</answer>" \
     --apply_verifiable_reward true \
+    --verbose True \
     --temperature 1.0 \
     --ground_truths_key ground_truth \
     --sft_messages_key messages \
