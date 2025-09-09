@@ -76,7 +76,7 @@ def _robust_queue_get(q, timeout=None):
     """Get item from queue with retries and logging."""
     try:
         return q.get(timeout=timeout)
-    except queue.Empty, TimeoutError as e:
+    except (queue.Empty, TimeoutError) as e:
         logger.info(f"Failed to get item from queue: {e}")
 
 
@@ -85,7 +85,7 @@ def _robust_queue_put(q, item, timeout=None):
     """Put item into queue with retries and logging."""
     try:
         return q.put(item, timeout=timeout)
-    except queue.Full, TimeoutError as e:
+    except (queue.Full, TimeoutError) as e:
         logger.info(f"Failed to put item into queue: {e}")
 
 
