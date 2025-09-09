@@ -52,44 +52,6 @@ from open_instruct.utils import ray_get_with_progress
 logger = logger_utils.setup_logger(__name__)
 
 
-def _log_queue_retry_attempt(retry_state):
-    """Log queue operation retry attempts."""
-    logger.warning(
-        f"Queue operation failed on attempt {retry_state.attempt_number}. "
-        f"Retrying in {retry_state.next_action.sleep} seconds. "
-        f"Exception: {retry_state.outcome.exception()}"
-    )
-
-
-def _queue_retry_decorator(operation_name: str):
-    """Create a tenacity retry decorator for queue operations."""
-    return tenacity.retry(
-        wait=tenacity.wait_exponential(multiplier=1, min=1, max=10),
-        retry=tenacity.retry_if_exception_type((queue.Empty, queue.Full, TimeoutError)),
-        before_sleep=_log_queue_retry_attempt,
-        reraise=True,
-    )
-
-
-@_queue_retry_decorator("queue_get")
-def _robust_queue_get(q, timeout=None):
-    """Get item from queue with retries and logging."""
-    try:
-        return q.get(timeout=timeout)
-    except (queue.Empty, TimeoutError) as e:
-        logger.info(f"Failed to get item from queue: {e}")
-        raise
-
-
-@_queue_retry_decorator("queue_put")
-def _robust_queue_put(q, item, timeout=None):
-    """Put item into queue with retries and logging."""
-    try:
-        return q.put(item, timeout=timeout)
-    except (queue.Full, TimeoutError) as e:
-        logger.info(f"Failed to put item into queue: {e}")
-
-
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
 # Turns out Ray doesnt necessarily place bundles together,
 # so this function is used to get the bundle indices of a placement group
@@ -435,11 +397,6 @@ class LLMRayActor:
         else:
             self.executor = None
 
-        # Prefetch buffer components
-        self._prefetch_buffer = collections.deque()
-        self._prefetch_cv = threading.Condition()
-        self._prefetch_thread = None
-
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
@@ -472,7 +429,8 @@ class LLMRayActor:
         self._should_stop_value = False
         self._should_stop_timeout_s = 5
 
-        # Start prefetch thread
+        self._prefetch_buffer = collections.deque()
+        self._prefetch_cv = threading.Condition()
         self._prefetch_thread = threading.Thread(target=self._prefetch_worker, daemon=True)
         self._prefetch_thread.start()
 
@@ -486,20 +444,6 @@ class LLMRayActor:
             else:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
-
-    def _check_and_restart_prefetch_thread(self):
-        """Check if prefetch thread is alive and restart if necessary."""
-        if not self._prefetch_thread or not self._prefetch_thread.is_alive():
-            if self.verbose:
-                self.logger.warning(
-                    f"Prefetch thread is dead! Restarting... "
-                    f"buffer_size={len(self._prefetch_buffer)}, "
-                    f"buffer_size={len(self._prefetch_buffer)}"
-                )
-            self._prefetch_thread = threading.Thread(target=self._prefetch_worker, daemon=True)
-            self._prefetch_thread.start()
-            if self.verbose:
-                self.logger.info("Prefetch thread restarted successfully")
 
     def _prefetch_worker(self):
         """Background worker that prefetches requests until we have enough buffered."""
@@ -522,14 +466,11 @@ class LLMRayActor:
                     continue
 
                 current_unfinished = self.llm_engine.get_num_unfinished_requests()
-
-                if self.inference_batch_size is not None and current_unfinished >= self.inference_batch_size:
+                if current_unfinished >= self.inference_batch_size:
                     self._prefetch_cv.wait(timeout=0.1)  # shorter wait is OK
                     continue
             try:
                 request = self.prompt_queue.get(timeout=0.1)
-
-                # Directly add request to llm_engine instead of buffering
                 num_added = add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
 
                 if self.verbose and num_added > 0:
@@ -542,13 +483,12 @@ class LLMRayActor:
                     self._prefetch_cv.notify_all()
 
             except queue.Empty:
-                # Nothing available right now; loop around.
                 continue
 
     def _insert_result_to_queue(self, result, is_eval: bool):
         """Insert result into the appropriate queue with blocking put."""
         results_queue = self.eval_results_queue if is_eval else self.results_queue
-        results_queue.put(result)  # Blocking put
+        results_queue.put(result)
 
     def fill_engine(self):
         """Fill the LLM engine queue with requests until inference_batch_size is reached.
@@ -684,26 +624,6 @@ class LLMRayActor:
             final_unfinished = self.llm_engine.get_num_unfinished_requests()
             pending_tools = len(tracking["pending_tool_futures"])
             if final_unfinished + pending_tools == 0:
-                # Enhanced diagnostics for the critical exit condition
-                if self.verbose:
-                    prefetch_buffer_size = (
-                        len(self._prefetch_buffer) if hasattr(self, "_prefetch_buffer") else "no buffer"
-                    )
-                    buffer_size = len(self._prefetch_buffer) if hasattr(self, "_prefetch_buffer") else "no buffer"
-                    should_stop = self._should_stop()
-                    queue_size = "unknown"
-                    try:
-                        queue_size = self.prompt_queue.qsize()
-                    except Exception:
-                        queue_size = "error"
-
-                    self.logger.info(
-                        f"EXITING process_from_queue: no work remaining. "
-                        f"final_unfinished={final_unfinished}, pending_tools={pending_tools}, "
-                        f"should_stop={should_stop}, queue_size={queue_size}, "
-                        f"prefetch_buffer_size={prefetch_buffer_size}, buffer_size={buffer_size}, "
-                        f"total_processed={total_processed}, iteration_count={iteration_count}"
-                    )
                 exit_reason = "no work remaining"
                 break
 
