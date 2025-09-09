@@ -1,5 +1,5 @@
 MODEL_NAME=/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/olmo3-hparam-search/olmo2.5-6T-R5-NO_LR_FIX-olmo2-tulu3-mix-num_3
-EXP_NAME=olmo2.5-6T-R5-NO_LR_FIX-valpy-testing
+EXP_NAME=olmo2.5-6T-R5-NO_LR_FIX-valpy-testing-more_data
 python mason.py \
     --cluster ai2/augusta \
     --workspace ai2/olmo-instruct \
