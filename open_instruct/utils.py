@@ -825,11 +825,7 @@ class BeakerRuntimeConfig:
 
 
 def is_beaker_job() -> bool:
-    has_beaker_job = "BEAKER_JOB_ID" in os.environ
-    logger.info(f"is_beaker_job: BEAKER_JOB_ID present: {has_beaker_job}")
-    if has_beaker_job:
-        logger.info(f"is_beaker_job: BEAKER_JOB_ID value: {os.environ.get('BEAKER_JOB_ID')}")
-    return has_beaker_job
+    return "BEAKER_JOB_ID" in os.environ
 
 
 def get_beaker_experiment_info(experiment_id: str) -> Optional[dict]:
@@ -961,12 +957,7 @@ def maybe_update_beaker_description(
         wandb_url: Optional wandb URL to include
         original_descriptions: Cache of original descriptions for progress updates
     """
-    logger.info(
-        f"maybe_update_beaker_description called with: current_step={current_step}, total_steps={total_steps}, wandb_url={wandb_url}"
-    )
-
     if not is_beaker_job():
-        logger.info("Not a Beaker job, returning early")
         return
 
     experiment_id = os.environ.get("BEAKER_WORKLOAD_ID")
@@ -976,8 +967,6 @@ def maybe_update_beaker_description(
         )
         return
 
-    logger.info(f"BEAKER_WORKLOAD_ID: {experiment_id}")
-
     try:
         client = beaker.Beaker.from_env()
     except beaker.exceptions.ConfigurationError as e:
@@ -986,62 +975,53 @@ def maybe_update_beaker_description(
 
     try:
         spec = client.experiment.get(experiment_id)
-        current_description = spec.description or ""
-        logger.info(
-            f"Current Beaker description: {current_description[:100]}..."
-            if len(current_description) > 100
-            else f"Current Beaker description: {current_description}"
-        )
     except beaker.exceptions.ExperimentNotFound:
-        logger.warning(f"Failed to get Beaker experiment with ID: {experiment_id}")
-        logger.warning("This might be fine if you are e.g. running in an interactive job.")
+        logger.warning(
+            f"Failed to get Beaker experiment with ID: {experiment_id}"
+            "This might be fine if you are e.g. running in an interactive job."
+        )
         return
 
+    if experiment_id not in original_descriptions:
+        original_descriptions[experiment_id] = spec.description or ""
+
+    # Build description from scratch each time
     description_components = [
-        current_description,
+        original_descriptions[experiment_id],
         f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}",
         f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}",
     ]
 
     if wandb_url:
         description_components.append(wandb_url)
+
     if current_step is not None:
-        progress_pattern = r"\[[\d.]+% complete \(step \d+/\d+\), (?:eta [^\]]+|finished)\]"
-        base_description = re.sub(progress_pattern, "", current_description).strip()
-
-        if experiment_id not in original_descriptions:
-            original_descriptions[experiment_id] = base_description
-
-        base_description = original_descriptions[experiment_id]
-        description_components[0] = base_description
-
         progress_pct = (current_step / total_steps) * 100
+        elapsed_time = time.time() - start_time
 
         if current_step >= total_steps:
-            progress_bar = f"[100% complete (step {total_steps}/{total_steps}), finished]"
+            time_str = format_eta(elapsed_time)
+            time_label = "finished in"
         else:
-            elapsed_time = time.time() - start_time
             if current_step > 0:
                 time_per_step = elapsed_time / current_step
                 remaining_steps = total_steps - current_step
                 eta_seconds = time_per_step * remaining_steps
-                eta_str = format_eta(eta_seconds)
+                time_str = format_eta(eta_seconds)
             else:
-                eta_str = "calculating..."
-            progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), eta {eta_str}]"
+                time_str = "calculating..."
+            time_label = "eta"
+
+        progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), {time_label} {time_str}]"
         description_components.append(progress_bar)
     new_description = " ".join(description_components)
-    logger.info(
-        f"Setting new Beaker description: {new_description[:200]}..."
-        if len(new_description) > 200
-        else f"Setting new Beaker description: {new_description}"
-    )
     try:
         client.experiment.set_description(experiment_id, new_description)
-        logger.info("Successfully updated Beaker description")
     except requests.exceptions.HTTPError as e:
-        logger.warning(f"Failed to update Beaker description due to HTTP error: {e}")
-        logger.warning("Continuing without updating description - this is likely a temporary Beaker service issue")
+        logger.warning(
+            f"Failed to update Beaker description due to HTTP error: {e}"
+            "Continuing without updating description - this is likely a temporary Beaker service issue"
+        )
 
 
 def live_subprocess_output(cmd: List[str]) -> str:
@@ -1540,18 +1520,6 @@ class RayProcess:
 
 
 def extract_user_query(conversation: str, chat_template_name: str = None) -> str:
-    # only works for tulu_thinker_r1_style
-    # pattern = r"\n\n<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
-
-    # works for tulu_thinker_r1_style and tulu_thinker
-    # pattern = r"<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
-
-    # match = re.search(pattern, conversation, re.DOTALL)
-    # # Return the captured group if found, else return None
-    # return match.group(1).strip() if match else None
-
-    # works for olmo too:
-    # TODO: implement a better logic to get queries before creating the chat template
     pattern = re.compile(
         r"(?:"
         r"<\|user\|\>\n(?P<simple>.*?)\n<\|assistant\|\>\n<think>"  # template 0 (your original)
@@ -1561,14 +1529,13 @@ def extract_user_query(conversation: str, chat_template_name: str = None) -> str
         r")",
         re.DOTALL,
     )
-
     # Get the last user query matched (most recent user turn before assistant <think>)
     matches = list(pattern.finditer(conversation))
     if matches:
         m = matches[-1]
         user_query = (m.group("simple") or m.group("im")).strip()
     else:
-        user_query = None
+        user_query = conversation
 
     return user_query
 
