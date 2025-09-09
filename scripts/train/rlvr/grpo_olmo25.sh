@@ -1,7 +1,8 @@
 # full integration mix
 # dataset_mix="saurabh5/rlvr_acecoder_filtered 63033 hamishivi/rlvr_orz_math_57k_collected 56878 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2 56878 allenai/IF_multi_constraints_upto5 56878"
 # math only mix
-dataset_mix="hamishivi/DAPO-Math-17k-Processed 1.0"
+# dataset_mix="hamishivi/DAPO-Math-17k-Processed 1.0"
+dataset_mix="hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2 1.0"
 
 # all evals
 # evals="minerva_math::hamish_zs_reasoning,gsm8k::zs_cot_latex,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,ifeval::hamish_zs_reasoning,popqa::hamish_zs_reasoning,mmlu:cot::hamish_zs_reasoning,alpaca_eval_v3::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,mbppplus:0-shot-chat::tulu-thinker,codex_humanevalplus:0-shot-chat-v1::tulu-thinker"
@@ -12,8 +13,9 @@ evals="minerva_math::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,a
 # model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round5-100B-olmo25_7b-anneal-2T-f07e3111/step47684-hf"
 # gs_model_name="olmo2.5-2T-midtraining-round5-100B"
 
-model_name_or_path="gs://ai2-llm/checkpoints/lucas/olmo25_7b_lc_64k_6T_M100B_r5-midtrain_round3_qwenlike_s2pdf_gzip2080_just-synth-cwe-yake_yarn-fullonly_10B-c6bda7ae/step2385"
-gs_model_name="olmo2.5-LC-64k-c6bda7ae"
+# model_name_or_path="gs://ai2-llm/checkpoints/lucas/olmo25_7b_lc_64k_6T_M100B_r5-midtrain_round3_qwenlike_s2pdf_gzip2080_just-synth-cwe-yake_yarn-fullonly_10B-c6bda7ae/step2385-hf"
+model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/lucas/olmo25_7b_lc_64k_6T_M100B_r5-midtrain_round3_qwenlike_s2pdf_gzip2080_just-synth-cwe-yake_yarn-fullonly_10B-c6bda7ae/step2385-hf"
+gs_model_name="olmo2.5-R5-10BLC-c6bda7ae"
 
 exp_name="grpo_dapo14k_${gs_model_name}"
 EXP_NAME=${EXP_NAME:-${exp_name}}
@@ -61,7 +63,7 @@ python open_instruct/grpo_fast.py \
     --response_length 16384 \
     --pack_length 32768 \
     --model_name_or_path ${model_name_or_path} \
-    --chat_template_name olmo_thinker_r1_style \
+    --chat_template_name olmo_simple_thinker_r1_style \
     --stop_strings "</answer>" \
     --non_stop_penalty False \
     --temperature 1.0 \
