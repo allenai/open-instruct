@@ -504,13 +504,9 @@ class LLMRayActor:
                 continue
 
     def _insert_result_to_queue(self, result, is_eval: bool):
-        """Insert result into the appropriate queue with error handling."""
-        try:
-            results_queue = self.eval_results_queue if is_eval else self.results_queue
-            results_queue.put(result, timeout=10)
-        except queue.Full:
-            queue_name = "eval" if is_eval else "train"
-            self.logger.warning(f"{queue_name} results queue is full, discarding result.")
+        """Insert result into the appropriate queue with blocking put."""
+        results_queue = self.eval_results_queue if is_eval else self.results_queue
+        results_queue.put(result)  # Blocking put - will wait indefinitely
 
     def fill_engine(self):
         """Fill the LLM engine queue with requests until inference_batch_size is reached.
@@ -659,15 +655,13 @@ class LLMRayActor:
                             request_id, request_outputs, tracking, current_time
                         )
 
-                # Engine refill - only refill when at 30% capacity
-                low = int(0.3 * self.inference_batch_size)
-                unfinished = self.llm_engine.get_num_unfinished_requests()
-                if unfinished <= low:
-                    fill_result = self.fill_engine()
-                    if iteration_count % 100 == 0 and self.verbose:
-                        self.logger.info(
-                            f"Engine refill: added {fill_result} requests, unfinished={unfinished}, low_threshold={low}"
-                        )
+                # Engine refill - prefetch worker eliminates blocking queue.get() so no threshold needed
+                fill_result = self.fill_engine()
+                if iteration_count % 100 == 0 and self.verbose:
+                    unfinished = self.llm_engine.get_num_unfinished_requests()
+                    self.logger.info(
+                        f"Engine refill: added {fill_result} requests, unfinished={unfinished}"
+                    )
 
             # If no work to do, break to yield control back to generate_thread,
             # allowing weight_sync_thread to acquire the LLMRayActor lock
