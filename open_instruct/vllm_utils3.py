@@ -483,22 +483,25 @@ class LLMRayActor:
                     continue
 
                 current_unfinished = self.llm_engine.get_num_unfinished_requests()
-                total_capacity = current_unfinished + self._buffered_samples
 
-                if self.inference_batch_size is not None and total_capacity >= self.inference_batch_size:
+                if self.inference_batch_size is not None and current_unfinished >= self.inference_batch_size:
                     self._prefetch_cv.wait(timeout=0.1)  # shorter wait is OK
                     continue
             try:
                 request = self.prompt_queue.get(timeout=0.1)
+
+                # Directly add request to llm_engine instead of buffering
+                num_added = add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
+
+                if self.verbose and num_added > 0:
+                    self.logger.info(
+                        f"Prefetch worker: added {num_added} requests directly to engine, "
+                        f"current_unfinished={self.llm_engine.get_num_unfinished_requests()}"
+                    )
+
                 with self._prefetch_cv:
-                    self._prefetch_buffer.append(request)
-                    self._buffered_samples += request.generation_config.n
                     self._prefetch_cv.notify_all()
-                    if self.verbose and len(self._prefetch_buffer) % 10 == 0:
-                        self.logger.info(
-                            f"Prefetch worker: fetched request, buffer_size={len(self._prefetch_buffer)}, "
-                            f"buffered_samples={self._buffered_samples}"
-                        )
+
             except queue.Empty:
                 # Nothing available right now; loop around.
                 continue
@@ -519,9 +522,6 @@ class LLMRayActor:
             return num_added
 
         with self._prefetch_cv:
-            # Check if prefetch thread is alive and restart if necessary
-            self._check_and_restart_prefetch_thread()
-
             requests_to_process = []
             num_to_add = self.inference_batch_size - self.llm_engine.get_num_unfinished_requests()
             available = len(self._prefetch_buffer)
@@ -611,23 +611,9 @@ class LLMRayActor:
                     self.logger.info(f"process_from_queue exiting: {exit_reason}")
                 return total_processed
 
-            # Log progress every 100 iterations
-            if iteration_count % 100 == 0:
-                unfinished = self.llm_engine.get_num_unfinished_requests()
-                pending_tools = len(tracking["pending_tool_futures"])
-                if self.verbose:
-                    self.logger.info(
-                        f"process_from_queue iteration {iteration_count}: "
-                        f"processed={total_processed}, unfinished={unfinished}, "
-                        f"inference_batch_size={self.inference_batch_size}, "
-                        f"pending_tools={pending_tools}"
-                    )
-
             # Process tool futures
             tool_outputs = self._poll_tool_futures(tracking, self.llm_engine.tokenizer)
             current_time = time.time()
-            if tool_outputs and iteration_count % 100 == 0 and self.verbose:
-                self.logger.info(f"Processing {len(tool_outputs)} tool outputs on iteration {iteration_count}")
 
             for output in tool_outputs:
                 request_id = _extract_base_request_id(output.request_id)
@@ -654,14 +640,6 @@ class LLMRayActor:
                         total_processed += self._maybe_process_and_insert(
                             request_id, request_outputs, tracking, current_time
                         )
-
-                # Engine refill - prefetch worker eliminates blocking queue.get() so no threshold needed
-                fill_result = self.fill_engine()
-                if iteration_count % 100 == 0 and self.verbose:
-                    unfinished = self.llm_engine.get_num_unfinished_requests()
-                    self.logger.info(
-                        f"Engine refill: added {fill_result} requests, unfinished={unfinished}"
-                    )
 
             # If no work to do, break to yield control back to generate_thread,
             # allowing weight_sync_thread to acquire the LLMRayActor lock
