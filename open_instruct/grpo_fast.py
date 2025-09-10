@@ -90,6 +90,7 @@ from open_instruct.dataset_transformation import (
     DATASET_SOURCE_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
+    RAW_USER_QUERY,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
@@ -1183,7 +1184,7 @@ def data_preparation_thread(
     for training_step in range(1, num_training_steps + 1):
         # Get next batch of prompts and responses
         items = queries_prompt_Q.get()
-        queries, ground_truths, datasets = items
+        queries, ground_truths, datasets, raw_user_query = items
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -1191,6 +1192,7 @@ def data_preparation_thread(
             queries = [item for item in queries for _ in range(args.num_samples_per_prompt_rollout)]
             ground_truths = [item for item in ground_truths for _ in range(args.num_samples_per_prompt_rollout)]
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
+            raw_user_query = [item for item in raw_user_query for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             responses, finish_reasons, masks, infos = inference_results_Q.get()
             num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
@@ -1210,8 +1212,9 @@ def data_preparation_thread(
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
-            decoded_queries = tokenizer.batch_decode(queries, skip_special_tokens=True)
-            decoded_queries = [extract_user_query(query) for query in decoded_queries]
+            # TODO: make this configurable wrt what is in the raw query.
+            # currently, is just the first user turn. 
+            decoded_queries = raw_user_query
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
             
             # DEBUG: Log a few sample responses to check for answer tags
@@ -1881,7 +1884,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
     datasets_next = data_next[DATASET_SOURCE_KEY]
-    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
+    raw_user_query_next = data_next[RAW_USER_QUERY]
+    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next, raw_user_query_next))
     param_prompt_Q.put((None, queries_next))
 
     num_total_tokens = 0
@@ -1901,9 +1905,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
                     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
                     datasets_next = data_next[DATASET_SOURCE_KEY]
+                    raw_user_query_next = data_next[RAW_USER_QUERY]
                     with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
                         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
-                queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
+                queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next, raw_user_query_next))
                 param_prompt_Q.put((None, queries_next))
             else:
                 if training_step != 1:
@@ -1913,9 +1918,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
                     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
                     datasets_next = data_next[DATASET_SOURCE_KEY]
+                    raw_user_query_next = data_next[RAW_USER_QUERY]
                     with Timer("🔄 Loading weights using shared memory"):
                         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
-                    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
+                    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next, raw_user_query_next))
                     param_prompt_Q.put((None, queries_next))
 
             # ------------------------------------------------------------------------------------------------

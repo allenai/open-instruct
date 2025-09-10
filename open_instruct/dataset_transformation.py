@@ -615,6 +615,7 @@ DEFAULT_SFT_MESSAGES_KEY = "messages"
 GROUND_TRUTHS_KEY = "ground_truth"
 DATASET_SOURCE_KEY = "dataset"
 RL_RAG_QUESTION_TYPE_KEY = "question_type"
+RAW_USER_QUERY = "raw_user_query"
 
 
 @dataclass
@@ -1036,6 +1037,7 @@ def rlvr_tokenize_rl_rag_v1(
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     dataset_source_key: str = DATASET_SOURCE_KEY,
     question_type_key: str = RL_RAG_QUESTION_TYPE_KEY,
+    raw_user_query_key: str = RAW_USER_QUERY,
     system_prompt_text: Optional[str] = None,
     additional_question_instructions: Optional[Dict[str, str]] = None,
 ):
@@ -1046,6 +1048,10 @@ def rlvr_tokenize_rl_rag_v1(
             messages[0]["content"] = system_prompt_text
         else:
             messages = [{"role": "system", "content": system_prompt_text}] + messages
+
+    # grab the raw query from the messages - first user turn.
+    user_messages_only = [msg for msg in messages if msg["role"] == "user"]
+    row[raw_user_query_key] = user_messages_only[0]["content"]
     
     # RL-rag specific logic: add a question instruction.
     if additional_question_instructions is not None:
