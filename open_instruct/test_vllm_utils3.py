@@ -425,6 +425,7 @@ class TestVLLMUtils3New(unittest.TestCase):
             tracking=tracking,
             dataset_index=0,
             tools=actor.tools,
+            original_sampling_params=actor.request_metadata[request_id]["original_sampling_params"],
             token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=10, generation_time=1.0),
             start_time=1000.0,
         )
@@ -495,6 +496,7 @@ class TestVLLMUtils3New(unittest.TestCase):
             tracking=tracking,
             dataset_index=0,
             tools=actor.tools,
+            original_sampling_params=actor.request_metadata[request_id]["original_sampling_params"],
             token_statistics=TokenStatistics(num_prompt_tokens=5, num_response_tokens=10, generation_time=1.0),
             start_time=1000.0,
         )
@@ -771,7 +773,7 @@ class TestVLLMUtils3New(unittest.TestCase):
 
         # This should raise the AssertionError we're testing for
         with self.assertRaises(AssertionError) as context:
-            result = _finalize_outputs(
+            _finalize_outputs(
                 output=first_request,
                 tracking=tracking,
                 dataset_index=43039,
@@ -920,6 +922,7 @@ class TestVllmUtils3(unittest.TestCase):
             tracking=tracking,
             dataset_index=43039,
             tools={"some_tool": {}},  # Tools enabled
+            original_sampling_params=MagicMock(n=2),
             token_statistics=TokenStatistics(num_prompt_tokens=10, num_response_tokens=6, generation_time=1.0),
             start_time=1000.0,
         )
@@ -980,6 +983,7 @@ class TestVllmUtils3(unittest.TestCase):
             tracking=tracking,
             dataset_index=100,  # Single dataset index for this request
             tools={"some_tool": {}},
+            original_sampling_params=MagicMock(n=2),
             token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=6, generation_time=1.0),
             start_time=1000.0,
         )

@@ -15,6 +15,7 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
+import copy
 import os
 import queue
 import threading
@@ -98,20 +99,68 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
     # Update concatenated outputs
     if output.request_id in tracking["concat_outputs"]:
-        # Assert we're only updating a single output
+        # When updating an existing entry, we extend the token_ids of the first (and only) output
+        # The entry should already have been validated to have exactly 1 output when first stored
+        existing_outputs = tracking["concat_outputs"][output.request_id].outputs
+        logger.error(
+            f"FOUND EXISTING ENTRY for {output.request_id} with {len(existing_outputs)} outputs. "
+            f"This entry should have been created with exactly 1 output. "
+            f"Entry type: {type(tracking['concat_outputs'][output.request_id])}, "
+            f"Outputs type: {type(existing_outputs)}, "
+            f"First output type: {type(existing_outputs[0]) if existing_outputs else 'N/A'}"
+        )
         assert len(tracking["concat_outputs"][output.request_id].outputs) == 1, (
             f"Expected concat_outputs to have exactly 1 output for {output.request_id}, "
             f"but found {len(tracking['concat_outputs'][output.request_id].outputs)}. "
-            f"This indicates multiple outputs were incorrectly stored earlier."
+            f"This indicates multiple outputs were incorrectly stored."
         )
         tracking["concat_outputs"][output.request_id].outputs[0].token_ids.extend(o.token_ids)
     else:
+        # Assert we're not processing the same request_id multiple times
+        assert output.request_id not in tracking["concat_outputs"], (
+            f"Request {output.request_id} is being processed multiple times. "
+            f"It already exists in concat_outputs with {len(tracking['concat_outputs'].get(output.request_id, {}).get('outputs', []))} outputs."
+        )
+
         # Assert when initially storing that we only have one output
         assert len(output.outputs) == 1, (
             f"Expected exactly 1 output when initially storing in concat_outputs for {output.request_id}, "
             f"but got {len(output.outputs)}. This may indicate tool processing created multiple outputs."
         )
-        tracking["concat_outputs"][output.request_id] = output
+
+        # Create a deep copy of the output to prevent reference issues
+        # We need to copy the output object and its outputs list to avoid shared references
+        copied_outputs = [copy.deepcopy(o) for o in output.outputs]
+        assert len(copied_outputs) == 1, f"Copied outputs list has {len(copied_outputs)} items, expected 1"
+
+        output_copy = vllm.RequestOutput(
+            request_id=output.request_id,
+            prompt=output.prompt,
+            prompt_token_ids=output.prompt_token_ids,
+            prompt_logprobs=output.prompt_logprobs,
+            outputs=copied_outputs,
+            finished=output.finished,
+        )
+
+        # Assert the copy has exactly 1 output
+        assert len(output_copy.outputs) == 1, (
+            f"After creating copy, expected 1 output but got {len(output_copy.outputs)} for {output.request_id}. "
+            f"This indicates an issue with the deepcopy or RequestOutput constructor."
+        )
+
+        # Check that it's not the same list object
+        assert output_copy.outputs is not copied_outputs, (
+            "RequestOutput is using the same list object we passed! This could lead to shared references."
+        )
+
+        logger.info(f"Storing {output.request_id} in concat_outputs with {len(output_copy.outputs)} output(s)")
+        tracking["concat_outputs"][output.request_id] = output_copy
+
+        # Final verification
+        assert len(tracking["concat_outputs"][output.request_id].outputs) == 1, (
+            f"After storing, concat_outputs[{output.request_id}] has {len(tracking['concat_outputs'][output.request_id].outputs)} outputs, "
+            f"expected 1. This indicates the outputs list was modified after assignment."
+        )
 
     tracking["masks"][output.request_id].extend([1] * len(o.token_ids))
 
@@ -615,6 +664,12 @@ class LLMRayActor:
             current_time = time.time()
 
             for output in tool_outputs:
+                # Check that tool outputs also have exactly 1 completion
+                assert len(output.outputs) == 1, (
+                    f"Tool output returned {len(output.outputs)} outputs for request {output.request_id}, "
+                    f"but all entries in concat_outputs should have exactly 1 output. "
+                    f"This indicates an entry was incorrectly stored with multiple outputs."
+                )
                 request_id = _extract_base_request_id(output.request_id)
                 request_outputs[request_id].append(output)
                 total_processed += self._maybe_process_and_insert(request_id, request_outputs, tracking, current_time)
@@ -624,6 +679,13 @@ class LLMRayActor:
                 step_outputs = [o for o in self.llm_engine.step() if o.finished]
 
                 for output in step_outputs:
+                    # We always set n=1 for each sub-request in add_request()
+                    assert len(output.outputs) == 1, (
+                        f"vLLM returned {len(output.outputs)} outputs for request {output.request_id}, "
+                        f"but we always set n=1 for sub-requests. This indicates vLLM is not respecting "
+                        f"the n parameter in sampling_params."
+                    )
+
                     base_req_id = _extract_base_request_id(output.request_id)
 
                     # Check if metadata exists for this request
@@ -714,10 +776,13 @@ class LLMRayActor:
             for sub_req_id, output_obj in list(tracking["concat_outputs"].items()):
                 if _extract_base_request_id(sub_req_id) != request_id:
                     continue
+                # Log for debugging
+                logger.info(f"Checking {sub_req_id} in concat_outputs: has {len(output_obj.outputs)} outputs")
                 # Assert that tool-merged outputs have exactly one output
                 assert len(output_obj.outputs) == 1, (
                     f"Tool-merged output for {sub_req_id} has {len(output_obj.outputs)} outputs, "
-                    f"expected exactly 1. This indicates incorrect tool processing or merging."
+                    f"expected exactly 1. This indicates incorrect tool processing or merging. "
+                    f"Output IDs: {[o.index for o in output_obj.outputs] if hasattr(output_obj.outputs[0], 'index') else 'no index attr'}"
                 )
                 canonical[sub_req_id] = output_obj
 
@@ -770,15 +835,41 @@ class LLMRayActor:
                         f"This may indicate vLLM is generating multiple samples per sub-request "
                         f"(e.g., best-of-n sampling)."
                     )
+
+                    # Create deep copies to avoid reference issues
+                    copied_outputs = [copy.deepcopy(o) for o in out.outputs]
+                    assert len(copied_outputs) == 1, (
+                        f"Copied outputs list for stub has {len(copied_outputs)} items, expected 1"
+                    )
+
                     stub = vllm.RequestOutput(
                         request_id=sub_id,
                         prompt=out.prompt,
                         prompt_token_ids=out.prompt_token_ids,
                         prompt_logprobs=out.prompt_logprobs,
-                        outputs=list(out.outputs),
+                        outputs=copied_outputs,
                         finished=True,
                     )
+
+                    # Assert the stub has exactly 1 output
+                    assert len(stub.outputs) == 1, (
+                        f"After creating stub, expected 1 output but got {len(stub.outputs)} for {sub_id}. "
+                        f"This indicates an issue with the list copy or RequestOutput constructor."
+                    )
+
+                    # Check that it's not the same list object
+                    assert stub.outputs is not copied_outputs, (
+                        "RequestOutput stub is using the same list object we passed! This could lead to shared references."
+                    )
+
+                    logger.info(f"Creating stub for {sub_id} in concat_outputs with {len(stub.outputs)} output(s)")
                     tracking["concat_outputs"][sub_id] = stub
+
+                    # Final verification
+                    assert len(tracking["concat_outputs"][sub_id].outputs) == 1, (
+                        f"After storing stub, concat_outputs[{sub_id}] has {len(tracking['concat_outputs'][sub_id].outputs)} outputs, "
+                        f"expected 1. This indicates the outputs list was modified after assignment."
+                    )
                     token_count = len(stub.outputs[0].token_ids) if stub.outputs else 0
                     tracking["masks"][sub_id] = [1] * token_count  # 1 = model tokens, 0 = tool tokens
                     tracking["num_calls"][sub_id] = 0
