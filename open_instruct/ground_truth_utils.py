@@ -700,16 +700,20 @@ class RLRAGExactAnswerVerifier(VerifierFunction):
         # check answer non-empty
         if not answer_string:
             return VerificationResult(score=0.0)
-        # if label is list, max over labels
-        if isinstance(label, str):
+        # Ensure label is a list (handle cases where JSON-decoded label is int/float/etc.)
+        if not isinstance(label, list):
             label = [label]
         grading_response = None
         if self.verifier_strategy == "f1":
-            score = max(f1_score(answer_string, str(lab))["f1"] for lab in label)
+            score = max(float(f1_score(answer_string, str(lab))["f1"]) for lab in label)
         elif self.verifier_strategy == "em":
-            score = max(normalize_answer(answer_string) == normalize_answer(str(lab)) for lab in label)
+            score = max(float(normalize_answer(answer_string) == normalize_answer(str(lab))) for lab in label)
         elif self.verifier_strategy == "judge":
-            score, grading_response = max(self.llm_judge_verifier(answer_string, lab, query) for lab in label)
+            # Select the result with the highest score explicitly
+            score, grading_response = max(
+                (self.llm_judge_verifier(answer_string, str(lab), query) for lab in label),
+                key=lambda x: x[0],
+            )
         else:
             raise ValueError(f"Invalid verifier strategy: {self.verifier_strategy}")
         # if f1 is 0, but format is correct, return 0.1
