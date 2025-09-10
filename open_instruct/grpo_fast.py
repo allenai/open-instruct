@@ -2204,6 +2204,9 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
                 generate_metrics_Q.put_nowait({"time/generation": timer.duration})
             except Full:
                 logger.warning("[Generate Thread] generate metrics queue full, skipping metric")
+        else:
+            # Sleep briefly when no work is processed to avoid tight spinning
+            time.sleep(0.1)
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 

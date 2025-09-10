@@ -557,6 +557,12 @@ class LLMRayActor:
                             f"All available metadata keys: {list(self.request_metadata.keys())}"
                         )
 
+                    # Assert: check sample count before processing
+                    expected_samples = self.request_metadata[base_req_id]["original_sampling_params"].n
+                    current_samples_before = sum(
+                        1 for k in tracking["concat_outputs"].keys() if _extract_base_request_id(k) == base_req_id
+                    )
+
                     result = _handle_output(
                         output,
                         self.tools,
@@ -564,6 +570,14 @@ class LLMRayActor:
                         self.request_metadata[base_req_id]["sampling_params"],
                         self.max_tool_calls,
                         self.executor,
+                    )
+
+                    # Assert: check sample count after processing
+                    current_samples_after = sum(
+                        1 for k in tracking["concat_outputs"].keys() if _extract_base_request_id(k) == base_req_id
+                    )
+                    assert current_samples_after <= expected_samples, (
+                        f"Too many samples for {base_req_id}: expected ≤{expected_samples}, got {current_samples_after} (was {current_samples_before} before). Keys: {[k for k in tracking['concat_outputs'].keys() if _extract_base_request_id(k) == base_req_id]}"
                     )
                     # Result is None when we do more tool processing.
                     if result is not None:
@@ -577,6 +591,10 @@ class LLMRayActor:
             # allowing weight_sync_thread to acquire the LLMRayActor lock
             final_unfinished = self.llm_engine.get_num_unfinished_requests()
             pending_tools = len(tracking["pending_tool_futures"])
+            if self.verbose:
+                self.logger.info(
+                    f"process_from_queue iteration {iteration_count}: unfinished={final_unfinished}, pending_tools={pending_tools}"
+                )
             if final_unfinished + pending_tools == 0:
                 exit_reason = "no work remaining"
                 break
@@ -629,31 +647,37 @@ class LLMRayActor:
         """
         expected_n = self.request_metadata[request_id]["original_sampling_params"].n
 
-        # For tool mode, we need special handling because outputs might be in concat_outputs
-        # instead of request_outputs while being processed by tools
-        if self.tools:
-            concat_outputs_count = sum(
-                1 for k in tracking["concat_outputs"].keys() if "_".join(k.split("_")[:-1]) == request_id
-            )
-            # If we have all samples in concat_outputs but not in request_outputs,
-            # we need to wait or extract them from concat_outputs
-            if concat_outputs_count == expected_n and len(request_outputs[request_id]) < expected_n:
-                # Convert concat_outputs to request_outputs format for processing
-                # Get existing request_ids to avoid duplicates
-                existing_request_ids = {out.request_id for out in request_outputs[request_id]}
+        # When tools are enabled, _finalize_outputs expects every sub-request id
+        # to exist in tracking["concat_outputs"], even if it never used tools.
+        # Backfill stubs for engine-only sub-requests.
+        if self.tools and len(request_outputs[request_id]) < expected_n:
+            # Merge any finished tool-path samples for this base request.
+            existing_request_ids = {out.request_id for out in request_outputs[request_id]}
+            to_delete = []
+            for req_id, output_obj in list(tracking["concat_outputs"].items()):
+                if _extract_base_request_id(req_id) != request_id:
+                    continue
+                if output_obj.request_id in existing_request_ids:
+                    to_delete.append(req_id)
+                    continue
+                # Treat this tool-path sample as completed for aggregation purposes.
+                request_outputs[request_id].append(output_obj)
+                existing_request_ids.add(output_obj.request_id)
+                to_delete.append(req_id)
 
-                for req_id, output_obj in tracking["concat_outputs"].items():
-                    if _extract_base_request_id(req_id) != request_id:
-                        continue
-                    # Only append if not already present
-                    if output_obj.request_id not in existing_request_ids:
-                        request_outputs[request_id].append(output_obj)
-                        existing_request_ids.add(output_obj.request_id)
+            # Optionally clean up migrated entries to keep tracking tidy.
+            for req_id in to_delete:
+                tracking["concat_outputs"].pop(req_id, None)
+                tracking["masks"].pop(req_id, None)
+                tracking["num_calls"].pop(req_id, None)
+                tracking["timeout"].pop(req_id, None)
+                tracking["tool_error"].pop(req_id, None)
+                tracking["tool_output"].pop(req_id, None)
+                tracking["tool_runtime"].pop(req_id, None)
+                tracking["tool_called"].pop(req_id, None)
 
-            # Still not enough samples ready
             if len(request_outputs[request_id]) < expected_n:
                 return 0
-
         if len(request_outputs[request_id]) == expected_n:
             outs = request_outputs.pop(request_id)
             result, is_eval = self._process_completed_request(request_id, outs, tracking, current_time)
@@ -815,22 +839,11 @@ class LLMRayActor:
             else:
                 # If we can't make a new request, this tool execution is complete
                 completed_outputs.append(tracking["concat_outputs"][req_id])
-
             dict_keys_to_delete.append(req_id)
 
-        # Track which base request IDs had tool futures removed
-        processed_base_request_ids = set()
+        # Remove the futures we just processed; do NOT clean up metadata here.
         for req_id in dict_keys_to_delete:
-            base_req_id = _extract_base_request_id(req_id)
-            processed_base_request_ids.add(base_req_id)
             tracking["pending_tool_futures"].pop(req_id, None)
-
-        # Check if any base requests no longer have pending tool futures and can be cleaned up
-        for base_req_id in processed_base_request_ids:
-            if not self._has_pending_tool_futures_for_request(base_req_id, tracking):
-                # All tool futures for this request are done, safe to clean up metadata
-                self._cleanup_request_data(base_req_id, tracking)
-
         return completed_outputs
 
     def init_process_group(
