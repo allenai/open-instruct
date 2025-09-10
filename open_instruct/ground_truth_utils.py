@@ -45,6 +45,7 @@ from open_instruct.search_rewards.longform_finegrained_rewards_v2 import compute
 from open_instruct.search_rewards.utils.finegrained_utils import FinegrainedScore 
 from open_instruct.search_rewards.toy_case_multi_dataset_reward import compute_multi_question_reward
 from open_instruct.search_rewards.utils.search_utils import score_query_redundancy
+from open_instruct.search_rewards.utils.run_utils import run_litellm
 from open_instruct.utils import extract_final_answer
 from open_instruct.IFEvalG import instructions_registry
 
@@ -510,6 +511,54 @@ def f1_score(prediction, ground_truth):
     return {"f1": f1, "precision": precision, "recall": recall}
 
 
+# from: https://github.com/centerforaisafety/hle/blob/7b6be5aad6f9b43af3857de7867f3b52f6e4acb3/hle_eval/run_judge_results.py#L16-L33
+GRADER_TEMPLATE = """
+Judge whether the following [response] to [question] is correct or not based on the precise and unambiguous [correct_answer] below.
+
+[question]: {question}
+
+[response]: {response}
+
+Your judgement must be in the format and criteria specified below:
+
+extracted_final_answer: The final exact answer extracted from the [response]. Put the extracted answer as 'None' if there is no exact, final answer to extract from the response.
+
+[correct_answer]: {correct_answer}
+
+reasoning: Explain why the extracted_final_answer is correct or incorrect based on [correct_answer], focusing only on if there are meaningful differences between [correct_answer] and the extracted_final_answer. Do not comment on any background to the problem, do not attempt to solve the problem, do not argue for any answer different than [correct_answer], focus only on whether the answers match.
+
+correct: Answer 'yes' if extracted_final_answer matches the [correct_answer] given above, or is within a small margin of error for numerical problems. Answer 'no' otherwise, i.e. if there if there is any inconsistency, ambiguity, non-equivalency, or if the extracted answer is incorrect.
+
+
+confidence: The extracted confidence score between 0|\%| and 100|\%| from [response]. Put 100 if there is no confidence score available.
+""".strip()
+
+CHOICE_STRINGS = ["yes", "no"]
+
+class LLMJudgeVerifier:
+    """
+    Verifier that computes the LLM judge score between the prediction and the label.
+    """
+
+    def __init__(self, grader_model: str = "gpt-4.1"):
+        self.grader_model = grader_model
+    
+    def __call__(self, prediction, ground_truth, question):
+        """
+        Verifier that computes the LLM judge score between the prediction and the label.
+        """
+        grader_prompt = GRADER_TEMPLATE.format(
+                question=question,
+                correct_answer=ground_truth,
+                response=prediction,
+            )
+        grading_response = run_litellm(self.grader_model, None, grader_prompt)
+
+        match = re.search(r"correct: (yes|no)", grading_response)
+        judge_result = match.group(1) if match else "no"
+        return float(judge_result == "yes"), grading_response
+
+
 class FlanVerifier(VerifierFunction):
     """
     Verifier for Flan tasks that extracts the answer after "The answer is:"
@@ -605,6 +654,57 @@ class ReSearchVerifierF1(VerifierFunction):
             return VerificationResult(score=0.1)
         # otherwise return f1
         return VerificationResult(score=f1)
+
+
+class RLRAGExactAnswerVerifier(VerifierFunction):
+    """
+    Verifier that computes the RL-RAG (exact answer) score between the prediction and the label.
+    """
+
+    def __init__(self, verifier_config: Optional[VerifierConfig] = None, verifier_strategy: str = "judge") -> None:
+        self.answer_pattern = re.compile(r"<answer>(.*?)</answer>", re.IGNORECASE | re.DOTALL)
+        self.boxed_pattern = re.compile(r"\\boxed\{(.*?)\}", re.IGNORECASE | re.DOTALL)
+        self.verifier_strategy = verifier_strategy # "f1" or "em" or "judge"
+        if self.verifier_strategy == "judge":
+            self.llm_judge_verifier = LLMJudgeVerifier()  # using gpt-4.1 by default
+        super().__init__(name="rl_rag_exact_answer", verifier_config=verifier_config, weight=1.0)
+    
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
+        try:
+            label = json.loads(label)
+        except json.JSONDecodeError:
+            label = label.strip()
+        # extract answer
+        answer_match = self.answer_pattern.search(prediction)
+        boxed_match = self.boxed_pattern.search(prediction)
+        if not answer_match and not boxed_match:
+            return VerificationResult(score=0.0)
+        if boxed_match:
+            answer_string = boxed_match.group(1)
+        else:
+            answer_string = answer_match.group(1)
+        # check answer non-empty
+        if not answer_string:
+            return VerificationResult(score=0.0)
+        # if label is list, max over labels
+        if isinstance(label, str):
+            label = [label]
+        grading_response = None
+        if self.verifier_strategy == "f1":
+            score = max(f1_score(answer_string, str(lab))["f1"] for lab in label)
+        elif self.verifier_strategy == "em":
+            score = max(normalize_answer(answer_string) == normalize_answer(str(lab)) for lab in label)
+        elif self.verifier_strategy == "judge":
+            score, grading_response = max(self.llm_judge_verifier(answer_string, lab, query) for lab in label)
+        else:
+            raise ValueError(f"Invalid verifier strategy: {self.verifier_strategy}")
+        # if f1 is 0, but format is correct, return 0.1
+        if score == 0:
+            return VerificationResult(score=0.1, reasoning=grading_response)
+        # otherwise return f1
+        return VerificationResult(score=score, reasoning=grading_response)
 
 
 class R1SearchVerifier(VerifierFunction):
