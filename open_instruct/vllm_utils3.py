@@ -647,38 +647,49 @@ class LLMRayActor:
         """
         expected_n = self.request_metadata[request_id]["original_sampling_params"].n
 
-        # When tools are enabled, _finalize_outputs expects every sub-request id
-        # to exist in tracking["concat_outputs"], even if it never used tools.
-        # Backfill stubs for engine-only sub-requests.
-        if self.tools and len(request_outputs[request_id]) < expected_n:
-            # Merge any finished tool-path samples for this base request.
+        if self.tools:
             existing_request_ids = {out.request_id for out in request_outputs[request_id]}
-            to_delete = []
             for req_id, output_obj in list(tracking["concat_outputs"].items()):
                 if _extract_base_request_id(req_id) != request_id:
                     continue
                 if output_obj.request_id in existing_request_ids:
-                    to_delete.append(req_id)
                     continue
                 # Treat this tool-path sample as completed for aggregation purposes.
                 request_outputs[request_id].append(output_obj)
                 existing_request_ids.add(output_obj.request_id)
-                to_delete.append(req_id)
-
-            # Optionally clean up migrated entries to keep tracking tidy.
-            for req_id in to_delete:
-                tracking["concat_outputs"].pop(req_id, None)
-                tracking["masks"].pop(req_id, None)
-                tracking["num_calls"].pop(req_id, None)
-                tracking["timeout"].pop(req_id, None)
-                tracking["tool_error"].pop(req_id, None)
-                tracking["tool_output"].pop(req_id, None)
-                tracking["tool_runtime"].pop(req_id, None)
-                tracking["tool_called"].pop(req_id, None)
-
+            # If we still don't have all expected samples, wait for more.
             if len(request_outputs[request_id]) < expected_n:
                 return 0
         if len(request_outputs[request_id]) == expected_n:
+            # Ensure there is a tracking stub for every sub-request (even if no tools were used).
+            if self.tools:
+                outs = request_outputs[request_id]
+                for j, out in enumerate(outs):
+                    sub_id = f"{request_id}_{j}"
+                    if sub_id not in tracking["concat_outputs"]:
+                        # Create a stub so _finalize_outputs can read masks/metadata uniformly.
+                        tracking["concat_outputs"][sub_id] = vllm.RequestOutput(
+                            request_id=sub_id,
+                            prompt=out.prompt,
+                            prompt_token_ids=out.prompt_token_ids,
+                            prompt_logprobs=out.prompt_logprobs,
+                            outputs=list(out.outputs),
+                            finished=True,
+                        )
+                        # Initialize tool bookkeeping fields expected downstream.
+                        token_count = (
+                            len(tracking["concat_outputs"][sub_id].outputs[0].token_ids)
+                            if tracking["concat_outputs"][sub_id].outputs
+                            else 0
+                        )
+                        tracking["masks"][sub_id] = [1] * token_count  # 1 = model tokens, 0 = tool tokens
+                        tracking["num_calls"][sub_id] = 0
+                        tracking["timeout"][sub_id] = False
+                        tracking["tool_error"][sub_id] = ""
+                        tracking["tool_output"][sub_id] = ""
+                        tracking["tool_runtime"][sub_id] = 0.0
+                        tracking["tool_called"][sub_id] = False
+
             outs = request_outputs.pop(request_id)
             result, is_eval = self._process_completed_request(request_id, outs, tracking, current_time)
             self._insert_result_to_queue(result, is_eval=is_eval)
