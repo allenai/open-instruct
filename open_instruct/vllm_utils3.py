@@ -476,8 +476,10 @@ class LLMRayActor:
             int: Number of requests processed
         """
         num_processed = self.fill_engine(timeout=timeout)
-
-        if num_processed == 0:
+        
+        # Even if we didn't add new requests, we may still have unfinished ones
+        # in the engine from a previous cycle. Continue stepping to drain them.
+        if num_processed == 0 and not self.llm_engine.has_unfinished_requests():
             return num_processed
 
         tracking = _init_tool_tracking()

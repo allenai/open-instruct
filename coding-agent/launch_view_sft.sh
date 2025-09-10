@@ -17,7 +17,7 @@ exp_name=rlvr_code_view_tool_sft
         --exp_name ${exp_name} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 8 \
-        --num_unique_prompts_rollout 64 \
+        --num_unique_prompts_rollout 72 \
         --num_mini_batches 4 \
         --num_epochs 1 \
         --learning_rate 1e-6 \
@@ -40,8 +40,8 @@ exp_name=rlvr_code_view_tool_sft
         --sft_messages_key messages \
         --total_episodes 1200000 \
         --deepspeed_stage 3 \
-        --num_learners_per_node 8 8 \
-        --vllm_num_engines 16 \
+        --num_learners_per_node 8 \
+        --vllm_num_engines 24 \
         --vllm_tensor_parallel_size 1 \
         --backend_timeout 180 \
         --lr_scheduler_type constant \
