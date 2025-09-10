@@ -75,6 +75,11 @@ class VerifierConfig:
 
         return cls(**matching_kwargs)
 
+@dataclass
+class RLRAGExactAnswerVerifierConfig(VerifierConfig):
+    verifier_strategy: str = "judge"
+    """The strategy to use for verification in rl_rag_exact_answer verifier: 'f1', 'em', or 'judge'"""
+
 
 @dataclass
 class LMJudgeVerifierConfig(VerifierConfig):
@@ -661,13 +666,20 @@ class RLRAGExactAnswerVerifier(VerifierFunction):
     Verifier that computes the RL-RAG (exact answer) score between the prediction and the label.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None, verifier_strategy: str = "judge") -> None:
+    def __init__(self, verifier_config: Optional[RLRAGExactAnswerVerifierConfig] = None) -> None:
         self.answer_pattern = re.compile(r"<answer>(.*?)</answer>", re.IGNORECASE | re.DOTALL)
         self.boxed_pattern = re.compile(r"\\boxed\{(.*?)\}", re.IGNORECASE | re.DOTALL)
-        self.verifier_strategy = verifier_strategy # "f1" or "em" or "judge"
+        self.verifier_strategy = getattr(verifier_config, "verifier_strategy", "judge") if verifier_config else "judge" # "f1" or "em" or "judge"
         if self.verifier_strategy == "judge":
             self.llm_judge_verifier = LLMJudgeVerifier()  # using gpt-4.1 by default
         super().__init__(name="rl_rag_exact_answer", verifier_config=verifier_config, weight=1.0)
+    
+    @classmethod
+    def get_config_class(cls) -> type:
+        """
+        Return the configuration class for this verifier.
+        """
+        return RLRAGExactAnswerVerifierConfig
     
     def __call__(
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None

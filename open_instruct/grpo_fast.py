@@ -280,6 +280,8 @@ class Args:
     """whether to apply verifiable reward"""
     verification_reward: float = 10.0
     """the reward value for verifiable responses"""
+    verifier_strategy: str = "judge"
+    """The strategy to use for verification in rl_rag_exact_answer verifier: 'f1', 'em', or 'judge'"""
 
     # -- llm verifiers
     llm_judge_model: str = "azure/gpt-4o-mini-standard"
