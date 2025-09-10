@@ -90,6 +90,7 @@ from open_instruct.dataset_transformation import (
     DATASET_SOURCE_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
+    QUERY_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
@@ -351,6 +352,8 @@ class Args:
     """Where to save the model"""
     save_traces: bool = False
     """Whether to save learning data traces"""
+    save_rollouts: bool = False
+    """Whether to save learning data rollouts"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
     keep_last_n_checkpoints: int = 3
@@ -1183,7 +1186,7 @@ def data_preparation_thread(
     for training_step in range(1, num_training_steps + 1):
         # Get next batch of prompts and responses
         items = queries_prompt_Q.get()
-        queries, ground_truths, datasets = items
+        queries, ground_truths, datasets, queries_next = items
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -1191,6 +1194,7 @@ def data_preparation_thread(
             queries = [item for item in queries for _ in range(args.num_samples_per_prompt_rollout)]
             ground_truths = [item for item in ground_truths for _ in range(args.num_samples_per_prompt_rollout)]
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
+            queries_next = [item for item in queries_next for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             responses, finish_reasons, masks, infos = inference_results_Q.get()
             num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
@@ -1210,8 +1214,7 @@ def data_preparation_thread(
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
-            decoded_queries = tokenizer.batch_decode(queries, skip_special_tokens=True)
-            decoded_queries = [extract_user_query(query) for query in decoded_queries]
+            decoded_queries = queries_next  # just the question on its own, without the system prompt.
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
             
             # DEBUG: Log a few sample responses to check for answer tags
@@ -1448,6 +1451,18 @@ def data_preparation_thread(
             os.makedirs(args.output_dir, exist_ok=True)
             with open(f"{args.output_dir}/traces_{args.run_name}.jsonl", "a") as f:
                 json.dump(traces, f)
+                f.write("\n")
+        # adjusted form just saves queries, responses, scores, ground truths
+        if args.save_rollouts:
+            rollouts = {
+                "queries": decoded_queries,
+                "responses": decoded_responses,
+                "scores": scores.tolist(),
+                "ground_truths": ground_truths,
+            }
+            os.makedirs(args.output_dir, exist_ok=True)
+            with open(f"{args.output_dir}/rollouts_{args.run_name}.jsonl", "a") as f:
+                json.dump(rollouts, f)
                 f.write("\n")
 
         # Put the packed sequences and metrics into the output queue
@@ -1881,7 +1896,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
     datasets_next = data_next[DATASET_SOURCE_KEY]
-    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
+    queries_next = data_next[QUERY_KEY]
+    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next, queries_next))
     param_prompt_Q.put((None, queries_next))
 
     num_total_tokens = 0
@@ -1901,9 +1917,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
                     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
                     datasets_next = data_next[DATASET_SOURCE_KEY]
+                    queries_next = data_next[QUERY_KEY]
                     with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
                         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
-                queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
+                queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next, queries_next))
                 param_prompt_Q.put((None, queries_next))
             else:
                 if training_step != 1:
@@ -1913,9 +1930,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
                     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
                     datasets_next = data_next[DATASET_SOURCE_KEY]
+                    queries_next = data_next[QUERY_KEY]
                     with Timer("🔄 Loading weights using shared memory"):
                         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
-                    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
+                    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next, queries_next))
                     param_prompt_Q.put((None, queries_next))
 
             # ------------------------------------------------------------------------------------------------

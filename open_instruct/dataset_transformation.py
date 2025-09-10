@@ -615,6 +615,7 @@ DEFAULT_SFT_MESSAGES_KEY = "messages"
 GROUND_TRUTHS_KEY = "ground_truth"
 DATASET_SOURCE_KEY = "dataset"
 RL_RAG_QUESTION_TYPE_KEY = "question_type"
+RAW_QUERY_KEY = "raw_query"
 
 
 @dataclass
@@ -1046,6 +1047,14 @@ def rlvr_tokenize_rl_rag_v1(
             messages[0]["content"] = system_prompt_text
         else:
             messages = [{"role": "system", "content": system_prompt_text}] + messages
+
+    # extract the question and save it as an explicit query.
+    if len(messages) > 1:
+        row[RAW_QUERY_KEY] = messages[1]["content"]
+        assert messages[1]["role"] == "user"
+    else:
+        row[RAW_QUERY_KEY] = messages[0]["content"]
+        assert messages[0]["role"] == "user"
     
     # RL-rag specific logic: add a question instruction.
     if additional_question_instructions is not None:

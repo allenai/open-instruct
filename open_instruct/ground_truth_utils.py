@@ -666,6 +666,154 @@ class R1SearchVerifier(VerifierFunction):
         return VerificationResult(score=0.0)
 
 
+class ReSearchVerifierLMConfig(VerifierConfig):
+    """
+    Config for the ReSearchVerifierLM.
+    """
+    llm_judge_model: str
+    llm_judge_max_tokens: int = 4096
+    llm_judge_temperature: float = 1.0
+    llm_judge_prompt = (
+            "Judge whether the following [response] to [question] is correct based on the precise and unambiguous [correct_answer].\n\n"
+            "[question]: {question}\n\n[response]: {response}\n\n"
+            "Your judgement must be:\n"
+            "- extracted_final_answer: the final exact answer extracted from [response] (or None).\n"
+            "[correct_answer]: {correct_answer}\n\n"
+            "reasoning: brief rationale focusing only on equivalence to [correct_answer].\n"
+            "correct: yes or no (yes if equivalent or within trivial formatting differences).\n"
+        )
+
+
+class ReSearchVerifierLM(VerifierFunction):
+
+    # Use WeakKeyDictionary to automatically clean up clients when event loops are garbage collected
+    _client_cache = weakref.WeakKeyDictionary()
+
+    """
+    Verifier that uses a language model decide exact match between the prediction and the label.
+    """
+    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+        self.verifier_config = verifier_config
+        super().__init__("re_search_llm_judge", verifier_config=verifier_config, weight=1.0)
+
+    def get_cost(self, response, model: str) -> float:
+        """
+        Compute API cost using token usage and PRICE_PER_TOKEN map (normalized to USD).
+        """
+        model_name = model.split("/")[-1]
+        model_name = model_name.replace("-standard", "")
+        try:
+            prompt_tokens = getattr(response.usage, "prompt_tokens", 0)
+            completion_tokens = getattr(response.usage, "completion_tokens", 0)
+        except Exception:
+            prompt_tokens, completion_tokens = 0, 0
+        return (
+            PRICE_PER_TOKEN.get(model_name, {}).get("input", 0) * prompt_tokens
+            + PRICE_PER_TOKEN.get(model_name, {}).get("output", 0) * completion_tokens
+        )
+
+    def _extract_answer_string(self, response: str):
+        # matching shannons mcp tool extraction.
+        # Try to extract answer string between <answer> and </answer> or in \boxed{}
+        # If not found, return the full response
+        # If there are multiple answer strings, return the last one
+
+        # Try to extract answer string between <answer> and </answer> tags
+        answer_match = re.findall(r'<answer>(.*?)</answer>', response, re.DOTALL)
+        if answer_match:
+            return answer_match[-1].strip()
+        
+        # Try to extract answer string from \boxed{} format
+        boxed_match = re.findall(r'\\boxed\{([^}]*)\}', response)
+        if boxed_match:
+            return boxed_match[-1].strip()
+        
+        # Try to extract answer string between "Exact Answer:" and "\nConfidence:"
+        exact_answer_match = re.findall(r'Exact Answer:(.*?)\nConfidence:', response, re.DOTALL)
+        if exact_answer_match:
+            return exact_answer_match[-1].strip()
+        
+        # Otherwise, take the string after </think> and only return the last 4k characters
+        think_match = re.findall(r'</think>(.*)', response, re.DOTALL)
+        if think_match:
+            return think_match[-1].strip()[-4096:]
+        
+        return response[-4096:]
+        
+    async def async_call(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
+        """
+        Asynchronously grade the response using an LLM, with retries and cost tracking.
+        """
+        # Prepare prompt
+        prediction_answer = self._extract_answer_string(prediction)
+        grader_prompt = self.verifier_config.llm_judge_prompt.format(
+            question=query, response=prediction_answer, correct_answer=label
+        )
+
+        # Retry on transient failures
+        max_retries = 3
+        retry_delay = 1.0
+        for attempt in range(max_retries):
+            try:
+                messages = build_messages(grader_prompt)
+                response = await acompletion(
+                    model=self.verifier_config.llm_judge_model,
+                    messages=messages,
+                    temperature=self.verifier_config.llm_judge_temperature,
+                    max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
+                )
+                # Parse judge text
+                text = getattr(getattr(response, "choices", [{}])[0], "message", {}).get("content", "") if hasattr(response, "choices") else ""
+                if not text:
+                    # Fallback to possible alt attribute
+                    text = getattr(response, "content", "") or ""
+                match = re.search(r"correct:\s*(yes|no)", text, flags=re.IGNORECASE)
+                score = 1.0 if (match and match.group(1).lower() == "yes") else 0.0
+                cost = self.get_cost(response, self.verifier_config.llm_judge_model)
+                return VerificationResult(score=score, cost=cost, reasoning=text)
+            except Exception as e:
+                logger.warning(f"ReSearchVerifierLM attempt {attempt + 1}/{max_retries} failed: {str(e)}")
+                if attempt == max_retries - 1:
+                    logger.error("ReSearchVerifierLM failed after retries. Returning default score 0.0")
+                    return VerificationResult(score=0.0, cost=0.0, reasoning=f"Error: {str(e)}")
+                await asyncio.sleep(retry_delay * (2 ** attempt))
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                raise RuntimeError(
+                    "Cannot call synchronous __call__ method from within an async context. Use async_call instead."
+                )
+            else:
+                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+        except RuntimeError:
+            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+
+    @classmethod
+    async def cleanup_all_clients(cls):
+        """
+        Manually close all cached clients. Call this before shutting down to avoid cleanup warnings.
+        """
+        clients_to_close = list(cls._client_cache.values())
+        cls._client_cache.clear()
+
+        for client in clients_to_close:
+            try:
+                await client.close()
+            except Exception as e:
+                logger.warning(f"Error closing OpenAI client: {e}")
+                # Suppress the error to avoid breaking shutdown
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        return ReSearchVerifierLMConfig
+
+
 class MaxLenVerifier(VerifierFunction):
     """
     Verifier that checks if the length of the prediction is within the maximum allowed length.
@@ -1164,3 +1312,4 @@ async def cleanup_all_llm_judge_clients():
     Cleanup function to properly close all LLM judge clients before shutdown.
     """
     await LMJudgeVerifier.cleanup_all_clients()
+    await ReSearchVerifierLM.cleanup_all_clients()
