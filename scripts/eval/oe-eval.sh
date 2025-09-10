@@ -353,7 +353,7 @@ for TASK in "${TASKS[@]}"; do
         --gpus "$GPU_COUNT" \
         --gantry-args "$GANTRY_ARGS" \
         ${REVISION_ARG} \
-        --cluster ai2/augusta-google-1 \
+        --cluster ai2/augusta \
         --beaker-retries 2 \
         --beaker-image "$BEAKER_IMAGE" \
         --beaker-priority  "$PRIORITY" \
