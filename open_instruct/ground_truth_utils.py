@@ -700,9 +700,9 @@ class RLRAGExactAnswerVerifier(VerifierFunction):
         # check answer non-empty
         if not answer_string:
             return VerificationResult(score=0.0)
-        # if label is list, max over labels
-        if isinstance(label, str):
-            label = [label]
+        # Ensure label is iterable; wrap non-list labels (including ints) into a list
+        if not isinstance(label, list):
+            label = [str(label)]
         grading_response = None
         if self.verifier_strategy == "f1":
             score = max(f1_score(answer_string, str(lab))["f1"] for lab in label)
