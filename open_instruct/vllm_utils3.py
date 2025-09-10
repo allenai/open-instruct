@@ -201,7 +201,9 @@ def _process_outputs_with_tools(
     return result
 
 
-def _finalize_outputs(output, tracking, dataset_index, tools, token_statistics=None, start_time=None):
+def _finalize_outputs(
+    output, tracking, dataset_index, tools, original_sampling_params=None, token_statistics=None, start_time=None
+):
     """Prepare final outputs based on whether tools were used."""
     if not tools:
         return _process_outputs(
@@ -262,7 +264,7 @@ def _finalize_outputs(output, tracking, dataset_index, tools, token_statistics=N
     )
 
     # Add final validation to catch the specific error early
-    expected_response_count = len(relevant_outputs)  # Should equal generation_config.n
+    expected_response_count = original_sampling_params.n if original_sampling_params else len(relevant_outputs)
     actual_response_count = len(result.responses)
     if actual_response_count != expected_response_count:
         raise AssertionError(
@@ -603,6 +605,7 @@ class LLMRayActor:
             tracking,
             metadata["dataset_index"],
             self.tools,
+            original_sampling_params=metadata["original_sampling_params"],
             token_statistics=TokenStatistics(
                 num_prompt_tokens=metadata["prompt_tokens"],
                 num_response_tokens=total_generation_tokens,
