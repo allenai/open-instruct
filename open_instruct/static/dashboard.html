@@ -39,9 +39,49 @@
                 </div>
             </div>
         </div>
+        <h2>🎯 Training Progress</h2>
+        <div id="training-progress-container">
+            <div class="token-card" style="border-left-color: #4CAF50;">
+                <div class="token-grid">
+                    <div class="token-stat">
+                        <div class="token-label">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <h2>🧠 Model Utilization</h2>
+        <div id="model-utilization-container">
+            <div class="token-card" style="border-left-color: #E91E63;">
+                <div class="token-grid">
+                    <div class="token-stat">
+                        <div class="token-label">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <h2>💾 Memory Usage</h2>
+        <div id="memory-usage-container">
+            <div class="token-card" style="border-left-color: #FF9800;">
+                <div class="token-grid">
+                    <div class="token-stat">
+                        <div class="token-label">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
         <h2>💾 KV Cache</h2>
         <div id="kv-cache-container">
             <div class="token-card" style="border-left-color: #FF9800;">
+                <div class="token-grid">
+                    <div class="token-stat">
+                        <div class="token-label">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <h2>🎭 Actor Status</h2>
+        <div id="actor-status-container">
+            <div class="token-card" style="border-left-color: #2196F3;">
                 <div class="token-grid">
                     <div class="token-stat">
                         <div class="token-label">Loading...</div>
@@ -116,18 +156,25 @@
                     if (num >= 1000) return (num / 1000).toFixed(2) + 'K';
                     return num.toFixed(0);
                 };
+                
+                const formatTokensPerSecond = (num) => {
+                    if (num >= 1000000) return (num / 1000000).toFixed(2) + 'M';
+                    if (num >= 36500) return (num / 1000).toFixed(1) + 'k';
+                    if (num >= 1000) return num.toLocaleString('en-US');
+                    return num.toFixed(1);
+                };
 
                 document.getElementById('token-container').innerHTML = `
                     <div class="token-card">
                         <div class="token-grid">
                             <div class="token-stat">
                                 <div class="token-label">Prefill Tokens/Sec</div>
-                                <div class="token-value">${stats.prefill_tokens_per_sec.toFixed(1)}</div>
+                                <div class="token-value">${formatTokensPerSecond(stats.prefill_tokens_per_sec)}</div>
                                 <div class="token-rate">Avg over ${stats.sample_count} samples | Total: ${formatNumber(stats.total_prefill_tokens)}</div>
                             </div>
                             <div class="token-stat">
                                 <div class="token-label">Decode Tokens/Sec</div>
-                                <div class="token-value">${stats.decode_tokens_per_sec.toFixed(1)}</div>
+                                <div class="token-value">${formatTokensPerSecond(stats.decode_tokens_per_sec)}</div>
                                 <div class="token-rate">Avg over ${stats.sample_count} samples | Total: ${formatNumber(stats.total_decode_tokens)}</div>
                             </div>
                         </div>
@@ -155,6 +202,103 @@
                                 <div class="token-label">Avg Batch Generation Time</div>
                                 <div class="token-value" style="color: #9C27B0;">${formatTime(timing.avg_batch_generation_time)}</div>
                                 <div class="token-rate">Moving avg: last ${timing.batch_generation_count} of 100 batches</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Update training progress
+            if (data.training_progress) {
+                const progress = data.training_progress;
+                document.getElementById('training-progress-container').innerHTML = `
+                    <div class="token-card" style="border-left-color: #4CAF50;">
+                        <div class="token-grid">
+                            <div class="token-stat">
+                                <div class="token-label">Current Training Step</div>
+                                <div class="token-value" style="color: #4CAF50;">${progress.current_step} / ${progress.total_steps || 'N/A'}</div>
+                                <div class="token-rate">${progress.progress_percent.toFixed(1)}% complete</div>
+                            </div>
+                            <div class="token-stat">
+                                <div class="token-label">Estimated Time Remaining</div>
+                                <div class="token-value" style="color: #4CAF50;">${progress.eta_formatted}</div>
+                                <div class="token-rate">Based on current training speed</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Update model utilization (MFU/MBU)
+            if (data.utilization_stats) {
+                const util = data.utilization_stats;
+                document.getElementById('model-utilization-container').innerHTML = `
+                    <div class="token-card" style="border-left-color: #E91E63;">
+                        <div class="token-grid">
+                            <div class="token-stat">
+                                <div class="token-label">Model FLOPs Utilization (MFU)</div>
+                                <div class="token-value" style="color: #E91E63;">${util.mfu.toFixed(1)}%</div>
+                                <div class="token-rate">Percentage of theoretical peak FLOPS (avg over ${util.sample_count} samples)</div>
+                            </div>
+                            <div class="token-stat">
+                                <div class="token-label">Memory Bandwidth Utilization (MBU)</div>
+                                <div class="token-value" style="color: #E91E63;">${util.mbu.toFixed(1)}%</div>
+                                <div class="token-rate">Percentage of theoretical peak memory bandwidth (avg over ${util.sample_count} samples)</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                document.getElementById('model-utilization-container').innerHTML = `
+                    <div class="token-card" style="border-left-color: #E91E63;">
+                        <div class="token-grid">
+                            <div class="token-stat">
+                                <div class="token-label">Model FLOPs Utilization (MFU)</div>
+                                <div class="token-value" style="color: #E91E63;">Collecting...</div>
+                                <div class="token-rate">Percentage of theoretical peak FLOPS</div>
+                            </div>
+                            <div class="token-stat">
+                                <div class="token-label">Memory Bandwidth Utilization (MBU)</div>
+                                <div class="token-value" style="color: #E91E63;">Collecting...</div>
+                                <div class="token-rate">Percentage of theoretical peak memory bandwidth</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Update memory usage
+            if (data.memory_stats) {
+                const mem = data.memory_stats;
+                document.getElementById('memory-usage-container').innerHTML = `
+                    <div class="token-card" style="border-left-color: #FF9800;">
+                        <div class="token-grid">
+                            <div class="token-stat">
+                                <div class="token-label">Average KV Cache Size</div>
+                                <div class="token-value" style="color: #FF9800;">${mem.average_kv_cache_size.toFixed(2)} GB</div>
+                                <div class="token-rate">Per actor KV cache memory usage</div>
+                            </div>
+                            <div class="token-stat">
+                                <div class="token-label">Total GPU Memory Usage</div>
+                                <div class="token-value" style="color: #FF9800;">${mem.total_gpu_memory_used.toFixed(2)} GB</div>
+                                <div class="token-rate">Across all inference actors (peak: ${mem.peak_memory_usage.toFixed(2)} GB)</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                document.getElementById('memory-usage-container').innerHTML = `
+                    <div class="token-card" style="border-left-color: #FF9800;">
+                        <div class="token-grid">
+                            <div class="token-stat">
+                                <div class="token-label">Average KV Cache Size</div>
+                                <div class="token-value" style="color: #FF9800;">Collecting...</div>
+                                <div class="token-rate">Per actor KV cache memory usage</div>
+                            </div>
+                            <div class="token-stat">
+                                <div class="token-label">Total GPU Memory Usage</div>
+                                <div class="token-value" style="color: #FF9800;">Collecting...</div>
+                                <div class="token-rate">Across all inference actors</div>
                             </div>
                         </div>
                     </div>
@@ -189,6 +333,84 @@
                 `;
 
                 document.getElementById('kv-cache-container').innerHTML = kvCacheHtml;
+            }
+
+            // Update actor status
+            if (data.actor_status) {
+                const actors = data.actor_status;
+                const actorCount = Object.keys(actors).length;
+
+                if (actorCount === 0) {
+                    document.getElementById('actor-status-container').innerHTML = `
+                        <div class="token-card" style="border-left-color: #2196F3;">
+                            <div class="token-grid">
+                                <div class="token-stat">
+                                    <div class="token-label">No Active Actors</div>
+                                    <div class="token-value" style="color: #2196F3;">0</div>
+                                    <div class="token-rate">Waiting for actors to report status</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    let actorHtml = '<div class="token-card" style="border-left-color: #2196F3;"><div class="token-grid">';
+                    
+                    // Summary stats
+                    let totalUnfinished = 0;
+                    let activeCount = 0;
+                    for (const [actorId, status] of Object.entries(actors)) {
+                        totalUnfinished += status.unfinished_requests;
+                        if (status.is_active) activeCount++;
+                    }
+
+                    actorHtml += `
+                        <div class="token-stat">
+                            <div class="token-label">Total Actors</div>
+                            <div class="token-value" style="color: #2196F3;">${actorCount}</div>
+                            <div class="token-rate">${activeCount} active • ${actorCount - activeCount} idle</div>
+                        </div>
+                        <div class="token-stat">
+                            <div class="token-label">Total Unfinished Requests</div>
+                            <div class="token-value" style="color: #2196F3;">${totalUnfinished}</div>
+                            <div class="token-rate">Across all actors</div>
+                        </div>
+                    `;
+                    
+                    actorHtml += '</div></div>';
+
+                    // Individual actor cards
+                    for (const [actorId, status] of Object.entries(actors)) {
+                        const statusColor = status.is_active ? '#4CAF50' : '#9E9E9E';
+                        const statusText = status.is_active ? 'Active' : 'Idle';
+                        const timeSinceUpdate = Math.floor((Date.now() / 1000) - status.last_update);
+                        
+                        actorHtml += `
+                            <div class="queue-card" style="margin-top: 10px;">
+                                <div class="queue-name">Actor ${status.actor_id_short}</div>
+                                <div class="queue-stats" style="color: ${statusColor};">
+                                    ${statusText} • ${status.unfinished_requests} unfinished • Batch size: ${status.inference_batch_size}
+                                </div>
+                                <div class="token-rate" style="font-size: 0.8em; color: #666;">
+                                    Updated ${timeSinceUpdate}s ago
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    document.getElementById('actor-status-container').innerHTML = actorHtml;
+                }
+            } else {
+                document.getElementById('actor-status-container').innerHTML = `
+                    <div class="token-card" style="border-left-color: #2196F3;">
+                        <div class="token-grid">
+                            <div class="token-stat">
+                                <div class="token-label">Actor Status</div>
+                                <div class="token-value" style="color: #2196F3;">Collecting...</div>
+                                <div class="token-rate">Waiting for actor status reports</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
             }
         }
 
