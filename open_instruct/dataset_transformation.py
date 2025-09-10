@@ -1062,7 +1062,11 @@ def rlvr_tokenize_rl_rag_v1(
         else:
             original_question = messages[0]["content"]
             assert messages[0]["role"] == "user"
-        messages[1]["content"] = original_question + "\n\n" + additional_question_instructions[question_type]
+        # we might have question types that dont need additional instructions.
+        if question_type in additional_question_instructions:
+            messages[1]["content"] = original_question + "\n\n" + additional_question_instructions[question_type]
+        else:
+            messages[1]["content"] = original_question
 
     # only truncate last message if it's not an assistant message
     if len(messages) == 1:
