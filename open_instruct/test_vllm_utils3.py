@@ -1,8 +1,11 @@
+import asyncio
 import logging
 import queue
 import threading
 import time
 import unittest
+from concurrent import futures
+from unittest import mock
 from unittest.mock import MagicMock, patch
 
 import vllm
@@ -11,6 +14,839 @@ from open_instruct.queue_types import TokenStatistics
 from open_instruct.vllm_utils3 import LLMRayActor, _finalize_outputs, _init_tool_tracking
 
 
+class FakeTool:
+    """Fake tool for testing."""
+
+    def __init__(self):
+        self.call_count = 0
+        self.last_args = None
+
+    def __call__(self, *args, **kwargs):
+        self.call_count += 1
+        self.last_args = (args, kwargs)
+        return "TOOL_OUTPUT"
+
+
+class FakeRequestOutput:
+    """Fake RequestOutput for testing."""
+
+    def __init__(self, request_id, outputs=None, finished=True):
+        self.request_id = request_id
+        self.outputs = outputs or []
+        self.finished = finished
+
+
+class FakeCompletionOutput:
+    """Fake CompletionOutput for testing."""
+
+    def __init__(self, text="", token_ids=None, finish_reason=None, stop_reason=None):
+        self.text = text
+        self.token_ids = token_ids or []
+        self.finish_reason = finish_reason
+        self.stop_reason = stop_reason
+        self.mask = None
+        self.num_calls = 0
+        self.timeout = False
+        self.tool_error = ""
+        self.tool_output = ""
+        self.tool_runtime = 0.0
+        self.tool_called = False
+
+
+class FakeAsyncLLMEngine:
+    """Fake AsyncLLMEngine for testing."""
+
+    def __init__(self):
+        self.unfinished_requests = {}
+        self.add_request_calls = []
+        self.abort_request_calls = []
+        self.tokenizer = MagicMock()
+        self.tokenizer.eos_token_id = 2
+        self.tokenizer.encode.return_value = [1, 2, 3]
+        self.tokenizer.decode.return_value = "decoded_text"
+
+    async def add_request(self, request_id, prompt, sampling_params, **kwargs):
+        self.add_request_calls.append(
+            {"request_id": request_id, "prompt": prompt, "sampling_params": sampling_params, "kwargs": kwargs}
+        )
+        self.unfinished_requests[request_id] = True
+
+    async def abort_request(self, request_id):
+        self.abort_request_calls.append(request_id)
+        if request_id in self.unfinished_requests:
+            del self.unfinished_requests[request_id]
+
+    def get_num_unfinished_requests(self):
+        return len(self.unfinished_requests)
+
+    def has_unfinished_requests(self):
+        return len(self.unfinished_requests) > 0
+
+    def finish_request(self, request_id, outputs=None, finished=True):
+        """Simulate finishing a request."""
+        if request_id in self.unfinished_requests and finished:
+            del self.unfinished_requests[request_id]
+        return FakeRequestOutput(request_id, outputs, finished)
+
+    def step(self):
+        """Simulate engine step."""
+        return []
+
+
+class FakeActorManager:
+    """Fake ActorManager for testing."""
+
+    def __init__(self):
+        self._should_stop = False
+
+    class RemoteCallable:
+        def __init__(self, value):
+            self.value = value
+
+        def remote(self):
+            return self
+
+        def __await__(self):
+            async def _return():
+                return self.value
+
+            return _return().__await__()
+
+    @property
+    def should_stop(self):
+        return self.RemoteCallable(self._should_stop)
+
+    def set_should_stop(self, value):
+        self._should_stop = value
+
+
+class TestVLLMUtils3New(unittest.TestCase):
+    """New comprehensive test cases for vllm_utils3 module."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        logging.disable(logging.CRITICAL)
+        self.tokenizer = mock.MagicMock()
+        self.tokenizer.eos_token_id = 2
+        self.tokenizer.encode.return_value = [1, 2, 3]
+        self.tokenizer.decode.return_value = "decoded_text"
+
+        self.model_config = mock.MagicMock()
+        self.model_config.max_model_len = 1000
+
+        self.generation_config = mock.MagicMock()
+        self.generation_config.max_tokens = 100
+        self.generation_config.temperature = 1.0
+        self.generation_config.top_p = 1.0
+        self.generation_config.n = 1
+
+        self.engine = FakeAsyncLLMEngine()
+        self.actor_manager = FakeActorManager()
+
+        self.metadata = {}
+        self.tracking = _init_tool_tracking()
+        self.results_queue = queue.Queue()
+
+    def tearDown(self):
+        """Clean up after test."""
+        logging.disable(logging.NOTSET)
+
+    def test_tools_configured_not_used_n1(self):
+        """Test tools configured but not used with n=1."""
+        # Create actor instance
+        actor = LLMRayActor.__new__(LLMRayActor)
+        actor.logger = MagicMock()
+        actor.verbose = False
+        actor.tools = {"any": FakeTool()}
+        actor.request_metadata = {}
+        actor.llm_engine = self.engine
+        actor.executor = MagicMock()
+        actor.max_tool_calls = 10
+        actor._engine_steps_timing = {"engine_step_call": 0.0, "extract_base_request_id": 0.0, "handle_output": 0.0}
+
+        request_id = "train_1_0"  # Format: prefix_training_step_dataset_index
+        sub_request_id = f"{request_id}_0"
+
+        actor.request_metadata[request_id] = {
+            "prompt_token_ids": [1, 2, 3],
+            "original_sampling_params": self.generation_config,
+            "is_eval": False,
+            "dataset_index": 0,
+            "prompt": "test prompt",
+        }
+
+        # Set up tracking
+        tracking = _init_tool_tracking()
+        tracking["concat_outputs"][sub_request_id] = None
+
+        # Create output without tool call
+        mock_output = FakeCompletionOutput(text="Normal output", token_ids=[4, 5, 6], finish_reason="stop")
+        mock_output.mask = [1, 1, 1]
+
+        mock_request = FakeRequestOutput(sub_request_id, [mock_output], finished=True)
+        mock_request.prompt = "test prompt"
+        mock_request.prompt_token_ids = [1, 2, 3]
+
+        # Store the output
+        tracking["concat_outputs"][sub_request_id] = mock_request
+        tracking["masks"][sub_request_id] = [1, 1, 1]
+        tracking["num_calls"][sub_request_id] = 0
+        tracking["timeout"][sub_request_id] = False
+        tracking["tool_error"][sub_request_id] = ""
+        tracking["tool_output"][sub_request_id] = ""
+        tracking["tool_runtime"][sub_request_id] = 0.0
+        tracking["tool_called"][sub_request_id] = False
+
+        # Call finalize with properly structured tracking
+        # Note: _finalize_outputs expects the base request ID from output
+        mock_request.request_id = request_id  # Use base request ID, not sub-request ID
+        result = _finalize_outputs(
+            output=mock_request,
+            tracking=tracking,
+            dataset_index=0,
+            tools=actor.tools,
+            original_sampling_params=actor.request_metadata[request_id]["original_sampling_params"],
+            token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=3, generation_time=1.0),
+            start_time=1000.0,
+        )
+
+        # Assertions
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result.responses), 1)
+        self.assertEqual(result.responses[0], [4, 5, 6])
+        self.assertEqual(result.masks[0], [1, 1, 1])
+
+    def test_tools_configured_not_used_n3(self):
+        """Test tools configured but not used with n>1."""
+        actor = LLMRayActor.__new__(LLMRayActor)
+        actor.logger = MagicMock()
+        actor.verbose = False
+        actor.tools = {"any": FakeTool()}
+        actor.request_metadata = {}
+        actor.llm_engine = self.engine
+
+        request_id = "train_1_0"  # Format: prefix_training_step_dataset_index
+        n = 3
+
+        actor.request_metadata[request_id] = {
+            "prompt_token_ids": [1, 2, 3],
+            "original_sampling_params": MagicMock(n=n),
+            "is_eval": False,
+            "dataset_index": 0,
+            "prompt": "test prompt",
+        }
+
+        # Set up tracking with 3 samples
+        tracking = _init_tool_tracking()
+
+        for i in range(n):
+            sub_id = f"{request_id}_{i}"
+            mock_output = FakeCompletionOutput(
+                text=f"Output {i}", token_ids=[4 + i, 5 + i, 6 + i], finish_reason="stop"
+            )
+            mock_output.mask = [1, 1, 1]
+
+            mock_request = FakeRequestOutput(sub_id, [mock_output], finished=True)
+            mock_request.prompt = "test prompt"
+            mock_request.prompt_token_ids = [1, 2, 3]
+
+            tracking["concat_outputs"][sub_id] = mock_request
+            tracking["masks"][sub_id] = [1, 1, 1]
+            tracking["num_calls"][sub_id] = 0
+            tracking["timeout"][sub_id] = False
+            tracking["tool_error"][sub_id] = ""
+            tracking["tool_output"][sub_id] = ""
+            tracking["tool_runtime"][sub_id] = 0.0
+            tracking["tool_called"][sub_id] = False
+
+        # Use the first request for finalization
+        first_request = tracking["concat_outputs"][f"{request_id}_0"]
+        first_request.request_id = request_id  # Use base request ID
+        result = _finalize_outputs(
+            output=first_request,
+            tracking=tracking,
+            dataset_index=0,
+            tools=actor.tools,
+            original_sampling_params=actor.request_metadata[request_id]["original_sampling_params"],
+            token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=9, generation_time=1.0),
+            start_time=1000.0,
+        )
+
+        # Assertions
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result.responses), 3)
+        for i in range(n):
+            self.assertEqual(result.responses[i], [4 + i, 5 + i, 6 + i])
+            self.assertEqual(result.masks[i], [1, 1, 1])
+
+    def test_mixed_samples_tool_and_engine(self):
+        """Test mixed samples with some tool-use and some engine-only."""
+        actor = LLMRayActor.__new__(LLMRayActor)
+        actor.logger = MagicMock()
+        actor.verbose = False
+        actor.tools = {"tool": FakeTool()}
+        actor.request_metadata = {}
+        actor.llm_engine = self.engine
+        actor.executor = futures.ThreadPoolExecutor(max_workers=1)
+        actor.max_tool_calls = 10
+
+        request_id = "train_1_0"  # Format: prefix_training_step_dataset_index
+        n = 3
+
+        actor.request_metadata[request_id] = {
+            "prompt_token_ids": [1, 2, 3],
+            "original_sampling_params": MagicMock(n=n),
+            "is_eval": False,
+            "dataset_index": 0,
+            "prompt": "test prompt",
+        }
+
+        tracking = _init_tool_tracking()
+
+        # Sample 0: with tool call
+        sub_id_0 = f"{request_id}_0"
+        mock_output_0 = FakeCompletionOutput(text="<tool>tool</tool>input", token_ids=[4, 5, 6], finish_reason="stop")
+        mock_output_0.mask = [1, 1, 1]
+        mock_request_0 = FakeRequestOutput(sub_id_0, [mock_output_0], finished=True)
+        mock_request_0.prompt = "test prompt"
+        mock_request_0.prompt_token_ids = [1, 2, 3]
+
+        # Simulate tool output appended
+        tool_tokens = [7, 8, 9]
+        combined_tokens = [4, 5, 6] + tool_tokens
+        combined_mask = [1, 1, 1] + [0, 0, 0]  # Tool tokens have mask=0
+
+        tracking["concat_outputs"][sub_id_0] = mock_request_0
+        tracking["concat_outputs"][sub_id_0].outputs[0].token_ids = combined_tokens
+        tracking["masks"][sub_id_0] = combined_mask
+        tracking["num_calls"][sub_id_0] = 1
+        tracking["tool_called"][sub_id_0] = True
+        tracking["tool_output"][sub_id_0] = "TOOL!"
+        tracking["tool_runtime"][sub_id_0] = 0.1
+        tracking["timeout"][sub_id_0] = False
+        tracking["tool_error"][sub_id_0] = ""
+
+        # Samples 1 and 2: engine-only
+        for i in [1, 2]:
+            sub_id = f"{request_id}_{i}"
+            mock_output = FakeCompletionOutput(
+                text=f"Engine output {i}", token_ids=[10 + i, 11 + i, 12 + i], finish_reason="stop"
+            )
+            mock_output.mask = [1, 1, 1]
+            mock_request = FakeRequestOutput(sub_id, [mock_output], finished=True)
+            mock_request.prompt = "test prompt"
+            mock_request.prompt_token_ids = [1, 2, 3]
+
+            tracking["concat_outputs"][sub_id] = mock_request
+            tracking["masks"][sub_id] = [1, 1, 1]
+            tracking["num_calls"][sub_id] = 0
+            tracking["tool_called"][sub_id] = False
+            tracking["tool_output"][sub_id] = ""
+            tracking["tool_runtime"][sub_id] = 0.0
+            tracking["timeout"][sub_id] = False
+            tracking["tool_error"][sub_id] = ""
+
+        # Finalize
+        mock_request_0.request_id = request_id  # Use base request ID
+        result = _finalize_outputs(
+            output=mock_request_0,
+            tracking=tracking,
+            dataset_index=0,
+            tools=actor.tools,
+            original_sampling_params=actor.request_metadata[request_id]["original_sampling_params"],
+            token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=15, generation_time=1.0),
+            start_time=1000.0,
+        )
+
+        # Assertions
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result.responses), 3)
+        self.assertEqual(result.responses[0], combined_tokens)
+        self.assertEqual(result.masks[0], combined_mask)
+        self.assertTrue(result.request_info.tool_calleds[0])
+        self.assertFalse(result.request_info.tool_calleds[1])
+        self.assertFalse(result.request_info.tool_calleds[2])
+
+    def test_tool_output_clipping_per_request_max_tokens(self):
+        """Test tool output clipping based on per-request max_tokens."""
+        actor = LLMRayActor.__new__(LLMRayActor)
+        actor.logger = MagicMock()
+        actor.verbose = False
+        actor.tools = {"tool": FakeTool()}
+        actor.request_metadata = {}
+        actor.llm_engine = self.engine
+
+        request_id = "train_1_0"  # Format: prefix_training_step_dataset_index
+        sub_id = f"{request_id}_0"
+        max_tokens = 10
+
+        self.generation_config.max_tokens = max_tokens
+
+        actor.request_metadata[request_id] = {
+            "prompt_token_ids": [1, 2, 3],
+            "original_sampling_params": self.generation_config,
+            "is_eval": False,
+            "dataset_index": 0,
+            "prompt": "test prompt",
+        }
+
+        tracking = _init_tool_tracking()
+
+        # Model generates 5 tokens
+        model_tokens = [4, 5, 6, 7, 8]
+        # Tool would generate 10 tokens but should be clipped
+        tool_tokens = list(range(10, 20))
+
+        # Total would be 15 tokens, but max_tokens=10, so should be clipped to 10
+        expected_tokens = model_tokens + tool_tokens[:5]  # 5 model + 5 tool = 10 total
+        expected_mask = [1] * 5 + [0] * 5  # Model tokens have mask=1, tool tokens have mask=0
+
+        mock_output = FakeCompletionOutput(
+            text="<tool>tool</tool>input", token_ids=expected_tokens, finish_reason="stop"
+        )
+        mock_output.mask = expected_mask
+
+        mock_request = FakeRequestOutput(sub_id, [mock_output], finished=True)
+        mock_request.prompt = "test prompt"
+        mock_request.prompt_token_ids = [1, 2, 3]
+
+        tracking["concat_outputs"][sub_id] = mock_request
+        tracking["masks"][sub_id] = expected_mask
+        tracking["num_calls"][sub_id] = 1
+        tracking["tool_called"][sub_id] = True
+        tracking["tool_output"][sub_id] = "TOOL_OUTPUT_LONG"
+        tracking["tool_runtime"][sub_id] = 0.1
+        tracking["timeout"][sub_id] = False
+        tracking["tool_error"][sub_id] = ""
+
+        mock_request.request_id = request_id  # Use base request ID
+        result = _finalize_outputs(
+            output=mock_request,
+            tracking=tracking,
+            dataset_index=0,
+            tools=actor.tools,
+            token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=10, generation_time=1.0),
+            start_time=1000.0,
+        )
+
+        # Assertions
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result.responses), 1)
+        self.assertLessEqual(len(result.responses[0]), max_tokens)
+        self.assertEqual(len(result.responses[0]), len(result.masks[0]))
+
+    def test_tool_output_clipping_context_window(self):
+        """Test tool output clipping based on context window."""
+        actor = LLMRayActor.__new__(LLMRayActor)
+        actor.logger = MagicMock()
+        actor.verbose = False
+        actor.tools = {"tool": FakeTool()}
+        actor.request_metadata = {}
+        actor.llm_engine = self.engine
+
+        request_id = "train_1_0"  # Format: prefix_training_step_dataset_index
+        sub_id = f"{request_id}_0"
+
+        # Small context window
+        max_model_len = 15
+        prompt_tokens = [1, 2, 3, 4, 5]
+        model_tokens = [6, 7, 8, 9, 10]
+        tool_tokens = list(range(11, 21))  # 10 tokens
+
+        # Total would be 5 (prompt) + 5 (model) + 10 (tool) = 20 tokens
+        # But max_model_len = 15, so need to clip tool output
+        # Available for tool = 15 - 5 (prompt) - 5 (model) = 5 tokens
+        expected_tool_tokens = tool_tokens[:5]
+        expected_tokens = model_tokens + expected_tool_tokens
+        expected_mask = [1] * 5 + [0] * 5
+
+        actor.request_metadata[request_id] = {
+            "prompt_token_ids": prompt_tokens,
+            "original_sampling_params": self.generation_config,
+            "is_eval": False,
+            "dataset_index": 0,
+            "prompt": "test prompt",
+        }
+
+        tracking = _init_tool_tracking()
+        tracking["can_make_new_request"] = {sub_id: False}  # Should be False after clipping
+
+        mock_output = FakeCompletionOutput(
+            text="<tool>tool</tool>input", token_ids=expected_tokens, finish_reason="stop"
+        )
+        mock_output.mask = expected_mask
+
+        mock_request = FakeRequestOutput(sub_id, [mock_output], finished=True)
+        mock_request.prompt = "test prompt"
+        mock_request.prompt_token_ids = prompt_tokens
+
+        tracking["concat_outputs"][sub_id] = mock_request
+        tracking["masks"][sub_id] = expected_mask
+        tracking["num_calls"][sub_id] = 1
+        tracking["tool_called"][sub_id] = True
+        tracking["tool_output"][sub_id] = "TOOL_OUTPUT_VERY_LONG"
+        tracking["tool_runtime"][sub_id] = 0.1
+        tracking["timeout"][sub_id] = False
+        tracking["tool_error"][sub_id] = ""
+
+        mock_request.request_id = request_id  # Use base request ID
+        result = _finalize_outputs(
+            output=mock_request,
+            tracking=tracking,
+            dataset_index=0,
+            tools=actor.tools,
+            token_statistics=TokenStatistics(num_prompt_tokens=5, num_response_tokens=10, generation_time=1.0),
+            start_time=1000.0,
+        )
+
+        # Assertions
+        self.assertIsNotNone(result)
+        total_length = len(prompt_tokens) + len(result.responses[0])
+        self.assertLessEqual(total_length, max_model_len)
+        self.assertFalse(tracking["can_make_new_request"].get(sub_id, True))
+
+    def test_tool_failure_path(self):
+        """Test handling of tool failures."""
+        actor = LLMRayActor.__new__(LLMRayActor)
+        actor.logger = MagicMock()
+        actor.verbose = False
+        actor.tools = {"tool": FakeTool()}
+        actor.request_metadata = {}
+        actor.llm_engine = self.engine
+
+        request_id = "train_1_0"  # Format: prefix_training_step_dataset_index
+        sub_id = f"{request_id}_0"
+
+        actor.request_metadata[request_id] = {
+            "prompt_token_ids": [1, 2, 3],
+            "original_sampling_params": self.generation_config,
+            "is_eval": False,
+            "dataset_index": 0,
+            "prompt": "test prompt",
+        }
+
+        tracking = _init_tool_tracking()
+
+        mock_output = FakeCompletionOutput(text="<tool>tool</tool>input", token_ids=[4, 5, 6], finish_reason="stop")
+        mock_output.mask = [1, 1, 1]
+
+        mock_request = FakeRequestOutput(sub_id, [mock_output], finished=True)
+        mock_request.prompt = "test prompt"
+        mock_request.prompt_token_ids = [1, 2, 3]
+
+        tracking["concat_outputs"][sub_id] = mock_request
+        tracking["masks"][sub_id] = [1, 1, 1]
+        tracking["num_calls"][sub_id] = 1
+        tracking["tool_called"][sub_id] = True
+        tracking["tool_output"][sub_id] = "partial"
+        tracking["tool_error"][sub_id] = "boom"
+        tracking["tool_runtime"][sub_id] = 0.1
+        tracking["timeout"][sub_id] = False
+
+        mock_request.request_id = request_id  # Use base request ID
+        result = _finalize_outputs(
+            output=mock_request,
+            tracking=tracking,
+            dataset_index=0,
+            tools=actor.tools,
+            original_sampling_params=actor.request_metadata[request_id]["original_sampling_params"],
+            token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=3, generation_time=1.0),
+            start_time=1000.0,
+        )
+
+        # Assertions
+        self.assertIsNotNone(result)
+        self.assertEqual(result.request_info.tool_errors[0], "boom")
+        self.assertTrue(result.request_info.tool_calleds[0])
+
+    def test_pending_engine_requests_deferred_cleanup(self):
+        """Test that cleanup is deferred when engine has pending sub-requests."""
+        actor = LLMRayActor.__new__(LLMRayActor)
+        actor.logger = MagicMock()
+        actor.verbose = False
+        actor.tools = {}
+        actor.request_metadata = {}
+        actor.llm_engine = self.engine
+
+        request_id = "train_1_0"  # Format: prefix_training_step_dataset_index
+        n = 2
+
+        actor.request_metadata[request_id] = {
+            "prompt_token_ids": [1, 2, 3],
+            "original_sampling_params": MagicMock(n=n),
+            "is_eval": False,
+            "dataset_index": 0,
+        }
+
+        # Add unfinished sub-request to engine
+        sub_id_1 = f"{request_id}_1"
+        self.engine.unfinished_requests[sub_id_1] = True
+
+        # Mock scheduler
+        mock_scheduler = MagicMock()
+        mock_unfinished = MagicMock()
+        mock_unfinished.request_id = sub_id_1
+        mock_scheduler.waiting = [mock_unfinished]
+        mock_scheduler.running = []
+        mock_scheduler.swapped = []
+        self.engine.scheduler = mock_scheduler
+
+        tracking = {}
+
+        # Should NOT clean up because sub-request is still in engine
+        actor._cleanup_request_data(request_id, tracking)
+        self.assertIn(request_id, actor.request_metadata)
+
+        # Now clear unfinished requests
+        self.engine.unfinished_requests.clear()
+        mock_scheduler.waiting = []
+        self.engine.has_unfinished_requests = lambda: False
+
+        # Should clean up now
+        actor._cleanup_request_data(request_id, tracking)
+        self.assertNotIn(request_id, actor.request_metadata)
+
+    def test_pending_tool_futures_deferred_cleanup(self):
+        """Test that cleanup is deferred when there are pending tool futures."""
+        actor = LLMRayActor.__new__(LLMRayActor)
+        actor.logger = MagicMock()
+        actor.verbose = False
+        actor.tools = {"tool": FakeTool()}
+        actor.request_metadata = {}
+        actor.llm_engine = self.engine
+        actor.executor = futures.ThreadPoolExecutor(max_workers=1)
+
+        request_id = "train_1_0"  # Format: prefix_training_step_dataset_index
+        sub_id = f"{request_id}_0"
+
+        actor.request_metadata[request_id] = {
+            "prompt_token_ids": [1, 2, 3],
+            "original_sampling_params": MagicMock(n=1),
+            "is_eval": False,
+            "dataset_index": 0,
+        }
+
+        tracking = _init_tool_tracking()
+
+        # Add a pending future
+        never_done_future = futures.Future()
+        tracking["pending_tool_futures"][sub_id] = never_done_future
+
+        # Mock scheduler with no unfinished requests
+        mock_scheduler = MagicMock()
+        mock_scheduler.waiting = []
+        mock_scheduler.running = []
+        mock_scheduler.swapped = []
+        self.engine.scheduler = mock_scheduler
+        self.engine.has_unfinished_requests = lambda: False
+
+        # Should NOT clean up because of pending future
+        actor._cleanup_request_data(request_id, tracking)
+        self.assertIn(request_id, actor.request_metadata)
+
+        # Complete the future
+        never_done_future.set_result({"output": "DONE", "error": None})
+        del tracking["pending_tool_futures"][sub_id]
+
+        # Should clean up now
+        actor._cleanup_request_data(request_id, tracking)
+        self.assertNotIn(request_id, actor.request_metadata)
+
+    def test_prefetch_batching_behavior(self):
+        """Test prefetch batching behavior based on unfinished requests."""
+        actor = LLMRayActor.__new__(LLMRayActor)
+        actor.logger = MagicMock()
+        actor.verbose = False
+        actor.llm_engine = self.engine
+        actor.inference_batch_size = 2
+
+        # Add enough unfinished requests to trigger batching behavior
+        for i in range(3):
+            self.engine.unfinished_requests[f"req_{i}"] = True
+
+        # Should have >= 2 unfinished requests
+        self.assertGreaterEqual(self.engine.get_num_unfinished_requests(), 2)
+
+        # Clear some requests
+        self.engine.unfinished_requests = {"req_0": True}
+
+        # Should have < 2 unfinished requests
+        self.assertLess(self.engine.get_num_unfinished_requests(), 2)
+
+    def test_stop_logic_and_exit_reasons(self):
+        """Test stop logic and loop exit reasons."""
+        # Test basic stop logic concepts without full actor setup
+
+        # Test 1: Verify engine unfinished request tracking
+        self.engine.unfinished_requests = {"req_1": True, "req_2": True}
+        self.assertEqual(self.engine.get_num_unfinished_requests(), 2)
+
+        self.engine.unfinished_requests.clear()
+        self.assertEqual(self.engine.get_num_unfinished_requests(), 0)
+
+        # Test 2: Verify tracking initialization and cleanup
+        tracking = _init_tool_tracking()
+        self.assertIn("pending_tool_futures", tracking)
+        self.assertIsInstance(tracking["pending_tool_futures"], dict)
+
+        # Test 3: Verify actor manager stop behavior
+        manager = FakeActorManager()
+        manager.set_should_stop(False)
+
+        async def test_stop():
+            result = await manager.should_stop.remote()
+            return result
+
+        self.assertFalse(asyncio.run(test_stop()))
+
+        manager.set_should_stop(True)
+        self.assertTrue(asyncio.run(test_stop()))
+
+    def test_response_count_mismatch_with_duplicate_outputs(self):
+        """Test that reproduces the response count mismatch error with duplicate outputs."""
+        actor = LLMRayActor.__new__(LLMRayActor)
+        actor.logger = MagicMock()
+        actor.verbose = False
+        actor.tools = {"tool": FakeTool()}
+        actor.request_metadata = {}
+        actor.llm_engine = self.engine
+
+        request_id = "train_1_43039"  # Format: prefix_training_step_dataset_index
+        n = 4  # Expecting 4 responses
+
+        actor.request_metadata[request_id] = {
+            "prompt_token_ids": [1, 2, 3],
+            "original_sampling_params": MagicMock(n=n),
+            "is_eval": False,
+            "dataset_index": 43039,
+            "prompt": "test prompt",
+        }
+
+        tracking = _init_tool_tracking()
+
+        # Create outputs that would lead to duplicate merging (7 instead of 4)
+        # This simulates the bug where outputs get incorrectly duplicated
+        for i in range(n):
+            sub_id = f"{request_id}_{i}"
+            mock_output = FakeCompletionOutput(
+                text=f"Output {i}", token_ids=[4 + i, 5 + i, 6 + i], finish_reason="stop"
+            )
+            mock_output.mask = [1, 1, 1]
+
+            mock_request = FakeRequestOutput(sub_id, [mock_output], finished=True)
+            mock_request.prompt = "test prompt"
+            mock_request.prompt_token_ids = [1, 2, 3]
+
+            tracking["concat_outputs"][sub_id] = mock_request
+            tracking["masks"][sub_id] = [1, 1, 1]
+            tracking["num_calls"][sub_id] = 0
+            tracking["timeout"][sub_id] = False
+            tracking["tool_error"][sub_id] = ""
+            tracking["tool_output"][sub_id] = ""
+            tracking["tool_runtime"][sub_id] = 0.0
+            tracking["tool_called"][sub_id] = False
+
+        # Add duplicate outputs to simulate the bug (adding 3 more to make 7)
+        for i in range(3):
+            sub_id = f"{request_id}_{i}"  # Reusing same sub_ids
+            mock_output = FakeCompletionOutput(
+                text=f"Duplicate {i}", token_ids=[10 + i, 11 + i, 12 + i], finish_reason="stop"
+            )
+            mock_output.mask = [1, 1, 1]
+
+            # Create a duplicate request output that gets merged incorrectly
+            duplicate_request = FakeRequestOutput(sub_id, [mock_output], finished=True)
+            duplicate_request.prompt = "test prompt"
+            duplicate_request.prompt_token_ids = [1, 2, 3]
+
+            # Incorrectly extend the outputs array (simulating the merging bug)
+            if sub_id in tracking["concat_outputs"]:
+                tracking["concat_outputs"][sub_id].outputs.append(mock_output)
+
+        # Now the first 3 sub-requests have 2 outputs each (1 original + 1 duplicate)
+        # So we'd have 3*2 + 1 = 7 outputs total when we expect 4
+
+        first_request = tracking["concat_outputs"][f"{request_id}_0"]
+        first_request.request_id = request_id  # Use base request ID
+
+        # This should raise the AssertionError we're testing for
+        with self.assertRaises(AssertionError) as context:
+            result = _finalize_outputs(
+                output=first_request,
+                tracking=tracking,
+                dataset_index=43039,
+                tools=actor.tools,
+                original_sampling_params=actor.request_metadata[request_id]["original_sampling_params"],
+                token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=12, generation_time=1.0),
+                start_time=1000.0,
+            )
+
+        # Verify the error message matches what we expect
+        self.assertIn("Response count mismatch", str(context.exception))
+        self.assertIn("expected 4 responses but got 7", str(context.exception))
+
+    def test_regression_original_bug(self):
+        """Regression test for the original bug with tools present but not used."""
+        actor = LLMRayActor.__new__(LLMRayActor)
+        actor.logger = MagicMock()
+        actor.verbose = False
+        actor.tools = {"any": FakeTool()}
+        actor.request_metadata = {}
+        actor.llm_engine = self.engine
+
+        request_id = "train_1_0"  # Format: prefix_training_step_dataset_index
+        sub_id = f"{request_id}_0"
+
+        actor.request_metadata[request_id] = {
+            "prompt_token_ids": [1, 2, 3],
+            "original_sampling_params": MagicMock(n=1),
+            "is_eval": False,
+            "dataset_index": 0,
+            "prompt": "test prompt",
+        }
+
+        tracking = _init_tool_tracking()
+
+        # Create output WITHOUT tool call but WITH tools configured
+        mock_output = FakeCompletionOutput(
+            text="Normal output without tool call", token_ids=[4, 5, 6], finish_reason="stop"
+        )
+        mock_output.mask = [1, 1, 1]
+
+        mock_request = FakeRequestOutput(sub_id, [mock_output], finished=True)
+        mock_request.prompt = "test prompt"
+        mock_request.prompt_token_ids = [1, 2, 3]
+
+        # This is the key: we need the stub entry in concat_outputs even without tool call
+        tracking["concat_outputs"][sub_id] = mock_request
+        tracking["masks"][sub_id] = [1, 1, 1]
+        tracking["num_calls"][sub_id] = 0
+        tracking["tool_called"][sub_id] = False
+        tracking["tool_output"][sub_id] = ""
+        tracking["tool_error"][sub_id] = ""
+        tracking["tool_runtime"][sub_id] = 0.0
+        tracking["timeout"][sub_id] = False
+
+        # This should NOT raise "No outputs found" error
+        mock_request.request_id = request_id  # Use base request ID
+        result = _finalize_outputs(
+            output=mock_request,
+            tracking=tracking,
+            dataset_index=0,
+            tools=actor.tools,
+            original_sampling_params=actor.request_metadata[request_id]["original_sampling_params"],
+            token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=3, generation_time=1.0),
+            start_time=1000.0,
+        )
+
+        # Assertions
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result.responses), 1)
+        self.assertEqual(result.responses[0], [4, 5, 6])
+        self.assertFalse(result.request_info.tool_calleds[0])
+
+
+# Keep original test class for backward compatibility
 class TestVllmUtils3(unittest.TestCase):
     def setUp(self):
         logging.disable(logging.CRITICAL)

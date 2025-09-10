@@ -98,8 +98,19 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
     # Update concatenated outputs
     if output.request_id in tracking["concat_outputs"]:
+        # Assert we're only updating a single output
+        assert len(tracking["concat_outputs"][output.request_id].outputs) == 1, (
+            f"Expected concat_outputs to have exactly 1 output for {output.request_id}, "
+            f"but found {len(tracking['concat_outputs'][output.request_id].outputs)}. "
+            f"This indicates multiple outputs were incorrectly stored earlier."
+        )
         tracking["concat_outputs"][output.request_id].outputs[0].token_ids.extend(o.token_ids)
     else:
+        # Assert when initially storing that we only have one output
+        assert len(output.outputs) == 1, (
+            f"Expected exactly 1 output when initially storing in concat_outputs for {output.request_id}, "
+            f"but got {len(output.outputs)}. This may indicate tool processing created multiple outputs."
+        )
         tracking["concat_outputs"][output.request_id] = output
 
     tracking["masks"][output.request_id].extend([1] * len(o.token_ids))
@@ -202,7 +213,7 @@ def _process_outputs_with_tools(
 
 
 def _finalize_outputs(
-    output, tracking, dataset_index, tools, original_sampling_params=None, token_statistics=None, start_time=None
+    output, tracking, dataset_index, tools, original_sampling_params, token_statistics=None, start_time=None
 ):
     """Prepare final outputs based on whether tools were used."""
     if not tools:
@@ -239,9 +250,16 @@ def _finalize_outputs(
     for req_id, output_obj in relevant_outputs.items():
         real_req_id = _extract_base_request_id(req_id)
         if real_req_id not in merged_outputs:
+            # Assert when first storing an output object
+            logger.info(f"First output for {real_req_id}: req_id={req_id}, num_outputs={len(output_obj.outputs)}")
             merged_outputs[real_req_id] = output_obj
         else:
             # Each sub-request should contribute exactly one output (the final result after tool processing)
+            logger.info(
+                f"Merging output for {real_req_id}: req_id={req_id}, "
+                f"existing_outputs={len(merged_outputs[real_req_id].outputs)}, "
+                f"new_outputs={len(output_obj.outputs)}"
+            )
             assert len(output_obj.outputs) == 1, (
                 f"Expected exactly 1 output per sub-request, got {len(output_obj.outputs)} for {req_id}. "
                 f"This indicates tool processing created multiple outputs instead of one final result."
@@ -259,12 +277,23 @@ def _finalize_outputs(
         f"_finalize_outputs: {len(relevant_outputs)} sub-requests merged into {len(final_outputs)} outputs with {total_responses} total responses"
     )
 
+    # Add detailed logging before processing to help debug
+    logger.info(
+        f"Before _process_outputs_with_tools: final_outputs has {len(final_outputs)} items, "
+        f"with output counts: {[len(out.outputs) for out in final_outputs]}"
+    )
+
+    # Assert each output in final_outputs has the expected structure
+    for idx, output in enumerate(final_outputs):
+        total_outputs = len(output.outputs)
+        logger.info(f"final_outputs[{idx}] (id={output.request_id}) has {total_outputs} outputs")
+
     result = _process_outputs_with_tools(
         final_outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
     )
 
     # Add final validation to catch the specific error early
-    expected_response_count = original_sampling_params.n if original_sampling_params else len(relevant_outputs)
+    expected_response_count = original_sampling_params.n
     actual_response_count = len(result.responses)
     if actual_response_count != expected_response_count:
         raise AssertionError(
@@ -273,6 +302,54 @@ def _finalize_outputs(
         )
 
     return result
+
+
+def _process_completed_request(request_id, outs, tracking, current_time, tools, request_metadata):
+    """Process a completed request with all its samples and return the result.
+
+    This is a free function that processes completed requests independently of the actor state.
+
+    Args:
+        request_id: The base request ID
+        outs: List of vllm.RequestOutput objects for all sub-requests
+        tracking: Dictionary containing tool tracking information
+        current_time: Current timestamp for performance metrics
+        tools: Dictionary of available tools (may be None or empty)
+        request_metadata: Dictionary containing metadata for all requests
+
+    Returns:
+        Tuple of (result, is_eval) where result is a GenerationResult and is_eval is a boolean
+    """
+    final_output = vllm.RequestOutput(
+        request_id=request_id,
+        prompt=outs[0].prompt,
+        prompt_token_ids=outs[0].prompt_token_ids,
+        prompt_logprobs=outs[0].prompt_logprobs,
+        outputs=[],  # Will be set below based on whether tools are enabled
+        finished=outs[0].finished,
+    )
+
+    # When tools are enabled, _finalize_outputs will handle merging from tracking
+    # When tools are disabled, we flatten all outputs here
+    if not tools:
+        final_output.outputs = [completion for out in outs for completion in out.outputs]
+
+    total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
+    metadata = request_metadata[request_id]  # Don't pop yet, _poll_tool_futures might need it
+    result = _finalize_outputs(
+        final_output,
+        tracking,
+        metadata["dataset_index"],
+        tools,
+        original_sampling_params=metadata["original_sampling_params"],
+        token_statistics=TokenStatistics(
+            num_prompt_tokens=metadata["prompt_tokens"],
+            num_response_tokens=total_generation_tokens,
+            generation_time=current_time - metadata["start_time"],
+        ),
+        start_time=metadata["start_time"],
+    )
+    return result, metadata["is_eval"]
 
 
 def _extract_base_request_id(full_request_id: str) -> str:
@@ -606,33 +683,6 @@ class LLMRayActor:
             self.logger.info(f"process_from_queue exiting: {exit_reason}")
         return total_processed
 
-    def _process_completed_request(self, request_id, outs, tracking, current_time):
-        """Process a completed request with all its samples and return the result."""
-        final_output = vllm.RequestOutput(
-            request_id=request_id,
-            prompt=outs[0].prompt,
-            prompt_token_ids=outs[0].prompt_token_ids,
-            prompt_logprobs=outs[0].prompt_logprobs,
-            outputs=[completion for out in outs for completion in out.outputs],
-            finished=outs[0].finished,
-        )
-        total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
-        metadata = self.request_metadata[request_id]  # Don't pop yet, _poll_tool_futures might need it
-        result = _finalize_outputs(
-            final_output,
-            tracking,
-            metadata["dataset_index"],
-            self.tools,
-            original_sampling_params=metadata["original_sampling_params"],
-            token_statistics=TokenStatistics(
-                num_prompt_tokens=metadata["prompt_tokens"],
-                num_response_tokens=total_generation_tokens,
-                generation_time=current_time - metadata["start_time"],
-            ),
-            start_time=metadata["start_time"],
-        )
-        return result, metadata["is_eval"]
-
     def _maybe_process_and_insert(
         self,
         request_id: str,
@@ -647,62 +697,114 @@ class LLMRayActor:
         """
         expected_n = self.request_metadata[request_id]["original_sampling_params"].n
 
+        # ---- Readiness check and canonicalization of sub-requests ----
+        # Build a canonical map: sub_id -> chosen RequestOutput
+        # Prefer tool-merged results from tracking["concat_outputs"]; otherwise fallback to engine outputs.
+        def _suffix_index(sub_req_id: str) -> int:
+            # sub_req_id looks like "<base>_<j>"; take the last underscore
+            try:
+                return int(sub_req_id.rsplit("_", 1)[1])
+            except Exception:
+                return -1
+
+        canonical: Dict[str, vllm.RequestOutput] = {}
+
         if self.tools:
-            existing_request_ids = {out.request_id for out in request_outputs[request_id]}
-            for req_id, output_obj in list(tracking["concat_outputs"].items()):
-                if _extract_base_request_id(req_id) != request_id:
+            # 1) Prefer tool-merged outputs when available.
+            for sub_req_id, output_obj in list(tracking["concat_outputs"].items()):
+                if _extract_base_request_id(sub_req_id) != request_id:
                     continue
-                if output_obj.request_id in existing_request_ids:
-                    continue
-                # Treat this tool-path sample as completed for aggregation purposes.
-                request_outputs[request_id].append(output_obj)
-                existing_request_ids.add(output_obj.request_id)
-            # If we still don't have all expected samples, wait for more.
-            if len(request_outputs[request_id]) < expected_n:
-                return 0
-        if len(request_outputs[request_id]) == expected_n:
-            # Ensure there is a tracking stub for every sub-request (even if no tools were used).
-            if self.tools:
-                outs = request_outputs[request_id]
-                for j, out in enumerate(outs):
-                    sub_id = f"{request_id}_{j}"
-                    if sub_id not in tracking["concat_outputs"]:
-                        # Create a stub so _finalize_outputs can read masks/metadata uniformly.
-                        tracking["concat_outputs"][sub_id] = vllm.RequestOutput(
-                            request_id=sub_id,
-                            prompt=out.prompt,
-                            prompt_token_ids=out.prompt_token_ids,
-                            prompt_logprobs=out.prompt_logprobs,
-                            outputs=list(out.outputs),
-                            finished=True,
-                        )
-                        # Initialize tool bookkeeping fields expected downstream.
-                        token_count = (
-                            len(tracking["concat_outputs"][sub_id].outputs[0].token_ids)
-                            if tracking["concat_outputs"][sub_id].outputs
-                            else 0
-                        )
-                        tracking["masks"][sub_id] = [1] * token_count  # 1 = model tokens, 0 = tool tokens
-                        tracking["num_calls"][sub_id] = 0
-                        tracking["timeout"][sub_id] = False
-                        tracking["tool_error"][sub_id] = ""
-                        tracking["tool_output"][sub_id] = ""
-                        tracking["tool_runtime"][sub_id] = 0.0
-                        tracking["tool_called"][sub_id] = False
-
-            outs = request_outputs.pop(request_id)
-            result, is_eval = self._process_completed_request(request_id, outs, tracking, current_time)
-            self._insert_result_to_queue(result, is_eval=is_eval)
-
-            # Clean up metadata and tracking for this request after enqueuing
-            self._cleanup_request_data(request_id, tracking)
-
-            if self.verbose:
-                self.logger.info(
-                    f"Completed and inserted request {request_id} with {expected_n} samples (eval={is_eval})"
+                # Assert that tool-merged outputs have exactly one output
+                assert len(output_obj.outputs) == 1, (
+                    f"Tool-merged output for {sub_req_id} has {len(output_obj.outputs)} outputs, "
+                    f"expected exactly 1. This indicates incorrect tool processing or merging."
                 )
-            return 1
-        return 0
+                canonical[sub_req_id] = output_obj
+
+        # 2) Add/keep engine outputs only for sub-requests that don't already have a tool-merged result.
+        # NOTE: do not modify request_outputs[...] while iterating
+        for out in list(request_outputs[request_id]):
+            sub_id = out.request_id
+            if _extract_base_request_id(sub_id) != request_id:
+                continue
+            if sub_id not in canonical:
+                canonical[sub_id] = out
+            else:
+                # Tie-break: prefer the longer completion (robust if tool_merged vs engine differ)
+                try:
+                    cur_len = len(canonical[sub_id].outputs[0].token_ids) if canonical[sub_id].outputs else 0
+                    new_len = len(out.outputs[0].token_ids) if out.outputs else 0
+                    if new_len > cur_len:
+                        canonical[sub_id] = out
+                except Exception:
+                    # If anything odd, keep existing (tool-merged is usually better)
+                    pass
+
+        # If we don't have all expected sub-requests yet, wait.
+        # We expect sub-ids exactly: f"{request_id}_{j}" for j in range(expected_n)
+        needed_ids = [f"{request_id}_{j}" for j in range(expected_n)]
+        available = [sid for sid in needed_ids if sid in canonical]
+        if len(available) < expected_n:
+            return 0
+
+        # Build ordered outs (0..n-1), ensuring one per sub-request.
+        ordered_outs: List[vllm.RequestOutput] = []
+        for j in range(expected_n):
+            sub_id = f"{request_id}_{j}"
+            out = canonical.get(sub_id)
+            if out is None:
+                # Should not happen due to check above; be conservative.
+                return 0
+            ordered_outs.append(out)
+
+        # Ensure tracking stubs exist for every sub-request (tools enabled case).
+        if self.tools:
+            for out in ordered_outs:
+                sub_id = out.request_id
+                if sub_id not in tracking["concat_outputs"]:
+                    # Create a stub so _finalize_outputs can read masks/metadata uniformly.
+                    # Add assertion to detect if we're getting multiple outputs per sub-request
+                    assert len(out.outputs) == 1, (
+                        f"Expected exactly 1 output per sub-request when creating stub, "
+                        f"but got {len(out.outputs)} outputs for {sub_id}. "
+                        f"This may indicate vLLM is generating multiple samples per sub-request "
+                        f"(e.g., best-of-n sampling)."
+                    )
+                    stub = vllm.RequestOutput(
+                        request_id=sub_id,
+                        prompt=out.prompt,
+                        prompt_token_ids=out.prompt_token_ids,
+                        prompt_logprobs=out.prompt_logprobs,
+                        outputs=list(out.outputs),
+                        finished=True,
+                    )
+                    tracking["concat_outputs"][sub_id] = stub
+                    token_count = len(stub.outputs[0].token_ids) if stub.outputs else 0
+                    tracking["masks"][sub_id] = [1] * token_count  # 1 = model tokens, 0 = tool tokens
+                    tracking["num_calls"][sub_id] = 0
+                    tracking["timeout"][sub_id] = False
+                    tracking["tool_error"][sub_id] = ""
+                    tracking["tool_output"][sub_id] = ""
+                    tracking["tool_runtime"][sub_id] = 0.0
+                    tracking["tool_called"][sub_id] = False
+
+        # At this point we're ready to finalize exactly n samples.
+        outs = ordered_outs
+        # Do NOT mutate tracking here; cleanup happens after enqueue.
+
+        # Remove the base entry from request_outputs to prevent growth.
+        request_outputs.pop(request_id, None)
+        result, is_eval = _process_completed_request(
+            request_id, outs, tracking, current_time, self.tools, self.request_metadata
+        )
+        self._insert_result_to_queue(result, is_eval=is_eval)
+
+        # Clean up metadata and tracking for this request after enqueuing
+        self._cleanup_request_data(request_id, tracking)
+
+        if self.verbose:
+            self.logger.info(f"Completed and inserted request {request_id} with {expected_n} samples (eval={is_eval})")
+        return 1
 
     def _has_pending_tool_futures_for_request(self, request_id: str, tracking: Dict[str, Any]) -> bool:
         """Check if there are any pending tool futures for a given base request ID."""
