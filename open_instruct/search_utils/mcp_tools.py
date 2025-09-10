@@ -4,6 +4,10 @@ A wrapper and registry for tools in rl-rag-mcp.
 from typing import List
 import inspect
 import asyncio
+import os
+import time
+import httpx
+import httpcore
 
 try:
     from mcp_agents.tool_interface.mcp_tools import MassiveServeSearchTool, SemanticScholarSnippetSearchTool, SerperSearchTool, Crawl4AIBrowseTool
@@ -56,9 +60,14 @@ class MCPTool(Tool):
     to work out how to route them. Ideally, this would be more tightly integrated into vllm,
     but for now, this is a bit cleaner.
     """
-    def __init__(self, mcp_tool_names: List[str], parser_name: str = "unified", *args, **kwargs):
+    def __init__(self, mcp_tool_names: List[str], parser_name: str = "unified", transport_type: str | None = None, max_retries: int = 3, retry_backoff: float = 0.5, *args, **kwargs):
         self.mcp_tools = []
         self.stop_strings = []
+        # Allow selecting transport via arg or env; default to StreamableHttpTransport
+        self.transport_type = transport_type or os.environ.get("MCP_TRANSPORT", "StreamableHttpTransport")
+        # Transient error retry settings
+        self.max_retries = max_retries
+        self.retry_backoff = retry_backoff
         for mcp_tool_name in mcp_tool_names:
             # filter kwargs so we only pass ones the constructor understands
             mcp_tool_cls = MCP_TOOL_REGISTRY[mcp_tool_name]
@@ -73,7 +82,7 @@ class MCPTool(Tool):
             self.mcp_tools.append(mcp_tool_cls(
                 name=mcp_tool_name,
                 tool_parser=parser_name,
-                transport_type="StreamableHttpTransport",  # for now, we only support streamable http transport.
+                transport_type=self.transport_type,
                 **filtered_kwargs,
             ))
             # assign the stop strings from the parser itself.
@@ -95,7 +104,18 @@ class MCPTool(Tool):
         try:
             for mcp_tool in self.mcp_tools:
                 if mcp_tool.tool_parser.has_calls(trunc_prompt, mcp_tool.name):
-                    document_tool_output = asyncio.run(mcp_tool(trunc_prompt))
+                    # Retry on transient stream/network errors
+                    last_exc: Exception | None = None
+                    for attempt in range(self.max_retries):
+                        try:
+                            document_tool_output = asyncio.run(mcp_tool(trunc_prompt))
+                            break
+                        except (httpcore.RemoteProtocolError, httpx.ReadError, ConnectionError, TimeoutError, asyncio.TimeoutError) as e:
+                            last_exc = e
+                            print(f"Error: {e}, retrying...")
+                            if attempt + 1 >= self.max_retries:
+                                raise
+                            time.sleep(self.retry_backoff * (2 ** attempt))
                     # first format the output
                     text_output = mcp_tool._format_output(document_tool_output)
                     # wrap in the tags
@@ -107,7 +127,6 @@ class MCPTool(Tool):
         if document_tool_output is None:
             if error is None and not found_tool:
                 error = "No valid tool calls found."
-                print(f"No mcp tool found for trunc. prompt: {trunc_prompt}")      
                 return ToolOutput(
                     output=error,
                     called=False,
@@ -143,6 +162,8 @@ class MCPTool(Tool):
             print(f"Error from mcp tool: {document_tool_output.error}")
             print("Returning error output anyway.")
         # munge into format that open-instruct likes.
+        print(f"Tool call prompt: {trunc_prompt}")
+        print(f"Returning tool output: {text_output}")
         return ToolOutput(
             output=text_output,
             called=True,
