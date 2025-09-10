@@ -701,22 +701,26 @@ class RLRAGExactAnswerVerifier(VerifierFunction):
         if not answer_string:
             return VerificationResult(score=0.0)
         # Ensure label is iterable; wrap non-list labels (including ints) into a list
-        if not isinstance(label, list):
-            label = [str(label)]
-        grading_response = None
-        if self.verifier_strategy == "f1":
-            score = max(f1_score(answer_string, str(lab))["f1"] for lab in label)
-        elif self.verifier_strategy == "em":
-            score = max(normalize_answer(answer_string) == normalize_answer(str(lab)) for lab in label)
-        elif self.verifier_strategy == "judge":
-            score, grading_response = max(self.llm_judge_verifier(answer_string, lab, query) for lab in label)
-        else:
-            raise ValueError(f"Invalid verifier strategy: {self.verifier_strategy}")
-        # if f1 is 0, but format is correct, return 0.1
-        if score == 0:
-            return VerificationResult(score=0.1, reasoning=grading_response)
-        # otherwise return f1
-        return VerificationResult(score=score, reasoning=grading_response)
+        try:
+            if not isinstance(label, list):
+                label = [str(label)]
+            grading_response = None
+            if self.verifier_strategy == "f1":
+                score = max(f1_score(answer_string, str(lab))["f1"] for lab in label)
+            elif self.verifier_strategy == "em":
+                score = max(normalize_answer(answer_string) == normalize_answer(str(lab)) for lab in label)
+            elif self.verifier_strategy == "judge":
+                score, grading_response = max(self.llm_judge_verifier(answer_string, lab, query) for lab in label)
+            else:
+                raise ValueError(f"Invalid verifier strategy: {self.verifier_strategy}")
+            # if f1 is 0, but format is correct, return 0.1
+            if score == 0:
+                return VerificationResult(score=0.1, reasoning=grading_response)
+            # otherwise return f1
+            return VerificationResult(score=score, reasoning=grading_response)
+        except Exception as e:
+            logging.warning(f"Error verifying label: {e}")
+            return VerificationResult(score=0.0)
 
 
 class R1SearchVerifier(VerifierFunction):
