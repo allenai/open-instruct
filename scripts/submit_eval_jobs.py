@@ -70,9 +70,6 @@ WEKA_CLUSTERS = [
     "ai2/neptune",
     "ai2/ceres"
 ]
-GCP_CLUSTERS = [
-    "ai2/augusta"
-]
 
 
 today = date.today().strftime("%m%d%Y")
@@ -88,10 +85,10 @@ parser.add_argument("--beaker_image", type=str, default="oe-eval-beaker/oe_eval_
 parser.add_argument("--beaker_subfolder", type=str, default=None)
 parser.add_argument("--cluster", nargs='+', default=[
     # "ai2/s2-cirrascale-l40",
-    "ai2/ceres-cirrascale",
-    "ai2/neptune-cirrascale",
-    "ai2/saturn-cirrascale",
-    "ai2/jupiter-cirrascale-2",
+    "ai2/ceres",
+    "ai2/neptune",
+    "ai2/saturn",
+    "ai2/jupiter",
 ])
 parser.add_argument("--is_tuned", action="store_true")
 parser.add_argument("--use_hf_tokenizer_template", action="store_true")
