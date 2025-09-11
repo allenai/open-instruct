@@ -47,7 +47,7 @@ set -ex
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--task-suite TASK_SUITE] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>] [--process-output <process_output>]"
+    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--task-suite TASK_SUITE] [--priority priority] [--beaker-workspace BEAKER_WORKSPACE] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>] [--process-output <process_output>]"
     echo "TASK_SUITE should be one of: NEXT_MODEL_DEV, NEXT_MODEL_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN (default: NEXT_MODEL_DEV)"
     echo "TASKS should be a comma-separated list of task specifications (e.g., 'gsm8k::tulu,bbh:cot::tulu')"
     echo "STOP_SEQUENCES should be a comma-separated list of strings to stop generation at (e.g., '</answer>,\\n\\n')"
@@ -66,6 +66,7 @@ while [[ "$#" -gt 0 ]]; do
         --max-length) MAX_LENGTH="$2"; shift ;;
         --task-suite) TASK_SUITE="$2"; shift ;;
         --priority) PRIORITY="$2"; shift ;;
+        --beaker-workspace) BEAKER_WORKSPACE="$2"; shift ;;
         --tasks) CUSTOM_TASKS="$2"; shift ;;
         --evaluate_on_weka) EVALUATE_ON_WEKA="true" ;;
         --step) STEP="$2"; shift ;;
@@ -103,6 +104,7 @@ MODEL_NAME_SAFE=${MODEL_NAME//\//_}
 MAX_LENGTH="${MAX_LENGTH:-4096}"
 TASK_SUITE="${TASK_SUITE:-NEXT_MODEL_DEV}"
 PRIORITY="${PRIORITY:normal}"
+BEAKER_WORKSPACE="${BEAKER_WORKSPACE:-ai2/tulu-3-results}"
 EVALUATE_ON_WEKA="${EVALUATE_ON_WEKA:-false}"
 RUN_ID="${RUN_ID:-}"
 STEP="${STEP:-}"
@@ -320,7 +322,7 @@ for TASK in "${TASKS[@]}"; do
     if [ "$EVALUATE_ON_WEKA" == "true" ]; then
         python oe-eval-internal/oe_eval/launch.py \
             --model "$MODEL_NAME" \
-            --beaker-workspace "ai2/tulu-3-results" \
+            --beaker-workspace "$BEAKER_WORKSPACE" \
             --beaker-budget ai2/oe-adapt \
             --beaker-timeout 48h \
             --task "$TASK" \
@@ -341,7 +343,7 @@ for TASK in "${TASKS[@]}"; do
     else
         python oe-eval-internal/oe_eval/launch.py \
         --model "$MODEL_NAME" \
-        --beaker-workspace "ai2/tulu-3-results" \
+        --beaker-workspace "$BEAKER_WORKSPACE" \
         --beaker-budget ai2/oe-adapt \
         --beaker-timeout 48h \
         --task "$TASK" \
