@@ -1035,8 +1035,9 @@ class TestVllmUtils3(unittest.TestCase):
         normalized_check = " ".join(continuation_check.split())
 
         # Verify the fix is present
-        self.assertIn(normalized_check, normalized_source,
-                      "The continuation request readiness check is not present in the code")
+        self.assertIn(
+            normalized_check, normalized_source, "The continuation request readiness check is not present in the code"
+        )
 
     def test_process_from_queue_should_not_exit_with_unfinished_requests(self):
         """Test that process_from_queue doesn't exit early when fill_engine returns 0 but unfinished requests exist.

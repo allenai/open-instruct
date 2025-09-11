@@ -810,8 +810,19 @@ class LLMRayActor:
         iteration_count = 0
 
         exit_reason = "unknown"
-        while not self._should_stop():
+        while True:
             iteration_count += 1
+
+            # Check exit conditions - only exit if should_stop AND no pending work
+            if self._should_stop():
+                pending_tools = len(self.tracking["pending_tool_futures"])
+                unfinished = self.llm_engine.get_num_unfinished_requests()
+
+                if pending_tools == 0 and unfinished == 0:
+                    exit_reason = "should_stop requested (all work complete)"
+                    break
+                elif self.verbose and iteration_count % 100 == 0:
+                    self.logger.info(f"Delaying stop: unfinished={unfinished}, pending_tools={pending_tools}")
 
             # Return every 10k iterations to allow weight synchronization
             if iteration_count % 10000 == 0:
@@ -909,6 +920,9 @@ class LLMRayActor:
                 self.logger.info(
                     f"process_from_queue iteration {iteration_count}: unfinished={final_unfinished}, pending_tools={pending_tools}"
                 )
+            if final_unfinished == 0 and pending_tools > 0:
+                # Sleep for 1 second to let pending tools complete.
+                time.sleep(1)
             if final_unfinished + pending_tools == 0:
                 # CRITICAL INVARIANT CHECKS before exiting
                 # When we think we're done, verify that ALL requests are actually complete
@@ -982,9 +996,6 @@ class LLMRayActor:
                 exit_reason = "no work remaining"
                 break
 
-        # Check if we exited due to should_stop
-        if self._should_stop() and exit_reason == "unknown":
-            exit_reason = "should_stop requested"
         if self.verbose:
             self.logger.info(f"process_from_queue exiting: {exit_reason}")
         return total_processed
