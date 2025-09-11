@@ -468,7 +468,7 @@ class Args:
                 if tool not in TOOL_CLASS_REGISTRY:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: {', '.join(TOOL_CLASS_REGISTRY.keys())}")
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
-        if "mcp" in self.tools:
+        if self.tools and "mcp" in self.tools:
             if self.mcp_tool_names is None:
                 raise ValueError("mcp_tool_names must be provided when mcp is in tools")
             self.mcp_tool_names = self.mcp_tool_names.split(",")
