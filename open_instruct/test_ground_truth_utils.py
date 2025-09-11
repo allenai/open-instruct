@@ -13,9 +13,10 @@ from open_instruct.ground_truth_utils import PuzzleMatcherVerifier
 class TestPuzzleMatcherVerifier(unittest.TestCase):
     """Test suite for PuzzleMatcherVerifier"""
 
-    def setUp(self):
+    @classmethod
+    def setUpClass(cls):
         """Set up test fixtures"""
-        self.verifier = PuzzleMatcherVerifier()
+        cls.verifier = PuzzleMatcherVerifier()
 
     @parameterized.expand(
         [
