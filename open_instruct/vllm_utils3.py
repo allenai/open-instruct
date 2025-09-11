@@ -882,9 +882,17 @@ class LLMRayActor:
                     )
                     # Result is None when we do more tool processing.
                     if result is not None:
-                        # Always accumulate the result
-                        request_id = _extract_base_request_id(result.request_id)
-                        self.request_outputs[request_id].append(result)
+                        # Sub-request is done (no more tool calls)
+                        # Use the complete output from concat_outputs if it exists (has tool processing)
+                        # Otherwise use the direct result (no tools were ever called)
+                        if output.request_id in self.tracking["concat_outputs"]:
+                            complete_output = self.tracking["concat_outputs"][output.request_id]
+                        else:
+                            complete_output = result
+
+                        # Now add the COMPLETE output to request_outputs
+                        request_id = _extract_base_request_id(output.request_id)
+                        self.request_outputs[request_id].append(complete_output)
 
                         # Try to process and insert if we have all expected outputs
                         total_processed += self._maybe_process_and_insert(
@@ -1038,11 +1046,6 @@ class LLMRayActor:
         needed_ids = [f"{request_id}_{j}" for j in range(expected_n)]
         available = [sid for sid in needed_ids if sid in canonical]
         if len(available) < expected_n:
-            return 0
-
-        # Check if there are any pending tool futures for this request
-        # We should NOT process the request until all tool processing is complete
-        if self._has_pending_tool_futures_for_request(request_id, tracking):
             return 0
 
         # Build ordered outs (0..n-1), ensuring one per sub-request.
