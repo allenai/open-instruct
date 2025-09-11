@@ -608,7 +608,13 @@ def init_process_group(
     return pg
 
 
-def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, request_metadata: dict):
+def add_request(
+    request: PromptRequest,
+    llm_engine: vllm.LLMEngine,
+    tools,
+    request_metadata: dict,
+    vllm_active_requests: dict = None,
+):
     """Add a request to the LLM engine."""
     prefix = "eval" if request.is_eval else "train"
     request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
@@ -629,7 +635,11 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         sub_sampling_params = sampling_params.clone()  # Already has n=1
         if request.generation_config.seed is not None:
             sub_sampling_params.seed = request.generation_config.seed + j
-        llm_engine.add_request(f"{request_id}_{j}", tokens_prompt, sub_sampling_params)
+        sub_request_id = f"{request_id}_{j}"
+        llm_engine.add_request(sub_request_id, tokens_prompt, sub_sampling_params)
+        # Track this request as active in vLLM
+        if vllm_active_requests is not None:
+            vllm_active_requests[sub_request_id] = request.dataset_index
     return request.generation_config.n
 
 
@@ -657,6 +667,7 @@ class LLMRayActor:
         self.verbose = verbose
         self.request_metadata = {}
         self.request_tracking = ConcurrentDict()  # Thread-safe tracking
+        self.vllm_active_requests = {}  # Track all requests currently in vLLM: request_id -> dataset_index
 
         if self.tools:
             self.executor = ThreadPoolExecutor(max_workers=20)
@@ -749,7 +760,13 @@ class LLMRayActor:
                 if self.verbose:
                     self.logger.info(f"_prefetch_worker: Successfully tracked dataset_index={dataset_index}")
 
-                num_added = add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
+                num_added = add_request(
+                    request,
+                    self.llm_engine,
+                    self.tools,
+                    request_metadata=self.request_metadata,
+                    vllm_active_requests=self.vllm_active_requests,
+                )
 
                 if self.verbose and num_added > 0:
                     self.logger.info(
@@ -847,6 +864,10 @@ class LLMRayActor:
                         f"but we always set n=1 for sub-requests. This indicates vLLM is not respecting "
                         f"the n parameter in sampling_params."
                     )
+
+                    # Remove from vllm_active_requests since this request is finished
+                    if output.request_id in self.vllm_active_requests:
+                        del self.vllm_active_requests[output.request_id]
 
                     base_req_id = _extract_base_request_id(output.request_id)
 
@@ -1143,6 +1164,25 @@ class LLMRayActor:
             assert tracking_entry["inserted"], (
                 f"Dataset index {expected_dataset_index} was not marked as inserted before cleanup"
             )
+
+            # Safety check: Ensure no active vLLM requests or pending tool futures for this dataset_index
+            active_requests_for_dataset = [
+                req_id for req_id, ds_idx in self.vllm_active_requests.items() if ds_idx == expected_dataset_index
+            ]
+
+            has_pending_tools = self._has_pending_tool_futures_for_request(request_id, tracking)
+
+            if active_requests_for_dataset or has_pending_tools:
+                self.logger.error(
+                    f"WARNING: Attempting to clean up dataset_index {expected_dataset_index} but found:\n"
+                    f"  - Active vLLM requests: {active_requests_for_dataset}\n"
+                    f"  - Has pending tool futures: {has_pending_tools}\n"
+                    f"  - Request ID: {request_id}\n"
+                    f"  - All active vLLM requests: {list(self.vllm_active_requests.keys())}\n"
+                    f"This indicates requests are being cleaned up while still being processed!"
+                )
+                # Still delete to avoid memory leak, but we've logged the issue
+
             self.request_tracking.delete(expected_dataset_index)
 
         if self.verbose:
@@ -1289,6 +1329,10 @@ class LLMRayActor:
                     self.llm_engine.add_request(
                         req_id, vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token), new_sampling_params
                     )
+                    # Track tool continuation request as active
+                    base_req_id = _extract_base_request_id(req_id)
+                    if base_req_id in self.request_metadata:
+                        self.vllm_active_requests[req_id] = self.request_metadata[base_req_id]["dataset_index"]
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
                     self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
