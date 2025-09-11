@@ -657,7 +657,6 @@ class LLMRayActor:
         self.verbose = verbose
         self.request_metadata = {}
         self.request_tracking = ConcurrentDict()  # Thread-safe tracking
-        self.continuation_requests = set()  # Track which requests are tool continuations
 
         if self.tools:
             self.executor = ThreadPoolExecutor(max_workers=20)
@@ -883,34 +882,14 @@ class LLMRayActor:
                     )
                     # Result is None when we do more tool processing.
                     if result is not None:
-                        # Check if this is a continuation request - if so, don't insert it
-                        if output.request_id in self.continuation_requests:
-                            # This is a tool continuation that completed - don't insert separately
-                            # The result will be aggregated with the original request
-                            self.continuation_requests.remove(output.request_id)
-                            # Update tracking but don't insert
-                            request_id = _extract_base_request_id(result.request_id)
-                            self.request_outputs[request_id].append(result)
-
-                            # Check if we now have all samples ready
-                            if request_id in self.request_metadata:
-                                expected_n = self.request_metadata[request_id]["original_sampling_params"].n
-
-                                # Count how many outputs we have for this request
-                                num_outputs = len(self.request_outputs[request_id])
-
-                                # Only try to process if we have all expected outputs
-                                if num_outputs >= expected_n:
-                                    total_processed += self._maybe_process_and_insert(
-                                        request_id, self.request_outputs, self.tracking, current_time
-                                    )
-                        else:
-                            # This is an original request that completed without tools
-                            request_id = _extract_base_request_id(result.request_id)
-                            self.request_outputs[request_id].append(result)
-                            total_processed += self._maybe_process_and_insert(
-                                request_id, self.request_outputs, self.tracking, current_time
-                            )
+                        # Always accumulate the result
+                        request_id = _extract_base_request_id(result.request_id)
+                        self.request_outputs[request_id].append(result)
+                        
+                        # Try to process and insert if we have all expected outputs
+                        total_processed += self._maybe_process_and_insert(
+                            request_id, self.request_outputs, self.tracking, current_time
+                        )
 
             # If no work to do, break to yield control back to generate_thread,
             # allowing weight_sync_thread to acquire the LLMRayActor lock
@@ -966,13 +945,8 @@ class LLMRayActor:
                                 # No pending outputs for this base, so truly orphaned
                                 orphaned_tracking.append(f"{sub_id} (base: {base_id})")
 
-                # 4. Check continuation requests
-                pending_continuations = []
-                if self.continuation_requests:
-                    pending_continuations = list(self.continuation_requests)
-
                 # Log comprehensive state and assert
-                if incomplete_metadata or pending_in_outputs or orphaned_tracking or pending_continuations:
+                if incomplete_metadata or pending_in_outputs or orphaned_tracking:
                     error_msg = (
                         f"\\n=== CRITICAL: INCOMPLETE STATE AT EXIT ===\\n"
                         f"vLLM unfinished: {final_unfinished}\\n"
@@ -980,7 +954,6 @@ class LLMRayActor:
                         f"Incomplete metadata: {incomplete_metadata or 'None'}\\n"
                         f"Ready but not inserted: {pending_in_outputs or 'None'}\\n"
                         f"Orphaned tracking: {orphaned_tracking or 'None'}\\n"
-                        f"Pending continuations: {pending_continuations or 'None'}\\n"
                         f"Request metadata keys: {list(self.request_metadata.keys())}\\n"
                         f"Request outputs keys: {list(self.request_outputs.keys())}\\n"
                     )
@@ -1306,9 +1279,6 @@ class LLMRayActor:
                 new_sampling_params.max_tokens = new_sample_tokens
 
                 try:
-                    # Mark this request as a continuation so we don't try to insert it separately
-                    self.continuation_requests.add(req_id)
-
                     self.llm_engine.add_request(
                         req_id, vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token), new_sampling_params
                     )
