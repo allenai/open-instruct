@@ -798,8 +798,14 @@ class LLMRayActor:
             int: Number of requests processed
         """
 
-        tracking = _init_tool_tracking()
-        request_outputs = defaultdict(list)
+        # Initialize tracking and outputs if they don't exist (for backwards compatibility)
+        if not hasattr(self, "tracking"):
+            self.tracking = _init_tool_tracking()
+        if not hasattr(self, "request_outputs"):
+            self.request_outputs = defaultdict(list)
+
+        # Use persistent instance variables for tracking and outputs
+        # This ensures state is maintained across multiple calls
         total_processed = 0
         iteration_count = 0
 
@@ -815,7 +821,7 @@ class LLMRayActor:
                 return total_processed
 
             # Process tool futures (just updates tracking, doesn't return results to insert)
-            self._poll_tool_futures(tracking, self.llm_engine.tokenizer)
+            self._poll_tool_futures(self.tracking, self.llm_engine.tokenizer)
             current_time = time.time()
             # Tool outputs are now accumulated in tracking and will be inserted
             # only when the final request completes
@@ -845,13 +851,13 @@ class LLMRayActor:
                     # Assert: check sample count before processing
                     expected_samples = self.request_metadata[base_req_id]["original_sampling_params"].n
                     current_samples_before = sum(
-                        1 for k in tracking["concat_outputs"].keys() if _extract_base_request_id(k) == base_req_id
+                        1 for k in self.tracking["concat_outputs"].keys() if _extract_base_request_id(k) == base_req_id
                     )
 
                     result = _handle_output(
                         output,
                         self.tools,
-                        tracking,
+                        self.tracking,
                         self.request_metadata[base_req_id]["sampling_params"],
                         self.max_tool_calls,
                         self.executor,
@@ -859,10 +865,10 @@ class LLMRayActor:
 
                     # Assert: check sample count after processing
                     current_samples_after = sum(
-                        1 for k in tracking["concat_outputs"].keys() if _extract_base_request_id(k) == base_req_id
+                        1 for k in self.tracking["concat_outputs"].keys() if _extract_base_request_id(k) == base_req_id
                     )
                     assert current_samples_after <= expected_samples, (
-                        f"Too many samples for {base_req_id}: expected ≤{expected_samples}, got {current_samples_after} (was {current_samples_before} before). Keys: {[k for k in tracking['concat_outputs'].keys() if _extract_base_request_id(k) == base_req_id]}"
+                        f"Too many samples for {base_req_id}: expected ≤{expected_samples}, got {current_samples_after} (was {current_samples_before} before). Keys: {[k for k in self.tracking['concat_outputs'].keys() if _extract_base_request_id(k) == base_req_id]}"
                     )
                     # Result is None when we do more tool processing.
                     if result is not None:
@@ -879,13 +885,13 @@ class LLMRayActor:
                             request_id = _extract_base_request_id(result.request_id)
                             self.request_outputs[request_id].append(result)
                             total_processed += self._maybe_process_and_insert(
-                                request_id, request_outputs, tracking, current_time
+                                request_id, self.request_outputs, self.tracking, current_time
                             )
 
             # If no work to do, break to yield control back to generate_thread,
             # allowing weight_sync_thread to acquire the LLMRayActor lock
             final_unfinished = self.llm_engine.get_num_unfinished_requests()
-            pending_tools = len(tracking["pending_tool_futures"])
+            pending_tools = len(self.tracking["pending_tool_futures"])
             if self.verbose:
                 self.logger.info(
                     f"process_from_queue iteration {iteration_count}: unfinished={final_unfinished}, pending_tools={pending_tools}"
