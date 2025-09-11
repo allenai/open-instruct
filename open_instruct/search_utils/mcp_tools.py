@@ -80,7 +80,7 @@ class MCPTool(Tool):
         self.stop_strings = []
         # Allow selecting transport via arg or env; default to StreamableHttpTransport
         self.transport_type = transport_type or os.environ.get("MCP_TRANSPORT", "StreamableHttpTransport")
-        self.mcp_host = mcp_host or os.environ.get("MCP_TRANSPORT_HOST", "localhost")
+        self.mcp_host = mcp_host or os.environ.get("MCP_TRANSPORT_HOST", "0.0.0.0")
         if self.mcp_host is not None:
             os.environ["MCP_TRANSPORT_HOST"] = str(self.mcp_host)
         self.mcp_port = mcp_port or os.environ.get("MCP_TRANSPORT_PORT", 8000)
@@ -135,6 +135,7 @@ class MCPTool(Tool):
                     for attempt in range(self.max_retries):
                         try:
                             document_tool_output = asyncio.run(mcp_tool(trunc_prompt))
+                            print(f"MCP tool output: {document_tool_output}")
                             break
                         except (httpcore.RemoteProtocolError, httpx.ReadError, ConnectionError, TimeoutError, asyncio.TimeoutError) as e:
                             last_exc = e
@@ -206,10 +207,10 @@ if __name__ == "__main__":
     from open_instruct.grpo_fast import launch_mcp_subprocess
     import time
     # need to launch mcp server first.
-    launch_mcp_subprocess("uv run python -m rl-rag-mcp.mcp_agents.mcp_backend.main --transport http --port 8000 --host 0.0.0.0 --path /mcp", "./mcp_logs")
+    launch_mcp_subprocess("python -m rl-rag-mcp.mcp_agents.mcp_backend.main --transport http --port 8000 --host 0.0.0.0 --path /mcp", "./mcp_logs")
     # wait for it to launch.
     time.sleep(10)
     # then we can use the mcp tool.
-    mcp_tool = MCPTool(["google_search"], number_documents_to_search=10, api_endpoint="http://localhost:8000/mcp")
-    print(mcp_tool('<tool name="google_search">What is the capital of France?</tool>'))
+    mcp_tool = MCPTool(["browse_webpage"], number_documents_to_search=10, api_endpoint="http://localhost:8000/mcp")
+    print(mcp_tool('<tool name="browse_webpage">https://www.google.com</tool>'))
 
