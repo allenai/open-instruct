@@ -883,9 +883,15 @@ class LLMRayActor:
                     # Result is None when we do more tool processing.
                     if result is not None:
                         # Sub-request is done (no more tool calls)
-                        # The result is already properly processed as a GenerationResult
                         request_id = _extract_base_request_id(output.request_id)
-                        self.request_outputs[request_id].append(result)
+
+                        # Move the accumulated output from concat_outputs to request_outputs
+                        if output.request_id in self.tracking["concat_outputs"]:
+                            complete_output = self.tracking["concat_outputs"][output.request_id]
+                            self.request_outputs[request_id].append(complete_output)
+                        else:
+                            # No tools were used, use the direct result
+                            self.request_outputs[request_id].append(result)
 
                         # Try to process and insert if we have all expected outputs
                         total_processed += self._maybe_process_and_insert(
@@ -1286,10 +1292,6 @@ class LLMRayActor:
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
                     self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
-            else:
-                # If we can't make a new request, this tool execution is complete
-                # Don't append to completed_outputs - we don't want to insert intermediate results
-                pass
             dict_keys_to_delete.append(req_id)
 
         # Remove the futures we just processed; do NOT clean up metadata here.
