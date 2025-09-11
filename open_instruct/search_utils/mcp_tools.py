@@ -82,10 +82,10 @@ class MCPTool(Tool):
         self.transport_type = transport_type or os.environ.get("MCP_TRANSPORT", "StreamableHttpTransport")
         self.mcp_host = mcp_host or os.environ.get("MCP_TRANSPORT_HOST", "localhost")
         if self.mcp_host is not None:
-            os.environ["MCP_TRANSPORT_HOST"] = self.mcp_host
+            os.environ["MCP_TRANSPORT_HOST"] = str(self.mcp_host)
         self.mcp_port = mcp_port or os.environ.get("MCP_TRANSPORT_PORT", 8000)
         if self.mcp_port is not None:
-            os.environ["MCP_TRANSPORT_PORT"] = self.mcp_port
+            os.environ["MCP_TRANSPORT_PORT"] = str(self.mcp_port)
         # Prefer explicit base_url, fall back to search_api_endpoint for compatibility
         self.base_url = base_url or search_api_endpoint
         # Transient error retry settings
