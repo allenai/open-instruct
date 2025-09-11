@@ -1,12 +1,13 @@
 MODEL_NAME=/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/olmo3-hparam-search/olmo2.5-6T-R5-NO_LR_FIX-olmo2-tulu3-mix-num_3
-# MODEL_NAME=/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/usable-tulu/olmo2-7B-FINAL-LC-olmo2-tulu3-mix-num_3
+EXP_NAME=retrojm-dpo-olmo3-qwen3delta-chat35-lr1e-7_150k
 python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
-    --cluster ai2/jupiter-cirrascale-2 ai2/ceres-cirrascale \
-    --workspace ai2/usable-olmo \
-    --priority high \
+    --cluster ai2/augusta \
+    --workspace ai2/olmo-instruct \
+    --priority urgent \
     --image scottg/open_instruct_dev --pure_docker_mode \
     --preemptible \
-    --num_nodes 2 \
+    --num_nodes 1 \
+    --gs_model_name $EXP_NAME \
     --budget ai2/oe-base \
     --no_auto_dataset_cache \
     --gpus 8 -- accelerate launch \
@@ -16,7 +17,7 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/dpo_tune_cache.py \
-    --exp_name retrojm-dpo-olmo3-qwen3delta-chat35-lr1e-7_150k \
+    --exp_name $EXP_NAME \
     --model_name_or_path $MODEL_NAME \
     --tokenizer_name $MODEL_NAME \
     --use_slow_tokenizer False \

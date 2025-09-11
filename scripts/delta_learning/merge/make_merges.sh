@@ -1,0 +1,12 @@
+python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
+    --cluster ai2/jupiter ai2/ceres ai2/neptune ai2/saturn \
+    --workspace ai2/olmo-instruct \
+    --priority urgent \
+    --image scottg/open_instruct_dev --pure_docker_mode \
+    --preemptible \
+    --num_nodes 1 \
+    --budget ai2/oe-adapt \
+    --no_auto_dataset_cache \
+    --gpus 1 -- python /weka/oe-adapt-default/scottg/olmo/merging/merge_ckpts.py \
+    --mode extrapolate \
+    --merge_alphas 0.05 0.1 0.15 0.2 0.25 0.3

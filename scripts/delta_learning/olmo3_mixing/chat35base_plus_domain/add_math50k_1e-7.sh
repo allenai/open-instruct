@@ -1,9 +1,10 @@
 MODEL_NAME=/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/olmo3-hparam-search/olmo2.5-6T-R5-NO_LR_FIX-olmo2-tulu3-mix-num_3
-# MODEL_NAME=/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/usable-tulu/olmo2-7B-FINAL-LC-olmo2-tulu3-mix-num_3
+EXP_NAME=retrojm-dpo-deltamix-add_math50k_lr1e-7
 python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
-    --cluster ai2/jupiter-cirrascale-2 ai2/ceres-cirrascale ai2/saturn-cirrascale \
-    --workspace ai2/usable-olmo \
-    --priority high \
+    --cluster ai2/augusta \
+    --workspace ai2/olmo-instruct \
+    --priority urgent \
+    --gs_model_name $EXP_NAME \
     --image scottg/open_instruct_dev --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
@@ -16,7 +17,7 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/dpo_tune_cache.py \
-    --exp_name retrojm-dpo-deltamix-add_math50k_lr1e-7 \
+    --exp_name $EXP_NAME \
     --model_name_or_path $MODEL_NAME \
     --tokenizer_name $MODEL_NAME \
     --use_slow_tokenizer False \
@@ -37,4 +38,5 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --gradient_checkpointing \
     --report_to wandb \
     --chat_template_name olmo \
-    --with_tracking
+    --with_tracking \
+    --eval_workspace olmo-instruct

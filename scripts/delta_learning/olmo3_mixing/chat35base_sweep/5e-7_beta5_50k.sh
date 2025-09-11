@@ -1,14 +1,13 @@
 MODEL_NAME=/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/olmo3-hparam-search/olmo2.5-6T-R5-NO_LR_FIX-olmo2-tulu3-mix-num_3
-EXP_NAME=retrojm-dpo-deltamix-add_sci50k_lr5e-7
+EXP_NAME=retrojm-dpo-deltamix-base_lr5e-7_beta5_50k
 python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
-    --cluster ai2/augusta \
+    --cluster ai2/jupiter-cirrascale-2 ai2/ceres-cirrascale \
     --workspace ai2/olmo-instruct \
     --priority urgent \
-    --gs_model_name $EXP_NAME \
     --image scottg/open_instruct_dev --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
-    --budget ai2/oe-base \
+    --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
     --gpus 8 -- accelerate launch \
     --mixed_precision bf16 \
@@ -21,9 +20,8 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --model_name_or_path $MODEL_NAME \
     --tokenizer_name $MODEL_NAME \
     --use_slow_tokenizer False \
-    --dataset_mixer_list scottgeng00/olmo-3-preference-mix-deltas-100k_base 1.0 \
-        scottgeng00/olmo-3-preference-mix-deltas-100k_base_complement-only_science 50000 \
-    --max_seq_length 2048 \
+    --dataset_mixer_list scottgeng00/olmo-3-preference-mix-deltas-chat0.35 1.0 \
+    --max_seq_length 4096 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 8 \
     --learning_rate 5e-7 \
@@ -39,4 +37,5 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --report_to wandb \
     --chat_template_name olmo \
     --with_tracking \
+    --max_train_samples 50000 \
     --eval_workspace olmo-instruct

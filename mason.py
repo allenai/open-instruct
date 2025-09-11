@@ -59,6 +59,7 @@ WEKA_CLUSTERS = [
     "ai2/jupiter-cirrascale-2",
     "ai2/jupiter",
     "ai2/saturn-cirrascale",
+    "ai2/saturn",
     "ai2/titan-cirrascale",
     "ai2/titan",
     "ai2/neptune-cirrascale",
