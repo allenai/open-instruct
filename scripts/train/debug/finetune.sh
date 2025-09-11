@@ -1,11 +1,9 @@
-accelerate launch \
+uv run accelerate launch \
     --mixed_precision bf16 \
     --num_processes 1 \
     open_instruct/finetune.py \
-    --model_name_or_path EleutherAI/pythia-14m \
-    --tokenizer_name EleutherAI/pythia-14m \
-    --use_slow_tokenizer False \
-    --use_flash_attn False \
+    --model_name_or_path Qwen/Qwen3-0.6B \
+    --tokenizer_name Qwen/Qwen3-0.6B \
     --max_seq_length 1024 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
@@ -14,7 +12,7 @@ accelerate launch \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
-    --output_dir output/sft_pythia_14m/ \
+    --output_dir output/ \
     --report_to wandb \
     --logging_steps 1 \
     --reduce_loss sum \
