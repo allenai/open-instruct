@@ -162,14 +162,6 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     if output.request_id in tracking["concat_outputs"]:
         # When updating an existing entry, we extend the token_ids of the first (and only) output
         # The entry should already have been validated to have exactly 1 output when first stored
-        existing_outputs = tracking["concat_outputs"][output.request_id].outputs
-        logger.error(
-            f"FOUND EXISTING ENTRY for {output.request_id} with {len(existing_outputs)} outputs. "
-            f"This entry should have been created with exactly 1 output. "
-            f"Entry type: {type(tracking['concat_outputs'][output.request_id])}, "
-            f"Outputs type: {type(existing_outputs)}, "
-            f"First output type: {type(existing_outputs[0]) if existing_outputs else 'N/A'}"
-        )
         assert len(tracking["concat_outputs"][output.request_id].outputs) == 1, (
             f"Expected concat_outputs to have exactly 1 output for {output.request_id}, "
             f"but found {len(tracking['concat_outputs'][output.request_id].outputs)}. "
@@ -665,6 +657,7 @@ class LLMRayActor:
         self.verbose = verbose
         self.request_metadata = {}
         self.request_tracking = ConcurrentDict()  # Thread-safe tracking
+        self.continuation_requests = set()  # Track which requests are tool continuations
 
         if self.tools:
             self.executor = ThreadPoolExecutor(max_workers=20)
@@ -742,12 +735,20 @@ class LLMRayActor:
 
                 # Track that we pulled this dataset_index from the prompt queue
                 dataset_index = request.dataset_index
+
+                # Log for debugging
+                if self.verbose:
+                    self.logger.info(f"_prefetch_worker: Pulling dataset_index={dataset_index} from prompt queue")
+
                 self.request_tracking.assert_not_exists(
                     dataset_index,
                     f"Dataset index {dataset_index} already in request_tracking. "
                     f"This indicates duplicate dataset indices in prompt queue.",
                 )
                 self.request_tracking.set(dataset_index, {"pulled": True, "inserted": False})
+
+                if self.verbose:
+                    self.logger.info(f"_prefetch_worker: Successfully tracked dataset_index={dataset_index}")
 
                 num_added = add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
 
@@ -768,45 +769,21 @@ class LLMRayActor:
         # Validate that this dataset_index was pulled from prompt queue
         dataset_index = result.dataset_index
         if dataset_index is not None:  # dataset_index can be None for combined results
-            # Check if this is a tool continuation - if so, skip tracking validation
-            # Tool continuations are results from requests added back by _poll_tool_futures
-            # They share the same dataset_index but are not separately tracked
-            is_tool_continuation = False
-
-            # Check if the dataset_index exists in tracking
-            if not self.request_tracking.contains(dataset_index):
-                # This might be a tool continuation - check if the original request had tools
-                # Tool continuations will have already had their dataset_index cleaned up
-                # after the first result was inserted
-                # For now, we'll just log a warning instead of asserting
-                if self.tools:
-                    # With tools enabled, this is likely a tool continuation
-                    is_tool_continuation = True
-                    if self.verbose:
-                        self.logger.info(
-                            f"Dataset index {dataset_index} not in tracking - likely a tool continuation result"
-                        )
-                else:
-                    # Without tools, this should never happen
-                    self.request_tracking.assert_exists(
-                        dataset_index,
-                        f"Dataset index {dataset_index} was never pulled from prompt queue. "
-                        f"Available indices: {self.request_tracking.keys()}",
-                    )
-
-            if not is_tool_continuation and self.request_tracking.contains(dataset_index):
-                # Only update tracking for non-continuation results
-                tracking_entry = self.request_tracking.get(dataset_index)
-                if not tracking_entry["inserted"]:
-                    self.request_tracking.assert_and_update(
-                        dataset_index,
-                        "inserted",
-                        False,
-                        True,
-                        f"Dataset index {dataset_index} has already been inserted into results queue. "
-                        f"This indicates duplicate result insertion.",
-                    )
-                # else: already inserted, this is a continuation
+            # Since we no longer insert tool continuation results,
+            # every result should have been tracked
+            self.request_tracking.assert_exists(
+                dataset_index,
+                f"Dataset index {dataset_index} was never pulled from prompt queue. "
+                f"Available indices: {self.request_tracking.keys()}",
+            )
+            self.request_tracking.assert_and_update(
+                dataset_index,
+                "inserted",
+                False,
+                True,
+                f"Dataset index {dataset_index} has already been inserted into results queue. "
+                f"This indicates duplicate result insertion.",
+            )
 
         results_queue = self.eval_results_queue if is_eval else self.results_queue
         results_queue.put(result)
@@ -837,20 +814,11 @@ class LLMRayActor:
                     self.logger.info(f"process_from_queue exiting: {exit_reason}")
                 return total_processed
 
-            # Process tool futures
-            tool_outputs = self._poll_tool_futures(tracking, self.llm_engine.tokenizer)
+            # Process tool futures (just updates tracking, doesn't return results to insert)
+            self._poll_tool_futures(tracking, self.llm_engine.tokenizer)
             current_time = time.time()
-
-            for output in tool_outputs:
-                # Check that tool outputs also have exactly 1 completion
-                assert len(output.outputs) == 1, (
-                    f"Tool output returned {len(output.outputs)} outputs for request {output.request_id}, "
-                    f"but all entries in concat_outputs should have exactly 1 output. "
-                    f"This indicates an entry was incorrectly stored with multiple outputs."
-                )
-                request_id = _extract_base_request_id(output.request_id)
-                request_outputs[request_id].append(output)
-                total_processed += self._maybe_process_and_insert(request_id, request_outputs, tracking, current_time)
+            # Tool outputs are now accumulated in tracking and will be inserted
+            # only when the final request completes
 
             # Process engine steps - ONLY if there are unfinished requests
             if self.llm_engine.has_unfinished_requests():
@@ -898,11 +866,21 @@ class LLMRayActor:
                     )
                     # Result is None when we do more tool processing.
                     if result is not None:
-                        request_id = _extract_base_request_id(result.request_id)
-                        request_outputs[request_id].append(result)
-                        total_processed += self._maybe_process_and_insert(
-                            request_id, request_outputs, tracking, current_time
-                        )
+                        # Check if this is a continuation request - if so, don't insert it
+                        if output.request_id in self.continuation_requests:
+                            # This is a tool continuation that completed - don't insert separately
+                            # The result will be aggregated with the original request
+                            self.continuation_requests.remove(output.request_id)
+                            # Update tracking but don't insert
+                            request_id = _extract_base_request_id(result.request_id)
+                            self.request_outputs[request_id].append(result)
+                        else:
+                            # This is an original request that completed without tools
+                            request_id = _extract_base_request_id(result.request_id)
+                            self.request_outputs[request_id].append(result)
+                            total_processed += self._maybe_process_and_insert(
+                                request_id, request_outputs, tracking, current_time
+                            )
 
             # If no work to do, break to yield control back to generate_thread,
             # allowing weight_sync_thread to acquire the LLMRayActor lock
@@ -1080,20 +1058,13 @@ class LLMRayActor:
         self._cleanup_request_data(request_id, tracking)
 
         # Clean up request tracking for this dataset_index
-        # Only clean up if this is not a request that might have tool continuations
-        has_tool_continuation = self.request_metadata[request_id].get("has_tool_continuation", False)
-
-        if self.request_tracking.contains(expected_dataset_index) and not has_tool_continuation:
+        if self.request_tracking.contains(expected_dataset_index):
             # Verify it was properly inserted before cleaning up
             tracking_entry = self.request_tracking.get(expected_dataset_index)
             assert tracking_entry["inserted"], (
                 f"Dataset index {expected_dataset_index} was not marked as inserted before cleanup"
             )
             self.request_tracking.delete(expected_dataset_index)
-        elif has_tool_continuation and self.verbose:
-            self.logger.info(
-                f"Not cleaning up tracking for dataset_index {expected_dataset_index} - has tool continuations"
-            )
 
         if self.verbose:
             self.logger.info(f"Completed and inserted request {request_id} with {expected_n} samples (eval={is_eval})")
@@ -1236,10 +1207,8 @@ class LLMRayActor:
                 new_sampling_params.max_tokens = new_sample_tokens
 
                 try:
-                    # Mark this as a tool continuation in metadata
-                    # Extract base request ID to get the original dataset_index
-                    if base_req_id in self.request_metadata:
-                        self.request_metadata[base_req_id]["has_tool_continuation"] = True
+                    # Mark this request as a continuation so we don't try to insert it separately
+                    self.continuation_requests.add(req_id)
 
                     self.llm_engine.add_request(
                         req_id, vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token), new_sampling_params
@@ -1249,7 +1218,8 @@ class LLMRayActor:
                     self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
             else:
                 # If we can't make a new request, this tool execution is complete
-                completed_outputs.append(tracking["concat_outputs"][req_id])
+                # Don't append to completed_outputs - we don't want to insert intermediate results
+                pass
             dict_keys_to_delete.append(req_id)
 
         # Remove the futures we just processed; do NOT clean up metadata here.
