@@ -60,14 +60,40 @@ class MCPTool(Tool):
     to work out how to route them. Ideally, this would be more tightly integrated into vllm,
     but for now, this is a bit cleaner.
     """
-    def __init__(self, mcp_tool_names: List[str], parser_name: str = "unified", transport_type: str | None = None, max_retries: int = 3, retry_backoff: float = 0.5, *args, **kwargs):
+    def __init__(
+        self,
+        mcp_tool_names: List[str] | str,
+        parser_name: str = "unified",
+        transport_type: str | None = None,
+        mcp_host: str | None = None,
+        mcp_port: int | None = None,
+        max_retries: int = 3,
+        retry_backoff: float = 0.5,
+        base_url: str | None = None,
+        search_api_endpoint: str | None = None,
+        start_str: str = "",
+        end_str: str | None = None,
+        *args,
+        **kwargs,
+    ):
         self.mcp_tools = []
         self.stop_strings = []
         # Allow selecting transport via arg or env; default to StreamableHttpTransport
         self.transport_type = transport_type or os.environ.get("MCP_TRANSPORT", "StreamableHttpTransport")
+        self.mcp_host = mcp_host or os.environ.get("MCP_TRANSPORT_HOST", "localhost")
+        if self.base_url is not None:
+            os.environ["MCP_TRANSPORT_HOST"] = self.mcp_host
+        self.mcp_port = mcp_port or os.environ.get("MCP_TRANSPORT_PORT", 8000)
+        if self.mcp_port is not None:
+            os.environ["MCP_TRANSPORT_PORT"] = self.mcp_port
+        # Prefer explicit base_url, fall back to search_api_endpoint for compatibility
+        self.base_url = base_url or search_api_endpoint
         # Transient error retry settings
         self.max_retries = max_retries
         self.retry_backoff = retry_backoff
+        # Support comma-separated string for mcp_tool_names
+        if isinstance(mcp_tool_names, str):
+            mcp_tool_names = [n.strip() for n in mcp_tool_names.split(",") if n.strip()]
         for mcp_tool_name in mcp_tool_names:
             # filter kwargs so we only pass ones the constructor understands
             mcp_tool_cls = MCP_TOOL_REGISTRY[mcp_tool_name]
@@ -88,7 +114,7 @@ class MCPTool(Tool):
             # assign the stop strings from the parser itself.
             self.stop_strings += self.mcp_tools[-1].tool_parser.stop_sequences
         # MCP tool handles its own start and end strings.
-        super().__init__(start_str="", end_str=self.stop_strings[-1])
+        super().__init__(start_str=start_str, end_str=end_str or self.stop_strings[-1])
 
     def get_stop_strings(self) -> List[str]:
         return self.stop_strings

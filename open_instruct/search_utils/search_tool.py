@@ -9,16 +9,27 @@ from open_instruct.tool_utils.tool_vllm import Tool, ToolOutput
 
 
 class SearchTool(Tool):
-    def __init__(self, api_endpoint: str, use_massive_ds: bool = False, *args, **kwargs):
-        self.api_endpoint = api_endpoint
+    def __init__(
+        self,
+        api_endpoint: str | None = None,
+        use_massive_ds: bool = False,
+        search_api_endpoint: str | None = None,
+        number_documents_to_search: int = 3,
+        start_str: str = "<search>",
+        end_str: str = "</search>",
+        *args,
+        **kwargs,
+    ):
+        # Prefer explicit api_endpoint, fall back to search_api_endpoint
+        self.api_endpoint = api_endpoint or search_api_endpoint
         if use_massive_ds:
             self.get_snippets_for_query = get_snippets_for_query_massive_ds
         else:
             self.get_snippets_for_query = get_snippets_for_query_s2
-        self.start_str = "<search>"
-        self.end_str = "</search>"
-        self.number_documents_to_search = kwargs.pop("number_documents_to_search", 3)
-        super().__init__(*args, **kwargs)
+        self.start_str = start_str
+        self.end_str = end_str
+        self.number_documents_to_search = number_documents_to_search
+        super().__init__(start_str=start_str, end_str=end_str, *args, **kwargs)
 
     def __call__(self, prompt: str) -> ToolOutput:
         # Find Python code blocks using regex

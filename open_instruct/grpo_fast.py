@@ -132,8 +132,10 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
     sync_gs_bucket,
 )
+from open_instruct.tool_utils.tool_actor import ToolActor, TOOL_CLASS_REGISTRY
+from open_instruct.tool_utils.tool_proxy import ToolProxy
 from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
-from open_instruct.search_utils.mcp_tools import MCP_TOOL_REGISTRY, MCPTool
+from open_instruct.search_utils.mcp_tools import MCP_TOOL_REGISTRY
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -391,23 +393,22 @@ class Args:
 
     # Tool settings
     tools: Optional[List[str]] = None
-    """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
+    """If set, use the tool mapped to the string. Currently only supports `search`, `code`, and `mcp`"""
     max_tool_calls: List[int] = field(default_factory=lambda: [5])
     """Maximum number of tool calls allowed. If a list is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
     mask_tool_use: bool = True
     """Whether to mask the tool output. By default on."""
     only_reward_good_outputs: bool = False
     """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
-    use_mcp_tools: bool = False
-    """Whether to use MCP tools. For now if you use the MCP tools, you need to run an MCP server on the background."""
-    mcp_tool_names: Optional[str] = "s2"
-    """The names (comma separated) of the MCP tool to use."""
-    mcp_parser_name: Optional[str] = None
-    """The name of the MCP parser to use."""
-    mcp_server_command: Optional[str] = None
-    """Command to run MCP server subprocess when use_mcp_tools is enabled. Example: 'uv run python -m rl-rag-mcp.mcp_agents.mcp_backend.main --transport http --port 8000 --host 0.0.0.0 --path /mcp'"""
+    tool_max_concurrency: int = 512
+    """The maximum number of concurrent tool calls allowed across all rollouts per tool."""
 
 
+    ### begin per-tool settings ###
+    # code-tool specific settings
+    code_tool_api_endpoint: Optional[str] = None
+
+    # search-tool specific settings
     # rl-rag tool settings. These are shared across different tools.
     number_documents_to_search: int = 3
     """The maximum number of documents to retrieve for each query."""
@@ -416,8 +417,19 @@ class Args:
     use_massive_ds: bool = False
     """Whether to use massive ds for search. Only matters for non-MCP search tool."""
 
-    # code-tool specific settings
-    code_tool_api_endpoint: Optional[str] = None
+    # mcp-tool specific settings
+    mcp_tool_names: Optional[str] = "snippet_search,google_search,browse_webpage"
+    """The names (comma separated) of the MCP tool to use. Valid tools are: snippet_search, google_search, browse_webpage."""
+    mcp_parser_name: Optional[str] = None
+    """The name of the MCP parser to use."""
+    mcp_server_command: Optional[str] = None
+    """Command to run MCP server subprocess when use_mcp_tools is enabled. Example: 'uv run python -m rl-rag-mcp.mcp_agents.mcp_backend.main --transport http --port 8000 --host 0.0.0.0 --path /mcp'. If not set, will not launch the MCP stuff on its own."""
+    mcp_host: Optional[str] = None
+    """The host of the MCP server. Note it should match the host of the MCP server command if specified there."""
+    mcp_port: Optional[int] = None
+    """The port of the MCP server. Note it should match the port of the MCP server command if specified there."""
+    ### end per-tool settings ###
+
 
     # Reward function override
     overwrite_reward_fn_tag: Optional[str] = None
@@ -451,18 +463,18 @@ class Args:
             download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
         if self.checkpoint_state_dir is not None:
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
-        if self.use_mcp_tools:
+        if self.tools is not None and len(self.tools) > 0:
+            for tool in self.tools:
+                if tool not in TOOL_CLASS_REGISTRY:
+                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: {', '.join(TOOL_CLASS_REGISTRY.keys())}")
+            assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
+        if "mcp" in self.tools:
             if self.mcp_tool_names is None:
-                raise ValueError("mcp_tool_names must be provided when use_mcp_tools is True")
+                raise ValueError("mcp_tool_names must be provided when mcp is in tools")
             self.mcp_tool_names = self.mcp_tool_names.split(",")
             for mcp_tool_name in self.mcp_tool_names:
                 if mcp_tool_name not in MCP_TOOL_REGISTRY:
                     raise ValueError(f"MCP tool {mcp_tool_name} is not supported. Supported tools are: {', '.join(MCP_TOOL_REGISTRY.keys())}")
-        if self.tools is not None and len(self.tools) > 0:
-            for tool in self.tools:
-                if tool not in ["search", "code"]:
-                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
-            assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
 
 def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
     """Compute mean of tensor with a masked values."""
@@ -1706,9 +1718,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     # ------------------------------------------------------------
     # Launch MCP subprocess if needed
     mcp_process = None
-    if args.use_mcp_tools:
+    if args.tools and "mcp" in args.tools:
         if args.mcp_server_command is None:
-            print("mcp_server_command is not provided when use_mcp_tools is True; please make sure to launch the MCP server manually.")
+            print("mcp_server_command is not provided when mcp is in tools; please make sure to launch the MCP server manually.")
         else:
             mcp_process = launch_mcp_subprocess(args.mcp_server_command, args.output_dir)
             if mcp_process is None:
@@ -1738,50 +1750,25 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         for model in policy_group.models
     )
     max_len = args.max_prompt_token_length + args.response_length
-    # make tool list
     tool_objects = {}
-    # first, handle the "regular" tools of search and code.
+    tool_max_conc = args.tool_actor_max_concurrency
+
+    def _register_actor_backed_tool(class_path: str, init_kwargs: dict):
+        actor = ToolActor.options(max_concurrency=tool_max_conc).remote(class_path=class_path, init_kwargs=init_kwargs)
+        start = ray.get(actor.get_start_str.remote())
+        stop_strings = ray.get(actor.get_stop_strings.remote())
+        # If the tool provides multiple stop strings, register each as an entry.
+        for end_str in stop_strings:
+            tool_objects[end_str] = ToolProxy(actor_handle=actor, start_str=start, end_str=end_str)
+
+    # first, handle the "regular" tools of search and code via actors.
     if args.tools:
         for tool in args.tools:
-            if tool.lower() == "search":
-                from open_instruct.search_utils.search_tool import SearchTool
-
-                tool = SearchTool(
-                    start_str="<search>",
-                    end_str="</search>",
-                    use_massive_ds=args.use_massive_ds,
-                    api_endpoint=args.search_api_endpoint,
-                    number_documents_to_search=args.number_documents_to_search,
-                )
-                tool_objects[tool.end_str] = tool
-            elif tool.lower() == "code":
-                from open_instruct.tool_utils.tool_vllm import PythonCodeTool
-
-                tool = PythonCodeTool(
-                    start_str="<code>",
-                    end_str="</code>",
-                    api_endpoint=args.code_tool_api_endpoint,
-                )
-                tool_objects[tool.end_str] = tool
-            else:
+            class_path = TOOL_CLASS_REGISTRY.get(tool.lower(), None)
+            if class_path is None:
                 raise ValueError(f"Unknown tool: {tool}")
-    if args.use_mcp_tools:
-        # set env var so the mcp tool can find the mcp server
-        host = os.environ.get("BEAKER_LEADER_REPLICA_IP", "localhost")
-        # weird bug in beaker... gives 127.0.0.1\n127.0.0.1 instead of just 127.0.0.1.
-        if "127.0.0.1" in host:
-            host = "localhost"
-        os.environ["MCP_TRANSPORT_HOST"] = host
-        print(f"MCP_TRANSPORT_HOST: {os.environ['MCP_TRANSPORT_HOST']}")
-        tool = MCPTool(
-            mcp_tool_names=args.mcp_tool_names,
-            parser_name=args.mcp_parser_name,
-            number_documents_to_search=args.number_documents_to_search,
-            base_url=args.search_api_endpoint,
-        )
-        # mcp tools can have multiple end strings.
-        for end_str in tool.get_stop_strings():
-            tool_objects[end_str] = tool
+            # Pass the entire args namespace; ToolActor will filter valid kwargs
+            _register_actor_backed_tool(class_path=class_path, init_kwargs=vars(args))
 
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
