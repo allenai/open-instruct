@@ -1753,6 +1753,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     tool_objects = {}
     tool_max_conc = args.tool_max_concurrency
 
+    # one additional thing: set mcp host if we are in a beaker job
+    if os.environ.get("BEAKER_LEADER_REPLICA_IP") is not None:
+        args.mcp_host = os.environ.get("BEAKER_LEADER_REPLICA_IP")
+        # minor fix.
+        if "127.0.0.1" in args.mcp_host:
+            args.mcp_host = "0.0.0.0"
+
     def _register_actor_backed_tool(class_path: str, init_kwargs: dict):
         actor = ToolActor.options(max_concurrency=tool_max_conc).remote(class_path=class_path, init_kwargs=init_kwargs)
         start = ray.get(actor.get_start_str.remote())

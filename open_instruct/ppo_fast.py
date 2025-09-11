@@ -1617,6 +1617,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         for end_str in stop_strings:
             tool_objects[end_str] = ToolProxy(actor_handle=actor, start_str=start, end_str=end_str)
 
+    # one additional thing: set mcp host if we are in a beaker job
+    if os.environ.get("BEAKER_LEADER_REPLICA_IP") is not None:
+        args.mcp_host = os.environ.get("BEAKER_LEADER_REPLICA_IP")
+        # minor fix.
+        if "127.0.0.1" in args.mcp_host:
+            args.mcp_host = "0.0.0.0"
+    
     if args.tools:
         for tool in args.tools:
             class_path = TOOL_CLASS_REGISTRY.get(tool.lower(), None)
