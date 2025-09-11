@@ -82,8 +82,9 @@ from transformers import (
 )
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
-from open_instruct.tool_utils.tool_actor import TOOL_CLASS_REGISTRY
 from open_instruct.search_utils.mcp_tools import MCP_TOOL_REGISTRY
+from open_instruct.tool_utils.tool_actor import ToolActor, TOOL_CLASS_REGISTRY
+from open_instruct.tool_utils.tool_proxy import ToolProxy
 
 from open_instruct.dataset_transformation import (
     DATASET_SOURCE_KEY,
@@ -1607,13 +1608,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     max_len = args.max_prompt_token_length + args.response_length
     # make tool list via generic ToolActor + ToolProxy
     tool_objects = {}
-    from open_instruct.tool_utils.tool_actor import ToolActor
-    from open_instruct.tool_utils.tool_proxy import ToolProxy
-
-    desired_max_conc = getattr(args, "tool_max_concurrency", 16)
+    tool_max_conc = args.tool_max_concurrency
 
     def _register_actor_backed_tool(class_path: str, init_kwargs: dict):
-        actor = ToolActor.options(max_concurrency=desired_max_conc).remote(class_path=class_path, init_kwargs=init_kwargs)
+        actor = ToolActor.options(max_concurrency=tool_max_conc).remote(class_path=class_path, init_kwargs=init_kwargs)
         start = ray.get(actor.get_start_str.remote())
         stop_strings = ray.get(actor.get_stop_strings.remote())
         for end_str in stop_strings:

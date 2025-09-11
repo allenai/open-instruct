@@ -1751,7 +1751,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     )
     max_len = args.max_prompt_token_length + args.response_length
     tool_objects = {}
-    tool_max_conc = args.tool_actor_max_concurrency
+    tool_max_conc = args.tool_max_concurrency
 
     def _register_actor_backed_tool(class_path: str, init_kwargs: dict):
         actor = ToolActor.options(max_concurrency=tool_max_conc).remote(class_path=class_path, init_kwargs=init_kwargs)
