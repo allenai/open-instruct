@@ -25,7 +25,6 @@ gantry run \
        --beaker-image nathanl/open_instruct_auto \
        --cluster ai2/prior-elanding \
        --budget ai2/oe-adapt \
-       --env VLLM_ATTENTION_BACKEND=FLASHINFER \
        --install 'uv sync' \
        -- uv run python -m open_instruct.benchmark_generators \
     --model_name_or_path "$model_name_or_path" \
