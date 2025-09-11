@@ -10,32 +10,12 @@ from parameterized import parameterized
 from open_instruct.ground_truth_utils import PuzzleMatcherVerifier
 
 
-class MockArgs:
-    """Mock arguments class to simulate args for build_all_verifiers"""
-
-    def __init__(self):
-        self.remap_verifier = None
-
-
-def build_all_verifiers(args):
-    """
-    Simplified version of build_all_verifiers for testing
-    """
-    verifiers = {}
-    verifier_config = PuzzleMatcherVerifier.get_config_class().from_args(args)
-    puzzle_verifier = PuzzleMatcherVerifier(verifier_config)
-    verifiers[puzzle_verifier.name] = puzzle_verifier
-    return verifiers
-
-
 class TestPuzzleMatcherVerifier(unittest.TestCase):
     """Test suite for PuzzleMatcherVerifier"""
 
     def setUp(self):
         """Set up test fixtures"""
-        args = MockArgs()
-        reward_fn_mapping = build_all_verifiers(args)
-        self.verifier = reward_fn_mapping["puzzle"]
+        self.verifier = PuzzleMatcherVerifier()
 
     @parameterized.expand(
         [
