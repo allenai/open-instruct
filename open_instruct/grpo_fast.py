@@ -1756,6 +1756,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     # one additional thing: set mcp host if we are in a beaker job
     if os.environ.get("BEAKER_LEADER_REPLICA_IP") is not None:
         args.mcp_host = os.environ.get("BEAKER_LEADER_REPLICA_IP")
+        print(f"🚨 Setting MCP host to {args.mcp_host} based on BEAKER_LEADER_REPLICA_IP")
         # minor fix.
         if "127.0.0.1" in args.mcp_host:
             args.mcp_host = "0.0.0.0"
