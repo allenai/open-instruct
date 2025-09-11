@@ -51,6 +51,67 @@ from open_instruct.utils import ray_get_with_progress
 logger = logger_utils.setup_logger(__name__)
 
 
+class ConcurrentDict:
+    """Thread-safe dictionary for tracking request processing."""
+
+    def __init__(self):
+        self._dict = {}
+        self._lock = threading.Lock()
+
+    def set(self, key, value):
+        """Set a key-value pair atomically."""
+        with self._lock:
+            assert key not in self._dict, (
+                f"Key {key} already exists in ConcurrentDict. This indicates duplicate entries."
+            )
+            self._dict[key] = value
+
+    def get(self, key):
+        """Get a value by key."""
+        with self._lock:
+            return self._dict.get(key)
+
+    def contains(self, key):
+        """Check if key exists."""
+        with self._lock:
+            return key in self._dict
+
+    def assert_exists(self, key, error_msg):
+        """Assert that a key exists with a custom error message."""
+        with self._lock:
+            assert key in self._dict, error_msg
+
+    def assert_not_exists(self, key, error_msg):
+        """Assert that a key does not exist with a custom error message."""
+        with self._lock:
+            assert key not in self._dict, error_msg
+
+    def update_field(self, key, field, value):
+        """Update a specific field in a dict value atomically."""
+        with self._lock:
+            assert key in self._dict, f"Key {key} not found in ConcurrentDict"
+            assert field in self._dict[key], f"Field {field} not found in {key}"
+            self._dict[key][field] = value
+
+    def assert_and_update(self, key, field, expected_value, new_value, error_msg):
+        """Assert current value and update atomically."""
+        with self._lock:
+            assert key in self._dict, f"Key {key} not found in ConcurrentDict"
+            assert self._dict[key][field] == expected_value, error_msg
+            self._dict[key][field] = new_value
+
+    def delete(self, key):
+        """Delete a key atomically."""
+        with self._lock:
+            if key in self._dict:
+                del self._dict[key]
+
+    def keys(self):
+        """Get list of keys (snapshot)."""
+        with self._lock:
+            return list(self._dict.keys())
+
+
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
 # Turns out Ray doesnt necessarily place bundles together,
 # so this function is used to get the bundle indices of a placement group
@@ -148,10 +209,9 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
             f"This indicates an issue with the deepcopy or RequestOutput constructor."
         )
 
-        # Check that it's not the same list object
-        assert output_copy.outputs is not copied_outputs, (
-            "RequestOutput is using the same list object we passed! This could lead to shared references."
-        )
+        # Note: vllm.RequestOutput uses the exact list object we pass, not a copy
+        # This is expected behavior, so we set copied_outputs to None after this to avoid reuse
+        copied_outputs = None
 
         logger.info(f"Storing {output.request_id} in concat_outputs with {len(output_copy.outputs)} output(s)")
         tracking["concat_outputs"][output.request_id] = output_copy
@@ -182,11 +242,15 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
 def _process_outputs(
     outputs: List[vllm.RequestOutput],
-    dataset_index: Optional[List[int]] = None,
+    dataset_index: Optional[int] = None,
     token_statistics: Optional[TokenStatistics] = None,
     start_time: Optional[float] = None,
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format."""
+    # Validate dataset_index type
+    assert isinstance(dataset_index, (int, type(None))), (
+        f"dataset_index must be an integer or None, got {type(dataset_index)}: {dataset_index}"
+    )
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
     finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
 
@@ -222,11 +286,15 @@ def _process_outputs(
 
 def _process_outputs_with_tools(
     outputs: List[vllm.RequestOutput],
-    dataset_index: Optional[List[int]] = None,
+    dataset_index: Optional[int] = None,
     token_statistics: Optional[TokenStatistics] = None,
     start_time: Optional[float] = None,
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format with tool information."""
+    # Validate dataset_index type
+    assert isinstance(dataset_index, (int, type(None))), (
+        f"dataset_index must be an integer or None, got {type(dataset_index)}: {dataset_index}"
+    )
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
     finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
 
@@ -265,6 +333,11 @@ def _finalize_outputs(
     output, tracking, dataset_index, tools, original_sampling_params, token_statistics=None, start_time=None
 ):
     """Prepare final outputs based on whether tools were used."""
+    # Validate dataset_index type
+    assert isinstance(dataset_index, (int, type(None))), (
+        f"dataset_index must be an integer or None, got {type(dataset_index)}: {dataset_index}"
+    )
+
     if not tools:
         return _process_outputs(
             [output], dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
@@ -273,7 +346,13 @@ def _finalize_outputs(
     # Tool mode: add metadata and merge completions
     # Store the original request_id before output gets overwritten
     output_request_id = output.request_id
+
+    # Only set attributes for sub-requests belonging to the current request
     for req_id in tracking["masks"]:
+        # Skip if this sub-request doesn't belong to the current base request
+        if _extract_base_request_id(req_id) != output_request_id:
+            continue
+
         assert req_id in tracking["concat_outputs"], f"req_id {req_id} not in concat_outputs!"
         output_obj = tracking["concat_outputs"][req_id].outputs[0]
         setattr(output_obj, "mask", tracking["masks"][req_id])
@@ -295,29 +374,68 @@ def _finalize_outputs(
     if expected_samples == 0:
         raise ValueError(f"No outputs found in tracking['concat_outputs'] for request {output_request_id}")
 
+    # Collect outputs from all sub-requests without modifying the tracking dictionary
     merged_outputs = {}
     for req_id, output_obj in relevant_outputs.items():
         real_req_id = _extract_base_request_id(req_id)
-        if real_req_id not in merged_outputs:
-            # Assert when first storing an output object
-            logger.info(f"First output for {real_req_id}: req_id={req_id}, num_outputs={len(output_obj.outputs)}")
-            merged_outputs[real_req_id] = output_obj
-        else:
-            # Each sub-request should contribute exactly one output (the final result after tool processing)
-            logger.info(
-                f"Merging output for {real_req_id}: req_id={req_id}, "
-                f"existing_outputs={len(merged_outputs[real_req_id].outputs)}, "
-                f"new_outputs={len(output_obj.outputs)}"
-            )
-            assert len(output_obj.outputs) == 1, (
-                f"Expected exactly 1 output per sub-request, got {len(output_obj.outputs)} for {req_id}. "
-                f"This indicates tool processing created multiple outputs instead of one final result."
-            )
-            merged_outputs[real_req_id].outputs.extend(output_obj.outputs)
 
-    # Sort by dataset index (extracted from request_id format: "{prefix}_{training_step}_{dataset_index}")
-    final_outputs = sorted(
-        merged_outputs.values(), key=lambda x: (int(x.request_id.split("_")[1]), int(x.request_id.split("_")[2]))
+        # Each sub-request should have exactly one output
+        assert len(output_obj.outputs) == 1, (
+            f"Expected exactly 1 output per sub-request, got {len(output_obj.outputs)} for {req_id}. "
+            f"This indicates tool processing created multiple outputs instead of one final result."
+        )
+
+        if real_req_id not in merged_outputs:
+            # Initialize with lists to collect outputs from all sub-requests
+            merged_outputs[real_req_id] = {
+                "base_output": output_obj,  # Keep first sub-request as template for metadata
+                "all_outputs": [],  # Collect all outputs here
+            }
+
+        # Add this sub-request's output to the collection (create a copy to avoid modifying original)
+        merged_outputs[real_req_id]["all_outputs"].append(copy.deepcopy(output_obj.outputs[0]))
+
+        logger.info(
+            f"Collecting output for {real_req_id} from sub-request {req_id}: "
+            f"total collected so far: {len(merged_outputs[real_req_id]['all_outputs'])}"
+        )
+
+    # Create new RequestOutput objects with merged outputs (without modifying originals)
+    final_merged = {}
+    for real_req_id, merge_data in merged_outputs.items():
+        base_output = merge_data["base_output"]
+        all_outputs = merge_data["all_outputs"]
+
+        # Create a new RequestOutput with all collected outputs
+        merged_output = vllm.RequestOutput(
+            request_id=real_req_id,
+            prompt=base_output.prompt,
+            prompt_token_ids=base_output.prompt_token_ids,
+            prompt_logprobs=base_output.prompt_logprobs,
+            outputs=all_outputs,  # Use the collected outputs
+            finished=base_output.finished,
+        )
+
+        final_merged[real_req_id] = merged_output
+
+        logger.info(
+            f"Created merged output for {real_req_id} with {len(merged_output.outputs)} outputs "
+            f"(without modifying original tracking entries)"
+        )
+
+    # Since we're only processing one request at a time, final_merged should have exactly one entry
+    assert len(final_merged) == 1, (
+        f"Expected exactly 1 merged output for request {output_request_id}, but got {len(final_merged)}. "
+        f"Keys in final_merged: {list(final_merged.keys())}"
+    )
+
+    # Get the single merged output (no sorting needed since there's only one)
+    final_outputs = list(final_merged.values())
+
+    # Additional assertion: verify we have exactly one output object
+    assert len(final_outputs) == 1, (
+        f"Expected exactly 1 output object in final_outputs, but got {len(final_outputs)}. "
+        f"This indicates an issue with the merging logic."
     )
 
     # Validate total response count before processing
@@ -385,6 +503,13 @@ def _process_completed_request(request_id, outs, tracking, current_time, tools, 
 
     total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
     metadata = request_metadata[request_id]  # Don't pop yet, _poll_tool_futures might need it
+
+    # Validate dataset_index from metadata
+    assert isinstance(metadata["dataset_index"], int), (
+        f"metadata['dataset_index'] must be an integer, got {type(metadata['dataset_index'])}: {metadata['dataset_index']} "
+        f"for request_id={request_id}"
+    )
+
     result = _finalize_outputs(
         final_output,
         tracking,
@@ -539,6 +664,7 @@ class LLMRayActor:
         self.inference_batch_size = inference_batch_size
         self.verbose = verbose
         self.request_metadata = {}
+        self.request_tracking = ConcurrentDict()  # Thread-safe tracking
 
         if self.tools:
             self.executor = ThreadPoolExecutor(max_workers=20)
@@ -613,6 +739,16 @@ class LLMRayActor:
                     continue
             try:
                 request = self.prompt_queue.get(timeout=0.1)
+
+                # Track that we pulled this dataset_index from the prompt queue
+                dataset_index = request.dataset_index
+                self.request_tracking.assert_not_exists(
+                    dataset_index,
+                    f"Dataset index {dataset_index} already in request_tracking. "
+                    f"This indicates duplicate dataset indices in prompt queue.",
+                )
+                self.request_tracking.set(dataset_index, {"pulled": True, "inserted": False})
+
                 num_added = add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
 
                 if self.verbose and num_added > 0:
@@ -628,8 +764,50 @@ class LLMRayActor:
                 continue
 
     def _insert_result_to_queue(self, result, is_eval: bool):
-        """Insert result into the appropriate q
-        ueue with blocking put."""
+        """Insert result into the appropriate queue with blocking put."""
+        # Validate that this dataset_index was pulled from prompt queue
+        dataset_index = result.dataset_index
+        if dataset_index is not None:  # dataset_index can be None for combined results
+            # Check if this is a tool continuation - if so, skip tracking validation
+            # Tool continuations are results from requests added back by _poll_tool_futures
+            # They share the same dataset_index but are not separately tracked
+            is_tool_continuation = False
+
+            # Check if the dataset_index exists in tracking
+            if not self.request_tracking.contains(dataset_index):
+                # This might be a tool continuation - check if the original request had tools
+                # Tool continuations will have already had their dataset_index cleaned up
+                # after the first result was inserted
+                # For now, we'll just log a warning instead of asserting
+                if self.tools:
+                    # With tools enabled, this is likely a tool continuation
+                    is_tool_continuation = True
+                    if self.verbose:
+                        self.logger.info(
+                            f"Dataset index {dataset_index} not in tracking - likely a tool continuation result"
+                        )
+                else:
+                    # Without tools, this should never happen
+                    self.request_tracking.assert_exists(
+                        dataset_index,
+                        f"Dataset index {dataset_index} was never pulled from prompt queue. "
+                        f"Available indices: {self.request_tracking.keys()}",
+                    )
+
+            if not is_tool_continuation and self.request_tracking.contains(dataset_index):
+                # Only update tracking for non-continuation results
+                tracking_entry = self.request_tracking.get(dataset_index)
+                if not tracking_entry["inserted"]:
+                    self.request_tracking.assert_and_update(
+                        dataset_index,
+                        "inserted",
+                        False,
+                        True,
+                        f"Dataset index {dataset_index} has already been inserted into results queue. "
+                        f"This indicates duplicate result insertion.",
+                    )
+                # else: already inserted, this is a continuation
+
         results_queue = self.eval_results_queue if is_eval else self.results_queue
         results_queue.put(result)
 
@@ -857,10 +1035,9 @@ class LLMRayActor:
                         f"This indicates an issue with the list copy or RequestOutput constructor."
                     )
 
-                    # Check that it's not the same list object
-                    assert stub.outputs is not copied_outputs, (
-                        "RequestOutput stub is using the same list object we passed! This could lead to shared references."
-                    )
+                    # Note: vllm.RequestOutput uses the exact list object we pass, not a copy
+                    # This is expected behavior, so we set copied_outputs to None after this to avoid reuse
+                    copied_outputs = None
 
                     logger.info(f"Creating stub for {sub_id} in concat_outputs with {len(stub.outputs)} output(s)")
                     tracking["concat_outputs"][sub_id] = stub
@@ -888,10 +1065,35 @@ class LLMRayActor:
         result, is_eval = _process_completed_request(
             request_id, outs, tracking, current_time, self.tools, self.request_metadata
         )
+
+        # Validate dataset_index consistency before inserting
+        expected_dataset_index = self.request_metadata[request_id]["dataset_index"]
+        actual_dataset_index = result.dataset_index
+        assert expected_dataset_index == actual_dataset_index, (
+            f"Dataset index mismatch: expected {expected_dataset_index} from metadata, "
+            f"but got {actual_dataset_index} in result for request_id {request_id}"
+        )
+
         self._insert_result_to_queue(result, is_eval=is_eval)
 
         # Clean up metadata and tracking for this request after enqueuing
         self._cleanup_request_data(request_id, tracking)
+
+        # Clean up request tracking for this dataset_index
+        # Only clean up if this is not a request that might have tool continuations
+        has_tool_continuation = self.request_metadata[request_id].get("has_tool_continuation", False)
+
+        if self.request_tracking.contains(expected_dataset_index) and not has_tool_continuation:
+            # Verify it was properly inserted before cleaning up
+            tracking_entry = self.request_tracking.get(expected_dataset_index)
+            assert tracking_entry["inserted"], (
+                f"Dataset index {expected_dataset_index} was not marked as inserted before cleanup"
+            )
+            self.request_tracking.delete(expected_dataset_index)
+        elif has_tool_continuation and self.verbose:
+            self.logger.info(
+                f"Not cleaning up tracking for dataset_index {expected_dataset_index} - has tool continuations"
+            )
 
         if self.verbose:
             self.logger.info(f"Completed and inserted request {request_id} with {expected_n} samples (eval={is_eval})")
@@ -1034,6 +1236,11 @@ class LLMRayActor:
                 new_sampling_params.max_tokens = new_sample_tokens
 
                 try:
+                    # Mark this as a tool continuation in metadata
+                    # Extract base request ID to get the original dataset_index
+                    if base_req_id in self.request_metadata:
+                        self.request_metadata[base_req_id]["has_tool_continuation"] = True
+
                     self.llm_engine.add_request(
                         req_id, vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token), new_sampling_params
                     )
