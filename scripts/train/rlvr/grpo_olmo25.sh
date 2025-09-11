@@ -1,8 +1,8 @@
 # full integration mix
 # dataset_mix="saurabh5/rlvr_acecoder_filtered 63033 hamishivi/rlvr_orz_math_57k_collected 56878 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2 56878 allenai/IF_multi_constraints_upto5 56878"
 # math only mix
-# dataset_mix="hamishivi/DAPO-Math-17k-Processed 1.0"
-dataset_mix="hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2 1.0"
+dataset_mix="mnoukhov/DAPO-Math-14k-Processed-RLVR 1.0"
+# dataset_mix="hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2 1.0"
 
 # all evals
 # evals="minerva_math::hamish_zs_reasoning,gsm8k::zs_cot_latex,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,ifeval::hamish_zs_reasoning,popqa::hamish_zs_reasoning,mmlu:cot::hamish_zs_reasoning,alpaca_eval_v3::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,mbppplus:0-shot-chat::tulu-thinker,codex_humanevalplus:0-shot-chat-v1::tulu-thinker"
@@ -39,7 +39,7 @@ python mason.py \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gs_model_name $gs_model_name \
-    --gpus 8 \
+   --gpus 8 \
     --budget ai2/oe-adapt \
     -- \
 source configs/beaker_configs/ray_node_setup.sh \&\& \
