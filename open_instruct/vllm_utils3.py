@@ -880,6 +880,19 @@ class LLMRayActor:
                             # Update tracking but don't insert
                             request_id = _extract_base_request_id(result.request_id)
                             self.request_outputs[request_id].append(result)
+
+                            # Check if we now have all samples ready
+                            if request_id in self.request_metadata:
+                                expected_n = self.request_metadata[request_id]["original_sampling_params"].n
+
+                                # Count how many outputs we have for this request
+                                num_outputs = len(self.request_outputs[request_id])
+
+                                # Only try to process if we have all expected outputs
+                                if num_outputs >= expected_n:
+                                    total_processed += self._maybe_process_and_insert(
+                                        request_id, self.request_outputs, self.tracking, current_time
+                                    )
                         else:
                             # This is an original request that completed without tools
                             request_id = _extract_base_request_id(result.request_id)
@@ -892,11 +905,80 @@ class LLMRayActor:
             # allowing weight_sync_thread to acquire the LLMRayActor lock
             final_unfinished = self.llm_engine.get_num_unfinished_requests()
             pending_tools = len(self.tracking["pending_tool_futures"])
-            if self.verbose:
+            if self.verbose and iteration_count % 100 == 0:
                 self.logger.info(
                     f"process_from_queue iteration {iteration_count}: unfinished={final_unfinished}, pending_tools={pending_tools}"
                 )
             if final_unfinished + pending_tools == 0:
+                # CRITICAL INVARIANT CHECKS before exiting
+                # When we think we're done, verify that ALL requests are actually complete
+
+                # 1. Check metadata for incomplete requests
+                incomplete_metadata = []
+                for req_id, metadata in self.request_metadata.items():
+                    expected_n = metadata["original_sampling_params"].n
+                    if req_id not in self.request_outputs:
+                        # This request has metadata but no outputs yet
+                        incomplete_metadata.append(
+                            f"{req_id}: no outputs in request_outputs (expecting {expected_n} samples)"
+                        )
+                    else:
+                        num_outputs = len(self.request_outputs[req_id])
+                        if num_outputs < expected_n:
+                            incomplete_metadata.append(f"{req_id}: only {num_outputs}/{expected_n} outputs collected")
+
+                # 2. Check for pending outputs not yet processed
+                pending_in_outputs = []
+                for req_id, outputs in self.request_outputs.items():
+                    if outputs:  # Has outputs waiting
+                        if req_id in self.request_metadata:
+                            expected_n = self.request_metadata[req_id]["original_sampling_params"].n
+                            if len(outputs) >= expected_n:
+                                # We have enough outputs but haven't processed them
+                                pending_in_outputs.append(
+                                    f"{req_id}: {len(outputs)}/{expected_n} outputs ready but not inserted"
+                                )
+
+                # 3. Check tracking for orphaned sub-requests
+                orphaned_tracking = []
+                if self.tools and "concat_outputs" in self.tracking:
+                    for sub_id in self.tracking["concat_outputs"]:
+                        base_id = _extract_base_request_id(sub_id)
+                        # Check if base request exists in metadata
+                        if base_id not in self.request_metadata:
+                            # This sub-request has no parent metadata - might be already processed
+                            # Only flag as orphaned if it wasn't already inserted
+                            if base_id not in self.request_outputs or not self.request_outputs[base_id]:
+                                # No pending outputs for this base, so truly orphaned
+                                orphaned_tracking.append(f"{sub_id} (base: {base_id})")
+
+                # 4. Check continuation requests
+                pending_continuations = []
+                if self.continuation_requests:
+                    pending_continuations = list(self.continuation_requests)
+
+                # Log comprehensive state and assert
+                if incomplete_metadata or pending_in_outputs or orphaned_tracking or pending_continuations:
+                    error_msg = (
+                        f"\\n=== CRITICAL: INCOMPLETE STATE AT EXIT ===\\n"
+                        f"vLLM unfinished: {final_unfinished}\\n"
+                        f"Pending tools: {pending_tools}\\n"
+                        f"Incomplete metadata: {incomplete_metadata or 'None'}\\n"
+                        f"Ready but not inserted: {pending_in_outputs or 'None'}\\n"
+                        f"Orphaned tracking: {orphaned_tracking or 'None'}\\n"
+                        f"Pending continuations: {pending_continuations or 'None'}\\n"
+                        f"Request metadata keys: {list(self.request_metadata.keys())}\\n"
+                        f"Request outputs keys: {list(self.request_outputs.keys())}\\n"
+                    )
+                    self.logger.error(error_msg)
+
+                    # Assert to prevent hanging
+                    assert False, (
+                        f"Attempting to exit process_from_queue with incomplete requests. "
+                        f"This would cause the training loop to hang waiting for results that will never come.\\n"
+                        f"{error_msg}"
+                    )
+
                 exit_reason = "no work remaining"
                 break
 
