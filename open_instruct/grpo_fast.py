@@ -471,7 +471,7 @@ class Args:
         if self.tools and "mcp" in self.tools:
             if self.mcp_tool_names is None:
                 raise ValueError("mcp_tool_names must be provided when mcp is in tools")
-            self.mcp_tool_names = self.mcp_tool_names.split(",")
+            self.mcp_tool_names = [n.strip() for n in self.mcp_tool_names.split(",") if n.strip()]
             for mcp_tool_name in self.mcp_tool_names:
                 if mcp_tool_name not in MCP_TOOL_REGISTRY:
                     raise ValueError(f"MCP tool {mcp_tool_name} is not supported. Supported tools are: {', '.join(MCP_TOOL_REGISTRY.keys())}")

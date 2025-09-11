@@ -1618,7 +1618,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             tool_objects[end_str] = ToolProxy(actor_handle=actor, start_str=start, end_str=end_str)
 
     if args.tools:
-        from open_instruct.tool_utils.tool_actor import TOOL_CLASS_REGISTRY
         for tool in args.tools:
             class_path = TOOL_CLASS_REGISTRY.get(tool.lower(), None)
             if class_path is None:
