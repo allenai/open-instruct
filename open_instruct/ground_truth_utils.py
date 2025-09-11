@@ -447,7 +447,7 @@ class PuzzleMatcherVerifier(VerifierFunction):
     """
 
     def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
-        super().__init__("Puzzle", verifier_config=verifier_config, weight=1.0)
+        super().__init__("puzzle", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None

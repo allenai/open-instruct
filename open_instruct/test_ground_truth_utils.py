@@ -35,7 +35,7 @@ def quick_test():
     # Setup verifier using standard pattern
     args = MockArgs()
     reward_fn_mapping = build_all_verifiers(args)
-    verifier = reward_fn_mapping["Puzzle"]
+    verifier = reward_fn_mapping["puzzle"]
 
     # Quick test cases
     print("1. Simple match test:")
@@ -84,7 +84,7 @@ def test_puzzle_matcher_verifier():
     # Create mock args and build verifiers
     args = MockArgs()
     reward_fn_mapping = build_all_verifiers(args)
-    verifier = reward_fn_mapping["Puzzle"]
+    verifier = reward_fn_mapping["puzzle"]
 
     # Test cases list
     test_cases = [
