@@ -1051,12 +1051,22 @@ class LLMRayActor:
         canonical: Dict[str, vllm.RequestOutput] = {}
 
         if self.tools:
-            # 1) Prefer tool-merged outputs when available.
+            # 1) Only include outputs that are actually complete (no pending tool futures)
             for sub_req_id, output_obj in list(tracking["concat_outputs"].items()):
                 if _extract_base_request_id(sub_req_id) != request_id:
                     continue
-                # Log for debugging
-                logger.info(f"Checking {sub_req_id} in concat_outputs: has {len(output_obj.outputs)} outputs")
+                # Check if this output has pending tool calls
+                has_pending = sub_req_id in tracking.get("pending_tool_futures", {})
+                logger.info(
+                    f"Checking {sub_req_id} in concat_outputs: has {len(output_obj.outputs)} outputs, "
+                    f"has_pending_tool_future={has_pending}"
+                )
+
+                # CRITICAL: Only consider this output ready if it has no pending tool futures
+                if has_pending:
+                    logger.info(f"Skipping {sub_req_id} - has pending tool future")
+                    continue
+
                 # Assert that tool-merged outputs have exactly one output
                 assert len(output_obj.outputs) == 1, (
                     f"Tool-merged output for {sub_req_id} has {len(output_obj.outputs)} outputs, "
@@ -1204,15 +1214,14 @@ class LLMRayActor:
             has_pending_tools = self._has_pending_tool_futures_for_request(request_id, tracking)
 
             if active_requests_for_dataset or has_pending_tools:
-                self.logger.error(
-                    f"WARNING: Attempting to clean up dataset_index {expected_dataset_index} but found:\n"
+                raise ValueError(
+                    f"CRITICAL: Attempting to clean up dataset_index {expected_dataset_index} but found:\n"
                     f"  - Active vLLM requests: {active_requests_for_dataset}\n"
                     f"  - Has pending tool futures: {has_pending_tools}\n"
                     f"  - Request ID: {request_id}\n"
                     f"  - All active vLLM requests: {list(self.vllm_active_requests.keys())}\n"
                     f"This indicates requests are being cleaned up while still being processed!"
                 )
-                # Still delete to avoid memory leak, but we've logged the issue
 
             self.logger.info(
                 f"[Cleanup] Deleting tracking for dataset_index={expected_dataset_index}, "
