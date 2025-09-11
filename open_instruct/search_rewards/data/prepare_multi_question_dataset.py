@@ -4,6 +4,7 @@ Each example contains two questions that must both be answered correctly.
 """
 
 import os
+import json
 import random
 import pandas as pd
 from datasets import Dataset
@@ -297,23 +298,8 @@ def create_multi_question_examples_from_tqa(tqa_dataset, num_examples: int = 100
     
     tqa_list = list(tqa_dataset)
     
-    # Filter out samples that contain semicolons in their ground truth
-    # This prevents parsing issues when combining multiple ground truths
-    filtered_tqa_list = []
-    skipped_count = 0
-    
-    for sample in tqa_list:
-        ground_truth = sample["ground_truth"]
-        if ";" in ground_truth:
-            skipped_count += 1
-        else:
-            filtered_tqa_list.append(sample)
-    
-    print(f"Filtered out {skipped_count} samples containing semicolons in ground truth")
-    print(f"Remaining samples: {len(filtered_tqa_list)}")
-    
     # Calculate maximum possible examples
-    max_possible_examples = len(filtered_tqa_list) // num_questions
+    max_possible_examples = len(tqa_list) // num_questions
     
     # Handle num_examples = -1 (generate maximum possible)
     if num_examples == -1:
@@ -322,11 +308,11 @@ def create_multi_question_examples_from_tqa(tqa_dataset, num_examples: int = 100
     else:
         # Check if we have enough questions after filtering
         total_questions_needed = num_examples * num_questions
-        if len(filtered_tqa_list) < total_questions_needed:
+        if len(tqa_list) < total_questions_needed:
             raise ValueError(f"Not enough questions in TQA dataset after filtering. Need {total_questions_needed} but only have {len(filtered_tqa_list)}. Maximum possible examples: {max_possible_examples}")
     
     # Shuffle the filtered dataset to ensure randomness
-    random.shuffle(filtered_tqa_list)
+    random.shuffle(tqa_list)
     
     multi_question_examples = []
     
@@ -339,7 +325,7 @@ def create_multi_question_examples_from_tqa(tqa_dataset, num_examples: int = 100
         # Sample num_questions without overlap
         start_idx = i * num_questions
         end_idx = start_idx + num_questions
-        selected_questions = filtered_tqa_list[start_idx:end_idx]
+        selected_questions = tqa_list[start_idx:end_idx]
         
         # Extract questions and ground truth answers
         questions = []
@@ -362,9 +348,8 @@ def create_multi_question_examples_from_tqa(tqa_dataset, num_examples: int = 100
         # Format the prompt (use replace instead of format to avoid brace conflicts)
         formatted_prompt = prompt_template.replace("{question}", combined_question)
         
-        # Create combined ground truth (semicolon-separated)
-        # Note: We've filtered out samples with semicolons to avoid parsing conflicts
-        combined_ground_truth = "; ".join(answers)
+        # Create combined ground truth (json-separated)
+        combined_ground_truth = json.dumps(answers)
         
         # Create the example in the same format as the original datasets
         example = {
@@ -402,23 +387,8 @@ def create_multi_question_examples_from_2wiki(wiki2_dataset, num_examples: int =
     
     wiki2_list = list(wiki2_dataset)
     
-    # Filter out samples that contain semicolons in their ground truth
-    # This prevents parsing issues when combining multiple ground truths
-    filtered_wiki2_list = []
-    skipped_count = 0
-    
-    for sample in wiki2_list:
-        ground_truth = sample["ground_truth"]
-        if ";" in ground_truth:
-            skipped_count += 1
-        else:
-            filtered_wiki2_list.append(sample)
-    
-    print(f"Filtered out {skipped_count} samples containing semicolons in ground truth")
-    print(f"Remaining samples: {len(filtered_wiki2_list)}")
-    
     # Calculate maximum possible examples
-    max_possible_examples = len(filtered_wiki2_list) // num_questions
+    max_possible_examples = len(wiki2_list) // num_questions
     
     # Handle num_examples = -1 (generate maximum possible)
     if num_examples == -1:
@@ -427,11 +397,11 @@ def create_multi_question_examples_from_2wiki(wiki2_dataset, num_examples: int =
     else:
         # Check if we have enough questions after filtering
         total_questions_needed = num_examples * num_questions
-        if len(filtered_wiki2_list) < total_questions_needed:
+        if len(wiki2_list) < total_questions_needed:
             raise ValueError(f"Not enough questions in 2Wiki dataset after filtering. Need {total_questions_needed} but only have {len(filtered_wiki2_list)}. Maximum possible examples: {max_possible_examples}")
     
     # Shuffle the filtered dataset to ensure randomness
-    random.shuffle(filtered_wiki2_list)
+    random.shuffle(wiki2_list)
     
     multi_question_examples = []
     
@@ -444,7 +414,7 @@ def create_multi_question_examples_from_2wiki(wiki2_dataset, num_examples: int =
         # Sample num_questions without overlap
         start_idx = i * num_questions
         end_idx = start_idx + num_questions
-        selected_questions = filtered_wiki2_list[start_idx:end_idx]
+        selected_questions = wiki2_list[start_idx:end_idx]
         
         # Extract questions and ground truth answers
         questions = []
@@ -467,9 +437,8 @@ def create_multi_question_examples_from_2wiki(wiki2_dataset, num_examples: int =
         # Format the prompt (use replace instead of format to avoid brace conflicts)
         formatted_prompt = prompt_template.replace("{question}", combined_question)
         
-        # Create combined ground truth (semicolon-separated)
-        # Note: We've filtered out samples with semicolons to avoid parsing conflicts
-        combined_ground_truth = "; ".join(answers)
+        # Create combined ground truth (json-separated)
+        combined_ground_truth = json.dumps(answers)
         
         # Create the example in the same format as the original datasets
         example = {
@@ -816,9 +785,9 @@ if __name__ == "__main__":
     tqa_2q_datasets = create_multi_question_dataset_from_tqa(
         num_examples=-1,
         seed=42,
-        num_questions=10,  # 2 questions per example
+        num_questions=2,  # 2 questions per example
         push_to_hub=True,  # Set to True to push to hub
-        hub_id="rulins/multi_question_synthetic_single_source_tqa_10q",
+        hub_id="rulins/multi_question_synthetic_single_source_tqa_2q",
         dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
         val_size=100  # 300 examples for validation
     )
@@ -828,9 +797,9 @@ if __name__ == "__main__":
     tqa_5q_datasets = create_multi_question_dataset_from_tqa(
         num_examples=-1,  # Generate maximum possible examples until no more samples
         seed=42,
-        num_questions=15,  # 5 questions per example
+        num_questions=5,  # 5 questions per example
         push_to_hub=True,  # Set to True to push to hub
-        hub_id="rulins/multi_question_synthetic_single_source_tqa_15q",
+        hub_id="rulins/multi_question_synthetic_single_source_tqa_5q",
         dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
         val_size=100  # 300 examples for validation
     )
@@ -857,9 +826,9 @@ if __name__ == "__main__":
     wiki2_2q_datasets = create_multi_question_dataset_from_2wiki(
         num_examples=-1,
         seed=42,
-        num_questions=10,  # 2 questions per example
+        num_questions=2,  # 2 questions per example
         push_to_hub=True,  # Set to True to push to hub
-        hub_id="rulins/multi_question_synthetic_single_source_2wiki_10q",
+        hub_id="rulins/multi_question_synthetic_single_source_2wiki_2q",
         dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
         val_size=100  # 300 examples for validation
     )
@@ -869,9 +838,9 @@ if __name__ == "__main__":
     wiki2_5q_datasets = create_multi_question_dataset_from_2wiki(
         num_examples=-1,  # Generate maximum possible examples until no more samples
         seed=42,
-        num_questions=15,  # 5 questions per example
+        num_questions=5,  # 5 questions per example
         push_to_hub=True,  # Set to True to push to hub
-        hub_id="rulins/multi_question_synthetic_single_source_2wiki_15q",
+        hub_id="rulins/multi_question_synthetic_single_source_2wiki_5q",
         dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
         val_size=100  # 300 examples for validation
     )

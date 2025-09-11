@@ -24,7 +24,7 @@ def split_response_and_get_spans(response: str, num_questions: int) -> Tuple[Lis
         - spans: List of span tuples [(start_char, end_char)] for each question
     """
     if num_questions <= 1:
-        return [response], [[(0, len(response))]]
+        return [response], [[(0, len(response))]], 1
     
     sub_responses = []
     spans = []
@@ -56,6 +56,33 @@ def split_response_and_get_spans(response: str, num_questions: int) -> Tuple[Lis
     return sub_responses, spans, num_valid_spans
 
 
+# def extract_ground_truth_per_question(ground_truth: str) -> List[str]:
+#     """
+#     Extract ground truth answers for each individual question.
+#     Expects ground truth in format: JSON arrays separated by semicolons
+#     e.g., '["ans1", "ans2"]; ["ans3", "ans4"]; ["ans5"]'
+#     Returns: List of JSON strings, one per question
+#     """
+#     try:
+#         # Try to parse as a complete JSON array first for single question case
+#         if ground_truth.strip().startswith('[') and ground_truth.strip().endswith(']'):
+#             parsed = json.loads(ground_truth)
+#             return [json.dumps(item) if isinstance(item, list) else str(item) for item in parsed]
+#     except (json.JSONDecodeError, TypeError):
+#         pass
+    
+#     # Handle the multi-question case: JSON arrays separated by semicolons
+#     try:
+#         if ground_truth.strip().startswith('[') and ground_truth.strip().endswith(']'):
+#             # Convert semicolon-separated JSON arrays to a proper JSON array
+#             full_json = '[' + ground_truth.replace('; ', ', ') + ']'
+#             parsed = json.loads(full_json)
+#             return [json.dumps(item) if isinstance(item, list) else str(item) for item in parsed]
+#         else:
+#             return ground_truth.split(";")
+#     except (json.JSONDecodeError, TypeError):
+#         raise ValueError(f"Invalid ground truth format: {ground_truth}")
+
 def extract_ground_truth_per_question(ground_truth: str) -> List[str]:
     """
     Extract ground truth answers for each individual question.
@@ -63,25 +90,13 @@ def extract_ground_truth_per_question(ground_truth: str) -> List[str]:
     e.g., '["ans1", "ans2"]; ["ans3", "ans4"]; ["ans5"]'
     Returns: List of JSON strings, one per question
     """
-    try:
-        # Try to parse as a complete JSON array first for single question case
-        if ground_truth.strip().startswith('[') and ground_truth.strip().endswith(']'):
-            parsed = json.loads(ground_truth)
-            return [json.dumps(item) if isinstance(item, list) else str(item) for item in parsed]
-    except (json.JSONDecodeError, TypeError):
-        pass
-    
-    # Handle the multi-question case: JSON arrays separated by semicolons
-    try:
-        if ground_truth.strip().startswith('[') and ground_truth.strip().endswith(']'):
-            # Convert semicolon-separated JSON arrays to a proper JSON array
-            full_json = '[' + ground_truth.replace('; ', ', ') + ']'
-            parsed = json.loads(full_json)
-            return [json.dumps(item) if isinstance(item, list) else str(item) for item in parsed]
-        else:
-            return ground_truth.split(";")
-    except (json.JSONDecodeError, TypeError):
-        raise ValueError(f"Invalid ground truth format: {ground_truth}")
+    ground_truth = json.loads(ground_truth)
+    return ground_truth
+    # if len(ground_truth) != 1:
+    #     return [json.dumps(item) if isinstance(item, list) else str(item) for item in ground_truth]
+    # else:
+    #     ground_truth = ground_truth[0]
+    #     return ground_truth.split(";")  # TODO: the use of this is terrible
 
 
 def extract_boxed_answer_from_response(response: str) -> str:
@@ -100,8 +115,12 @@ def extract_boxed_answer_from_response(response: str) -> str:
     if boxed_match:
         return boxed_match.group(1).strip()
     
+    answer_match = re.search(r"<answer\s*(.*?)\s*</answer", response, re.DOTALL)
+    if answer_match:
+        return answer_match.group(1).strip()
+    
     # If no boxed answer found, return the entire response
-    return response
+    return ""
 
 def normalize_answer(s: str) -> str:
     """
@@ -189,6 +208,7 @@ def compute_multi_question_reward(
     """
     # Get verifiable reward scores for each question
     ground_truth_per_question = extract_ground_truth_per_question(ground_truth)
+    print(f"🎀 ground_truth_per_question: {ground_truth_per_question}")
     num_questions = len(ground_truth_per_question)
     
     # Split the response into individual question components for span generation
