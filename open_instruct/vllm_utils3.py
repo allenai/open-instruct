@@ -1101,6 +1101,16 @@ class LLMRayActor:
         if len(available) < expected_n:
             return 0
 
+        # CRITICAL: Check if any sub-requests still have active vLLM continuations
+        # This can happen when tool calls complete and add continuations back to vLLM
+        active_sub_requests = [sub_id for sub_id in needed_ids if sub_id in self.vllm_active_requests]
+        if active_sub_requests:
+            logger.info(
+                f"[_maybe_process_and_insert] Cannot process {request_id} yet - "
+                f"sub-requests still active in vLLM: {active_sub_requests}"
+            )
+            return 0
+
         # Build ordered outs (0..n-1), ensuring one per sub-request.
         ordered_outs: List[vllm.RequestOutput] = []
         for j in range(expected_n):
