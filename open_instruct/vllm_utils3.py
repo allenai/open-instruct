@@ -891,6 +891,8 @@ class LLMRayActor:
                     # Remove from vllm_active_requests since this request is finished
                     if output.request_id in self.vllm_active_requests:
                         del self.vllm_active_requests[output.request_id]
+                        if self.verbose:
+                            self.logger.info(f"Removed {output.request_id} from vllm_active_requests")
 
                     base_req_id = _extract_base_request_id(output.request_id)
 
@@ -995,27 +997,66 @@ class LLMRayActor:
                             if base_id not in self.request_outputs or not self.request_outputs[base_id]:
                                 # No pending outputs for this base, so truly orphaned
                                 orphaned_tracking.append(f"{sub_id} (base: {base_id})")
+                
+                # 4. Check if any sub-requests are still active in vLLM
+                active_sub_requests = []
+                for req_id in self.request_metadata.keys():
+                    expected_n = self.request_metadata[req_id]["original_sampling_params"].n
+                    for j in range(expected_n):
+                        sub_id = f"{req_id}_{j}"
+                        if sub_id in self.vllm_active_requests:
+                            active_sub_requests.append(sub_id)
+                
+                # If we have incomplete requests or active sub-requests, don't exit yet
+                if incomplete_metadata or pending_in_outputs or orphaned_tracking or active_sub_requests:
+                    if self.verbose or active_sub_requests:
+                        self.logger.info(
+                            f"Detected incomplete state - continuing processing:\\n"
+                            f"  Incomplete metadata: {len(incomplete_metadata)} requests\\n"
+                            f"  Pending outputs: {len(pending_in_outputs)} requests\\n"  
+                            f"  Orphaned tracking: {len(orphaned_tracking)} sub-requests\\n"
+                            f"  Active sub-requests in vLLM: {active_sub_requests[:5]}{'...' if len(active_sub_requests) > 5 else ''}"
+                        )
+                    
+                    # If we only have incomplete metadata/outputs but no active work, we have a real problem
+                    if not active_sub_requests and final_unfinished == 0 and pending_tools == 0:
+                        # Give it one more second in case outputs are in flight
+                        time.sleep(1.0)
+                        
+                        # Re-check after sleep
+                        final_unfinished = self.llm_engine.get_num_unfinished_requests()
+                        pending_tools = len(self.tracking["pending_tool_futures"])
+                        active_sub_requests = [
+                            f"{req_id}_{j}" 
+                            for req_id in self.request_metadata.keys()
+                            for j in range(self.request_metadata[req_id]["original_sampling_params"].n)
+                            if f"{req_id}_{j}" in self.vllm_active_requests
+                        ]
+                        
+                        if final_unfinished == 0 and pending_tools == 0 and not active_sub_requests:
+                            # Still no work after waiting - this is a real problem
+                            error_msg = (
+                                f"\\n=== CRITICAL: INCOMPLETE STATE AT EXIT ===\\n"
+                                f"vLLM unfinished: {final_unfinished}\\n"
+                                f"Pending tools: {pending_tools}\\n"
+                                f"Active sub-requests: {active_sub_requests or 'None'}\\n"
+                                f"Incomplete metadata: {incomplete_metadata or 'None'}\\n"
+                                f"Ready but not inserted: {pending_in_outputs or 'None'}\\n"
+                                f"Orphaned tracking: {orphaned_tracking or 'None'}\\n"
+                                f"Request metadata keys: {list(self.request_metadata.keys())}\\n"
+                                f"Request outputs keys: {list(self.request_outputs.keys())}\\n"
+                            )
+                            self.logger.error(error_msg)
 
-                # Log comprehensive state and assert
-                if incomplete_metadata or pending_in_outputs or orphaned_tracking:
-                    error_msg = (
-                        f"\\n=== CRITICAL: INCOMPLETE STATE AT EXIT ===\\n"
-                        f"vLLM unfinished: {final_unfinished}\\n"
-                        f"Pending tools: {pending_tools}\\n"
-                        f"Incomplete metadata: {incomplete_metadata or 'None'}\\n"
-                        f"Ready but not inserted: {pending_in_outputs or 'None'}\\n"
-                        f"Orphaned tracking: {orphaned_tracking or 'None'}\\n"
-                        f"Request metadata keys: {list(self.request_metadata.keys())}\\n"
-                        f"Request outputs keys: {list(self.request_outputs.keys())}\\n"
-                    )
-                    self.logger.error(error_msg)
-
-                    # Assert to prevent hanging
-                    assert False, (
-                        f"Attempting to exit process_from_queue with incomplete requests. "
-                        f"This would cause the training loop to hang waiting for results that will never come.\\n"
-                        f"{error_msg}"
-                    )
+                            # Assert to prevent hanging
+                            assert False, (
+                                f"Attempting to exit process_from_queue with incomplete requests. "
+                                f"This would cause the training loop to hang waiting for results that will never come.\\n"
+                                f"{error_msg}"
+                            )
+                    
+                    # Continue processing - don't exit yet
+                    continue
 
                 exit_reason = "no work remaining"
                 break
