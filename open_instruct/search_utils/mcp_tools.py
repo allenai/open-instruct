@@ -81,7 +81,7 @@ class MCPTool(Tool):
         # Allow selecting transport via arg or env; default to StreamableHttpTransport
         self.transport_type = transport_type or os.environ.get("MCP_TRANSPORT", "StreamableHttpTransport")
         self.mcp_host = mcp_host or os.environ.get("MCP_TRANSPORT_HOST", "localhost")
-        if self.base_url is not None:
+        if self.mcp_host is not None:
             os.environ["MCP_TRANSPORT_HOST"] = self.mcp_host
         self.mcp_port = mcp_port or os.environ.get("MCP_TRANSPORT_PORT", 8000)
         if self.mcp_port is not None:
