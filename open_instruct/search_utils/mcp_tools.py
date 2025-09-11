@@ -63,7 +63,7 @@ class MCPTool(Tool):
     def __init__(
         self,
         mcp_tool_names: List[str] | str,
-        parser_name: str = "unified",
+        mcp_parser_name: str = "unified",
         transport_type: str | None = None,
         mcp_host: str | None = None,
         mcp_port: int | None = None,
