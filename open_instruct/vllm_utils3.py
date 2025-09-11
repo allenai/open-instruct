@@ -746,9 +746,11 @@ class LLMRayActor:
                 # Track that we pulled this dataset_index from the prompt queue
                 dataset_index = request.dataset_index
 
-                # Log for debugging
-                if self.verbose:
-                    self.logger.info(f"_prefetch_worker: Pulling dataset_index={dataset_index} from prompt queue")
+                # ALWAYS log this for debugging
+                self.logger.info(
+                    f"[_prefetch_worker] Pulling dataset_index={dataset_index} from prompt queue, "
+                    f"is_eval={request.is_eval}, training_step={request.training_step}"
+                )
 
                 self.request_tracking.assert_not_exists(
                     dataset_index,
@@ -757,8 +759,10 @@ class LLMRayActor:
                 )
                 self.request_tracking.set(dataset_index, {"pulled": True, "inserted": False})
 
-                if self.verbose:
-                    self.logger.info(f"_prefetch_worker: Successfully tracked dataset_index={dataset_index}")
+                self.logger.info(
+                    f"[_prefetch_worker] Successfully tracked dataset_index={dataset_index}, "
+                    f"current tracking keys: {self.request_tracking.keys()}"
+                )
 
                 num_added = add_request(
                     request,
@@ -785,6 +789,25 @@ class LLMRayActor:
         # Validate that this dataset_index was pulled from prompt queue
         dataset_index = result.dataset_index
         if dataset_index is not None:  # dataset_index can be None for combined results
+            # Log detailed tracking info
+            self.logger.info(
+                f"[_insert_result_to_queue] Attempting to insert dataset_index={dataset_index}, "
+                f"is_eval={is_eval}, "
+                f"tracking contains: {self.request_tracking.keys()}, "
+                f"active vLLM requests: {list(self.vllm_active_requests.values())}, "
+                f"result type: {type(result)}, "
+                f"has outputs: {hasattr(result, 'outputs')}"
+            )
+
+            # Check if this dataset_index was ever in vLLM but not in tracking
+            if dataset_index in self.vllm_active_requests.values() and not self.request_tracking.contains(
+                dataset_index
+            ):
+                self.logger.error(
+                    f"CRITICAL: dataset_index {dataset_index} is in vllm_active_requests but NOT in request_tracking! "
+                    f"This indicates tracking was lost or deleted prematurely."
+                )
+
             # Since we no longer insert tool continuation results,
             # every result should have been tracked
             self.request_tracking.assert_exists(
@@ -1147,6 +1170,14 @@ class LLMRayActor:
         # Validate dataset_index consistency before inserting
         expected_dataset_index = self.request_metadata[request_id]["dataset_index"]
         actual_dataset_index = result.dataset_index
+
+        self.logger.info(
+            f"[_maybe_process_and_insert] Processing completed request {request_id}, "
+            f"expected_dataset_index={expected_dataset_index}, "
+            f"actual_dataset_index={actual_dataset_index}, "
+            f"is_eval={is_eval}"
+        )
+
         assert expected_dataset_index == actual_dataset_index, (
             f"Dataset index mismatch: expected {expected_dataset_index} from metadata, "
             f"but got {actual_dataset_index} in result for request_id {request_id}"
@@ -1183,7 +1214,16 @@ class LLMRayActor:
                 )
                 # Still delete to avoid memory leak, but we've logged the issue
 
+            self.logger.info(
+                f"[Cleanup] Deleting tracking for dataset_index={expected_dataset_index}, "
+                f"request_id={request_id}, "
+                f"remaining tracking keys before delete: {self.request_tracking.keys()}"
+            )
             self.request_tracking.delete(expected_dataset_index)
+            self.logger.info(
+                f"[Cleanup] Successfully deleted tracking for dataset_index={expected_dataset_index}, "
+                f"remaining tracking keys after delete: {self.request_tracking.keys()}"
+            )
 
         if self.verbose:
             self.logger.info(f"Completed and inserted request {request_id} with {expected_n} samples (eval={is_eval})")
