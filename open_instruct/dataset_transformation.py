@@ -442,6 +442,24 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    "olmo_simple_thinker_r1_style": (
+        "A conversation between user and assistant. "
+        "The user asks a question, and the assistant solves it. "
+        "The assistant first thinks and reasons about the question "
+        "and after thinking provides the user with the answer. "
+        "The reasoning process is enclosed in <think> </think> tags "
+        "and the answer is enclosed in <answer> </answer> tags "
+        "so the full response is <think> reasoning process here </think> "
+        "<answer> answer here </answer>."
+        "\n\n"
+        "{% for message in messages %}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['role'].capitalize() + ': ' + message['content'] + '\n' }}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ 'assistant:\n<think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
     # template is taken from https://arxiv.org/abs/2501.12948.
     "r1_simple_chat": (
         "A conversation between User and Assistant. "

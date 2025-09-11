@@ -262,9 +262,6 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
                 additional_secrets: List[Dict[str, str]]):
     env_vars = []
     additional_env_var_names = [var["name"] for var in additional_env_vars]
-    if "VLLM_ATTENTION_BACKEND" not in additional_env_var_names:
-        env_vars.append(beaker.EnvVar(name="VLLM_ATTENTION_BACKEND",
-                                      value="FLASHINFER"))
     if "RAY_CGRAPH_get_timeout" not in additional_env_var_names:
         env_vars.append(beaker.EnvVar(name="RAY_CGRAPH_get_timeout",
                                       value="300"))
