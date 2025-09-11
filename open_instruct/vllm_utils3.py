@@ -878,7 +878,17 @@ class LLMRayActor:
 
             # Process engine steps - ONLY if there are unfinished requests
             if self.llm_engine.has_unfinished_requests():
-                step_outputs = [o for o in self.llm_engine.step() if o.finished]
+                all_outputs = list(self.llm_engine.step())
+                
+                # Assert that all outputs from step() are finished
+                unfinished_outputs = [o for o in all_outputs if not o.finished]
+                assert not unfinished_outputs, (
+                    f"vLLM step() returned {len(unfinished_outputs)} unfinished outputs. "
+                    f"This violates our assumption that we only need to process finished outputs. "
+                    f"Unfinished request IDs: {[o.request_id for o in unfinished_outputs]}"
+                )
+                
+                step_outputs = all_outputs
 
                 for output in step_outputs:
                     # We always set n=1 for each sub-request in add_request()
@@ -889,10 +899,14 @@ class LLMRayActor:
                     )
 
                     # Remove from vllm_active_requests since this request is finished
-                    if output.request_id in self.vllm_active_requests:
-                        del self.vllm_active_requests[output.request_id]
-                        if self.verbose:
-                            self.logger.info(f"Removed {output.request_id} from vllm_active_requests")
+                    if output.request_id not in self.vllm_active_requests:
+                        raise RuntimeError(
+                            f"Sub-request {output.request_id} completed but was not in vllm_active_requests. "
+                            f"This indicates a critical tracking bug. Active requests: {list(self.vllm_active_requests.keys())}"
+                        )
+                    del self.vllm_active_requests[output.request_id]
+                    if self.verbose:
+                        self.logger.info(f"Removed {output.request_id} from vllm_active_requests")
 
                     base_req_id = _extract_base_request_id(output.request_id)
 
