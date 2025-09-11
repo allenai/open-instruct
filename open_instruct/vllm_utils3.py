@@ -885,7 +885,7 @@ class LLMRayActor:
                         # Always accumulate the result
                         request_id = _extract_base_request_id(result.request_id)
                         self.request_outputs[request_id].append(result)
-                        
+
                         # Try to process and insert if we have all expected outputs
                         total_processed += self._maybe_process_and_insert(
                             request_id, self.request_outputs, self.tracking, current_time
@@ -1038,6 +1038,11 @@ class LLMRayActor:
         needed_ids = [f"{request_id}_{j}" for j in range(expected_n)]
         available = [sid for sid in needed_ids if sid in canonical]
         if len(available) < expected_n:
+            return 0
+
+        # Check if there are any pending tool futures for this request
+        # We should NOT process the request until all tool processing is complete
+        if self._has_pending_tool_futures_for_request(request_id, tracking):
             return 0
 
         # Build ordered outs (0..n-1), ensuring one per sub-request.
