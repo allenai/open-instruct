@@ -196,7 +196,8 @@ class GSM8KVerifier(VerifierFunction):
         extracted = numbers[-1] if numbers else response
         score = float(str(extracted).lower() == str(label).lower())
         return VerificationResult(score=score)
-        
+
+
 class MathVerifier(VerifierFunction):
     """
     Verifier for math problems.
@@ -418,7 +419,6 @@ class StringMatcherVerifier(VerifierFunction):
         return VerificationResult(score=score)
 
 
-
 class F1Verifier(VerifierFunction):
     """
     Verifier that computes the string F1 score between the prediction and the label.
@@ -437,6 +437,7 @@ class F1Verifier(VerifierFunction):
         # return f1 score
         score = f1_score(prediction, label)["f1"]
         return VerificationResult(score=score)
+
 
 class PuzzleMatcherVerifier(VerifierFunction):
     """
@@ -457,7 +458,8 @@ class PuzzleMatcherVerifier(VerifierFunction):
         prediction = prediction.replace("<answer>", "").replace("</answer>", "")
         score = float(normalize_answer(prediction) == normalize_answer(label))
         return VerificationResult(score=score)
-        
+
+
 class ReSearchVerifierF1(VerifierFunction):
     """
     Verifier from ReSearch paper (https://arxiv.org/abs/2503.19470)
