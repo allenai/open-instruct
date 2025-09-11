@@ -1,6 +1,41 @@
 #!/bin/bash
 set -euo pipefail
 
+# 1) Verify we're inside a Git repo
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "Error: This directory is not a Git repository."
+  exit 1
+fi
+
+# 2) Fail if there are any uncommitted or untracked changes
+#    (staged, unstaged, or untracked files)
+if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+  echo "Error: Uncommitted changes detected. Please commit or stash before running."
+  echo "------- git status (short) -------"
+  git status --short
+  exit 1
+fi
+
+# 3) Fail if current HEAD has commits not pushed to origin/main
+#    (i.e., HEAD is ahead of origin/main)
+#    Ensure the remote branch exists first.
+if ! git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
+  echo "Error: Could not find 'origin/main'. Ensure an 'origin' remote with a 'main' branch exists."
+  exit 1
+fi
+
+# Fetch latest origin/main to compare accurately
+git fetch origin main --quiet
+
+# Count commits reachable from HEAD that are not in origin/main
+if [[ "$(git rev-list --count origin/main..HEAD)" -gt 0 ]]; then
+  echo "Error: You have local commits not pushed to origin/main."
+  echo "Tip: Push your current branch or rebase/merge onto origin/main as needed."
+  echo "------- commits ahead of origin/main -------"
+  git log --oneline origin/main..HEAD
+  exit 1
+fi
+
 git_hash=$(git rev-parse --short HEAD)
 git_branch=$(git rev-parse --abbrev-ref HEAD)
 # Sanitize the branch name to remove invalid characters for Beaker names
