@@ -883,16 +883,9 @@ class LLMRayActor:
                     # Result is None when we do more tool processing.
                     if result is not None:
                         # Sub-request is done (no more tool calls)
-                        # Use the complete output from concat_outputs if it exists (has tool processing)
-                        # Otherwise use the direct result (no tools were ever called)
-                        if output.request_id in self.tracking["concat_outputs"]:
-                            complete_output = self.tracking["concat_outputs"][output.request_id]
-                        else:
-                            complete_output = result
-
-                        # Now add the COMPLETE output to request_outputs
+                        # The result is already properly processed as a GenerationResult
                         request_id = _extract_base_request_id(output.request_id)
-                        self.request_outputs[request_id].append(complete_output)
+                        self.request_outputs[request_id].append(result)
 
                         # Try to process and insert if we have all expected outputs
                         total_processed += self._maybe_process_and_insert(
