@@ -778,29 +778,6 @@ class LLMRayActor:
                             if f"{req_id}_{j}" in self.vllm_active_requests
                         ]
 
-                        if final_unfinished == 0 and pending_tools == 0 and not active_sub_requests:
-                            # Still no work after waiting - this is a real problem
-                            # Use comprehensive validation to identify the exact issue
-                                error_msg = (
-                                    f"\\n=== CRITICAL: INCOMPLETE STATE AT EXIT ===\\n"
-                                    f"vLLM unfinished: {final_unfinished}\\n"
-                                    f"Pending tools: {pending_tools}\\n"
-                                    f"Active sub-requests: {active_sub_requests or 'None'}\\n"
-                                    f"Incomplete metadata: {incomplete_metadata or 'None'}\\n"
-                                    f"Ready but not inserted: {pending_in_outputs or 'None'}\\n"
-                                    f"Orphaned tracking: {orphaned_tracking or 'None'}\\n"
-                                    f"Request metadata keys: {list(self.request_metadata.keys())}\\n"
-                                    f"Request outputs keys: {list(self.request_outputs.keys())}\\n"
-                                    f"\\nValidation error: {str(e)}"
-                                )
-                                self.logger.error(error_msg)
-
-                                # Re-raise with full context
-                                assert False, (
-                                    f"Attempting to exit process_from_queue with incomplete requests. "
-                                    f"This would cause the training loop to hang waiting for results that will never come.\\n"
-                                    f"{error_msg}"
-                                )
 
                     # Continue processing - don't exit yet
                     continue
