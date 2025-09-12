@@ -73,6 +73,7 @@ class MCPTool(Tool):
         search_api_endpoint: str | None = None,
         start_str: str = "",
         end_str: str | None = None,
+        mcp_timeout: int = 180,
         *args,
         **kwargs,
     ):
@@ -106,6 +107,7 @@ class MCPTool(Tool):
             # basically, we want to defer as much as possible to the mcp tool.
             # this 'tool' actually just passes everything down to the mcp tool.
             self.mcp_tools.append(mcp_tool_cls(
+                timeout=mcp_timeout,
                 name=mcp_tool_name,
                 tool_parser=mcp_parser_name,
                 transport_type=self.transport_type,
