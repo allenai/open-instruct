@@ -392,7 +392,8 @@ class LLMRayActor:
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             self.logger.info(f"creating LLM with bundle_indices={bundle_indices}")
 
-        self.llm_engine = vllm.LLMEngine.from_engine_args(vllm.EngineArgs(*args, **kwargs))
+        # for some reason log stats causes a crash in the engine at assert outputs.scheduler_stats is not None
+        self.llm_engine = vllm.LLMEngine.from_engine_args(vllm.EngineArgs(*args, **kwargs, disable_log_stats=True))
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
