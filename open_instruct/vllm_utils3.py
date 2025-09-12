@@ -772,6 +772,11 @@ class LLMRayActor:
                     vllm_active_requests=self.vllm_active_requests,
                 )
 
+                # Validate sub-request counts after adding
+                prefix = "eval" if request.is_eval else "train"
+                request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
+                self._validate_sub_request_counts(f"After adding request {request_id}")
+
                 if self.verbose and num_added > 0:
                     self.logger.info(
                         f"Prefetch worker: added {num_added} requests directly to engine, "
@@ -879,7 +884,7 @@ class LLMRayActor:
             # Process engine steps - ONLY if there are unfinished requests
             if self.llm_engine.has_unfinished_requests():
                 all_outputs = list(self.llm_engine.step())
-                
+
                 # Assert that all outputs from step() are finished
                 unfinished_outputs = [o for o in all_outputs if not o.finished]
                 assert not unfinished_outputs, (
@@ -887,7 +892,7 @@ class LLMRayActor:
                     f"This violates our assumption that we only need to process finished outputs. "
                     f"Unfinished request IDs: {[o.request_id for o in unfinished_outputs]}"
                 )
-                
+
                 step_outputs = all_outputs
 
                 for output in step_outputs:
@@ -907,6 +912,9 @@ class LLMRayActor:
                     del self.vllm_active_requests[output.request_id]
                     if self.verbose:
                         self.logger.info(f"Removed {output.request_id} from vllm_active_requests")
+
+                    # Validate sub-request counts after removing from vLLM
+                    self._validate_sub_request_counts(f"After removing {output.request_id} from vLLM")
 
                     base_req_id = _extract_base_request_id(output.request_id)
 
@@ -933,6 +941,10 @@ class LLMRayActor:
                         self.executor,
                     )
 
+                    # If result is None, the output was moved to pending_tool_futures
+                    if result is None and self.tools:
+                        self._validate_sub_request_counts(f"After adding {output.request_id} to pending_tool_futures")
+
                     # Assert: check sample count after processing
                     current_samples_after = sum(
                         1 for k in self.tracking["concat_outputs"].keys() if _extract_base_request_id(k) == base_req_id
@@ -954,9 +966,17 @@ class LLMRayActor:
                             self.request_outputs[request_id].append(result)
 
                         # Try to process and insert if we have all expected outputs
-                        total_processed += self._maybe_process_and_insert(
+                        # Validate before processing
+                        self._validate_sub_request_counts(f"Before _maybe_process_and_insert for {request_id}")
+
+                        processed = self._maybe_process_and_insert(
                             request_id, self.request_outputs, self.tracking, current_time
                         )
+                        total_processed += processed
+
+                        # Validate after processing (only if actually processed)
+                        if processed > 0:
+                            self._validate_sub_request_counts(f"After _maybe_process_and_insert for {request_id}")
 
             # If no work to do, break to yield control back to generate_thread,
             # allowing weight_sync_thread to acquire the LLMRayActor lock
@@ -1011,7 +1031,7 @@ class LLMRayActor:
                             if base_id not in self.request_outputs or not self.request_outputs[base_id]:
                                 # No pending outputs for this base, so truly orphaned
                                 orphaned_tracking.append(f"{sub_id} (base: {base_id})")
-                
+
                 # 4. Check if any sub-requests are still active in vLLM
                 active_sub_requests = []
                 for req_id in self.request_metadata.keys():
@@ -1020,55 +1040,61 @@ class LLMRayActor:
                         sub_id = f"{req_id}_{j}"
                         if sub_id in self.vllm_active_requests:
                             active_sub_requests.append(sub_id)
-                
+
                 # If we have incomplete requests or active sub-requests, don't exit yet
                 if incomplete_metadata or pending_in_outputs or orphaned_tracking or active_sub_requests:
                     if self.verbose or active_sub_requests:
                         self.logger.info(
                             f"Detected incomplete state - continuing processing:\\n"
                             f"  Incomplete metadata: {len(incomplete_metadata)} requests\\n"
-                            f"  Pending outputs: {len(pending_in_outputs)} requests\\n"  
+                            f"  Pending outputs: {len(pending_in_outputs)} requests\\n"
                             f"  Orphaned tracking: {len(orphaned_tracking)} sub-requests\\n"
                             f"  Active sub-requests in vLLM: {active_sub_requests[:5]}{'...' if len(active_sub_requests) > 5 else ''}"
                         )
-                    
+
                     # If we only have incomplete metadata/outputs but no active work, we have a real problem
                     if not active_sub_requests and final_unfinished == 0 and pending_tools == 0:
                         # Give it one more second in case outputs are in flight
                         time.sleep(1.0)
-                        
+
                         # Re-check after sleep
                         final_unfinished = self.llm_engine.get_num_unfinished_requests()
                         pending_tools = len(self.tracking["pending_tool_futures"])
                         active_sub_requests = [
-                            f"{req_id}_{j}" 
+                            f"{req_id}_{j}"
                             for req_id in self.request_metadata.keys()
                             for j in range(self.request_metadata[req_id]["original_sampling_params"].n)
                             if f"{req_id}_{j}" in self.vllm_active_requests
                         ]
-                        
+
                         if final_unfinished == 0 and pending_tools == 0 and not active_sub_requests:
                             # Still no work after waiting - this is a real problem
-                            error_msg = (
-                                f"\\n=== CRITICAL: INCOMPLETE STATE AT EXIT ===\\n"
-                                f"vLLM unfinished: {final_unfinished}\\n"
-                                f"Pending tools: {pending_tools}\\n"
-                                f"Active sub-requests: {active_sub_requests or 'None'}\\n"
-                                f"Incomplete metadata: {incomplete_metadata or 'None'}\\n"
-                                f"Ready but not inserted: {pending_in_outputs or 'None'}\\n"
-                                f"Orphaned tracking: {orphaned_tracking or 'None'}\\n"
-                                f"Request metadata keys: {list(self.request_metadata.keys())}\\n"
-                                f"Request outputs keys: {list(self.request_outputs.keys())}\\n"
-                            )
-                            self.logger.error(error_msg)
+                            # Use comprehensive validation to identify the exact issue
+                            try:
+                                self._validate_sub_request_counts("At exit with incomplete state")
+                            except AssertionError as e:
+                                # Validation will provide detailed error message about what's wrong
+                                error_msg = (
+                                    f"\\n=== CRITICAL: INCOMPLETE STATE AT EXIT ===\\n"
+                                    f"vLLM unfinished: {final_unfinished}\\n"
+                                    f"Pending tools: {pending_tools}\\n"
+                                    f"Active sub-requests: {active_sub_requests or 'None'}\\n"
+                                    f"Incomplete metadata: {incomplete_metadata or 'None'}\\n"
+                                    f"Ready but not inserted: {pending_in_outputs or 'None'}\\n"
+                                    f"Orphaned tracking: {orphaned_tracking or 'None'}\\n"
+                                    f"Request metadata keys: {list(self.request_metadata.keys())}\\n"
+                                    f"Request outputs keys: {list(self.request_outputs.keys())}\\n"
+                                    f"\\nValidation error: {str(e)}"
+                                )
+                                self.logger.error(error_msg)
 
-                            # Assert to prevent hanging
-                            assert False, (
-                                f"Attempting to exit process_from_queue with incomplete requests. "
-                                f"This would cause the training loop to hang waiting for results that will never come.\\n"
-                                f"{error_msg}"
-                            )
-                    
+                                # Re-raise with full context
+                                assert False, (
+                                    f"Attempting to exit process_from_queue with incomplete requests. "
+                                    f"This would cause the training loop to hang waiting for results that will never come.\\n"
+                                    f"{error_msg}"
+                                )
+
                     # Continue processing - don't exit yet
                     continue
 
@@ -1263,6 +1289,9 @@ class LLMRayActor:
         # Clean up metadata and tracking for this request after enqueuing
         self._cleanup_request_data(request_id, tracking)
 
+        # Validate after cleanup
+        self._validate_sub_request_counts(f"After cleanup for {request_id}")
+
         # Clean up request tracking for this dataset_index
         if self.request_tracking.contains(expected_dataset_index):
             # Verify it was properly inserted before cleaning up
@@ -1345,6 +1374,52 @@ class LLMRayActor:
             return True
 
         return False
+
+    def _validate_sub_request_counts(self, context: str):
+        """Validate that all sub-requests are accounted for."""
+        # Group by base request ID - using defaultdict for cleaner code
+        request_accounting = defaultdict(
+            lambda: {"vllm": 0, "pending_tools": 0, "concat": 0, "outputs": 0, "expected": 0}
+        )
+
+        # Count vLLM active
+        for sub_id in self.vllm_active_requests:
+            base_id = _extract_base_request_id(sub_id)
+            request_accounting[base_id]["vllm"] += 1
+
+        # Count pending tools
+        for sub_id in self.tracking["pending_tool_futures"]:
+            base_id = _extract_base_request_id(sub_id)
+            request_accounting[base_id]["pending_tools"] += 1
+
+        # Count in concat_outputs
+        for sub_id in self.tracking["concat_outputs"]:
+            base_id = _extract_base_request_id(sub_id)
+            request_accounting[base_id]["concat"] += 1
+
+        # Count in request_outputs
+        for base_id, outputs in self.request_outputs.items():
+            request_accounting[base_id]["outputs"] += len(outputs)
+
+        # Get expected counts from original_sampling_params
+        for base_id in request_accounting:
+            # If base_id is not in request_metadata, that's a critical error
+            request_accounting[base_id]["expected"] = self.request_metadata[base_id]["original_sampling_params"].n
+
+        # Validate
+        errors = []
+        for base_id, counts in request_accounting.items():
+            total = counts["vllm"] + counts["pending_tools"] + counts["concat"] + counts["outputs"]
+            if total != counts["expected"]:
+                errors.append(
+                    f"{base_id}: expected {counts['expected']}, got {total} "
+                    f"(vllm={counts['vllm']}, tools={counts['pending_tools']}, "
+                    f"concat={counts['concat']}, outputs={counts['outputs']})"
+                )
+
+        if errors:
+            self.logger.error(f"[{context}] Sub-request count validation failed:\n" + "\n".join(errors))
+            assert False, f"Sub-request tracking inconsistency at {context}"
 
     def _cleanup_request_data(self, request_id: str, tracking: Dict[str, Any]):
         """Clean up metadata and tracking data for a completed request."""
@@ -1447,6 +1522,9 @@ class LLMRayActor:
                     base_req_id = _extract_base_request_id(req_id)
                     if base_req_id in self.request_metadata:
                         self.vllm_active_requests[req_id] = self.request_metadata[base_req_id]["dataset_index"]
+
+                    # Validate sub-request counts after re-adding for tool continuation
+                    self._validate_sub_request_counts(f"After re-adding {req_id} for tool continuation")
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
                     self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
@@ -1455,6 +1533,8 @@ class LLMRayActor:
         # Remove the futures we just processed; do NOT clean up metadata here.
         for req_id in dict_keys_to_delete:
             tracking["pending_tool_futures"].pop(req_id, None)
+            # Validate sub-request counts after removing from pending_tool_futures
+            self._validate_sub_request_counts(f"After removing {req_id} from pending_tool_futures")
         return completed_outputs
 
     def init_process_group(
