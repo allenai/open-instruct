@@ -1599,6 +1599,8 @@ class LLMRayActor:
                     self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
             else:
                 # Can't make a new request (hit limits), finalize this sub-request
+                # Remove from pending_tool_futures BEFORE finalizing to avoid cleanup issues
+                tracking["pending_tool_futures"].pop(req_id, None)
                 complete_output = tracking["concat_outputs"][req_id].outputs[0]
                 current_time = time.time()
                 self._finalize_sub_request(req_id, last_output, complete_output, current_time)
@@ -1606,15 +1608,20 @@ class LLMRayActor:
 
         # Remove the futures we just processed; do NOT clean up metadata here.
         for req_id in dict_keys_to_delete:
+            # Some may have already been removed (in the else clause above)
+            was_in_pending = req_id in tracking["pending_tool_futures"]
             tracking["pending_tool_futures"].pop(req_id, None)
-            base_req_id = _extract_base_request_id(req_id)
-            if base_req_id in self.request_metadata:
-                # Check if this was re-added to vLLM or finalized
-                if req_id in self.vllm_active_requests:
-                    context = f"After moving {req_id} from tools back to vLLM"
-                else:
-                    context = f"After finalizing {req_id} from tools"
-                self._validate_single_request_counts(base_req_id, context)
+
+            # Only validate if we actually removed it (wasn't already removed)
+            if was_in_pending:
+                base_req_id = _extract_base_request_id(req_id)
+                if base_req_id in self.request_metadata:
+                    # Check if this was re-added to vLLM or finalized
+                    if req_id in self.vllm_active_requests:
+                        context = f"After moving {req_id} from tools back to vLLM"
+                    else:
+                        context = f"After finalizing {req_id} from tools"
+                    self._validate_single_request_counts(base_req_id, context)
         return completed_outputs
 
     def init_process_group(
