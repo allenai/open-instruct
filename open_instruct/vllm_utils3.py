@@ -1175,7 +1175,17 @@ class LLMRayActor:
         # We expect sub-ids exactly: f"{request_id}_{j}" for j in range(expected_n)
         needed_ids = [f"{request_id}_{j}" for j in range(expected_n)]
         available = [sid for sid in needed_ids if sid in canonical]
+
+        # Log the readiness check
+        self.logger.info(
+            f"[_maybe_process_and_insert] Checking {request_id}: "
+            f"expected_n={expected_n}, available={len(available)}, "
+            f"canonical_keys={list(canonical.keys())}, "
+            f"needed={needed_ids}"
+        )
+
         if len(available) < expected_n:
+            self.logger.info(f"[_maybe_process_and_insert] Not ready - only {len(available)}/{expected_n} available")
             return 0
 
         # CRITICAL: Check if any sub-requests still have active vLLM continuations
@@ -1293,8 +1303,34 @@ class LLMRayActor:
                 f"Dataset index {expected_dataset_index} was not marked as inserted before cleanup"
             )
 
-            # Note: _cleanup_request_data already checks for pending tool futures and active vLLM requests
-            # and returns early without cleaning up if they exist. So we can safely proceed here.
+            # Safety check: Ensure no active vLLM requests or pending tool futures for this dataset_index
+            active_requests_for_dataset = [
+                req_id for req_id, ds_idx in self.vllm_active_requests.items() if ds_idx == expected_dataset_index
+            ]
+
+            has_pending_tools = self._has_pending_tool_futures_for_request(request_id, tracking)
+
+            # Get the IDs of pending tool futures for this request for better debugging
+            pending_tool_ids = (
+                [
+                    req_id
+                    for req_id in tracking["pending_tool_futures"]
+                    if _extract_base_request_id(req_id) == request_id
+                ]
+                if has_pending_tools
+                else []
+            )
+
+            if active_requests_for_dataset or has_pending_tools:
+                raise ValueError(
+                    f"CRITICAL: Attempting to clean up dataset_index {expected_dataset_index} but found:\n"
+                    f"  - Active vLLM requests: {active_requests_for_dataset}\n"
+                    f"  - Has pending tool futures: {has_pending_tools}\n"
+                    f"  - Pending tool future IDs: {pending_tool_ids}\n"
+                    f"  - Request ID: {request_id}\n"
+                    f"  - All active vLLM requests: {list(self.vllm_active_requests.keys())}\n"
+                    f"This indicates requests are being cleaned up while still being processed!"
+                )
 
             self.logger.info(
                 f"[Cleanup] Deleting tracking for dataset_index={expected_dataset_index}, "
@@ -1585,6 +1621,19 @@ class LLMRayActor:
                     self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
             else:
                 # Can't make a new request (hit limits), finalize this sub-request
+                base_req_id = _extract_base_request_id(req_id)
+
+                # Log the state before finalizing
+                other_pending = [
+                    other_id
+                    for other_id in tracking["pending_tool_futures"]
+                    if _extract_base_request_id(other_id) == base_req_id and other_id != req_id
+                ]
+                self.logger.info(
+                    f"[_poll_tool_futures] Finalizing {req_id} (can't continue). "
+                    f"Other pending tools for {base_req_id}: {other_pending}"
+                )
+
                 # Remove from pending_tool_futures BEFORE finalizing to avoid cleanup issues
                 tracking["pending_tool_futures"].pop(req_id, None)
                 complete_output = tracking["concat_outputs"][req_id].outputs[0]
