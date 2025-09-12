@@ -913,9 +913,6 @@ class LLMRayActor:
                     if self.verbose:
                         self.logger.info(f"Removed {output.request_id} from vllm_active_requests")
 
-                    # Validate sub-request counts after removing from vLLM
-                    self._validate_sub_request_counts(f"After removing {output.request_id} from vLLM")
-
                     base_req_id = _extract_base_request_id(output.request_id)
 
                     # Check if metadata exists for this request
@@ -943,7 +940,7 @@ class LLMRayActor:
 
                     # If result is None, the output was moved to pending_tool_futures
                     if result is None and self.tools:
-                        self._validate_sub_request_counts(f"After adding {output.request_id} to pending_tool_futures")
+                        self._validate_sub_request_counts(f"After moving {output.request_id} to pending_tool_futures")
 
                     # Assert: check sample count after processing
                     current_samples_after = sum(
@@ -965,9 +962,10 @@ class LLMRayActor:
                             # No tools were used, use the direct result
                             self.request_outputs[request_id].append(result)
 
+                        # Validate after moving to request_outputs
+                        self._validate_sub_request_counts(f"After moving {output.request_id} to request_outputs")
+
                         # Try to process and insert if we have all expected outputs
-                        # Validate before processing
-                        self._validate_sub_request_counts(f"Before _maybe_process_and_insert for {request_id}")
 
                         processed = self._maybe_process_and_insert(
                             request_id, self.request_outputs, self.tracking, current_time
