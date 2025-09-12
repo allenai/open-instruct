@@ -1405,6 +1405,21 @@ class LLMRayActor:
             counts = request_accounting[base_id]
             total = counts["vllm"] + counts["pending_tools"] + counts["concat"] + counts["outputs"]
             if total != counts["expected"]:
+                # Add detailed logging before failing
+                self.logger.error(f"[{context}] Validation failed for {base_id}:")
+                self.logger.error(f"  Expected: {counts['expected']}")
+                self.logger.error(f"  Found: {total}")
+                self.logger.error(
+                    f"  - vLLM active: {counts['vllm']} -> {[k for k in self.vllm_active_requests.keys() if k.startswith(base_id)]}"
+                )
+                self.logger.error(
+                    f"  - Pending tools: {counts['pending_tools']} -> {[k for k in self.tracking['pending_tool_futures'].keys() if k.startswith(base_id)]}"
+                )
+                self.logger.error(
+                    f"  - Concat outputs: {counts['concat']} -> {[k for k in self.tracking['concat_outputs'].keys() if k.startswith(base_id)]}"
+                )
+                self.logger.error(f"  - Request outputs: {counts['outputs']}")
+
                 errors.append(
                     f"{base_id}: expected {counts['expected']}, got {total} "
                     f"(vllm={counts['vllm']}, tools={counts['pending_tools']}, "
