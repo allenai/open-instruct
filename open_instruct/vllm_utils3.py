@@ -16,6 +16,7 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 import copy
+import dataclasses
 import os
 import queue
 import threading
@@ -1555,7 +1556,8 @@ class LLMRayActor:
             # Extract index from sub_request_id like "train_1_43039_2" -> 2
             parts = sub_request_id.rsplit("_", 1)
             if len(parts) == 2 and parts[1].isdigit():
-                complete_output.index = int(parts[1])
+                # Create new CompletionOutput with corrected index
+                complete_output = dataclasses.replace(complete_output, index=int(parts[1]))
 
         # Add the completion output
         self.request_outputs[base_request_id].outputs.append(complete_output)
