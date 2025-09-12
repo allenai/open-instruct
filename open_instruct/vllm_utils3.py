@@ -1165,7 +1165,7 @@ class LLMRayActor:
                         if sub_id in tracking.get("pending_tool_futures", {}):
                             logger.info(f"Skipping {sub_id} from request_outputs - has pending tool future")
                             continue
-                        
+
                         # Create a wrapper RequestOutput for consistency
                         wrapper = vllm.RequestOutput(
                             request_id=sub_id,
@@ -1643,7 +1643,7 @@ class LLMRayActor:
                 # Remove from pending_tool_futures BEFORE finalization to ensure consistent state
                 # This prevents the cleanup logic from seeing this as a pending tool future
                 tracking["pending_tool_futures"].pop(req_id, None)
-                
+
                 complete_output = tracking["concat_outputs"][req_id].outputs[0]
                 current_time = time.time()
                 self._finalize_sub_request(req_id, last_output, complete_output, current_time)
