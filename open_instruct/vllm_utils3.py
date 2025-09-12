@@ -775,7 +775,7 @@ class LLMRayActor:
                 # Validate sub-request counts after adding
                 prefix = "eval" if request.is_eval else "train"
                 request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
-                self._validate_sub_request_counts(f"After adding request {request_id}")
+                self._validate_single_request_counts(request_id, f"After adding request {request_id}")
 
                 if self.verbose and num_added > 0:
                     self.logger.info(
@@ -940,7 +940,9 @@ class LLMRayActor:
 
                     # If result is None, the output was moved to pending_tool_futures
                     if result is None and self.tools:
-                        self._validate_sub_request_counts(f"After moving {output.request_id} to pending_tool_futures")
+                        self._validate_single_request_counts(
+                            base_req_id, f"After moving {output.request_id} to pending_tool_futures"
+                        )
 
                     # Assert: check sample count after processing
                     current_samples_after = sum(
@@ -963,7 +965,9 @@ class LLMRayActor:
                             self.request_outputs[request_id].append(result)
 
                         # Validate after moving to request_outputs
-                        self._validate_sub_request_counts(f"After moving {output.request_id} to request_outputs")
+                        self._validate_single_request_counts(
+                            request_id, f"After moving {output.request_id} to request_outputs"
+                        )
 
                         # Try to process and insert if we have all expected outputs
 
@@ -974,7 +978,9 @@ class LLMRayActor:
 
                         # Validate after processing (only if actually processed)
                         if processed > 0:
-                            self._validate_sub_request_counts(f"After _maybe_process_and_insert for {request_id}")
+                            self._validate_single_request_counts(
+                                request_id, f"After _maybe_process_and_insert for {request_id}"
+                            )
 
             # If no work to do, break to yield control back to generate_thread,
             # allowing weight_sync_thread to acquire the LLMRayActor lock
@@ -1370,6 +1376,34 @@ class LLMRayActor:
 
         return False
 
+    def _validate_single_request_counts(self, base_request_id: str, context: str):
+        """Validate that all sub-requests for a specific request are accounted for."""
+        if base_request_id not in self.request_metadata:
+            # Request already cleaned up, skip validation
+            return
+
+        expected = self.request_metadata[base_request_id]["original_sampling_params"].n
+
+        # Count sub-requests for this specific request
+        vllm_count = sum(1 for k in self.vllm_active_requests.keys() if k.startswith(base_request_id + "_"))
+        tools_count = sum(
+            1 for k in self.tracking["pending_tool_futures"].keys() if k.startswith(base_request_id + "_")
+        )
+        outputs_count = len(self.request_outputs.get(base_request_id, []))
+
+        total = vllm_count + tools_count + outputs_count
+
+        if total != expected:
+            error_msg = (
+                f"[{context}] Validation failed for {base_request_id}:\n"
+                f"  Expected: {expected}\n"
+                f"  Found: {total}\n"
+                f"  - vLLM active: {vllm_count} -> {[k for k in self.vllm_active_requests.keys() if k.startswith(base_request_id + '_')]}\n"
+                f"  - Pending tools: {tools_count} -> {[k for k in self.tracking['pending_tool_futures'].keys() if k.startswith(base_request_id + '_')]}\n"
+                f"  - Request outputs: {outputs_count}"
+            )
+            raise RuntimeError(f"Sub-request tracking inconsistency: {error_msg}")
+
     def _validate_sub_request_counts(self, context: str):
         """Validate that all sub-requests are accounted for."""
         # Group by base request ID - using defaultdict for cleaner code
@@ -1523,7 +1557,10 @@ class LLMRayActor:
                         self.vllm_active_requests[req_id] = self.request_metadata[base_req_id]["dataset_index"]
 
                     # Validate sub-request counts after re-adding for tool continuation
-                    self._validate_sub_request_counts(f"After re-adding {req_id} for tool continuation")
+                    base_req_id = _extract_base_request_id(req_id)
+                    self._validate_single_request_counts(
+                        base_req_id, f"After re-adding {req_id} for tool continuation"
+                    )
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
                     self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
@@ -1533,7 +1570,8 @@ class LLMRayActor:
         for req_id in dict_keys_to_delete:
             tracking["pending_tool_futures"].pop(req_id, None)
             # Validate sub-request counts after removing from pending_tool_futures
-            self._validate_sub_request_counts(f"After removing {req_id} from pending_tool_futures")
+            base_req_id = _extract_base_request_id(req_id)
+            self._validate_single_request_counts(base_req_id, f"After removing {req_id} from pending_tool_futures")
         return completed_outputs
 
     def init_process_group(
