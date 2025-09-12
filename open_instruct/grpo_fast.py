@@ -428,7 +428,7 @@ class Args:
     """The host of the MCP server. Note it should match the host of the MCP server command if specified there."""
     mcp_port: Optional[int] = None
     """The port of the MCP server. Note it should match the port of the MCP server command if specified there."""
-    mcp_timeout: int = 180,
+    mcp_timeout: int = 180
     """The timeout for the MCP tool."""
     ### end per-tool settings ###
 
