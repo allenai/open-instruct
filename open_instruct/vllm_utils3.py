@@ -394,7 +394,7 @@ class LLMRayActor:
 
         engine_args = vllm.EngineArgs(*args, **kwargs)
         # Log stats causes a crash in the engine at assert outputs.scheduler_stats is not None when we call step() and there is nothing to step.
-        engine_args.log_stats = False
+        engine_args.disable_log_stats = True
 
         # Cascade attention has known performance issues: https://github.com/vllm-project/vllm/issues/17652
         engine_args.disable_cascade_attn = True
