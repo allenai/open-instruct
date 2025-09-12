@@ -1536,7 +1536,7 @@ class LLMRayActor:
         dict_keys_to_delete = []
         completed_outputs = []
 
-        for req_id, (future, last_o, last_output) in tracking["pending_tool_futures"].items():
+        for req_id, (future, last_o, last_output) in list(tracking["pending_tool_futures"].items()):
             if not future.done():
                 continue
 
