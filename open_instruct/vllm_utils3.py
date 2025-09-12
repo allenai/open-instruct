@@ -846,7 +846,7 @@ class LLMRayActor:
         if not hasattr(self, "tracking"):
             self.tracking = _init_tool_tracking()
         if not hasattr(self, "request_outputs"):
-            self.request_outputs = defaultdict(list)
+            self.request_outputs = {}
 
         # Use persistent instance variables for tracking and outputs
         # This ensures state is maintained across multiple calls
@@ -938,7 +938,6 @@ class LLMRayActor:
                         self.executor,
                     )
 
-
                     # Assert: check sample count after processing
                     current_samples_after = sum(
                         1 for k in self.tracking["concat_outputs"].keys() if _extract_base_request_id(k) == base_req_id
@@ -951,13 +950,24 @@ class LLMRayActor:
                         # Sub-request is done (no more tool calls)
                         request_id = _extract_base_request_id(output.request_id)
 
-                        # Move the accumulated output from concat_outputs to request_outputs
+                        # Initialize request_outputs entry if needed
+                        if request_id not in self.request_outputs:
+                            self.request_outputs[request_id] = vllm.RequestOutput(
+                                request_id=request_id,
+                                prompt=output.prompt,
+                                prompt_token_ids=output.prompt_token_ids,
+                                prompt_logprobs=output.prompt_logprobs,
+                                outputs=[],
+                                finished=True,
+                            )
+
+                        # Get the CompletionOutput to add
+                        assert len(output.outputs) == 1, f"{len(output.outputs)=} != 1"
                         if output.request_id in self.tracking["concat_outputs"]:
-                            complete_output = self.tracking["concat_outputs"][output.request_id]
-                            self.request_outputs[request_id].append(complete_output)
+                            complete_output = self.tracking["concat_outputs"][output.request_id].outputs[0]
                         else:
-                            # No tools were used, use the direct result
-                            self.request_outputs[request_id].append(result)
+                            complete_output = result.outputs[0]
+                        self.request_outputs[request_id].outputs.append(complete_output)
 
                         # Validate after moving to request_outputs
                         self._validate_single_request_counts(
@@ -1155,24 +1165,25 @@ class LLMRayActor:
                 )
                 canonical[sub_req_id] = output_obj
 
-        # 2) Add/keep engine outputs only for sub-requests that don't already have a tool-merged result.
-        # NOTE: do not modify request_outputs[...] while iterating
-        for out in list(request_outputs[request_id]):
-            sub_id = out.request_id
-            if _extract_base_request_id(sub_id) != request_id:
-                continue
-            if sub_id not in canonical:
-                canonical[sub_id] = out
-            else:
-                # Tie-break: prefer the longer completion (robust if tool_merged vs engine differ)
-                try:
-                    cur_len = len(canonical[sub_id].outputs[0].token_ids) if canonical[sub_id].outputs else 0
-                    new_len = len(out.outputs[0].token_ids) if out.outputs else 0
-                    if new_len > cur_len:
-                        canonical[sub_id] = out
-                except Exception:
-                    # If anything odd, keep existing (tool-merged is usually better)
-                    pass
+        # 2) Check outputs already collected in request_outputs
+        # With new structure, request_outputs[request_id] is a single RequestOutput with multiple CompletionOutputs
+        if request_id in request_outputs and request_outputs[request_id].outputs:
+            # Each CompletionOutput should have an index field indicating which sub-request it came from
+            for comp_output in request_outputs[request_id].outputs:
+                if hasattr(comp_output, "index"):
+                    sub_id = f"{request_id}_{comp_output.index}"
+                    # Create a RequestOutput wrapper for this CompletionOutput to match canonical structure
+                    if sub_id not in canonical:
+                        # Create a wrapper RequestOutput for consistency
+                        wrapper = vllm.RequestOutput(
+                            request_id=sub_id,
+                            prompt=request_outputs[request_id].prompt,
+                            prompt_token_ids=request_outputs[request_id].prompt_token_ids,
+                            prompt_logprobs=request_outputs[request_id].prompt_logprobs,
+                            outputs=[comp_output],
+                            finished=True,
+                        )
+                        canonical[sub_id] = wrapper
 
         # If we don't have all expected sub-requests yet, wait.
         # We expect sub-ids exactly: f"{request_id}_{j}" for j in range(expected_n)
@@ -1384,18 +1395,30 @@ class LLMRayActor:
         tools_count = sum(
             1 for k in self.tracking["pending_tool_futures"].keys() if k.startswith(base_request_id + "_")
         )
-        outputs_count = len(self.request_outputs.get(base_request_id, []))
+        if base_request_id in self.request_outputs:
+            outputs_count = len(self.request_outputs[base_request_id].outputs)
+        else:
+            outputs_count = 0
 
         total = vllm_count + tools_count + outputs_count
 
         if total != expected:
+            # Get sub-request IDs in outputs based on their index
+            output_indices = []
+            if base_request_id in self.request_outputs:
+                for comp_output in self.request_outputs[base_request_id].outputs:
+                    if hasattr(comp_output, "index"):
+                        output_indices.append(f"{base_request_id}_{comp_output.index}")
+                    else:
+                        output_indices.append("missing_index")
+
             error_msg = (
                 f"[{context}] Validation failed for {base_request_id}:\n"
                 f"  Expected: {expected}\n"
                 f"  Found: {total}\n"
                 f"  - vLLM active: {vllm_count} -> {[k for k in self.vllm_active_requests.keys() if k.startswith(base_request_id + '_')]}\n"
                 f"  - Pending tools: {tools_count} -> {[k for k in self.tracking['pending_tool_futures'].keys() if k.startswith(base_request_id + '_')]}\n"
-                f"  - Request outputs: {outputs_count}"
+                f"  - Request outputs: {outputs_count} -> {output_indices}"
             )
             raise RuntimeError(f"Sub-request tracking inconsistency: {error_msg}")
 
