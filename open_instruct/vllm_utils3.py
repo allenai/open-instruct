@@ -1424,8 +1424,8 @@ class LLMRayActor:
             request_accounting[base_id]["pending_tools"] += 1
 
         # Count in request_outputs
-        for base_id, outputs in self.request_outputs.items():
-            request_accounting[base_id]["outputs"] += len(outputs)
+        for base_id, request_output in self.request_outputs.items():
+            request_accounting[base_id]["outputs"] += len(request_output.outputs)
 
         # Validate - crash if metadata is missing (that's a bug)
         errors = []
