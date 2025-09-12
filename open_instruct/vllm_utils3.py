@@ -1512,14 +1512,6 @@ class LLMRayActor:
         # Add the completion output
         self.request_outputs[base_request_id].outputs.append(complete_output)
 
-        # Validate after moving to request_outputs
-        self._validate_single_request_counts(base_request_id, f"After moving {sub_request_id} to request_outputs")
-
-        # Validate before processing
-        self._validate_single_request_counts(
-            base_request_id, f"Before _maybe_process_and_insert for {base_request_id}"
-        )
-
         # Try to process and insert if we have all expected outputs
         processed = self._maybe_process_and_insert(base_request_id, self.request_outputs, self.tracking, current_time)
 
@@ -1609,6 +1601,10 @@ class LLMRayActor:
         # Remove the futures we just processed; do NOT clean up metadata here.
         for req_id in dict_keys_to_delete:
             tracking["pending_tool_futures"].pop(req_id, None)
+            # Validate after removing from pending_tool_futures
+            base_req_id = _extract_base_request_id(req_id)
+            if base_req_id in self.request_metadata:  # Only validate if metadata still exists
+                self._validate_single_request_counts(base_req_id, f"After removing {req_id} from pending_tool_futures")
         return completed_outputs
 
     def init_process_group(
