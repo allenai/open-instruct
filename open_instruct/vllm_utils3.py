@@ -946,48 +946,6 @@ class LLMRayActor:
         # Clean up metadata and tracking for this request after enqueuing
         self._cleanup_request_data(request_id, tracking)
 
-        # Clean up request tracking for this dataset_index
-        if self.request_tracking.contains(expected_dataset_index):
-            # Verify it was properly inserted before cleaning up
-            tracking_entry = self.request_tracking.get(expected_dataset_index)
-            assert tracking_entry["inserted"], (
-                f"Dataset index {expected_dataset_index} was not marked as inserted before cleanup"
-            )
-
-            # Safety check: Ensure no active vLLM requests or pending tool futures for this dataset_index
-            has_pending_tools = self._has_pending_tool_futures_for_request(request_id, tracking)
-
-            # Get the IDs of pending tool futures for this request for better debugging
-            pending_tool_ids = (
-                [
-                    req_id
-                    for req_id in tracking["pending_tool_futures"]
-                    if _extract_base_request_id(req_id) == request_id
-                ]
-                if has_pending_tools
-                else []
-            )
-
-            if has_pending_tools:
-                raise ValueError(
-                    f"CRITICAL: Attempting to clean up dataset_index {expected_dataset_index} but found:\n"
-                    f"  - Has pending tool futures: {has_pending_tools}\n"
-                    f"  - Pending tool future IDs: {pending_tool_ids}\n"
-                    f"  - Request ID: {request_id}\n"
-                    f"This indicates requests are being cleaned up while still being processed!"
-                )
-
-            self.logger.info(
-                f"[Cleanup] Deleting tracking for dataset_index={expected_dataset_index}, "
-                f"request_id={request_id}, "
-                f"remaining tracking keys before delete: {self.request_tracking.keys()}"
-            )
-            self.request_tracking.delete(expected_dataset_index)
-            self.logger.info(
-                f"[Cleanup] Successfully deleted tracking for dataset_index={expected_dataset_index}, "
-                f"remaining tracking keys after delete: {self.request_tracking.keys()}"
-            )
-
         if self.verbose:
             self.logger.info(f"Completed and inserted request {request_id} with {expected_n} samples (eval={is_eval})")
         return 1
