@@ -1634,11 +1634,15 @@ class LLMRayActor:
                     f"Other pending tools for {base_req_id}: {other_pending}"
                 )
 
-                # Do NOT remove from pending_tool_futures here - it will be removed after finalization
-                # to maintain consistent tracking state throughout the finalization process
+                # Remove from pending_tool_futures BEFORE finalization to ensure consistent state
+                # This prevents the cleanup logic from seeing this as a pending tool future
+                tracking["pending_tool_futures"].pop(req_id, None)
+                
                 complete_output = tracking["concat_outputs"][req_id].outputs[0]
                 current_time = time.time()
                 self._finalize_sub_request(req_id, last_output, complete_output, current_time)
+                # Don't add to dict_keys_to_delete since we already removed it
+                continue
             dict_keys_to_delete.append(req_id)
 
         # Remove the futures we just processed; do NOT clean up metadata here.
