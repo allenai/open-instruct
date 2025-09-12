@@ -998,20 +998,20 @@ class LLMRayActor:
                             f"{req_id}: no outputs in request_outputs (expecting {expected_n} samples)"
                         )
                     else:
-                        num_outputs = len(self.request_outputs[req_id])
+                        num_outputs = len(self.request_outputs[req_id].outputs)
                         if num_outputs < expected_n:
                             incomplete_metadata.append(f"{req_id}: only {num_outputs}/{expected_n} outputs collected")
 
                 # 2. Check for pending outputs not yet processed
                 pending_in_outputs = []
-                for req_id, outputs in self.request_outputs.items():
-                    if outputs:  # Has outputs waiting
+                for req_id, request_output in self.request_outputs.items():
+                    if request_output.outputs:  # Has outputs waiting
                         if req_id in self.request_metadata:
                             expected_n = self.request_metadata[req_id]["original_sampling_params"].n
-                            if len(outputs) >= expected_n:
+                            if len(request_output.outputs) >= expected_n:
                                 # We have enough outputs but haven't processed them
                                 pending_in_outputs.append(
-                                    f"{req_id}: {len(outputs)}/{expected_n} outputs ready but not inserted"
+                                    f"{req_id}: {len(request_output.outputs)}/{expected_n} outputs ready but not inserted"
                                 )
 
                 # 3. Check tracking for orphaned sub-requests
