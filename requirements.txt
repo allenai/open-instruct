@@ -13,12 +13,10 @@ anyio==4.9.0
 astor==0.8.1
 async-timeout==5.0.1 ; python_full_version < '3.11'
 attrs==25.3.0
-autoflake==2.3.1
 babel==2.17.0
 backrefs==5.8
-beaker-py==1.34.3
+beaker-py==1.36.4
 bitsandbytes==0.46.0 ; sys_platform != 'darwin'
-black==25.1.0
 blake3==1.0.5
 cachetools==5.5.2
 certifi==2025.4.26
@@ -30,15 +28,14 @@ colorama==0.4.6
 colorful==0.5.6
 compressed-tensors==0.10.1
 contourpy==1.3.2
-cuda-bindings==13.0.0 ; sys_platform != 'darwin'
-cuda-pathfinder==1.1.0 ; sys_platform != 'darwin'
-cuda-python==13.0.0 ; sys_platform != 'darwin'
+cuda-bindings==13.0.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+cuda-pathfinder==1.1.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+cuda-python==13.0.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
 cupy-cuda12x==13.4.1 ; sys_platform != 'darwin'
 cycler==0.12.1
 datasets==4.0.0
 debugpy==1.8.14
 deepspeed==0.15.4
-deprecated==1.2.18
 depyf==0.18.0
 dill==0.3.8
 diskcache==5.6.3
@@ -55,9 +52,8 @@ fastapi==0.115.12
 fastapi-cli==0.0.7
 fastrlock==0.8.3 ; sys_platform != 'darwin'
 filelock==3.18.0
-flake8==7.2.0
 flash-attn==2.8.0.post2 ; sys_platform != 'darwin'
-flashinfer-python==0.2.8 ; sys_platform != 'darwin'
+flashinfer-python==0.2.8 ; platform_machine == 'x86_64' and sys_platform == 'linux'
 fonttools==4.58.1
 frozenlist==1.6.2
 fsspec==2025.3.0
@@ -66,7 +62,7 @@ ghp-import==2.1.0
 gitdb==4.0.12
 gitpython==3.1.44
 google-api-core==2.25.0
-google-auth==2.40.3
+google-auth==2.39.0
 googleapis-common-protos==1.70.0
 grpcio==1.72.1
 h11==0.16.0
@@ -82,7 +78,6 @@ immutabledict==1.2.0
 importlib-metadata==8.0.0
 iniconfig==2.1.0
 interegular==0.3.3
-isort==6.0.1
 jinja2==3.1.6
 jiter==0.10.0
 joblib==1.5.1
@@ -101,7 +96,6 @@ markdown-include==0.8.1
 markdown-it-py==3.0.0
 markupsafe==3.0.2
 matplotlib==3.10.3
-mccabe==0.7.0
 mdurl==0.1.2
 mergedeep==1.3.4
 mistral-common==1.5.6
@@ -114,7 +108,6 @@ msgpack==1.1.0
 msgspec==0.19.0
 multidict==6.4.4
 multiprocess==0.70.16
-mypy-extensions==1.1.0
 nest-asyncio==1.6.0
 networkx==3.4.2 ; python_full_version < '3.11'
 networkx==3.5 ; python_full_version >= '3.11'
@@ -136,21 +129,21 @@ nvidia-cusparselt-cu12==0.6.3 ; platform_machine == 'x86_64' and sys_platform ==
 nvidia-ml-py==12.575.51
 nvidia-nccl-cu12==2.26.2 ; platform_machine == 'x86_64' and sys_platform == 'linux'
 nvidia-nvjitlink-cu12==12.8.61 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-nvidia-nvshmem-cu12==3.3.20 ; sys_platform != 'darwin'
+nvidia-nvshmem-cu12==3.3.20 ; platform_machine == 'x86_64' and sys_platform == 'linux'
 nvidia-nvtx-cu12==12.8.55 ; platform_machine == 'x86_64' and sys_platform == 'linux'
 nvitop==1.5.1
 openai==1.84.0
 opencensus==0.11.4
 opencensus-context==0.1.3
 opencv-python-headless==4.11.0.86
-opentelemetry-api==1.26.0
-opentelemetry-exporter-otlp==1.26.0
-opentelemetry-exporter-otlp-proto-common==1.26.0
-opentelemetry-exporter-otlp-proto-grpc==1.26.0
-opentelemetry-exporter-otlp-proto-http==1.26.0
-opentelemetry-proto==1.26.0
-opentelemetry-sdk==1.26.0
-opentelemetry-semantic-conventions==0.47b0
+opentelemetry-api==1.36.0
+opentelemetry-exporter-otlp==1.36.0
+opentelemetry-exporter-otlp-proto-common==1.36.0
+opentelemetry-exporter-otlp-proto-grpc==1.36.0
+opentelemetry-exporter-otlp-proto-http==1.36.0
+opentelemetry-proto==1.36.0
+opentelemetry-sdk==1.36.0
+opentelemetry-semantic-conventions==0.57b0
 opentelemetry-semantic-conventions-ai==0.4.9
 outlines==0.1.11
 outlines-core==0.1.26
@@ -168,22 +161,20 @@ prometheus-client==0.22.1
 prometheus-fastapi-instrumentator==7.1.0
 propcache==0.3.1
 proto-plus==1.26.1
-protobuf==4.25.8
+protobuf==5.29.5
 psutil==7.0.0
 py-cpuinfo==9.0.0
 py-spy==0.4.0
 pyarrow==20.0.0
 pyasn1==0.6.1
 pyasn1-modules==0.4.2
-pycodestyle==2.13.0
 pycountry==24.6.1
 pycparser==2.22 ; implementation_name == 'pypy'
 pydantic==2.11.5
 pydantic-core==2.33.2
-pyflakes==3.3.2
 pygments==2.19.1
 pymdown-extensions==10.15
-pynvml==12.0.0 ; sys_platform != 'darwin'
+pynvml==12.0.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
 pyparsing==3.2.3
 pytest==8.4.0
 pytest-xdist==3.8.0
@@ -203,7 +194,7 @@ requests==2.32.3
 rich==13.9.4
 rich-toolkit==0.14.7
 rpds-py==0.25.1
-rsa==4.9.1
+rsa==4.7.2
 ruff==0.12.0
 safetensors==0.5.3
 scipy==1.15.3
