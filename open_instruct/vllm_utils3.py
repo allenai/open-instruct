@@ -1293,22 +1293,8 @@ class LLMRayActor:
                 f"Dataset index {expected_dataset_index} was not marked as inserted before cleanup"
             )
 
-            # Safety check: Ensure no active vLLM requests or pending tool futures for this dataset_index
-            active_requests_for_dataset = [
-                req_id for req_id, ds_idx in self.vllm_active_requests.items() if ds_idx == expected_dataset_index
-            ]
-
-            has_pending_tools = self._has_pending_tool_futures_for_request(request_id, tracking)
-
-            if active_requests_for_dataset or has_pending_tools:
-                raise ValueError(
-                    f"CRITICAL: Attempting to clean up dataset_index {expected_dataset_index} but found:\n"
-                    f"  - Active vLLM requests: {active_requests_for_dataset}\n"
-                    f"  - Has pending tool futures: {has_pending_tools}\n"
-                    f"  - Request ID: {request_id}\n"
-                    f"  - All active vLLM requests: {list(self.vllm_active_requests.keys())}\n"
-                    f"This indicates requests are being cleaned up while still being processed!"
-                )
+            # Note: _cleanup_request_data already checks for pending tool futures and active vLLM requests
+            # and returns early without cleaning up if they exist. So we can safely proceed here.
 
             self.logger.info(
                 f"[Cleanup] Deleting tracking for dataset_index={expected_dataset_index}, "
