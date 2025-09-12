@@ -962,6 +962,17 @@ class LLMRayActor:
                         )
                         total_processed += processed
 
+                        # Validate after complete transition to request_outputs
+                        self._validate_single_request_counts(base_req_id, f"After finalizing {output.request_id}")
+                    else:
+                        # Sub-request went to tools, validate the transition
+                        self._validate_single_request_counts(
+                            base_req_id, f"After sending {output.request_id} to tools"
+                        )
+
+            # Validate all requests after processing is complete
+            self._validate_sub_request_counts("After processing all outputs")
+
             # If no work to do, break to yield control back to generate_thread,
             # allowing weight_sync_thread to acquire the LLMRayActor lock
             final_unfinished = self.llm_engine.get_num_unfinished_requests()
@@ -1583,11 +1594,6 @@ class LLMRayActor:
                     if base_req_id in self.request_metadata:
                         self.vllm_active_requests[req_id] = self.request_metadata[base_req_id]["dataset_index"]
 
-                    # Validate sub-request counts after re-adding for tool continuation
-                    base_req_id = _extract_base_request_id(req_id)
-                    self._validate_single_request_counts(
-                        base_req_id, f"After re-adding {req_id} for tool continuation"
-                    )
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
                     self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
@@ -1601,10 +1607,14 @@ class LLMRayActor:
         # Remove the futures we just processed; do NOT clean up metadata here.
         for req_id in dict_keys_to_delete:
             tracking["pending_tool_futures"].pop(req_id, None)
-            # Validate after removing from pending_tool_futures
             base_req_id = _extract_base_request_id(req_id)
-            if base_req_id in self.request_metadata:  # Only validate if metadata still exists
-                self._validate_single_request_counts(base_req_id, f"After removing {req_id} from pending_tool_futures")
+            if base_req_id in self.request_metadata:
+                # Check if this was re-added to vLLM or finalized
+                if req_id in self.vllm_active_requests:
+                    context = f"After moving {req_id} from tools back to vLLM"
+                else:
+                    context = f"After finalizing {req_id} from tools"
+                self._validate_single_request_counts(base_req_id, context)
         return completed_outputs
 
     def init_process_group(
