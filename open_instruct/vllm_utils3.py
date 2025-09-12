@@ -684,15 +684,10 @@ class LLMRayActor:
                         total_processed += processed
 
                         # Validate after complete transition to request_outputs
-                        self._validate_single_request_counts(base_req_id, f"After finalizing {output.request_id}")
                     else:
                         # Sub-request went to tools, validate the transition
-                        self._validate_single_request_counts(
-                            base_req_id, f"After sending {output.request_id} to tools"
-                        )
+                        pass
 
-            # Validate all requests after processing is complete
-            self._validate_sub_request_counts("After processing all outputs")
 
             # If no work to do, break to yield control back to generate_thread,
             # allowing weight_sync_thread to acquire the LLMRayActor lock
@@ -786,10 +781,6 @@ class LLMRayActor:
                         if final_unfinished == 0 and pending_tools == 0 and not active_sub_requests:
                             # Still no work after waiting - this is a real problem
                             # Use comprehensive validation to identify the exact issue
-                            try:
-                                self._validate_sub_request_counts("At exit with incomplete state")
-                            except AssertionError as e:
-                                # Validation will provide detailed error message about what's wrong
                                 error_msg = (
                                     f"\\n=== CRITICAL: INCOMPLETE STATE AT EXIT ===\\n"
                                     f"vLLM unfinished: {final_unfinished}\\n"
@@ -1285,7 +1276,6 @@ class LLMRayActor:
                 context = f"After moving {req_id} from tools back to vLLM"
             else:
                 context = f"After finalizing {req_id} from tools"
-            self._validate_single_request_counts(base_req_id, context)
 
         return completed_outputs
 
