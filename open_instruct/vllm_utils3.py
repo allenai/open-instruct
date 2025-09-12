@@ -1289,9 +1289,6 @@ class LLMRayActor:
         # Clean up metadata and tracking for this request after enqueuing
         self._cleanup_request_data(request_id, tracking)
 
-        # Validate after cleanup
-        self._validate_sub_request_counts(f"After cleanup for {request_id}")
-
         # Clean up request tracking for this dataset_index
         if self.request_tracking.contains(expected_dataset_index):
             # Verify it was properly inserted before cleaning up
@@ -1401,14 +1398,13 @@ class LLMRayActor:
         for base_id, outputs in self.request_outputs.items():
             request_accounting[base_id]["outputs"] += len(outputs)
 
-        # Get expected counts from original_sampling_params
+        # Validate - crash if metadata is missing (that's a bug)
+        errors = []
         for base_id in request_accounting:
             # If base_id is not in request_metadata, that's a critical error
             request_accounting[base_id]["expected"] = self.request_metadata[base_id]["original_sampling_params"].n
 
-        # Validate
-        errors = []
-        for base_id, counts in request_accounting.items():
+            counts = request_accounting[base_id]
             total = counts["vllm"] + counts["pending_tools"] + counts["concat"] + counts["outputs"]
             if total != counts["expected"]:
                 errors.append(
