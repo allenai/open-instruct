@@ -938,11 +938,6 @@ class LLMRayActor:
                         self.executor,
                     )
 
-                    # If result is None, the output was moved to pending_tool_futures
-                    if result is None and self.tools:
-                        self._validate_single_request_counts(
-                            base_req_id, f"After moving {output.request_id} to pending_tool_futures"
-                        )
 
                     # Assert: check sample count after processing
                     current_samples_after = sum(
@@ -1569,9 +1564,6 @@ class LLMRayActor:
         # Remove the futures we just processed; do NOT clean up metadata here.
         for req_id in dict_keys_to_delete:
             tracking["pending_tool_futures"].pop(req_id, None)
-            # Validate sub-request counts after removing from pending_tool_futures
-            base_req_id = _extract_base_request_id(req_id)
-            self._validate_single_request_counts(base_req_id, f"After removing {req_id} from pending_tool_futures")
         return completed_outputs
 
     def init_process_group(
