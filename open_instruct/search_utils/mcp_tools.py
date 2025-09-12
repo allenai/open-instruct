@@ -60,14 +60,41 @@ class MCPTool(Tool):
     to work out how to route them. Ideally, this would be more tightly integrated into vllm,
     but for now, this is a bit cleaner.
     """
-    def __init__(self, mcp_tool_names: List[str], parser_name: str = "unified", transport_type: str | None = None, max_retries: int = 3, retry_backoff: float = 0.5, *args, **kwargs):
+    def __init__(
+        self,
+        mcp_tool_names: List[str] | str,
+        mcp_parser_name: str = "unified",
+        transport_type: str | None = None,
+        mcp_host: str | None = None,
+        mcp_port: int | None = None,
+        max_retries: int = 3,
+        retry_backoff: float = 0.5,
+        base_url: str | None = None,
+        search_api_endpoint: str | None = None,
+        start_str: str = "",
+        end_str: str | None = None,
+        mcp_timeout: int = 180,
+        *args,
+        **kwargs,
+    ):
         self.mcp_tools = []
         self.stop_strings = []
         # Allow selecting transport via arg or env; default to StreamableHttpTransport
         self.transport_type = transport_type or os.environ.get("MCP_TRANSPORT", "StreamableHttpTransport")
+        self.mcp_host = mcp_host or os.environ.get("MCP_TRANSPORT_HOST", "0.0.0.0")
+        if self.mcp_host is not None:
+            os.environ["MCP_TRANSPORT_HOST"] = str(self.mcp_host)
+        self.mcp_port = mcp_port or os.environ.get("MCP_TRANSPORT_PORT", 8000)
+        if self.mcp_port is not None:
+            os.environ["MCP_TRANSPORT_PORT"] = str(self.mcp_port)
+        # Prefer explicit base_url, fall back to search_api_endpoint for compatibility
+        self.base_url = base_url or search_api_endpoint
         # Transient error retry settings
         self.max_retries = max_retries
         self.retry_backoff = retry_backoff
+        # Support comma-separated string for mcp_tool_names
+        if isinstance(mcp_tool_names, str):
+            mcp_tool_names = [n.strip() for n in mcp_tool_names.split(",") if n.strip()]
         for mcp_tool_name in mcp_tool_names:
             # filter kwargs so we only pass ones the constructor understands
             mcp_tool_cls = MCP_TOOL_REGISTRY[mcp_tool_name]
@@ -80,15 +107,16 @@ class MCPTool(Tool):
             # basically, we want to defer as much as possible to the mcp tool.
             # this 'tool' actually just passes everything down to the mcp tool.
             self.mcp_tools.append(mcp_tool_cls(
+                timeout=mcp_timeout,
                 name=mcp_tool_name,
-                tool_parser=parser_name,
+                tool_parser=mcp_parser_name,
                 transport_type=self.transport_type,
                 **filtered_kwargs,
             ))
             # assign the stop strings from the parser itself.
             self.stop_strings += self.mcp_tools[-1].tool_parser.stop_sequences
         # MCP tool handles its own start and end strings.
-        super().__init__(start_str="", end_str=self.stop_strings[-1])
+        super().__init__(start_str=start_str, end_str=end_str or self.stop_strings[-1])
 
     def get_stop_strings(self) -> List[str]:
         return self.stop_strings
@@ -162,8 +190,6 @@ class MCPTool(Tool):
             print(f"Error from mcp tool: {document_tool_output.error}")
             print("Returning error output anyway.")
         # munge into format that open-instruct likes.
-        print(f"Tool call prompt: {trunc_prompt}")
-        print(f"Returning tool output: {text_output}")
         return ToolOutput(
             output=text_output,
             called=True,
@@ -180,10 +206,10 @@ if __name__ == "__main__":
     from open_instruct.grpo_fast import launch_mcp_subprocess
     import time
     # need to launch mcp server first.
-    launch_mcp_subprocess("uv run python -m rl-rag-mcp.mcp_agents.mcp_backend.main --transport http --port 8000 --host 0.0.0.0 --path /mcp", "./mcp_logs")
+    launch_mcp_subprocess("python -m rl-rag-mcp.mcp_agents.mcp_backend.main --transport http --port 8000 --host 0.0.0.0 --path /mcp", "./mcp_logs")
     # wait for it to launch.
     time.sleep(10)
     # then we can use the mcp tool.
-    mcp_tool = MCPTool(["google_search"], number_documents_to_search=10, api_endpoint="http://localhost:8000/mcp")
-    print(mcp_tool('<tool name="google_search">What is the capital of France?</tool>'))
+    mcp_tool = MCPTool(["browse_webpage"], number_documents_to_search=10, api_endpoint="http://localhost:8000/mcp")
+    print(mcp_tool('<tool name="browse_webpage">https://www.google.com</tool>'))
 

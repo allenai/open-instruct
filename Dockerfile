@@ -48,7 +48,7 @@ COPY rl-rag-mcp rl-rag-mcp
 RUN rm -rf rl-rag-mcp/.cache
 RUN pip install -e rl-rag-mcp
 RUN python -m playwright install-deps
-RUN python -m playwright install chromium
+RUN python -m playwright install
 
 
 COPY open_instruct open_instruct
