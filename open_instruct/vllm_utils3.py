@@ -399,7 +399,7 @@ class LLMRayActor:
         # Cascade attention has known performance issues: https://github.com/vllm-project/vllm/issues/17652
         engine_args.disable_cascade_attn = True
 
-        self.llm_engine = vllm.LLMEngine.from_engine_args()
+        self.llm_engine = vllm.LLMEngine.from_engine_args(engine_args)
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
