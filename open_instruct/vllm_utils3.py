@@ -265,6 +265,7 @@ def create_vllm_engines(
                 bundle_indices=bundle_indices,
                 num_gpus=0.2 if use_hybrid_engine else 1,
                 enable_sleep_mode=vllm_enable_sleep,
+                disable_cascade_attn=True,
                 noset_visible_devices=ray_noset_visible_devices(),
                 tool_use=tool_use,
                 **additional_kwargs,
