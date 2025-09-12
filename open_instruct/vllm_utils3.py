@@ -1373,9 +1373,7 @@ class LLMRayActor:
     def _validate_sub_request_counts(self, context: str):
         """Validate that all sub-requests are accounted for."""
         # Group by base request ID - using defaultdict for cleaner code
-        request_accounting = defaultdict(
-            lambda: {"vllm": 0, "pending_tools": 0, "concat": 0, "outputs": 0, "expected": 0}
-        )
+        request_accounting = defaultdict(lambda: {"vllm": 0, "pending_tools": 0, "outputs": 0, "expected": 0})
 
         # Count vLLM active
         for sub_id in self.vllm_active_requests:
@@ -1386,11 +1384,6 @@ class LLMRayActor:
         for sub_id in self.tracking["pending_tool_futures"]:
             base_id = _extract_base_request_id(sub_id)
             request_accounting[base_id]["pending_tools"] += 1
-
-        # Count in concat_outputs
-        for sub_id in self.tracking["concat_outputs"]:
-            base_id = _extract_base_request_id(sub_id)
-            request_accounting[base_id]["concat"] += 1
 
         # Count in request_outputs
         for base_id, outputs in self.request_outputs.items():
@@ -1403,7 +1396,7 @@ class LLMRayActor:
             request_accounting[base_id]["expected"] = self.request_metadata[base_id]["original_sampling_params"].n
 
             counts = request_accounting[base_id]
-            total = counts["vllm"] + counts["pending_tools"] + counts["concat"] + counts["outputs"]
+            total = counts["vllm"] + counts["pending_tools"] + counts["outputs"]
             if total != counts["expected"]:
                 # Add detailed logging before failing
                 self.logger.error(f"[{context}] Validation failed for {base_id}:")
@@ -1415,15 +1408,12 @@ class LLMRayActor:
                 self.logger.error(
                     f"  - Pending tools: {counts['pending_tools']} -> {[k for k in self.tracking['pending_tool_futures'].keys() if k.startswith(base_id)]}"
                 )
-                self.logger.error(
-                    f"  - Concat outputs: {counts['concat']} -> {[k for k in self.tracking['concat_outputs'].keys() if k.startswith(base_id)]}"
-                )
                 self.logger.error(f"  - Request outputs: {counts['outputs']}")
 
                 errors.append(
                     f"{base_id}: expected {counts['expected']}, got {total} "
                     f"(vllm={counts['vllm']}, tools={counts['pending_tools']}, "
-                    f"concat={counts['concat']}, outputs={counts['outputs']})"
+                    f"outputs={counts['outputs']})"
                 )
 
         if errors:
