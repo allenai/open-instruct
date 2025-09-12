@@ -135,7 +135,6 @@ class MCPTool(Tool):
                     for attempt in range(self.max_retries):
                         try:
                             document_tool_output = asyncio.run(mcp_tool(trunc_prompt))
-                            print(f"MCP tool output: {document_tool_output}")
                             break
                         except (httpcore.RemoteProtocolError, httpx.ReadError, ConnectionError, TimeoutError, asyncio.TimeoutError) as e:
                             last_exc = e
@@ -189,8 +188,6 @@ class MCPTool(Tool):
             print(f"Error from mcp tool: {document_tool_output.error}")
             print("Returning error output anyway.")
         # munge into format that open-instruct likes.
-        print(f"Tool call prompt: {trunc_prompt}")
-        print(f"Returning tool output: {text_output}")
         return ToolOutput(
             output=text_output,
             called=True,
