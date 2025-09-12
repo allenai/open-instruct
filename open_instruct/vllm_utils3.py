@@ -624,16 +624,6 @@ class LLMRayActor:
                         f"the n parameter in sampling_params."
                     )
 
-                    # Remove from vllm_active_requests since this request is finished
-                    if output.request_id not in self.vllm_active_requests:
-                        raise RuntimeError(
-                            f"Sub-request {output.request_id} completed but was not in vllm_active_requests. "
-                            f"This indicates a critical tracking bug. Active requests: {list(self.vllm_active_requests.keys())}"
-                        )
-                    del self.vllm_active_requests[output.request_id]
-                    if self.verbose:
-                        self.logger.info(f"Removed {output.request_id} from vllm_active_requests")
-
                     base_req_id = _extract_base_request_id(output.request_id)
 
                     # Check if metadata exists for this request
@@ -687,7 +677,6 @@ class LLMRayActor:
                     else:
                         # Sub-request went to tools, validate the transition
                         pass
-
 
             # If no work to do, break to yield control back to generate_thread,
             # allowing weight_sync_thread to acquire the LLMRayActor lock
@@ -745,12 +734,6 @@ class LLMRayActor:
 
                 # 4. Check if any sub-requests are still active in vLLM
                 active_sub_requests = []
-                for req_id in self.request_metadata.keys():
-                    expected_n = self.request_metadata[req_id]["original_sampling_params"].n
-                    for j in range(expected_n):
-                        sub_id = f"{req_id}_{j}"
-                        if sub_id in self.vllm_active_requests:
-                            active_sub_requests.append(sub_id)
 
                 # If we have incomplete requests or active sub-requests, don't exit yet
                 if incomplete_metadata or pending_in_outputs or orphaned_tracking or active_sub_requests:
@@ -771,13 +754,6 @@ class LLMRayActor:
                         # Re-check after sleep
                         final_unfinished = self.llm_engine.get_num_unfinished_requests()
                         pending_tools = len(self.tracking["pending_tool_futures"])
-                        active_sub_requests = [
-                            f"{req_id}_{j}"
-                            for req_id in self.request_metadata.keys()
-                            for j in range(self.request_metadata[req_id]["original_sampling_params"].n)
-                            if f"{req_id}_{j}" in self.vllm_active_requests
-                        ]
-
 
                     # Continue processing - don't exit yet
                     continue
@@ -883,16 +859,6 @@ class LLMRayActor:
             self.logger.info(f"[_maybe_process_and_insert] Not ready - only {len(available)}/{expected_n} available")
             return 0
 
-        # CRITICAL: Check if any sub-requests still have active vLLM continuations
-        # This can happen when tool calls complete and add continuations back to vLLM
-        active_sub_requests = [sub_id for sub_id in needed_ids if sub_id in self.vllm_active_requests]
-        if active_sub_requests:
-            logger.info(
-                f"[_maybe_process_and_insert] Cannot process {request_id} yet - "
-                f"sub-requests still active in vLLM: {active_sub_requests}"
-            )
-            return 0
-
         # Build ordered outs (0..n-1), ensuring one per sub-request.
         ordered_outs: List[vllm.RequestOutput] = []
         for j in range(expected_n):
@@ -931,7 +897,6 @@ class LLMRayActor:
                         f"After creating stub, expected 1 output but got {len(stub.outputs)} for {sub_id}. "
                         f"This indicates an issue with the list copy or RequestOutput constructor."
                     )
-
 
                     logger.info(f"Creating stub for {sub_id} in concat_outputs with {len(stub.outputs)} output(s)")
                     tracking["concat_outputs"][sub_id] = stub
@@ -990,10 +955,6 @@ class LLMRayActor:
             )
 
             # Safety check: Ensure no active vLLM requests or pending tool futures for this dataset_index
-            active_requests_for_dataset = [
-                req_id for req_id, ds_idx in self.vllm_active_requests.items() if ds_idx == expected_dataset_index
-            ]
-
             has_pending_tools = self._has_pending_tool_futures_for_request(request_id, tracking)
 
             # Get the IDs of pending tool futures for this request for better debugging
@@ -1007,14 +968,12 @@ class LLMRayActor:
                 else []
             )
 
-            if active_requests_for_dataset or has_pending_tools:
+            if has_pending_tools:
                 raise ValueError(
                     f"CRITICAL: Attempting to clean up dataset_index {expected_dataset_index} but found:\n"
-                    f"  - Active vLLM requests: {active_requests_for_dataset}\n"
                     f"  - Has pending tool futures: {has_pending_tools}\n"
                     f"  - Pending tool future IDs: {pending_tool_ids}\n"
                     f"  - Request ID: {request_id}\n"
-                    f"  - All active vLLM requests: {list(self.vllm_active_requests.keys())}\n"
                     f"This indicates requests are being cleaned up while still being processed!"
                 )
 
@@ -1210,7 +1169,7 @@ class LLMRayActor:
                     # Track tool continuation request as active
                     base_req_id = _extract_base_request_id(req_id)
                     if base_req_id in self.request_metadata:
-                        self.vllm_active_requests[req_id] = self.request_metadata[base_req_id]["dataset_index"]
+                        pass  # Request added to vLLM engine
 
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
@@ -1248,11 +1207,6 @@ class LLMRayActor:
         # Now validate after ALL removals are complete
         for req_id in dict_keys_to_delete:
             base_req_id = _extract_base_request_id(req_id)
-            # Check if this was re-added to vLLM or finalized
-            if req_id in self.vllm_active_requests:
-                context = f"After moving {req_id} from tools back to vLLM"
-            else:
-                context = f"After finalizing {req_id} from tools"
 
         return completed_outputs
 
