@@ -1160,6 +1160,12 @@ class LLMRayActor:
                     sub_id = f"{request_id}_{comp_output.index}"
                     # Create a RequestOutput wrapper for this CompletionOutput to match canonical structure
                     if sub_id not in canonical:
+                        # CRITICAL: Check if this sub-request has a pending tool future
+                        # This mirrors the check in Section 1 to ensure consistency
+                        if sub_id in tracking.get("pending_tool_futures", {}):
+                            logger.info(f"Skipping {sub_id} from request_outputs - has pending tool future")
+                            continue
+                        
                         # Create a wrapper RequestOutput for consistency
                         wrapper = vllm.RequestOutput(
                             request_id=sub_id,
