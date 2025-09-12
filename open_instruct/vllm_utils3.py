@@ -948,18 +948,6 @@ class LLMRayActor:
                     # Result is None when we do more tool processing.
                     if result is not None:
                         # Sub-request is done (no more tool calls)
-                        request_id = _extract_base_request_id(output.request_id)
-
-                        # Initialize request_outputs entry if needed
-                        if request_id not in self.request_outputs:
-                            self.request_outputs[request_id] = vllm.RequestOutput(
-                                request_id=request_id,
-                                prompt=output.prompt,
-                                prompt_token_ids=output.prompt_token_ids,
-                                prompt_logprobs=output.prompt_logprobs,
-                                outputs=[],
-                                finished=True,
-                            )
 
                         # Get the CompletionOutput to add
                         assert len(output.outputs) == 1, f"{len(output.outputs)=} != 1"
@@ -967,25 +955,12 @@ class LLMRayActor:
                             complete_output = self.tracking["concat_outputs"][output.request_id].outputs[0]
                         else:
                             complete_output = result.outputs[0]
-                        self.request_outputs[request_id].outputs.append(complete_output)
 
-                        # Validate after moving to request_outputs
-                        self._validate_single_request_counts(
-                            request_id, f"After moving {output.request_id} to request_outputs"
-                        )
-
-                        # Try to process and insert if we have all expected outputs
-
-                        processed = self._maybe_process_and_insert(
-                            request_id, self.request_outputs, self.tracking, current_time
+                        # Use helper to finalize the sub-request
+                        processed = self._finalize_sub_request(
+                            output.request_id, output, complete_output, current_time
                         )
                         total_processed += processed
-
-                        # Validate after processing (only if actually processed)
-                        if processed > 0:
-                            self._validate_single_request_counts(
-                                request_id, f"After _maybe_process_and_insert for {request_id}"
-                            )
 
             # If no work to do, break to yield control back to generate_thread,
             # allowing weight_sync_thread to acquire the LLMRayActor lock
@@ -1508,6 +1483,48 @@ class LLMRayActor:
                 tracking["tool_called"].pop(sub_req_id, None)
                 # Note: pending_tool_futures should already be cleaned by _poll_tool_futures
 
+    def _finalize_sub_request(self, sub_request_id, request_output_for_prompts, complete_output, current_time):
+        """
+        Finalize a completed sub-request by moving it to request_outputs and processing if ready.
+
+        Args:
+            sub_request_id: The sub-request ID (e.g., "train_1_43039_2")
+            request_output_for_prompts: RequestOutput containing prompt info
+            complete_output: The CompletionOutput to add
+            current_time: Current timestamp for processing
+
+        Returns:
+            Number of processed requests (0 or 1)
+        """
+        base_request_id = _extract_base_request_id(sub_request_id)
+
+        # Initialize request_outputs entry if needed
+        if base_request_id not in self.request_outputs:
+            self.request_outputs[base_request_id] = vllm.RequestOutput(
+                request_id=base_request_id,
+                prompt=request_output_for_prompts.prompt,
+                prompt_token_ids=request_output_for_prompts.prompt_token_ids,
+                prompt_logprobs=request_output_for_prompts.prompt_logprobs,
+                outputs=[],
+                finished=True,
+            )
+
+        # Add the completion output
+        self.request_outputs[base_request_id].outputs.append(complete_output)
+
+        # Validate after moving to request_outputs
+        self._validate_single_request_counts(base_request_id, f"After moving {sub_request_id} to request_outputs")
+
+        # Validate before processing
+        self._validate_single_request_counts(
+            base_request_id, f"Before _maybe_process_and_insert for {base_request_id}"
+        )
+
+        # Try to process and insert if we have all expected outputs
+        processed = self._maybe_process_and_insert(base_request_id, self.request_outputs, self.tracking, current_time)
+
+        return processed
+
     def _poll_tool_futures(self, tracking, tokenizer):
         """Poll and handle completed tool executions."""
         if not self.tools or not tracking["pending_tool_futures"]:
@@ -1582,6 +1599,11 @@ class LLMRayActor:
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
                     self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
+            else:
+                # Can't make a new request (hit limits), finalize this sub-request
+                complete_output = tracking["concat_outputs"][req_id].outputs[0]
+                current_time = time.time()
+                self._finalize_sub_request(req_id, last_output, complete_output, current_time)
             dict_keys_to_delete.append(req_id)
 
         # Remove the futures we just processed; do NOT clean up metadata here.
