@@ -1548,6 +1548,15 @@ class LLMRayActor:
                 finished=True,
             )
 
+        # Extract the sub-request index from the sub_request_id and set it on the CompletionOutput
+        # This is needed when tools are disabled and n>1 to properly identify which sub-request
+        # each output belongs to
+        if not self.tools and "_" in sub_request_id:
+            # Extract index from sub_request_id like "train_1_43039_2" -> 2
+            parts = sub_request_id.rsplit("_", 1)
+            if len(parts) == 2 and parts[1].isdigit():
+                complete_output.index = int(parts[1])
+
         # Add the completion output
         self.request_outputs[base_request_id].outputs.append(complete_output)
 
