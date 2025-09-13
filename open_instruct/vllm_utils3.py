@@ -1336,13 +1336,14 @@ class LLMRayActor:
 
         self._insert_result_to_queue(result, is_eval=is_eval)
 
-        # Clean up metadata and tracking for this request after enqueuing
-        self._cleanup_request_data(request_id, tracking)
-
         # Clean up request tracking for this dataset_index
         # Build tracking key from training_step and dataset_index
+        # IMPORTANT: Get training_step BEFORE cleanup_request_data removes metadata
         training_step = self.request_metadata[request_id]["training_step"]
         tracking_key = f"{training_step}_{expected_dataset_index}"
+
+        # Clean up metadata and tracking for this request after enqueuing
+        self._cleanup_request_data(request_id, tracking)
 
         if self.request_tracking.contains(tracking_key):
             # Verify it was properly inserted before cleaning up
