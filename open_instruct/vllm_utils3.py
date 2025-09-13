@@ -236,6 +236,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 def _process_outputs(
     outputs: List[vllm.RequestOutput],
     dataset_index: Optional[int] = None,
+    training_step: Optional[int] = None,
     token_statistics: Optional[TokenStatistics] = None,
     start_time: Optional[float] = None,
 ) -> "GenerationResult":
@@ -270,6 +271,7 @@ def _process_outputs(
         masks=masks,
         request_info=request_info,
         dataset_index=dataset_index,
+        training_step=training_step,
         token_statistics=token_statistics,
         start_time=start_time,
     )
@@ -280,6 +282,7 @@ def _process_outputs(
 def _process_outputs_with_tools(
     outputs: List[vllm.RequestOutput],
     dataset_index: Optional[int] = None,
+    training_step: Optional[int] = None,
     token_statistics: Optional[TokenStatistics] = None,
     start_time: Optional[float] = None,
 ) -> "GenerationResult":
@@ -315,6 +318,7 @@ def _process_outputs_with_tools(
         masks=masks,
         request_info=request_info,
         dataset_index=dataset_index,
+        training_step=training_step,
         token_statistics=token_statistics,
         start_time=start_time,
     )
@@ -323,7 +327,14 @@ def _process_outputs_with_tools(
 
 
 def _finalize_outputs(
-    output, tracking, dataset_index, tools, original_sampling_params, token_statistics=None, start_time=None
+    output,
+    tracking,
+    dataset_index,
+    training_step,
+    tools,
+    original_sampling_params,
+    token_statistics=None,
+    start_time=None,
 ):
     """Prepare final outputs based on whether tools were used."""
     # Validate dataset_index type
@@ -333,7 +344,11 @@ def _finalize_outputs(
 
     if not tools:
         return _process_outputs(
-            [output], dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
+            [output],
+            dataset_index=dataset_index,
+            training_step=training_step,
+            token_statistics=token_statistics,
+            start_time=start_time,
         )
 
     # Tool mode: add metadata and merge completions
@@ -449,7 +464,11 @@ def _finalize_outputs(
         logger.info(f"final_outputs[{idx}] (id={output.request_id}) has {total_outputs} outputs")
 
     result = _process_outputs_with_tools(
-        final_outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
+        final_outputs,
+        dataset_index=dataset_index,
+        training_step=training_step,
+        token_statistics=token_statistics,
+        start_time=start_time,
     )
 
     # Add final validation to catch the specific error early
@@ -507,6 +526,7 @@ def _process_completed_request(request_id, outs, tracking, current_time, tools, 
         final_output,
         tracking,
         metadata["dataset_index"],
+        metadata["training_step"],
         tools,
         original_sampling_params=metadata["original_sampling_params"],
         token_statistics=TokenStatistics(
