@@ -2033,6 +2033,7 @@ def create_model_and_optimizer(
         actor_manager=actor_manager,
         inference_batch_size=args.inference_batch_size,
         use_fp8_kv_cache=args.use_fp8_kv_cache,
+        verbose=args.verbose,
     )
 
     resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
@@ -2203,6 +2204,9 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
                 generate_metrics_Q.put_nowait({"time/generation": timer.duration})
             except Full:
                 logger.warning("[Generate Thread] generate metrics queue full, skipping metric")
+        else:
+            # Sleep briefly when no work is processed to avoid tight spinning
+            time.sleep(0.1)
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
@@ -2787,8 +2791,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     queue_size = (args.async_steps + 1) * args.num_unique_prompts_rollout
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
-    # Queue is sized to allow for up to 2 steps to be enqueued simultaneously.
-    evaluation_inference_results_Q = ray_queue.Queue(maxsize=len(eval_dataset) * 2 if eval_dataset else 0)
+    # We don't really care if we ever hit the max, so we let the queue be unbounded.
+    evaluation_inference_results_Q = ray_queue.Queue()
 
     policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
         create_model_and_optimizer(
