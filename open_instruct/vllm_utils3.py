@@ -746,19 +746,30 @@ class LLMRayActor:
 
                 # Track that we pulled this dataset_index from the prompt queue
                 dataset_index = request.dataset_index
+                training_step = request.training_step
+                # Create unique tracking key combining training_step and dataset_index
+                tracking_key = f"{training_step}_{dataset_index}"
 
                 # ALWAYS log this for debugging
                 self.logger.info(
                     f"[_prefetch_worker] Pulling dataset_index={dataset_index} from prompt queue, "
-                    f"is_eval={request.is_eval}, training_step={request.training_step}"
+                    f"is_eval={request.is_eval}, training_step={training_step}, tracking_key={tracking_key}"
                 )
 
                 self.request_tracking.assert_not_exists(
-                    dataset_index,
-                    f"Dataset index {dataset_index} already in request_tracking. "
+                    tracking_key,
+                    f"Tracking key {tracking_key} already in request_tracking. "
                     f"This indicates duplicate dataset indices in prompt queue.",
                 )
-                self.request_tracking.set(dataset_index, {"pulled": True, "inserted": False})
+                self.request_tracking.set(
+                    tracking_key,
+                    {
+                        "pulled": True,
+                        "inserted": False,
+                        "dataset_index": dataset_index,
+                        "training_step": training_step,
+                    },
+                )
 
                 self.logger.info(
                     f"[_prefetch_worker] Successfully tracked dataset_index={dataset_index}, "
@@ -795,9 +806,14 @@ class LLMRayActor:
         # Validate that this dataset_index was pulled from prompt queue
         dataset_index = result.dataset_index
         if dataset_index is not None:  # dataset_index can be None for combined results
+            # Build tracking key from training_step and dataset_index
+            training_step = result.training_step
+            tracking_key = f"{training_step}_{dataset_index}"
+
             # Log detailed tracking info
             self.logger.info(
                 f"[_insert_result_to_queue] Attempting to insert dataset_index={dataset_index}, "
+                f"training_step={training_step}, tracking_key={tracking_key}, "
                 f"is_eval={is_eval}, "
                 f"tracking contains: {self.request_tracking.keys()}, "
                 f"active vLLM requests: {list(self.vllm_active_requests.values())}, "
@@ -805,28 +821,29 @@ class LLMRayActor:
                 f"has outputs: {hasattr(result, 'outputs')}"
             )
 
-            # Check if this dataset_index was ever in vLLM but not in tracking
+            # Check if this tracking_key was ever tracked
+            # Note: We still check dataset_index in vllm_active_requests since that uses dataset_index alone
             if dataset_index in self.vllm_active_requests.values() and not self.request_tracking.contains(
-                dataset_index
+                tracking_key
             ):
                 self.logger.error(
-                    f"CRITICAL: dataset_index {dataset_index} is in vllm_active_requests but NOT in request_tracking! "
+                    f"CRITICAL: dataset_index {dataset_index} is in vllm_active_requests but tracking_key {tracking_key} NOT in request_tracking! "
                     f"This indicates tracking was lost or deleted prematurely."
                 )
 
             # Since we no longer insert tool continuation results,
             # every result should have been tracked
             self.request_tracking.assert_exists(
-                dataset_index,
-                f"Dataset index {dataset_index} was never pulled from prompt queue. "
-                f"Available indices: {self.request_tracking.keys()}",
+                tracking_key,
+                f"Tracking key {tracking_key} was never pulled from prompt queue. "
+                f"Available keys: {self.request_tracking.keys()}",
             )
             self.request_tracking.assert_and_update(
-                dataset_index,
+                tracking_key,
                 "inserted",
                 False,
                 True,
-                f"Dataset index {dataset_index} has already been inserted into results queue. "
+                f"Tracking key {tracking_key} has already been inserted into results queue. "
                 f"This indicates duplicate result insertion.",
             )
 
@@ -1303,12 +1320,14 @@ class LLMRayActor:
         self._cleanup_request_data(request_id, tracking)
 
         # Clean up request tracking for this dataset_index
-        if self.request_tracking.contains(expected_dataset_index):
+        # Build tracking key from training_step and dataset_index
+        training_step = self.request_metadata[request_id]["training_step"]
+        tracking_key = f"{training_step}_{expected_dataset_index}"
+
+        if self.request_tracking.contains(tracking_key):
             # Verify it was properly inserted before cleaning up
-            tracking_entry = self.request_tracking.get(expected_dataset_index)
-            assert tracking_entry["inserted"], (
-                f"Dataset index {expected_dataset_index} was not marked as inserted before cleanup"
-            )
+            tracking_entry = self.request_tracking.get(tracking_key)
+            assert tracking_entry["inserted"], f"Tracking key {tracking_key} was not marked as inserted before cleanup"
 
             # Safety check: Ensure no active vLLM requests or pending tool futures for this dataset_index
             active_requests_for_dataset = [
@@ -1330,7 +1349,7 @@ class LLMRayActor:
 
             if active_requests_for_dataset or has_pending_tools:
                 raise ValueError(
-                    f"CRITICAL: Attempting to clean up dataset_index {expected_dataset_index} but found:\n"
+                    f"CRITICAL: Attempting to clean up tracking_key {tracking_key} but found:\n"
                     f"  - Active vLLM requests: {active_requests_for_dataset}\n"
                     f"  - Has pending tool futures: {has_pending_tools}\n"
                     f"  - Pending tool future IDs: {pending_tool_ids}\n"
@@ -1340,13 +1359,13 @@ class LLMRayActor:
                 )
 
             self.logger.info(
-                f"[Cleanup] Deleting tracking for dataset_index={expected_dataset_index}, "
+                f"[Cleanup] Deleting tracking for tracking_key={tracking_key}, "
                 f"request_id={request_id}, "
                 f"remaining tracking keys before delete: {self.request_tracking.keys()}"
             )
-            self.request_tracking.delete(expected_dataset_index)
+            self.request_tracking.delete(tracking_key)
             self.logger.info(
-                f"[Cleanup] Successfully deleted tracking for dataset_index={expected_dataset_index}, "
+                f"[Cleanup] Successfully deleted tracking for tracking_key={tracking_key}, "
                 f"remaining tracking keys after delete: {self.request_tracking.keys()}"
             )
 
