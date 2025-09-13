@@ -952,6 +952,32 @@ class LLMRayActor:
                         f"the n parameter in sampling_params."
                     )
 
+                    # Fix the index field for non-tool mode
+                    # When tools are disabled and we have n>1, we create sub-requests with IDs like
+                    # train_3_12_0, train_3_12_1, etc. But vLLM creates CompletionOutputs with index=0
+                    # for all of them (since each sub-request has n=1). We need to fix this.
+                    if not self.tools and "_" in output.request_id:
+                        # Extract the actual index from the sub-request ID
+                        parts = output.request_id.rsplit("_", 1)
+                        if len(parts) == 2 and parts[1].isdigit():
+                            correct_index = int(parts[1])
+                            base_req_id_from_parse = "_".join(parts[:-1])
+
+                            # Fix the index on the CompletionOutput
+                            for i, comp_output in enumerate(output.outputs):
+                                output.outputs[i] = dataclasses.replace(comp_output, index=correct_index)
+
+                            # Verify the fix by reconstructing the sub-request ID
+                            base_req_id = _extract_base_request_id(output.request_id)
+                            reconstructed_id = f"{base_req_id}_{output.outputs[0].index}"
+                            assert reconstructed_id == output.request_id, (
+                                f"Index fix failed: reconstructed {reconstructed_id} != original {output.request_id}. "
+                                f"Base: {base_req_id}, Index: {output.outputs[0].index}, Correct index: {correct_index}"
+                            )
+                            assert base_req_id == base_req_id_from_parse, (
+                                f"Base request ID mismatch: {base_req_id} != {base_req_id_from_parse}"
+                            )
+
                     # Remove from vllm_active_requests since this request is finished
                     if output.request_id not in self.vllm_active_requests:
                         raise RuntimeError(
