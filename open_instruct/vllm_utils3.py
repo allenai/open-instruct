@@ -1589,6 +1589,17 @@ class LLMRayActor:
         """
         base_request_id = _extract_base_request_id(sub_request_id)
 
+        # Extract the sub-request index from the sub_request_id and set it on the CompletionOutput
+        # This is needed when tools are disabled and n>1 to properly identify which sub-request
+        # each output belongs to. MUST be done BEFORE adding to request_outputs so that
+        # _maybe_process_and_insert can find the index field when checking completeness.
+        if not self.tools and "_" in sub_request_id:
+            # Extract index from sub_request_id like "train_1_43039_2" -> 2
+            parts = sub_request_id.rsplit("_", 1)
+            if len(parts) == 2 and parts[1].isdigit():
+                # Create new CompletionOutput with corrected index
+                complete_output = dataclasses.replace(complete_output, index=int(parts[1]))
+
         # Initialize request_outputs entry if needed
         if base_request_id not in self.request_outputs:
             self.request_outputs[base_request_id] = vllm.RequestOutput(
@@ -1600,17 +1611,7 @@ class LLMRayActor:
                 finished=True,
             )
 
-        # Extract the sub-request index from the sub_request_id and set it on the CompletionOutput
-        # This is needed when tools are disabled and n>1 to properly identify which sub-request
-        # each output belongs to
-        if not self.tools and "_" in sub_request_id:
-            # Extract index from sub_request_id like "train_1_43039_2" -> 2
-            parts = sub_request_id.rsplit("_", 1)
-            if len(parts) == 2 and parts[1].isdigit():
-                # Create new CompletionOutput with corrected index
-                complete_output = dataclasses.replace(complete_output, index=int(parts[1]))
-
-        # Add the completion output
+        # Add the completion output (with index field already set if needed)
         self.request_outputs[base_request_id].outputs.append(complete_output)
 
         # Try to process and insert if we have all expected outputs
