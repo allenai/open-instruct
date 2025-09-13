@@ -635,7 +635,7 @@ def add_request(
     tools,
     request_metadata: dict,
     vllm_active_requests: dict = None,
-):
+) -> int:
     """Add a request to the LLM engine."""
     prefix = "eval" if request.is_eval else "train"
     request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
@@ -652,7 +652,8 @@ def add_request(
     }
 
     tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
-    for j in range(request.generation_config.n):
+    n = request.generation_config.n
+    for j in range(n):
         sub_sampling_params = sampling_params.clone()  # Already has n=1
         if request.generation_config.seed is not None:
             sub_sampling_params.seed = request.generation_config.seed + j
@@ -661,7 +662,17 @@ def add_request(
         # Track this request as active in vLLM
         if vllm_active_requests is not None:
             vllm_active_requests[sub_request_id] = request.dataset_index
-    return request.generation_config.n
+
+    # Assert all n sub-requests are tracked
+    if vllm_active_requests is not None:
+        for j in range(n):
+            sub_request_id = f"{request_id}_{j}"
+            assert sub_request_id in vllm_active_requests, (
+                f"Sub-request {sub_request_id} missing from vllm_active_requests after adding. "
+                f"Expected all {n} sub-requests for {request_id} to be tracked."
+            )
+
+    return n
 
 
 class LLMRayActor:
