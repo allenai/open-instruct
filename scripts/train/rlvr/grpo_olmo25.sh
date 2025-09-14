@@ -1,33 +1,22 @@
-# full integration mix
-# dataset_mix="saurabh5/rlvr_acecoder_filtered 63033 hamishivi/rlvr_orz_math_57k_collected 56878 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2 56878 allenai/IF_multi_constraints_upto5 56878"
-# math only mix
-dataset_mix="hamishivi/rlvr_orz_math_57k_collected 56878"
+#!/bin/bash
 
-# all evals
-# evals="minerva_math::hamish_zs_reasoning,gsm8k::zs_cot_latex,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,ifeval::hamish_zs_reasoning,popqa::hamish_zs_reasoning,mmlu:cot::hamish_zs_reasoning,alpaca_eval_v3::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,mbppplus:0-shot-chat::tulu-thinker,codex_humanevalplus:0-shot-chat-v1::tulu-thinker"
+# OLMo 2.5 model
+MODEL_NAME_OR_PATH="/oe-training-default/ai2-llm/checkpoints/lucas/olmo25_7b_lc_64k_6T_M100B_round5-sparkle_6634-pre_s2pdf_gzip2080_cweN-yake-all-olmo_yarn-fullonly_50B-740666e3/step11921-hf"
+GS_MODEL_NAME="olmo25_7b_lc_beta_740666e3"
+
+# english only DAPO
+DATASETS="mnoukhov/DAPO-Math-14k-Processed-RLVR 1.0"
+
 # math evals
-evals="minerva_math::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,aime:zs_cot_r1::pass_at_32_2024_temp1,aime:zs_cot_r1::pass_at_32_2025_temp1"
+EVALS="minerva_math::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,aime:zs_cot_r1::pass_at_32_2024_temp1,aime:zs_cot_r1::pass_at_32_2025_temp1"
 
-# all I've changed with the checkpoints is the config.json, model_type=olmo3 and architectures is OLMo3ForCausalLM 
-# model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round5-100B-olmo25_7b-anneal-2T-f07e3111/step47684-hf"
-# gs_model_name="olmo2.5-2T-midtraining-round5-100B"
-#
-# model_name_or_path="/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/olmo3-hparam-search/olmo2.5-LC-R3-olmo2-tulu3-mix-num_3"
-# gs_model_name="olmo2.5-lc-r3-jacobsft-mix3"
-#
+# AIME 2024, 2025 local evals
+LOCAL_EVALS="mnoukhov/aime2024-25-rlvr 1.0 mnoukhov/aime2024-25-rlvr 1.0"
+LOCAL_EVAL_SPLITS="test_2024 test_2025"
 
-model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/lucas/olmo25_7b_lc_64k_2T_M100B_r5-midtrain_round3_qwenlike_s2pdf_gzip2080_10B-b4b8fe01/step2385-hf"
-gs_model_name="olmo2.5-2T-R5100B-R3LC10B"
+EXP_NAME="grpo_dapo14k_${gs_model_name}"
 
-exp_name="grpo_mathonly_1m_${gs_model_name}"
-EXP_NAME=${EXP_NAME:-${exp_name}}
-
-
-# cluster
-cluster=ai2/augusta-google-1
-# cluster=ai2/jupiter-cirrascale-2
-
-NUM_GPUS=${NUM_GPUS:-8}
+cluster=ai2/augusta
 
 python mason.py \
     --task_name ${EXP_NAME} \
@@ -37,11 +26,11 @@ python mason.py \
     --pure_docker_mode \
     --image ${1:-michaeln/open_instruct_olmo2_retrofit} \
     --preemptible \
-    --num_nodes 1 \
+    --num_nodes 6 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
-    --gs_model_name $gs_model_name \
-    --gpus ${NUM_GPUS} \
+    --gs_model_name $GS_MODEL_NAME \
+    --gpus 8 \
     --budget ai2/oe-adapt \
     -- \
 source configs/beaker_configs/ray_node_setup.sh \&\& \
@@ -56,23 +45,23 @@ python open_instruct/grpo_fast.py \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
     --kl_estimator kl3 \
-    --dataset_mixer_list ${dataset_mix} \
+    --dataset_mixer_list $DATASETS \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k 32 \
-    --dataset_mixer_eval_list_splits train \
+    --dataset_mixer_eval_list $LOCAL_EVALS \
+    --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_token_length 18432 \
     --max_prompt_token_length 2048 \
     --response_length 16384 \
     --pack_length 32768 \
-    --model_name_or_path ${model_name_or_path} \
-    --chat_template_name olmo_thinker_r1_style \
+    --model_name_or_path ${MODEL_NAME_OR_PATH} \
+    --chat_template_name olmo_thinker_r1_style_nochat \
     --stop_strings "</answer>" \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 1024000 \
+    --total_episodes 2048000 \
     --deepspeed_stage 3 \
-    --num_learners_per_node 4 \
-    --vllm_num_engines 4 \
+    --num_learners_per_node 8 \
+    --vllm_num_engines 40 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
@@ -85,7 +74,7 @@ python open_instruct/grpo_fast.py \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
     --mask_truncated_completions True \
-    --oe_eval_max_length 8192 \
+    --oe_eval_max_length 32000 \
     --try_launch_beaker_eval_jobs_on_weka True \
-    --oe_eval_tasks ${evals} \
+    --oe_eval_tasks $EVALS \
     --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto
