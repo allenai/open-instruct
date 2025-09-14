@@ -1387,9 +1387,10 @@ class LLMRayActor:
             tracking_entry = self.request_tracking.get(tracking_key)
             assert tracking_entry["inserted"], f"Tracking key {tracking_key} was not marked as inserted before cleanup"
 
-            # Safety check: Ensure no active vLLM requests or pending tool futures for this dataset_index
+            # Safety check: Ensure no active vLLM requests or pending tool futures for this request
+            # Check for sub-requests that belong to THIS specific request (not just same dataset_index)
             active_requests_for_dataset = [
-                req_id for req_id, ds_idx in self.vllm_active_requests.items() if ds_idx == expected_dataset_index
+                req_id for req_id in self.vllm_active_requests.keys() if _extract_base_request_id(req_id) == request_id
             ]
 
             has_pending_tools = self._has_pending_tool_futures_for_request(request_id, tracking)
