@@ -1278,7 +1278,6 @@ class LLMRayActor:
         # Build tracking key from training_step and dataset_index
         # IMPORTANT: Get training_step BEFORE cleanup_request_data removes metadata
         training_step = self.request_metadata[request_id]["training_step"]
-        tracking_key = make_request_id(result)
 
         # Clean up metadata and tracking for this request after enqueuing
         self._cleanup_request_data(request_id, tracking)
@@ -1300,7 +1299,7 @@ class LLMRayActor:
 
         if active_requests_for_dataset or has_pending_tools:
             raise ValueError(
-                f"CRITICAL: Attempting to clean up tracking_key {tracking_key} but found:\n"
+                f"CRITICAL: Attempting to clean up tracking_key {request_id} but found:\n"
                 f"  - Active vLLM requests: {active_requests_for_dataset}\n"
                 f"  - Has pending tool futures: {has_pending_tools}\n"
                 f"  - Pending tool future IDs: {pending_tool_ids}\n"
