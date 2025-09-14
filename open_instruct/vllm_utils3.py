@@ -22,6 +22,7 @@ import queue
 import threading
 import time
 from collections import defaultdict
+from concurrent import futures
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Union
@@ -111,6 +112,12 @@ class ConcurrentDict:
         """Get list of keys (snapshot)."""
         with self._lock:
             return list(self._dict.keys())
+
+
+def make_tracking_key(training_step: int, dataset_index: int, is_eval: bool) -> str:
+    """Generate a unique tracking key for a request."""
+    prefix = "eval" if is_eval else "train"
+    return f"{prefix}_{training_step}_{dataset_index}"
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -739,8 +746,8 @@ class LLMRayActor:
         self._should_stop_timeout_s = 5
 
         self._prefetch_cv = threading.Condition()
-        self._prefetch_thread = threading.Thread(target=self._prefetch_worker, daemon=True)
-        self._prefetch_thread.start()
+        self._executor = futures.ThreadPoolExecutor(max_workers=1)
+        self._prefetch_future = self._executor.submit(self._prefetch_worker)
 
     def _should_stop(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
@@ -779,7 +786,7 @@ class LLMRayActor:
                 dataset_index = request.dataset_index
                 training_step = request.training_step
                 # Create unique tracking key combining training_step and dataset_index
-                tracking_key = f"{training_step}_{dataset_index}"
+                tracking_key = make_tracking_key(training_step, dataset_index, request.is_eval)
 
                 # ALWAYS log this for debugging
                 self.logger.info(
@@ -839,7 +846,7 @@ class LLMRayActor:
         if dataset_index is not None:  # dataset_index can be None for combined results
             # Build tracking key from training_step and dataset_index
             training_step = result.training_step
-            tracking_key = f"{training_step}_{dataset_index}"
+            tracking_key = make_tracking_key(training_step, dataset_index, is_eval)
 
             # Log detailed tracking info
             self.logger.info(
@@ -905,6 +912,10 @@ class LLMRayActor:
         exit_reason = "unknown"
         while True:
             iteration_count += 1
+
+            # Health check: ensure prefetch worker is alive. This will raise if it has crashed.
+            if self._prefetch_future.done():
+                self._prefetch_future.result()
 
             # Check exit conditions - only exit if should_stop AND no pending work
             if self._should_stop():
@@ -1377,7 +1388,7 @@ class LLMRayActor:
         # Build tracking key from training_step and dataset_index
         # IMPORTANT: Get training_step BEFORE cleanup_request_data removes metadata
         training_step = self.request_metadata[request_id]["training_step"]
-        tracking_key = f"{training_step}_{expected_dataset_index}"
+        tracking_key = make_tracking_key(training_step, expected_dataset_index, is_eval)
 
         # Clean up metadata and tracking for this request after enqueuing
         self._cleanup_request_data(request_id, tracking)
