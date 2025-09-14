@@ -81,11 +81,15 @@ def extract_citations_from_context(context: str) -> Dict[str, str]:
 
     # Pattern to match <snippets id="xxx" ...> content </snippets>
     # Updated to handle both quoted and unquoted attributes in HTML-like format
-    pattern = r'<snippets?\s+id=(["\']?)([^"\'>\s]+)\1[^>]*>(.*?)</snippets?>'
+    pattern1 = r'<snippets?\s+id=(["\']?)([^"\'>\s]+)\1[^>]*>(.*?)</snippets?>'
+    pattern2 = r'<snippet?\s+id=(["\']?)([^"\'>\s]+)\1[^>]*>(.*?)</snippet?>'
+    pattern3 = r'<webpage?\s+id=(["\']?)([^"\'>\s]+)\1[^>]*>(.*?)</webpage?>'
 
-    matches = re.findall(pattern, context, re.DOTALL)
+    matches1 = re.findall(pattern1, context, re.DOTALL)
+    matches2 = re.findall(pattern2, context, re.DOTALL)
+    matches3 = re.findall(pattern3, context, re.DOTALL)
 
-    for quote_char, snippet_id, search_results in matches:
+    for quote_char, snippet_id, search_results in matches1 + matches2 + matches3:
         # Clean up the id and search results (remove extra whitespace)
         clean_id = snippet_id.strip()
         clean_search_results = search_results.strip()
