@@ -23,7 +23,6 @@ import threading
 import time
 from collections import defaultdict
 from concurrent import futures
-from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Union
 
@@ -53,68 +52,7 @@ from open_instruct.utils import ray_get_with_progress
 logger = logger_utils.setup_logger(__name__)
 
 
-class ConcurrentDict:
-    """Thread-safe dictionary for tracking request processing."""
-
-    def __init__(self):
-        self._dict = {}
-        self._lock = threading.Lock()
-
-    def set(self, key, value):
-        """Set a key-value pair atomically."""
-        with self._lock:
-            assert key not in self._dict, (
-                f"Key {key} already exists in ConcurrentDict. This indicates duplicate entries."
-            )
-            self._dict[key] = value
-
-    def get(self, key):
-        """Get a value by key."""
-        with self._lock:
-            return self._dict.get(key)
-
-    def contains(self, key):
-        """Check if key exists."""
-        with self._lock:
-            return key in self._dict
-
-    def assert_exists(self, key, error_msg):
-        """Assert that a key exists with a custom error message."""
-        with self._lock:
-            assert key in self._dict, error_msg
-
-    def assert_not_exists(self, key, error_msg):
-        """Assert that a key does not exist with a custom error message."""
-        with self._lock:
-            assert key not in self._dict, error_msg
-
-    def update_field(self, key, field, value):
-        """Update a specific field in a dict value atomically."""
-        with self._lock:
-            assert key in self._dict, f"Key {key} not found in ConcurrentDict"
-            assert field in self._dict[key], f"Field {field} not found in {key}"
-            self._dict[key][field] = value
-
-    def assert_and_update(self, key, field, expected_value, new_value, error_msg):
-        """Assert current value and update atomically."""
-        with self._lock:
-            assert key in self._dict, f"Key {key} not found in ConcurrentDict"
-            assert self._dict[key][field] == expected_value, error_msg
-            self._dict[key][field] = new_value
-
-    def delete(self, key):
-        """Delete a key atomically."""
-        with self._lock:
-            if key in self._dict:
-                del self._dict[key]
-
-    def keys(self):
-        """Get list of keys (snapshot)."""
-        with self._lock:
-            return list(self._dict.keys())
-
-
-def make_tracking_key(request: PromptRequest) -> str:
+def make_request_id(request: PromptRequest) -> str:
     """Generate a unique tracking key for a request."""
     prefix = "eval" if request.is_eval else "train"
     return f"{prefix}_{request.training_step}_{request.dataset_index}"
@@ -647,7 +585,7 @@ def add_request(
     prefix = "eval" if request.is_eval else "train"
     sampling_params = request.generation_config.clone()
     sampling_params.n = 1  # Use n=1 for tool processing
-    request_id = make_request_id(request.training_step, request.dataset_index, request.is_eval)
+    request_id = make_request_id(request)
     request_metadata[request_id] = {
         "is_eval": request.is_eval,
         "dataset_index": request.dataset_index,
@@ -705,11 +643,10 @@ class LLMRayActor:
         self.inference_batch_size = inference_batch_size
         self.verbose = verbose
         self.request_metadata = {}
-        self.request_tracking = ConcurrentDict()  # Thread-safe tracking
         self.vllm_active_requests = {}  # Track all requests currently in vLLM: request_id -> dataset_index
 
         if self.tools:
-            self.executor = ThreadPoolExecutor(max_workers=20)
+            self.executor = futures.ThreadPoolExecutor(max_workers=20)
         else:
             self.executor = None
 
@@ -786,7 +723,7 @@ class LLMRayActor:
                 dataset_index = request.dataset_index
                 training_step = request.training_step
                 # Create unique tracking key combining training_step and dataset_index
-                tracking_key = make_tracking_key(request)
+                tracking_key = make_request_id(request)
 
                 # ALWAYS log this for debugging
                 self.logger.info(
@@ -794,25 +731,7 @@ class LLMRayActor:
                     f"is_eval={request.is_eval}, training_step={training_step}, tracking_key={tracking_key}"
                 )
 
-                self.request_tracking.assert_not_exists(
-                    tracking_key,
-                    f"Tracking key {tracking_key} already in request_tracking. "
-                    f"This indicates duplicate dataset indices in prompt queue.",
-                )
-                self.request_tracking.set(
-                    tracking_key,
-                    {
-                        "pulled": True,
-                        "inserted": False,
-                        "dataset_index": dataset_index,
-                        "training_step": training_step,
-                    },
-                )
-
-                self.logger.info(
-                    f"[_prefetch_worker] Successfully tracked dataset_index={dataset_index}, "
-                    f"current tracking keys: {self.request_tracking.keys()}"
-                )
+                self.logger.info(f"[_prefetch_worker] Successfully tracked dataset_index={dataset_index}")
 
                 num_added = add_request(
                     request,
@@ -846,43 +765,16 @@ class LLMRayActor:
         if dataset_index is not None:  # dataset_index can be None for combined results
             # Build tracking key from training_step and dataset_index
             training_step = result.training_step
-            tracking_key = make_tracking_key(training_step, dataset_index, is_eval)
+            tracking_key = make_request_id(result)
 
             # Log detailed tracking info
             self.logger.info(
                 f"[_insert_result_to_queue] Attempting to insert dataset_index={dataset_index}, "
                 f"training_step={training_step}, tracking_key={tracking_key}, "
                 f"is_eval={is_eval}, "
-                f"tracking contains: {self.request_tracking.keys()}, "
                 f"active vLLM requests: {list(self.vllm_active_requests.values())}, "
                 f"result type: {type(result)}, "
                 f"has outputs: {hasattr(result, 'outputs')}"
-            )
-
-            # Check if this tracking_key was ever tracked
-            # Note: We still check dataset_index in vllm_active_requests since that uses dataset_index alone
-            if dataset_index in self.vllm_active_requests.values() and not self.request_tracking.contains(
-                tracking_key
-            ):
-                self.logger.error(
-                    f"CRITICAL: dataset_index {dataset_index} is in vllm_active_requests but tracking_key {tracking_key} NOT in request_tracking! "
-                    f"This indicates tracking was lost or deleted prematurely."
-                )
-
-            # Since we no longer insert tool continuation results,
-            # every result should have been tracked
-            self.request_tracking.assert_exists(
-                tracking_key,
-                f"Tracking key {tracking_key} was never pulled from prompt queue. "
-                f"Available keys: {self.request_tracking.keys()}",
-            )
-            self.request_tracking.assert_and_update(
-                tracking_key,
-                "inserted",
-                False,
-                True,
-                f"Tracking key {tracking_key} has already been inserted into results queue. "
-                f"This indicates duplicate result insertion.",
             )
 
         results_queue = self.eval_results_queue if is_eval else self.results_queue
@@ -1398,56 +1290,45 @@ class LLMRayActor:
         # Build tracking key from training_step and dataset_index
         # IMPORTANT: Get training_step BEFORE cleanup_request_data removes metadata
         training_step = self.request_metadata[request_id]["training_step"]
-        tracking_key = make_tracking_key(training_step, expected_dataset_index, is_eval)
+        tracking_key = make_request_id(result)
 
         # Clean up metadata and tracking for this request after enqueuing
         self._cleanup_request_data(request_id, tracking)
 
-        if self.request_tracking.contains(tracking_key):
-            # Verify it was properly inserted before cleaning up
-            tracking_entry = self.request_tracking.get(tracking_key)
-            assert tracking_entry["inserted"], f"Tracking key {tracking_key} was not marked as inserted before cleanup"
+        # Safety check: Ensure no active vLLM requests or pending tool futures for this request
+        # Check for sub-requests that belong to THIS specific request (not just same dataset_index)
+        active_requests_for_dataset = [
+            req_id for req_id in self.vllm_active_requests.keys() if _extract_base_request_id(req_id) == request_id
+        ]
 
-            # Safety check: Ensure no active vLLM requests or pending tool futures for this request
-            # Check for sub-requests that belong to THIS specific request (not just same dataset_index)
-            active_requests_for_dataset = [
-                req_id for req_id in self.vllm_active_requests.keys() if _extract_base_request_id(req_id) == request_id
+        has_pending_tools = self._has_pending_tool_futures_for_request(request_id, tracking)
+
+        # Get the IDs of pending tool futures for this request for better debugging
+        pending_tool_ids = (
+            [
+                req_id
+                for req_id in tracking["pending_tool_futures"]
+                if _extract_base_request_id(req_id) == request_id
             ]
+            if has_pending_tools
+            else []
+        )
 
-            has_pending_tools = self._has_pending_tool_futures_for_request(request_id, tracking)
-
-            # Get the IDs of pending tool futures for this request for better debugging
-            pending_tool_ids = (
-                [
-                    req_id
-                    for req_id in tracking["pending_tool_futures"]
-                    if _extract_base_request_id(req_id) == request_id
-                ]
-                if has_pending_tools
-                else []
+        if active_requests_for_dataset or has_pending_tools:
+            raise ValueError(
+                f"CRITICAL: Attempting to clean up tracking_key {tracking_key} but found:\n"
+                f"  - Active vLLM requests: {active_requests_for_dataset}\n"
+                f"  - Has pending tool futures: {has_pending_tools}\n"
+                f"  - Pending tool future IDs: {pending_tool_ids}\n"
+                f"  - Request ID: {request_id}\n"
+                f"  - All active vLLM requests: {list(self.vllm_active_requests.keys())}\n"
+                f"This indicates requests are being cleaned up while still being processed!"
             )
 
-            if active_requests_for_dataset or has_pending_tools:
-                raise ValueError(
-                    f"CRITICAL: Attempting to clean up tracking_key {tracking_key} but found:\n"
-                    f"  - Active vLLM requests: {active_requests_for_dataset}\n"
-                    f"  - Has pending tool futures: {has_pending_tools}\n"
-                    f"  - Pending tool future IDs: {pending_tool_ids}\n"
-                    f"  - Request ID: {request_id}\n"
-                    f"  - All active vLLM requests: {list(self.vllm_active_requests.keys())}\n"
-                    f"This indicates requests are being cleaned up while still being processed!"
-                )
-
-            self.logger.info(
-                f"[Cleanup] Deleting tracking for tracking_key={tracking_key}, "
-                f"request_id={request_id}, "
-                f"remaining tracking keys before delete: {self.request_tracking.keys()}"
-            )
-            self.request_tracking.delete(tracking_key)
-            self.logger.info(
-                f"[Cleanup] Successfully deleted tracking for tracking_key={tracking_key}, "
-                f"remaining tracking keys after delete: {self.request_tracking.keys()}"
-            )
+        self.logger.info(
+            f"[Cleanup] Deleting tracking for tracking_key={tracking_key}, "
+            f"request_id={request_id}"
+        )
 
         if self.verbose:
             self.logger.info(f"Completed and inserted request {request_id} with {expected_n} samples (eval={is_eval})")
