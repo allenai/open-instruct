@@ -989,15 +989,12 @@ class LLMRayActor:
                                 f"Base request ID mismatch: {base_req_id} != {base_req_id_from_parse}"
                             )
 
-                    # Remove from vllm_active_requests since this request is finished
+                    # Verify the request is being tracked
                     if output.request_id not in self.vllm_active_requests:
                         raise RuntimeError(
                             f"Sub-request {output.request_id} completed but was not in vllm_active_requests. "
                             f"This indicates a critical tracking bug. Active requests: {list(self.vllm_active_requests.keys())}"
                         )
-                    del self.vllm_active_requests[output.request_id]
-                    if self.verbose:
-                        self.logger.info(f"Removed {output.request_id} from vllm_active_requests")
 
                     base_req_id = _extract_base_request_id(output.request_id)
 
@@ -1048,10 +1045,20 @@ class LLMRayActor:
                         )
                         total_processed += processed
 
+                        # Now that the sub-request is fully processed, remove from vllm_active_requests
+                        del self.vllm_active_requests[output.request_id]
+                        if self.verbose:
+                            self.logger.info(f"Removed {output.request_id} from vllm_active_requests after finalizing")
+
                         # Validate after complete transition to request_outputs
                         self._validate_single_request_counts(base_req_id, f"After finalizing {output.request_id}")
                     else:
-                        # Sub-request went to tools, validate the transition
+                        # Sub-request went to tools, remove from vllm_active_requests as it's now in pending_tool_futures
+                        del self.vllm_active_requests[output.request_id]
+                        if self.verbose:
+                            self.logger.info(f"Removed {output.request_id} from vllm_active_requests (went to tools)")
+
+                        # Validate the transition
                         self._validate_single_request_counts(
                             base_req_id, f"After sending {output.request_id} to tools"
                         )
