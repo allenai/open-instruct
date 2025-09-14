@@ -68,7 +68,11 @@ def extract_citations_from_context(context: str) -> Dict[str, str]:
     <snippets id="a1b2c3d4" metadata='{"author": "smith", "source": "arxiv", "year": 2023}'>
         Search result content here
     </snippets>
-
+    
+    Other formats are also supported, such as:
+    <snippet id="a1b2c3d4">Search result content here</snippet>
+    <webpage id="a1b2c3d4">Search result content here</webpage>
+    
     The id can be any string, including hash-like IDs (e.g., a1b2c3d4)
 
     Args:
