@@ -765,18 +765,6 @@ class LLMRayActor:
         if dataset_index is not None:  # dataset_index can be None for combined results
             # Build tracking key from training_step and dataset_index
             training_step = result.training_step
-            tracking_key = make_request_id(result)
-
-            # Log detailed tracking info
-            self.logger.info(
-                f"[_insert_result_to_queue] Attempting to insert dataset_index={dataset_index}, "
-                f"training_step={training_step}, tracking_key={tracking_key}, "
-                f"is_eval={is_eval}, "
-                f"active vLLM requests: {list(self.vllm_active_requests.values())}, "
-                f"result type: {type(result)}, "
-                f"has outputs: {hasattr(result, 'outputs')}"
-            )
-
         results_queue = self.eval_results_queue if is_eval else self.results_queue
         results_queue.put(result)
 
@@ -1305,11 +1293,7 @@ class LLMRayActor:
 
         # Get the IDs of pending tool futures for this request for better debugging
         pending_tool_ids = (
-            [
-                req_id
-                for req_id in tracking["pending_tool_futures"]
-                if _extract_base_request_id(req_id) == request_id
-            ]
+            [req_id for req_id in tracking["pending_tool_futures"] if _extract_base_request_id(req_id) == request_id]
             if has_pending_tools
             else []
         )
@@ -1325,10 +1309,7 @@ class LLMRayActor:
                 f"This indicates requests are being cleaned up while still being processed!"
             )
 
-        self.logger.info(
-            f"[Cleanup] Deleting tracking for tracking_key={tracking_key}, "
-            f"request_id={request_id}"
-        )
+        self.logger.info(f"[Cleanup] Deleting tracking for tracking_key={tracking_key}, request_id={request_id}")
 
         if self.verbose:
             self.logger.info(f"Completed and inserted request {request_id} with {expected_n} samples (eval={is_eval})")
