@@ -1039,16 +1039,19 @@ class LLMRayActor:
                         else:
                             complete_output = result.outputs[0]
 
+                        # Remove from vllm_active_requests BEFORE calling _finalize_sub_request
+                        # to avoid deadlock in _maybe_process_and_insert
+                        del self.vllm_active_requests[output.request_id]
+                        if self.verbose:
+                            self.logger.info(
+                                f"Removed {output.request_id} from vllm_active_requests before finalizing"
+                            )
+
                         # Use helper to finalize the sub-request
                         processed = self._finalize_sub_request(
                             output.request_id, output, complete_output, current_time
                         )
                         total_processed += processed
-
-                        # Now that the sub-request is fully processed, remove from vllm_active_requests
-                        del self.vllm_active_requests[output.request_id]
-                        if self.verbose:
-                            self.logger.info(f"Removed {output.request_id} from vllm_active_requests after finalizing")
 
                         # Validate after complete transition to request_outputs
                         self._validate_single_request_counts(base_req_id, f"After finalizing {output.request_id}")
