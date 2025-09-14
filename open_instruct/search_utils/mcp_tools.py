@@ -137,6 +137,7 @@ class MCPTool(Tool):
                     for attempt in range(self.max_retries):
                         try:
                             document_tool_output = asyncio.run(mcp_tool(trunc_prompt))
+                            print("Using MCP tool: ", mcp_tool.name)
                             break
                         except (httpcore.RemoteProtocolError, httpx.ReadError, ConnectionError, TimeoutError, asyncio.TimeoutError) as e:
                             last_exc = e
