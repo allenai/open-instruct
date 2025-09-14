@@ -12,7 +12,7 @@ EVALS="minerva_math::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,a
 
 # AIME 2024, 2025 local evals
 LOCAL_EVALS="mnoukhov/aime2024-25-rlvr 1.0 mnoukhov/aime2024-25-rlvr 1.0"
-LOCAL_EVAL_SPLITS="test_2024 test_2025"
+LOCAL_EVAL_SPLITS="test_2024 test_2024 test_2025 test_2025"
 
 EXP_NAME="grpo_dapo14k_${gs_model_name}"
 
@@ -41,7 +41,7 @@ python open_instruct/grpo_fast.py \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 128 \
     --num_mini_batches 4 \
-    --num_epochs 1 \
+    --num_epochs 2 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
     --kl_estimator kl3 \
