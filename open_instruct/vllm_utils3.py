@@ -1308,8 +1308,6 @@ class LLMRayActor:
                 f"This indicates requests are being cleaned up while still being processed!"
             )
 
-        self.logger.info(f"[Cleanup] Deleting tracking for tracking_key={tracking_key}, request_id={request_id}")
-
         if self.verbose:
             self.logger.info(f"Completed and inserted request {request_id} with {expected_n} samples (eval={is_eval})")
         return 1
