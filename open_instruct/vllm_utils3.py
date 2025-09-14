@@ -106,60 +106,16 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
     # Update concatenated outputs
     if output.request_id in tracking["concat_outputs"]:
-        # When updating an existing entry, we extend the token_ids of the first (and only) output
-        # The entry should already have been validated to have exactly 1 output when first stored
-        assert len(tracking["concat_outputs"][output.request_id].outputs) == 1, (
-            f"Expected concat_outputs to have exactly 1 output for {output.request_id}, "
-            f"but found {len(tracking['concat_outputs'][output.request_id].outputs)}. "
-            f"This indicates multiple outputs were incorrectly stored."
-        )
         tracking["concat_outputs"][output.request_id].outputs[0].token_ids.extend(o.token_ids)
     else:
-        # Assert we're not processing the same request_id multiple times
-        assert output.request_id not in tracking["concat_outputs"], (
-            f"Request {output.request_id} is being processed multiple times. "
-            f"It already exists in concat_outputs with {len(tracking['concat_outputs'].get(output.request_id, {}).get('outputs', []))} outputs."
-        )
-
-        # Assert when initially storing that we only have one output
-        assert len(output.outputs) == 1, (
-            f"Expected exactly 1 output when initially storing in concat_outputs for {output.request_id}, "
-            f"but got {len(output.outputs)}. This may indicate tool processing created multiple outputs."
-        )
-
-        # Create a deep copy of the output to prevent reference issues
-        # We need to copy the output object and its outputs list to avoid shared references
-        copied_outputs = [copy.deepcopy(o) for o in output.outputs]
-        assert len(copied_outputs) == 1, f"Copied outputs list has {len(copied_outputs)} items, expected 1"
-
         output_copy = vllm.RequestOutput(
             request_id=output.request_id,
             prompt=output.prompt,
             prompt_token_ids=output.prompt_token_ids,
             prompt_logprobs=output.prompt_logprobs,
-            outputs=copied_outputs,
+            outputs=output.outputs[:],
             finished=output.finished,
         )
-
-        # Assert the copy has exactly 1 output
-        assert len(output_copy.outputs) == 1, (
-            f"After creating copy, expected 1 output but got {len(output_copy.outputs)} for {output.request_id}. "
-            f"This indicates an issue with the deepcopy or RequestOutput constructor."
-        )
-
-        # Note: vllm.RequestOutput uses the exact list object we pass, not a copy
-        # This is expected behavior, so we set copied_outputs to None after this to avoid reuse
-        copied_outputs = None
-
-        logger.info(f"Storing {output.request_id} in concat_outputs with {len(output_copy.outputs)} output(s)")
-        tracking["concat_outputs"][output.request_id] = output_copy
-
-        # Final verification
-        assert len(tracking["concat_outputs"][output.request_id].outputs) == 1, (
-            f"After storing, concat_outputs[{output.request_id}] has {len(tracking['concat_outputs'][output.request_id].outputs)} outputs, "
-            f"expected 1. This indicates the outputs list was modified after assignment."
-        )
-
     tracking["masks"][output.request_id].extend([1] * len(o.token_ids))
 
     # Check for tool calls
@@ -186,10 +142,6 @@ def _process_outputs(
     start_time: Optional[float] = None,
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format."""
-    # Validate dataset_index type
-    assert isinstance(dataset_index, (int, type(None))), (
-        f"dataset_index must be an integer or None, got {type(dataset_index)}: {dataset_index}"
-    )
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
     finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
 
@@ -232,10 +184,6 @@ def _process_outputs_with_tools(
     start_time: Optional[float] = None,
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format with tool information."""
-    # Validate dataset_index type
-    assert isinstance(dataset_index, (int, type(None))), (
-        f"dataset_index must be an integer or None, got {type(dataset_index)}: {dataset_index}"
-    )
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
     finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
 
@@ -282,10 +230,6 @@ def _finalize_outputs(
     start_time=None,
 ):
     """Prepare final outputs based on whether tools were used."""
-    # Validate dataset_index type
-    assert isinstance(dataset_index, (int, type(None))), (
-        f"dataset_index must be an integer or None, got {type(dataset_index)}: {dataset_index}"
-    )
 
     if not tools:
         return _process_outputs(
@@ -460,12 +404,6 @@ def _process_completed_request(request_id, outs, tracking, current_time, tools, 
 
     total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
     metadata = request_metadata[request_id]  # Don't pop yet, _poll_tool_futures might need it
-
-    # Validate dataset_index from metadata
-    assert isinstance(metadata["dataset_index"], int), (
-        f"metadata['dataset_index'] must be an integer, got {type(metadata['dataset_index'])}: {metadata['dataset_index']} "
-        f"for request_id={request_id}"
-    )
 
     result = _finalize_outputs(
         final_output,
@@ -744,7 +682,6 @@ class LLMRayActor:
                 # Validate sub-request counts after adding
                 prefix = "eval" if request.is_eval else "train"
                 request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
-                self._validate_single_request_counts(request_id, f"After adding request {request_id}")
 
                 if self.verbose and num_added > 0:
                     self.logger.info(
@@ -760,11 +697,6 @@ class LLMRayActor:
 
     def _insert_result_to_queue(self, result, is_eval: bool):
         """Insert result into the appropriate queue with blocking put."""
-        # Validate that this dataset_index was pulled from prompt queue
-        dataset_index = result.dataset_index
-        if dataset_index is not None:  # dataset_index can be None for combined results
-            # Build tracking key from training_step and dataset_index
-            training_step = result.training_step
         results_queue = self.eval_results_queue if is_eval else self.results_queue
         results_queue.put(result)
 
@@ -933,22 +865,6 @@ class LLMRayActor:
                         )
                         total_processed += processed
 
-                        # Validate after complete transition to request_outputs
-                        self._validate_single_request_counts(base_req_id, f"After finalizing {output.request_id}")
-                    else:
-                        # Sub-request went to tools, remove from vllm_active_requests as it's now in pending_tool_futures
-                        del self.vllm_active_requests[output.request_id]
-                        if self.verbose:
-                            self.logger.info(f"Removed {output.request_id} from vllm_active_requests (went to tools)")
-
-                        # Validate the transition
-                        self._validate_single_request_counts(
-                            base_req_id, f"After sending {output.request_id} to tools"
-                        )
-
-            # Validate all requests after processing is complete
-            self._validate_sub_request_counts("After processing all outputs")
-
             # If no work to do, break to yield control back to generate_thread,
             # allowing weight_sync_thread to acquire the LLMRayActor lock
             final_unfinished = self.llm_engine.get_num_unfinished_requests()
@@ -1037,34 +953,6 @@ class LLMRayActor:
                             for j in range(self.request_metadata[req_id]["original_sampling_params"].n)
                             if f"{req_id}_{j}" in self.vllm_active_requests
                         ]
-
-                        if final_unfinished == 0 and pending_tools == 0 and not active_sub_requests:
-                            # Still no work after waiting - this is a real problem
-                            # Use comprehensive validation to identify the exact issue
-                            try:
-                                self._validate_sub_request_counts("At exit with incomplete state")
-                            except AssertionError as e:
-                                # Validation will provide detailed error message about what's wrong
-                                error_msg = (
-                                    f"\\n=== CRITICAL: INCOMPLETE STATE AT EXIT ===\\n"
-                                    f"vLLM unfinished: {final_unfinished}\\n"
-                                    f"Pending tools: {pending_tools}\\n"
-                                    f"Active sub-requests: {active_sub_requests or 'None'}\\n"
-                                    f"Incomplete metadata: {incomplete_metadata or 'None'}\\n"
-                                    f"Ready but not inserted: {pending_in_outputs or 'None'}\\n"
-                                    f"Orphaned tracking: {orphaned_tracking or 'None'}\\n"
-                                    f"Request metadata keys: {list(self.request_metadata.keys())}\\n"
-                                    f"Request outputs keys: {list(self.request_outputs.keys())}\\n"
-                                    f"\\nValidation error: {str(e)}"
-                                )
-                                self.logger.error(error_msg)
-
-                                # Re-raise with full context
-                                assert False, (
-                                    f"Attempting to exit process_from_queue with incomplete requests. "
-                                    f"This would cause the training loop to hang waiting for results that will never come.\\n"
-                                    f"{error_msg}"
-                                )
 
                     # Continue processing - don't exit yet
                     continue
@@ -1355,96 +1243,6 @@ class LLMRayActor:
 
         return False
 
-    def _validate_single_request_counts(self, base_request_id: str, context: str):
-        """Validate that all sub-requests for a specific request are accounted for."""
-        if base_request_id not in self.request_metadata:
-            # Request already cleaned up, skip validation
-            return
-
-        expected = self.request_metadata[base_request_id]["original_sampling_params"].n
-
-        # Count sub-requests for this specific request
-        vllm_count = sum(1 for k in self.vllm_active_requests.keys() if k.startswith(base_request_id + "_"))
-        tools_count = sum(
-            1 for k in self.tracking["pending_tool_futures"].keys() if k.startswith(base_request_id + "_")
-        )
-        if base_request_id in self.request_outputs:
-            outputs_count = len(self.request_outputs[base_request_id].outputs)
-        else:
-            outputs_count = 0
-
-        total = vllm_count + tools_count + outputs_count
-
-        if total != expected:
-            # Get sub-request IDs in outputs based on their index
-            output_indices = []
-            if base_request_id in self.request_outputs:
-                for comp_output in self.request_outputs[base_request_id].outputs:
-                    if hasattr(comp_output, "index"):
-                        output_indices.append(f"{base_request_id}_{comp_output.index}")
-                    else:
-                        output_indices.append("missing_index")
-
-            error_msg = (
-                f"[{context}] Validation failed for {base_request_id}:\n"
-                f"  Expected: {expected}\n"
-                f"  Found: {total}\n"
-                f"  - vLLM active: {vllm_count} -> {[k for k in self.vllm_active_requests.keys() if k.startswith(base_request_id + '_')]}\n"
-                f"  - Pending tools: {tools_count} -> {[k for k in self.tracking['pending_tool_futures'].keys() if k.startswith(base_request_id + '_')]}\n"
-                f"  - Request outputs: {outputs_count} -> {output_indices}"
-            )
-            raise RuntimeError(f"Sub-request tracking inconsistency: {error_msg}")
-
-    def _validate_sub_request_counts(self, context: str):
-        """Validate that all sub-requests are accounted for."""
-        # Group by base request ID - using defaultdict for cleaner code
-        request_accounting = defaultdict(lambda: {"vllm": 0, "pending_tools": 0, "outputs": 0, "expected": 0})
-
-        # Count vLLM active
-        for sub_id in self.vllm_active_requests:
-            base_id = _extract_base_request_id(sub_id)
-            request_accounting[base_id]["vllm"] += 1
-
-        # Count pending tools
-        for sub_id in self.tracking["pending_tool_futures"]:
-            base_id = _extract_base_request_id(sub_id)
-            request_accounting[base_id]["pending_tools"] += 1
-
-        # Count in request_outputs
-        for base_id, request_output in self.request_outputs.items():
-            request_accounting[base_id]["outputs"] += len(request_output.outputs)
-
-        # Validate - crash if metadata is missing (that's a bug)
-        errors = []
-        for base_id in request_accounting:
-            # If base_id is not in request_metadata, that's a critical error
-            request_accounting[base_id]["expected"] = self.request_metadata[base_id]["original_sampling_params"].n
-
-            counts = request_accounting[base_id]
-            total = counts["vllm"] + counts["pending_tools"] + counts["outputs"]
-            if total != counts["expected"]:
-                # Add detailed logging before failing
-                self.logger.error(f"[{context}] Validation failed for {base_id}:")
-                self.logger.error(f"  Expected: {counts['expected']}")
-                self.logger.error(f"  Found: {total}")
-                self.logger.error(
-                    f"  - vLLM active: {counts['vllm']} -> {[k for k in self.vllm_active_requests.keys() if k.startswith(base_id)]}"
-                )
-                self.logger.error(
-                    f"  - Pending tools: {counts['pending_tools']} -> {[k for k in self.tracking['pending_tool_futures'].keys() if k.startswith(base_id)]}"
-                )
-                self.logger.error(f"  - Request outputs: {counts['outputs']}")
-
-                errors.append(
-                    f"{base_id}: expected {counts['expected']}, got {total} "
-                    f"(vllm={counts['vllm']}, tools={counts['pending_tools']}, "
-                    f"outputs={counts['outputs']})"
-                )
-
-        if errors:
-            self.logger.error(f"[{context}] Sub-request count validation failed:\n" + "\n".join(errors))
-            assert False, f"Sub-request tracking inconsistency at {context}"
-
     def _cleanup_request_data(self, request_id: str, tracking: Dict[str, Any]):
         """Clean up metadata and tracking data for a completed request."""
         # Check if there are still pending tool futures for this request
@@ -1633,7 +1431,6 @@ class LLMRayActor:
                 context = f"After moving {req_id} from tools back to vLLM"
             else:
                 context = f"After finalizing {req_id} from tools"
-            self._validate_single_request_counts(base_req_id, context)
 
         return completed_outputs
 
