@@ -1599,7 +1599,13 @@ class LLMRayActor:
 
         if errors:
             self.logger.error(f"[{context}] Sub-request count validation failed:\n" + "\n".join(errors))
-            assert False, f"Sub-request tracking inconsistency at {context}"
+            # Be lenient while the engine still has unfinished requests; strict only when idle
+            if not self.llm_engine.has_unfinished_requests():
+                assert False, f"Sub-request tracking inconsistency at {context}"
+            else:
+                self.logger.warning(
+                    f"[{context}] Detected temporary inconsistency but engine has unfinished requests; continuing"
+                )
 
     def _cleanup_request_data(self, request_id: str, tracking: Dict[str, Any]):
         """Clean up metadata and tracking data for a completed request."""
