@@ -2088,6 +2088,7 @@ def split_and_insert_batch(
     param_prompt_Q: ray_queue.Queue,
     generation_config,
     is_eval: bool,
+    epoch: Optional[int] = None,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
     for idx, query, ground_truth, dataset, raw_query in zip(
@@ -2100,6 +2101,7 @@ def split_and_insert_batch(
                 generation_config=generation_config,
                 training_step=training_step,
                 dataset_index=idx,
+                epoch=epoch,
                 is_eval=is_eval,
             )
         )
@@ -2634,16 +2636,26 @@ def run_training(
         [f.result() for f in [packing_future, generation_future, weight_sync_thread_future] if f.done()]
 
     # Send initial data to ensure we have a N-step offset.
-    for _ in range(args.async_steps):
+    # Use distinct (earlier) training_step values per prefill to avoid duplicate tracking keys
+    # for the same (training_step, dataset_index) pair when the main loop starts.
+    current_epoch = 0
+    prev_index = iter_dataloader.index
+    for prefill_idx in range(args.async_steps):
         dataset_indices = next(iter_dataloader)
+        # Detect iterator wrap-around to bump epoch during prefill
+        if iter_dataloader.index < prev_index:
+            current_epoch += 1
+        prev_index = iter_dataloader.index
         batch = next_batch(dataset_indices, train_dataset)
+        prefill_training_step = resume_training_step - args.async_steps + prefill_idx
         split_and_insert_batch(
             batch,
-            resume_training_step,
+            prefill_training_step,
             pending_queries_map,
             param_prompt_Q,
             generation_configs["train"],
             is_eval=False,
+            epoch=current_epoch,
         )
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
         num_total_tokens = checkpoint_state["num_total_tokens"]
@@ -2675,9 +2687,18 @@ def run_training(
         weight_sync_trigger_event.set()
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+        # Update epoch when we wrap around the dataset order
+        if iter_dataloader.index == 0:
+            current_epoch += 1
         batch = next_batch(next(iter_dataloader), train_dataset)
         split_and_insert_batch(
-            batch, training_step, pending_queries_map, param_prompt_Q, generation_configs["train"], is_eval=False
+            batch,
+            training_step,
+            pending_queries_map,
+            param_prompt_Q,
+            generation_configs["train"],
+            is_eval=False,
+            epoch=current_epoch,
         )
         if (
             training_step % args.local_eval_every == 0
@@ -2691,6 +2712,7 @@ def run_training(
                 param_prompt_Q,
                 generation_configs["eval"],
                 is_eval=True,
+                epoch=current_epoch,
             )
 
         # The generate_thread is now handling vLLM processing asynchronously

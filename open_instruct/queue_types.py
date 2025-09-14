@@ -33,6 +33,7 @@ class GenerationResult:
     request_info: RequestInfo
     dataset_index: Optional[int] = None
     training_step: Optional[int] = None
+    epoch: Optional[int] = None
     token_statistics: Optional[TokenStatistics] = None
     start_time: Optional[float] = None
 
@@ -50,5 +51,6 @@ class PromptRequest:
     generation_config: Any
     training_step: Optional[int] = None
     dataset_index: Optional[int] = None
+    epoch: Optional[int] = None
     is_eval: bool = False
     start_time: Optional[float] = None

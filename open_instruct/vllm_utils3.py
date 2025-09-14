@@ -114,10 +114,13 @@ class ConcurrentDict:
             return list(self._dict.keys())
 
 
-def make_tracking_key(training_step: int, dataset_index: int, is_eval: bool) -> str:
+
+def make_tracking_key(training_step: int, dataset_index: int, is_eval: bool, epoch: Optional[int] = None) -> str:
     """Generate a unique tracking key for a request."""
     prefix = "eval" if is_eval else "train"
-    return f"{prefix}_{training_step}_{dataset_index}"
+    if epoch is None:
+        return f"{prefix}_{training_step}_{dataset_index}"
+    return f"{prefix}_{training_step}_{dataset_index}_e{epoch}"
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -244,6 +247,7 @@ def _process_outputs(
     outputs: List[vllm.RequestOutput],
     dataset_index: Optional[int] = None,
     training_step: Optional[int] = None,
+    epoch: Optional[int] = None,
     token_statistics: Optional[TokenStatistics] = None,
     start_time: Optional[float] = None,
 ) -> "GenerationResult":
@@ -279,6 +283,7 @@ def _process_outputs(
         request_info=request_info,
         dataset_index=dataset_index,
         training_step=training_step,
+        epoch=epoch,
         token_statistics=token_statistics,
         start_time=start_time,
     )
@@ -290,6 +295,7 @@ def _process_outputs_with_tools(
     outputs: List[vllm.RequestOutput],
     dataset_index: Optional[int] = None,
     training_step: Optional[int] = None,
+    epoch: Optional[int] = None,
     token_statistics: Optional[TokenStatistics] = None,
     start_time: Optional[float] = None,
 ) -> "GenerationResult":
@@ -326,6 +332,7 @@ def _process_outputs_with_tools(
         request_info=request_info,
         dataset_index=dataset_index,
         training_step=training_step,
+        epoch=epoch,
         token_statistics=token_statistics,
         start_time=start_time,
     )
@@ -338,6 +345,7 @@ def _finalize_outputs(
     tracking,
     dataset_index,
     training_step,
+    epoch,
     tools,
     original_sampling_params,
     token_statistics=None,
@@ -354,6 +362,7 @@ def _finalize_outputs(
             [output],
             dataset_index=dataset_index,
             training_step=training_step,
+            epoch=epoch,
             token_statistics=token_statistics,
             start_time=start_time,
         )
@@ -474,6 +483,7 @@ def _finalize_outputs(
         final_outputs,
         dataset_index=dataset_index,
         training_step=training_step,
+        epoch=epoch,
         token_statistics=token_statistics,
         start_time=start_time,
     )
@@ -534,6 +544,7 @@ def _process_completed_request(request_id, outs, tracking, current_time, tools, 
         tracking,
         metadata["dataset_index"],
         metadata["training_step"],
+        metadata.get("epoch"),
         tools,
         original_sampling_params=metadata["original_sampling_params"],
         token_statistics=TokenStatistics(
@@ -645,13 +656,15 @@ def add_request(
 ) -> int:
     """Add a request to the LLM engine."""
     prefix = "eval" if request.is_eval else "train"
-    request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
+    epoch_suffix = f"_e{request.epoch}" if getattr(request, "epoch", None) is not None else ""
+    request_id = f"{prefix}_{request.training_step}_{request.dataset_index}{epoch_suffix}"
     sampling_params = request.generation_config.clone()
     sampling_params.n = 1  # Use n=1 for tool processing
     request_metadata[request_id] = {
         "is_eval": request.is_eval,
         "dataset_index": request.dataset_index,
         "training_step": request.training_step,
+        "epoch": getattr(request, "epoch", None),
         "sampling_params": sampling_params,
         "original_sampling_params": request.generation_config,
         "prompt_tokens": len(request.prompt),
@@ -785,8 +798,10 @@ class LLMRayActor:
                 # Track that we pulled this dataset_index from the prompt queue
                 dataset_index = request.dataset_index
                 training_step = request.training_step
-                # Create unique tracking key combining training_step and dataset_index
-                tracking_key = make_tracking_key(training_step, dataset_index, request.is_eval)
+                # Create unique tracking key combining training_step, dataset_index, and epoch (if provided)
+                tracking_key = make_tracking_key(
+                    training_step, dataset_index, request.is_eval, getattr(request, "epoch", None)
+                )
 
                 # ALWAYS log this for debugging
                 self.logger.info(
@@ -846,7 +861,7 @@ class LLMRayActor:
         if dataset_index is not None:  # dataset_index can be None for combined results
             # Build tracking key from training_step and dataset_index
             training_step = result.training_step
-            tracking_key = make_tracking_key(training_step, dataset_index, is_eval)
+            tracking_key = make_tracking_key(training_step, dataset_index, is_eval, getattr(result, "epoch", None))
 
             # Log detailed tracking info
             self.logger.info(
@@ -1395,7 +1410,7 @@ class LLMRayActor:
         # Build tracking key from training_step and dataset_index
         # IMPORTANT: Get training_step BEFORE cleanup_request_data removes metadata
         training_step = self.request_metadata[request_id]["training_step"]
-        tracking_key = make_tracking_key(training_step, expected_dataset_index, is_eval)
+        tracking_key = make_tracking_key(training_step, expected_dataset_index, is_eval, getattr(result, "epoch", None))
 
         # Clean up metadata and tracking for this request after enqueuing
         self._cleanup_request_data(request_id, tracking)
