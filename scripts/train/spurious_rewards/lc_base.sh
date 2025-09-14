@@ -50,7 +50,7 @@ python open_instruct/grpo_fast.py \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 128 \
     --num_mini_batches 4 \
-    --num_epochs 1 \
+    --num_epochs 4 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
     --kl_estimator kl3 \
@@ -81,7 +81,7 @@ python open_instruct/grpo_fast.py \
     --with_tracking \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
-    --mask_truncated_completions True \
+    --mask_truncated_completions False \
     --oe_eval_max_length 8192 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --oe_eval_tasks ${evals} \

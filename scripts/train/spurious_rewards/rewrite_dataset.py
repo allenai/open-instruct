@@ -1,4 +1,4 @@
-dataset_name = "hamishivi/rlvr_orz_math_57k_collected"
+dataset_name = "mnoukhov/DAPO-Math-14k-Processed-RLVR"
 
 from datasets import load_dataset
 
@@ -14,5 +14,5 @@ def to_random(example):
 ds["train"] = ds["train"].map(to_random)
 
 breakpoint()
-ds.push_to_hub("stellalisy/rlvr_orz_math_57k_collected_random")
+ds.push_to_hub("stellalisy/DAPO-Math-14k-Processed-RLVR_random")
 

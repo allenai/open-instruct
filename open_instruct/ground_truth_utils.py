@@ -188,7 +188,6 @@ class RandomVerifier(VerifierFunction):
     Verifier for random reward that returns a random reward between 0 and 1 with a given probability.
     """
 
-
     def __init__(self, verifier_config: Optional[RandomVerifierConfig] = None) -> None:
         if verifier_config is None:
             verifier_config = RandomVerifierConfig()
@@ -203,7 +202,6 @@ class RandomVerifier(VerifierFunction):
         else: 
             score = random.random() > self.verifier_config.probability
         return VerificationResult(score=score)
-
 
     @classmethod
     def get_config_class(cls) -> type:
