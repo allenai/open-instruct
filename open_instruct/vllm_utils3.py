@@ -114,10 +114,10 @@ class ConcurrentDict:
             return list(self._dict.keys())
 
 
-def make_tracking_key(training_step: int, dataset_index: int, is_eval: bool) -> str:
+def make_tracking_key(request: PromptRequest) -> str:
     """Generate a unique tracking key for a request."""
-    prefix = "eval" if is_eval else "train"
-    return f"{prefix}_{training_step}_{dataset_index}"
+    prefix = "eval" if request.is_eval else "train"
+    return f"{prefix}_{request.training_step}_{request.dataset_index}"
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -645,9 +645,9 @@ def add_request(
 ) -> int:
     """Add a request to the LLM engine."""
     prefix = "eval" if request.is_eval else "train"
-    request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
     sampling_params = request.generation_config.clone()
     sampling_params.n = 1  # Use n=1 for tool processing
+    request_id = make_request_id(request.training_step, request.dataset_index, request.is_eval)
     request_metadata[request_id] = {
         "is_eval": request.is_eval,
         "dataset_index": request.dataset_index,
@@ -786,7 +786,7 @@ class LLMRayActor:
                 dataset_index = request.dataset_index
                 training_step = request.training_step
                 # Create unique tracking key combining training_step and dataset_index
-                tracking_key = make_tracking_key(training_step, dataset_index, request.is_eval)
+                tracking_key = make_tracking_key(request)
 
                 # ALWAYS log this for debugging
                 self.logger.info(
