@@ -2774,10 +2774,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
 
-    # ensure we have enough prompts for bsz and prefill
-    if len(train_dataset) < args.async_steps * args.num_unique_prompts_rollout:
+    if len(train_dataset) < (needed := args.async_steps * args.num_unique_prompts_rollout):
         raise ValueError(
-            f"Train dataset is too small! Is {len(train_dataset)} prompts, but {args.async_steps * args.num_unique_prompts_rollout} are needed to have enough prompts for bsz and prefill. Try reducing async_steps or num_unique_prompts_rollout."
+            f"Train dataset is too small! Is {len(train_dataset)} prompts, but {needed} are needed to have enough prompts for bsz and prefill. Try reducing async_steps or num_unique_prompts_rollout."
         )
 
     if args.cache_dataset_only:
