@@ -3,7 +3,6 @@ import unittest
 from unittest.mock import MagicMock
 
 import vllm
-from parameterized import parameterized
 
 from open_instruct.vllm_utils3 import process_completed_request
 
@@ -74,7 +73,6 @@ class TestVllmUtils3(unittest.TestCase):
             current_time=1001.0,
             tools=tools,
             request_metadata=request_metadata,
-
         )
 
         # Verify is_eval is correct
@@ -164,7 +162,6 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.request_info.tool_outputs, ["", ""])
         self.assertEqual(result.request_info.tool_runtimes, [0.0, 0.0])
         self.assertEqual(result.request_info.tool_calleds, [False, False])
-
 
 
 if __name__ == "__main__":

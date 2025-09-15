@@ -168,7 +168,6 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
     finish_reasons = [out.finish_reason for out in final_output.outputs]
     use_tools = bool(tools)
 
-
     # Extract attributes based on whether tools are used
     if use_tools:
         # Extract tool-specific attributes from outputs
@@ -189,7 +188,7 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
         tool_runtimes = [0.0] * len(response_ids)
         tool_calleds = [False] * len(response_ids)
 
-    return GenerationResult(
+    result = GenerationResult(
         responses=response_ids,
         finish_reasons=finish_reasons,
         masks=masks,
