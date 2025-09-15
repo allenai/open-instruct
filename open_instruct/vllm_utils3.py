@@ -479,7 +479,19 @@ class LLMRayActor:
 
         tracking = _init_tool_tracking()
         outputs = []
+        iteration_count = 0
         while True:
+            iteration_count += 1
+            if iteration_count % 100 == 0:
+                num_unfinished = self.llm_engine.get_num_unfinished_requests()
+                num_pending_tools = len(tracking["pending_tool_futures"])
+                logger.info(
+                    f"[LLMRayActor Progress] Iteration {iteration_count}: "
+                    f"{num_unfinished} unfinished requests, "
+                    f"{num_pending_tools} pending tool futures, "
+                    f"{len(outputs)} outputs collected"
+                )
+
             outputs.extend(self._poll_tool_futures(tracking, self.llm_engine.tokenizer))
 
             # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)
