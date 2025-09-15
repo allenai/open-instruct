@@ -108,15 +108,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     if output.request_id in tracking["concat_outputs"]:
         tracking["concat_outputs"][output.request_id].outputs[0].token_ids.extend(o.token_ids)
     else:
-        output_copy = vllm.RequestOutput(
-            request_id=output.request_id,
-            prompt=output.prompt,
-            prompt_token_ids=output.prompt_token_ids,
-            prompt_logprobs=output.prompt_logprobs,
-            outputs=output.outputs[:],
-            finished=output.finished,
-        )
-        tracking["concat_outputs"][output.request_id] = output_copy
+        tracking["concat_outputs"][output.request_id] = output
     tracking["masks"][output.request_id].extend([1] * len(o.token_ids))
 
     # Check for tool calls
