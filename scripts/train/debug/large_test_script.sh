@@ -32,7 +32,7 @@ uv run python mason.py \
         --dataset_mixer_eval_list_splits train \
         --max_token_length 10240 \
         --max_prompt_token_length 2048 \
-        --response_length 4096 \
+        --response_length 16000 \
         --pack_length 20480 \
         --model_name_or_path Qwen/Qwen2.5-7B \
         --chat_template_name tulu_thinker \
