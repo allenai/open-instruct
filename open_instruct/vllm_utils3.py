@@ -128,88 +128,63 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
 
 def _process_outputs(
-    outputs: List[vllm.RequestOutput],
+    output: vllm.RequestOutput,
     dataset_index: int,
     training_step: int,
     token_statistics: TokenStatistics,
     start_time: float,
+    use_tools: bool = False,
 ) -> "GenerationResult":
-    """Process vLLM RequestOutputs into GenerationResult format."""
-    response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
-    finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
+    """Process a vLLM RequestOutput into GenerationResult format.
 
-    masks = [[1] * len(resp) for resp in response_ids]
-    num_calls = [0] * len(response_ids)
-    timeouts = [0] * len(response_ids)
-    tool_errors = [""] * len(response_ids)
-    tool_outputs = [""] * len(response_ids)
-    tool_runtimes = [0] * len(response_ids)
-    tool_calleds = [False] * len(response_ids)
+    Args:
+        output: A single vLLM RequestOutput object
+        dataset_index: Index of the dataset
+        training_step: Current training step
+        token_statistics: Token usage statistics
+        start_time: Start time for timing metrics
+        use_tools: Whether to extract tool-specific attributes from outputs
+    """
+    response_ids = [list(out.token_ids) for out in output.outputs]
+    finish_reasons = [out.finish_reason for out in output.outputs]
 
-    request_info = RequestInfo(
-        num_calls=num_calls,
-        timeouts=timeouts,
-        tool_errors=tool_errors,
-        tool_outputs=tool_outputs,
-        tool_runtimes=tool_runtimes,
-        tool_calleds=tool_calleds,
-    )
+    # Extract attributes based on whether tools are used
+    if use_tools:
+        # Extract tool-specific attributes from outputs
+        masks = [getattr(out, "mask", [1] * len(out.token_ids)) for out in output.outputs]
+        num_calls = [getattr(out, "num_calls", 0) for out in output.outputs]
+        timeouts = [getattr(out, "timeout", False) for out in output.outputs]
+        tool_errors = [getattr(out, "tool_error", "") for out in output.outputs]
+        tool_outputs = [getattr(out, "tool_output", "") for out in output.outputs]
+        tool_runtimes = [getattr(out, "tool_runtime", 0.0) for out in output.outputs]
+        tool_calleds = [getattr(out, "tool_called", False) for out in output.outputs]
+    else:
+        # Use default values when tools are not used
+        masks = [[1] * len(resp) for resp in response_ids]
+        num_calls = [0] * len(response_ids)
+        timeouts = [False] * len(response_ids)
+        tool_errors = [""] * len(response_ids)
+        tool_outputs = [""] * len(response_ids)
+        tool_runtimes = [0.0] * len(response_ids)
+        tool_calleds = [False] * len(response_ids)
 
-    result = GenerationResult(
+    return GenerationResult(
         responses=response_ids,
         finish_reasons=finish_reasons,
         masks=masks,
-        request_info=request_info,
+        request_info=RequestInfo(
+            num_calls=num_calls,
+            timeouts=timeouts,
+            tool_errors=tool_errors,
+            tool_outputs=tool_outputs,
+            tool_runtimes=tool_runtimes,
+            tool_calleds=tool_calleds,
+        ),
         dataset_index=dataset_index,
         training_step=training_step,
         token_statistics=token_statistics,
         start_time=start_time,
     )
-
-    return result
-
-
-def _process_outputs_with_tools(
-    outputs: List[vllm.RequestOutput],
-    dataset_index: int,
-    training_step: int,
-    token_statistics: TokenStatistics,
-    start_time: float,
-) -> "GenerationResult":
-    """Process vLLM RequestOutputs into GenerationResult format with tool information."""
-    response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
-    finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
-
-    masks = [out.mask for output in outputs for out in output.outputs]
-
-    num_calls = [out.num_calls for output in outputs for out in output.outputs]
-    timeouts = [out.timeout for output in outputs for out in output.outputs]
-    tool_errors = [out.tool_error for output in outputs for out in output.outputs]
-    tool_outputs = [out.tool_output for output in outputs for out in output.outputs]
-    tool_runtimes = [out.tool_runtime for output in outputs for out in output.outputs]
-    tool_calleds = [out.tool_called for output in outputs for out in output.outputs]
-
-    request_info = RequestInfo(
-        num_calls=num_calls,
-        timeouts=timeouts,
-        tool_errors=tool_errors,
-        tool_outputs=tool_outputs,
-        tool_runtimes=tool_runtimes,
-        tool_calleds=tool_calleds,
-    )
-
-    result = GenerationResult(
-        responses=response_ids,
-        finish_reasons=finish_reasons,
-        masks=masks,
-        request_info=request_info,
-        dataset_index=dataset_index,
-        training_step=training_step,
-        token_statistics=token_statistics,
-        start_time=start_time,
-    )
-
-    return result
 
 
 def _finalize_outputs(
@@ -226,143 +201,57 @@ def _finalize_outputs(
 
     if not tools:
         return _process_outputs(
-            [output],
+            output,
             dataset_index=dataset_index,
             training_step=training_step,
             token_statistics=token_statistics,
             start_time=start_time,
+            use_tools=False,
         )
 
-    # Tool mode: add metadata and merge completions
-    # Store the original request_id before output gets overwritten
-    output_request_id = output.request_id
+    # Tool mode: add metadata to sub-request outputs and merge them
+    request_id = output.request_id
 
-    # Only set attributes for sub-requests belonging to the current request
-    for req_id in tracking["masks"]:
-        # Skip if this sub-request doesn't belong to the current base request
-        if _extract_base_request_id(req_id) != output_request_id:
-            continue
+    # Collect all sub-request outputs for this request
+    all_outputs = []
+    for j in range(original_sampling_params.n):
+        sub_req_id = f"{request_id}_{j}"
 
-        assert req_id in tracking["concat_outputs"], f"req_id {req_id} not in concat_outputs!"
-        output_obj = tracking["concat_outputs"][req_id].outputs[0]
-        setattr(output_obj, "mask", tracking["masks"][req_id])
-        setattr(output_obj, "num_calls", tracking["num_calls"][req_id])
-        setattr(output_obj, "timeout", tracking["timeout"][req_id])
-        setattr(output_obj, "tool_error", tracking["tool_error"][req_id])
-        setattr(output_obj, "tool_output", tracking["tool_output"][req_id])
-        setattr(output_obj, "tool_runtime", tracking["tool_runtime"][req_id])
-        setattr(output_obj, "tool_called", tracking["tool_called"][req_id])
+        # Get the concatenated output for this sub-request
+        if sub_req_id not in tracking["concat_outputs"]:
+            raise ValueError(f"Missing output for sub-request {sub_req_id}")
 
-    # Merge n completions into the same outputs
-    # Filter tracking data to only include the current request
-    relevant_outputs = {
-        k: v for k, v in tracking["concat_outputs"].items() if _extract_base_request_id(k) == output_request_id
-    }
+        sub_output = tracking["concat_outputs"][sub_req_id].outputs[0]
 
-    # Validate we have the expected number of outputs for this request
-    expected_samples = len([k for k in relevant_outputs.keys() if "_".join(k.split("_")[:-1]) == output_request_id])
-    if expected_samples == 0:
-        raise ValueError(f"No outputs found in tracking['concat_outputs'] for request {output_request_id}")
+        # Set tool metadata attributes on the output
+        setattr(sub_output, "mask", tracking["masks"][sub_req_id])
+        setattr(sub_output, "num_calls", tracking["num_calls"][sub_req_id])
+        setattr(sub_output, "timeout", tracking["timeout"][sub_req_id])
+        setattr(sub_output, "tool_error", tracking["tool_error"][sub_req_id])
+        setattr(sub_output, "tool_output", tracking["tool_output"][sub_req_id])
+        setattr(sub_output, "tool_runtime", tracking["tool_runtime"][sub_req_id])
+        setattr(sub_output, "tool_called", tracking["tool_called"][sub_req_id])
 
-    # Collect outputs from all sub-requests without modifying the tracking dictionary
-    merged_outputs = {}
-    for req_id, output_obj in relevant_outputs.items():
-        real_req_id = _extract_base_request_id(req_id)
+        all_outputs.append(sub_output)
 
-        # Each sub-request should have exactly one output
-        assert len(output_obj.outputs) == 1, (
-            f"Expected exactly 1 output per sub-request, got {len(output_obj.outputs)} for {req_id}. "
-            f"This indicates tool processing created multiple outputs instead of one final result."
-        )
-
-        if real_req_id not in merged_outputs:
-            # Initialize with lists to collect outputs from all sub-requests
-            merged_outputs[real_req_id] = {
-                "base_output": output_obj,  # Keep first sub-request as template for metadata
-                "all_outputs": [],  # Collect all outputs here
-            }
-
-        # Add this sub-request's output to the collection (create a copy to avoid modifying original)
-        merged_outputs[real_req_id]["all_outputs"].append(copy.deepcopy(output_obj.outputs[0]))
-
-        logger.info(
-            f"Collecting output for {real_req_id} from sub-request {req_id}: "
-            f"total collected so far: {len(merged_outputs[real_req_id]['all_outputs'])}"
-        )
-
-    # Create new RequestOutput objects with merged outputs (without modifying originals)
-    final_merged = {}
-    for real_req_id, merge_data in merged_outputs.items():
-        base_output = merge_data["base_output"]
-        all_outputs = merge_data["all_outputs"]
-
-        # Create a new RequestOutput with all collected outputs
-        merged_output = vllm.RequestOutput(
-            request_id=real_req_id,
-            prompt=base_output.prompt,
-            prompt_token_ids=base_output.prompt_token_ids,
-            prompt_logprobs=base_output.prompt_logprobs,
-            outputs=all_outputs,  # Use the collected outputs
-            finished=base_output.finished,
-        )
-
-        final_merged[real_req_id] = merged_output
-
-        logger.info(
-            f"Created merged output for {real_req_id} with {len(merged_output.outputs)} outputs "
-            f"(without modifying original tracking entries)"
-        )
-
-    # Since we're only processing one request at a time, final_merged should have exactly one entry
-    assert len(final_merged) == 1, (
-        f"Expected exactly 1 merged output for request {output_request_id}, but got {len(final_merged)}. "
-        f"Keys in final_merged: {list(final_merged.keys())}"
+    # Create merged output with all sub-request outputs
+    merged_output = vllm.RequestOutput(
+        request_id=request_id,
+        prompt=output.prompt,
+        prompt_token_ids=output.prompt_token_ids,
+        prompt_logprobs=output.prompt_logprobs,
+        outputs=all_outputs,
+        finished=output.finished,
     )
 
-    # Get the single merged output (no sorting needed since there's only one)
-    final_outputs = list(final_merged.values())
-
-    # Additional assertion: verify we have exactly one output object
-    assert len(final_outputs) == 1, (
-        f"Expected exactly 1 output object in final_outputs, but got {len(final_outputs)}. "
-        f"This indicates an issue with the merging logic."
-    )
-
-    # Validate total response count before processing
-    total_responses = sum(len(output.outputs) for output in final_outputs)
-    logger.info(
-        f"_finalize_outputs: {len(relevant_outputs)} sub-requests merged into {len(final_outputs)} outputs with {total_responses} total responses"
-    )
-
-    # Add detailed logging before processing to help debug
-    logger.info(
-        f"Before _process_outputs_with_tools: final_outputs has {len(final_outputs)} items, "
-        f"with output counts: {[len(out.outputs) for out in final_outputs]}"
-    )
-
-    # Assert each output in final_outputs has the expected structure
-    for idx, output in enumerate(final_outputs):
-        total_outputs = len(output.outputs)
-        logger.info(f"final_outputs[{idx}] (id={output.request_id}) has {total_outputs} outputs")
-
-    result = _process_outputs_with_tools(
-        final_outputs,
+    return _process_outputs(
+        merged_output,
         dataset_index=dataset_index,
         training_step=training_step,
         token_statistics=token_statistics,
         start_time=start_time,
+        use_tools=True,
     )
-
-    # Add final validation to catch the specific error early
-    expected_response_count = original_sampling_params.n
-    actual_response_count = len(result.responses)
-    if actual_response_count != expected_response_count:
-        raise AssertionError(
-            f"Response count mismatch in _finalize_outputs: expected {expected_response_count} responses "
-            f"but got {actual_response_count}. This indicates incorrect merging of tool-processed outputs."
-        )
-
-    return result
 
 
 def _process_completed_request(request_id, outs, tracking, current_time, tools, request_metadata):
