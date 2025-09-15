@@ -1137,6 +1137,7 @@ def launch_ai2_evals_on_weka(
     eval_priority: Optional[str] = "high",
     beaker_image: Optional[str] = None,
     workspace: Optional[str] = "tulu-3-results",
+    gpu_multiplier: Optional[int] = None,
 ) -> None:
     weka_cluster = "ai2/saturn ai2/neptune ai2/ceres ai2/jupiter"
     gcp_cluster = "ai2/augusta"
@@ -1190,6 +1191,8 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_stop_sequences '{','.join(stop_strings)}'"
     if beaker_image is not None:
         command += f" --beaker_image {beaker_image}"
+    if gpu_multiplier is not None:
+        command += f" --gpu_multiplier {gpu_multiplier}"
     print(f"Launching eval jobs with command: {command}")
     process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()

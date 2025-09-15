@@ -359,6 +359,8 @@ class FlatArguments:
     """The beaker evaluation tasks to launch"""
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
+    oe_eval_gpu_multiplier: Optional[int] = None,
+    """the multiplier for the number of GPUs for evaluation"""
     eval_workspace: Optional[str] = "tulu-3-results"
     """The workspace to launch evaluation jobs on"""
     eval_priority: Optional[str] = "high"
@@ -1019,6 +1021,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             gs_bucket_path=args.gs_bucket_path,
             workspace=args.eval_workspace,
             eval_priority=args.eval_priority,
+            gpu_multiplier=args.oe_eval_gpu_multiplier,
         )
     if args.push_to_hub:
         push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
