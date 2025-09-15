@@ -338,6 +338,7 @@ class LLMRayActor:
         eval_results_queue=None,
         actor_manager=None,
         inference_batch_size: Optional[int] = None,
+        inflight_updates: bool = False,
         verbose: bool = False,
         **kwargs,
     ):
@@ -345,6 +346,7 @@ class LLMRayActor:
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inference_batch_size = inference_batch_size
+        self.inflight_updates = inflight_updates
         self.verbose = verbose
         self.request_metadata = {}
         self.vllm_active_requests = set()  # Track all requests currently in vLLM
@@ -458,13 +460,19 @@ class LLMRayActor:
             if self._prefetch_future.done():
                 self._prefetch_future.result()
 
-            # Check exit conditions - only exit if should_stop AND no pending work
+            # Check exit conditions
             if self._should_stop():
-                pending_tools = len(self.tracking["pending_tool_futures"])
-                unfinished = self.llm_engine.get_num_unfinished_requests()
-
-                if pending_tools == 0 and unfinished == 0:
+                if self.inflight_updates:
+                    # With inflight_updates enabled, return immediately when should_stop is set
+                    # This allows quick pausing and resumption of processing
                     break
+                else:
+                    # Original behavior: only exit if should_stop AND no pending work
+                    pending_tools = len(self.tracking["pending_tool_futures"])
+                    unfinished = self.llm_engine.get_num_unfinished_requests()
+
+                    if pending_tools == 0 and unfinished == 0:
+                        break
 
             self._poll_tool_futures(self.tracking, self.llm_engine.tokenizer)
             current_time = time.time()
@@ -945,6 +953,7 @@ def create_vllm_engines(
     actor_manager=None,
     inference_batch_size: Optional[int] = None,
     use_fp8_kv_cache=False,
+    inflight_updates: bool = False,
     verbose: bool = False,
 ) -> list[LLMRayActor]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
@@ -1027,6 +1036,7 @@ def create_vllm_engines(
                 tools=tools,
                 max_tool_calls=max_tool_calls_dict,
                 inference_batch_size=inference_batch_size,
+                inflight_updates=inflight_updates,
                 kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
                 calculate_kv_scales=use_fp8_kv_cache,
                 verbose=verbose,
