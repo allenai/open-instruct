@@ -2630,12 +2630,12 @@ def run_training(
         [f.result() for f in [packing_future, generation_future, weight_sync_thread_future] if f.done()]
 
     # Send initial data to ensure we have a N-step offset.
-    for _ in range(args.async_steps):
+    for i in range(args.async_steps):
         dataset_indices = next(iter_dataloader)
         batch = next_batch(dataset_indices, train_dataset)
         split_and_insert_batch(
             batch,
-            resume_training_step,
+            resume_training_step + i,
             pending_queries_map,
             param_prompt_Q,
             generation_configs["train"],
@@ -2673,7 +2673,12 @@ def run_training(
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         batch = next_batch(next(iter_dataloader), train_dataset)
         split_and_insert_batch(
-            batch, training_step, pending_queries_map, param_prompt_Q, generation_configs["train"], is_eval=False
+            batch,
+            training_step + args.async_steps,
+            pending_queries_map,
+            param_prompt_Q,
+            generation_configs["train"],
+            is_eval=False,
         )
         if (
             training_step % args.local_eval_every == 0
@@ -2682,7 +2687,7 @@ def run_training(
         ):
             split_and_insert_batch(
                 eval_batch,
-                training_step,
+                training_step + args.async_steps,
                 eval_pending_queries_map,
                 param_prompt_Q,
                 generation_configs["eval"],
