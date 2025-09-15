@@ -212,17 +212,6 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
     return result, metadata["is_eval"]
 
 
-def _extract_base_request_id(full_request_id: str) -> str:
-    """Extract base request ID by removing the sample suffix.
-
-    >>> _extract_base_request_id("train_1_43039_0")
-    'train_1_43039'
-    >>> _extract_base_request_id("eval_5_12345_2")
-    'eval_5_12345'
-    """
-    return "_".join(full_request_id.split("_")[:-1])
-
-
 def ray_noset_visible_devices(env_vars=os.environ):
     # Refer to
     # https://github.com/ray-project/ray/blob/161849364a784442cc659fb9780f1a6adee85fce/python/ray/_private/accelerators/nvidia_gpu.py#L95-L96
@@ -310,9 +299,9 @@ def add_request(
     vllm_active_requests: dict,
 ) -> int:
     """Add a request to the LLM engine."""
+    request_id = make_request_id(request)
     sampling_params = request.generation_config.clone()
     sampling_params.n = 1  # Use n=1 for tool processing
-    request_id = make_request_id(request)
     request_metadata[request_id] = {
         "is_eval": request.is_eval,
         "dataset_index": request.dataset_index,
@@ -485,14 +474,15 @@ class LLMRayActor:
                     # When we have n>1, we create sub-requests with IDs like
                     # train_3_12_0, train_3_12_1, etc. But vLLM creates CompletionOutputs with index=0
                     # for all of them (since each sub-request has n=1). We need to fix this.
-                    if "_" in output.request_id:
-                        # Extract the actual index from the sub-request ID
-                        parts = output.request_id.rsplit("_", 1)
-                        if len(parts) == 2 and parts[1].isdigit():
-                            correct_index = int(parts[1])
-                            # Fix the index on the CompletionOutput
-                            for i, comp_output in enumerate(output.outputs):
-                                output.outputs[i] = dataclasses.replace(comp_output, index=correct_index)
+                    # Extract the actual index from the sub-request ID
+                    parts = output.request_id.rsplit("_", 1)
+                    assert len(parts) == 2 and parts[1].isdigit(), (
+                        f"Wrong request id format ({output.request_id}), should be request_id _ sub_request_index"
+                    )
+
+                    # Fix the index on the CompletionOutput
+                    correct_index = int(parts[1])
+                    output.outputs = [dataclass.replace(o, index=correct_index) for o in output.outputs]
 
                     base_req_id = _extract_base_request_id(output.request_id)
                     result = _handle_output(
@@ -518,7 +508,6 @@ class LLMRayActor:
                         # Remove from vllm_active_requests BEFORE calling _finalize_sub_request
                         # to avoid deadlock in _maybe_process_and_insert
                         self.vllm_active_requests.discard(output.request_id)
-                        # Use helper to finalize the sub-request
                         total_processed += self._finalize_sub_request(
                             output.request_id, output, complete_output, current_time
                         )
