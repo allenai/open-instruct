@@ -472,6 +472,8 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
+        assert False, "I am a fake error."
+
         num_processed = self.fill_engine(timeout=timeout)
 
         if num_processed == 0:
