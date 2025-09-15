@@ -454,6 +454,7 @@ class LLMRayActor:
         Returns:
             int: Number of requests added to the engine
         """
+        logger.info(f"[LLMRayActor] fill_engine called with timeout={timeout}")
         num_added = 0
         should_stop = self._should_stop()
         if should_stop:

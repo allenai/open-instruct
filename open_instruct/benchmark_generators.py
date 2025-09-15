@@ -742,7 +742,14 @@ def run_benchmark(
     # Create individual PromptRequest for each warmup prompt
     for i, prompt in enumerate(warmup_prompts):
         dataset_index = warmup_start_idx + i
+        try:
+            qsize = param_prompt_Q.qsize()
+            logger.info(f"Queue size before put: {qsize}")
+        except Exception as e:
+            logger.info(f"Could not get queue size: {e}")
+
         logger.info(f"Putting warmup prompt {i + 1}/{len(warmup_prompts)} into queue (dataset_index={dataset_index})")
+        start_put = time.perf_counter()
         param_prompt_Q.put(
             PromptRequest(
                 prompt=prompt,
@@ -751,6 +758,8 @@ def run_benchmark(
                 start_time=time.perf_counter(),
             )
         )
+        put_time = time.perf_counter() - start_put
+        logger.info(f"Successfully put prompt {i + 1}/{len(warmup_prompts)} into queue (took {put_time:.3f}s)")
     logger.info(f"All {len(warmup_prompts)} warmup prompts submitted to queue")
     model_dims = load_model_dims(model_config.model_name_or_path)
 
