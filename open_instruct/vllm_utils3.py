@@ -199,47 +199,6 @@ def _process_outputs(
     )
 
 
-def _process_outputs_with_tools(
-    outputs: List[vllm.RequestOutput],
-    dataset_index: Optional[List[int]] = None,
-    token_statistics: Optional[TokenStatistics] = None,
-    start_time: Optional[float] = None,
-) -> "GenerationResult":
-    """Process vLLM RequestOutputs into GenerationResult format with tool information."""
-    response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
-    finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
-
-    masks = [out.mask for output in outputs for out in output.outputs]
-
-    num_calls = [out.num_calls for output in outputs for out in output.outputs]
-    timeouts = [out.timeout for output in outputs for out in output.outputs]
-    tool_errors = [out.tool_error for output in outputs for out in output.outputs]
-    tool_outputs = [out.tool_output for output in outputs for out in output.outputs]
-    tool_runtimes = [out.tool_runtime for output in outputs for out in output.outputs]
-    tool_calleds = [out.tool_called for output in outputs for out in output.outputs]
-
-    request_info = RequestInfo(
-        num_calls=num_calls,
-        timeouts=timeouts,
-        tool_errors=tool_errors,
-        tool_outputs=tool_outputs,
-        tool_runtimes=tool_runtimes,
-        tool_calleds=tool_calleds,
-    )
-
-    result = GenerationResult(
-        responses=response_ids,
-        finish_reasons=finish_reasons,
-        masks=masks,
-        request_info=request_info,
-        dataset_index=dataset_index,
-        token_statistics=token_statistics,
-        start_time=start_time,
-    )
-
-    return result
-
-
 def _finalize_outputs(
     output: vllm.RequestOutput,
     tracking: Dict[str, Any],
@@ -262,21 +221,13 @@ def _finalize_outputs(
             use_tools=False,
         )
 
-    # Tool mode: add metadata to sub-request outputs and merge them
-    request_id = output.request_id
-
     # Collect all sub-request outputs for this request
     all_outputs = []
     for j in range(original_sampling_params.n):
-        sub_req_id = f"{request_id}_{j}"
-
-        # Get the concatenated output for this sub-request
-        if sub_req_id not in tracking["concat_outputs"]:
-            raise ValueError(f"Missing output for sub-request {sub_req_id}")
-
-        sub_output = tracking["concat_outputs"][sub_req_id].outputs[0]
+        sub_req_id = f"{output.request_id}_{j}"
 
         # Set tool metadata attributes on the output
+        sub_output = tracking["concat_outputs"][sub_req_id].outputs[0]
         setattr(sub_output, "mask", tracking["masks"][sub_req_id])
         setattr(sub_output, "num_calls", tracking["num_calls"][sub_req_id])
         setattr(sub_output, "timeout", tracking["timeout"][sub_req_id])
@@ -289,7 +240,7 @@ def _finalize_outputs(
 
     # Create merged output with all sub-request outputs
     merged_output = vllm.RequestOutput(
-        request_id=request_id,
+        request_id=output.request_id,
         prompt=output.prompt,
         prompt_token_ids=output.prompt_token_ids,
         prompt_logprobs=output.prompt_logprobs,
@@ -562,16 +513,13 @@ class LLMRayActor:
             total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
             metadata = self.request_metadata.pop(request_id)
 
-            # Need to get original_sampling_params - check if it's stored in metadata
-            original_sampling_params = metadata.get("sampling_params", vllm.SamplingParams(n=1))
-
             result = _finalize_outputs(
                 final_output,
                 tracking,
                 metadata["dataset_index"],
                 metadata["training_step"],
                 self.tools,
-                original_sampling_params,
+                metadata["sampling_params"],
                 TokenStatistics(
                     num_prompt_tokens=metadata["prompt_tokens"],
                     num_response_tokens=total_generation_tokens,
