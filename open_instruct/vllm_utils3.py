@@ -838,7 +838,12 @@ class LLMRayActor:
                         f"Too many samples for {base_req_id}: expected ≤{expected_samples}, got {current_samples_after} (was {current_samples_before} before). Keys: {[k for k in self.tracking['concat_outputs'].keys() if _extract_base_request_id(k) == base_req_id]}"
                     )
                     # Result is None when we do more tool processing.
-                    if result is not None:
+                    if result is None:
+                        # Request went to tools - remove from vllm_active_requests since it's no longer in vLLM
+                        del self.vllm_active_requests[output.request_id]
+                        if self.verbose:
+                            self.logger.info(f"Removed {output.request_id} from vllm_active_requests (sent to tools)")
+                    else:
                         # Sub-request is done (no more tool calls)
 
                         # Get the CompletionOutput to add
