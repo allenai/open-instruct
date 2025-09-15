@@ -521,7 +521,6 @@ def add_request(
     vllm_active_requests: dict = None,
 ) -> int:
     """Add a request to the LLM engine."""
-    prefix = "eval" if request.is_eval else "train"
     sampling_params = request.generation_config.clone()
     sampling_params.n = 1  # Use n=1 for tool processing
     request_id = make_request_id(request)
@@ -681,9 +680,6 @@ class LLMRayActor:
                 )
 
                 # Validate sub-request counts after adding
-                prefix = "eval" if request.is_eval else "train"
-                request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
-
                 if self.verbose and num_added > 0:
                     self.logger.info(
                         f"Prefetch worker: added {num_added} requests directly to engine, "
@@ -1163,11 +1159,6 @@ class LLMRayActor:
 
         self._insert_result_to_queue(result, is_eval=is_eval)
 
-        # Clean up request tracking for this dataset_index
-        # Build tracking key from training_step and dataset_index
-        # IMPORTANT: Get training_step BEFORE cleanup_request_data removes metadata
-        training_step = self.request_metadata[request_id]["training_step"]
-
         # Clean up metadata and tracking for this request after enqueuing
         self._cleanup_request_data(request_id, tracking)
 
@@ -1423,15 +1414,6 @@ class LLMRayActor:
         # Remove the futures we just processed; do NOT clean up metadata here.
         for req_id in dict_keys_to_delete:
             tracking["pending_tool_futures"].pop(req_id, None)
-
-        # Now validate after ALL removals are complete
-        for req_id in dict_keys_to_delete:
-            base_req_id = _extract_base_request_id(req_id)
-            # Check if this was re-added to vLLM or finalized
-            if req_id in self.vllm_active_requests:
-                context = f"After moving {req_id} from tools back to vLLM"
-            else:
-                context = f"After finalizing {req_id} from tools"
 
         return completed_outputs
 
