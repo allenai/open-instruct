@@ -2788,7 +2788,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     queue_size = (args.async_steps + 1) * args.num_unique_prompts_rollout
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
-    # We don't really care if we ever hit the max, so we let the queue be unbounded.
+    # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
 
     policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (

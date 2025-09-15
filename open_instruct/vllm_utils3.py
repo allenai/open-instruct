@@ -89,6 +89,23 @@ def _init_tool_tracking():
     }
 
 
+def make_request_id(request: PromptRequest) -> str:
+    """Generate a unique tracking key for a request."""
+    prefix = "eval" if request.is_eval else "train"
+    return f"{prefix}_{request.training_step}_{request.dataset_index}"
+
+
+def _extract_base_request_id(full_request_id: str) -> str:
+    """Extract base request ID by removing the sample suffix.
+
+    >>> _extract_base_request_id("train_1_43039_0")
+    'train_1_43039'
+    >>> _extract_base_request_id("eval_5_12345_2")
+    'eval_5_12345'
+    """
+    return "_".join(full_request_id.split("_")[:-1])
+
+
 def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, executor):
     """
     Handle a finished output. Returns the output if it should be added to results,
@@ -207,7 +224,6 @@ def _finalize_outputs(
         start_time=start_time,
         use_tools=bool(tools),
     )
-
 
 def _process_completed_request(request_id, outs, tracking, current_time, tools, request_metadata):
     """Process a completed request with all its samples and return the result.
@@ -423,7 +439,8 @@ class LLMRayActor:
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
-            self.logger.info(f"creating LLM with bundle_indices={bundle_indices}")
+            if self.verbose:
+                self.logger.info(f"creating LLM with bundle_indices={bundle_indices}")
 
         engine_args = vllm.EngineArgs(*args, **kwargs)
         # Log stats causes a crash in the engine at assert outputs.scheduler_stats is not None when we call step() and there is nothing to step.
@@ -873,7 +890,6 @@ class LLMRayActor:
             tool_result = future.result()  # Get the tool result
 
             # Get sampling params from request metadata for this request
-            # Extract the base request ID by removing the sub-request suffix
             base_req_id = _extract_base_request_id(req_id)
             sampling_params = self.request_metadata[base_req_id]["sampling_params"]
 
