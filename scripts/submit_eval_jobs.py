@@ -71,7 +71,7 @@ WEKA_CLUSTERS = [
     "ai2/ceres"
 ]
 GCP_CLUSTERS = [
-    "ai2/augusta-google-1"
+    "ai2/augusta"
 ]
 
 
