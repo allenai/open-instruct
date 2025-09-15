@@ -559,16 +559,19 @@ class LLMRayActor:
             return 0
 
         # At this point we have all outputs ready. Build ordered outputs for processing.
-        # The outputs in request_outputs[request_id].outputs should already have correct indices
+        # First organize available_outputs into a dictionary for O(1) lookup
+        outputs_by_index = {o.index: o for o in available_outputs if hasattr(o, "index")}
+
+        # Verify we have all required outputs before proceeding
+        if len(outputs_by_index) != expected_n or any(j not in outputs_by_index for j in range(expected_n)):
+            self.logger.warning(
+                f"Incomplete or malformed outputs for {request_id}. "
+                f"Expected {expected_n} samples, got indices {sorted(outputs_by_index.keys())}. Skipping."
+            )
+            return 0
+
         ordered_outs: List[vllm.RequestOutput] = []
         for j in range(expected_n):
-            # Find the output with index j
-            matching_output = None
-            for comp_output in available_outputs:
-                if hasattr(comp_output, "index") and comp_output.index == j:
-                    matching_output = comp_output
-                    break
-
             # Create a RequestOutput wrapper for each CompletionOutput
             ordered_outs.append(
                 vllm.RequestOutput(
@@ -576,7 +579,7 @@ class LLMRayActor:
                     prompt=request_outputs[request_id].prompt,
                     prompt_token_ids=request_outputs[request_id].prompt_token_ids,
                     prompt_logprobs=request_outputs[request_id].prompt_logprobs,
-                    outputs=[matching_output],
+                    outputs=[outputs_by_index[j]],
                     finished=True,
                 )
             )
