@@ -82,6 +82,12 @@ def _init_tool_tracking():
     }
 
 
+def make_request_id(request: PromptRequest) -> str:
+    """Generate a unique tracking key for a request."""
+    prefix = "eval" if request.is_eval else "train"
+    return f"{prefix}_{request.training_step}_{request.dataset_index}"
+
+
 def _extract_base_request_id(full_request_id: str) -> str:
     """Extract base request ID by removing the sample suffix.
 
@@ -131,43 +137,66 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
 
 def _process_outputs(
-    outputs: List[vllm.RequestOutput],
-    dataset_index: Optional[List[int]] = None,
-    token_statistics: Optional[TokenStatistics] = None,
-    start_time: Optional[float] = None,
+    output: vllm.RequestOutput,
+    dataset_index: int,
+    training_step: int,
+    token_statistics: TokenStatistics,
+    start_time: float,
+    use_tools: bool = False,
 ) -> "GenerationResult":
-    """Process vLLM RequestOutputs into GenerationResult format."""
-    response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
-    finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
+    """Process a vLLM RequestOutput into GenerationResult format.
 
-    masks = [[1] * len(resp) for resp in response_ids]
-    num_calls = [0] * len(response_ids)
-    timeouts = [0] * len(response_ids)
-    tool_errors = [""] * len(response_ids)
-    tool_outputs = [""] * len(response_ids)
-    tool_runtimes = [0] * len(response_ids)
-    tool_calleds = [False] * len(response_ids)
+    Args:
+        output: The vLLM request output to process
+        dataset_index: Index in the dataset
+        training_step: Current training step
+        token_statistics: Token usage statistics
+        start_time: Request start time
+        use_tools: Whether tools are being used
 
-    request_info = RequestInfo(
-        num_calls=num_calls,
-        timeouts=timeouts,
-        tool_errors=tool_errors,
-        tool_outputs=tool_outputs,
-        tool_runtimes=tool_runtimes,
-        tool_calleds=tool_calleds,
-    )
+    Returns:
+        GenerationResult containing processed outputs
+    """
+    response_ids = [list(out.token_ids) for out in output.outputs]
+    finish_reasons = [out.finish_reason for out in output.outputs]
 
-    result = GenerationResult(
+    # Extract attributes based on whether tools are used
+    if use_tools:
+        # Extract tool-specific attributes from outputs
+        masks = [getattr(out, "mask", [1] * len(out.token_ids)) for out in output.outputs]
+        num_calls = [getattr(out, "num_calls", 0) for out in output.outputs]
+        timeouts = [getattr(out, "timeout", False) for out in output.outputs]
+        tool_errors = [getattr(out, "tool_error", "") for out in output.outputs]
+        tool_outputs = [getattr(out, "tool_output", "") for out in output.outputs]
+        tool_runtimes = [getattr(out, "tool_runtime", 0.0) for out in output.outputs]
+        tool_calleds = [getattr(out, "tool_called", False) for out in output.outputs]
+    else:
+        # Use default values when tools are not used
+        masks = [[1] * len(resp) for resp in response_ids]
+        num_calls = [0] * len(response_ids)
+        timeouts = [False] * len(response_ids)
+        tool_errors = [""] * len(response_ids)
+        tool_outputs = [""] * len(response_ids)
+        tool_runtimes = [0.0] * len(response_ids)
+        tool_calleds = [False] * len(response_ids)
+
+    return GenerationResult(
         responses=response_ids,
         finish_reasons=finish_reasons,
         masks=masks,
-        request_info=request_info,
+        request_info=RequestInfo(
+            num_calls=num_calls,
+            timeouts=timeouts,
+            tool_errors=tool_errors,
+            tool_outputs=tool_outputs,
+            tool_runtimes=tool_runtimes,
+            tool_calleds=tool_calleds,
+        ),
         dataset_index=dataset_index,
+        training_step=training_step,
         token_statistics=token_statistics,
         start_time=start_time,
     )
-
-    return result
 
 
 def _process_outputs_with_tools(
@@ -211,45 +240,70 @@ def _process_outputs_with_tools(
     return result
 
 
-def _finalize_outputs(outputs, tracking, dataset_index, tools, token_statistics=None, start_time=None):
+def _finalize_outputs(
+    output: vllm.RequestOutput,
+    tracking: Dict[str, Any],
+    dataset_index: int,
+    training_step: int,
+    tools: Optional[Dict[str, Tool]],
+    original_sampling_params: vllm.SamplingParams,
+    token_statistics: TokenStatistics,
+    start_time: float,
+) -> GenerationResult:
     """Prepare final outputs based on whether tools were used."""
+
     if not tools:
         return _process_outputs(
-            outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
+            output,
+            dataset_index=dataset_index,
+            training_step=training_step,
+            token_statistics=token_statistics,
+            start_time=start_time,
+            use_tools=False,
         )
 
-    # Tool mode: add metadata and merge completions
-    for req_id in tracking["masks"]:
-        assert req_id in tracking["concat_outputs"], f"req_id {req_id} not in concat_outputs!"
-        output = tracking["concat_outputs"][req_id].outputs[0]
-        setattr(output, "mask", tracking["masks"][req_id])
-        setattr(output, "num_calls", tracking["num_calls"][req_id])
-        setattr(output, "timeout", tracking["timeout"][req_id])
-        setattr(output, "tool_error", tracking["tool_error"][req_id])
-        setattr(output, "tool_output", tracking["tool_output"][req_id])
-        setattr(output, "tool_runtime", tracking["tool_runtime"][req_id])
-        setattr(output, "tool_called", tracking["tool_called"][req_id])
+    # Tool mode: add metadata to sub-request outputs and merge them
+    request_id = output.request_id
 
-    # Merge n completions into the same outputs
-    # Filter tracking data to only include the current request
-    request_id = outputs[0].request_id
-    relevant_outputs = {k: v for k, v in tracking["concat_outputs"].items() if k.startswith(request_id + "_")}
+    # Collect all sub-request outputs for this request
+    all_outputs = []
+    for j in range(original_sampling_params.n):
+        sub_req_id = f"{request_id}_{j}"
 
-    merged_outputs = {}
-    for req_id, output in relevant_outputs.items():
-        real_req_id = "_".join(req_id.split("_")[:-1])
-        if real_req_id not in merged_outputs:
-            merged_outputs[real_req_id] = output
-        else:
-            merged_outputs[real_req_id].outputs.extend(output.outputs)
+        # Get the concatenated output for this sub-request
+        if sub_req_id not in tracking["concat_outputs"]:
+            raise ValueError(f"Missing output for sub-request {sub_req_id}")
 
-    # Sort by dataset index (extracted from request_id format: "{prefix}_{training_step}_{dataset_index}")
-    final_outputs = sorted(
-        merged_outputs.values(), key=lambda x: (int(x.request_id.split("_")[1]), int(x.request_id.split("_")[2]))
+        sub_output = tracking["concat_outputs"][sub_req_id].outputs[0]
+
+        # Set tool metadata attributes on the output
+        setattr(sub_output, "mask", tracking["masks"][sub_req_id])
+        setattr(sub_output, "num_calls", tracking["num_calls"][sub_req_id])
+        setattr(sub_output, "timeout", tracking["timeout"][sub_req_id])
+        setattr(sub_output, "tool_error", tracking["tool_error"][sub_req_id])
+        setattr(sub_output, "tool_output", tracking["tool_output"][sub_req_id])
+        setattr(sub_output, "tool_runtime", tracking["tool_runtime"][sub_req_id])
+        setattr(sub_output, "tool_called", tracking["tool_called"][sub_req_id])
+
+        all_outputs.append(sub_output)
+
+    # Create merged output with all sub-request outputs
+    merged_output = vllm.RequestOutput(
+        request_id=request_id,
+        prompt=output.prompt,
+        prompt_token_ids=output.prompt_token_ids,
+        prompt_logprobs=output.prompt_logprobs,
+        outputs=all_outputs,
+        finished=output.finished,
     )
 
-    return _process_outputs_with_tools(
-        final_outputs, dataset_index=dataset_index, token_statistics=token_statistics, start_time=start_time
+    return _process_outputs(
+        merged_output,
+        dataset_index=dataset_index,
+        training_step=training_step,
+        token_statistics=token_statistics,
+        start_time=start_time,
+        use_tools=True,
     )
 
 
@@ -334,8 +388,7 @@ def init_process_group(
 
 def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, request_metadata: dict):
     """Add a request to the LLM engine."""
-    prefix = "eval" if request.is_eval else "train"
-    request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
+    request_id = make_request_id(request)
     sampling_params = request.generation_config.clone()
     sampling_params.n = 1  # Use n=1 for tool processing
     request_metadata[request_id] = {
@@ -431,16 +484,9 @@ class LLMRayActor:
         return self._should_stop_value
 
     def _insert_result_to_queue(self, result, is_eval: bool):
-        """Insert result into the appropriate queue with error handling."""
+        """Insert result into the appropriate queue with blocking put."""
         results_queue = self.eval_results_queue if is_eval else self.results_queue
-        timeout = 10
-        while True:
-            try:
-                results_queue.put(result, timeout=timeout)
-            except queue.Full:
-                queue_name = "eval" if is_eval else "train"
-                self.logger.warning(f"{queue_name} queue is full when trying to insert result. Retrying...")
-                continue
+        results_queue.put(result)
 
     def fill_engine(self, timeout: float):
         """Fill the LLM engine queue with requests until inference_batch_size is reached.
@@ -483,7 +529,7 @@ class LLMRayActor:
             if self.llm_engine.has_unfinished_requests():
                 step_outputs = [o for o in self.llm_engine.step() if o.finished]
                 for output in step_outputs:
-                    base_req_id = "_".join(output.request_id.split("_")[:-1])
+                    base_req_id = _extract_base_request_id(output.request_id)
                     result = _handle_output(
                         output,
                         self.tools,
@@ -502,7 +548,7 @@ class LLMRayActor:
         end_time = time.time()
         request_outputs = defaultdict(list)
         for output in outputs:
-            request_id = "_".join(output.request_id.split("_")[:-1])
+            request_id = _extract_base_request_id(output.request_id)
             request_outputs[request_id].append(output)
         for request_id, outs in request_outputs.items():
             final_output = vllm.RequestOutput(
@@ -515,17 +561,23 @@ class LLMRayActor:
             )
             total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
             metadata = self.request_metadata.pop(request_id)
+
+            # Need to get original_sampling_params - check if it's stored in metadata
+            original_sampling_params = metadata.get("sampling_params", vllm.SamplingParams(n=1))
+
             result = _finalize_outputs(
-                [final_output],
+                final_output,
                 tracking,
                 metadata["dataset_index"],
+                metadata["training_step"],
                 self.tools,
-                token_statistics=TokenStatistics(
+                original_sampling_params,
+                TokenStatistics(
                     num_prompt_tokens=metadata["prompt_tokens"],
                     num_response_tokens=total_generation_tokens,
                     generation_time=end_time - metadata["start_time"],
                 ),
-                start_time=metadata["start_time"],
+                metadata["start_time"],
             )
             self._insert_result_to_queue(result, is_eval=metadata["is_eval"])
 
@@ -547,8 +599,7 @@ class LLMRayActor:
             tool_result = future.result()  # Get the tool result
 
             # Get sampling params from request metadata for this request
-            # Extract the base request ID by removing the sub-request suffix
-            base_req_id = "_".join(req_id.split("_")[:-1])
+            base_req_id = _extract_base_request_id(req_id)
             sampling_params = self.request_metadata[base_req_id]["sampling_params"]
 
             last_prompt_token_ids = last_output.prompt_token_ids
