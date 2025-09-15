@@ -12,7 +12,7 @@ import vllm
 from parameterized import parameterized
 
 from open_instruct.queue_types import PromptRequest, TokenStatistics
-from open_instruct.vllm_utils3 import LLMRayActor, _extract_base_request_id, _finalize_outputs, _init_tool_tracking, make_request_id
+from open_instruct.vllm_utils3 import LLMRayActor, _extract_base_request_id, _init_tool_tracking, process_outputs
 
 
 class FakeTool:
@@ -183,6 +183,12 @@ class TestVLLMUtils3New(unittest.TestCase):
         # Create output without tool call
         mock_output = FakeCompletionOutput(text="Normal output", token_ids=[4, 5, 6], finish_reason="stop")
         mock_output.mask = [1, 1, 1]
+        mock_output.num_calls = 0
+        mock_output.timeout = False
+        mock_output.tool_error = ""
+        mock_output.tool_output = ""
+        mock_output.tool_runtime = 0.0
+        mock_output.tool_called = False
 
         mock_request = FakeRequestOutput(sub_request_id, [mock_output], finished=True)
         mock_request.prompt = "test prompt"
@@ -198,18 +204,16 @@ class TestVLLMUtils3New(unittest.TestCase):
         tracking["tool_runtime"][sub_request_id] = 0.0
         tracking["tool_called"][sub_request_id] = False
 
-        # Call finalize with properly structured tracking
-        # Note: _finalize_outputs expects the base request ID from output
+        # Call process_outputs with properly structured tracking
+        # Note: process_outputs expects the base request ID from output
         mock_request.request_id = request_id  # Use base request ID, not sub-request ID
-        result = _finalize_outputs(
+        result = process_outputs(
             output=mock_request,
-            tracking=tracking,
             dataset_index=0,
             training_step=1,
-            tools=actor.tools,
-            original_sampling_params=actor.request_metadata[request_id]["original_sampling_params"],
             token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=3, generation_time=1.0),
             start_time=1000.0,
+            use_tools=bool(actor.tools),
         )
 
         # Assertions
@@ -247,6 +251,12 @@ class TestVLLMUtils3New(unittest.TestCase):
                 text=f"Output {i}", token_ids=[4 + i, 5 + i, 6 + i], finish_reason="stop"
             )
             mock_output.mask = [1, 1, 1]
+            mock_output.num_calls = 0
+            mock_output.timeout = False
+            mock_output.tool_error = ""
+            mock_output.tool_output = ""
+            mock_output.tool_runtime = 0.0
+            mock_output.tool_called = False
 
             mock_request = FakeRequestOutput(sub_id, [mock_output], finished=True)
             mock_request.prompt = "test prompt"
@@ -264,14 +274,12 @@ class TestVLLMUtils3New(unittest.TestCase):
         # Use the first request for finalization
         first_request = tracking["concat_outputs"][f"{request_id}_0"]
         first_request.request_id = request_id  # Use base request ID
-        result = _finalize_outputs(
+        result = process_outputs(
             output=first_request,
-            tracking=tracking,
             dataset_index=0,
-            tools=actor.tools,
-            original_sampling_params=actor.request_metadata[request_id]["original_sampling_params"],
             token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=9, generation_time=1.0),
             start_time=1000.0,
+            use_tools=bool(actor.tools),
         )
 
         # Assertions
@@ -335,6 +343,13 @@ class TestVLLMUtils3New(unittest.TestCase):
                 text=f"Engine output {i}", token_ids=[10 + i, 11 + i, 12 + i], finish_reason="stop"
             )
             mock_output.mask = [1, 1, 1]
+            mock_output.num_calls = 0
+            mock_output.timeout = False
+            mock_output.tool_error = ""
+            mock_output.tool_output = ""
+            mock_output.tool_runtime = 0.0
+            mock_output.tool_called = False
+
             mock_request = FakeRequestOutput(sub_id, [mock_output], finished=True)
             mock_request.prompt = "test prompt"
             mock_request.prompt_token_ids = [1, 2, 3]
@@ -381,15 +396,13 @@ class TestVLLMUtils3New(unittest.TestCase):
         merged_output.prompt_token_ids = [1, 2, 3]
 
         # Finalize - now just passes through since metadata is already attached
-        result = _finalize_outputs(
+        result = process_outputs(
             output=merged_output,
-            tracking=tracking,
             dataset_index=0,
             training_step=1,
-            tools=actor.tools,
-            original_sampling_params=actor.request_metadata[request_id]["original_sampling_params"],
             token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=15, generation_time=1.0),
             start_time=1000.0,
+            use_tools=True,
         )
 
         # Assertions
@@ -439,6 +452,12 @@ class TestVLLMUtils3New(unittest.TestCase):
             text="<tool>tool</tool>input", token_ids=expected_tokens, finish_reason="stop"
         )
         mock_output.mask = expected_mask
+        mock_output.num_calls = 1
+        mock_output.timeout = False
+        mock_output.tool_error = ""
+        mock_output.tool_output = "TOOL_OUTPUT_LONG"
+        mock_output.tool_runtime = 0.1
+        mock_output.tool_called = True
 
         mock_request = FakeRequestOutput(sub_id, [mock_output], finished=True)
         mock_request.prompt = "test prompt"
@@ -454,14 +473,12 @@ class TestVLLMUtils3New(unittest.TestCase):
         tracking["tool_error"][sub_id] = ""
 
         mock_request.request_id = request_id  # Use base request ID
-        result = _finalize_outputs(
+        result = process_outputs(
             output=mock_request,
-            tracking=tracking,
             dataset_index=0,
-            tools=actor.tools,
-            original_sampling_params=actor.request_metadata[request_id]["original_sampling_params"],
             token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=10, generation_time=1.0),
             start_time=1000.0,
+            use_tools=True,
         )
 
         # Assertions
@@ -510,6 +527,12 @@ class TestVLLMUtils3New(unittest.TestCase):
             text="<tool>tool</tool>input", token_ids=expected_tokens, finish_reason="stop"
         )
         mock_output.mask = expected_mask
+        mock_output.num_calls = 1
+        mock_output.timeout = False
+        mock_output.tool_error = ""
+        mock_output.tool_output = "TOOL_OUTPUT_LONG"
+        mock_output.tool_runtime = 0.1
+        mock_output.tool_called = True
 
         mock_request = FakeRequestOutput(sub_id, [mock_output], finished=True)
         mock_request.prompt = "test prompt"
@@ -525,14 +548,12 @@ class TestVLLMUtils3New(unittest.TestCase):
         tracking["tool_error"][sub_id] = ""
 
         mock_request.request_id = request_id  # Use base request ID
-        result = _finalize_outputs(
+        result = process_outputs(
             output=mock_request,
-            tracking=tracking,
             dataset_index=0,
-            tools=actor.tools,
-            original_sampling_params=actor.request_metadata[request_id]["original_sampling_params"],
             token_statistics=TokenStatistics(num_prompt_tokens=5, num_response_tokens=10, generation_time=1.0),
             start_time=1000.0,
+            use_tools=True,
         )
 
         # Assertions
@@ -565,6 +586,12 @@ class TestVLLMUtils3New(unittest.TestCase):
 
         mock_output = FakeCompletionOutput(text="<tool>tool</tool>input", token_ids=[4, 5, 6], finish_reason="stop")
         mock_output.mask = [1, 1, 1]
+        mock_output.num_calls = 1
+        mock_output.timeout = False
+        mock_output.tool_error = ""
+        mock_output.tool_output = "TOOL_OUTPUT_LONG"
+        mock_output.tool_runtime = 0.1
+        mock_output.tool_called = True
 
         mock_request = FakeRequestOutput(sub_id, [mock_output], finished=True)
         mock_request.prompt = "test prompt"
@@ -589,15 +616,13 @@ class TestVLLMUtils3New(unittest.TestCase):
         setattr(mock_output, "tool_called", tracking["tool_called"][sub_id])
 
         mock_request.request_id = request_id  # Use base request ID
-        result = _finalize_outputs(
+        result = process_outputs(
             output=mock_request,
-            tracking=tracking,
             dataset_index=0,
             training_step=1,
-            tools=actor.tools,
-            original_sampling_params=actor.request_metadata[request_id]["original_sampling_params"],
             token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=3, generation_time=1.0),
             start_time=1000.0,
+            use_tools=True,
         )
 
         # Assertions
@@ -778,6 +803,12 @@ class TestVLLMUtils3New(unittest.TestCase):
                 text=f"Output {i}", token_ids=[4 + i, 5 + i, 6 + i], finish_reason="stop"
             )
             mock_output.mask = [1, 1, 1]
+            mock_output.num_calls = 0
+            mock_output.timeout = False
+            mock_output.tool_error = ""
+            mock_output.tool_output = ""
+            mock_output.tool_runtime = 0.0
+            mock_output.tool_called = False
 
             mock_request = FakeRequestOutput(sub_id, [mock_output], finished=True)
             mock_request.prompt = "test prompt"
@@ -812,7 +843,7 @@ class TestVLLMUtils3New(unittest.TestCase):
         # Now the first 3 sub-requests have 2 outputs each (1 original + 1 duplicate)
         # So we'd have 3*2 + 1 = 7 outputs total when we expect 4
 
-        # With our simplified implementation, _finalize_outputs just passes through
+        # With our simplified implementation, process_outputs just passes through
         # the outputs it receives. It doesn't collect from tracking anymore.
         # So we need to build an output with the wrong number of samples to test the error.
 
@@ -835,20 +866,18 @@ class TestVLLMUtils3New(unittest.TestCase):
         wrong_output.prompt = "test prompt"
         wrong_output.prompt_token_ids = [1, 2, 3]
 
-        # Call _finalize_outputs - it will now pass through to _process_outputs
+        # Call process_outputs - it will now pass through to process_outputs
         # which should detect the mismatch
-        result = _finalize_outputs(
+        result = process_outputs(
             output=wrong_output,
-            tracking=tracking,
             dataset_index=43039,
             training_step=1,
-            tools=actor.tools,
-            original_sampling_params=actor.request_metadata[request_id]["original_sampling_params"],
             token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=21, generation_time=1.0),
             start_time=1000.0,
+            use_tools=True,
         )
 
-        # With the simplified implementation, _finalize_outputs just passes through
+        # With the simplified implementation, process_outputs just passes through
         # So we should get a result with 7 responses
         self.assertEqual(len(result.responses), 7)
 
@@ -879,6 +908,12 @@ class TestVLLMUtils3New(unittest.TestCase):
             text="Normal output without tool call", token_ids=[4, 5, 6], finish_reason="stop"
         )
         mock_output.mask = [1, 1, 1]
+        mock_output.num_calls = 1
+        mock_output.timeout = False
+        mock_output.tool_error = ""
+        mock_output.tool_output = "TOOL_OUTPUT_LONG"
+        mock_output.tool_runtime = 0.1
+        mock_output.tool_called = True
 
         mock_request = FakeRequestOutput(sub_id, [mock_output], finished=True)
         mock_request.prompt = "test prompt"
@@ -894,7 +929,7 @@ class TestVLLMUtils3New(unittest.TestCase):
         tracking["tool_runtime"][sub_id] = 0.0
         tracking["timeout"][sub_id] = False
 
-        # Attach metadata to the output before calling _finalize_outputs
+        # Attach metadata to the output before calling process_outputs
         setattr(mock_output, "mask", tracking["masks"][sub_id])
         setattr(mock_output, "num_calls", tracking["num_calls"][sub_id])
         setattr(mock_output, "timeout", tracking["timeout"][sub_id])
@@ -905,15 +940,13 @@ class TestVLLMUtils3New(unittest.TestCase):
 
         # This should NOT raise "No outputs found" error
         mock_request.request_id = request_id  # Use base request ID
-        result = _finalize_outputs(
+        result = process_outputs(
             output=mock_request,
-            tracking=tracking,
             dataset_index=0,
             training_step=1,
-            tools=actor.tools,
-            original_sampling_params=actor.request_metadata[request_id]["original_sampling_params"],
             token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=3, generation_time=1.0),
             start_time=1000.0,
+            use_tools=True,
         )
 
         # Assertions
@@ -931,8 +964,8 @@ class TestVllmUtils3(unittest.TestCase):
     def tearDown(self):
         logging.disable(logging.NOTSET)
 
-    def test_finalize_outputs_with_tools_merging(self):
-        """Test that _finalize_outputs correctly merges multiple samples from same prompt.
+    def testprocess_outputs_with_tools_merging(self):
+        """Test that process_outputs correctly merges multiple samples from same prompt.
 
         This test reproduces the bug where responses from different prompts
         could get incorrectly merged due to request_id sorting issues.
@@ -991,6 +1024,7 @@ class TestVllmUtils3(unittest.TestCase):
         tracking["tool_called"][req_id_1] = True
         tracking["tool_called"][req_id_2] = True
 
+<<<<<<< HEAD
         # Create a mock output and sampling params
         mock_output = MagicMock(spec=vllm.RequestOutput)
         mock_output.request_id = "train_1_43039"
@@ -1002,17 +1036,26 @@ class TestVllmUtils3(unittest.TestCase):
 
         mock_sampling_params = MagicMock(spec=vllm.SamplingParams)
         mock_sampling_params.n = 2  # Two samples per prompt
+=======
+        # Create a merged request output with both samples
+        merged_output = MagicMock(spec=vllm.RequestOutput)
+        merged_output.request_id = "train_1_43039"
+        merged_output.outputs = [mock_output1, mock_output2]  # Both samples
+>>>>>>> c5f0dbb4 (Removed _finalize_outputs, renamed process_outputs.)
 
         # Call the function under test
-        result = _finalize_outputs(
-            output=mock_request_output1,
-            tracking=tracking,
+        result = process_outputs(
+            output=merged_output,
             dataset_index=43039,
             training_step=1,
+<<<<<<< HEAD
             tools={"some_tool": {}},  # Tools enabled
             original_sampling_params=mock_sampling_params,
+=======
+>>>>>>> c5f0dbb4 (Removed _finalize_outputs, renamed process_outputs.)
             token_statistics=TokenStatistics(num_prompt_tokens=10, num_response_tokens=6, generation_time=1.0),
             start_time=1000.0,
+            use_tools=True,
         )
 
         # Verify that we get exactly one result (one prompt)
@@ -1027,7 +1070,7 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.masks[0], [1, 1, 1])
         self.assertEqual(result.masks[1], [1, 1, 1])
 
-    def test_finalize_outputs_request_id_sorting(self):
+    def testprocess_outputs_request_id_sorting(self):
         """Test that request IDs are sorted correctly by training_step and dataset_index."""
         tracking = _init_tool_tracking()
 
@@ -1066,6 +1109,7 @@ class TestVllmUtils3(unittest.TestCase):
             tracking["tool_runtime"][sample_req_id] = 0.1
             tracking["tool_called"][sample_req_id] = True
 
+<<<<<<< HEAD
         # Create a mock output and sampling params
         mock_final_output = MagicMock(spec=vllm.RequestOutput)
         mock_final_output.request_id = base_request_id
@@ -1089,10 +1133,29 @@ class TestVllmUtils3(unittest.TestCase):
             training_step=1,
             tools={"some_tool": {}},
             original_sampling_params=mock_sampling_params,
+=======
+        # Create a merged output with all samples
+        merged_output = MagicMock(spec=vllm.RequestOutput)
+        merged_output.request_id = base_request_id
+        merged_output.outputs = []
+
+        # Add outputs in the order they appear in tracking
+        for sample_idx in sample_indices:
+            sample_req_id = f"{base_request_id}_{sample_idx}"
+            if sample_req_id in tracking["concat_outputs"]:
+                merged_output.outputs.append(tracking["concat_outputs"][sample_req_id].outputs[0])
+
+        result = process_outputs(
+            output=merged_output,
+            dataset_index=100,  # Single dataset index for this request
+            training_step=1,
+>>>>>>> c5f0dbb4 (Removed _finalize_outputs, renamed process_outputs.)
             token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=6, generation_time=1.0),
             start_time=1000.0,
+            use_tools=True,
         )
 
+<<<<<<< HEAD
         # Results should be sorted by sample index (0, 1, 2) regardless of insertion order
         # The function now correctly sorts by sample index, not tracking insertion order
         # Sample 0 has tokens [1, 2], sample 1 has tokens [5, 6], sample 2 has tokens [3, 4]
@@ -1151,6 +1214,13 @@ class TestVllmUtils3(unittest.TestCase):
         # Extract base should give us back the original
         extracted = _extract_base_request_id(full_request_id)
         self.assertEqual(extracted, request_id)
+=======
+        # Results come in the order they were added to merged_output.outputs
+        # Since we added samples with indices [2, 0, 1], they get processed in that order
+        # So responses should be [[3, 4], [1, 2], [5, 6]] (in tracking order)
+        expected_responses = [[3, 4], [1, 2], [5, 6]]
+        self.assertEqual(result.responses, expected_responses, "Responses should match tracking order")
+>>>>>>> c5f0dbb4 (Removed _finalize_outputs, renamed process_outputs.)
 
     def test_continuation_requests_trigger_processing(self):
         """Test that when a continuation request completes, it triggers processing of all samples.

@@ -143,7 +143,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     return output
 
 
-def _process_outputs(
+def process_outputs(
     output: vllm.RequestOutput,
     dataset_index: int,
     training_step: int,
@@ -203,32 +203,8 @@ def _process_outputs(
     )
 
 
-def _finalize_outputs(
-    output: vllm.RequestOutput,
-    tracking: Dict[str, Any],
-    dataset_index: int,
-    training_step: int,
-    tools: Optional[Dict[str, Tool]],
-    original_sampling_params: vllm.SamplingParams,
-    token_statistics: TokenStatistics,
-    start_time: float,
-) -> GenerationResult:
-    """Prepare final outputs based on whether tools were used."""
-
-    # Simply pass through to _process_outputs - metadata is already attached
-    return _process_outputs(
-        output,
-        dataset_index=dataset_index,
-        training_step=training_step,
-        token_statistics=token_statistics,
-        start_time=start_time,
-        use_tools=bool(tools),
-    )
-
 def _process_completed_request(request_id, outs, tracking, current_time, tools, request_metadata):
     """Process a completed request with all its samples and return the result.
-
-    This is a free function that processes completed requests independently of the actor state.
 
     Args:
         request_id: The base request ID
@@ -252,19 +228,17 @@ def _process_completed_request(request_id, outs, tracking, current_time, tools, 
 
     total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
     metadata = request_metadata[request_id]  # Don't pop yet, _poll_tool_futures might need it
-    result = _finalize_outputs(
+    result = process_outputs(
         final_output,
-        tracking,
-        metadata["dataset_index"],
-        metadata["training_step"],
-        tools,
-        original_sampling_params=metadata["original_sampling_params"],
+        dataset_index=metadata["dataset_index"],
+        training_step=metadata["training_step"],
         token_statistics=TokenStatistics(
             num_prompt_tokens=metadata["prompt_tokens"],
             num_response_tokens=total_generation_tokens,
             generation_time=current_time - metadata["start_time"],
         ),
         start_time=metadata["start_time"],
+        use_tools=bool(tools),
     )
     return result, metadata["is_eval"]
 
@@ -614,33 +588,17 @@ class LLMRayActor:
         if request_id not in request_outputs:
             return 0
 
-        # Check if we have all expected sub-request outputs
         available_outputs = request_outputs[request_id].outputs
         if len(available_outputs) < expected_n:
-            self.logger.info(
-                f"[_maybe_process_and_insert] Not ready - only {len(available_outputs)}/{expected_n} outputs available"
-            )
             return 0
 
-        # CRITICAL: Check if any sub-requests still have active vLLM continuations
-        # This can happen when tool calls complete and add continuations back to vLLM
         needed_ids = [f"{request_id}_{j}" for j in range(expected_n)]
         active_sub_requests = [sub_id for sub_id in needed_ids if sub_id in self.vllm_active_requests]
         if active_sub_requests:
-            logger.info(
-                f"[_maybe_process_and_insert] Cannot process {request_id} yet - "
-                f"sub-requests still active in vLLM: {active_sub_requests}"
-            )
             return 0
 
-        # Check if any sub-requests have pending tool futures
         has_pending_tools = any(sub_id in tracking.get("pending_tool_futures", {}) for sub_id in needed_ids)
         if has_pending_tools:
-            pending_tool_ids = [sub_id for sub_id in needed_ids if sub_id in tracking.get("pending_tool_futures", {})]
-            logger.info(
-                f"[_maybe_process_and_insert] Cannot process {request_id} yet - "
-                f"sub-requests have pending tool futures: {pending_tool_ids}"
-            )
             return 0
 
         # At this point we have all outputs ready. Build ordered outputs for processing.
@@ -654,14 +612,6 @@ class LLMRayActor:
                     matching_output = comp_output
                     break
 
-            if matching_output is None:
-                # This shouldn't happen if our index assignment is correct
-                self.logger.error(
-                    f"Missing output for index {j} in request {request_id}. "
-                    f"Available indices: {[getattr(o, 'index', None) for o in available_outputs]}"
-                )
-                return 0
-
             # Create a RequestOutput wrapper for each CompletionOutput
             ordered_outs.append(
                 vllm.RequestOutput(
@@ -674,65 +624,13 @@ class LLMRayActor:
                 )
             )
 
-        # At this point we're ready to finalize exactly n samples.
-        outs = ordered_outs
-        # Do NOT mutate tracking here; cleanup happens after enqueue.
-
         # Remove the base entry from request_outputs to prevent growth.
         request_outputs.pop(request_id, None)
         result, is_eval = _process_completed_request(
-            request_id, outs, tracking, current_time, self.tools, self.request_metadata
+            request_id, ordered_outs, tracking, current_time, self.tools, self.request_metadata
         )
-
-        # Validate dataset_index consistency before inserting
-        expected_dataset_index = self.request_metadata[request_id]["dataset_index"]
-        actual_dataset_index = result.dataset_index
-
-        self.logger.info(
-            f"[_maybe_process_and_insert] Processing completed request {request_id}, "
-            f"expected_dataset_index={expected_dataset_index}, "
-            f"actual_dataset_index={actual_dataset_index}, "
-            f"is_eval={is_eval}"
-        )
-
-        assert expected_dataset_index == actual_dataset_index, (
-            f"Dataset index mismatch: expected {expected_dataset_index} from metadata, "
-            f"but got {actual_dataset_index} in result for request_id {request_id}"
-        )
-
         self._insert_result_to_queue(result, is_eval=is_eval)
-
-        # Clean up metadata and tracking for this request after enqueuing
         self._cleanup_request_data(request_id, tracking)
-
-        # Safety check: Ensure no active vLLM requests or pending tool futures for this request
-        # Check for sub-requests that belong to THIS specific request (not just same dataset_index)
-        active_requests_for_dataset = [
-            req_id for req_id in self.vllm_active_requests if _extract_base_request_id(req_id) == request_id
-        ]
-
-        has_pending_tools = self._has_pending_tool_futures_for_request(request_id, tracking)
-
-        # Get the IDs of pending tool futures for this request for better debugging
-        pending_tool_ids = (
-            [req_id for req_id in tracking["pending_tool_futures"] if _extract_base_request_id(req_id) == request_id]
-            if has_pending_tools
-            else []
-        )
-
-        if active_requests_for_dataset or has_pending_tools:
-            raise ValueError(
-                f"CRITICAL: Attempting to clean up tracking_key {request_id} but found:\n"
-                f"  - Active vLLM requests: {active_requests_for_dataset}\n"
-                f"  - Has pending tool futures: {has_pending_tools}\n"
-                f"  - Pending tool future IDs: {pending_tool_ids}\n"
-                f"  - Request ID: {request_id}\n"
-                f"  - All active vLLM requests: {list(self.vllm_active_requests)}\n"
-                f"This indicates requests are being cleaned up while still being processed!"
-            )
-
-        if self.verbose:
-            self.logger.info(f"Completed and inserted request {request_id} with {expected_n} samples (eval={is_eval})")
         return 1
 
     def _has_pending_tool_futures_for_request(self, request_id: str, tracking: Dict[str, Any]) -> bool:
