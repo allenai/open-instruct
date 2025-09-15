@@ -461,17 +461,37 @@ class LLMRayActor:
             return num_added
         num_unfinished = self.llm_engine.get_num_unfinished_requests()
         num_to_add = self.inference_batch_size - num_unfinished
+
+        # Try to get queue size for debugging
+        try:
+            queue_size = self.prompt_queue.qsize()
+            queue_info = f", queue_size={queue_size}"
+        except Exception:
+            queue_info = ", queue_size=unknown"
+
         logger.info(
-            f"[LLMRayActor] fill_engine: batch_size={self.inference_batch_size}, unfinished={num_unfinished}, to_add={num_to_add}"
+            f"[LLMRayActor] fill_engine: batch_size={self.inference_batch_size}, unfinished={num_unfinished}, to_add={num_to_add}{queue_info}"
         )
 
+        attempt = 0
         while num_added < num_to_add:
+            attempt += 1
             try:
+                logger.info(
+                    f"[LLMRayActor] Attempt {attempt}: Trying to get request from queue with timeout={timeout}s"
+                )
                 request = self.prompt_queue.get(timeout=timeout)
-                logger.info("[LLMRayActor] Got request from queue, adding to engine")
+                logger.info(
+                    f"[LLMRayActor] Got request from queue (dataset_index={request.dataset_index}), adding to engine"
+                )
                 num_added += add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
             except queue.Empty:
-                logger.info(f"[LLMRayActor] Queue empty after timeout, added {num_added} requests")
+                logger.info(
+                    f"[LLMRayActor] Queue.Empty exception after {timeout}s timeout, added {num_added} requests so far"
+                )
+                break
+            except Exception as e:
+                logger.error(f"[LLMRayActor] Unexpected error getting from queue: {e}")
                 break
         return num_added
 
@@ -486,6 +506,7 @@ class LLMRayActor:
         logger.info(f"[LLMRayActor] fill_engine returned {num_processed} requests")
 
         if num_processed == 0:
+            logger.info("[LLMRayActor] No requests processed, returning early from process_from_queue")
             return num_processed
 
         tracking = _init_tool_tracking()
