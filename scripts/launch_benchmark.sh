@@ -40,7 +40,7 @@ for model_name_or_path in "$@"; do
     echo ""
     echo "Launching benchmark for model: $model_name_or_path"
 
-    python mason.py \
+    uv run python mason.py \
         --cluster ai2/ceres \
         --cluster ai2/jupiter \
         --cluster ai2/saturn \
