@@ -744,8 +744,14 @@ def run_benchmark(
     try:
         logger.info("Running warmup batch...")
 
-        warmup_result = inference_results_Q.get()
-        logger.info(f"Warmup batch completed with {len(warmup_result.responses)} responses")
+        # Collect all warmup results (one per prompt)
+        warmup_batch_size = warmup_end_idx - warmup_start_idx
+        warmup_results = [inference_results_Q.get() for _ in range(warmup_batch_size)]
+
+        total_warmup_responses = sum(len(result.responses) for result in warmup_results)
+        logger.info(
+            f"Warmup batch completed with {total_warmup_responses} total responses from {len(warmup_results)} prompts"
+        )
         logger.info(f"Submitting {num_batches - 1} batches for main benchmark...")
         submission_future = executor.submit(
             submission_thread,
@@ -761,33 +767,48 @@ def run_benchmark(
         for batch_idx in range(1, num_batches):
             # Quick health check!
             [future.result() for future in [submission_future, generation_future] if future.done()]
-            result = inference_results_Q.get()
+
+            # Collect all results for this batch (one per prompt)
+            batch_results = [inference_results_Q.get() for _ in range(args.num_unique_prompts_rollout)]
 
             completion_time = time.perf_counter()
-            # Calculate generation time from when the request was enqueued
-            batch_generation_time = completion_time - result.start_time if result.start_time else 0
+            # Calculate generation time from the earliest request start time
+            earliest_start_time = min(result.start_time for result in batch_results if result.start_time)
+            batch_generation_time = completion_time - earliest_start_time if earliest_start_time else 0
 
-            new_tokens = sum(len(response) for response in result.responses)
-            tokens_per_second = new_tokens / batch_generation_time if batch_generation_time > 0 else 0
+            # Aggregate metrics across all results in the batch
+            total_new_tokens = sum(len(response) for result in batch_results for response in result.responses)
+            tokens_per_second = total_new_tokens / batch_generation_time if batch_generation_time > 0 else 0
+
+            # Collect all finish reasons and response lengths
+            all_finish_reasons = []
+            all_response_lengths = []
+            all_dataset_indices = []
+            all_prompt_lengths = []
+
+            for result in batch_results:
+                all_finish_reasons.extend(result.finish_reasons)
+                all_response_lengths.extend([len(response) for response in result.responses])
+                all_dataset_indices.append(result.dataset_index)
+
+                # Get prompt length for this result
+                prompt_data = dataset[result.dataset_index]
+                prompt = prompt_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+                all_prompt_lengths.append(len(prompt))
 
             result_dict = {
                 "tokens_per_second": tokens_per_second,
                 "generation_time": batch_generation_time,
-                "num_new_tokens": new_tokens,
-                "finish_reasons": collections.Counter(result.finish_reasons),
-                "response_lengths": [len(response) for response in result.responses],
-                "dataset_indices": result.dataset_index,
+                "num_new_tokens": total_new_tokens,
+                "finish_reasons": collections.Counter(all_finish_reasons),
+                "response_lengths": all_response_lengths,
+                "dataset_indices": all_dataset_indices,
             }
-            # Get prompt lengths using dataset indices from the result
-            prompt_data = dataset[result.dataset_index]
-            prompt = prompt_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
-            prompt_lengths = [len(prompt)]
-            response_lengths = [len(response) for response in result.responses]
 
             # Calculate total FLOPs for all prompts and responses in the batch
             # No need to expand prompt_lengths - the flops method now handles samples_per_prompt
             model_flops = model_dims.flops(
-                prompt_lengths, response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
+                all_prompt_lengths, all_response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
             )
 
             # MFU = (FLOPs / time) / peak_FLOPS * 100
@@ -796,7 +817,7 @@ def run_benchmark(
 
             # Calculate total memory bytes for all prompts and responses in the batch
             model_memory_bytes = model_dims.memory_bytes(
-                prompt_lengths, response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
+                all_prompt_lengths, all_response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
             )
 
             # MBU = (Memory bytes / time) / peak_bandwidth * 100
@@ -811,7 +832,7 @@ def run_benchmark(
                 f"MFU: {result_dict['mfu']:.2f}%, "
                 f"MBU: {result_dict['mbu']:.2f}%, "
                 f"generation time: {batch_generation_time:.2f}s, "
-                f"total new tokens: {new_tokens}"
+                f"total new tokens: {total_new_tokens}"
             )
 
         # Calculate total time for main benchmark only
