@@ -2557,7 +2557,7 @@ def cleanup_training_resources(
             logger.info("Shutting down Ray...")
             ray.shutdown()
             logger.info("✅ Ray shut down")
-    except Exception as e:
+    except Exception as e:ex
         logger.warning(f"Ray shutdown failed: {e}")
 
     # Clean up distributed process group if it was initialized
@@ -2565,9 +2565,6 @@ def cleanup_training_resources(
         logger.info("Destroying process group...")
         dist.destroy_process_group()
         logger.info("✅ Process group destroyed")
-
-
-    
 
 
 def run_training(
