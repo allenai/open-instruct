@@ -638,14 +638,23 @@ def setup_vllm_engines(
 
 def generate_thread(vllm_engines: list[ray.actor.ActorHandle], stop_event: threading.Event) -> None:
     """Thread that repeatedly calls process_from_queue on vllm engines."""
-    logger.info("[Generate Thread] Starting generation thread")
+    logger.info(f"[Generate Thread] Starting generation thread with {len(vllm_engines)} engines")
+    iteration = 0
     while not stop_event.is_set():
+        iteration += 1
+        if iteration % 10 == 0:
+            logger.info(
+                f"[Generate Thread] Iteration {iteration}: calling process_from_queue on {len(vllm_engines)} engines"
+            )
+
         processed_results = ray.get([engine.process_from_queue.remote(timeout=20) for engine in vllm_engines])
         num_processed = sum(int(result) for result in processed_results)
         if num_processed == 0:
+            if iteration % 10 == 0:
+                logger.info(f"[Generate Thread] No requests processed in iteration {iteration}, sleeping...")
             time.sleep(1)
         else:
-            logger.debug(f"[Generate Thread] Processed {num_processed} requests")
+            logger.info(f"[Generate Thread] Processed {num_processed} requests in iteration {iteration}")
 
 
 def submission_thread(

@@ -457,12 +457,19 @@ class LLMRayActor:
         num_added = 0
         if self._should_stop():
             return num_added
-        num_to_add = self.inference_batch_size - self.llm_engine.get_num_unfinished_requests()
+        num_unfinished = self.llm_engine.get_num_unfinished_requests()
+        num_to_add = self.inference_batch_size - num_unfinished
+        logger.info(
+            f"[LLMRayActor] fill_engine: batch_size={self.inference_batch_size}, unfinished={num_unfinished}, to_add={num_to_add}"
+        )
+
         while num_added < num_to_add:
             try:
                 request = self.prompt_queue.get(timeout=timeout)
+                logger.info("[LLMRayActor] Got request from queue, adding to engine")
                 num_added += add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
             except queue.Empty:
+                logger.info(f"[LLMRayActor] Queue empty after timeout, added {num_added} requests")
                 break
         return num_added
 
@@ -472,7 +479,9 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
+        logger.info(f"[LLMRayActor] process_from_queue called with timeout={timeout}")
         num_processed = self.fill_engine(timeout=timeout)
+        logger.info(f"[LLMRayActor] fill_engine returned {num_processed} requests")
 
         if num_processed == 0:
             return num_processed
