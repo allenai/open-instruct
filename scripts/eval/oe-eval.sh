@@ -175,34 +175,34 @@ TULU_3_UNSEEN=(
 # New default task suites
 NEXT_MODEL_DEV=(
     # Knowledge
-    "mmlu:cot::hamish_zs_reasoning"
-    "popqa::hamish_zs_reasoning"
-    "simpleqa::tulu-thinker"
+    "mmlu:cot::hamish_zs_reasoning_deepseek"
+    "popqa::hamish_zs_reasoning_deepseek"
+    "simpleqa::tulu-thinker_deepseek"
     
     # Reasoning
-    "bbh:cot::hamish_zs_reasoning"
-    "gpqa:0shot_cot::hamish_zs_reasoning"
-    "zebralogic::hamish_zs_reasoning"
-    "agi_eval_english:0shot_cot::hamish_zs_reasoning"
+    "bbh:cot::hamish_zs_reasoning_deepseek"
+    "gpqa:0shot_cot::hamish_zs_reasoning_deepseek"
+    "zebralogic::hamish_zs_reasoning_deepseek"
+    "agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek"
 
     # Math
     # [faster] minerva_math_500::hamish_zs_reasoning
-    "minerva_math::hamish_zs_reasoning"
-    "gsm8k::zs_cot_latex"
-    "omega_500:0-shot-chat" # OLD: "omega:0-shot-chat"
-    "aime:zs_cot_r1::pass_at_32_2024_temp1"
-    "aime:zs_cot_r1::pass_at_32_2025_temp1"  # OLD: "aime::hamish_zs_reasoning"
+    "minerva_math::hamish_zs_reasoning_deepseek"
+    "gsm8k::zs_cot_latex_deepseek"
+    "omega_500:0-shot-chat_deepseek" # OLD: "omega:0-shot-chat"
+    "aime:zs_cot_r1::pass_at_32_2024_deepseek"
+    "aime:zs_cot_r1::pass_at_32_2025_deepseek"  # OLD: "aime::hamish_zs_reasoning"
     
     # Coding
-    "codex_humanevalplus:0-shot-chat::tulu-thinker"
-    "mbppplus:0-shot-chat::tulu-thinker"
-    "livecodebench_codegeneration::tulu-thinker"
+    "codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek"
+    "mbppplus:0-shot-chat::tulu-thinker_deepseek"
+    "livecodebench_codegeneration::tulu-thinker_deepseek"
     # [TODO not merged] codeeditorbench - requires separate server
     # [TODO, maybe] cruxeval
     
     # Chat / IF / Vibes
-    "alpaca_eval_v3::hamish_zs_reasoning"
-    "ifeval::hamish_zs_reasoning"
+    "alpaca_eval_v3::hamish_zs_reasoning_deepseek"
+    "ifeval::hamish_zs_reasoning_deepseek"
     # [expensive, multi-turn all versions] multiturn_alpacaeval::tulu
     # [expensive, typos vibes] styled_evals::tulu
     # [optional, typos compare] styled_math500::tulu
@@ -353,7 +353,7 @@ for TASK in "${TASKS[@]}"; do
         --gpus "$GPU_COUNT" \
         --gantry-args "$GANTRY_ARGS" \
         ${REVISION_ARG} \
-        --cluster ai2/augusta-google-1 \
+        --cluster ai2/augusta \
         --beaker-retries 2 \
         --beaker-image "$BEAKER_IMAGE" \
         --beaker-priority  "$PRIORITY" \
