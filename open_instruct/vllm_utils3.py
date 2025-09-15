@@ -541,7 +541,6 @@ class LLMRayActor:
                             output.request_id, output, complete_output, current_time
                         )
 
-            # Log progress if verbose
             if self.verbose and iteration_count % 100 == 0:
                 final_unfinished = self.llm_engine.get_num_unfinished_requests()
                 pending_tools = len(self.tracking["pending_tool_futures"])
