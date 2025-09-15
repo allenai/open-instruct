@@ -48,7 +48,7 @@ for model_name_or_path in "$@"; do
         --pure_docker_mode \
         --workspace ai2/open-instruct-dev \
 	--preemptible \
-        --priority urgent \
+        --priority high \
         --num_nodes 1 \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
