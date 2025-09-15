@@ -650,7 +650,8 @@ if args.run_oe_eval_experiments:
     # add priority
     oe_eval_cmd += f" --priority {args.priority}"
     # add beaker workspace
-    oe_eval_cmd += f" --beaker-workspace {workspace}"
+    workspace_with_ai2 = f"ai2/{workspace}" if not workspace.startswith("ai2/") else workspace
+    oe_eval_cmd += f" --beaker-workspace {workspace_with_ai2}"
     # Add stop sequences if provided
     if args.oe_eval_stop_sequences:
         oe_eval_cmd += f" --stop-sequences '{args.oe_eval_stop_sequences}'"
