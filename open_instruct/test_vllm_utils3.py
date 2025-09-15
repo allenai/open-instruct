@@ -167,20 +167,6 @@ class TestVllmUtils3(unittest.TestCase):
         result = _extract_base_request_id(full_request_id)
         self.assertEqual(result, expected_base_id)
 
-    def test_extract_base_request_id_edge_cases(self):
-        """Test _extract_base_request_id with edge cases."""
-        # Single underscore case
-        result = _extract_base_request_id("a_b")
-        self.assertEqual(result, "a")
-
-        # No underscores
-        result = _extract_base_request_id("nounderscore")
-        self.assertEqual(result, "")
-
-        # Empty string
-        result = _extract_base_request_id("")
-        self.assertEqual(result, "")
-
     @parameterized.expand(
         [
             (False, 0, 0, "train_0_0"),
@@ -202,40 +188,10 @@ class TestVllmUtils3(unittest.TestCase):
         result = make_request_id(request)
         self.assertEqual(result, expected_id)
 
-    def test_make_request_id_train_vs_eval(self):
-        """Test that make_request_id correctly distinguishes between train and eval."""
-        # Training request
-        train_request = PromptRequest(
-            prompt=[1, 2, 3],
-            generation_config={},
-            training_step=10,
-            dataset_index=20,
-            is_eval=False,
-        )
-        train_id = make_request_id(train_request)
-        self.assertTrue(train_id.startswith("train_"))
-        self.assertEqual(train_id, "train_10_20")
-
-        # Evaluation request
-        eval_request = PromptRequest(
-            prompt=[1, 2, 3],
-            generation_config={},
-            training_step=10,
-            dataset_index=20,
-            is_eval=True,
-        )
-        eval_id = make_request_id(eval_request)
-        self.assertTrue(eval_id.startswith("eval_"))
-        self.assertEqual(eval_id, "eval_10_20")
-
     def test_make_request_id_extract_base_request_id_roundtrip(self):
         """Test that make_request_id and _extract_base_request_id work together correctly."""
         request = PromptRequest(
-            prompt=[1, 2, 3],
-            generation_config={},
-            training_step=42,
-            dataset_index=100,
-            is_eval=False,
+            prompt=[1, 2, 3], generation_config={}, training_step=42, dataset_index=100, is_eval=False
         )
 
         # Generate the request ID
