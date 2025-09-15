@@ -670,17 +670,17 @@ def submission_thread(
         batch_data = dataset[start_idx:end_idx]
         prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
 
-        # Create list of dataset indices for this batch
-        dataset_indices = list(range(start_idx, end_idx))
-
-        param_prompt_Q.put(
-            PromptRequest(
-                prompts=prompts,
-                dataset_index=dataset_indices,
-                generation_config=generation_config,
-                start_time=time.perf_counter(),
+        # Create individual PromptRequest for each prompt in the batch
+        for i, prompt in enumerate(prompts):
+            dataset_index = start_idx + i
+            param_prompt_Q.put(
+                PromptRequest(
+                    prompt=prompt,
+                    dataset_index=dataset_index,
+                    generation_config=generation_config,
+                    start_time=time.perf_counter(),
+                )
             )
-        )
     logger.info(f"[Submission Thread] All {num_batches} batches submitted")
 
 
@@ -728,15 +728,17 @@ def run_benchmark(
     warmup_end_idx = min(args.num_unique_prompts_rollout, len(dataset))
     warmup_data = dataset[warmup_start_idx:warmup_end_idx]
     warmup_prompts = warmup_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
-    warmup_dataset_indices = list(range(warmup_start_idx, warmup_end_idx))
-    param_prompt_Q.put(
-        PromptRequest(
-            prompts=warmup_prompts,
-            dataset_index=warmup_dataset_indices,
-            generation_config=generation_config,
-            start_time=time.perf_counter(),
+    # Create individual PromptRequest for each warmup prompt
+    for i, prompt in enumerate(warmup_prompts):
+        dataset_index = warmup_start_idx + i
+        param_prompt_Q.put(
+            PromptRequest(
+                prompt=prompt,
+                dataset_index=dataset_index,
+                generation_config=generation_config,
+                start_time=time.perf_counter(),
+            )
         )
-    )
     model_dims = load_model_dims(model_config.model_name_or_path)
 
     try:
@@ -778,8 +780,8 @@ def run_benchmark(
             }
             # Get prompt lengths using dataset indices from the result
             prompt_data = dataset[result.dataset_index]
-            prompts = prompt_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
-            prompt_lengths = [len(prompt) for prompt in prompts]
+            prompt = prompt_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+            prompt_lengths = [len(prompt)]
             response_lengths = [len(response) for response in result.responses]
 
             # Calculate total FLOPs for all prompts and responses in the batch
