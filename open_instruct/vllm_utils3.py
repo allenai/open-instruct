@@ -15,7 +15,6 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
-import copy
 import dataclasses
 import os
 import queue
@@ -476,8 +475,7 @@ class LLMRayActor:
                 continue
             try:
                 request = self.prompt_queue.get(timeout=0.1)
-                tracking_key = make_request_id(request)
-                num_added = add_request(
+                add_request(
                     request,
                     self.llm_engine,
                     self.tools,
@@ -526,11 +524,11 @@ class LLMRayActor:
             current_time = time.time()
             if self.llm_engine.has_unfinished_requests():
                 for output in [o for o in self.llm_engine.step() if o.finished]:
-                    # Fix the index field for non-tool mode
-                    # When tools are disabled and we have n>1, we create sub-requests with IDs like
+                    # Fix the index field for all sub-requests
+                    # When we have n>1, we create sub-requests with IDs like
                     # train_3_12_0, train_3_12_1, etc. But vLLM creates CompletionOutputs with index=0
                     # for all of them (since each sub-request has n=1). We need to fix this.
-                    if not self.tools and "_" in output.request_id:
+                    if "_" in output.request_id:
                         # Extract the actual index from the sub-request ID
                         parts = output.request_id.rsplit("_", 1)
                         if len(parts) == 2 and parts[1].isdigit():
@@ -622,15 +620,9 @@ class LLMRayActor:
             return 0
 
         # Check if any sub-requests have pending tool futures
-        has_pending_tools = any(
-            sub_id in tracking.get("pending_tool_futures", {})
-            for sub_id in needed_ids
-        )
+        has_pending_tools = any(sub_id in tracking.get("pending_tool_futures", {}) for sub_id in needed_ids)
         if has_pending_tools:
-            pending_tool_ids = [
-                sub_id for sub_id in needed_ids
-                if sub_id in tracking.get("pending_tool_futures", {})
-            ]
+            pending_tool_ids = [sub_id for sub_id in needed_ids if sub_id in tracking.get("pending_tool_futures", {})]
             logger.info(
                 f"[_maybe_process_and_insert] Cannot process {request_id} yet - "
                 f"sub-requests have pending tool futures: {pending_tool_ids}"
@@ -657,14 +649,16 @@ class LLMRayActor:
                 return 0
 
             # Create a RequestOutput wrapper for each CompletionOutput
-            ordered_outs.append(vllm.RequestOutput(
-                request_id=f"{request_id}_{j}",
-                prompt=request_outputs[request_id].prompt,
-                prompt_token_ids=request_outputs[request_id].prompt_token_ids,
-                prompt_logprobs=request_outputs[request_id].prompt_logprobs,
-                outputs=[matching_output],
-                finished=True,
-            ))
+            ordered_outs.append(
+                vllm.RequestOutput(
+                    request_id=f"{request_id}_{j}",
+                    prompt=request_outputs[request_id].prompt,
+                    prompt_token_ids=request_outputs[request_id].prompt_token_ids,
+                    prompt_logprobs=request_outputs[request_id].prompt_logprobs,
+                    outputs=[matching_output],
+                    finished=True,
+                )
+            )
 
         # At this point we're ready to finalize exactly n samples.
         outs = ordered_outs
@@ -835,7 +829,11 @@ class LLMRayActor:
         # If tools are enabled, attach tool metadata to the output
         if self.tools:
             # Set tool metadata attributes on the output
-            setattr(complete_output, "mask", self.tracking["masks"].get(sub_request_id, [1] * len(complete_output.token_ids)))
+            setattr(
+                complete_output,
+                "mask",
+                self.tracking["masks"].get(sub_request_id, [1] * len(complete_output.token_ids)),
+            )
             setattr(complete_output, "num_calls", self.tracking["num_calls"].get(sub_request_id, 0))
             setattr(complete_output, "timeout", self.tracking["timeout"].get(sub_request_id, False))
             setattr(complete_output, "tool_error", self.tracking["tool_error"].get(sub_request_id, ""))
