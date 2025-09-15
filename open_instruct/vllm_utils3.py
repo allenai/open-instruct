@@ -438,6 +438,42 @@ class LLMRayActor:
         results_queue = self.eval_results_queue if is_eval else self.results_queue
         results_queue.put(result)
 
+    def _should_exit(self) -> bool:
+        """Determine if the processing loop should exit.
+
+        Returns:
+            bool: True if the loop should exit, False otherwise.
+        """
+        # Check stop condition first (cheapest check)
+        stop_requested = self._should_stop()
+
+        # Case 1: inflight_updates enabled and stop requested - exit immediately
+        if self.inflight_updates and stop_requested:
+            return True
+
+        # Now check for pending work (only if needed)
+        if stop_requested:
+            # Need to check if we have pending work
+            pending_tools = len(self.tracking["pending_tool_futures"])
+            unfinished = self.llm_engine.get_num_unfinished_requests()
+
+            # Case 2: stop requested and no pending work - exit
+            if pending_tools == 0 and unfinished == 0:
+                return True
+            # Otherwise, we have pending work and should continue
+            return False
+
+        # No stop requested - check if there's any work to do
+        pending_tools = len(self.tracking["pending_tool_futures"])
+        unfinished = self.llm_engine.get_num_unfinished_requests()
+
+        # Case 3: no work left at all - exit
+        if pending_tools == 0 and unfinished == 0:
+            return True
+
+        # Otherwise, continue processing
+        return False
+
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
@@ -453,26 +489,12 @@ class LLMRayActor:
         total_processed = 0
         iteration_count = 0
 
-        while True:
+        while not self._should_exit():
             iteration_count += 1
 
             # Health check: ensure prefetch worker is alive. This will raise if it has crashed.
             if self._prefetch_future.done():
                 self._prefetch_future.result()
-
-            # Check exit conditions
-            if self._should_stop():
-                if self.inflight_updates:
-                    # With inflight_updates enabled, return immediately when should_stop is set
-                    # This allows quick pausing and resumption of processing
-                    break
-                else:
-                    # Original behavior: only exit if should_stop AND no pending work
-                    pending_tools = len(self.tracking["pending_tool_futures"])
-                    unfinished = self.llm_engine.get_num_unfinished_requests()
-
-                    if pending_tools == 0 and unfinished == 0:
-                        break
 
             self._poll_tool_futures(self.tracking, self.llm_engine.tokenizer)
             current_time = time.time()
@@ -519,19 +541,18 @@ class LLMRayActor:
                             output.request_id, output, complete_output, current_time
                         )
 
-            # If no work to do, break to yield control back to generate_thread,
-            # allowing weight_sync_thread to acquire the LLMRayActor lock
-            final_unfinished = self.llm_engine.get_num_unfinished_requests()
-            pending_tools = len(self.tracking["pending_tool_futures"])
+            # Log progress if verbose
             if self.verbose and iteration_count % 100 == 0:
+                final_unfinished = self.llm_engine.get_num_unfinished_requests()
+                pending_tools = len(self.tracking["pending_tool_futures"])
                 self.logger.info(
                     f"process_from_queue iteration {iteration_count}: unfinished={final_unfinished}, pending_tools={pending_tools}"
                 )
-            if final_unfinished == 0 and pending_tools > 0:
-                # Sleep for 1 second to let pending tools complete.
+
+            # If we have only pending tools but no unfinished requests, sleep briefly
+            # to let pending tools complete before the next iteration
+            if self.llm_engine.get_num_unfinished_requests() == 0 and len(self.tracking["pending_tool_futures"]) > 0:
                 time.sleep(1)
-            if final_unfinished + pending_tools == 0:
-                break
 
         return total_processed
 
