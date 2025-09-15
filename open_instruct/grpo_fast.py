@@ -2774,6 +2774,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
+
+    if len(train_dataset) < (needed := max(args.async_steps, 1) * args.num_unique_prompts_rollout):
+        raise ValueError(
+            f"Train dataset is too small! Is {len(train_dataset)} prompts, but {needed} are needed to have enough prompts for bsz and prefill. Try reducing async_steps or num_unique_prompts_rollout, or increasing the dataset size."
+        )
+
     if args.cache_dataset_only:
         return
 
