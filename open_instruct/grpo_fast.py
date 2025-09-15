@@ -48,14 +48,11 @@ from open_instruct import utils
 
 # isort: on
 import asyncio
-import atexit
 import json
 import math
 import random
 import shutil
-import signal
 import socket
-import sys
 import threading
 import time
 from argparse import Namespace
@@ -2552,18 +2549,16 @@ def cleanup_training_resources(
     # Clean up judge clients
     cleanup_judge_clients()
 
-    # Coordinate Ray shutdown across all distributed processes
-    if dist.is_initialized():
-        try:
-            # Use a barrier to ensure all processes reach shutdown simultaneously
-            logger.info("Synchronizing Ray shutdown across all processes...")
-            dist.barrier(timeout=timedelta(seconds=30))
-            logger.info("✅ All processes synchronized for Ray shutdown")
-        except Exception as e:
-            logger.warning(f"Failed to synchronize Ray shutdown: {e}")
-
-    ray.shutdown()
-    logger.info("✅ Ray shut down")
+    # Shutdown Ray only from the main process (rank 0) or when DDP isn't initialized
+    try:
+        is_ddp = dist.is_available() and dist.is_initialized()
+        is_rank0 = (not is_ddp) or (dist.get_rank() == 0)
+        if is_rank0 and ray.is_initialized():
+            logger.info("Shutting down Ray...")
+            ray.shutdown()
+            logger.info("✅ Ray shut down")
+    except Exception as e:
+        logger.warning(f"Ray shutdown failed: {e}")
 
     # Clean up distributed process group if it was initialized
     if dist.is_initialized():
@@ -2572,31 +2567,7 @@ def cleanup_training_resources(
         logger.info("✅ Process group destroyed")
 
 
-def cleanup_on_exit():
-    """Clean shutdown function registered with atexit for graceful Ray shutdown."""
-    try:
-        if ray.is_initialized():
-            logger.info("atexit: Initiating graceful Ray shutdown...")
-
-            # Coordinate shutdown across distributed processes if available
-            if dist.is_initialized():
-                try:
-                    logger.info("atexit: Synchronizing Ray shutdown across all processes...")
-                    dist.barrier(timeout=timedelta(seconds=10))
-                    logger.info("atexit: ✅ All processes synchronized for Ray shutdown")
-                except Exception as e:
-                    logger.warning(f"atexit: Failed to synchronize Ray shutdown: {e}")
-
-            ray.shutdown()
-            logger.info("atexit: ✅ Ray shut down gracefully")
-    except Exception as e:
-        logger.warning(f"atexit: Error during cleanup: {e}")
-
-
-def signal_handler(signum, frame):
-    """Minimal signal handler that exits cleanly, triggering atexit cleanup."""
-    logger.info(f"Received signal {signum}, exiting gracefully...")
-    sys.exit(0)
+    
 
 
 def run_training(
@@ -2947,13 +2918,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
 
 if __name__ == "__main__":
-    # Register cleanup function to handle graceful Ray shutdown on exit
-    atexit.register(cleanup_on_exit)
-
-    # Register minimal signal handlers that exit cleanly (triggering atexit)
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
-
     parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
     assert isinstance(args, Args)
