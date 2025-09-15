@@ -230,12 +230,9 @@ def _process_completed_request(request_id, outs, tracking, current_time, tools, 
         prompt=outs[0].prompt,
         prompt_token_ids=outs[0].prompt_token_ids,
         prompt_logprobs=outs[0].prompt_logprobs,
-        outputs=[],  # Will be set below based on whether tools are enabled
+        outputs=[completion for out in outs for completion in out.outputs],
         finished=outs[0].finished,
     )
-
-    if not tools:
-        final_output.outputs = [completion for out in outs for completion in out.outputs]
 
     total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
     metadata = request_metadata[request_id]  # Don't pop yet, _poll_tool_futures might need it
