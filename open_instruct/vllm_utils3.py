@@ -116,6 +116,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
             outputs=output.outputs[:],
             finished=output.finished,
         )
+        tracking["concat_outputs"][output.request_id] = output_copy
     tracking["masks"][output.request_id].extend([1] * len(o.token_ids))
 
     # Check for tool calls
