@@ -50,12 +50,6 @@ from open_instruct.utils import ray_get_with_progress
 logger = logger_utils.setup_logger(__name__)
 
 
-def make_request_id(request: PromptRequest) -> str:
-    """Generate a unique tracking key for a request."""
-    prefix = "eval" if request.is_eval else "train"
-    return f"{prefix}_{request.training_step}_{request.dataset_index}"
-
-
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
 # Turns out Ray doesnt necessarily place bundles together,
 # so this function is used to get the bundle indices of a placement group
@@ -87,6 +81,12 @@ def _init_tool_tracking():
         "masks": defaultdict(list),
         "pending_tool_futures": {},
     }
+
+
+def make_request_id(request: PromptRequest) -> str:
+    """Generate a unique tracking key for a request."""
+    prefix = "eval" if request.is_eval else "train"
+    return f"{prefix}_{request.training_step}_{request.dataset_index}"
 
 
 def _extract_base_request_id(full_request_id: str) -> str:
@@ -137,67 +137,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     return output
 
 
-def process_outputs(
-    output: vllm.RequestOutput,
-    dataset_index: int,
-    training_step: int,
-    token_statistics: TokenStatistics,
-    start_time: float,
-    use_tools: bool = False,
-) -> "GenerationResult":
-    """Process a vLLM RequestOutput into GenerationResult format.
-
-    Args:
-        output: A single vLLM RequestOutput object
-        dataset_index: Index of the dataset
-        training_step: Current training step
-        token_statistics: Token usage statistics
-        start_time: Start time for timing metrics
-        use_tools: Whether to extract tool-specific attributes from outputs
-    """
-    response_ids = [list(out.token_ids) for out in output.outputs]
-    finish_reasons = [out.finish_reason for out in output.outputs]
-
-    # Extract attributes based on whether tools are used
-    if use_tools:
-        # Extract tool-specific attributes from outputs
-        masks = [getattr(out, "mask", [1] * len(out.token_ids)) for out in output.outputs]
-        num_calls = [getattr(out, "num_calls", 0) for out in output.outputs]
-        timeouts = [getattr(out, "timeout", False) for out in output.outputs]
-        tool_errors = [getattr(out, "tool_error", "") for out in output.outputs]
-        tool_outputs = [getattr(out, "tool_output", "") for out in output.outputs]
-        tool_runtimes = [getattr(out, "tool_runtime", 0.0) for out in output.outputs]
-        tool_calleds = [getattr(out, "tool_called", False) for out in output.outputs]
-    else:
-        # Use default values when tools are not used
-        masks = [[1] * len(resp) for resp in response_ids]
-        num_calls = [0] * len(response_ids)
-        timeouts = [False] * len(response_ids)
-        tool_errors = [""] * len(response_ids)
-        tool_outputs = [""] * len(response_ids)
-        tool_runtimes = [0.0] * len(response_ids)
-        tool_calleds = [False] * len(response_ids)
-
-    return GenerationResult(
-        responses=response_ids,
-        finish_reasons=finish_reasons,
-        masks=masks,
-        request_info=RequestInfo(
-            num_calls=num_calls,
-            timeouts=timeouts,
-            tool_errors=tool_errors,
-            tool_outputs=tool_outputs,
-            tool_runtimes=tool_runtimes,
-            tool_calleds=tool_calleds,
-        ),
-        dataset_index=dataset_index,
-        training_step=training_step,
-        token_statistics=token_statistics,
-        start_time=start_time,
-    )
-
-
-def _process_completed_request(request_id, outs, tracking, current_time, tools, request_metadata):
+def process_completed_request(request_id, outs, tracking, current_time, tools, request_metadata):
     """Process a completed request with all its samples and return the result.
 
     Args:
@@ -222,8 +162,44 @@ def _process_completed_request(request_id, outs, tracking, current_time, tools, 
 
     total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
     metadata = request_metadata[request_id]  # Don't pop yet, _poll_tool_futures might need it
-    result = process_outputs(
-        final_output,
+
+    # Process the vLLM RequestOutput into GenerationResult format
+    response_ids = [list(out.token_ids) for out in final_output.outputs]
+    finish_reasons = [out.finish_reason for out in final_output.outputs]
+    use_tools = bool(tools)
+
+    # Extract attributes based on whether tools are used
+    if use_tools:
+        # Extract tool-specific attributes from outputs
+        masks = [getattr(out, "mask", [1] * len(out.token_ids)) for out in final_output.outputs]
+        num_calls = [getattr(out, "num_calls", 0) for out in final_output.outputs]
+        timeouts = [getattr(out, "timeout", False) for out in final_output.outputs]
+        tool_errors = [getattr(out, "tool_error", "") for out in final_output.outputs]
+        tool_outputs = [getattr(out, "tool_output", "") for out in final_output.outputs]
+        tool_runtimes = [getattr(out, "tool_runtime", 0.0) for out in final_output.outputs]
+        tool_calleds = [getattr(out, "tool_called", False) for out in final_output.outputs]
+    else:
+        # Use default values when tools are not used
+        masks = [[1] * len(resp) for resp in response_ids]
+        num_calls = [0] * len(response_ids)
+        timeouts = [False] * len(response_ids)
+        tool_errors = [""] * len(response_ids)
+        tool_outputs = [""] * len(response_ids)
+        tool_runtimes = [0.0] * len(response_ids)
+        tool_calleds = [False] * len(response_ids)
+
+    result = GenerationResult(
+        responses=response_ids,
+        finish_reasons=finish_reasons,
+        masks=masks,
+        request_info=RequestInfo(
+            num_calls=num_calls,
+            timeouts=timeouts,
+            tool_errors=tool_errors,
+            tool_outputs=tool_outputs,
+            tool_runtimes=tool_runtimes,
+            tool_calleds=tool_calleds,
+        ),
         dataset_index=metadata["dataset_index"],
         training_step=metadata["training_step"],
         token_statistics=TokenStatistics(
@@ -232,7 +208,6 @@ def _process_completed_request(request_id, outs, tracking, current_time, tools, 
             generation_time=current_time - metadata["start_time"],
         ),
         start_time=metadata["start_time"],
-        use_tools=bool(tools),
     )
     return result, metadata["is_eval"]
 
@@ -620,7 +595,7 @@ class LLMRayActor:
 
         # Remove the base entry from request_outputs to prevent growth.
         request_outputs.pop(request_id, None)
-        result, is_eval = _process_completed_request(
+        result, is_eval = process_completed_request(
             request_id, ordered_outs, tracking, current_time, self.tools, self.request_metadata
         )
         self._insert_result_to_queue(result, is_eval=is_eval)
