@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # OLMo 2.5 model
-MODEL_NAME_OR_PATH="/oe-training-default/ai2-llm/checkpoints/lucas/olmo25_7b_lc_64k_6T_M100B_round5-sparkle_6634-pre_s2pdf_gzip2080_cweN-yake-all-olmo_yarn-fullonly_50B-740666e3/step11921-hf"
+MODEL_NAME_OR_PATH="/weka/oe-eval-default/ai2-llm/checkpoints/lucas/olmo25_7b_lc_64k_6T_M100B_round5-sparkle_6634-pre_s2pdf_gzip2080_cweN-yake-all-olmo_yarn-fullonly_50B-740666e3/step11921-hf"
 GS_MODEL_NAME="olmo25_7b_lc_beta_740666e3"
 
 # english only DAPO
 DATASETS="mnoukhov/DAPO-Math-14k-Processed-RLVR 1.0"
 
 # math evals
-EVALS="minerva_math::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,aime:zs_cot_r1::pass_at_32_2024_temp1,aime:zs_cot_r1::pass_at_32_2025_temp1"
+EVALS="minerva_math::hamish_zs_reasoning_deepseek,minerva_math_500::hamish_zs_reasoning_deepseek,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek"
 
 # AIME 2024, 2025 local evals
 LOCAL_EVALS="mnoukhov/aime2024-25-rlvr 1.0 mnoukhov/aime2024-25-rlvr 1.0"
