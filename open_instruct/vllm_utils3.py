@@ -601,36 +601,12 @@ class LLMRayActor:
                 return True
         return False
 
-    def _has_pending_engine_requests_for_base_id(self, base_request_id: str) -> bool:
-        """Check if there are any unfinished sub-requests in the vLLM engine for a given base request ID."""
-        if not self.llm_engine.has_unfinished_requests():
-            return False
-
-        # Get all unfinished request IDs from the engine
-        try:
-            # vLLM engines have a scheduler that tracks unfinished requests
-            # We need to check if any unfinished request IDs belong to our base request
-            unfinished_request_ids = []
-
-            # Try to get unfinished request IDs from scheduler
-            if hasattr(self.llm_engine, "scheduler"):
-                if hasattr(self.llm_engine.scheduler, "waiting") and self.llm_engine.scheduler.waiting:
-                    unfinished_request_ids.extend([req.request_id for req in self.llm_engine.scheduler.waiting])
-                if hasattr(self.llm_engine.scheduler, "running") and self.llm_engine.scheduler.running:
-                    unfinished_request_ids.extend([req.request_id for req in self.llm_engine.scheduler.running])
-                if hasattr(self.llm_engine.scheduler, "swapped") and self.llm_engine.scheduler.swapped:
-                    unfinished_request_ids.extend([req.request_id for req in self.llm_engine.scheduler.swapped])
-
-            # Check if any unfinished request belongs to our base request ID
-            for req_id in unfinished_request_ids:
-                if _extract_base_request_id(req_id) == base_request_id:
-                    return True
-
-        except Exception as e:
-            # If we can't check the scheduler state, be conservative and assume there might be pending requests
-            self.logger.warning(f"Could not check engine state for base_request_id {base_request_id}: {e}")
-            return True
-
+    def _has_active_sub_requests_for_base_id(self, base_request_id: str) -> bool:
+        """Check if there are any active sub-requests in vLLM for a given base request ID."""
+        # Check if any active request IDs belong to our base request
+        for req_id in self.vllm_active_requests:
+            if _extract_base_request_id(req_id) == base_request_id:
+                return True
         return False
 
     def _cleanup_request_data(self, request_id: str, tracking: Dict[str, Any]):
@@ -640,14 +616,14 @@ class LLMRayActor:
             # Don't clean up metadata yet - tool futures still need it
             return
 
-        # Check if there are still unfinished sub-requests in the engine for this base request
-        if self._has_pending_engine_requests_for_base_id(request_id):
-            # Don't clean up metadata yet - engine step processing still needs it
+        # Check if there are still active sub-requests in vLLM for this base request
+        if self._has_active_sub_requests_for_base_id(request_id):
+            # Don't clean up metadata yet - active requests still need it
             return
 
         # Remove request metadata only after both conditions are met:
         # 1. No pending tool futures for this request
-        # 2. No unfinished sub-requests in the engine for this base request
+        # 2. No active sub-requests in vLLM for this base request
         self.request_metadata.pop(request_id, None)
 
         # Clean up tracking data for all sub-requests of this request
