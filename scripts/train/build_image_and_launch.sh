@@ -48,5 +48,5 @@ fi
 echo "Installing dependencies with uv..."
 uv sync
 
-# Run the provided script
-bash "$1" "$beaker_user/$image_name"
+# Run the provided script with all additional arguments
+bash "$1" "$beaker_user/$image_name" "${@:2}"

@@ -27,8 +27,20 @@ import transformers
 import vllm
 from ray.util import queue as ray_queue
 
+<<<<<<< HEAD
 from open_instruct import dataset_transformation, grpo_fast, logger_utils, model_utils, utils, vllm_utils3
 from open_instruct.actor_manager import ActorManager
+=======
+from open_instruct import (
+    actor_manager,
+    dataset_transformation,
+    grpo_fast,
+    logger_utils,
+    model_utils,
+    utils,
+    vllm_utils3,
+)
+>>>>>>> abc270c4 (Changes to clean up benchmark.)
 from open_instruct.queue_types import PromptRequest
 
 # For FLOPS, we assume bf16 and ignore sparsity.
@@ -534,16 +546,38 @@ class ModelDims:
         return total
 
 
-def load_model_dims(model_name: str) -> ModelDims:
-    cfg = transformers.AutoConfig.from_pretrained(model_name, trust_remote_code=True)
-    return ModelDims(
-        num_layers=cfg.num_hidden_layers,
-        hidden_size=cfg.hidden_size,
-        intermediate_size=cfg.intermediate_size,
-        vocab_size=cfg.vocab_size,
-        num_attn_heads=cfg.num_attention_heads,
-        num_kv_heads=getattr(cfg, "num_key_value_heads", None),
-    )
+DEFAULT_SENTINEL = object()
+
+
+def maybe_get_attribute(cfg: transformers.AutoConfig, attr_names: list[str], default=DEFAULT_SENTINEL) -> Any:
+    """Get the first matching attribute from cfg."""
+    for name in attr_names:
+        if hasattr(cfg, name):
+            return getattr(cfg, name)
+    if default is not DEFAULT_SENTINEL:
+        return default
+    raise ValueError(f"None of the attributes {attr_names} found in config.")
+
+
+def load_model_dims(model_name: str) -> Optional[ModelDims]:
+    try:
+        cfg = transformers.AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+        logger.info(f"HF config is: {cfg}.")
+        model_dims = ModelDims(
+            num_layers=maybe_get_attribute(cfg, ["num_hidden_layers", "n_layers"]),
+            hidden_size=maybe_get_attribute(cfg, ["hidden_size", "dim"]),
+            intermediate_size=maybe_get_attribute(cfg, ["intermediate_size"], default=None),
+            vocab_size=cfg.vocab_size,
+            num_attn_heads=cfg.num_attention_heads,
+            num_kv_heads=getattr(cfg, "num_key_value_heads", None),
+        )
+        if model_dims.intermediate_size is None:
+            model_dims.intermediate_size = 4 * model_dims.hidden_size
+        return model_dims
+    except Exception as e:
+        logger.warning(f"Could not load model config from Hugging Face for '{model_name}': {e}")
+        logger.warning("MFU and MBU calculations will not be available")
+        return None
 
 
 def get_device_name(device_name: str) -> str:
@@ -592,7 +626,7 @@ def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation
 
 def setup_vllm_engines(
     args: grpo_fast.Args, model_config: model_utils.ModelConfig, max_model_len: int = 20480
-) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue]:
+) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue, ray.actor.ActorHandle]:
     """Set up vLLM engines and queues."""
     logger.info("Setting up vLLM engines...")
 
@@ -608,8 +642,8 @@ def setup_vllm_engines(
     param_prompt_Q = ray_queue.Queue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
 
-    queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
-    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
+    queues_to_monitor = {"param_prompt_Q": param_prompt_Q, "inference_results_Q": inference_results_Q}
+    actor_manager_remote = ray.remote(actor_manager.ActorManager).remote(queues_to_monitor, args)
 
     vllm_engines = vllm_utils3.create_vllm_engines(
         num_engines=args.vllm_num_engines,
@@ -628,12 +662,12 @@ def setup_vllm_engines(
         max_tool_calls=[0],
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
-        actor_manager=actor_manager,
+        actor_manager=actor_manager_remote,
     )
 
     logger.info("vLLM engines ready")
 
-    return vllm_engines, param_prompt_Q, inference_results_Q, actor_manager
+    return vllm_engines, param_prompt_Q, inference_results_Q, actor_manager_remote
 
 
 def generate_thread(vllm_engines: list[ray.actor.ActorHandle], stop_event: threading.Event) -> None:
@@ -782,32 +816,42 @@ def run_benchmark(
             prompt_lengths = [len(prompt) for prompt in prompts]
             response_lengths = [len(response) for response in result.responses]
 
-            # Calculate total FLOPs for all prompts and responses in the batch
-            # No need to expand prompt_lengths - the flops method now handles samples_per_prompt
-            model_flops = model_dims.flops(
-                prompt_lengths, response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
-            )
+            # Calculate MFU and MBU if model dimensions are available
+            if model_dims is not None:
+                # Calculate total FLOPs for all prompts and responses in the batch
+                # No need to expand prompt_lengths - the flops method now handles samples_per_prompt
+                model_flops = model_dims.flops(
+                    prompt_lengths, response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
+                )
 
-            # MFU = (FLOPs / time) / peak_FLOPS * 100
-            model_flops_per_second = model_flops / batch_generation_time if batch_generation_time > 0 else 0
-            result_dict["mfu"] = 100 * model_flops_per_second / device_flops
+                # MFU = (FLOPs / time) / peak_FLOPS * 100
+                model_flops_per_second = model_flops / batch_generation_time if batch_generation_time > 0 else 0
+                result_dict["mfu"] = 100 * model_flops_per_second / device_flops
 
-            # Calculate total memory bytes for all prompts and responses in the batch
-            model_memory_bytes = model_dims.memory_bytes(
-                prompt_lengths, response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
-            )
+                # Calculate total memory bytes for all prompts and responses in the batch
+                model_memory_bytes = model_dims.memory_bytes(
+                    prompt_lengths, response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
+                )
 
-            # MBU = (Memory bytes / time) / peak_bandwidth * 100
-            model_bytes_per_second = model_memory_bytes / batch_generation_time if batch_generation_time > 0 else 0
-            result_dict["mbu"] = 100 * model_bytes_per_second / device_memory_bandwidth
+                # MBU = (Memory bytes / time) / peak_bandwidth * 100
+                model_bytes_per_second = model_memory_bytes / batch_generation_time if batch_generation_time > 0 else 0
+                result_dict["mbu"] = 100 * model_bytes_per_second / device_memory_bandwidth
+            else:
+                # Model dimensions not available - set to n/a
+                result_dict["mfu"] = "n/a"
+                result_dict["mbu"] = "n/a"
 
             save_completion_lengths([result_dict], timestamp, batch_idx)
             results.append(result_dict)
+            # Format MFU and MBU values for display
+            mfu_display = f"{result_dict['mfu']:.2f}%" if result_dict["mfu"] != "n/a" else result_dict["mfu"]
+            mbu_display = f"{result_dict['mbu']:.2f}%" if result_dict["mbu"] != "n/a" else result_dict["mbu"]
+
             logger.info(
                 f"Batch {batch_idx}/{num_batches - 1}: "
                 f"{result_dict['tokens_per_second']:.2f} new tokens/sec, "
-                f"MFU: {result_dict['mfu']:.2f}%, "
-                f"MBU: {result_dict['mbu']:.2f}%, "
+                f"MFU: {mfu_display}, "
+                f"MBU: {mbu_display}, "
                 f"generation time: {batch_generation_time:.2f}s, "
                 f"total new tokens: {new_tokens}"
             )
@@ -836,12 +880,23 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "response_lengths": [],
         "prompt_lengths": [],
     }
+
+    # Track if any MFU or MBU values are n/a
+    mfu_has_na = False
+    mbu_has_na = False
+
     for result in results:
         for key, value in result.items():
             if key == "mfu":
-                aggregated_results["total_mfu"] += value
+                if value == "n/a":
+                    mfu_has_na = True
+                else:
+                    aggregated_results["total_mfu"] += value
             elif key == "mbu":
-                aggregated_results["total_mbu"] += value
+                if value == "n/a":
+                    mbu_has_na = True
+                else:
+                    aggregated_results["total_mbu"] += value
             elif key == "tokens_per_second":
                 aggregated_results["total_tokens_per_second"] += value
             elif key == "generation_time":
@@ -860,8 +915,18 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         if aggregated_results["total_generation_time"] > 0
         else 0
     )
-    aggregated_results["avg_mfu"] = aggregated_results["total_mfu"] / num_results
-    aggregated_results["avg_mbu"] = aggregated_results["total_mbu"] / num_results
+
+    # Set averages to n/a if any individual result was n/a
+    if mfu_has_na:
+        aggregated_results["avg_mfu"] = "n/a"
+    else:
+        aggregated_results["avg_mfu"] = aggregated_results["total_mfu"] / num_results
+
+    if mbu_has_na:
+        aggregated_results["avg_mbu"] = "n/a"
+    else:
+        aggregated_results["avg_mbu"] = aggregated_results["total_mbu"] / num_results
+
     aggregated_results["avg_generation_time"] = aggregated_results["total_generation_time"] / num_results
     return aggregated_results
 
@@ -890,8 +955,13 @@ def print_summary(
     print("-" * 60)
     print(f"Average results over {len(results)} main benchmark batches:")
     print(f"Average tokens/second: {agg_results['avg_tokens_per_second']:.2f}")
-    print(f"Average MFU: {agg_results['avg_mfu']:.2f}%")
-    print(f"Average MBU: {agg_results['avg_mbu']:.2f}%")
+
+    # Format MFU and MBU for display
+    avg_mfu_display = f"{agg_results['avg_mfu']:.2f}%" if agg_results["avg_mfu"] != "n/a" else agg_results["avg_mfu"]
+    avg_mbu_display = f"{agg_results['avg_mbu']:.2f}%" if agg_results["avg_mbu"] != "n/a" else agg_results["avg_mbu"]
+
+    print(f"Average MFU: {avg_mfu_display}")
+    print(f"Average MBU: {avg_mbu_display}")
     print(f"Average generation time per batch: {agg_results['avg_generation_time']:.2f}s")
     print(f"Average new tokens per sample: {avg_new_tokens_per_sample:.2f} tokens")
 
@@ -968,7 +1038,10 @@ def main() -> None:
     free_all_gpu_memory()
 
     dataset = setup_dataset(args, tokenizer_config)
-    vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(args, model_config)
+    max_model_len = args.max_prompt_token_length + args.response_length
+    vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(
+        args, model_config, max_model_len=max_model_len
+    )
 
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
