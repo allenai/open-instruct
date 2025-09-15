@@ -525,7 +525,7 @@ class LLMRayActor:
                 metadata["dataset_index"],
                 metadata["training_step"],
                 self.tools,
-                metadata["sampling_params"],
+                metadata["original_sampling_params"],
                 TokenStatistics(
                     num_prompt_tokens=metadata["prompt_tokens"],
                     num_response_tokens=total_generation_tokens,
