@@ -1,6 +1,21 @@
 #!/bin/bash
 set -euo pipefail
 
+# 1) Verify we're inside a Git repo
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "Error: This directory is not a Git repository."
+  exit 1
+fi
+
+# 2) Fail if there are any uncommitted or untracked changes
+#    (staged, unstaged, or untracked files)
+if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+  echo "Error: Uncommitted changes detected. Please commit or stash before running."
+  echo "------- git status (short) -------"
+  git status --short
+  exit 1
+fi
+
 git_hash=$(git rev-parse --short HEAD)
 git_branch=$(git rev-parse --abbrev-ref HEAD)
 # Sanitize the branch name to remove invalid characters for Beaker names
