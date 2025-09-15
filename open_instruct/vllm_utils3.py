@@ -19,7 +19,6 @@ import copy
 import dataclasses
 import os
 import queue
-import threading
 import time
 from collections import defaultdict
 from concurrent import futures
@@ -109,6 +108,7 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
         tracking["concat_outputs"][output.request_id].outputs[0].token_ids.extend(o.token_ids)
     else:
         tracking["concat_outputs"][output.request_id] = output
+
     tracking["masks"][output.request_id].extend([1] * len(o.token_ids))
 
     # Check for tool calls
@@ -279,8 +279,6 @@ def _process_completed_request(request_id, outs, tracking, current_time, tools, 
         finished=outs[0].finished,
     )
 
-    # When tools are enabled, _finalize_outputs will handle merging from tracking
-    # When tools are disabled, we flatten all outputs here
     if not tools:
         final_output.outputs = [completion for out in outs for completion in out.outputs]
 
@@ -488,7 +486,6 @@ class LLMRayActor:
         self._should_stop_value = False
         self._should_stop_timeout_s = 5
 
-        self._prefetch_cv = threading.Condition()
         self._executor = futures.ThreadPoolExecutor(max_workers=1)
         self._prefetch_future = self._executor.submit(self._prefetch_worker)
 
@@ -506,22 +503,21 @@ class LLMRayActor:
     def _prefetch_worker(self):
         """Background worker that prefetches requests until we have enough buffered."""
         while True:
-            with self._prefetch_cv:
-                should_stop = self._should_stop()
-                if should_stop and self.verbose:
-                    try:
-                        queue_size = self.prompt_queue.qsize()
-                    except Exception:
-                        queue_size = "unknown"
-                    self.logger.info(f"Prefetch worker: should_stop=True, waiting. main_queue_size={queue_size}")
-                if should_stop:
-                    self._prefetch_cv.wait(timeout=0.1)
-                    continue
+            should_stop = self._should_stop()
+            if should_stop and self.verbose:
+                try:
+                    queue_size = self.prompt_queue.qsize()
+                except Exception:
+                    queue_size = "unknown"
+                self.logger.info(f"Prefetch worker: should_stop=True, waiting. main_queue_size={queue_size}")
+            if should_stop:
+                time.sleep(0.1)
+                continue
 
-                current_unfinished = self.llm_engine.get_num_unfinished_requests()
-                if current_unfinished >= self.inference_batch_size:
-                    self._prefetch_cv.wait(timeout=0.1)  # shorter wait is OK
-                    continue
+            current_unfinished = self.llm_engine.get_num_unfinished_requests()
+            if current_unfinished >= self.inference_batch_size:
+                time.sleep(0.1)  # shorter wait is OK
+                continue
             try:
                 request = self.prompt_queue.get(timeout=0.1)
 
@@ -554,9 +550,6 @@ class LLMRayActor:
                         f"current_unfinished={self.llm_engine.get_num_unfinished_requests()}"
                     )
 
-                with self._prefetch_cv:
-                    self._prefetch_cv.notify_all()
-
             except queue.Empty:
                 continue
 
@@ -586,7 +579,6 @@ class LLMRayActor:
         total_processed = 0
         iteration_count = 0
 
-        exit_reason = "unknown"
         while True:
             iteration_count += 1
 
@@ -600,17 +592,7 @@ class LLMRayActor:
                 unfinished = self.llm_engine.get_num_unfinished_requests()
 
                 if pending_tools == 0 and unfinished == 0:
-                    exit_reason = "should_stop requested (all work complete)"
                     break
-                elif self.verbose and iteration_count % 100 == 0:
-                    self.logger.info(f"Delaying stop: unfinished={unfinished}, pending_tools={pending_tools}")
-
-            # Return every 10k iterations to allow weight synchronization
-            if iteration_count % 10000 == 0:
-                exit_reason = "10k iteration limit reached"
-                if self.verbose:
-                    self.logger.info(f"process_from_queue exiting: {exit_reason}")
-                return total_processed
 
             # Process tool futures (just updates tracking, doesn't return results to insert)
             self._poll_tool_futures(self.tracking, self.llm_engine.tokenizer)
@@ -620,26 +602,7 @@ class LLMRayActor:
 
             # Process engine steps - ONLY if there are unfinished requests
             if self.llm_engine.has_unfinished_requests():
-                all_outputs = list(self.llm_engine.step())
-
-                # Assert that all outputs from step() are finished
-                unfinished_outputs = [o for o in all_outputs if not o.finished]
-                assert not unfinished_outputs, (
-                    f"vLLM step() returned {len(unfinished_outputs)} unfinished outputs. "
-                    f"This violates our assumption that we only need to process finished outputs. "
-                    f"Unfinished request IDs: {[o.request_id for o in unfinished_outputs]}"
-                )
-
-                step_outputs = all_outputs
-
-                for output in step_outputs:
-                    # We always set n=1 for each sub-request in add_request()
-                    assert len(output.outputs) == 1, (
-                        f"vLLM returned {len(output.outputs)} outputs for request {output.request_id}, "
-                        f"but we always set n=1 for sub-requests. This indicates vLLM is not respecting "
-                        f"the n parameter in sampling_params."
-                    )
-
+                for output in [o for o in self.llm_engine.step() if o.finished]:
                     # Fix the index field for non-tool mode
                     # When tools are disabled and we have n>1, we create sub-requests with IDs like
                     # train_3_12_0, train_3_12_1, etc. But vLLM creates CompletionOutputs with index=0
@@ -649,46 +612,11 @@ class LLMRayActor:
                         parts = output.request_id.rsplit("_", 1)
                         if len(parts) == 2 and parts[1].isdigit():
                             correct_index = int(parts[1])
-                            base_req_id_from_parse = "_".join(parts[:-1])
-
                             # Fix the index on the CompletionOutput
                             for i, comp_output in enumerate(output.outputs):
                                 output.outputs[i] = dataclasses.replace(comp_output, index=correct_index)
 
-                            # Verify the fix by reconstructing the sub-request ID
-                            base_req_id = _extract_base_request_id(output.request_id)
-                            reconstructed_id = f"{base_req_id}_{output.outputs[0].index}"
-                            assert reconstructed_id == output.request_id, (
-                                f"Index fix failed: reconstructed {reconstructed_id} != original {output.request_id}. "
-                                f"Base: {base_req_id}, Index: {output.outputs[0].index}, Correct index: {correct_index}"
-                            )
-                            assert base_req_id == base_req_id_from_parse, (
-                                f"Base request ID mismatch: {base_req_id} != {base_req_id_from_parse}"
-                            )
-
-                    # Verify the request is being tracked
-                    if output.request_id not in self.vllm_active_requests:
-                        raise RuntimeError(
-                            f"Sub-request {output.request_id} completed but was not in vllm_active_requests. "
-                            f"This indicates a critical tracking bug. Active requests: {list(self.vllm_active_requests.keys())}"
-                        )
-
                     base_req_id = _extract_base_request_id(output.request_id)
-
-                    # Check if metadata exists for this request
-                    if base_req_id not in self.request_metadata:
-                        raise RuntimeError(
-                            f"Critical bug: Missing metadata for request {base_req_id}. "
-                            f"This indicates metadata was cleaned up prematurely while sub-requests were still processing. "
-                            f"All available metadata keys: {list(self.request_metadata.keys())}"
-                        )
-
-                    # Assert: check sample count before processing
-                    expected_samples = self.request_metadata[base_req_id]["original_sampling_params"].n
-                    current_samples_before = sum(
-                        1 for k in self.tracking["concat_outputs"].keys() if _extract_base_request_id(k) == base_req_id
-                    )
-
                     result = _handle_output(
                         output,
                         self.tools,
@@ -698,24 +626,12 @@ class LLMRayActor:
                         self.executor,
                     )
 
-                    # Assert: check sample count after processing
-                    current_samples_after = sum(
-                        1 for k in self.tracking["concat_outputs"].keys() if _extract_base_request_id(k) == base_req_id
-                    )
-                    assert current_samples_after <= expected_samples, (
-                        f"Too many samples for {base_req_id}: expected ≤{expected_samples}, got {current_samples_after} (was {current_samples_before} before). Keys: {[k for k in self.tracking['concat_outputs'].keys() if _extract_base_request_id(k) == base_req_id]}"
-                    )
                     # Result is None when we do more tool processing.
                     if result is None:
                         # Request went to tools - remove from vllm_active_requests since it's no longer in vLLM
                         self.vllm_active_requests.discard(output.request_id)
-                        if self.verbose:
-                            self.logger.info(f"Removed {output.request_id} from vllm_active_requests (sent to tools)")
                     else:
                         # Sub-request is done (no more tool calls)
-
-                        # Get the CompletionOutput to add
-                        assert len(output.outputs) == 1, f"{len(output.outputs)=} != 1"
                         if output.request_id in self.tracking["concat_outputs"]:
                             complete_output = self.tracking["concat_outputs"][output.request_id].outputs[0]
                         else:
@@ -724,16 +640,10 @@ class LLMRayActor:
                         # Remove from vllm_active_requests BEFORE calling _finalize_sub_request
                         # to avoid deadlock in _maybe_process_and_insert
                         self.vllm_active_requests.discard(output.request_id)
-                        if self.verbose:
-                            self.logger.info(
-                                f"Removed {output.request_id} from vllm_active_requests before finalizing"
-                            )
-
                         # Use helper to finalize the sub-request
-                        processed = self._finalize_sub_request(
+                        total_processed += self._finalize_sub_request(
                             output.request_id, output, complete_output, current_time
                         )
-                        total_processed += processed
 
             # If no work to do, break to yield control back to generate_thread,
             # allowing weight_sync_thread to acquire the LLMRayActor lock
@@ -747,91 +657,8 @@ class LLMRayActor:
                 # Sleep for 1 second to let pending tools complete.
                 time.sleep(1)
             if final_unfinished + pending_tools == 0:
-                # CRITICAL INVARIANT CHECKS before exiting
-                # When we think we're done, verify that ALL requests are actually complete
-
-                # 1. Check metadata for incomplete requests
-                incomplete_metadata = []
-                for req_id, metadata in self.request_metadata.items():
-                    expected_n = metadata["original_sampling_params"].n
-                    if req_id not in self.request_outputs:
-                        # This request has metadata but no outputs yet
-                        incomplete_metadata.append(
-                            f"{req_id}: no outputs in request_outputs (expecting {expected_n} samples)"
-                        )
-                    else:
-                        num_outputs = len(self.request_outputs[req_id].outputs)
-                        if num_outputs < expected_n:
-                            incomplete_metadata.append(f"{req_id}: only {num_outputs}/{expected_n} outputs collected")
-
-                # 2. Check for pending outputs not yet processed
-                pending_in_outputs = []
-                for req_id, request_output in self.request_outputs.items():
-                    if request_output.outputs:  # Has outputs waiting
-                        if req_id in self.request_metadata:
-                            expected_n = self.request_metadata[req_id]["original_sampling_params"].n
-                            if len(request_output.outputs) >= expected_n:
-                                # We have enough outputs but haven't processed them
-                                pending_in_outputs.append(
-                                    f"{req_id}: {len(request_output.outputs)}/{expected_n} outputs ready but not inserted"
-                                )
-
-                # 3. Check tracking for orphaned sub-requests
-                orphaned_tracking = []
-                if self.tools and "concat_outputs" in self.tracking:
-                    for sub_id in self.tracking["concat_outputs"]:
-                        base_id = _extract_base_request_id(sub_id)
-                        # Check if base request exists in metadata
-                        if base_id not in self.request_metadata:
-                            # This sub-request has no parent metadata - might be already processed
-                            # Only flag as orphaned if it wasn't already inserted
-                            if base_id not in self.request_outputs or not self.request_outputs[base_id]:
-                                # No pending outputs for this base, so truly orphaned
-                                orphaned_tracking.append(f"{sub_id} (base: {base_id})")
-
-                # 4. Check if any sub-requests are still active in vLLM
-                active_sub_requests = []
-                for req_id in self.request_metadata.keys():
-                    expected_n = self.request_metadata[req_id]["original_sampling_params"].n
-                    for j in range(expected_n):
-                        sub_id = f"{req_id}_{j}"
-                        if sub_id in self.vllm_active_requests:
-                            active_sub_requests.append(sub_id)
-
-                # If we have incomplete requests or active sub-requests, don't exit yet
-                if incomplete_metadata or pending_in_outputs or orphaned_tracking or active_sub_requests:
-                    if self.verbose or active_sub_requests:
-                        self.logger.info(
-                            f"Detected incomplete state - continuing processing:\\n"
-                            f"  Incomplete metadata: {len(incomplete_metadata)} requests\\n"
-                            f"  Pending outputs: {len(pending_in_outputs)} requests\\n"
-                            f"  Orphaned tracking: {len(orphaned_tracking)} sub-requests\\n"
-                            f"  Active sub-requests in vLLM: {active_sub_requests[:5]}{'...' if len(active_sub_requests) > 5 else ''}"
-                        )
-
-                    # If we only have incomplete metadata/outputs but no active work, we have a real problem
-                    if not active_sub_requests and final_unfinished == 0 and pending_tools == 0:
-                        # Give it one more second in case outputs are in flight
-                        time.sleep(1.0)
-
-                        # Re-check after sleep
-                        final_unfinished = self.llm_engine.get_num_unfinished_requests()
-                        pending_tools = len(self.tracking["pending_tool_futures"])
-                        active_sub_requests = [
-                            f"{req_id}_{j}"
-                            for req_id in self.request_metadata.keys()
-                            for j in range(self.request_metadata[req_id]["original_sampling_params"].n)
-                            if f"{req_id}_{j}" in self.vllm_active_requests
-                        ]
-
-                    # Continue processing - don't exit yet
-                    continue
-
-                exit_reason = "no work remaining"
                 break
 
-        if self.verbose:
-            self.logger.info(f"process_from_queue exiting: {exit_reason}")
         return total_processed
 
     def _maybe_process_and_insert(
