@@ -76,12 +76,26 @@ class TestVllmUtils3(unittest.TestCase):
         tracking["tool_called"][req_id_1] = True
         tracking["tool_called"][req_id_2] = True
 
+        # Create a mock output and sampling params
+        mock_output = MagicMock(spec=vllm.RequestOutput)
+        mock_output.request_id = "train_1_43039"
+        mock_output.prompt = []
+        mock_output.prompt_token_ids = []
+        mock_output.prompt_logprobs = None
+        mock_output.outputs = [mock_output1, mock_output2]
+        mock_output.finished = True
+
+        mock_sampling_params = MagicMock(spec=vllm.SamplingParams)
+        mock_sampling_params.n = 2  # Two samples per prompt
+
         # Call the function under test
         result = _finalize_outputs(
-            outputs=[mock_request_output1],  # Need at least one output to get the base request_id
+            output=mock_output,
             tracking=tracking,
             dataset_index=43039,
+            training_step=1,
             tools={"some_tool": {}},  # Tools enabled
+            original_sampling_params=mock_sampling_params,
             token_statistics=TokenStatistics(num_prompt_tokens=10, num_response_tokens=6, generation_time=1.0),
             start_time=1000.0,
         )
@@ -137,20 +151,34 @@ class TestVllmUtils3(unittest.TestCase):
             tracking["tool_runtime"][sample_req_id] = 0.1
             tracking["tool_called"][sample_req_id] = True
 
+        # Create a mock output and sampling params
+        mock_final_output = MagicMock(spec=vllm.RequestOutput)
+        mock_final_output.request_id = base_request_id
+        mock_final_output.prompt = []
+        mock_final_output.prompt_token_ids = []
+        mock_final_output.prompt_logprobs = None
+        mock_final_output.outputs = [mock_outputs[0].outputs[0], mock_outputs[1].outputs[0], mock_outputs[2].outputs[0]]
+        mock_final_output.finished = True
+
+        mock_sampling_params = MagicMock(spec=vllm.SamplingParams)
+        mock_sampling_params.n = 3  # Three samples per prompt
+
         result = _finalize_outputs(
-            outputs=mock_outputs,
+            output=mock_final_output,
             tracking=tracking,
             dataset_index=100,  # Single dataset index for this request
+            training_step=1,
             tools={"some_tool": {}},
+            original_sampling_params=mock_sampling_params,
             token_statistics=TokenStatistics(num_prompt_tokens=3, num_response_tokens=6, generation_time=1.0),
             start_time=1000.0,
         )
 
-        # Results come in the order they were processed from tracking (which is dict iteration order)
-        # Since we added samples with indices [2, 0, 1], they get processed in that order
-        # So responses should be [[3, 4], [1, 2], [5, 6]] (in tracking order)
-        expected_responses = [[3, 4], [1, 2], [5, 6]]
-        self.assertEqual(result.responses, expected_responses, "Responses should match tracking order")
+        # Results should be sorted by sample index (0, 1, 2) regardless of insertion order
+        # The function now correctly sorts by sample index, not tracking insertion order
+        # Sample 0 has tokens [1, 2], sample 1 has tokens [5, 6], sample 2 has tokens [3, 4]
+        expected_responses = [[1, 2], [5, 6], [3, 4]]
+        self.assertEqual(result.responses, expected_responses, "Responses should be sorted by sample index")
 
     @parameterized.expand(
         [
