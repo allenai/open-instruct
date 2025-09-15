@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 import vllm
 from parameterized import parameterized
 
-from open_instruct.queue_types import TokenStatistics
-from open_instruct.vllm_utils3 import _extract_base_request_id, _finalize_outputs, _init_tool_tracking
+from open_instruct.queue_types import PromptRequest, TokenStatistics
+from open_instruct.vllm_utils3 import _extract_base_request_id, _finalize_outputs, _init_tool_tracking, make_request_id
 
 
 class TestVllmUtils3(unittest.TestCase):
@@ -180,6 +180,74 @@ class TestVllmUtils3(unittest.TestCase):
         # Empty string
         result = _extract_base_request_id("")
         self.assertEqual(result, "")
+
+    @parameterized.expand(
+        [
+            (False, 0, 0, "train_0_0"),
+            (False, 1, 43039, "train_1_43039"),
+            (True, 5, 12345, "eval_5_12345"),
+            (False, 100, 999, "train_100_999"),
+            (True, 123, 456, "eval_123_456"),
+        ]
+    )
+    def test_make_request_id(self, is_eval, training_step, dataset_index, expected_id):
+        """Test make_request_id generates correct request IDs."""
+        request = PromptRequest(
+            prompt=[1, 2, 3],
+            generation_config={},
+            training_step=training_step,
+            dataset_index=dataset_index,
+            is_eval=is_eval,
+        )
+        result = make_request_id(request)
+        self.assertEqual(result, expected_id)
+
+    def test_make_request_id_train_vs_eval(self):
+        """Test that make_request_id correctly distinguishes between train and eval."""
+        # Training request
+        train_request = PromptRequest(
+            prompt=[1, 2, 3],
+            generation_config={},
+            training_step=10,
+            dataset_index=20,
+            is_eval=False,
+        )
+        train_id = make_request_id(train_request)
+        self.assertTrue(train_id.startswith("train_"))
+        self.assertEqual(train_id, "train_10_20")
+
+        # Evaluation request
+        eval_request = PromptRequest(
+            prompt=[1, 2, 3],
+            generation_config={},
+            training_step=10,
+            dataset_index=20,
+            is_eval=True,
+        )
+        eval_id = make_request_id(eval_request)
+        self.assertTrue(eval_id.startswith("eval_"))
+        self.assertEqual(eval_id, "eval_10_20")
+
+    def test_make_request_id_extract_base_request_id_roundtrip(self):
+        """Test that make_request_id and _extract_base_request_id work together correctly."""
+        request = PromptRequest(
+            prompt=[1, 2, 3],
+            generation_config={},
+            training_step=42,
+            dataset_index=100,
+            is_eval=False,
+        )
+
+        # Generate the request ID
+        request_id = make_request_id(request)
+        self.assertEqual(request_id, "train_42_100")
+
+        # Add a sample suffix (as would happen in vLLM processing)
+        full_request_id = f"{request_id}_0"
+
+        # Extract base should give us back the original
+        extracted = _extract_base_request_id(full_request_id)
+        self.assertEqual(extracted, request_id)
 
 
 if __name__ == "__main__":
