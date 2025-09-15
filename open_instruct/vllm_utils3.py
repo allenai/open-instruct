@@ -129,10 +129,10 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
 def _process_outputs(
     outputs: List[vllm.RequestOutput],
-    dataset_index: Optional[int] = None,
-    training_step: Optional[int] = None,
-    token_statistics: Optional[TokenStatistics] = None,
-    start_time: Optional[float] = None,
+    dataset_index: int,
+    training_step: int,
+    token_statistics: TokenStatistics,
+    start_time: float,
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -171,10 +171,10 @@ def _process_outputs(
 
 def _process_outputs_with_tools(
     outputs: List[vllm.RequestOutput],
-    dataset_index: Optional[int] = None,
-    training_step: Optional[int] = None,
-    token_statistics: Optional[TokenStatistics] = None,
-    start_time: Optional[float] = None,
+    dataset_index: int,
+    training_step: int,
+    token_statistics: TokenStatistics,
+    start_time: float,
 ) -> "GenerationResult":
     """Process vLLM RequestOutputs into GenerationResult format with tool information."""
     response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
@@ -213,15 +213,15 @@ def _process_outputs_with_tools(
 
 
 def _finalize_outputs(
-    output,
-    tracking,
-    dataset_index,
-    training_step,
-    tools,
-    original_sampling_params,
-    token_statistics=None,
-    start_time=None,
-):
+    output: vllm.RequestOutput,
+    tracking: Dict[str, Any],
+    dataset_index: int,
+    training_step: int,
+    tools: Optional[Dict[str, Tool]],
+    original_sampling_params: vllm.SamplingParams,
+    token_statistics: TokenStatistics,
+    start_time: float,
+) -> GenerationResult:
     """Prepare final outputs based on whether tools were used."""
 
     if not tools:
@@ -397,7 +397,6 @@ def _process_completed_request(request_id, outs, tracking, current_time, tools, 
 
     total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
     metadata = request_metadata[request_id]  # Don't pop yet, _poll_tool_futures might need it
-
     result = _finalize_outputs(
         final_output,
         tracking,
