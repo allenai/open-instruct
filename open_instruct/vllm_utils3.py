@@ -482,7 +482,7 @@ class LLMRayActor:
 
                     # Fix the index on the CompletionOutput
                     correct_index = int(parts[1])
-                    output.outputs = [dataclass.replace(o, index=correct_index) for o in output.outputs]
+                    output.outputs = [dataclasses.replace(o, index=correct_index) for o in output.outputs]
 
                     base_req_id = _extract_base_request_id(output.request_id)
                     result = _handle_output(
