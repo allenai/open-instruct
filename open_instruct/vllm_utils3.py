@@ -396,9 +396,9 @@ def init_process_group(
 def add_request(
     request: PromptRequest,
     llm_engine: vllm.LLMEngine,
-    tools,
+    tools: Dict[str, Tool],
     request_metadata: dict,
-    vllm_active_requests: dict = None,
+    vllm_active_requests: dict,
 ) -> int:
     """Add a request to the LLM engine."""
     sampling_params = request.generation_config.clone()
@@ -415,27 +415,15 @@ def add_request(
     }
 
     tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
-    n = request.generation_config.n
-    for j in range(n):
+    for j in range(request.generation_config.n):
         sub_sampling_params = sampling_params.clone()  # Already has n=1
         if request.generation_config.seed is not None:
             sub_sampling_params.seed = request.generation_config.seed + j
         sub_request_id = f"{request_id}_{j}"
         llm_engine.add_request(sub_request_id, tokens_prompt, sub_sampling_params)
-        # Track this request as active in vLLM
-        if vllm_active_requests is not None:
-            vllm_active_requests[sub_request_id] = request.dataset_index
+        vllm_active_requests.add(sub_request_id)
 
-    # Assert all n sub-requests are tracked
-    if vllm_active_requests is not None:
-        for j in range(n):
-            sub_request_id = f"{request_id}_{j}"
-            assert sub_request_id in vllm_active_requests, (
-                f"Sub-request {sub_request_id} missing from vllm_active_requests after adding. "
-                f"Expected all {n} sub-requests for {request_id} to be tracked."
-            )
-
-    return n
+    return request.generation_config.n
 
 
 class LLMRayActor:
@@ -461,7 +449,7 @@ class LLMRayActor:
         self.inference_batch_size = inference_batch_size
         self.verbose = verbose
         self.request_metadata = {}
-        self.vllm_active_requests = {}  # Track all requests currently in vLLM: request_id -> dataset_index
+        self.vllm_active_requests = set()  # Track all requests currently in vLLM
 
         if self.tools:
             self.executor = futures.ThreadPoolExecutor(max_workers=20)
@@ -720,7 +708,7 @@ class LLMRayActor:
                     # Result is None when we do more tool processing.
                     if result is None:
                         # Request went to tools - remove from vllm_active_requests since it's no longer in vLLM
-                        del self.vllm_active_requests[output.request_id]
+                        self.vllm_active_requests.discard(output.request_id)
                         if self.verbose:
                             self.logger.info(f"Removed {output.request_id} from vllm_active_requests (sent to tools)")
                     else:
@@ -735,7 +723,7 @@ class LLMRayActor:
 
                         # Remove from vllm_active_requests BEFORE calling _finalize_sub_request
                         # to avoid deadlock in _maybe_process_and_insert
-                        del self.vllm_active_requests[output.request_id]
+                        self.vllm_active_requests.discard(output.request_id)
                         if self.verbose:
                             self.logger.info(
                                 f"Removed {output.request_id} from vllm_active_requests before finalizing"
@@ -1050,7 +1038,7 @@ class LLMRayActor:
         # Safety check: Ensure no active vLLM requests or pending tool futures for this request
         # Check for sub-requests that belong to THIS specific request (not just same dataset_index)
         active_requests_for_dataset = [
-            req_id for req_id in self.vllm_active_requests.keys() if _extract_base_request_id(req_id) == request_id
+            req_id for req_id in self.vllm_active_requests if _extract_base_request_id(req_id) == request_id
         ]
 
         has_pending_tools = self._has_pending_tool_futures_for_request(request_id, tracking)
@@ -1069,7 +1057,7 @@ class LLMRayActor:
                 f"  - Has pending tool futures: {has_pending_tools}\n"
                 f"  - Pending tool future IDs: {pending_tool_ids}\n"
                 f"  - Request ID: {request_id}\n"
-                f"  - All active vLLM requests: {list(self.vllm_active_requests.keys())}\n"
+                f"  - All active vLLM requests: {list(self.vllm_active_requests)}\n"
                 f"This indicates requests are being cleaned up while still being processed!"
             )
 
@@ -1265,7 +1253,7 @@ class LLMRayActor:
                     # Track tool continuation request as active
                     base_req_id = _extract_base_request_id(req_id)
                     if base_req_id in self.request_metadata:
-                        self.vllm_active_requests[req_id] = self.request_metadata[base_req_id]["dataset_index"]
+                        self.vllm_active_requests.add(req_id)
 
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
