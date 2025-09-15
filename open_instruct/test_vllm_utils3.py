@@ -157,7 +157,11 @@ class TestVllmUtils3(unittest.TestCase):
         mock_final_output.prompt = []
         mock_final_output.prompt_token_ids = []
         mock_final_output.prompt_logprobs = None
-        mock_final_output.outputs = [mock_outputs[0].outputs[0], mock_outputs[1].outputs[0], mock_outputs[2].outputs[0]]
+        mock_final_output.outputs = [
+            mock_outputs[0].outputs[0],
+            mock_outputs[1].outputs[0],
+            mock_outputs[2].outputs[0],
+        ]
         mock_final_output.finished = True
 
         mock_sampling_params = MagicMock(spec=vllm.SamplingParams)
