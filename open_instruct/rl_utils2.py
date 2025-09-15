@@ -57,7 +57,7 @@ class PackedSequences(Generic[T]):
     """packed sequence lengths (batch_size, pack_length)"""
     dones: Optional[np.ndarray] = None
     """packed dones (batch_size, pack_length), specifies the sequence boundaries
-    E.g., [0, 0, 0, 0, 1, 0, 0, 0, 0, 2] means the first sequence ends at index 4, and the 
+    E.g., [0, 0, 0, 0, 1, 0, 0, 0, 0, 2] means the first sequence ends at index 4, and the
     second sequence ends at index 9
     """
     rewards: Optional[np.ndarray] = None

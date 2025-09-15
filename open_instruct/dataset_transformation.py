@@ -815,14 +815,8 @@ INPUT_IDS_KEY = "input_ids"
 ATTENTION_MASK_KEY = "attention_mask"
 LABELS_KEY = "labels"
 DATASET_ORIGIN_KEY = "dataset_source"  # just 'dataset' clashes with RLVR stuff (see VERIFIER_SOURCE_KEY)
-TOKENIZED_SFT_DATASET_KEYS = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY, RAW_PROMPT_KEY]
-TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE = [
-    INPUT_IDS_KEY,
-    ATTENTION_MASK_KEY,
-    LABELS_KEY,
-    DATASET_ORIGIN_KEY,
-    RAW_PROMPT_KEY,
-]
+TOKENIZED_SFT_DATASET_KEYS = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY]
+TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY, DATASET_ORIGIN_KEY]
 
 
 def remove_dataset_source_field(dataset: Dataset) -> Dataset:
@@ -878,6 +872,7 @@ def sft_tokenize_v1(
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
+    row.pop(RAW_PROMPT_KEY, None)
     return row
 
 

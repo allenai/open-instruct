@@ -16,8 +16,8 @@ uv run python mason.py \
        --image "$BEAKER_IMAGE" \
        --description "Single GPU on Beaker with tool use test script." \
        --pure_docker_mode \
-       --workspace ai2/tulu-thinker \
-       --priority high \
+       --workspace ai2/open-instruct-dev \
+       --priority urgent \
        --preemptible \
        --num_nodes 1 \
        --max_retries 0 \
@@ -67,6 +67,7 @@ uv run python mason.py \
     --num_mini_batches 1 \
     --lr_scheduler_type constant \
     --save_freq 100 \
+    --update_progress_every 1 \
     --try_launch_beaker_eval_jobs_on_weka False \
     --vllm_num_engines 1 \
     --max_tool_calls 5 \
