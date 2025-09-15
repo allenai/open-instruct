@@ -118,6 +118,7 @@ parser.add_argument("--step", type=int, default=None, help="Step number for post
 parser.add_argument("--run_id", type=str, default=None, help="A unique run ID for postgresql logging.")
 parser.add_argument("--oe_eval_stop_sequences", type=str, default=None, help="Comma-separated list of stop sequences for OE eval.")
 parser.add_argument("--process_output", type=str, default="r1_style", help="Process output type for OE eval (e.g., 'r1_style'). Defaults to 'r1_style', which should work for most of our models, including non-thinking ones.")
+parser.add_argument("--s3_output_dir", type=str, default=None, help="S3 output directory for evaluation results (e.g., 's3://bucket/path'). If provided, results will be uploaded to S3 after evaluation completes.")
 args = parser.parse_args()
 
 
@@ -664,6 +665,10 @@ if args.run_oe_eval_experiments:
     if args.cluster and len(args.cluster) > 0:
         cluster_str = ",".join(args.cluster)
         oe_eval_cmd += f" --cluster '{cluster_str}'"
+
+    # Add S3 output directory if provided
+    if args.s3_output_dir:
+        oe_eval_cmd += f" --remote-output-dir {args.s3_output_dir}"
 
     print(f"Running OE eval with command: {oe_eval_cmd}")
     subprocess.Popen(oe_eval_cmd, shell=True)

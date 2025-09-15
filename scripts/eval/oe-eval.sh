@@ -8,7 +8,7 @@ set -ex
 # sadly, this is internal at Ai2 for now, but we are working on making it public!
 
 # Example usages:
-# ./scripts/eval/oe-eval.sh --model-name <model_name>  --model-location <model_path> [--hf-upload] [--max-length <max_length>]
+# ./scripts/eval/oe-eval.sh --model-name <model_name>  --model-location <model_path> [--hf-upload] [--max-length <max_length>] [--remote-output-dir <s3_path>]
 # model_name should be a human-readable name for the model/run. This will be used in experiment tracking.
 # model_path should be
 #   (a) a huggingface name (e.g. allenai/llama-3-tulu-2-8b),
@@ -16,9 +16,11 @@ set -ex
 #   (c) a beaker dataset hash (e.g., beaker://01J28FDK3GDNA2C5E9JXBW1TP4) - note the beaker://
 #   (d) (untested) an absolute path to a model on cirrascale nfs.
 # hf-upload is an optional flag to upload the results to huggingface for result tracking.
+# remote-output-dir is an optional S3 path where results will be uploaded after evaluation completes.
 # e.g.:
 # ./scripts/eval/oe-eval.sh --model-name olmo_17_7b_turbo_sft  --model-location beaker://01J28FDK3GDNA2C5E9JXBW1TP4 --hf-upload --max-length 2048
 # ./scripts/eval/oe-eval.sh --model-name llama-3-tulu-2-dpo-8b --model-location allenai/llama-3-tulu-2-8b --hf-upload
+# ./scripts/eval/oe-eval.sh --model-name my_model --model-location my_model --remote-output-dir s3://my-bucket/eval_results
 # Specifying unseen-evals evaluates the model on the unseen evaluation suite instead of the development suite.
 
 # Tulu eval dev suite is:
@@ -47,11 +49,12 @@ set -ex
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--task-suite TASK_SUITE] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>] [--process-output <process_output>]"
+    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--task-suite TASK_SUITE] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>] [--process-output <process_output>] [--remote-output-dir <s3_path>]"
     echo "TASK_SUITE should be one of: NEXT_MODEL_DEV, NEXT_MODEL_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN (default: NEXT_MODEL_DEV)"
     echo "TASKS should be a comma-separated list of task specifications (e.g., 'gsm8k::tulu,bbh:cot::tulu')"
     echo "STOP_SEQUENCES should be a comma-separated list of strings to stop generation at (e.g., '</answer>,\\n\\n')"
     echo "PROCESS_OUTPUT should be a string specifying how to process the model output (e.g., 'r1_style')"
+    echo "REMOTE_OUTPUT_DIR should be an S3 path where results will be uploaded (e.g., 's3://bucket/path')"
     exit 1
 }
 
@@ -74,6 +77,7 @@ while [[ "$#" -gt 0 ]]; do
         --beaker-image) BEAKER_IMAGE="$2"; shift ;;
         --cluster) CLUSTER="$2"; shift ;;
         --process-output) PROCESS_OUTPUT="$2"; shift ;;
+        --remote-output-dir) REMOTE_OUTPUT_DIR="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
@@ -142,6 +146,13 @@ if [[ -n "$REVISION" ]]; then
     REVISION_ARG="--revision $REVISION"
 else
     REVISION_ARG=""
+fi
+
+# Set REMOTE_OUTPUT_DIR_ARG if provided
+if [[ -n "$REMOTE_OUTPUT_DIR" ]]; then
+    REMOTE_OUTPUT_DIR_ARG="--remote-output-dir $REMOTE_OUTPUT_DIR"
+else
+    REMOTE_OUTPUT_DIR_ARG=""
 fi
 
 # Define default tasks if no custom tasks provided
@@ -337,7 +348,8 @@ for TASK in "${TASKS[@]}"; do
             --beaker-image "$BEAKER_IMAGE" \
             --beaker-priority "$PRIORITY" \
             --push-datalake \
-            --datalake-tags "$DATALAKE_ARGS"
+            --datalake-tags "$DATALAKE_ARGS" \
+            ${REMOTE_OUTPUT_DIR_ARG}
     else
         python oe-eval-internal/oe_eval/launch.py \
         --model "$MODEL_NAME" \
@@ -358,6 +370,7 @@ for TASK in "${TASKS[@]}"; do
         --beaker-image "$BEAKER_IMAGE" \
         --beaker-priority  "$PRIORITY" \
         --push-datalake \
-        --datalake-tags "$DATALAKE_ARGS"
+        --datalake-tags "$DATALAKE_ARGS" \
+        ${REMOTE_OUTPUT_DIR_ARG}
     fi
 done
