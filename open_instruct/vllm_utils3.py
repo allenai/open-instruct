@@ -89,12 +89,6 @@ def _init_tool_tracking():
     }
 
 
-def make_request_id(request: PromptRequest) -> str:
-    """Generate a unique tracking key for a request."""
-    prefix = "eval" if request.is_eval else "train"
-    return f"{prefix}_{request.training_step}_{request.dataset_index}"
-
-
 def _extract_base_request_id(full_request_id: str) -> str:
     """Extract base request ID by removing the sample suffix.
 
