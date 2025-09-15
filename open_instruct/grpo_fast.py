@@ -52,7 +52,9 @@ import json
 import math
 import random
 import shutil
+import signal
 import socket
+import sys
 import threading
 import time
 from argparse import Namespace
@@ -2914,7 +2916,23 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     utils.check_runtime_leaks()
 
 
+def _graceful_exit_handler(signum, frame):
+    try:
+        logger.info(f"Received signal {signum}; exiting gracefully with code 0")
+    except Exception:
+        pass
+    raise SystemExit(0)
+
+
 if __name__ == "__main__":
+    # Ensure replicas exit with code 0 on SIGTERM/SIGINT to avoid failed job status
+    try:
+        signal.signal(signal.SIGTERM, _graceful_exit_handler)
+        signal.signal(signal.SIGINT, _graceful_exit_handler)
+    except Exception:
+        # Some environments may not allow setting handlers; ignore
+        pass
+
     parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
     assert isinstance(args, Args)
