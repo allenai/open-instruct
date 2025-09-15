@@ -2204,9 +2204,6 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
                 generate_metrics_Q.put_nowait({"time/generation": timer.duration})
             except Full:
                 logger.warning("[Generate Thread] generate metrics queue full, skipping metric")
-        else:
-            # Sleep briefly when no work is processed to avoid tight spinning
-            time.sleep(0.1)
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
@@ -2777,6 +2774,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
+
+    if len(train_dataset) < (needed := max(args.async_steps, 1) * args.num_unique_prompts_rollout):
+        raise ValueError(
+            f"Train dataset is too small! Is {len(train_dataset)} prompts, but {needed} are needed to have enough prompts for bsz and prefill. Try reducing async_steps or num_unique_prompts_rollout, or increasing the dataset size."
+        )
+
     if args.cache_dataset_only:
         return
 
@@ -2791,7 +2794,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     queue_size = (args.async_steps + 1) * args.num_unique_prompts_rollout
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
-    # We don't really care if we ever hit the max, so we let the queue be unbounded.
+    # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
 
     policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
@@ -2873,8 +2876,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             actor_manager,
             checkpoint_state,
         )
-    except Exception as e:
-        logger.error(f"Error in run_training: {e}", exc_info=True)
     finally:
         cleanup_training_resources(
             stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q], actor_manager

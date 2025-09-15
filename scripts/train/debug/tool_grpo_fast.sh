@@ -23,8 +23,8 @@ uv run python mason.py \
        --max_retries 0 \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
-       --no-host-networking \
        --budget ai2/oe-adapt \
+       --no-host-networking \
        --gpus 1 \
 	   -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 1.0 \
@@ -41,7 +41,6 @@ uv run python mason.py \
     --model_name_or_path Qwen/Qwen3-1.7B \
     --stop_strings "</answer>" \
     --apply_verifiable_reward true \
-    --verbose True \
     --temperature 1.0 \
     --ground_truths_key ground_truth \
     --sft_messages_key messages \

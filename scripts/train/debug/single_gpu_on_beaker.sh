@@ -36,7 +36,6 @@ uv run python mason.py \
     --stop_strings "</answer>" \
     --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
-    --verbose True \
     --temperature 0.7 \
     --ground_truths_key ground_truth \
     --chat_template_name r1_simple_chat_postpend_think \
