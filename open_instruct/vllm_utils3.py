@@ -199,58 +199,14 @@ def _finalize_outputs(
 ) -> GenerationResult:
     """Prepare final outputs based on whether tools were used."""
 
-    if not tools:
-        return _process_outputs(
-            output,
-            dataset_index=dataset_index,
-            training_step=training_step,
-            token_statistics=token_statistics,
-            start_time=start_time,
-            use_tools=False,
-        )
-
-    # Tool mode: add metadata to sub-request outputs and merge them
-    request_id = output.request_id
-
-    # Collect all sub-request outputs for this request
-    all_outputs = []
-    for j in range(original_sampling_params.n):
-        sub_req_id = f"{request_id}_{j}"
-
-        # Get the concatenated output for this sub-request
-        if sub_req_id not in tracking["concat_outputs"]:
-            raise ValueError(f"Missing output for sub-request {sub_req_id}")
-
-        sub_output = tracking["concat_outputs"][sub_req_id].outputs[0]
-
-        # Set tool metadata attributes on the output
-        setattr(sub_output, "mask", tracking["masks"][sub_req_id])
-        setattr(sub_output, "num_calls", tracking["num_calls"][sub_req_id])
-        setattr(sub_output, "timeout", tracking["timeout"][sub_req_id])
-        setattr(sub_output, "tool_error", tracking["tool_error"][sub_req_id])
-        setattr(sub_output, "tool_output", tracking["tool_output"][sub_req_id])
-        setattr(sub_output, "tool_runtime", tracking["tool_runtime"][sub_req_id])
-        setattr(sub_output, "tool_called", tracking["tool_called"][sub_req_id])
-
-        all_outputs.append(sub_output)
-
-    # Create merged output with all sub-request outputs
-    merged_output = vllm.RequestOutput(
-        request_id=request_id,
-        prompt=output.prompt,
-        prompt_token_ids=output.prompt_token_ids,
-        prompt_logprobs=output.prompt_logprobs,
-        outputs=all_outputs,
-        finished=output.finished,
-    )
-
+    # Simply pass through to _process_outputs - metadata is already attached
     return _process_outputs(
-        merged_output,
+        output,
         dataset_index=dataset_index,
         training_step=training_step,
         token_statistics=token_statistics,
         start_time=start_time,
-        use_tools=True,
+        use_tools=bool(tools),
     )
 
 
@@ -494,6 +450,8 @@ class LLMRayActor:
 
         self._executor = futures.ThreadPoolExecutor(max_workers=1)
         self._prefetch_future = self._executor.submit(self._prefetch_worker)
+        self.tracking = _init_tool_tracking()
+        self.request_outputs = {}
 
     def _should_stop(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
@@ -506,41 +464,19 @@ class LLMRayActor:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
 
-    def _prefetch_worker(self):
+    def _prefetch_worker(self, sleep_length_s: int = 1):
         """Background worker that prefetches requests until we have enough buffered."""
         while True:
-            should_stop = self._should_stop()
-            if should_stop and self.verbose:
-                try:
-                    queue_size = self.prompt_queue.qsize()
-                except Exception:
-                    queue_size = "unknown"
-                self.logger.info(f"Prefetch worker: should_stop=True, waiting. main_queue_size={queue_size}")
-            if should_stop:
-                time.sleep(0.1)
+            if self._should_stop():
+                time.sleep(sleep_length_s)
                 continue
-
             current_unfinished = self.llm_engine.get_num_unfinished_requests()
             if current_unfinished >= self.inference_batch_size:
-                time.sleep(0.1)  # shorter wait is OK
+                time.sleep(sleep_length_s)
                 continue
             try:
                 request = self.prompt_queue.get(timeout=0.1)
-
-                # Track that we pulled this dataset_index from the prompt queue
-                dataset_index = request.dataset_index
-                training_step = request.training_step
-                # Create unique tracking key combining training_step and dataset_index
                 tracking_key = make_request_id(request)
-
-                # ALWAYS log this for debugging
-                self.logger.info(
-                    f"[_prefetch_worker] Pulling dataset_index={dataset_index} from prompt queue, "
-                    f"is_eval={request.is_eval}, training_step={training_step}, tracking_key={tracking_key}"
-                )
-
-                self.logger.info(f"[_prefetch_worker] Successfully tracked dataset_index={dataset_index}")
-
                 num_added = add_request(
                     request,
                     self.llm_engine,
@@ -548,14 +484,6 @@ class LLMRayActor:
                     request_metadata=self.request_metadata,
                     vllm_active_requests=self.vllm_active_requests,
                 )
-
-                # Validate sub-request counts after adding
-                if self.verbose and num_added > 0:
-                    self.logger.info(
-                        f"Prefetch worker: added {num_added} requests directly to engine, "
-                        f"current_unfinished={self.llm_engine.get_num_unfinished_requests()}"
-                    )
-
             except queue.Empty:
                 continue
 
@@ -573,12 +501,6 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
-
-        # Initialize tracking and outputs if they don't exist (for backwards compatibility)
-        if not hasattr(self, "tracking"):
-            self.tracking = _init_tool_tracking()
-        if not hasattr(self, "request_outputs"):
-            self.request_outputs = {}
 
         # Use persistent instance variables for tracking and outputs
         # This ensures state is maintained across multiple calls
@@ -600,13 +522,8 @@ class LLMRayActor:
                 if pending_tools == 0 and unfinished == 0:
                     break
 
-            # Process tool futures (just updates tracking, doesn't return results to insert)
             self._poll_tool_futures(self.tracking, self.llm_engine.tokenizer)
             current_time = time.time()
-            # Tool outputs are now accumulated in tracking and will be inserted
-            # only when the final request completes
-
-            # Process engine steps - ONLY if there are unfinished requests
             if self.llm_engine.has_unfinished_requests():
                 for output in [o for o in self.llm_engine.step() if o.finished]:
                     # Fix the index field for non-tool mode
@@ -681,88 +598,21 @@ class LLMRayActor:
         """
         expected_n = self.request_metadata[request_id]["original_sampling_params"].n
 
-        # ---- Readiness check and canonicalization of sub-requests ----
-        # Build a canonical map: sub_id -> chosen RequestOutput
-        # Prefer tool-merged results from tracking["concat_outputs"]; otherwise fallback to engine outputs.
-        def _suffix_index(sub_req_id: str) -> int:
-            # sub_req_id looks like "<base>_<j>"; take the last underscore
-            try:
-                return int(sub_req_id.rsplit("_", 1)[1])
-            except Exception:
-                return -1
+        # Check if we have the base request in request_outputs
+        if request_id not in request_outputs:
+            return 0
 
-        canonical: Dict[str, vllm.RequestOutput] = {}
-
-        if self.tools:
-            # 1) Only include outputs that are actually complete (no pending tool futures)
-            for sub_req_id, output_obj in list(tracking["concat_outputs"].items()):
-                if _extract_base_request_id(sub_req_id) != request_id:
-                    continue
-                # Check if this output has pending tool calls
-                has_pending = sub_req_id in tracking.get("pending_tool_futures", {})
-                logger.info(
-                    f"Checking {sub_req_id} in concat_outputs: has {len(output_obj.outputs)} outputs, "
-                    f"has_pending_tool_future={has_pending}"
-                )
-
-                # CRITICAL: Only consider this output ready if it has no pending tool futures
-                if has_pending:
-                    logger.info(f"Skipping {sub_req_id} - has pending tool future")
-                    continue
-
-                # Assert that tool-merged outputs have exactly one output
-                assert len(output_obj.outputs) == 1, (
-                    f"Tool-merged output for {sub_req_id} has {len(output_obj.outputs)} outputs, "
-                    f"expected exactly 1. This indicates incorrect tool processing or merging. "
-                    f"Output IDs: {[o.index for o in output_obj.outputs] if hasattr(output_obj.outputs[0], 'index') else 'no index attr'}"
-                )
-                canonical[sub_req_id] = output_obj
-
-        # 2) Check outputs already collected in request_outputs
-        # With new structure, request_outputs[request_id] is a single RequestOutput with multiple CompletionOutputs
-        if request_id in request_outputs and request_outputs[request_id].outputs:
-            # Each CompletionOutput should have an index field indicating which sub-request it came from
-            for comp_output in request_outputs[request_id].outputs:
-                if hasattr(comp_output, "index"):
-                    sub_id = f"{request_id}_{comp_output.index}"
-                    # Create a RequestOutput wrapper for this CompletionOutput to match canonical structure
-                    if sub_id not in canonical:
-                        # CRITICAL: Check if this sub-request has a pending tool future
-                        # This mirrors the check in Section 1 to ensure consistency
-                        if sub_id in tracking.get("pending_tool_futures", {}):
-                            logger.info(f"Skipping {sub_id} from request_outputs - has pending tool future")
-                            continue
-
-                        # Create a wrapper RequestOutput for consistency
-                        wrapper = vllm.RequestOutput(
-                            request_id=sub_id,
-                            prompt=request_outputs[request_id].prompt,
-                            prompt_token_ids=request_outputs[request_id].prompt_token_ids,
-                            prompt_logprobs=request_outputs[request_id].prompt_logprobs,
-                            outputs=[comp_output],
-                            finished=True,
-                        )
-                        canonical[sub_id] = wrapper
-
-        # If we don't have all expected sub-requests yet, wait.
-        # We expect sub-ids exactly: f"{request_id}_{j}" for j in range(expected_n)
-        needed_ids = [f"{request_id}_{j}" for j in range(expected_n)]
-        available = [sid for sid in needed_ids if sid in canonical]
-
-        # Log the readiness check
-        self.logger.info(
-            f"[_maybe_process_and_insert] Checking {request_id}: "
-            f"expected_n={expected_n}, available={len(available)}, "
-            f"canonical_keys={list(canonical.keys())}, "
-            f"needed={needed_ids}"
-        )
-
-        if len(available) < expected_n:
-            self.logger.info(f"[_maybe_process_and_insert] Not ready - only {len(available)}/{expected_n} available")
+        # Check if we have all expected sub-request outputs
+        available_outputs = request_outputs[request_id].outputs
+        if len(available_outputs) < expected_n:
+            self.logger.info(
+                f"[_maybe_process_and_insert] Not ready - only {len(available_outputs)}/{expected_n} outputs available"
+            )
             return 0
 
         # CRITICAL: Check if any sub-requests still have active vLLM continuations
         # This can happen when tool calls complete and add continuations back to vLLM
+        needed_ids = [f"{request_id}_{j}" for j in range(expected_n)]
         active_sub_requests = [sub_id for sub_id in needed_ids if sub_id in self.vllm_active_requests]
         if active_sub_requests:
             logger.info(
@@ -771,71 +621,50 @@ class LLMRayActor:
             )
             return 0
 
-        # Build ordered outs (0..n-1), ensuring one per sub-request.
+        # Check if any sub-requests have pending tool futures
+        has_pending_tools = any(
+            sub_id in tracking.get("pending_tool_futures", {})
+            for sub_id in needed_ids
+        )
+        if has_pending_tools:
+            pending_tool_ids = [
+                sub_id for sub_id in needed_ids
+                if sub_id in tracking.get("pending_tool_futures", {})
+            ]
+            logger.info(
+                f"[_maybe_process_and_insert] Cannot process {request_id} yet - "
+                f"sub-requests have pending tool futures: {pending_tool_ids}"
+            )
+            return 0
+
+        # At this point we have all outputs ready. Build ordered outputs for processing.
+        # The outputs in request_outputs[request_id].outputs should already have correct indices
         ordered_outs: List[vllm.RequestOutput] = []
         for j in range(expected_n):
-            sub_id = f"{request_id}_{j}"
-            out = canonical.get(sub_id)
-            if out is None:
-                # Should not happen due to check above; be conservative.
+            # Find the output with index j
+            matching_output = None
+            for comp_output in available_outputs:
+                if hasattr(comp_output, "index") and comp_output.index == j:
+                    matching_output = comp_output
+                    break
+
+            if matching_output is None:
+                # This shouldn't happen if our index assignment is correct
+                self.logger.error(
+                    f"Missing output for index {j} in request {request_id}. "
+                    f"Available indices: {[getattr(o, 'index', None) for o in available_outputs]}"
+                )
                 return 0
-            ordered_outs.append(out)
 
-        # Ensure tracking stubs exist for every sub-request (tools enabled case).
-        if self.tools:
-            for out in ordered_outs:
-                sub_id = out.request_id
-                if sub_id not in tracking["concat_outputs"]:
-                    # Create a stub so _finalize_outputs can read masks/metadata uniformly.
-                    # Add assertion to detect if we're getting multiple outputs per sub-request
-                    assert len(out.outputs) == 1, (
-                        f"Expected exactly 1 output per sub-request when creating stub, "
-                        f"but got {len(out.outputs)} outputs for {sub_id}. "
-                        f"This may indicate vLLM is generating multiple samples per sub-request "
-                        f"(e.g., best-of-n sampling)."
-                    )
-
-                    # Create deep copies to avoid reference issues
-                    copied_outputs = [copy.deepcopy(o) for o in out.outputs]
-                    assert len(copied_outputs) == 1, (
-                        f"Copied outputs list for stub has {len(copied_outputs)} items, expected 1"
-                    )
-
-                    stub = vllm.RequestOutput(
-                        request_id=sub_id,
-                        prompt=out.prompt,
-                        prompt_token_ids=out.prompt_token_ids,
-                        prompt_logprobs=out.prompt_logprobs,
-                        outputs=copied_outputs,
-                        finished=True,
-                    )
-
-                    # Assert the stub has exactly 1 output
-                    assert len(stub.outputs) == 1, (
-                        f"After creating stub, expected 1 output but got {len(stub.outputs)} for {sub_id}. "
-                        f"This indicates an issue with the list copy or RequestOutput constructor."
-                    )
-
-                    # Note: vllm.RequestOutput uses the exact list object we pass, not a copy
-                    # This is expected behavior, so we set copied_outputs to None after this to avoid reuse
-                    copied_outputs = None
-
-                    logger.info(f"Creating stub for {sub_id} in concat_outputs with {len(stub.outputs)} output(s)")
-                    tracking["concat_outputs"][sub_id] = stub
-
-                    # Final verification
-                    assert len(tracking["concat_outputs"][sub_id].outputs) == 1, (
-                        f"After storing stub, concat_outputs[{sub_id}] has {len(tracking['concat_outputs'][sub_id].outputs)} outputs, "
-                        f"expected 1. This indicates the outputs list was modified after assignment."
-                    )
-                    token_count = len(stub.outputs[0].token_ids) if stub.outputs else 0
-                    tracking["masks"][sub_id] = [1] * token_count  # 1 = model tokens, 0 = tool tokens
-                    tracking["num_calls"][sub_id] = 0
-                    tracking["timeout"][sub_id] = False
-                    tracking["tool_error"][sub_id] = ""
-                    tracking["tool_output"][sub_id] = ""
-                    tracking["tool_runtime"][sub_id] = 0.0
-                    tracking["tool_called"][sub_id] = False
+            # Create a RequestOutput wrapper for each CompletionOutput
+            ordered_outs.append(vllm.RequestOutput(
+                request_id=f"{request_id}_{j}",
+                prompt=request_outputs[request_id].prompt,
+                prompt_token_ids=request_outputs[request_id].prompt_token_ids,
+                prompt_logprobs=request_outputs[request_id].prompt_logprobs,
+                outputs=[matching_output],
+                finished=True,
+            ))
 
         # At this point we're ready to finalize exactly n samples.
         outs = ordered_outs
@@ -993,15 +822,26 @@ class LLMRayActor:
         base_request_id = _extract_base_request_id(sub_request_id)
 
         # Extract the sub-request index from the sub_request_id and set it on the CompletionOutput
-        # This is needed when tools are disabled and n>1 to properly identify which sub-request
-        # each output belongs to. MUST be done BEFORE adding to request_outputs so that
+        # This is needed to properly identify which sub-request each output belongs to.
+        # MUST be done BEFORE adding to request_outputs so that
         # _maybe_process_and_insert can find the index field when checking completeness.
-        if not self.tools and "_" in sub_request_id:
+        if "_" in sub_request_id:
             # Extract index from sub_request_id like "train_1_43039_2" -> 2
             parts = sub_request_id.rsplit("_", 1)
             if len(parts) == 2 and parts[1].isdigit():
                 # Create new CompletionOutput with corrected index
                 complete_output = dataclasses.replace(complete_output, index=int(parts[1]))
+
+        # If tools are enabled, attach tool metadata to the output
+        if self.tools:
+            # Set tool metadata attributes on the output
+            setattr(complete_output, "mask", self.tracking["masks"].get(sub_request_id, [1] * len(complete_output.token_ids)))
+            setattr(complete_output, "num_calls", self.tracking["num_calls"].get(sub_request_id, 0))
+            setattr(complete_output, "timeout", self.tracking["timeout"].get(sub_request_id, False))
+            setattr(complete_output, "tool_error", self.tracking["tool_error"].get(sub_request_id, ""))
+            setattr(complete_output, "tool_output", self.tracking["tool_output"].get(sub_request_id, ""))
+            setattr(complete_output, "tool_runtime", self.tracking["tool_runtime"].get(sub_request_id, 0.0))
+            setattr(complete_output, "tool_called", self.tracking["tool_called"].get(sub_request_id, False))
 
         # Initialize request_outputs entry if needed
         if base_request_id not in self.request_outputs:
