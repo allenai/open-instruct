@@ -455,7 +455,9 @@ class LLMRayActor:
             int: Number of requests added to the engine
         """
         num_added = 0
-        if self._should_stop():
+        should_stop = self._should_stop()
+        if should_stop:
+            logger.info("[LLMRayActor] fill_engine: _should_stop() returned True, exiting early")
             return num_added
         num_unfinished = self.llm_engine.get_num_unfinished_requests()
         num_to_add = self.inference_batch_size - num_unfinished

@@ -737,9 +737,12 @@ def run_benchmark(
     warmup_end_idx = min(args.num_unique_prompts_rollout, len(dataset))
     warmup_data = dataset[warmup_start_idx:warmup_end_idx]
     warmup_prompts = warmup_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+    logger.info(f"Warmup batch: {len(warmup_prompts)} prompts from indices {warmup_start_idx} to {warmup_end_idx}")
+
     # Create individual PromptRequest for each warmup prompt
     for i, prompt in enumerate(warmup_prompts):
         dataset_index = warmup_start_idx + i
+        logger.info(f"Putting warmup prompt {i + 1}/{len(warmup_prompts)} into queue (dataset_index={dataset_index})")
         param_prompt_Q.put(
             PromptRequest(
                 prompt=prompt,
@@ -748,6 +751,7 @@ def run_benchmark(
                 start_time=time.perf_counter(),
             )
         )
+    logger.info(f"All {len(warmup_prompts)} warmup prompts submitted to queue")
     model_dims = load_model_dims(model_config.model_name_or_path)
 
     try:
@@ -755,7 +759,13 @@ def run_benchmark(
 
         # Collect all warmup results (one per prompt)
         warmup_batch_size = warmup_end_idx - warmup_start_idx
-        warmup_results = [inference_results_Q.get() for _ in range(warmup_batch_size)]
+        logger.info(f"Waiting for {warmup_batch_size} warmup results from inference_results_Q...")
+        warmup_results = []
+        for i in range(warmup_batch_size):
+            logger.info(f"Waiting for warmup result {i + 1}/{warmup_batch_size}...")
+            result = inference_results_Q.get()
+            logger.info(f"Got warmup result {i + 1}/{warmup_batch_size}")
+            warmup_results.append(result)
 
         total_warmup_responses = sum(len(result.responses) for result in warmup_results)
         logger.info(
