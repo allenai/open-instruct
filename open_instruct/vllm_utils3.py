@@ -766,13 +766,26 @@ class LLMRayActor:
         cache_config = engine.cache_config
         model_config = engine.model_config
 
+        # Debug logging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"cache_config.num_gpu_blocks: {cache_config.num_gpu_blocks}")
+        logger.info(f"cache_config.block_size: {cache_config.block_size}")
+        logger.info(f"model_config.max_model_len: {model_config.max_model_len}")
+
         num_gpu_blocks = cache_config.num_gpu_blocks
         block_size = cache_config.block_size
         max_model_len = model_config.max_model_len
 
+        # Check if values are initialized
+        if num_gpu_blocks is None or num_gpu_blocks == 0:
+            logger.warning("num_gpu_blocks not initialized yet, returning default value")
+            return 1.0
+
         # Calculate max concurrency using vLLM's formula
         max_concurrency = (num_gpu_blocks * block_size) / max_model_len
 
+        logger.info(f"Calculated max_concurrency: {max_concurrency}")
         return max_concurrency
 
 
