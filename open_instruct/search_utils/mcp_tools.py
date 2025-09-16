@@ -69,7 +69,6 @@ class MCPTool(Tool):
         mcp_port: int | None = None,
         max_retries: int = 3,
         retry_backoff: float = 0.5,
-        base_url: str | None = None,
         search_api_endpoint: str | None = None,
         start_str: str = "",
         end_str: str | None = None,
@@ -87,8 +86,6 @@ class MCPTool(Tool):
         self.mcp_port = mcp_port or os.environ.get("MCP_TRANSPORT_PORT", 8000)
         if self.mcp_port is not None:
             os.environ["MCP_TRANSPORT_PORT"] = str(self.mcp_port)
-        # Prefer explicit base_url, fall back to search_api_endpoint for compatibility
-        self.base_url = base_url or search_api_endpoint
         # Transient error retry settings
         self.max_retries = max_retries
         self.retry_backoff = retry_backoff
