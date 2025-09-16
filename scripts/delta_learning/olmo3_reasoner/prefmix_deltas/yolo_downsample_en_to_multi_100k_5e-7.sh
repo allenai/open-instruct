@@ -1,13 +1,13 @@
 MODEL_NAME=/weka/oe-adapt-default/hamishi/model_checkpoints/olmo2.5-6T-LC_R1-reasoning_mix_1_with_yarn
-EXP_NAME=olmo3-rsn-dpo-delta-yolo_eneqm_100k-5e-7
+EXP_NAME=olmo3-rsn-dpo-lc-delta-yolo_eneqm_100k-5e-7
 python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
 	--cluster ai2/jupiter-cirrascale-2 ai2/ceres-cirrascale \
 	--gs_model_name $EXP_NAME \
-    --workspace ai2/olmo-instruct \
+    --workspace ai2/usable-olmo \
     --priority urgent \
     --image scottg/open_instruct_dev --pure_docker_mode \
     --preemptible \
-    --num_nodes 1 \
+    --num_nodes 2 \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
     --gpus 8 -- accelerate launch \
@@ -22,9 +22,9 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --tokenizer_name $MODEL_NAME \
     --use_slow_tokenizer False \
     --dataset_mixer_list scottgeng00/olmo-3-preference-mix-deltas_reasoning-yolo_downsample_wildchat_to_multilingual 1.0 \
-    --max_seq_length 4096 \
+    --max_seq_length 16384 \
     --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 8 \
+    --gradient_accumulation_steps 4 \
     --learning_rate 5e-7 \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
@@ -38,5 +38,8 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --report_to wandb \
     --chat_template_name olmo_thinker \
     --with_tracking \
-    --eval_workspace usable-olmo \
+    --eval_workspace tulu-3-results \
+    --eval_priority urgent \
+    --oe_eval_max_length 32768 \
+    --oe_eval_gpu_multiplier 4 \
     --max_train_samples 100000

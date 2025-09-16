@@ -1,5 +1,5 @@
 MODEL_NAME=/weka/oe-adapt-default/hamishi/model_checkpoints/olmo2.5-6T-LC_R1-reasoning_mix_1_with_yarn
-EXP_NAME=olmo3-rsn-dpo-lc-delta-yolo_scottmix1_100k-5e-7
+EXP_NAME=sg-0915-test
 python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
 	--cluster ai2/jupiter-cirrascale-2 ai2/ceres-cirrascale \
 	--gs_model_name $EXP_NAME \
@@ -21,7 +21,7 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --model_name_or_path $MODEL_NAME \
     --tokenizer_name $MODEL_NAME \
     --use_slow_tokenizer False \
-    --dataset_mixer_list scottgeng00/olmo-3-preference-mix-deltas_reasoning-yolo_scottmix 1.0 \
+    --dataset_mixer_list scottgeng00/olmo-3-preference-mix-deltas_reasoning-yolo_scottmix 1000 \
     --max_seq_length 16384 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
@@ -42,4 +42,5 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --eval_priority urgent \
     --oe_eval_max_length 32768 \
     --oe_eval_gpu_multiplier 4 \
-    --max_train_samples 100000
+    --try_launch_beaker_eval_jobs False \
+    --max_train_samples 1000
