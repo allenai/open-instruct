@@ -635,6 +635,7 @@ def setup_vllm_engines(
         results_queue=inference_results_Q,
         actor_manager=actor_manager,
         inference_batch_size=args.inference_batch_size,
+        inflight_updates=args.inflight_updates,
     )
 
     logger.info("vLLM engines ready")
@@ -823,11 +824,9 @@ def run_benchmark(
             weight_sync_time = simulate_weight_sync(actor_manager, vllm_engines, args)
 
             completion_time = time.perf_counter()
-            # Calculate generation time from the earliest request start time
+            # Calculate generation time from the earliest request start time (inclusive of sync)
             earliest_start_time = min(result.start_time for result in batch_results if result.start_time)
-            batch_generation_time = (
-                completion_time - earliest_start_time - weight_sync_time if earliest_start_time else 0
-            )
+            batch_generation_time = completion_time - earliest_start_time if earliest_start_time else 0
 
             # Aggregate metrics across all results in the batch
             total_new_tokens = sum(len(response) for result in batch_results for response in result.responses)
