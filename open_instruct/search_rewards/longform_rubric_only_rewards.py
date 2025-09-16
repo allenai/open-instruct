@@ -1,10 +1,11 @@
 import os
 from typing import Any, Dict, Optional
 import json
+import asyncio
 import logging
 import litellm
 from open_instruct.search_rewards.utils.format_utils import extract_answer_context_citations
-from open_instruct.search_rewards.utils.rubric_utils import _score_rubric
+from open_instruct.search_rewards.utils.rubric_utils import _score_rubric, _score_weighted_rubric
 from open_instruct.search_rewards.utils.search_utils import score_num_in_context_search_turns
 
 LOGGER = logging.getLogger(__name__)
@@ -68,6 +69,37 @@ def compute_rubric_reward(response: str, ground_truth: Dict[str, Any], use_gener
         "rubric_averaged_reward": result["rubric_averaged_reward"],
         }
     return result
+
+
+def compute_general_rubric_reward(response: str, ground_truth: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Compute a reward score for a response based on a test case.
+    """
+    result = {
+        "reward": 0.0,
+        "error": None,
+    }
+
+    # Extract answer from the response
+    extracted_context, extracted_answer, extracted_citations = extract_answer_context_citations(response)
+    
+    if extracted_answer is None:
+        result["error"] = "Failed to extract answer from response"
+        result["reward"] = 0.0
+        result["log_values"] = {
+            "rubric_reward": 0.0,
+        }
+        return result
+
+    # Score the rubrics using the extracted function
+    reward = asyncio.run(_score_weighted_rubric(extracted_answer, ground_truth))
+                    
+    result["reward"] = reward
+    result["log_values"] = {
+        "rubric_reward": reward,
+        }
+    return result
+
 
 if __name__ == '__main__':
     # Example usage:
