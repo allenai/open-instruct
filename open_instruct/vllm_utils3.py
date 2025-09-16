@@ -760,40 +760,20 @@ class LLMRayActor:
         await self._ensure_engine_initialized()
         # AsyncLLMEngine wraps the underlying LLMEngine
         engine = self.llm_engine.engine
-        # For UniProcExecutor, access through driver_worker
-        kv_cache_specs = engine.model_executor.driver_worker.get_kv_cache_specs()
-        kv_cache_spec = kv_cache_specs[0]
-        # Group layers by their attention type (type_id) to handle models
-        # with sliding attention in some layers but not others
-        type_groups = defaultdict(list)
-        for layer_name, layer_spec in kv_cache_spec.items():
-            type_groups[layer_spec.type_id].append(layer_name)
 
-        grouped_layer_names = list(type_groups.values())
+        # Use the same calculation as vLLM's executor_base.py
+        # Reference: https://github.com/vllm-project/vllm/blob/b6553be1bc75f046b00046a4ad7576364d03c835/vllm/executor/executor_base.py#L119-L120
+        cache_config = engine.cache_config
+        model_config = engine.model_config
 
-        page_size = kv_cache_utils.get_uniform_page_size(kv_cache_spec)
+        num_gpu_blocks = cache_config.num_gpu_blocks
+        block_size = cache_config.block_size
+        max_model_len = model_config.max_model_len
 
-        vllm_config = engine.vllm_config
-        gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
-        total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
-        available_memory = int(gpu_memory_utilization * total_gpu_memory)
+        # Calculate max concurrency using vLLM's formula
+        max_concurrency = (num_gpu_blocks * block_size) / max_model_len
 
-        num_blocks = kv_cache_utils.get_num_blocks(vllm_config, len(kv_cache_spec), available_memory, page_size)
-
-        per_layer_size = page_size * num_blocks
-        kv_cache_tensors = [
-            kv_cache_interface.KVCacheTensor(size=per_layer_size, shared_by=[layer_name])
-            for layer_name in kv_cache_spec
-        ]
-
-        kv_cache_config = kv_cache_interface.KVCacheConfig(
-            num_blocks=num_blocks,
-            kv_cache_tensors=kv_cache_tensors,
-            kv_cache_groups=kv_cache_utils.create_kv_cache_group_specs(kv_cache_spec, grouped_layer_names),
-        )
-        max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(engine.vllm_config, kv_cache_config)
-
-        return int(max_concurrency)
+        return max_concurrency
 
 
 def get_cuda_arch_list() -> str:
