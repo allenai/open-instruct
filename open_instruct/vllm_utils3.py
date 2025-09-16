@@ -425,7 +425,7 @@ class LLMRayActor:
     async def _ensure_engine_initialized(self):
         """Ensure the AsyncLLMEngine is initialized."""
         if self.llm_engine is None:
-            self.llm_engine = await vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=False)
+            self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=False)
 
     async def generate_one_completion(
         self, request_id: str, prompt: vllm.TokensPrompt, sampling_params: vllm.SamplingParams
@@ -667,7 +667,7 @@ class LLMRayActor:
                 done, pending = await asyncio.wait(
                     self.active_tasks.values() if self.active_tasks else [],
                     timeout=timeout / 1000,
-                    return_when=asyncio.FIRST_COMPLETED
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
 
                 # Process completed tasks and collect their base request IDs
@@ -685,7 +685,9 @@ class LLMRayActor:
 
                 # Only check the requests that just had tasks complete
                 if completed_base_request_ids:
-                    processed_count = await self._check_and_process_completed_requests(list(completed_base_request_ids))
+                    processed_count = await self._check_and_process_completed_requests(
+                        list(completed_base_request_ids)
+                    )
                     total_processed += processed_count
 
                 if self.verbose and iteration_count % 100 == 0:
