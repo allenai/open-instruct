@@ -359,7 +359,7 @@ class FlatArguments:
     """The beaker evaluation tasks to launch"""
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
-    oe_eval_gpu_multiplier: Optional[int] = None,
+    oe_eval_gpu_multiplier: Optional[int] = None
     """the multiplier for the number of GPUs for evaluation"""
     eval_workspace: Optional[str] = "tulu-3-results"
     """The workspace to launch evaluation jobs on"""
