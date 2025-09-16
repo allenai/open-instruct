@@ -575,44 +575,33 @@ class LLMRayActor:
 
             self.request_outputs[base_request_id].outputs.append(complete_output)
 
-    async def _check_and_process_completed_requests(self, base_request_ids=None):
+    async def _check_and_process_completed_requests(self, base_request_ids: List[str]):
         """Check request_outputs for completed requests and process them.
 
         Args:
-            base_request_ids: Optional list of specific base request IDs to check.
-                             If None, checks all requests.
+            base_request_ids: List of specific base request IDs to check.
         """
-        completed_requests = []
+        if not base_request_ids:
+            return 0
 
-        # Determine which request IDs to check
-        ids_to_check = base_request_ids if base_request_ids is not None else list(self.request_outputs.keys())
+        processed_count = 0
+        current_time = time.perf_counter()
 
-        # Check which requests have all N outputs
+        # Acquire lock once for entire operation
         async with self.request_outputs_lock:
-            for base_request_id in ids_to_check:
-                if base_request_id not in self.request_outputs:
-                    continue
-                if base_request_id not in self.request_metadata:
-                    # Metadata already cleaned up, skip
+            for base_request_id in base_request_ids:
+                # Skip if not in outputs or metadata
+                if base_request_id not in self.request_outputs or base_request_id not in self.request_metadata:
                     continue
 
                 request_output = self.request_outputs[base_request_id]
                 expected_n = self.request_metadata[base_request_id]["original_sampling_params"].n
-                if len(request_output.outputs) == expected_n:
-                    completed_requests.append(base_request_id)
 
-        # Process completed requests
-        for base_request_id in completed_requests:
-            async with self.request_outputs_lock:
-                # Double-check it's still there
-                if base_request_id not in self.request_outputs:
+                # Check if this request has all N outputs
+                if len(request_output.outputs) != expected_n:
                     continue
-
-                request_output = self.request_outputs[base_request_id]
-                expected_n = self.request_metadata[base_request_id]["original_sampling_params"].n
 
                 # Build ordered outputs
-                current_time = time.perf_counter()
                 ordered_outs = []
                 for j in range(expected_n):
                     matching_output = None
@@ -633,18 +622,20 @@ class LLMRayActor:
                     )
 
                 # Remove from request_outputs
-                self.request_outputs.pop(base_request_id, None)
+                self.request_outputs.pop(base_request_id)
 
-            # Process and insert result (outside lock to avoid blocking)
-            result, is_eval = process_completed_request(
-                base_request_id, ordered_outs, {}, current_time, self.tools, self.request_metadata
-            )
-            self._insert_result_to_queue(result, is_eval=is_eval)
+                # Process and insert result (still within lock for consistency)
+                result, is_eval = process_completed_request(
+                    base_request_id, ordered_outs, {}, current_time, self.tools, self.request_metadata
+                )
+                self._insert_result_to_queue(result, is_eval=is_eval)
 
-            # Clean up metadata
-            self.request_metadata.pop(base_request_id, None)
+                # Clean up metadata
+                self.request_metadata.pop(base_request_id, None)
 
-        return len(completed_requests)
+                processed_count += 1
+
+        return processed_count
 
     async def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using AsyncLLMEngine.
@@ -708,7 +699,9 @@ class LLMRayActor:
 
             # Process any remaining completed requests only if inflight_updates is False
             if not self.inflight_updates:
-                processed_count = await self._check_and_process_completed_requests(None)  # Check all requests
+                # Check all requests by passing all base request IDs
+                all_base_request_ids = list(self.request_outputs.keys())
+                processed_count = await self._check_and_process_completed_requests(all_base_request_ids)
                 total_processed += processed_count
 
             # Stop the AsyncLLMEngine background loop
