@@ -407,7 +407,7 @@ class LLMRayActor:
     async def _ensure_engine_initialized(self):
         """Ensure the AsyncLLMEngine is initialized."""
         if self.llm_engine is None:
-            self.llm_engine = await vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=True)
+            self.llm_engine = await vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=False)
 
     async def generate_one_completion(
         self, request_id: str, prompt: vllm.TokensPrompt, sampling_params: vllm.SamplingParams
@@ -565,16 +565,37 @@ class LLMRayActor:
 
             self.request_outputs[base_request_id].outputs.append(complete_output)
 
-            # Check if all sub-requests are complete
-            expected_n = self.request_metadata[base_request_id]["original_sampling_params"].n
-            if len(self.request_outputs[base_request_id].outputs) == expected_n:
-                # All sub-requests complete - process and insert
+    async def _check_and_process_completed_requests(self):
+        """Check request_outputs for any completed requests and process them."""
+        completed_requests = []
+
+        # Check which requests have all N outputs
+        async with self.request_outputs_lock:
+            for base_request_id, request_output in self.request_outputs.items():
+                if base_request_id not in self.request_metadata:
+                    # Metadata already cleaned up, skip
+                    continue
+
+                expected_n = self.request_metadata[base_request_id]["original_sampling_params"].n
+                if len(request_output.outputs) == expected_n:
+                    completed_requests.append(base_request_id)
+
+        # Process completed requests
+        for base_request_id in completed_requests:
+            async with self.request_outputs_lock:
+                # Double-check it's still there
+                if base_request_id not in self.request_outputs:
+                    continue
+
+                request_output = self.request_outputs[base_request_id]
+                expected_n = self.request_metadata[base_request_id]["original_sampling_params"].n
+
+                # Build ordered outputs
                 current_time = time.perf_counter()
                 ordered_outs = []
                 for j in range(expected_n):
-                    # Find the output with index j
                     matching_output = None
-                    for comp_output in self.request_outputs[base_request_id].outputs:
+                    for comp_output in request_output.outputs:
                         if hasattr(comp_output, "index") and comp_output.index == j:
                             matching_output = comp_output
                             break
@@ -582,25 +603,27 @@ class LLMRayActor:
                     ordered_outs.append(
                         vllm.RequestOutput(
                             request_id=f"{base_request_id}_{j}",
-                            prompt=self.request_outputs[base_request_id].prompt,
-                            prompt_token_ids=self.request_outputs[base_request_id].prompt_token_ids,
-                            prompt_logprobs=self.request_outputs[base_request_id].prompt_logprobs,
+                            prompt=request_output.prompt,
+                            prompt_token_ids=request_output.prompt_token_ids,
+                            prompt_logprobs=request_output.prompt_logprobs,
                             outputs=[matching_output],
                             finished=True,
                         )
                     )
 
-                # Remove from request_outputs to prevent growth
+                # Remove from request_outputs
                 self.request_outputs.pop(base_request_id, None)
 
-                # Process and insert result
-                result, is_eval = process_completed_request(
-                    base_request_id, ordered_outs, {}, current_time, self.tools, self.request_metadata
-                )
-                self._insert_result_to_queue(result, is_eval=is_eval)
+            # Process and insert result (outside lock to avoid blocking)
+            result, is_eval = process_completed_request(
+                base_request_id, ordered_outs, {}, current_time, self.tools, self.request_metadata
+            )
+            self._insert_result_to_queue(result, is_eval=is_eval)
 
-                # Clean up metadata
-                self.request_metadata.pop(base_request_id, None)
+            # Clean up metadata
+            self.request_metadata.pop(base_request_id, None)
+
+        return len(completed_requests)
 
     async def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using AsyncLLMEngine.
@@ -614,48 +637,64 @@ class LLMRayActor:
         # Ensure engine is initialized
         await self._ensure_engine_initialized()
 
+        # Start the AsyncLLMEngine background loop
+        self.llm_engine.start_background_loop()
+
         iteration_count = 0
+        total_processed = 0
 
         # Start prefetch task
         prefetch_task = asyncio.create_task(self._prefetch_requests())
 
-        while not self._should_exit():
-            iteration_count += 1
-
-            # Clean up completed tasks and count processed requests
-            if self.active_tasks:
-                done_tasks = []
-                for task_id, task in list(self.active_tasks.items()):
-                    if task.done():
-                        try:
-                            await task  # Ensure any exceptions are raised
-                            # Task completed successfully - request was processed in _process_request
-                        except Exception as e:
-                            self.logger.error(f"Task {task_id} failed: {e}")
-                        done_tasks.append(task_id)
+        try:
+            while not self._should_exit():
+                iteration_count += 1
 
                 # Clean up completed tasks
-                for task_id in done_tasks:
-                    self.active_tasks.pop(task_id, None)
+                if self.active_tasks:
+                    done_tasks = []
+                    for task_id, task in list(self.active_tasks.items()):
+                        if task.done():
+                            try:
+                                await task  # Ensure any exceptions are raised
+                            except Exception as e:
+                                self.logger.error(f"Task {task_id} failed: {e}")
+                            done_tasks.append(task_id)
 
-            if self.verbose and iteration_count % 100 == 0:
-                active_tasks = len(self.active_tasks)
-                self.logger.info(f"process_from_queue iteration {iteration_count}: active_tasks={active_tasks}")
+                    # Clean up completed tasks
+                    for task_id in done_tasks:
+                        self.active_tasks.pop(task_id, None)
 
-            # Small sleep to prevent busy waiting
-            await asyncio.sleep(0.01)
+                # Check for completed requests and process them
+                processed_count = await self._check_and_process_completed_requests()
+                total_processed += processed_count
 
-        # Cancel prefetch task
-        prefetch_task.cancel()
-        await asyncio.gather(prefetch_task, return_exceptions=True)
+                if self.verbose and iteration_count % 100 == 0:
+                    active_tasks = len(self.active_tasks)
+                    self.logger.info(f"process_from_queue iteration {iteration_count}: active_tasks={active_tasks}")
 
-        # Wait for all active tasks to complete
-        if self.active_tasks:
-            await asyncio.gather(*self.active_tasks.values(), return_exceptions=True)
+                # Small sleep to prevent busy waiting
+                await asyncio.sleep(0.01)
 
-        # Count total processed by checking how many results were inserted
-        # This is more accurate than trying to track in the loop
-        return len(self.request_metadata)
+        finally:
+            # Cancel prefetch task
+            prefetch_task.cancel()
+            await asyncio.gather(prefetch_task, return_exceptions=True)
+
+            # Wait for all active tasks to complete
+            if self.active_tasks:
+                await asyncio.gather(*self.active_tasks.values(), return_exceptions=True)
+
+            # Process any remaining completed requests
+            processed_count = await self._check_and_process_completed_requests()
+            total_processed += processed_count
+
+            # Stop the AsyncLLMEngine background loop
+            if self.llm_engine:
+                self.llm_engine.shutdown_background_loop()
+
+            # Count total processed
+            return total_processed
 
     async def init_process_group(
         self,
