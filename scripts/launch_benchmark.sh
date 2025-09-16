@@ -66,7 +66,6 @@ for model_name_or_path in "$@"; do
             --max_prompt_token_length 2048 \
             --temperature 0 \
 	    --verbose False \
-	    --inflight_updates True \
             --response_length "$response_length" \
             --vllm_top_p 0.9 \
             --num_unique_prompts_rollout 2 \
