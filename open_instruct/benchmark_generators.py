@@ -12,6 +12,7 @@ import csv
 import dataclasses
 import gc
 import json
+import math
 import pathlib
 import threading
 import time
@@ -611,6 +612,13 @@ def setup_vllm_engines(
     queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
 
+    # Calculate inference_batch_size like grpo_fast does
+    total_prompts = args.num_samples_per_prompt_rollout * args.num_unique_prompts_rollout
+    inference_batch_size = max(1, math.ceil(total_prompts / args.vllm_num_engines))
+    logger.info(
+        f"Using inference_batch_size={inference_batch_size} (total_prompts={total_prompts}, engines={args.vllm_num_engines})"
+    )
+
     vllm_engines = vllm_utils3.create_vllm_engines(
         num_engines=args.vllm_num_engines,
         tensor_parallel_size=args.vllm_tensor_parallel_size,
@@ -629,6 +637,7 @@ def setup_vllm_engines(
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         actor_manager=actor_manager,
+        inference_batch_size=inference_batch_size,
     )
 
     logger.info("vLLM engines ready")

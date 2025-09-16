@@ -484,6 +484,11 @@ class LLMRayActor:
             return num_added
 
         logger.info(f"[LLMRayActor] inference_batch_size = {self.inference_batch_size}")
+
+        if self.inference_batch_size is None:
+            logger.error("[LLMRayActor] inference_batch_size is None! Cannot process requests.")
+            raise ValueError("inference_batch_size must be set to process requests")
+
         num_to_add = self.inference_batch_size - num_unfinished
 
         # Try to get queue size for debugging
