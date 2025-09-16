@@ -430,6 +430,8 @@ class Args:
     """The port of the MCP server. Note it should match the port of the MCP server command if specified there."""
     mcp_timeout: int = 180
     """The timeout for the MCP tool."""
+    base_url: Optional[str] = None
+    """The base URL for the MCP tool, used for massive_serve."""
     ### end per-tool settings ###
 
 
