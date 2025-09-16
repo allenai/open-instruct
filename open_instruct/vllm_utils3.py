@@ -18,7 +18,6 @@
 import asyncio
 import dataclasses
 import os
-import queue
 import time
 from collections import defaultdict
 from concurrent import futures
@@ -357,15 +356,10 @@ class LLMRayActor:
             # Check if we need more requests
             current_unfinished = len(self.active_tasks)
             if current_unfinished >= self.inference_batch_size:
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(1)
                 continue
 
-            try:
-                request = self.prompt_queue.get(timeout=0.1)
-                await self._add_request(request)
-            except queue.Empty:
-                await asyncio.sleep(0.1)
-                continue
+            await self._add_request(await self.prompt_queue.get_async())
 
     async def _add_request(self, request: PromptRequest):
         """Add a request to the async LLM engine."""
@@ -498,20 +492,14 @@ class LLMRayActor:
 
             # Check if any tool was triggered
             tool_info = get_triggered_tool(
-                output.outputs[0].text,
-                self.tools,
-                self.max_tool_calls,
-                num_calls,
-                current_sampling_params,
+                output.outputs[0].text, self.tools, self.max_tool_calls, num_calls, current_sampling_params
             )
-            if not tool_info:
+            if tool_info is None:
                 break  # No tool triggered - request is complete
 
             tool, stop_str = tool_info
 
-            # Execute tool synchronously (but in thread pool)
-            loop = asyncio.get_event_loop()
-            tool_result = await loop.run_in_executor(self.executor, tool, output.outputs[0].text)
+            tool_result = await asyncio.to_thread(tool, output.outputs[0].text)
 
             # Update tracking
             num_calls += 1
@@ -587,17 +575,28 @@ class LLMRayActor:
 
             self.request_outputs[base_request_id].outputs.append(complete_output)
 
-    async def _check_and_process_completed_requests(self):
-        """Check request_outputs for any completed requests and process them."""
+    async def _check_and_process_completed_requests(self, base_request_ids=None):
+        """Check request_outputs for completed requests and process them.
+
+        Args:
+            base_request_ids: Optional list of specific base request IDs to check.
+                             If None, checks all requests.
+        """
         completed_requests = []
+
+        # Determine which request IDs to check
+        ids_to_check = base_request_ids if base_request_ids is not None else list(self.request_outputs.keys())
 
         # Check which requests have all N outputs
         async with self.request_outputs_lock:
-            for base_request_id, request_output in self.request_outputs.items():
+            for base_request_id in ids_to_check:
+                if base_request_id not in self.request_outputs:
+                    continue
                 if base_request_id not in self.request_metadata:
                     # Metadata already cleaned up, skip
                     continue
 
+                request_output = self.request_outputs[base_request_id]
                 expected_n = self.request_metadata[base_request_id]["original_sampling_params"].n
                 if len(request_output.outputs) == expected_n:
                     completed_requests.append(base_request_id)
@@ -671,56 +670,45 @@ class LLMRayActor:
 
                 # Health check for prefetch task
                 if self.prefetch_task.done():
-                    # Check if it raised an exception
-                    try:
-                        self.prefetch_task.result()  # This will raise if the task failed
-                    except Exception as e:
-                        self.logger.error(f"Prefetch task failed with error: {e}")
-                        # Restart prefetch task
-                        self.prefetch_task = asyncio.create_task(self._prefetch_requests())
+                    self.prefetch_task.result()  # This will raise if the task failed
 
-                # Wait for any task to complete with timeout
-                if self.active_tasks:
-                    # Wait for any task to complete or timeout
-                    done, pending = await asyncio.wait(
-                        self.active_tasks.values(), timeout=timeout / 1000, return_when=asyncio.FIRST_COMPLETED
-                    )
+                # Wait for any task to complete or timeout
+                done, pending = await asyncio.wait(
+                    self.active_tasks.values() if self.active_tasks else [],
+                    timeout=timeout / 1000,
+                    return_when=asyncio.FIRST_COMPLETED
+                )
 
-                    # Process completed tasks
-                    for task in done:
-                        await task  # Get result or raise exception
+                # Process completed tasks and collect their base request IDs
+                completed_base_request_ids = set()
+                for task in done:
+                    await task  # Get result or raise exception
 
-                        # Remove the completed task using its name
-                        task_name = task.get_name()
-                        if task_name in self.active_tasks:
-                            self.active_tasks.pop(task_name, None)
+                    # Remove the completed task using its name
+                    task_name = task.get_name()
+                    if task_name in self.active_tasks:
+                        self.active_tasks.pop(task_name, None)
+                        # Extract base request ID from task name (e.g., "train_1_43039_2" -> "train_1_43039")
+                        base_request_id = _extract_base_request_id(task_name)
+                        completed_base_request_ids.add(base_request_id)
 
-                    # Check for completed requests after processing tasks
-                    processed_count = await self._check_and_process_completed_requests()
+                # Only check the requests that just had tasks complete
+                if completed_base_request_ids:
+                    processed_count = await self._check_and_process_completed_requests(list(completed_base_request_ids))
                     total_processed += processed_count
-                else:
-                    # No active tasks, just check for completed requests and sleep briefly
-                    processed_count = await self._check_and_process_completed_requests()
-                    total_processed += processed_count
-                    await asyncio.sleep(timeout / 1000)
 
                 if self.verbose and iteration_count % 100 == 0:
                     active_tasks = len(self.active_tasks)
                     self.logger.info(f"process_from_queue iteration {iteration_count}: active_tasks={active_tasks}")
 
         finally:
-            # Cancel prefetch task
-            if self.prefetch_task:
-                self.prefetch_task.cancel()
-                await asyncio.gather(self.prefetch_task, return_exceptions=True)
-
             # Wait for all active tasks to complete only if inflight_updates is False
-            if not self.inflight_updates and self.active_tasks:
+            if not self.inflight_updates:
                 await asyncio.gather(*self.active_tasks.values(), return_exceptions=True)
 
             # Process any remaining completed requests only if inflight_updates is False
             if not self.inflight_updates:
-                processed_count = await self._check_and_process_completed_requests()
+                processed_count = await self._check_and_process_completed_requests(None)  # Check all requests
                 total_processed += processed_count
 
             # Stop the AsyncLLMEngine background loop
