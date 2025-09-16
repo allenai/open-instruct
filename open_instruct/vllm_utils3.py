@@ -39,8 +39,6 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
-from vllm.v1 import kv_cache_interface
-from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
@@ -772,6 +770,7 @@ class LLMRayActor:
 
         # Debug logging
         import logging
+
         logger = logging.getLogger(__name__)
         logger.info(f"cache_config.num_gpu_blocks: {cache_config.num_gpu_blocks}")
         logger.info(f"cache_config.block_size: {cache_config.block_size}")
