@@ -38,7 +38,7 @@ from open_instruct.math_utils import (
 )
 from open_instruct.search_rewards.old_rewards.openscholar_rewards import compute_paper_reward
 from open_instruct.search_rewards.longform_hle_rewards import compute_hle_reward
-from open_instruct.search_rewards.longform_rubric_only_rewards import compute_rubric_reward
+from open_instruct.search_rewards.longform_rubric_only_rewards import compute_rubric_reward, compute_general_rubric_reward
 from open_instruct.search_rewards.longform_averaged_outcome_rewards import compute_longform_averaged_outcome_reward
 from open_instruct.search_rewards.longform_finegrained_rewards_v1 import compute_longform_finegrained_reward
 from open_instruct.search_rewards.longform_finegrained_rewards_v2 import compute_longform_finegrained_reward_v2
@@ -1118,6 +1118,33 @@ class RLRAGLongFormRubricsOnlyVerifier(VerifierFunction):
         
         result = compute_rubric_reward(prediction, test_case, use_general_rubric=use_general_rubric, mcp_parser_name=self.verifier_config.mcp_parser_name)
         score = result["reward"] if not evaluate_closed_book_answer else result["rubric_averaged_reward"]
+        return VerificationResult(score=score, log_values=result["log_values"])
+
+
+class RLRAGLongFormGeneralRubricVerifier(VerifierFunction):
+    """
+    Verifier that computes the RL-RAG (long form) score between the prediction and the label.
+    For closed book answer, we use the rubric averaged reward.
+    For search-augmented answer, we plus additional num_search_turns_reward.
+    """
+
+    def __init__(self, verifier_config: Optional[RubricVerifierConfig] = None) -> None:
+        super().__init__("general_rubric", verifier_config=verifier_config, weight=1.0)
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        """
+        Return the configuration class for this verifier.
+        """
+        return RubricVerifierConfig
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
+        test_case = json.loads(label)
+        
+        result = compute_general_rubric_reward(prediction, test_case)
+        score = result["reward"]
         return VerificationResult(score=score, log_values=result["log_values"])
 
 

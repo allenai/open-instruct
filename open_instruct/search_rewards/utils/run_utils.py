@@ -141,8 +141,8 @@ def run_azure_openai(
 
 def run_litellm(
     model_name: str,
-    system_prompt: Optional[str],
     user_prompt: str,
+    system_prompt: Optional[str] = None,
     **chat_kwargs,
 ) -> str:
     """
@@ -154,7 +154,7 @@ def run_litellm(
 
     Args:
         model_name: The model name (used as deployment if deployment not specified)
-        system_prompt: Optional system prompt
+        system_prompt: Optional system prompt (defaults to None)
         user_prompt: User prompt
         **chat_kwargs: Additional arguments to pass to the chat completion
 
@@ -191,8 +191,8 @@ def run_litellm(
 
 async def run_litellm_async(
     model_name: str,
-    system_prompt: Optional[str],
     user_prompt: str,
+    system_prompt: Optional[str] = None,
     **chat_kwargs,
 ) -> str:
     """
@@ -204,7 +204,7 @@ async def run_litellm_async(
 
     Args:
         model_name: The model name (used as deployment if deployment not specified)
-        system_prompt: Optional system prompt
+        system_prompt: Optional system prompt (defaults to None)
         user_prompt: User prompt
         **chat_kwargs: Additional arguments to pass to the chat completion
 
