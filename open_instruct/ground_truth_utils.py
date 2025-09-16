@@ -557,7 +557,7 @@ class LLMJudgeVerifier:
                 correct_answer=ground_truth,
                 response=prediction,
             )
-        grading_response = run_litellm(self.grader_model, None, grader_prompt)
+        grading_response = run_litellm(self.grader_model, grader_prompt, None)
 
         match = re.search(r"correct: (yes|no)", grading_response)
         judge_result = match.group(1) if match else "no"
