@@ -760,7 +760,8 @@ class LLMRayActor:
         await self._ensure_engine_initialized()
         # AsyncLLMEngine wraps the underlying LLMEngine
         engine = self.llm_engine.engine
-        kv_cache_specs = engine.model_executor.get_kv_cache_specs()
+        # For UniProcExecutor, access through driver_worker
+        kv_cache_specs = engine.model_executor.driver_worker.get_kv_cache_specs()
         kv_cache_spec = kv_cache_specs[0]
         # Group layers by their attention type (type_id) to handle models
         # with sliding attention in some layers but not others
