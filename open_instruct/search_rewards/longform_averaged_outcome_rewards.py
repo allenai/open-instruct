@@ -48,7 +48,10 @@ def compute_longform_averaged_outcome_reward(
     
     # score rubric
     rubric_scores = _score_rubric(extracted_answer, ground_truth, use_general_rubric=use_general_rubric)
-    rubric_reward = sum(rubric_scores.values()) / len(rubric_scores)
+    if sum(rubric_scores.values()) == 0:
+        rubric_reward = 0.0
+    else:
+        rubric_reward = sum(rubric_scores.values()) / len(rubric_scores)
     result["rubric_reward"] = rubric_reward
     
     # score citation (include 0.1 weighted citation format reward)
@@ -92,7 +95,10 @@ async def compute_longform_averaged_outcome_reward_async(
     
     # score rubric
     rubric_scores = await _score_weighted_rubric(extracted_answer, ground_truth, use_general_rubric=use_general_rubric)
-    rubric_reward = sum(rubric_scores.values()) / len(rubric_scores)
+    if sum(rubric_scores.values()) == 0:
+        rubric_reward = 0.0
+    else:
+        rubric_reward = sum(rubric_scores.values()) / len(rubric_scores)
     result["rubric_reward"] = rubric_reward
     
     # score citation (include 0.1 weighted citation format reward)
