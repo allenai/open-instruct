@@ -7,14 +7,14 @@ BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 echo "Using Beaker image: $BEAKER_IMAGE"
 
 uv run python mason.py \
+       --cluster ai2/ceres \
        --cluster ai2/jupiter \
        --cluster ai2/saturn \
-       --cluster ai2/ceres \
+       --non_resumable \
        --image "$BEAKER_IMAGE" \
        --description "Single GPU on Beaker test script." \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
-       --non_resumable \
        --preemptible \
        --priority high \
        --num_nodes 1 \
@@ -22,6 +22,7 @@ uv run python mason.py \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --budget ai2/oe-adapt \
        --gpus 1 \
+       --task_name open_instruct-single_gpu_test \
 	   -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --dataset_mixer_list_splits train \
