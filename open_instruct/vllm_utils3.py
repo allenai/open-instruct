@@ -69,13 +69,6 @@ def get_bundle_indices_list(placement_group: ray.util.placement_group) -> List[i
     return flattened_bundle_indices
 
 
-def _init_tool_tracking():
-    """Initialize tracking variables for tool mode."""
-    # Most tracking is now handled per-request in _process_request
-    # Only keep minimal shared state for compatibility
-    return {}
-
-
 def make_request_id(request: PromptRequest) -> str:
     """Generate a unique tracking key for a request."""
     prefix = "eval" if request.is_eval else "train"
@@ -91,9 +84,6 @@ def _extract_base_request_id(full_request_id: str) -> str:
     'eval_5_12345'
     """
     return "_".join(full_request_id.split("_")[:-1])
-
-
-# Removed _handle_output - functionality moved to _process_request
 
 
 def process_completed_request(request_id, outs, tracking, current_time, tools, request_metadata):
@@ -301,16 +291,13 @@ class LLMRayActor:
             if self.verbose:
                 self.logger.info(f"creating LLM with bundle_indices={bundle_indices}")
 
-        # Use AsyncEngineArgs instead of EngineArgs
-        engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
+        self.engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
         # Log stats causes a crash in the engine at assert outputs.scheduler_stats is not None when we call step() and there is nothing to step.
-        engine_args.disable_log_stats = True
+        self.engine_args.disable_log_stats = True
 
         # Cascade attention has known performance issues: https://github.com/vllm-project/vllm/issues/17652
-        engine_args.disable_cascade_attn = True
+        self.engine_args.disable_cascade_attn = True
 
-        # Store engine args to create AsyncLLMEngine lazily
-        self.engine_args = engine_args
         self.llm_engine = None
 
         self.prompt_queue = prompt_queue
@@ -325,7 +312,6 @@ class LLMRayActor:
 
         # Async tracking
         self.active_tasks = {}  # Track active async tasks
-        self.tracking = _init_tool_tracking()
         self.request_outputs = {}
         self.request_outputs_lock = asyncio.Lock()  # Lock for thread-safe access
 
@@ -341,7 +327,7 @@ class LLMRayActor:
         return self._should_stop_value
 
     async def _prefetch_requests(self):
-        """Async method to prefetch requests from queue."""
+        """Prefetches requests from queue."""
         while True:
             # Check if we need more requests
             current_unfinished = len(self.active_tasks)
@@ -609,7 +595,7 @@ class LLMRayActor:
 
                 # Process and insert result
                 result, is_eval = process_completed_request(
-                    base_request_id, ordered_outs, self.tracking, current_time, self.tools, self.request_metadata
+                    base_request_id, ordered_outs, {}, current_time, self.tools, self.request_metadata
                 )
                 self._insert_result_to_queue(result, is_eval=is_eval)
 
