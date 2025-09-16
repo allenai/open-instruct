@@ -402,8 +402,6 @@ class LLMRayActor:
         # Otherwise, continue processing
         return False
 
-    # Removed _process_request_outputs - functionality moved to _process_request
-
     async def _ensure_engine_initialized(self):
         """Ensure the AsyncLLMEngine is initialized."""
         if self.llm_engine is None:
@@ -417,10 +415,9 @@ class LLMRayActor:
         Wraps the async generator to return a single RequestOutput.
         """
         generator = self.llm_engine.add_request(request_id, prompt, sampling_params)
-        async for output in generator:
-            if output.finished:
-                return output
-        raise RuntimeError(f"Generator for {request_id} completed without a finished output")
+        outputs = [output async for output in generator if output.finished]
+        assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
+        return outputs[0]
 
     async def _process_request(
         self,
