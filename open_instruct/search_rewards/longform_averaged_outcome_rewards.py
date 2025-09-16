@@ -48,7 +48,8 @@ def compute_longform_averaged_outcome_reward(
     
     # score rubric
     rubric_scores = _score_rubric(extracted_answer, ground_truth, use_general_rubric=use_general_rubric)
-    if sum(rubric_scores.values()) == 0:
+    if len(rubric_scores) == 0:
+        print("🔥 No rubric scores found")
         rubric_reward = 0.0
     else:
         rubric_reward = sum(rubric_scores.values()) / len(rubric_scores)
@@ -95,7 +96,8 @@ async def compute_longform_averaged_outcome_reward_async(
     
     # score rubric
     rubric_scores = await _score_weighted_rubric(extracted_answer, ground_truth, use_general_rubric=use_general_rubric)
-    if sum(rubric_scores.values()) == 0:
+    if len(rubric_scores) == 0:
+        print("🔥 No rubric scores found")
         rubric_reward = 0.0
     else:
         rubric_reward = sum(rubric_scores.values()) / len(rubric_scores)
