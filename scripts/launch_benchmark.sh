@@ -65,7 +65,7 @@ for model_name_or_path in "$@"; do
             --max_token_length 10240 \
             --max_prompt_token_length 2048 \
             --temperature 1.0 \
-	    --verbose True \
+	    --verbose False \
 	    --inflight_updates True \
             --response_length "$response_length" \
             --vllm_top_p 0.9 \
