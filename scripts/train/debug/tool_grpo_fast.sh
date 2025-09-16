@@ -73,5 +73,5 @@ uv run python mason.py \
     --max_tool_calls 5 \
     --vllm_enable_prefix_caching \
     --tools code search \
-    --search_api_endpoint "http://saturn-cs-aus-232.reviz.ai2.in:44177/search" \
+    --search_api_endpoint "http://neptune-cs-aus-258.reviz.ai2.in:43189/search" \
     --code_tool_api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute
