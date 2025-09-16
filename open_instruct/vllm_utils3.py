@@ -385,8 +385,6 @@ class LLMRayActor:
         self.verbose = verbose
         self.request_metadata = {}
 
-        self.logger.info(f"[LLMRayActor] Initializing with inference_batch_size={inference_batch_size}")
-
         if self.tools:
             self.executor = ThreadPoolExecutor(max_workers=20)
         else:
@@ -419,9 +417,7 @@ class LLMRayActor:
         # Cascade attention has known performance issues: https://github.com/vllm-project/vllm/issues/17652
         engine_args.disable_cascade_attn = True
 
-        self.logger.info("[LLMRayActor] Creating vLLM engine...")
         self.llm_engine = vllm.LLMEngine.from_engine_args(engine_args)
-        self.logger.info("[LLMRayActor] vLLM engine created successfully")
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
@@ -458,72 +454,15 @@ class LLMRayActor:
         Returns:
             int: Number of requests added to the engine
         """
-        logger.info(f"[LLMRayActor] fill_engine called with timeout={timeout}")
         num_added = 0
-
-        # Check _should_stop with logging
-        logger.info("[LLMRayActor] Checking _should_stop()...")
-        try:
-            should_stop = self._should_stop()
-            logger.info(f"[LLMRayActor] _should_stop() returned {should_stop}")
-        except Exception as e:
-            logger.error(f"[LLMRayActor] Error in _should_stop(): {e}")
+        if self._should_stop():
             return num_added
-
-        if should_stop:
-            logger.info("[LLMRayActor] fill_engine: _should_stop() returned True, exiting early")
-            return num_added
-
-        # Get num_unfinished with logging
-        logger.info("[LLMRayActor] Getting num_unfinished_requests from engine...")
-        try:
-            num_unfinished = self.llm_engine.get_num_unfinished_requests()
-            logger.info(f"[LLMRayActor] num_unfinished_requests = {num_unfinished}")
-        except Exception as e:
-            logger.error(f"[LLMRayActor] Error getting num_unfinished_requests: {e}")
-            return num_added
-
-        logger.info(f"[LLMRayActor] inference_batch_size = {self.inference_batch_size}")
-
-        if self.inference_batch_size is None:
-            logger.error("[LLMRayActor] inference_batch_size is None! Cannot process requests.")
-            raise ValueError("inference_batch_size must be set to process requests")
-
-        num_to_add = self.inference_batch_size - num_unfinished
-
-        # Try to get queue size for debugging
-        logger.info("[LLMRayActor] Getting queue size...")
-        try:
-            queue_size = self.prompt_queue.qsize()
-            queue_info = f", queue_size={queue_size}"
-            logger.info(f"[LLMRayActor] Queue size = {queue_size}")
-        except Exception as e:
-            queue_info = ", queue_size=unknown"
-            logger.info(f"[LLMRayActor] Could not get queue size: {e}")
-
-        logger.info(
-            f"[LLMRayActor] fill_engine: batch_size={self.inference_batch_size}, unfinished={num_unfinished}, to_add={num_to_add}{queue_info}"
-        )
-
-        attempt = 0
+        num_to_add = self.inference_batch_size - self.llm_engine.get_num_unfinished_requests()
         while num_added < num_to_add:
-            attempt += 1
             try:
-                logger.info(
-                    f"[LLMRayActor] Attempt {attempt}: Trying to get request from queue with timeout={timeout}s"
-                )
                 request = self.prompt_queue.get(timeout=timeout)
-                logger.info(
-                    f"[LLMRayActor] Got request from queue (dataset_index={request.dataset_index}), adding to engine"
-                )
                 num_added += add_request(request, self.llm_engine, self.tools, request_metadata=self.request_metadata)
             except queue.Empty:
-                logger.info(
-                    f"[LLMRayActor] Queue.Empty exception after {timeout}s timeout, added {num_added} requests so far"
-                )
-                break
-            except Exception as e:
-                logger.error(f"[LLMRayActor] Unexpected error getting from queue: {e}")
                 break
         return num_added
 
@@ -533,29 +472,14 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
-        logger.info(f"[LLMRayActor] process_from_queue called with timeout={timeout}")
         num_processed = self.fill_engine(timeout=timeout)
-        logger.info(f"[LLMRayActor] fill_engine returned {num_processed} requests")
 
         if num_processed == 0:
-            logger.info("[LLMRayActor] No requests processed, returning early from process_from_queue")
             return num_processed
 
         tracking = _init_tool_tracking()
         outputs = []
-        iteration_count = 0
         while True:
-            iteration_count += 1
-            if iteration_count % 100 == 0:
-                num_unfinished = self.llm_engine.get_num_unfinished_requests()
-                num_pending_tools = len(tracking["pending_tool_futures"])
-                logger.info(
-                    f"[LLMRayActor Progress] Iteration {iteration_count}: "
-                    f"{num_unfinished} unfinished requests, "
-                    f"{num_pending_tools} pending tool futures, "
-                    f"{len(outputs)} outputs collected"
-                )
-
             outputs.extend(self._poll_tool_futures(tracking, self.llm_engine.tokenizer))
 
             # Process engine steps - ONLY if there are unfinished requests (matching ToolUseLLM)

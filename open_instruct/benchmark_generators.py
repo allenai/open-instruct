@@ -12,7 +12,6 @@ import csv
 import dataclasses
 import gc
 import json
-import math
 import pathlib
 import threading
 import time
@@ -612,13 +611,6 @@ def setup_vllm_engines(
     queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
 
-    # Calculate inference_batch_size like grpo_fast does
-    total_prompts = args.num_samples_per_prompt_rollout * args.num_unique_prompts_rollout
-    inference_batch_size = max(1, math.ceil(total_prompts / args.vllm_num_engines))
-    logger.info(
-        f"Using inference_batch_size={inference_batch_size} (total_prompts={total_prompts}, engines={args.vllm_num_engines})"
-    )
-
     vllm_engines = vllm_utils3.create_vllm_engines(
         num_engines=args.vllm_num_engines,
         tensor_parallel_size=args.vllm_tensor_parallel_size,
@@ -637,7 +629,7 @@ def setup_vllm_engines(
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         actor_manager=actor_manager,
-        inference_batch_size=inference_batch_size,
+        inference_batch_size=args.inference_batch_size,
     )
 
     logger.info("vLLM engines ready")
@@ -647,23 +639,14 @@ def setup_vllm_engines(
 
 def generate_thread(vllm_engines: list[ray.actor.ActorHandle], stop_event: threading.Event) -> None:
     """Thread that repeatedly calls process_from_queue on vllm engines."""
-    logger.info(f"[Generate Thread] Starting generation thread with {len(vllm_engines)} engines")
-    iteration = 0
+    logger.info("[Generate Thread] Starting generation thread")
     while not stop_event.is_set():
-        iteration += 1
-        if iteration % 10 == 0:
-            logger.info(
-                f"[Generate Thread] Iteration {iteration}: calling process_from_queue on {len(vllm_engines)} engines"
-            )
-
         processed_results = ray.get([engine.process_from_queue.remote(timeout=20) for engine in vllm_engines])
         num_processed = sum(int(result) for result in processed_results)
         if num_processed == 0:
-            if iteration % 10 == 0:
-                logger.info(f"[Generate Thread] No requests processed in iteration {iteration}, sleeping...")
             time.sleep(1)
         else:
-            logger.info(f"[Generate Thread] Processed {num_processed} requests in iteration {iteration}")
+            logger.debug(f"[Generate Thread] Processed {num_processed} requests")
 
 
 def submission_thread(
@@ -746,19 +729,9 @@ def run_benchmark(
     warmup_end_idx = min(args.num_unique_prompts_rollout, len(dataset))
     warmup_data = dataset[warmup_start_idx:warmup_end_idx]
     warmup_prompts = warmup_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
-    logger.info(f"Warmup batch: {len(warmup_prompts)} prompts from indices {warmup_start_idx} to {warmup_end_idx}")
-
     # Create individual PromptRequest for each warmup prompt
     for i, prompt in enumerate(warmup_prompts):
         dataset_index = warmup_start_idx + i
-        try:
-            qsize = param_prompt_Q.qsize()
-            logger.info(f"Queue size before put: {qsize}")
-        except Exception as e:
-            logger.info(f"Could not get queue size: {e}")
-
-        logger.info(f"Putting warmup prompt {i + 1}/{len(warmup_prompts)} into queue (dataset_index={dataset_index})")
-        start_put = time.perf_counter()
         param_prompt_Q.put(
             PromptRequest(
                 prompt=prompt,
@@ -767,9 +740,6 @@ def run_benchmark(
                 start_time=time.perf_counter(),
             )
         )
-        put_time = time.perf_counter() - start_put
-        logger.info(f"Successfully put prompt {i + 1}/{len(warmup_prompts)} into queue (took {put_time:.3f}s)")
-    logger.info(f"All {len(warmup_prompts)} warmup prompts submitted to queue")
     model_dims = load_model_dims(model_config.model_name_or_path)
 
     try:
@@ -777,12 +747,9 @@ def run_benchmark(
 
         # Collect all warmup results (one per prompt)
         warmup_batch_size = warmup_end_idx - warmup_start_idx
-        logger.info(f"Waiting for {warmup_batch_size} warmup results from inference_results_Q...")
         warmup_results = []
         for i in range(warmup_batch_size):
-            logger.info(f"Waiting for warmup result {i + 1}/{warmup_batch_size}...")
             result = inference_results_Q.get()
-            logger.info(f"Got warmup result {i + 1}/{warmup_batch_size}")
             warmup_results.append(result)
 
         total_warmup_responses = sum(len(result.responses) for result in warmup_results)
