@@ -337,12 +337,13 @@ class LLMRayActor:
         # Create prefetch task
         self.prefetch_task = asyncio.create_task(self._prefetch_requests())
 
-    def _should_stop(self) -> bool:
+    async def _should_stop(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
             if ready_refs:
-                self._should_stop_value = ray.get(ready_refs[0])
+                # Use asyncio.to_thread to avoid blocking the event loop
+                self._should_stop_value = await asyncio.to_thread(ray.get, ready_refs[0])
                 self._last_should_stop_update = time.perf_counter()
             else:
                 ray.cancel(should_stop_ref)
@@ -393,14 +394,14 @@ class LLMRayActor:
         results_queue = self.eval_results_queue if is_eval else self.results_queue
         results_queue.put(result)
 
-    def _should_exit(self) -> bool:
+    async def _should_exit(self) -> bool:
         """Determine if the processing loop should exit.
 
         Returns:
             bool: True if the loop should exit, False otherwise.
         """
         # Check stop condition first
-        stop_requested = self._should_stop()
+        stop_requested = await self._should_stop()
 
         # Case 1: inflight_updates enabled and stop requested - exit immediately
         if self.inflight_updates and stop_requested:
@@ -654,7 +655,7 @@ class LLMRayActor:
         total_processed = 0
 
         try:
-            while not self._should_exit():
+            while not await self._should_exit():
                 iteration_count += 1
 
                 # Health check for prefetch task
