@@ -328,6 +328,7 @@ class LLMRayActor:
         self._last_should_stop_update = float("-inf")
         self._should_stop_value = False
         self._should_stop_timeout_s = 5
+        self._inflight_ref = None
 
         # Async tracking
         self.active_tasks = {}  # Track active async tasks
@@ -338,15 +339,23 @@ class LLMRayActor:
         self.prefetch_task = asyncio.create_task(self._prefetch_requests())
 
     async def _should_stop(self) -> bool:
-        if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
-            should_stop_ref = self.actor_manager.should_stop.remote()
-            ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
-            if ready_refs:
-                # Use asyncio.to_thread to avoid blocking the event loop
-                self._should_stop_value = await asyncio.to_thread(ray.get, ready_refs[0])
-                self._last_should_stop_update = time.perf_counter()
-            else:
-                ray.cancel(should_stop_ref)
+        now = time.perf_counter()
+
+        # Only refresh if the cached value is stale and we aren't already waiting on a result
+        if (now - self._last_should_stop_update) > self._should_stop_timeout_s and self._inflight_ref is None:
+            self._inflight_ref = self.actor_manager.should_stop.remote()
+
+            try:
+                # Await the Ray result with an asyncio timeout
+                value = await asyncio.wait_for(self._inflight_ref, timeout=0.1)
+                self._should_stop_value = bool(value)
+                self._last_should_stop_update = now
+            except asyncio.TimeoutError:
+                # Timed out: cancel the Ray task to avoid leaks
+                ray.cancel(self._inflight_ref, force=True)
+            finally:
+                self._inflight_ref = None
+
         return self._should_stop_value
 
     async def _prefetch_requests(self):
