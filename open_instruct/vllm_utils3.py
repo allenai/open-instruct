@@ -15,6 +15,7 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
+import asyncio
 import dataclasses
 import os
 import queue
@@ -376,14 +377,21 @@ class LLMRayActor:
             if self.verbose:
                 self.logger.info(f"creating LLM with bundle_indices={bundle_indices}")
 
-        engine_args = vllm.EngineArgs(*args, **kwargs)
+        # Use AsyncEngineArgs instead of EngineArgs
+        engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
         # Log stats causes a crash in the engine at assert outputs.scheduler_stats is not None when we call step() and there is nothing to step.
         engine_args.disable_log_stats = True
 
         # Cascade attention has known performance issues: https://github.com/vllm-project/vllm/issues/17652
         engine_args.disable_cascade_attn = True
 
-        self.llm_engine = vllm.LLMEngine.from_engine_args(engine_args)
+        # Create event loop first
+        self._loop = asyncio.new_event_loop()
+
+        # Create AsyncLLMEngine with start_engine_loop=False so we can manage the loop ourselves
+        self.llm_engine = self._loop.run_until_complete(
+            vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
+        )
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
@@ -395,8 +403,8 @@ class LLMRayActor:
         self._should_stop_value = False
         self._should_stop_timeout_s = 5
 
-        self._executor = futures.ThreadPoolExecutor(max_workers=1)
-        self._prefetch_future = self._executor.submit(self._prefetch_worker)
+        # Async tracking
+        self.active_tasks = {}  # Track active async tasks
         self.tracking = _init_tool_tracking()
         self.request_outputs = {}
 
@@ -411,27 +419,51 @@ class LLMRayActor:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
 
-    def _prefetch_worker(self, sleep_length_s: int = 1):
-        """Background worker that prefetches requests until we have enough buffered."""
-        while True:
-            if self._should_stop():
-                time.sleep(sleep_length_s)
-                continue
-            current_unfinished = self.llm_engine.get_num_unfinished_requests()
+    async def _prefetch_requests(self):
+        """Async method to prefetch requests from queue."""
+        while not self._should_exit():
+            # Check if we need more requests
+            current_unfinished = len(self.active_tasks)
             if current_unfinished >= self.inference_batch_size:
-                time.sleep(sleep_length_s)
+                await asyncio.sleep(0.1)
                 continue
+
             try:
                 request = self.prompt_queue.get(timeout=0.1)
-                add_request(
-                    request,
-                    self.llm_engine,
-                    self.tools,
-                    request_metadata=self.request_metadata,
-                    vllm_active_requests=self.vllm_active_requests,
-                )
+                await self._add_request_async(request)
             except queue.Empty:
+                await asyncio.sleep(0.1)
                 continue
+
+    async def _add_request_async(self, request: PromptRequest):
+        """Add a request to the async LLM engine."""
+        request_id = make_request_id(request)
+        sampling_params = request.generation_config.clone()
+        sampling_params.n = 1  # Use n=1 for tool processing
+        self.request_metadata[request_id] = {
+            "is_eval": request.is_eval,
+            "dataset_index": request.dataset_index,
+            "training_step": request.training_step,
+            "sampling_params": sampling_params,
+            "original_sampling_params": request.generation_config,
+            "prompt_tokens": len(request.prompt),
+            "start_time": time.perf_counter(),
+        }
+
+        tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
+        for j in range(request.generation_config.n):
+            sub_sampling_params = sampling_params.clone()  # Already has n=1
+            if request.generation_config.seed is not None:
+                sub_sampling_params.seed = request.generation_config.seed + j
+            sub_request_id = f"{request_id}_{j}"
+
+            # Create async generator for this request
+            generator = self.llm_engine.add_request(sub_request_id, tokens_prompt, sub_sampling_params)
+            self.vllm_active_requests.add(sub_request_id)
+
+            # Create a task to process the outputs
+            task = asyncio.create_task(self._process_request_outputs(generator, sub_request_id, request_id))
+            self.active_tasks[sub_request_id] = task
 
     def _insert_result_to_queue(self, result, is_eval: bool):
         """Insert result into the appropriate queue with blocking put."""
@@ -455,27 +487,119 @@ class LLMRayActor:
         if stop_requested:
             # Need to check if we have pending work
             pending_tools = len(self.tracking["pending_tool_futures"])
-            unfinished = self.llm_engine.get_num_unfinished_requests()
+            active_tasks = len(self.active_tasks)
 
             # Case 2: stop requested and no pending work - exit
-            if pending_tools == 0 and unfinished == 0:
+            if pending_tools == 0 and active_tasks == 0:
                 return True
             # Otherwise, we have pending work and should continue
             return False
 
         # No stop requested - check if there's any work to do
         pending_tools = len(self.tracking["pending_tool_futures"])
-        unfinished = self.llm_engine.get_num_unfinished_requests()
+        active_tasks = len(self.active_tasks)
 
         # Case 3: no work left at all - exit
-        if pending_tools == 0 and unfinished == 0:
+        if pending_tools == 0 and active_tasks == 0:
             return True
 
         # Otherwise, continue processing
         return False
 
+    async def _process_request_outputs(self, generator, sub_request_id: str, base_request_id: str):
+        """Process outputs from an async request generator."""
+        final_output = None
+        async for output in generator:
+            if output.finished:
+                # Fix the index field
+                parts = sub_request_id.rsplit("_", 1)
+                assert len(parts) == 2 and parts[1].isdigit(), (
+                    f"Wrong request id format ({sub_request_id}), should be request_id _ sub_request_index"
+                )
+                correct_index = int(parts[1])
+                output.outputs = [dataclasses.replace(o, index=correct_index) for o in output.outputs]
+
+                # Handle the output (tools or final)
+                result = _handle_output(
+                    output,
+                    self.tools,
+                    self.tracking,
+                    self.request_metadata[base_request_id]["sampling_params"],
+                    self.max_tool_calls,
+                    self.executor,
+                )
+
+                if result is None:
+                    # Request went to tools - will be handled by tool polling
+                    self.vllm_active_requests.discard(sub_request_id)
+                else:
+                    # Sub-request is done
+                    if sub_request_id in self.tracking["concat_outputs"]:
+                        complete_output = self.tracking["concat_outputs"][sub_request_id].outputs[0]
+                    else:
+                        complete_output = result.outputs[0]
+
+                    self.vllm_active_requests.discard(sub_request_id)
+                    current_time = time.time()
+                    self._finalize_sub_request(sub_request_id, output, complete_output, current_time)
+
+                final_output = output
+                break
+
+        # Clean up the task from active_tasks
+        self.active_tasks.pop(sub_request_id, None)
+        self.vllm_active_requests.discard(sub_request_id)
+        return final_output
+
+    async def _async_process_from_queue(self, timeout: float = 60.0):
+        """Async version of process_from_queue."""
+        total_processed = 0
+        iteration_count = 0
+
+        # Start prefetch task
+        prefetch_task = asyncio.create_task(self._prefetch_requests())
+
+        while not self._should_exit():
+            iteration_count += 1
+
+            # Poll tool futures (AsyncLLMEngine wraps the underlying engine)
+            self._poll_tool_futures(self.tracking, self.llm_engine.engine.tokenizer)
+
+            # Process completed tasks
+            if self.active_tasks:
+                done_tasks = []
+                for task_id, task in list(self.active_tasks.items()):
+                    if task.done():
+                        result = task.result()
+                        if result:
+                            total_processed += 1
+                        done_tasks.append(task_id)
+
+                # Clean up completed tasks
+                for task_id in done_tasks:
+                    self.active_tasks.pop(task_id, None)
+
+            if self.verbose and iteration_count % 100 == 0:
+                active_tasks = len(self.active_tasks)
+                pending_tools = len(self.tracking["pending_tool_futures"])
+                self.logger.info(
+                    f"async_process iteration {iteration_count}: active_tasks={active_tasks}, pending_tools={pending_tools}"
+                )
+
+            # Small sleep to prevent busy waiting
+            await asyncio.sleep(0.01)
+
+        # Cancel prefetch task
+        prefetch_task.cancel()
+        await asyncio.gather(prefetch_task, return_exceptions=True)
+
+        # Wait for all active tasks to complete (no-op if empty)
+        await asyncio.gather(*self.active_tasks.values(), return_exceptions=True)
+
+        return total_processed
+
     def process_from_queue(self, timeout: float = 60.0):
-        """Run generation loop using LLMEngine directly, with optional tool support.
+        """Run generation loop using AsyncLLMEngine.
 
         Runs continuously until should_stop is set, periodically adding new requests
         and yielding control to allow weight synchronization.
@@ -483,77 +607,7 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
-
-        # Use persistent instance variables for tracking and outputs
-        # This ensures state is maintained across multiple calls
-        total_processed = 0
-        iteration_count = 0
-
-        while not self._should_exit():
-            iteration_count += 1
-
-            # Health check: ensure prefetch worker is alive. This will raise if it has crashed.
-            if self._prefetch_future.done():
-                self._prefetch_future.result()
-
-            self._poll_tool_futures(self.tracking, self.llm_engine.tokenizer)
-            current_time = time.time()
-            if self.llm_engine.has_unfinished_requests():
-                for output in [o for o in self.llm_engine.step() if o.finished]:
-                    # Fix the index field for all sub-requests
-                    # When we have n>1, we create sub-requests with IDs like
-                    # train_3_12_0, train_3_12_1, etc. But vLLM creates CompletionOutputs with index=0
-                    # for all of them (since each sub-request has n=1). We need to fix this.
-                    # Extract the actual index from the sub-request ID
-                    parts = output.request_id.rsplit("_", 1)
-                    assert len(parts) == 2 and parts[1].isdigit(), (
-                        f"Wrong request id format ({output.request_id}), should be request_id _ sub_request_index"
-                    )
-
-                    # Fix the index on the CompletionOutput
-                    correct_index = int(parts[1])
-                    output.outputs = [dataclasses.replace(o, index=correct_index) for o in output.outputs]
-                    base_req_id = _extract_base_request_id(output.request_id)
-                    result = _handle_output(
-                        output,
-                        self.tools,
-                        self.tracking,
-                        self.request_metadata[base_req_id]["sampling_params"],
-                        self.max_tool_calls,
-                        self.executor,
-                    )
-
-                    # Result is None when we do more tool processing.
-                    if result is None:
-                        # Request went to tools - remove from vllm_active_requests since it's no longer in vLLM
-                        self.vllm_active_requests.discard(output.request_id)
-                    else:
-                        # Sub-request is done (no more tool calls)
-                        if output.request_id in self.tracking["concat_outputs"]:
-                            complete_output = self.tracking["concat_outputs"][output.request_id].outputs[0]
-                        else:
-                            complete_output = result.outputs[0]
-
-                        # Remove from vllm_active_requests BEFORE calling _finalize_sub_request
-                        # to avoid deadlock in _maybe_process_and_insert
-                        self.vllm_active_requests.discard(output.request_id)
-                        total_processed += self._finalize_sub_request(
-                            output.request_id, output, complete_output, current_time
-                        )
-
-            if self.verbose and iteration_count % 100 == 0:
-                final_unfinished = self.llm_engine.get_num_unfinished_requests()
-                pending_tools = len(self.tracking["pending_tool_futures"])
-                self.logger.info(
-                    f"process_from_queue iteration {iteration_count}: unfinished={final_unfinished}, pending_tools={pending_tools}"
-                )
-
-            # If we have only pending tools but no unfinished requests, sleep briefly
-            # to let pending tools complete before the next iteration
-            if self.llm_engine.get_num_unfinished_requests() == 0 and len(self.tracking["pending_tool_futures"]) > 0:
-                time.sleep(1)
-
-        return total_processed
+        return self._loop.run_until_complete(self._async_process_from_queue(timeout))
 
     def _maybe_process_and_insert(
         self,
@@ -868,34 +922,51 @@ class LLMRayActor:
         use_ray=False,
         timeout_minutes=120,
     ):
-        return self.llm_engine.collective_rpc(
-            "init_process_group",
-            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
+        return self._loop.run_until_complete(
+            self.llm_engine.collective_rpc(
+                "init_process_group",
+                args=(
+                    master_address,
+                    master_port,
+                    rank_offset,
+                    world_size,
+                    group_name,
+                    backend,
+                    use_ray,
+                    timeout_minutes,
+                ),
+            )
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        return self._loop.run_until_complete(
+            self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        )
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        return self.llm_engine.collective_rpc(
-            "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
+        return self._loop.run_until_complete(
+            self.llm_engine.collective_rpc(
+                "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
+            )
         )
 
     def reset_prefix_cache(self):
-        self.llm_engine.reset_prefix_cache()
+        self._loop.run_until_complete(self.llm_engine.reset_prefix_cache())
 
     def sleep(self, level=1):
-        self.llm_engine.sleep(level=level)
+        self._loop.run_until_complete(self.llm_engine.sleep(level=level))
 
     def wake_up(self, tags: Optional[list[str]] = None):
-        self.llm_engine.wake_up(tags)
+        self._loop.run_until_complete(self.llm_engine.wake_up(tags))
 
     def ready(self):
         return True
 
     def get_kv_cache_info(self):
         """Get KV cache max concurrency from the vLLM engine."""
-        kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
+        # AsyncLLMEngine wraps the underlying LLMEngine
+        engine = self.llm_engine.engine
+        kv_cache_specs = engine.model_executor.get_kv_cache_specs()
         kv_cache_spec = kv_cache_specs[0]
         # Group layers by their attention type (type_id) to handle models
         # with sliding attention in some layers but not others
@@ -907,7 +978,7 @@ class LLMRayActor:
 
         page_size = kv_cache_utils.get_uniform_page_size(kv_cache_spec)
 
-        vllm_config = self.llm_engine.vllm_config
+        vllm_config = engine.vllm_config
         gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
         total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
         available_memory = int(gpu_memory_utilization * total_gpu_memory)
@@ -925,9 +996,7 @@ class LLMRayActor:
             kv_cache_tensors=kv_cache_tensors,
             kv_cache_groups=kv_cache_utils.create_kv_cache_group_specs(kv_cache_spec, grouped_layer_names),
         )
-        max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(
-            self.llm_engine.vllm_config, kv_cache_config
-        )
+        max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(engine.vllm_config, kv_cache_config)
 
         return int(max_concurrency)
 
