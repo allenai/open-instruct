@@ -73,6 +73,7 @@ class MCPTool(Tool):
         start_str: str = "",
         end_str: str | None = None,
         mcp_timeout: int = 180,
+        base_url: str | None = None,
         *args,
         **kwargs,
     ):
@@ -100,7 +101,8 @@ class MCPTool(Tool):
             filtered_kwargs = {
                 k: v for k, v in kwargs.items() if k in valid_params
             }
-
+            if "base_url" in valid_params:
+                filtered_kwargs["base_url"] = base_url
             # basically, we want to defer as much as possible to the mcp tool.
             # this 'tool' actually just passes everything down to the mcp tool.
             self.mcp_tools.append(mcp_tool_cls(
