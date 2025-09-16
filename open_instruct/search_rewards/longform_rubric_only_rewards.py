@@ -77,6 +77,10 @@ def compute_general_rubric_reward(response: str, ground_truth: Dict[str, Any]) -
     """
     result = {
         "reward": 0.0,
+        "log_values": {
+            "format_correct_has_answer": 0.0,
+            "rubric_reward": 0.0,
+        },
         "error": None,
     }
 
@@ -85,10 +89,6 @@ def compute_general_rubric_reward(response: str, ground_truth: Dict[str, Any]) -
     
     if extracted_answer is None:
         result["error"] = "Failed to extract answer from response"
-        result["reward"] = 0.0
-        result["log_values"] = {
-            "rubric_reward": 0.0,
-        }
         return result
 
     # Score the rubrics using the extracted function
@@ -97,6 +97,7 @@ def compute_general_rubric_reward(response: str, ground_truth: Dict[str, Any]) -
     result["reward"] = reward
     result["log_values"] = {
         "rubric_reward": reward,
+        "format_correct_has_answer": 1.0,
         }
     return result
 

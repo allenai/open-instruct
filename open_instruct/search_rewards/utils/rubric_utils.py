@@ -152,13 +152,13 @@ async def _score_weighted_rubric(response: str, ground_truth: Dict[str, Any]) ->
     Score the response against the weighted rubric in the ground truth.
     """
     rubrics = ground_truth["rubrics"]
-    question = ground_truth["query"] if "query" in ground_truth else ground_truth["Question"]
+    question = ground_truth["query"]
     tasks = []
     for rubric in rubrics:
-        task = _score_property_async(response, question, rubric["criteria"])
+        task = _score_property_async(response, question, rubric["description"])
         tasks.append(task)
     scores = await asyncio.gather(*tasks)
-    weighted_score = sum(score * rubric["score"] for score, rubric in zip(scores, rubrics)) / (sum(rubric["score"] for rubric in rubrics) + 1e-6)
+    weighted_score = sum(score * rubric["weight"] for score, rubric in zip(scores, rubrics)) / (sum(rubric["weight"] for rubric in rubrics) + 1e-6)
     return weighted_score
     
 
@@ -355,7 +355,7 @@ async def _generate_instance_wise_adaptive_rubrics(responses, ground_truths, num
     return adaptive_rubrics
 
 
-def update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubrics):
+def update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubrics, rubric_buffer=None):
     """
     Assume ground_truths in a format of
     {
@@ -369,9 +369,15 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubrics):
     }
     Update the ground_truths with the adaptive rubrics
     """
-    for ground_truth in ground_truths:
-        positive_rubrics = adaptive_rubrics[ground_truth["query"]]["positive_rubrics"]
-        negative_rubrics = adaptive_rubrics[ground_truth["query"]]["negative_rubrics"]
+    for ground_truth, rubrics in zip(ground_truths, adaptive_rubrics):
+        if isinstance(ground_truth, list):
+            # hacky fix for the data transformation that wraps the ground truth in a list
+            ground_truth = ground_truth[0]
+        ground_truth = json.loads(ground_truth)
+        print("Ground truth: ", ground_truth)
+        print("Adaptive rubrics: ", rubrics)
+        positive_rubrics = rubrics["positive_rubrics"]
+        negative_rubrics = rubrics["negative_rubrics"]
         ground_truth["rubrics"] = []
         for rubric in positive_rubrics:
             ground_truth["rubrics"].append({

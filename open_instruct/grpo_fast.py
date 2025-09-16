@@ -440,6 +440,8 @@ class Args:
     """Whether to use the general rubric for evaluation instead of specific rubrics"""
     evaluate_closed_book_answer: bool = False
     """Whether to evaluate the closed book answer"""
+    apply_adaptive_rubric_reward: bool = False
+    """Whether to apply adaptive rubric reward"""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
@@ -1462,6 +1464,7 @@ def data_preparation_thread(
                 "ground_truths": ground_truths,
                 "datasets": datasets,
                 "training_step": training_step,
+                # "decoded_responses": decoded_responses,
                 **reward_metrics,
             }
             os.makedirs(args.output_dir, exist_ok=True)
@@ -1712,6 +1715,19 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
     if args.cache_dataset_only:
         return
+    
+    if args.apply_adaptive_rubric_reward:
+        print("🚨 Applying adaptive rubric reward")
+        print("Example of ground truth:")
+        print(train_dataset[0][GROUND_TRUTHS_KEY])
+        rubric_buffer = {}
+        for ex in train_dataset:
+            if isinstance(ex[GROUND_TRUTHS_KEY], list):
+                gt = json.loads(ex[GROUND_TRUTHS_KEY][0])
+            else:
+                gt = json.loads(ex[GROUND_TRUTHS_KEY])
+            rubric_buffer[gt['query']] = gt['rubrics']
+    
 
     # ------------------------------------------------------------
     # Runtime setups and quick logging
@@ -2207,6 +2223,9 @@ if __name__ == "__main__":
 
     reward_fn_mapping = build_all_verifiers(args)
 
+    if args.apply_adaptive_rubric_reward:
+        from open_instruct.search_rewards.utils.rubric_utils import _generate_instance_wise_adaptive_rubrics, update_ground_truths_with_adaptive_rubrics
+
     async def reward_fn(
         responses: List[torch.Tensor],
         decoded_responses: List[str],
@@ -2216,6 +2235,7 @@ if __name__ == "__main__":
         infos: List[List[int]],
         queries: Optional[List[str]] = None,
         source_datasets: Optional[List[str]] = None,
+        rubric_buffer: Optional[Dict[str, List[Dict[str, float]]]] = None,
     ) -> List[float]:
         num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
         good_outputs = [
@@ -2242,6 +2262,13 @@ if __name__ == "__main__":
                     scores[i] = rl_rag_format_scores[i] + scores[i]
                 metrics["val/rl_rag_format_scores"] = np.array(rl_rag_format_scores).mean()
 
+        if args.apply_adaptive_rubric_reward:
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating adaptive rubric reward"):
+                adaptive_rubric_scores = await _generate_instance_wise_adaptive_rubrics(decoded_responses, ground_truths, args.num_samples_per_prompt_rollout)
+                # TODO: add the rubrics to the ground truth
+                ground_truths = update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubric_scores, rubric_buffer=None)
+                
+                
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
                 verifiable_rewards, per_func_rewards, log_values = await apply_verifiable_reward(
@@ -2254,6 +2281,7 @@ if __name__ == "__main__":
                     queries=queries,
                     overwrite_reward_fn_tag=args.overwrite_reward_fn_tag,
                 )
+                
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
                 # slightly complex combo of good outputs and additive format reward
