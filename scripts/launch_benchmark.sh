@@ -50,7 +50,7 @@ for model_name_or_path in "$@"; do
         --pure_docker_mode \
         --workspace ai2/open-instruct-dev \
 	--preemptible \
-        --priority high \
+        --priority urgent \
         --num_nodes 1 \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
@@ -66,6 +66,7 @@ for model_name_or_path in "$@"; do
             --max_prompt_token_length 2048 \
             --temperature 1.0 \
 	    --verbose True \
+	    --inflight_updates True \
             --response_length "$response_length" \
             --vllm_top_p 0.9 \
             --num_unique_prompts_rollout 2 \
