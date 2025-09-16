@@ -292,39 +292,6 @@ def init_process_group(
     return pg
 
 
-def add_request(
-    request: PromptRequest,
-    llm_engine: vllm.LLMEngine,
-    tools: Dict[str, Tool],
-    request_metadata: dict,
-    vllm_active_requests: dict,
-) -> int:
-    """Add a request to the LLM engine."""
-    request_id = make_request_id(request)
-    sampling_params = request.generation_config.clone()
-    sampling_params.n = 1  # Use n=1 for tool processing
-    request_metadata[request_id] = {
-        "is_eval": request.is_eval,
-        "dataset_index": request.dataset_index,
-        "training_step": request.training_step,
-        "sampling_params": sampling_params,
-        "original_sampling_params": request.generation_config,
-        "prompt_tokens": len(request.prompt),
-        "start_time": time.perf_counter(),
-    }
-
-    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
-    for j in range(request.generation_config.n):
-        sub_sampling_params = sampling_params.clone()  # Already has n=1
-        if request.generation_config.seed is not None:
-            sub_sampling_params.seed = request.generation_config.seed + j
-        sub_request_id = f"{request_id}_{j}"
-        llm_engine.add_request(sub_request_id, tokens_prompt, sub_sampling_params)
-        vllm_active_requests.add(sub_request_id)
-
-    return request.generation_config.n
-
-
 class LLMRayActor:
     """Ray actor for LLM generation with optional tool support."""
 
@@ -385,13 +352,9 @@ class LLMRayActor:
         # Cascade attention has known performance issues: https://github.com/vllm-project/vllm/issues/17652
         engine_args.disable_cascade_attn = True
 
-        # Create event loop first
-        self._loop = asyncio.new_event_loop()
-
-        # Create AsyncLLMEngine with start_engine_loop=False so we can manage the loop ourselves
-        self.llm_engine = self._loop.run_until_complete(
-            vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
-        )
+        # Store engine args to create AsyncLLMEngine lazily
+        self.engine_args = engine_args
+        self.llm_engine = None
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
@@ -421,7 +384,7 @@ class LLMRayActor:
 
     async def _prefetch_requests(self):
         """Async method to prefetch requests from queue."""
-        while not self._should_exit():
+        while True:
             # Check if we need more requests
             current_unfinished = len(self.active_tasks)
             if current_unfinished >= self.inference_batch_size:
@@ -430,12 +393,12 @@ class LLMRayActor:
 
             try:
                 request = self.prompt_queue.get(timeout=0.1)
-                await self._add_request_async(request)
+                await self._add_request(request)
             except queue.Empty:
                 await asyncio.sleep(0.1)
                 continue
 
-    async def _add_request_async(self, request: PromptRequest):
+    async def _add_request(self, request: PromptRequest):
         """Add a request to the async LLM engine."""
         request_id = make_request_id(request)
         sampling_params = request.generation_config.clone()
@@ -510,49 +473,66 @@ class LLMRayActor:
         """Process outputs from an async request generator."""
         final_output = None
         async for output in generator:
-            if output.finished:
-                # Fix the index field
-                parts = sub_request_id.rsplit("_", 1)
-                assert len(parts) == 2 and parts[1].isdigit(), (
-                    f"Wrong request id format ({sub_request_id}), should be request_id _ sub_request_index"
-                )
-                correct_index = int(parts[1])
-                output.outputs = [dataclasses.replace(o, index=correct_index) for o in output.outputs]
+            if not output.finished:
+                continue
 
-                # Handle the output (tools or final)
-                result = _handle_output(
-                    output,
-                    self.tools,
-                    self.tracking,
-                    self.request_metadata[base_request_id]["sampling_params"],
-                    self.max_tool_calls,
-                    self.executor,
-                )
+            # Fix the index field
+            parts = sub_request_id.rsplit("_", 1)
+            assert len(parts) == 2 and parts[1].isdigit(), (
+                f"Wrong request id format ({sub_request_id}), should be request_id _ sub_request_index"
+            )
+            correct_index = int(parts[1])
+            output.outputs = [dataclasses.replace(o, index=correct_index) for o in output.outputs]
 
-                if result is None:
-                    # Request went to tools - will be handled by tool polling
-                    self.vllm_active_requests.discard(sub_request_id)
+            # Handle the output (tools or final)
+            result = _handle_output(
+                output,
+                self.tools,
+                self.tracking,
+                self.request_metadata[base_request_id]["sampling_params"],
+                self.max_tool_calls,
+                self.executor,
+            )
+
+            if result is None:
+                # Request went to tools - will be handled by tool polling
+                self.vllm_active_requests.discard(sub_request_id)
+            else:
+                # Sub-request is done
+                if sub_request_id in self.tracking["concat_outputs"]:
+                    complete_output = self.tracking["concat_outputs"][sub_request_id].outputs[0]
                 else:
-                    # Sub-request is done
-                    if sub_request_id in self.tracking["concat_outputs"]:
-                        complete_output = self.tracking["concat_outputs"][sub_request_id].outputs[0]
-                    else:
-                        complete_output = result.outputs[0]
+                    complete_output = result.outputs[0]
 
-                    self.vllm_active_requests.discard(sub_request_id)
-                    current_time = time.time()
-                    self._finalize_sub_request(sub_request_id, output, complete_output, current_time)
+                self.vllm_active_requests.discard(sub_request_id)
+                current_time = time.perf_counter()
+                self._finalize_sub_request(sub_request_id, output, complete_output, current_time)
 
-                final_output = output
-                break
+            final_output = output
+            break
 
         # Clean up the task from active_tasks
         self.active_tasks.pop(sub_request_id, None)
         self.vllm_active_requests.discard(sub_request_id)
         return final_output
 
-    async def _async_process_from_queue(self, timeout: float = 60.0):
-        """Async version of process_from_queue."""
+    async def _ensure_engine_initialized(self):
+        """Ensure the AsyncLLMEngine is initialized."""
+        if self.llm_engine is None:
+            self.llm_engine = await vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=False)
+
+    async def process_from_queue(self, timeout: float = 60.0):
+        """Run generation loop using AsyncLLMEngine.
+
+        Runs continuously until should_stop is set, periodically adding new requests
+        and yielding control to allow weight synchronization.
+
+        Returns:
+            int: Number of requests processed
+        """
+        # Ensure engine is initialized
+        await self._ensure_engine_initialized()
+
         total_processed = 0
         iteration_count = 0
 
@@ -583,7 +563,7 @@ class LLMRayActor:
                 active_tasks = len(self.active_tasks)
                 pending_tools = len(self.tracking["pending_tool_futures"])
                 self.logger.info(
-                    f"async_process iteration {iteration_count}: active_tasks={active_tasks}, pending_tools={pending_tools}"
+                    f"process_from_queue iteration {iteration_count}: active_tasks={active_tasks}, pending_tools={pending_tools}"
                 )
 
             # Small sleep to prevent busy waiting
@@ -597,17 +577,6 @@ class LLMRayActor:
         await asyncio.gather(*self.active_tasks.values(), return_exceptions=True)
 
         return total_processed
-
-    def process_from_queue(self, timeout: float = 60.0):
-        """Run generation loop using AsyncLLMEngine.
-
-        Runs continuously until should_stop is set, periodically adding new requests
-        and yielding control to allow weight synchronization.
-
-        Returns:
-            int: Number of requests processed
-        """
-        return self._loop.run_until_complete(self._async_process_from_queue(timeout))
 
     def _maybe_process_and_insert(
         self,
@@ -867,18 +836,19 @@ class LLMRayActor:
                 new_sampling_params = sampling_params.clone()
                 new_sampling_params.max_tokens = new_sample_tokens
 
-                try:
-                    self.llm_engine.add_request(
-                        req_id, vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token), new_sampling_params
-                    )
-                    # Track tool continuation request as active
-                    base_req_id = _extract_base_request_id(req_id)
-                    if base_req_id in self.request_metadata:
-                        self.vllm_active_requests.add(req_id)
+                # Create async generator for the continuation request
+                generator = self.llm_engine.add_request(
+                    req_id, vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token), new_sampling_params
+                )
 
-                except Exception as e:
-                    # Match original ToolUseLLM behavior - just log and continue
-                    self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
+                # Track tool continuation request as active
+                base_req_id = _extract_base_request_id(req_id)
+                if base_req_id in self.request_metadata:
+                    self.vllm_active_requests.add(req_id)
+
+                    # Create a task to process the continuation
+                    task = asyncio.create_task(self._process_request_outputs(generator, req_id, base_req_id))
+                    self.active_tasks[req_id] = task
             else:
                 # Can't make a new request (hit limits), finalize this sub-request
                 base_req_id = _extract_base_request_id(req_id)
@@ -899,7 +869,7 @@ class LLMRayActor:
                 tracking["pending_tool_futures"].pop(req_id, None)
 
                 complete_output = tracking["concat_outputs"][req_id].outputs[0]
-                current_time = time.time()
+                current_time = time.perf_counter()
                 self._finalize_sub_request(req_id, last_output, complete_output, current_time)
                 # Don't add to dict_keys_to_delete since we already removed it
                 continue
@@ -911,7 +881,7 @@ class LLMRayActor:
 
         return completed_outputs
 
-    def init_process_group(
+    async def init_process_group(
         self,
         master_address,
         master_port,
@@ -922,48 +892,41 @@ class LLMRayActor:
         use_ray=False,
         timeout_minutes=120,
     ):
-        return self._loop.run_until_complete(
-            self.llm_engine.collective_rpc(
-                "init_process_group",
-                args=(
-                    master_address,
-                    master_port,
-                    rank_offset,
-                    world_size,
-                    group_name,
-                    backend,
-                    use_ray,
-                    timeout_minutes,
-                ),
-            )
+        await self._ensure_engine_initialized()
+        return await self.llm_engine.collective_rpc(
+            "init_process_group",
+            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
         )
 
-    def update_weight(self, name, dtype, shape, empty_cache=False):
-        return self._loop.run_until_complete(
-            self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+    async def update_weight(self, name, dtype, shape, empty_cache=False):
+        await self._ensure_engine_initialized()
+        return await self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+
+    async def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
+        await self._ensure_engine_initialized()
+        return await self.llm_engine.collective_rpc(
+            "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
 
-    def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        return self._loop.run_until_complete(
-            self.llm_engine.collective_rpc(
-                "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
-            )
-        )
+    async def reset_prefix_cache(self):
+        await self._ensure_engine_initialized()
+        await self.llm_engine.reset_prefix_cache()
 
-    def reset_prefix_cache(self):
-        self._loop.run_until_complete(self.llm_engine.reset_prefix_cache())
+    async def sleep(self, level=1):
+        await self._ensure_engine_initialized()
+        await self.llm_engine.sleep(level=level)
 
-    def sleep(self, level=1):
-        self._loop.run_until_complete(self.llm_engine.sleep(level=level))
+    async def wake_up(self, tags: Optional[list[str]] = None):
+        await self._ensure_engine_initialized()
+        await self.llm_engine.wake_up(tags)
 
-    def wake_up(self, tags: Optional[list[str]] = None):
-        self._loop.run_until_complete(self.llm_engine.wake_up(tags))
-
-    def ready(self):
+    async def ready(self):
+        await self._ensure_engine_initialized()
         return True
 
-    def get_kv_cache_info(self):
+    async def get_kv_cache_info(self):
         """Get KV cache max concurrency from the vLLM engine."""
+        await self._ensure_engine_initialized()
         # AsyncLLMEngine wraps the underlying LLMEngine
         engine = self.llm_engine.engine
         kv_cache_specs = engine.model_executor.get_kv_cache_specs()
