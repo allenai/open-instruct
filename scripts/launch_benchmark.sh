@@ -64,7 +64,7 @@ for model_name_or_path in "$@"; do
             --dataset_mixer_list_splits "train" \
             --max_token_length 10240 \
             --max_prompt_token_length 2048 \
-            --temperature 1.0 \
+            --temperature 0 \
 	    --verbose False \
 	    --inflight_updates True \
             --response_length "$response_length" \
