@@ -23,7 +23,7 @@ import time
 from collections import defaultdict
 from concurrent import futures
 from datetime import timedelta
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import ray
 import torch
@@ -84,6 +84,28 @@ def _extract_base_request_id(full_request_id: str) -> str:
     'eval_5_12345'
     """
     return "_".join(full_request_id.split("_")[:-1])
+
+
+def get_triggered_tool(
+    output_text: str,
+    tools: Dict[str, Tool],
+    max_tool_calls: Dict[str, int],
+    num_calls: int,
+    sampling_params: vllm.SamplingParams,
+) -> Optional[Tuple[Tool, str]]:
+    """Check if any tool was triggered and return the tool and stop_str if found.
+
+    Returns:
+        Tuple of (tool, stop_str) if a tool was triggered, None otherwise.
+    """
+    for stop_str in sampling_params.stop:
+        if stop_str in tools and output_text.endswith(stop_str):
+            # Determine which tool to use
+            if num_calls < max_tool_calls.get(stop_str, 0):
+                return tools[stop_str], stop_str
+            else:
+                return MaxCallsExceededTool(start_str="<tool>", end_str="</tool>"), stop_str
+    return None
 
 
 def process_completed_request(request_id, outs, tracking, current_time, tools, request_metadata):
@@ -315,8 +337,8 @@ class LLMRayActor:
         self.request_outputs = {}
         self.request_outputs_lock = asyncio.Lock()  # Lock for thread-safe access
 
-        # Create prefetch task (will be started in process_from_queue)
-        self.prefetch_task = None
+        # Create prefetch task
+        self.prefetch_task = asyncio.create_task(self._prefetch_requests())
 
     def _should_stop(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
@@ -367,9 +389,10 @@ class LLMRayActor:
                 sub_sampling_params.seed = request.generation_config.seed + j
             sub_request_id = f"{request_id}_{j}"
 
-            # Create a task to process this sub-request
+            # Create a task to process this sub-request with its ID as the name
             task = asyncio.create_task(
-                self._process_request(sub_request_id, request_id, tokens_prompt, sub_sampling_params, j)
+                self._process_request(sub_request_id, request_id, tokens_prompt, sub_sampling_params, j),
+                name=sub_request_id,
             )
             self.active_tasks[sub_request_id] = task
 
@@ -440,7 +463,7 @@ class LLMRayActor:
             index: The index of this sub-request (for n>1 sampling)
         """
         # Local tracking for this request
-        concat_output = None
+        request_output = None
         masks = []
         num_calls = 0
         timeout = False
@@ -457,91 +480,90 @@ class LLMRayActor:
             output = await self.generate_one_completion(sub_request_id, current_prompt, current_sampling_params)
 
             # Fix the index field
-            output.outputs = [dataclasses.replace(o, index=index) for o in output.outputs]
             assert len(output.outputs) == 1, f"{len(output.outputs)=}"
-            o = output.outputs[0]
+            output.outputs[0] = dataclasses.replace(output.outputs[0], index=index)
 
-            # Update concatenated output
-            if concat_output is None:
-                concat_output = output
+            # Initialize or extend request_output
+            if request_output is None:
+                request_output = output
             else:
-                concat_output.outputs[0].token_ids.extend(o.token_ids)
+                # Extend the token_ids in the existing CompletionOutput
+                request_output.outputs[0].token_ids.extend(output.outputs[0].token_ids)
 
-            masks.extend([1] * len(o.token_ids))
+            masks.extend([1] * len(output.outputs[0].token_ids))
 
-            # Check for tool calls if tools are enabled
-            if self.tools:
-                tool_triggered = False
-                for stop_str in current_sampling_params.stop:
-                    if stop_str in self.tools and o.text.endswith(stop_str):
-                        # Determine which tool to use
-                        if num_calls < self.max_tool_calls.get(stop_str, 0):
-                            tool = self.tools[stop_str]
-                        else:
-                            tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
+            # Check for tool calls - break early if no tools
+            if not self.tools:
+                break
 
-                        # Execute tool synchronously (but in thread pool)
-                        loop = asyncio.get_event_loop()
-                        tool_result = await loop.run_in_executor(self.executor, tool, o.text)
+            # Check if any tool was triggered
+            tool_info = get_triggered_tool(
+                output.outputs[0].text,
+                self.tools,
+                self.max_tool_calls,
+                num_calls,
+                current_sampling_params,
+            )
+            if not tool_info:
+                break  # No tool triggered - request is complete
 
-                        # Update tracking
-                        num_calls += 1
-                        timeout = tool_result.timeout
-                        tool_error += "" if tool_result.error is None else tool_result.error
-                        tool_output_str += tool_result.output
-                        tool_runtime += tool_result.runtime
-                        tool_called = True
+            tool, stop_str = tool_info
 
-                        # Prepare tool output tokens
-                        tokenizer = self.llm_engine.engine.tokenizer
-                        tool_output_token_ids = tokenizer.encode(
-                            "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
-                        )
+            # Execute tool synchronously (but in thread pool)
+            loop = asyncio.get_event_loop()
+            tool_result = await loop.run_in_executor(self.executor, tool, output.outputs[0].text)
 
-                        # Check context length
-                        prompt_and_tool_output_token = (
-                            output.prompt_token_ids + concat_output.outputs[0].token_ids + tool_output_token_ids
-                        )
-                        excess = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len
-                        if excess > 0:
-                            tool_output_token_ids = tool_output_token_ids[:-excess]
-                            can_continue = False
-                        else:
-                            can_continue = True
+            # Update tracking
+            num_calls += 1
+            timeout = tool_result.timeout
+            tool_error += "" if tool_result.error is None else tool_result.error
+            tool_output_str += tool_result.output
+            tool_runtime += tool_result.runtime
+            tool_called = True
 
-                        # Check max_tokens limit
-                        remaining = current_sampling_params.max_tokens - len(masks)
-                        if remaining <= 0:
-                            tool_output_token_ids = []
-                            can_continue = False
-                        elif len(tool_output_token_ids) > remaining:
-                            tool_output_token_ids = tool_output_token_ids[:remaining]
-                            can_continue = False
+            # Prepare tool output tokens
+            tokenizer = self.llm_engine.engine.tokenizer
+            tool_output_token_ids = tokenizer.encode(
+                "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+            )
 
-                        # Add tool output to concatenated result
-                        concat_output.outputs[0].token_ids.extend(tool_output_token_ids)
-                        masks.extend([0] * len(tool_output_token_ids))
+            # Check context length
+            prompt_and_tool_output_token = (
+                output.prompt_token_ids + request_output.outputs[0].token_ids + tool_output_token_ids
+            )
+            excess = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len
+            if excess > 0:
+                tool_output_token_ids = tool_output_token_ids[:-excess]
+                can_continue = False
+            else:
+                can_continue = True
 
-                        # Check if we can continue
-                        new_sample_tokens = current_sampling_params.max_tokens - len(masks)
-                        can_continue = can_continue and new_sample_tokens > 0
+            # Check max_tokens limit
+            remaining = current_sampling_params.max_tokens - len(masks)
+            if remaining <= 0:
+                tool_output_token_ids = []
+                can_continue = False
+            elif len(tool_output_token_ids) > remaining:
+                tool_output_token_ids = tool_output_token_ids[:remaining]
+                can_continue = False
 
-                        if can_continue:
-                            # Prepare for next iteration
-                            current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token)
-                            current_sampling_params = current_sampling_params.clone()
-                            current_sampling_params.max_tokens = new_sample_tokens
-                            tool_triggered = True
-                            break
+            # Add tool output to concatenated result
+            request_output.outputs[0].token_ids.extend(tool_output_token_ids)
+            masks.extend([0] * len(tool_output_token_ids))
 
-                if tool_triggered:
-                    continue  # Continue the while loop with new prompt
+            # Check if we can continue
+            new_sample_tokens = current_sampling_params.max_tokens - len(masks)
+            if not can_continue or new_sample_tokens <= 0:
+                break
 
-            # No tool triggered or can't continue - request is complete
-            break
+            # Prepare for next iteration
+            current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token)
+            current_sampling_params = current_sampling_params.clone()
+            current_sampling_params.max_tokens = new_sample_tokens
+            # Continue the while loop with new prompt
 
         # Attach tool metadata if tools are enabled
-        complete_output = concat_output.outputs[0]
+        complete_output = request_output.outputs[0]
         if self.tools:
             setattr(complete_output, "mask", masks)
             setattr(complete_output, "num_calls", num_calls)
@@ -556,9 +578,9 @@ class LLMRayActor:
             if base_request_id not in self.request_outputs:
                 self.request_outputs[base_request_id] = vllm.RequestOutput(
                     request_id=base_request_id,
-                    prompt=output.prompt,
-                    prompt_token_ids=output.prompt_token_ids,
-                    prompt_logprobs=output.prompt_logprobs,
+                    prompt=request_output.prompt,
+                    prompt_token_ids=request_output.prompt_token_ids,
+                    prompt_logprobs=request_output.prompt_logprobs,
                     outputs=[],
                     finished=True,
                 )
@@ -643,35 +665,35 @@ class LLMRayActor:
         iteration_count = 0
         total_processed = 0
 
-        # Start prefetch task if not already running
-        if self.prefetch_task is None or self.prefetch_task.done():
-            self.prefetch_task = asyncio.create_task(self._prefetch_requests())
-
         try:
             while not self._should_exit():
                 iteration_count += 1
 
+                # Health check for prefetch task
+                if self.prefetch_task.done():
+                    # Check if it raised an exception
+                    try:
+                        self.prefetch_task.result()  # This will raise if the task failed
+                    except Exception as e:
+                        self.logger.error(f"Prefetch task failed with error: {e}")
+                        # Restart prefetch task
+                        self.prefetch_task = asyncio.create_task(self._prefetch_requests())
+
                 # Wait for any task to complete with timeout
                 if self.active_tasks:
-                    # Create a list of tasks with their IDs
-                    task_items = list(self.active_tasks.items())
-                    tasks = [t for _, t in task_items]
-
                     # Wait for any task to complete or timeout
-                    done, pending = await asyncio.wait(tasks, timeout=timeout/1000, return_when=asyncio.FIRST_COMPLETED)
+                    done, pending = await asyncio.wait(
+                        self.active_tasks.values(), timeout=timeout / 1000, return_when=asyncio.FIRST_COMPLETED
+                    )
 
                     # Process completed tasks
                     for task in done:
-                        try:
-                            await task  # Get result or raise exception
-                        except Exception as e:
-                            self.logger.error(f"Task failed: {e}")
+                        await task  # Get result or raise exception
 
-                        # Find and remove the completed task
-                        for task_id, t in task_items:
-                            if t == task:
-                                self.active_tasks.pop(task_id, None)
-                                break
+                        # Remove the completed task using its name
+                        task_name = task.get_name()
+                        if task_name in self.active_tasks:
+                            self.active_tasks.pop(task_name, None)
 
                     # Check for completed requests after processing tasks
                     processed_count = await self._check_and_process_completed_requests()
@@ -680,7 +702,7 @@ class LLMRayActor:
                     # No active tasks, just check for completed requests and sleep briefly
                     processed_count = await self._check_and_process_completed_requests()
                     total_processed += processed_count
-                    await asyncio.sleep(timeout/1000)
+                    await asyncio.sleep(timeout / 1000)
 
                 if self.verbose and iteration_count % 100 == 0:
                     active_tasks = len(self.active_tasks)
