@@ -16,14 +16,22 @@ def extract_json_from_response(response: str) -> Optional[Dict[str, Any]]:
     if json_start == -1 or json_end == -1:
         return None
 
+    json_str = response[json_start:json_end]
+    
     try:
-        return json.loads(response[json_start:json_end])
+        return json.loads(json_str)
     except json.JSONDecodeError:
         try:
-            return json.loads(response[json_start:json_end] + "]}")
+            # Clean the JSON string of potential invisible characters and extra whitespace
+            cleaned_json = json_str.strip().encode('utf-8').decode('utf-8-sig')
+            return json.loads(cleaned_json)
         except json.JSONDecodeError:
-            LOGGER.warning(f"Could not decode JSON from response: {response[json_start:json_end]}")
-        return None
+            try:
+                # Last resort: try adding closing brackets (for incomplete arrays/objects)
+                return json.loads(json_str + "]}")
+            except json.JSONDecodeError:
+                LOGGER.warning(f"Could not decode JSON from response: {repr(json_str)}")
+                return None
 
 
 def run_chatopenai(

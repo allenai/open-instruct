@@ -147,16 +147,24 @@ def _score_rubric(response: str, ground_truth: Dict[str, Any], use_general_rubri
     return rubric_scores
 
 
-async def _score_weighted_rubric(response: str, ground_truth: Dict[str, Any]) -> float:
+async def _score_weighted_rubric(response: str, ground_truth: Dict[str, Any], use_general_rubric: bool = False) -> float:
     """
     Score the response against the weighted rubric in the ground truth.
     """
     rubrics = ground_truth["rubrics"]
     question = ground_truth["query"]
     tasks = []
-    for rubric in rubrics:
-        task = _score_property_async(response, question, rubric["description"])
+    general_rubric = """(1) Overall Comprehensiveness: The report should cover content as comprehensively as possible
+(2) Thoroughness of Discussion: Each section should be discussed thoroughly, not just superficially
+(3) Factuality: There should be minimal factual errors
+(4) Coherence: The discussion should stay focused and relevant to the topic"""
+    if use_general_rubric:
+        task = _score_property_async(response, question, general_rubric)
         tasks.append(task)
+    else:
+        for rubric in rubrics:
+            task = _score_property_async(response, question, rubric["description"])
+            tasks.append(task)
     scores = await asyncio.gather(*tasks)
     weighted_score = sum(score * rubric["weight"] for score, rubric in zip(scores, rubrics)) / (sum(rubric["weight"] for rubric in rubrics) + 1e-6)
     return weighted_score
@@ -369,7 +377,10 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubrics, 
     }
     Update the ground_truths with the adaptive rubrics
     """
+    valid_adaptive_rubric_rate = 0.0
     for ground_truth, rubrics in zip(ground_truths, adaptive_rubrics):
+        if rubrics is None:
+            continue
         if isinstance(ground_truth, list):
             # hacky fix for the data transformation that wraps the ground truth in a list
             ground_truth = ground_truth[0]
@@ -389,4 +400,6 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubrics, 
                 "criterion": rubric["ingredient"],
                 "score": -1.0,
             })
-    return ground_truths
+        valid_adaptive_rubric_rate += 1.0
+    valid_adaptive_rubric_rate /= len(ground_truths)
+    return ground_truths, valid_adaptive_rubric_rate

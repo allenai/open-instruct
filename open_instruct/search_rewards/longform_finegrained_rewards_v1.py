@@ -19,7 +19,7 @@ REWARD_WEIGHTS = {
 }
 
 
-def compute_longform_finegrained_reward(response: str, ground_truth: Dict[str, Any], question: str, mcp_parser_name: Optional[str] = None) -> Dict[str, Any]:
+def compute_longform_finegrained_reward(response: str, ground_truth: Dict[str, Any], question: str, mcp_parser_name: Optional[str] = None, use_general_rubric: bool = False) -> Dict[str, Any]:
     """ 
     Compute longform finegrained reward with spans.
     
@@ -53,7 +53,7 @@ def compute_longform_finegrained_reward(response: str, ground_truth: Dict[str, A
     
     if extracted_answer is not None:  # only compute if answer is extracted
         # score rubric
-        rubric_scores = _score_rubric(extracted_answer, ground_truth)
+        rubric_scores = _score_rubric(extracted_answer, ground_truth, use_general_rubric=False)
         rubric_reward = sum(rubric_scores.values()) / len(rubric_scores)
         result["rubric_reward"] = rubric_reward
         
