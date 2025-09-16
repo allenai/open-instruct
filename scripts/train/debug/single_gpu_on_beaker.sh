@@ -16,7 +16,7 @@ uv run python mason.py \
        --workspace ai2/open-instruct-dev \
        --non_resumable \
        --preemptible \
-       --priority urgent \
+       --priority high \
        --num_nodes 1 \
        --max_retries 0 \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
