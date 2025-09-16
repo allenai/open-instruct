@@ -724,18 +724,22 @@ class LLMRayActor:
         timeout_minutes=120,
     ):
         await self._ensure_engine_initialized()
-        return await self.llm_engine.collective_rpc(
+        # AsyncLLMEngine doesn't implement collective_rpc_async, so we need to
+        # call the synchronous version on the underlying engine directly
+        return self.llm_engine.engine.collective_rpc(
             "init_process_group",
             args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
         )
 
     async def update_weight(self, name, dtype, shape, empty_cache=False):
         await self._ensure_engine_initialized()
-        return await self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        # Use synchronous collective_rpc on the underlying engine
+        return self.llm_engine.engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     async def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
         await self._ensure_engine_initialized()
-        return await self.llm_engine.collective_rpc(
+        # Use synchronous collective_rpc on the underlying engine
+        return self.llm_engine.engine.collective_rpc(
             "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
 
