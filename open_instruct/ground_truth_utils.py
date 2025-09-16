@@ -39,7 +39,7 @@ from open_instruct.math_utils import (
 from open_instruct.search_rewards.old_rewards.openscholar_rewards import compute_paper_reward
 from open_instruct.search_rewards.longform_hle_rewards import compute_hle_reward
 from open_instruct.search_rewards.longform_rubric_only_rewards import compute_rubric_reward, compute_general_rubric_reward
-from open_instruct.search_rewards.longform_averaged_outcome_rewards import compute_longform_averaged_outcome_reward
+from open_instruct.search_rewards.longform_averaged_outcome_rewards import compute_longform_averaged_outcome_reward, compute_longform_averaged_outcome_reward_async
 from open_instruct.search_rewards.longform_finegrained_rewards_v1 import compute_longform_finegrained_reward
 from open_instruct.search_rewards.longform_finegrained_rewards_v2 import compute_longform_finegrained_reward_v2
 from open_instruct.search_rewards.utils.finegrained_utils import FinegrainedScore 
@@ -1167,10 +1167,34 @@ class RLRAGLongFormAveragedOutcomeVerifier(VerifierFunction):
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> VerificationResult:
         test_case = json.loads(label)
-        result = compute_longform_averaged_outcome_reward(prediction, test_case, query, mcp_parser_name=self.verifier_config.mcp_parser_name)
+        result = compute_longform_averaged_outcome_reward(prediction, test_case, query, mcp_parser_name=self.verifier_config.mcp_parser_name, use_general_rubric=self.verifier_config.use_general_rubric)
         score = result["reward"]
         return VerificationResult(score=score, log_values=result)
 
+
+class RLRAGLongFormAveragedOutcomeNewVerifier(VerifierFunction):
+    """
+    Verifier that computes the RL-RAG (long form) score between the prediction and the label.
+    """
+
+    def __init__(self, verifier_config: Optional[RubricVerifierConfig] = None) -> None:
+        super().__init__("rl_rag_longform_averaged_outcome_new", verifier_config=verifier_config, weight=1.0)
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        """
+        Return the configuration class for this verifier.
+        """
+        return RubricVerifierConfig
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
+        test_case = json.loads(label)
+        result = asyncio.run(compute_longform_averaged_outcome_reward_async(prediction, test_case, query, mcp_parser_name=self.verifier_config.mcp_parser_name, use_general_rubric=self.verifier_config.use_general_rubric))
+        score = result["reward"]
+        return VerificationResult(score=score, log_values=result)
+    
 
 class RLRAGLongFormReasoningJudgeVerifier(VerifierFunction):
     """

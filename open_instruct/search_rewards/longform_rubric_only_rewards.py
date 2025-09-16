@@ -75,11 +75,15 @@ def compute_general_rubric_reward(response: str, ground_truth: Dict[str, Any]) -
     """
     Compute a reward score for a response based on a test case.
     """
+    num_rubrics = len(ground_truth["rubrics"])
+    print("🔥 Num rubrics: ", num_rubrics)
+    
     result = {
         "reward": 0.0,
         "log_values": {
             "format_correct_has_answer": 0.0,
             "rubric_reward": 0.0,
+            "num_rubrics": num_rubrics,
         },
         "error": None,
     }
@@ -98,6 +102,7 @@ def compute_general_rubric_reward(response: str, ground_truth: Dict[str, Any]) -
     result["log_values"] = {
         "rubric_reward": reward,
         "format_correct_has_answer": 1.0,
+        "num_rubrics": num_rubrics,
         }
     return result
 
