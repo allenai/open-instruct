@@ -54,7 +54,11 @@ def compute_longform_finegrained_reward(response: str, ground_truth: Dict[str, A
     if extracted_answer is not None:  # only compute if answer is extracted
         # score rubric
         rubric_scores = _score_rubric(extracted_answer, ground_truth, use_general_rubric=False)
-        rubric_reward = sum(rubric_scores.values()) / len(rubric_scores)
+        if len(rubric_scores) == 0:
+            print("🔥 No rubric scores found")
+            rubric_reward = 0.0
+        else:
+            rubric_reward = sum(rubric_scores.values()) / len(rubric_scores)
         result["rubric_reward"] = rubric_reward
         
         # score citation (include 0.1 weighted citation format reward)
