@@ -439,6 +439,25 @@ class F1Verifier(VerifierFunction):
         return VerificationResult(score=score)
 
 
+class PuzzleMatcherVerifier(VerifierFunction):
+    """
+    Verifier for Puzzle tasks that require string matching (exact matching).
+
+    It checks if the model output matches the ground truth answer.
+    """
+
+    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+        super().__init__("puzzle", verifier_config=verifier_config, weight=1.0)
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
+        # remove answer tags from the prediction
+        prediction = remove_thinking_section(prediction)
+        score = float(normalize_answer(prediction) == normalize_answer(label))
+        return VerificationResult(score=score)
+
+
 class ReSearchVerifierF1(VerifierFunction):
     """
     Verifier from ReSearch paper (https://arxiv.org/abs/2503.19470)

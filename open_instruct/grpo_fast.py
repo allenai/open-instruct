@@ -248,6 +248,8 @@ class Args:
     """the lower clip range"""
     clip_higher: float = 0.2
     """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
+    inflight_updates: bool = False
+    """Enable immediate stopping of request processing when should_stop is set, allowing for quick pausing and resumption"""
     kl_estimator: Literal["kl1", "kl2", "kl3", "kl4"] = "kl3"
     """the KL estimator to use"""
     pack_length: int = 512
@@ -2033,6 +2035,8 @@ def create_model_and_optimizer(
         actor_manager=actor_manager,
         inference_batch_size=args.inference_batch_size,
         use_fp8_kv_cache=args.use_fp8_kv_cache,
+        inflight_updates=args.inflight_updates,
+        verbose=args.verbose,
     )
 
     resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
@@ -2777,6 +2781,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
+
+    if len(train_dataset) < (needed := max(args.async_steps, 1) * args.num_unique_prompts_rollout):
+        raise ValueError(
+            f"Train dataset is too small! Is {len(train_dataset)} prompts, but {needed} are needed to have enough prompts for bsz and prefill. Try reducing async_steps or num_unique_prompts_rollout, or increasing the dataset size."
+        )
+
     if args.cache_dataset_only:
         return
 
@@ -2791,8 +2801,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     queue_size = (args.async_steps + 1) * args.num_unique_prompts_rollout
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
-    # Queue is sized to allow for up to 2 steps to be enqueued simultaneously.
-    evaluation_inference_results_Q = ray_queue.Queue(maxsize=len(eval_dataset) * 2 if eval_dataset else 0)
+    # We don't care if we ever hit the max, so we let the queue be unbounded.
+    evaluation_inference_results_Q = ray_queue.Queue()
 
     policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
         create_model_and_optimizer(
@@ -2873,8 +2883,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             actor_manager,
             checkpoint_state,
         )
-    except Exception as e:
-        logger.error(f"Error in run_training: {e}", exc_info=True)
     finally:
         cleanup_training_resources(
             stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q], actor_manager

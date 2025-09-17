@@ -35,6 +35,7 @@ uv run python mason.py \
     --max_prompt_token_length 512 \
     --response_length 512 \
     --pack_length 1024 \
+    --inflight_updates True \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
@@ -73,5 +74,5 @@ uv run python mason.py \
     --max_tool_calls 5 \
     --vllm_enable_prefix_caching \
     --tools code search \
-    --search_api_endpoint "http://saturn-cs-aus-232.reviz.ai2.in:44177/search" \
+    --search_api_endpoint "http://neptune-cs-aus-258.reviz.ai2.in:43189/search" \
     --code_tool_api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute
