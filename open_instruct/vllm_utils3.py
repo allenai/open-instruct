@@ -326,6 +326,10 @@ class LLMRayActor:
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
+        logger.info("[LLMRayActor.__init__] Initialized with queues:")
+        logger.info(f"  - prompt_queue: {prompt_queue}")
+        logger.info(f"  - results_queue: {results_queue}")
+        logger.info(f"  - eval_results_queue: {eval_results_queue}")
 
         # For caching should_stop status.
         self._last_should_stop_update = float("-inf")
@@ -362,9 +366,13 @@ class LLMRayActor:
                 # Returning None signals caller to re-check should_stop and continue
                 return None
             try:
-                return await asyncio.to_thread(self.prompt_queue.get, timeout=1.0)
-            except Exception:
+                self.logger.debug(f"[_q_get_async] Attempting to get from prompt_queue: {self.prompt_queue}")
+                result = await asyncio.to_thread(self.prompt_queue.get, timeout=1.0)
+                self.logger.debug(f"[_q_get_async] Got result from queue: {type(result)}")
+                return result
+            except Exception as e:
                 # Likely timeout; just loop
+                self.logger.debug(f"[_q_get_async] Queue get timeout or error: {e}")
                 await asyncio.sleep(0.05)
 
     async def _should_stop(self) -> bool:
@@ -410,6 +418,10 @@ class LLMRayActor:
             if request is None:
                 # Likely should_stop; continue loop to honor stop semantics
                 continue
+
+            self.logger.info(
+                f"[_prefetch_requests] 📨 Got request from queue: step={getattr(request, 'training_step', 'unknown')}, idx={getattr(request, 'dataset_index', 'unknown')}, is_eval={getattr(request, 'is_eval', 'unknown')}"
+            )
 
             # Check again AFTER getting request but BEFORE adding to engine
             if await self._should_stop():
@@ -461,8 +473,19 @@ class LLMRayActor:
 
     def _insert_result_to_queue(self, result, is_eval: bool):
         """Insert result into the appropriate queue with blocking put."""
+        queue_type = "eval" if is_eval else "train"
         results_queue = self.eval_results_queue if is_eval else self.results_queue
-        results_queue.put(result)
+        logger.info(
+            f"[_insert_result_to_queue] 📤 Attempting to put result into {queue_type} queue: {result.dataset_index if hasattr(result, 'dataset_index') else 'unknown'}"
+        )
+        logger.info(f"[_insert_result_to_queue] Queue object: {results_queue}")
+        logger.info(f"[_insert_result_to_queue] Result type: {type(result)}")
+        try:
+            results_queue.put(result)
+            logger.info(f"[_insert_result_to_queue] ✅ Successfully put result into {queue_type} queue")
+        except Exception as e:
+            logger.error(f"[_insert_result_to_queue] ❌ Failed to put result into {queue_type} queue: {e}")
+            raise
 
     async def _should_exit(self) -> bool:
         """Determine if the processing loop should exit.
@@ -719,8 +742,14 @@ class LLMRayActor:
 
                 # Process and insert result (still within lock for consistency)
                 logger.info(f"[_check_and_process_completed_requests] Processing completed request {base_request_id}")
+                logger.info(
+                    f"[_check_and_process_completed_requests] Metadata for {base_request_id}: {self.request_metadata.get(base_request_id, 'Not found')}"
+                )
                 result, is_eval = process_completed_request(
                     base_request_id, ordered_outs, {}, current_time, self.tools, self.request_metadata
+                )
+                logger.info(
+                    f"[_check_and_process_completed_requests] Processed result type: {type(result)}, is_eval: {is_eval}"
                 )
                 self._insert_result_to_queue(result, is_eval=is_eval)
                 logger.info(f"[_check_and_process_completed_requests] Inserted result for {base_request_id} to queue")
