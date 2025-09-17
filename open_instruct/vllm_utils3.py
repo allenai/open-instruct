@@ -364,6 +364,11 @@ class LLMRayActor:
         await self._ensure_engine_initialized()
 
         while True:
+            # Don't consume requests during weight sync (regardless of inflight_updates)
+            if await self._should_stop():
+                await asyncio.sleep(0.1)
+                continue
+
             # Check if we need more requests
             current_unfinished = len(self.active_tasks)
             if current_unfinished >= self.inference_batch_size:
