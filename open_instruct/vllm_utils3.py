@@ -379,6 +379,15 @@ class LLMRayActor:
 
             self.logger.debug(f"Waiting for request from queue (active_tasks={current_unfinished})")
             request = await self.prompt_queue.get_async()
+
+            # Check again AFTER getting request but BEFORE adding to engine
+            if await self._should_stop():
+                # Put the request back in the queue for later processing
+                self.prompt_queue.put(request)
+                self.logger.debug(f"Weight sync in progress, putting request back in queue")
+                await asyncio.sleep(0.1)
+                continue
+
             self.logger.debug(f"Got request from queue, adding to engine")
             await self._add_request(request)
 
