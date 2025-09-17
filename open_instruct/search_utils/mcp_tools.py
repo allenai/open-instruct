@@ -74,6 +74,7 @@ class MCPTool(Tool):
         end_str: str | None = None,
         mcp_timeout: int = 180,
         base_url: str | None = None,
+        number_documents_to_search: int = 10,
         *args,
         **kwargs,
     ):
@@ -103,6 +104,8 @@ class MCPTool(Tool):
             }
             if "base_url" in valid_params:
                 filtered_kwargs["base_url"] = base_url
+            if "number_documents_to_search" in valid_params:
+                filtered_kwargs["number_documents_to_search"] = number_documents_to_search
             # basically, we want to defer as much as possible to the mcp tool.
             # this 'tool' actually just passes everything down to the mcp tool.
             self.mcp_tools.append(mcp_tool_cls(
