@@ -372,16 +372,19 @@ class LLMRayActor:
 
         # Only refresh if the cached value is stale and we aren't already waiting on a result
         if (now - self._last_should_stop_update) > self._should_stop_timeout_s and self._inflight_ref is None:
-            self._inflight_ref = self.actor_manager.should_stop.remote()
+            ref = self.actor_manager.should_stop.remote()
+            self._inflight_ref = ref
 
             try:
-                # Await the Ray result with an asyncio timeout
-                value = await asyncio.wait_for(self._inflight_ref, timeout=0.1)
-                self._should_stop_value = bool(value)
-                self._last_should_stop_update = now
-            except asyncio.TimeoutError:
-                # Timed out: cancel the Ray task to avoid leaks
-                ray.cancel(self._inflight_ref, force=True)
+                # Use ray.wait in a thread to avoid blocking the event loop
+                ready, _ = await asyncio.to_thread(ray.wait, [ref], 0.1)
+                if ready:
+                    value = await asyncio.to_thread(ray.get, ready[0])
+                    self._should_stop_value = bool(value)
+                    self._last_should_stop_update = now
+                else:
+                    # Cancel to avoid leaked tasks if not ready in time
+                    ray.cancel(ref, force=True)
             finally:
                 self._inflight_ref = None
 
