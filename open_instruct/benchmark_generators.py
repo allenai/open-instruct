@@ -823,8 +823,8 @@ def run_benchmark(
 
             # Simulate weight sync between batches
             weight_sync_time = simulate_weight_sync(actor_manager, vllm_engines, args)
-
             completion_time = time.perf_counter()
+            
             # Calculate generation time from the earliest request start time (inclusive of sync)
             earliest_start_time = min(result.start_time for result in batch_results if result.start_time)
             batch_generation_time = completion_time - earliest_start_time if earliest_start_time else 0
