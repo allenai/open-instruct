@@ -15,14 +15,15 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
+import asyncio
 import dataclasses
+import logging
 import os
-import queue
 import time
 from collections import defaultdict
 from concurrent import futures
 from datetime import timedelta
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import ray
 import torch
@@ -39,8 +40,6 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
-from vllm.v1 import kv_cache_interface
-from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
@@ -68,21 +67,6 @@ def get_bundle_indices_list(placement_group: ray.util.placement_group) -> List[i
     return flattened_bundle_indices
 
 
-def _init_tool_tracking():
-    """Initialize tracking variables for tool mode."""
-    return {
-        "num_calls": defaultdict(int),
-        "timeout": defaultdict(bool),
-        "tool_error": defaultdict(str),
-        "tool_output": defaultdict(str),
-        "tool_runtime": defaultdict(float),
-        "tool_called": defaultdict(bool),
-        "concat_outputs": {},
-        "masks": defaultdict(list),
-        "pending_tool_futures": {},
-    }
-
-
 def make_request_id(request: PromptRequest) -> str:
     """Generate a unique tracking key for a request."""
     prefix = "eval" if request.is_eval else "train"
@@ -100,41 +84,26 @@ def _extract_base_request_id(full_request_id: str) -> str:
     return "_".join(full_request_id.split("_")[:-1])
 
 
-def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, executor):
+def get_triggered_tool(
+    output_text: str,
+    tools: Dict[str, Tool],
+    max_tool_calls: Dict[str, int],
+    num_calls: int,
+    sampling_params: vllm.SamplingParams,
+) -> Optional[Tuple[Tool, str]]:
+    """Check if any tool was triggered and return the tool and stop_str if found.
+
+    Returns:
+        Tuple of (tool, stop_str) if a tool was triggered, None otherwise.
     """
-    Handle a finished output. Returns the output if it should be added to results,
-    or None if it's being held for tool processing.
-
-    This is a free function to keep the processing logic separate from the actor state.
-    """
-    if not tools:
-        return output
-
-    assert len(output.outputs) <= 1, f"{len(output.outputs)=}"  # In tool mode, sampling_params.n == 1
-    o = output.outputs[0]
-
-    # Update concatenated outputs
-    if output.request_id in tracking["concat_outputs"]:
-        tracking["concat_outputs"][output.request_id].outputs[0].token_ids.extend(o.token_ids)
-    else:
-        tracking["concat_outputs"][output.request_id] = output
-
-    tracking["masks"][output.request_id].extend([1] * len(o.token_ids))
-
-    # Check for tool calls
     for stop_str in sampling_params.stop:
-        if stop_str in tools and o.text.endswith(stop_str):
-            if tracking["num_calls"][output.request_id] < max_tool_calls.get(stop_str, 0):
-                tool = tools[stop_str]
+        if stop_str in tools and output_text.endswith(stop_str):
+            # Determine which tool to use
+            if num_calls < max_tool_calls.get(stop_str, 0):
+                return tools[stop_str], stop_str
             else:
-                tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
-
-            future = executor.submit(tool, o.text)
-            tracking["pending_tool_futures"][output.request_id] = (future, o, output)
-
-            return None  # Output is being held for tool processing
-
-    return output
+                return MaxCallsExceededTool(start_str="<tool>", end_str="</tool>"), stop_str
+    return None
 
 
 def process_completed_request(request_id, outs, tracking, current_time, tools, request_metadata):
@@ -291,39 +260,6 @@ def init_process_group(
     return pg
 
 
-def add_request(
-    request: PromptRequest,
-    llm_engine: vllm.LLMEngine,
-    tools: Dict[str, Tool],
-    request_metadata: dict,
-    vllm_active_requests: dict,
-) -> int:
-    """Add a request to the LLM engine."""
-    request_id = make_request_id(request)
-    sampling_params = request.generation_config.clone()
-    sampling_params.n = 1  # Use n=1 for tool processing
-    request_metadata[request_id] = {
-        "is_eval": request.is_eval,
-        "dataset_index": request.dataset_index,
-        "training_step": request.training_step,
-        "sampling_params": sampling_params,
-        "original_sampling_params": request.generation_config,
-        "prompt_tokens": len(request.prompt),
-        "start_time": time.perf_counter(),
-    }
-
-    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
-    for j in range(request.generation_config.n):
-        sub_sampling_params = sampling_params.clone()  # Already has n=1
-        if request.generation_config.seed is not None:
-            sub_sampling_params.seed = request.generation_config.seed + j
-        sub_request_id = f"{request_id}_{j}"
-        llm_engine.add_request(sub_request_id, tokens_prompt, sub_sampling_params)
-        vllm_active_requests.add(sub_request_id)
-
-    return request.generation_config.n
-
-
 class LLMRayActor:
     """Ray actor for LLM generation with optional tool support."""
 
@@ -343,13 +279,13 @@ class LLMRayActor:
         **kwargs,
     ):
         self.logger = logger_utils.setup_logger(__name__)
+        self.logger.setLevel(logging.DEBUG)  # Set to DEBUG for debugging
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inference_batch_size = inference_batch_size
         self.inflight_updates = inflight_updates
         self.verbose = verbose
         self.request_metadata = {}
-        self.vllm_active_requests = set()  # Track all requests currently in vLLM
 
         if self.tools:
             self.executor = futures.ThreadPoolExecutor(max_workers=20)
@@ -376,14 +312,14 @@ class LLMRayActor:
             if self.verbose:
                 self.logger.info(f"creating LLM with bundle_indices={bundle_indices}")
 
-        engine_args = vllm.EngineArgs(*args, **kwargs)
+        self.engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
         # Log stats causes a crash in the engine at assert outputs.scheduler_stats is not None when we call step() and there is nothing to step.
-        engine_args.disable_log_stats = True
+        self.engine_args.disable_log_stats = True
 
         # Cascade attention has known performance issues: https://github.com/vllm-project/vllm/issues/17652
-        engine_args.disable_cascade_attn = True
+        self.engine_args.disable_cascade_attn = True
 
-        self.llm_engine = vllm.LLMEngine.from_engine_args(engine_args)
+        self.llm_engine = None
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
@@ -394,88 +330,345 @@ class LLMRayActor:
         self._last_should_stop_update = float("-inf")
         self._should_stop_value = False
         self._should_stop_timeout_s = 5
+        self._inflight_ref = None
 
-        self._executor = futures.ThreadPoolExecutor(max_workers=1)
-        self._prefetch_future = self._executor.submit(self._prefetch_worker)
-        self.tracking = _init_tool_tracking()
+        # Async tracking
+        self.active_tasks = {}  # Track active async tasks
         self.request_outputs = {}
+        self.request_outputs_lock = asyncio.Lock()  # Lock for thread-safe access
 
-    def _should_stop(self) -> bool:
-        if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
-            should_stop_ref = self.actor_manager.should_stop.remote()
-            ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
-            if ready_refs:
-                self._should_stop_value = ray.get(ready_refs[0])
-                self._last_should_stop_update = time.perf_counter()
-            else:
-                ray.cancel(should_stop_ref)
+        # Create prefetch task
+        self.prefetch_task = asyncio.create_task(self._prefetch_requests())
+
+    async def _should_stop(self) -> bool:
+        now = time.perf_counter()
+
+        # Only refresh if the cached value is stale and we aren't already waiting on a result
+        if (now - self._last_should_stop_update) > self._should_stop_timeout_s and self._inflight_ref is None:
+            self._inflight_ref = self.actor_manager.should_stop.remote()
+
+            try:
+                # Await the Ray result with an asyncio timeout
+                value = await asyncio.wait_for(self._inflight_ref, timeout=0.1)
+                self._should_stop_value = bool(value)
+                self._last_should_stop_update = now
+            except asyncio.TimeoutError:
+                # Timed out: cancel the Ray task to avoid leaks
+                ray.cancel(self._inflight_ref, force=True)
+            finally:
+                self._inflight_ref = None
+
         return self._should_stop_value
 
-    def _prefetch_worker(self, sleep_length_s: int = 1):
-        """Background worker that prefetches requests until we have enough buffered."""
+    async def _prefetch_requests(self):
+        """Prefetches requests from queue."""
+        # Ensure engine is initialized before processing any requests
+        await self._ensure_engine_initialized()
+
         while True:
-            if self._should_stop():
-                time.sleep(sleep_length_s)
+            # Don't consume requests during weight sync (regardless of inflight_updates)
+            if await self._should_stop():
+                await asyncio.sleep(0.1)
                 continue
-            current_unfinished = self.llm_engine.get_num_unfinished_requests()
+
+            # Check if we need more requests
+            current_unfinished = len(self.active_tasks)
             if current_unfinished >= self.inference_batch_size:
-                time.sleep(sleep_length_s)
+                await asyncio.sleep(1)
                 continue
-            try:
-                request = self.prompt_queue.get(timeout=0.1)
-                add_request(
-                    request,
-                    self.llm_engine,
-                    self.tools,
-                    request_metadata=self.request_metadata,
-                    vllm_active_requests=self.vllm_active_requests,
-                )
-            except queue.Empty:
+
+            self.logger.debug(f"Waiting for request from queue (active_tasks={current_unfinished})")
+            request = await self.prompt_queue.get_async()
+
+            # Check again AFTER getting request but BEFORE adding to engine
+            if await self._should_stop():
+                # Put the request back in the queue for later processing
+                self.prompt_queue.put(request)
+                self.logger.debug(f"Weight sync in progress, putting request back in queue")
+                await asyncio.sleep(0.1)
                 continue
+
+            self.logger.debug(f"Got request from queue, adding to engine")
+            await self._add_request(request)
+
+    async def _add_request(self, request: PromptRequest):
+        """Add a request to the async LLM engine."""
+        request_id = make_request_id(request)
+        sampling_params = request.generation_config.clone()
+        sampling_params.n = 1  # Use n=1 for tool processing
+        self.request_metadata[request_id] = {
+            "is_eval": request.is_eval,
+            "dataset_index": request.dataset_index,
+            "training_step": request.training_step,
+            "sampling_params": sampling_params,
+            "original_sampling_params": request.generation_config,
+            "prompt_tokens": len(request.prompt),
+            "start_time": time.perf_counter(),
+        }
+
+        tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
+        for j in range(request.generation_config.n):
+            sub_sampling_params = sampling_params.clone()  # Already has n=1
+            if request.generation_config.seed is not None:
+                sub_sampling_params.seed = request.generation_config.seed + j
+            sub_request_id = f"{request_id}_{j}"
+
+            # Create a task to process this sub-request with its ID as the name
+            task = asyncio.create_task(
+                self._process_request(sub_request_id, request_id, tokens_prompt, sub_sampling_params, j),
+                name=sub_request_id,
+            )
+            self.active_tasks[sub_request_id] = task
 
     def _insert_result_to_queue(self, result, is_eval: bool):
         """Insert result into the appropriate queue with blocking put."""
         results_queue = self.eval_results_queue if is_eval else self.results_queue
         results_queue.put(result)
 
-    def _should_exit(self) -> bool:
+    async def _should_exit(self) -> bool:
         """Determine if the processing loop should exit.
 
         Returns:
             bool: True if the loop should exit, False otherwise.
         """
-        # Check stop condition first (cheapest check)
-        stop_requested = self._should_stop()
+        # Check stop condition first
+        stop_requested = await self._should_stop()
 
         # Case 1: inflight_updates enabled and stop requested - exit immediately
         if self.inflight_updates and stop_requested:
             return True
 
-        # Now check for pending work (only if needed)
-        if stop_requested:
-            # Need to check if we have pending work
-            pending_tools = len(self.tracking["pending_tool_futures"])
-            unfinished = self.llm_engine.get_num_unfinished_requests()
+        # Check for pending work
+        active_tasks = len(self.active_tasks)
 
-            # Case 2: stop requested and no pending work - exit
-            if pending_tools == 0 and unfinished == 0:
-                return True
-            # Otherwise, we have pending work and should continue
-            return False
-
-        # No stop requested - check if there's any work to do
-        pending_tools = len(self.tracking["pending_tool_futures"])
-        unfinished = self.llm_engine.get_num_unfinished_requests()
+        # Case 2: stop requested and no pending work - exit
+        if stop_requested and active_tasks == 0:
+            return True
 
         # Case 3: no work left at all - exit
-        if pending_tools == 0 and unfinished == 0:
+        if active_tasks == 0:
             return True
 
         # Otherwise, continue processing
         return False
 
-    def process_from_queue(self, timeout: float = 60.0):
-        """Run generation loop using LLMEngine directly, with optional tool support.
+    async def _ensure_engine_initialized(self):
+        """Ensure the AsyncLLMEngine is initialized."""
+        if self.llm_engine is None:
+            self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=True)
+
+    async def generate_one_completion(
+        self, request_id: str, prompt: vllm.TokensPrompt, sampling_params: vllm.SamplingParams
+    ) -> vllm.RequestOutput:
+        """Generate a single completion from the async engine.
+
+        Wraps the async generator to return a single RequestOutput.
+        """
+        generator = await self.llm_engine.add_request(request_id, prompt, sampling_params)
+        outputs = [output async for output in generator if output.finished]
+        assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
+        return outputs[0]
+
+    async def _process_request(
+        self,
+        sub_request_id: str,
+        base_request_id: str,
+        prompt: vllm.TokensPrompt,
+        sampling_params: vllm.SamplingParams,
+        index: int,
+    ):
+        """Process a single sub-request from start to finish, including tool handling.
+
+        Args:
+            sub_request_id: The sub-request ID (e.g., "train_1_43039_2")
+            base_request_id: The base request ID (e.g., "train_1_43039")
+            prompt: The prompt tokens
+            sampling_params: The sampling parameters
+            index: The index of this sub-request (for n>1 sampling)
+        """
+        # Local tracking for this request
+        request_output = None
+        masks = []
+        num_calls = 0
+        timeout = False
+        tool_error = ""
+        tool_output_str = ""
+        tool_runtime = 0.0
+        tool_called = False
+
+        current_prompt = prompt
+        current_sampling_params = sampling_params
+
+        while True:
+            # Generate completion
+            output = await self.generate_one_completion(sub_request_id, current_prompt, current_sampling_params)
+
+            # Fix the index field
+            assert len(output.outputs) == 1, f"{len(output.outputs)=}"
+            output.outputs[0] = dataclasses.replace(output.outputs[0], index=index)
+
+            # Initialize or extend request_output
+            if request_output is None:
+                request_output = output
+            else:
+                # Extend the token_ids in the existing CompletionOutput
+                request_output.outputs[0].token_ids.extend(output.outputs[0].token_ids)
+
+            masks.extend([1] * len(output.outputs[0].token_ids))
+
+            # Check for tool calls - break early if no tools
+            if not self.tools:
+                break
+
+            # Check if any tool was triggered
+            tool_info = get_triggered_tool(
+                output.outputs[0].text, self.tools, self.max_tool_calls, num_calls, current_sampling_params
+            )
+            if tool_info is None:
+                break  # No tool triggered - request is complete
+
+            tool, stop_str = tool_info
+
+            tool_result = await asyncio.to_thread(tool, output.outputs[0].text)
+
+            # Update tracking
+            num_calls += 1
+            timeout = tool_result.timeout
+            tool_error += "" if tool_result.error is None else tool_result.error
+            tool_output_str += tool_result.output
+            tool_runtime += tool_result.runtime
+            tool_called = True
+
+            # Prepare tool output tokens
+            tokenizer = self.llm_engine.engine.tokenizer
+            tool_output_token_ids = tokenizer.encode(
+                "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+            )
+
+            # Check context length
+            prompt_and_tool_output_token = (
+                output.prompt_token_ids + request_output.outputs[0].token_ids + tool_output_token_ids
+            )
+            excess = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len
+            if excess > 0:
+                tool_output_token_ids = tool_output_token_ids[:-excess]
+                can_continue = False
+            else:
+                can_continue = True
+
+            # Check max_tokens limit
+            remaining = current_sampling_params.max_tokens - len(masks)
+            if remaining <= 0:
+                tool_output_token_ids = []
+                can_continue = False
+            elif len(tool_output_token_ids) > remaining:
+                tool_output_token_ids = tool_output_token_ids[:remaining]
+                can_continue = False
+
+            # Add tool output to concatenated result
+            request_output.outputs[0].token_ids.extend(tool_output_token_ids)
+            masks.extend([0] * len(tool_output_token_ids))
+
+            # Check if we can continue
+            new_sample_tokens = current_sampling_params.max_tokens - len(masks)
+            if not can_continue or new_sample_tokens <= 0:
+                break
+
+            # Prepare for next iteration
+            current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token)
+            current_sampling_params = current_sampling_params.clone()
+            current_sampling_params.max_tokens = new_sample_tokens
+            # Continue the while loop with new prompt
+
+        # Attach tool metadata if tools are enabled
+        complete_output = request_output.outputs[0]
+        if self.tools:
+            setattr(complete_output, "mask", masks)
+            setattr(complete_output, "num_calls", num_calls)
+            setattr(complete_output, "timeout", timeout)
+            setattr(complete_output, "tool_error", tool_error)
+            setattr(complete_output, "tool_output", tool_output_str)
+            setattr(complete_output, "tool_runtime", tool_runtime)
+            setattr(complete_output, "tool_called", tool_called)
+
+        # Add to request_outputs with lock
+        async with self.request_outputs_lock:
+            if base_request_id not in self.request_outputs:
+                self.request_outputs[base_request_id] = vllm.RequestOutput(
+                    request_id=base_request_id,
+                    prompt=request_output.prompt,
+                    prompt_token_ids=request_output.prompt_token_ids,
+                    prompt_logprobs=request_output.prompt_logprobs,
+                    outputs=[],
+                    finished=True,
+                )
+
+            self.request_outputs[base_request_id].outputs.append(complete_output)
+
+    async def _check_and_process_completed_requests(self, base_request_ids: List[str]):
+        """Check request_outputs for completed requests and process them.
+
+        Args:
+            base_request_ids: List of specific base request IDs to check.
+        """
+        if not base_request_ids:
+            return 0
+
+        processed_count = 0
+        current_time = time.perf_counter()
+
+        # Acquire lock once for entire operation
+        async with self.request_outputs_lock:
+            for base_request_id in base_request_ids:
+                # Skip if not in outputs or metadata
+                if base_request_id not in self.request_outputs or base_request_id not in self.request_metadata:
+                    continue
+
+                request_output = self.request_outputs[base_request_id]
+                expected_n = self.request_metadata[base_request_id]["original_sampling_params"].n
+
+                # Check if this request has all N outputs
+                if len(request_output.outputs) != expected_n:
+                    continue
+
+                # Build ordered outputs
+                ordered_outs = []
+                for j in range(expected_n):
+                    matching_output = None
+                    for comp_output in request_output.outputs:
+                        if hasattr(comp_output, "index") and comp_output.index == j:
+                            matching_output = comp_output
+                            break
+
+                    ordered_outs.append(
+                        vllm.RequestOutput(
+                            request_id=f"{base_request_id}_{j}",
+                            prompt=request_output.prompt,
+                            prompt_token_ids=request_output.prompt_token_ids,
+                            prompt_logprobs=request_output.prompt_logprobs,
+                            outputs=[matching_output],
+                            finished=True,
+                        )
+                    )
+
+                # Remove from request_outputs
+                self.request_outputs.pop(base_request_id)
+
+                # Process and insert result (still within lock for consistency)
+                result, is_eval = process_completed_request(
+                    base_request_id, ordered_outs, {}, current_time, self.tools, self.request_metadata
+                )
+                self._insert_result_to_queue(result, is_eval=is_eval)
+
+                # Clean up metadata
+                self.request_metadata.pop(base_request_id, None)
+
+                processed_count += 1
+
+        return processed_count
+
+    async def process_from_queue(self, timeout: float = 60.0):
+        """Run generation loop using AsyncLLMEngine.
 
         Runs continuously until should_stop is set, periodically adding new requests
         and yielding control to allow weight synchronization.
@@ -483,360 +676,67 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
+        # Ensure engine is initialized
+        await self._ensure_engine_initialized()
 
-        # Use persistent instance variables for tracking and outputs
-        # This ensures state is maintained across multiple calls
-        total_processed = 0
         iteration_count = 0
+        total_processed = 0
 
-        while not self._should_exit():
-            iteration_count += 1
+        try:
+            while not await self._should_exit():
+                iteration_count += 1
 
-            # Health check: ensure prefetch worker is alive. This will raise if it has crashed.
-            if self._prefetch_future.done():
-                self._prefetch_future.result()
+                # Health check for prefetch task
+                if self.prefetch_task.done():
+                    self.prefetch_task.result()  # This will raise if the task failed
 
-            self._poll_tool_futures(self.tracking, self.llm_engine.tokenizer)
-            current_time = time.time()
-            if self.llm_engine.has_unfinished_requests():
-                for output in [o for o in self.llm_engine.step() if o.finished]:
-                    # Fix the index field for all sub-requests
-                    # When we have n>1, we create sub-requests with IDs like
-                    # train_3_12_0, train_3_12_1, etc. But vLLM creates CompletionOutputs with index=0
-                    # for all of them (since each sub-request has n=1). We need to fix this.
-                    # Extract the actual index from the sub-request ID
-                    parts = output.request_id.rsplit("_", 1)
-                    assert len(parts) == 2 and parts[1].isdigit(), (
-                        f"Wrong request id format ({output.request_id}), should be request_id _ sub_request_index"
-                    )
-
-                    # Fix the index on the CompletionOutput
-                    correct_index = int(parts[1])
-                    output.outputs = [dataclasses.replace(o, index=correct_index) for o in output.outputs]
-                    base_req_id = _extract_base_request_id(output.request_id)
-                    result = _handle_output(
-                        output,
-                        self.tools,
-                        self.tracking,
-                        self.request_metadata[base_req_id]["sampling_params"],
-                        self.max_tool_calls,
-                        self.executor,
-                    )
-
-                    # Result is None when we do more tool processing.
-                    if result is None:
-                        # Request went to tools - remove from vllm_active_requests since it's no longer in vLLM
-                        self.vllm_active_requests.discard(output.request_id)
-                    else:
-                        # Sub-request is done (no more tool calls)
-                        if output.request_id in self.tracking["concat_outputs"]:
-                            complete_output = self.tracking["concat_outputs"][output.request_id].outputs[0]
-                        else:
-                            complete_output = result.outputs[0]
-
-                        # Remove from vllm_active_requests BEFORE calling _finalize_sub_request
-                        # to avoid deadlock in _maybe_process_and_insert
-                        self.vllm_active_requests.discard(output.request_id)
-                        total_processed += self._finalize_sub_request(
-                            output.request_id, output, complete_output, current_time
-                        )
-
-            if self.verbose and iteration_count % 100 == 0:
-                final_unfinished = self.llm_engine.get_num_unfinished_requests()
-                pending_tools = len(self.tracking["pending_tool_futures"])
-                self.logger.info(
-                    f"process_from_queue iteration {iteration_count}: unfinished={final_unfinished}, pending_tools={pending_tools}"
+                # Wait for any task to complete or timeout
+                done, pending = await asyncio.wait(
+                    self.active_tasks.values() if self.active_tasks else [],
+                    timeout=timeout,
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
 
-            # If we have only pending tools but no unfinished requests, sleep briefly
-            # to let pending tools complete before the next iteration
-            if self.llm_engine.get_num_unfinished_requests() == 0 and len(self.tracking["pending_tool_futures"]) > 0:
-                time.sleep(1)
+                # Process completed tasks and collect their base request IDs
+                completed_base_request_ids = set()
+                for task in done:
+                    await task  # Get result or raise exception
 
-        return total_processed
+                    # Remove the completed task using its name
+                    task_name = task.get_name()
+                    if task_name in self.active_tasks:
+                        self.active_tasks.pop(task_name, None)
+                        # Extract base request ID from task name (e.g., "train_1_43039_2" -> "train_1_43039")
+                        base_request_id = _extract_base_request_id(task_name)
+                        completed_base_request_ids.add(base_request_id)
 
-    def _maybe_process_and_insert(
-        self,
-        request_id: str,
-        request_outputs: Dict[str, List[vllm.RequestOutput]],
-        tracking: Dict[str, Any],
-        current_time: float,
-    ) -> int:
-        """Check if we have N requests for request_id, process them, and insert results in queue.
-
-        Returns:
-            int: Number of requests processed (0 or 1).
-        """
-        expected_n = self.request_metadata[request_id]["original_sampling_params"].n
-
-        # Check if we have the base request in request_outputs
-        if request_id not in request_outputs:
-            return 0
-
-        available_outputs = request_outputs[request_id].outputs
-        if len(available_outputs) < expected_n:
-            return 0
-
-        needed_ids = [f"{request_id}_{j}" for j in range(expected_n)]
-        active_sub_requests = [sub_id for sub_id in needed_ids if sub_id in self.vllm_active_requests]
-        if active_sub_requests:
-            return 0
-
-        has_pending_tools = any(sub_id in tracking.get("pending_tool_futures", {}) for sub_id in needed_ids)
-        if has_pending_tools:
-            return 0
-
-        # At this point we have all outputs ready. Build ordered outputs for processing.
-        # First organize available_outputs into a dictionary for O(1) lookup
-        outputs_by_index = {o.index: o for o in available_outputs if hasattr(o, "index")}
-
-        # Verify we have all required outputs before proceeding
-        if len(outputs_by_index) != expected_n or any(j not in outputs_by_index for j in range(expected_n)):
-            self.logger.warning(
-                f"Incomplete or malformed outputs for {request_id}. "
-                f"Expected {expected_n} samples, got indices {sorted(outputs_by_index.keys())}. Skipping."
-            )
-            return 0
-
-        ordered_outs: List[vllm.RequestOutput] = []
-        for j in range(expected_n):
-            # Create a RequestOutput wrapper for each CompletionOutput
-            ordered_outs.append(
-                vllm.RequestOutput(
-                    request_id=f"{request_id}_{j}",
-                    prompt=request_outputs[request_id].prompt,
-                    prompt_token_ids=request_outputs[request_id].prompt_token_ids,
-                    prompt_logprobs=request_outputs[request_id].prompt_logprobs,
-                    outputs=[outputs_by_index[j]],
-                    finished=True,
-                )
-            )
-
-        # Remove the base entry from request_outputs to prevent growth.
-        request_outputs.pop(request_id, None)
-        result, is_eval = process_completed_request(
-            request_id, ordered_outs, tracking, current_time, self.tools, self.request_metadata
-        )
-        self._insert_result_to_queue(result, is_eval=is_eval)
-        self._cleanup_request_data(request_id, tracking)
-        return 1
-
-    def _has_pending_tool_futures_for_request(self, request_id: str, tracking: Dict[str, Any]) -> bool:
-        """Check if there are any pending tool futures for a given base request ID."""
-        if not self.tools or not tracking["pending_tool_futures"]:
-            return False
-
-        # Check if any pending tool futures belong to this base request
-        for req_id in tracking["pending_tool_futures"]:
-            if _extract_base_request_id(req_id) == request_id:
-                return True
-        return False
-
-    def _has_active_sub_requests_for_base_id(self, base_request_id: str) -> bool:
-        """Check if there are any active sub-requests in vLLM for a given base request ID."""
-        # Check if any active request IDs belong to our base request
-        for req_id in self.vllm_active_requests:
-            if _extract_base_request_id(req_id) == base_request_id:
-                return True
-        return False
-
-    def _cleanup_request_data(self, request_id: str, tracking: Dict[str, Any]):
-        """Clean up metadata and tracking data for a completed request."""
-        # Check if there are still pending tool futures for this request
-        if self._has_pending_tool_futures_for_request(request_id, tracking):
-            # Don't clean up metadata yet - tool futures still need it
-            return
-
-        # Check if there are still active sub-requests in vLLM for this base request
-        if self._has_active_sub_requests_for_base_id(request_id):
-            # Don't clean up metadata yet - active requests still need it
-            return
-
-        # Remove request metadata only after both conditions are met:
-        # 1. No pending tool futures for this request
-        # 2. No active sub-requests in vLLM for this base request
-        self.request_metadata.pop(request_id, None)
-
-        # Clean up tracking data for all sub-requests of this request
-        if self.tools:
-            # Find all sub-request IDs that belong to this base request
-            sub_request_ids = [
-                k for k in tracking["concat_outputs"].keys() if _extract_base_request_id(k) == request_id
-            ]
-
-            for sub_req_id in sub_request_ids:
-                # Clean up tracking dictionaries
-                tracking["concat_outputs"].pop(sub_req_id, None)
-                tracking["masks"].pop(sub_req_id, None)
-                tracking["num_calls"].pop(sub_req_id, None)
-                tracking["timeout"].pop(sub_req_id, None)
-                tracking["tool_error"].pop(sub_req_id, None)
-                tracking["tool_output"].pop(sub_req_id, None)
-                tracking["tool_runtime"].pop(sub_req_id, None)
-                tracking["tool_called"].pop(sub_req_id, None)
-                # Note: pending_tool_futures should already be cleaned by _poll_tool_futures
-
-    def _finalize_sub_request(self, sub_request_id, request_output_for_prompts, complete_output, current_time):
-        """
-        Finalize a completed sub-request by moving it to request_outputs and processing if ready.
-
-        Args:
-            sub_request_id: The sub-request ID (e.g., "train_1_43039_2")
-            request_output_for_prompts: RequestOutput containing prompt info
-            complete_output: The CompletionOutput to add
-            current_time: Current timestamp for processing
-
-        Returns:
-            Number of processed requests (0 or 1)
-        """
-        base_request_id = _extract_base_request_id(sub_request_id)
-
-        # Extract the sub-request index from the sub_request_id and set it on the CompletionOutput
-        # This is needed to properly identify which sub-request each output belongs to.
-        # MUST be done BEFORE adding to request_outputs so that
-        # _maybe_process_and_insert can find the index field when checking completeness.
-        if "_" in sub_request_id:
-            # Extract index from sub_request_id like "train_1_43039_2" -> 2
-            parts = sub_request_id.rsplit("_", 1)
-            if len(parts) == 2 and parts[1].isdigit():
-                # Create new CompletionOutput with corrected index
-                complete_output = dataclasses.replace(complete_output, index=int(parts[1]))
-
-        # If tools are enabled, attach tool metadata to the output
-        if self.tools:
-            # Set tool metadata attributes on the output
-            setattr(
-                complete_output,
-                "mask",
-                self.tracking["masks"].get(sub_request_id, [1] * len(complete_output.token_ids)),
-            )
-            setattr(complete_output, "num_calls", self.tracking["num_calls"].get(sub_request_id, 0))
-            setattr(complete_output, "timeout", self.tracking["timeout"].get(sub_request_id, False))
-            setattr(complete_output, "tool_error", self.tracking["tool_error"].get(sub_request_id, ""))
-            setattr(complete_output, "tool_output", self.tracking["tool_output"].get(sub_request_id, ""))
-            setattr(complete_output, "tool_runtime", self.tracking["tool_runtime"].get(sub_request_id, 0.0))
-            setattr(complete_output, "tool_called", self.tracking["tool_called"].get(sub_request_id, False))
-
-        # Initialize request_outputs entry if needed
-        if base_request_id not in self.request_outputs:
-            self.request_outputs[base_request_id] = vllm.RequestOutput(
-                request_id=base_request_id,
-                prompt=request_output_for_prompts.prompt,
-                prompt_token_ids=request_output_for_prompts.prompt_token_ids,
-                prompt_logprobs=request_output_for_prompts.prompt_logprobs,
-                outputs=[],
-                finished=True,
-            )
-
-        # Add the completion output (with index field already set if needed)
-        self.request_outputs[base_request_id].outputs.append(complete_output)
-
-        # Try to process and insert if we have all expected outputs
-        processed = self._maybe_process_and_insert(base_request_id, self.request_outputs, self.tracking, current_time)
-
-        return processed
-
-    def _poll_tool_futures(self, tracking, tokenizer):
-        """Poll and handle completed tool executions."""
-        if not self.tools or not tracking["pending_tool_futures"]:
-            return []
-
-        dict_keys_to_delete = []
-        completed_outputs = []
-
-        for req_id, (future, last_o, last_output) in list(tracking["pending_tool_futures"].items()):
-            if not future.done():
-                continue
-
-            # Tool future is done, process it
-            tool_result = future.result()  # Get the tool result
-
-            # Get sampling params from request metadata for this request
-            base_req_id = _extract_base_request_id(req_id)
-            sampling_params = self.request_metadata[base_req_id]["sampling_params"]
-
-            last_prompt_token_ids = last_output.prompt_token_ids
-            last_token_ids = last_o.token_ids
-            tool_output_token_ids = tokenizer.encode(
-                "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
-            )
-            tracking["timeout"][req_id] = tool_result.timeout
-            tracking["tool_error"][req_id] += "" if tool_result.error is None else tool_result.error
-            tracking["tool_output"][req_id] += tool_result.output
-            tracking["tool_runtime"][req_id] += tool_result.runtime
-            tracking["tool_called"][req_id] = True
-
-            # Edge case 1: clip against model context length
-            prompt_and_tool_output_token = last_prompt_token_ids + last_token_ids + tool_output_token_ids
-            tracking["num_calls"][req_id] += 1
-            excess = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len
-            if excess > 0:
-                tool_output_token_ids = tool_output_token_ids[:-excess]
-                can_make_new_request = False
-            else:
-                can_make_new_request = True
-
-            # Edge case 2: clip against per-request max_tokens
-            remaining = sampling_params.max_tokens - len(tracking["masks"][req_id])
-            if remaining <= 0:
-                tool_output_token_ids = []
-            elif len(tool_output_token_ids) > remaining:
-                tool_output_token_ids = tool_output_token_ids[:remaining]
-
-            tracking["concat_outputs"][req_id].outputs[0].token_ids.extend(tool_output_token_ids)
-            tracking["masks"][req_id].extend([0] * len(tool_output_token_ids))
-            new_sample_tokens = sampling_params.max_tokens - len(tracking["masks"][req_id])
-            can_make_new_request = can_make_new_request and new_sample_tokens > 0
-
-            if can_make_new_request:
-                new_sampling_params = sampling_params.clone()
-                new_sampling_params.max_tokens = new_sample_tokens
-
-                try:
-                    self.llm_engine.add_request(
-                        req_id, vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token), new_sampling_params
+                # Only check the requests that just had tasks complete
+                if completed_base_request_ids:
+                    processed_count = await self._check_and_process_completed_requests(
+                        list(completed_base_request_ids)
                     )
-                    # Track tool continuation request as active
-                    base_req_id = _extract_base_request_id(req_id)
-                    if base_req_id in self.request_metadata:
-                        self.vllm_active_requests.add(req_id)
+                    total_processed += processed_count
 
-                except Exception as e:
-                    # Match original ToolUseLLM behavior - just log and continue
-                    self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
-            else:
-                # Can't make a new request (hit limits), finalize this sub-request
-                base_req_id = _extract_base_request_id(req_id)
+                if self.verbose and iteration_count % 100 == 0:
+                    active_tasks = len(self.active_tasks)
+                    self.logger.info(f"process_from_queue iteration {iteration_count}: active_tasks={active_tasks}")
 
-                # Log the state before finalizing
-                other_pending = [
-                    other_id
-                    for other_id in tracking["pending_tool_futures"]
-                    if _extract_base_request_id(other_id) == base_req_id and other_id != req_id
-                ]
-                self.logger.info(
-                    f"[_poll_tool_futures] Finalizing {req_id} (can't continue). "
-                    f"Other pending tools for {base_req_id}: {other_pending}"
-                )
+        finally:
+            # Wait for all active tasks to complete only if inflight_updates is False
+            if not self.inflight_updates:
+                await asyncio.gather(*self.active_tasks.values(), return_exceptions=True)
 
-                # Remove from pending_tool_futures BEFORE finalization to ensure consistent state
-                # This prevents the cleanup logic from seeing this as a pending tool future
-                tracking["pending_tool_futures"].pop(req_id, None)
+            # Process any remaining completed requests only if inflight_updates is False
+            if not self.inflight_updates:
+                # Check all requests by passing all base request IDs
+                all_base_request_ids = list(self.request_outputs.keys())
+                processed_count = await self._check_and_process_completed_requests(all_base_request_ids)
+                total_processed += processed_count
 
-                complete_output = tracking["concat_outputs"][req_id].outputs[0]
-                current_time = time.time()
-                self._finalize_sub_request(req_id, last_output, complete_output, current_time)
-                # Don't add to dict_keys_to_delete since we already removed it
-                continue
-            dict_keys_to_delete.append(req_id)
+            # Count total processed
+            return total_processed
 
-        # Remove the futures we just processed; do NOT clean up metadata here.
-        for req_id in dict_keys_to_delete:
-            tracking["pending_tool_futures"].pop(req_id, None)
-
-        return completed_outputs
-
-    def init_process_group(
+    async def init_process_group(
         self,
         master_address,
         master_port,
@@ -847,68 +747,64 @@ class LLMRayActor:
         use_ray=False,
         timeout_minutes=120,
     ):
-        return self.llm_engine.collective_rpc(
+        await self._ensure_engine_initialized()
+        # AsyncLLMEngine doesn't implement collective_rpc_async, so we need to
+        # call the synchronous version on the underlying engine directly
+        return self.llm_engine.engine.collective_rpc(
             "init_process_group",
             args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
         )
 
-    def update_weight(self, name, dtype, shape, empty_cache=False):
-        return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+    async def update_weight(self, name, dtype, shape, empty_cache=False):
+        await self._ensure_engine_initialized()
+        # Use synchronous collective_rpc on the underlying engine
+        return self.llm_engine.engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
-    def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        return self.llm_engine.collective_rpc(
+    async def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
+        await self._ensure_engine_initialized()
+        # Use synchronous collective_rpc on the underlying engine
+        return self.llm_engine.engine.collective_rpc(
             "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
 
-    def reset_prefix_cache(self):
-        self.llm_engine.reset_prefix_cache()
+    async def reset_prefix_cache(self):
+        await self._ensure_engine_initialized()
+        await self.llm_engine.reset_prefix_cache()
 
-    def sleep(self, level=1):
-        self.llm_engine.sleep(level=level)
+    async def sleep(self, level=1):
+        await self._ensure_engine_initialized()
+        await self.llm_engine.sleep(level=level)
 
-    def wake_up(self, tags: Optional[list[str]] = None):
-        self.llm_engine.wake_up(tags)
+    async def wake_up(self, tags: Optional[list[str]] = None):
+        await self._ensure_engine_initialized()
+        await self.llm_engine.wake_up(tags)
 
-    def ready(self):
+    async def ready(self):
+        await self._ensure_engine_initialized()
         return True
 
-    def get_kv_cache_info(self):
+    async def get_kv_cache_info(self):
         """Get KV cache max concurrency from the vLLM engine."""
-        kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
-        kv_cache_spec = kv_cache_specs[0]
-        # Group layers by their attention type (type_id) to handle models
-        # with sliding attention in some layers but not others
-        type_groups = defaultdict(list)
-        for layer_name, layer_spec in kv_cache_spec.items():
-            type_groups[layer_spec.type_id].append(layer_name)
+        await self._ensure_engine_initialized()
+        # AsyncLLMEngine wraps the underlying LLMEngine
+        engine = self.llm_engine.engine
 
-        grouped_layer_names = list(type_groups.values())
+        # Use the same calculation as vLLM's executor_base.py
+        # Reference: https://github.com/vllm-project/vllm/blob/b6553be1bc75f046b00046a4ad7576364d03c835/vllm/executor/executor_base.py#L119-L120
+        num_gpu_blocks = engine.cache_config.num_gpu_blocks
+        block_size = engine.cache_config.block_size
+        max_model_len = engine.model_config.max_model_len
 
-        page_size = kv_cache_utils.get_uniform_page_size(kv_cache_spec)
+        # Check if values are initialized
+        if num_gpu_blocks is None or num_gpu_blocks == 0:
+            logger.warning("num_gpu_blocks not initialized yet, returning default value")
+            return 1.0
 
-        vllm_config = self.llm_engine.vllm_config
-        gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
-        total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
-        available_memory = int(gpu_memory_utilization * total_gpu_memory)
+        # Calculate max concurrency using vLLM's formula
+        max_concurrency = (num_gpu_blocks * block_size) / max_model_len
 
-        num_blocks = kv_cache_utils.get_num_blocks(vllm_config, len(kv_cache_spec), available_memory, page_size)
-
-        per_layer_size = page_size * num_blocks
-        kv_cache_tensors = [
-            kv_cache_interface.KVCacheTensor(size=per_layer_size, shared_by=[layer_name])
-            for layer_name in kv_cache_spec
-        ]
-
-        kv_cache_config = kv_cache_interface.KVCacheConfig(
-            num_blocks=num_blocks,
-            kv_cache_tensors=kv_cache_tensors,
-            kv_cache_groups=kv_cache_utils.create_kv_cache_group_specs(kv_cache_spec, grouped_layer_names),
-        )
-        max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(
-            self.llm_engine.vllm_config, kv_cache_config
-        )
-
-        return int(max_concurrency)
+        logger.info(f"Calculated max_concurrency: {max_concurrency}")
+        return max_concurrency
 
 
 def get_cuda_arch_list() -> str:
