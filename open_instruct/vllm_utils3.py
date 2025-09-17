@@ -370,7 +370,10 @@ class LLMRayActor:
                 await asyncio.sleep(1)
                 continue
 
-            await self._add_request(await self.prompt_queue.get_async())
+            self.logger.debug(f"Waiting for request from queue (active_tasks={current_unfinished})")
+            request = await self.prompt_queue.get_async()
+            self.logger.debug(f"Got request from queue, adding to engine")
+            await self._add_request(request)
 
     async def _add_request(self, request: PromptRequest):
         """Add a request to the async LLM engine."""
