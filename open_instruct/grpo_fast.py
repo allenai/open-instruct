@@ -432,6 +432,10 @@ class Args:
     """The timeout for the MCP tool."""
     base_url: Optional[str] = None
     """The base URL for the MCP tool, used for massive_serve."""
+    use_localized_snippets: bool = False
+    """Whether to use localized snippets for the MCP serper browse tool."""
+    context_chars: int = 6000
+    """The context characters for the MCP serper browse tool."""
     ### end per-tool settings ###
 
 

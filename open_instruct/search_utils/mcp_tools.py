@@ -10,7 +10,7 @@ import httpx
 import httpcore
 
 try:
-    from mcp_agents.tool_interface.mcp_tools import MassiveServeSearchTool, SemanticScholarSnippetSearchTool, SerperSearchTool, Crawl4AIBrowseTool
+    from mcp_agents.tool_interface.mcp_tools import MassiveServeSearchTool, SemanticScholarSnippetSearchTool, SerperSearchTool, Crawl4AIBrowseTool, SerperBrowseTool
 except ImportError as e:
     print(f"Failed to import mcp_agents. Please install from the source code:\n{e}")
     raise e
@@ -22,7 +22,8 @@ MCP_TOOL_REGISTRY = {
     "snippet_search": SemanticScholarSnippetSearchTool,
     "google_search": SerperSearchTool,
     "massive_serve": MassiveServeSearchTool,
-    "browse_webpage": Crawl4AIBrowseTool
+    # "browse_webpage": Crawl4AIBrowseTool # for now, some issues with using this.
+    "browse_webpage": SerperBrowseTool
 }
 
 def truncate_at_second_last_stop(text: str, stops: list[str]) -> str:
