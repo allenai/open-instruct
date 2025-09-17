@@ -1145,6 +1145,7 @@ class RLRAGLongFormGeneralRubricVerifier(VerifierFunction):
         
         result = compute_general_rubric_reward(prediction, test_case)
         score = result["reward"]
+        
         return VerificationResult(score=score, log_values=result["log_values"])
 
 

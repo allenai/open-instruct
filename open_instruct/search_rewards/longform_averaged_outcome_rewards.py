@@ -95,12 +95,15 @@ async def compute_longform_averaged_outcome_reward_async(
         return result
     
     # score rubric
-    rubric_scores = await _score_weighted_rubric(extracted_answer, ground_truth, use_general_rubric=use_general_rubric)
-    if len(rubric_scores) == 0:
-        print("🔥 No rubric scores found")
+    scores, weights = await _score_weighted_rubric(extracted_answer, ground_truth, use_general_rubric=use_general_rubric)
+    if len(scores) == 0:
+        print("🔥 No rubric scores found. This should not happen.")
         rubric_reward = 0.0
     else:
-        rubric_reward = sum(rubric_scores.values()) / len(rubric_scores)
+        # Compute weighted average externally
+        total_weighted_score = sum(score * weight for score, weight in zip(scores, weights))
+        total_weight = sum(weight for weight in weights if weight > 0)
+        rubric_reward = total_weighted_score / max(total_weight, 1.0)
     result["rubric_reward"] = rubric_reward
     
     # score citation (include 0.1 weighted citation format reward)

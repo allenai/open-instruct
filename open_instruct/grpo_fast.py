@@ -2270,7 +2270,7 @@ if __name__ == "__main__":
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating adaptive rubric reward"):
                 adaptive_rubric_scores = await _generate_instance_wise_adaptive_rubrics(decoded_responses, ground_truths, args.num_samples_per_prompt_rollout)
                 # TODO: incorporate the rubric buffer
-                ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics = update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubric_scores, rubric_buffer=None, num_samples_per_prompt_rollout=args.num_samples_per_prompt_rollout)
+                ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, _ = update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubric_scores, rubric_buffer=None, num_samples_per_prompt_rollout=args.num_samples_per_prompt_rollout)
                 metrics["objective/valid_adaptive_rubric_rate"] = valid_adaptive_rubric_rate
                 metrics["objective/avg_num_ground_truths"] = avg_num_ground_truths
                 metrics["objective/avg_num_adaptive_rubrics"] = avg_num_adaptive_rubrics

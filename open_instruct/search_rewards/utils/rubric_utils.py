@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 from collections import defaultdict
 
 from open_instruct.search_rewards.utils.run_utils import extract_json_from_response, run_litellm, run_litellm_async
@@ -147,9 +147,12 @@ def _score_rubric(response: str, ground_truth: Dict[str, Any], use_general_rubri
     return rubric_scores
 
 
-async def _score_weighted_rubric(response: str, ground_truth: Dict[str, Any], use_general_rubric: bool = False) -> float:
+async def _score_weighted_rubric(response: str, ground_truth: Dict[str, Any], use_general_rubric: bool = False) -> Tuple[List[float], List[float]]:
     """
-    Score the response against the weighted rubric in the ground truth.
+    Score the response against rubrics and return individual scores and weights.
+    
+    Returns:
+        Tuple of (scores, weights) where weighting can be done externally
     """
     rubrics = ground_truth["rubrics"]
     question = ground_truth["query"]
@@ -161,13 +164,15 @@ async def _score_weighted_rubric(response: str, ground_truth: Dict[str, Any], us
     if use_general_rubric:
         task = _score_property_async(response, question, general_rubric)
         tasks.append(task)
+        weights = [1.0]
     else:
         for rubric in rubrics:
             task = _score_property_async(response, question, rubric["description"])
             tasks.append(task)
+        weights = [rubric["weight"] for rubric in rubrics]
+    
     scores = await asyncio.gather(*tasks)
-    weighted_score = sum(score * rubric["weight"] for score, rubric in zip(scores, rubrics)) / (sum(rubric["weight"] for rubric in rubrics) + 1e-6)
-    return weighted_score
+    return scores, weights
     
 
 
@@ -375,7 +380,10 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubrics, 
             }
         ]
     }
-    Update the ground_truths with the adaptive rubrics
+    Update the ground_truths with the adaptive rubrics and manage rubric buffer
+    
+    Returns:
+        tuple: (ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, rubric_buffer)
     """
     valid_adaptive_rubric_rate = 0.0
     num_ground_truths = []
@@ -401,6 +409,7 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubrics, 
             ground_truth_str = ground_truth
             
         ground_truth_obj = json.loads(ground_truth_str)
+        query = ground_truth_obj["query"]
         
         print(f"Ground truth: {ground_truth_obj}\nAdaptive rubrics: {rubrics}")
         positive_rubrics = rubrics["positive_rubrics"] if "positive_rubrics" in rubrics else []
@@ -409,18 +418,46 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubrics, 
         num_ground_truths.append(len(ground_truth_obj["rubrics"]))
         num_adaptive_rubrics.append(len(positive_rubrics) + len(negative_rubrics))
         
-        # Replace the original rubrics with adaptive rubrics
-        ground_truth_obj["rubrics"] = []
-        for rubric in positive_rubrics:
-            ground_truth_obj["rubrics"].append({
-                "description": rubric["ingredient"],
-                "weight": 1.0,
-            })
-        for rubric in negative_rubrics:
-            ground_truth_obj["rubrics"].append({
-                "description": rubric["ingredient"],
-                "weight": -1.0,
-            })
+        # Always keep the original ground truth rubrics
+        original_rubrics = ground_truth_obj["rubrics"].copy()
+        
+        # Update rubric buffer with newly generated adaptive rubrics
+        if rubric_buffer is not None and query in rubric_buffer:
+            # Convert new adaptive rubrics to the buffer format
+            new_active_rubrics = []
+            for rubric in positive_rubrics:
+                new_active_rubrics.append({
+                    "description": rubric["ingredient"],
+                    "weight": 1.0,
+                    "handle": rubric["handle"]
+                })
+            for rubric in negative_rubrics:
+                new_active_rubrics.append({
+                    "description": rubric["ingredient"],
+                    "weight": -1.0,
+                    "handle": rubric["handle"]
+                })
+            
+            # Append new rubrics to active_rubrics in buffer
+            rubric_buffer[query]["active_rubrics"].extend(new_active_rubrics)
+            
+            # Keep original rubrics and append active rubrics from buffer
+            ground_truth_obj["rubrics"] = original_rubrics + rubric_buffer[query]["active_rubrics"]
+        else:
+            print(f"No buffer found for query {query}, using newly generated rubrics")
+            # Keep original rubrics and append newly generated adaptive rubrics
+            additional_rubrics = []
+            for rubric in positive_rubrics:
+                additional_rubrics.append({
+                    "description": rubric["ingredient"],
+                    "weight": 1.0,
+                })
+            for rubric in negative_rubrics:
+                additional_rubrics.append({
+                    "description": rubric["ingredient"],
+                    "weight": -1.0,
+                })
+            ground_truth_obj["rubrics"] = original_rubrics + additional_rubrics
         
         # Convert back to JSON string and update the original list
         updated_ground_truth_str = json.dumps(ground_truth_obj)
@@ -433,4 +470,4 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubrics, 
     valid_adaptive_rubric_rate /= len(ground_truths)
     avg_num_ground_truths = sum(num_ground_truths) / len(num_ground_truths)
     avg_num_adaptive_rubrics = sum(num_adaptive_rubrics) / len(num_adaptive_rubrics)
-    return ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics
+    return ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, rubric_buffer
