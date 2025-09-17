@@ -144,7 +144,7 @@ class MCPTool(Tool):
                             break
                         except (httpcore.RemoteProtocolError, httpx.ReadError, ConnectionError, TimeoutError, asyncio.TimeoutError) as e:
                             last_exc = e
-                            print(f"Error: {e}, retrying...")
+                            print(f"{mcp_tool.name} Error: {e}, retrying...")
                             if attempt + 1 >= self.max_retries:
                                 raise
                             time.sleep(self.retry_backoff * (2 ** attempt))
@@ -160,6 +160,7 @@ class MCPTool(Tool):
         if document_tool_output is None:
             if error is None and not found_tool:
                 error = "No valid tool calls found."
+                print(f"MCP Tool Error: {error}")
                 return ToolOutput(
                     output=error,
                     called=False,
@@ -170,6 +171,7 @@ class MCPTool(Tool):
                     end_str="\n</snippet>",
                 )
             elif error is not None:
+                print(f"MCP {tool_used_name} Tool Error: {error}")
                 return ToolOutput(
                     output=error,
                     called=False,
@@ -180,7 +182,7 @@ class MCPTool(Tool):
                     end_str="\n</snippet>",
                 )
             else:
-                print(f"Unknown error, no MCP response and no error found.")
+                print(f"MCP {tool_used_name} Tool Error: Unknown error, no MCP response and no error found.")
                 return ToolOutput(
                     output="Unknown error, no MCP response and no error found.",
                     called=False,
@@ -192,7 +194,7 @@ class MCPTool(Tool):
                 )
 
         if document_tool_output.error:
-            print(f"Error from mcp tool {tool_used_name}: {document_tool_output.error}")
+            print(f"MCP {tool_used_name} Tool Error: {document_tool_output.error}")
             print("Returning error output anyway.")
         # munge into format that open-instruct likes.
         return ToolOutput(
