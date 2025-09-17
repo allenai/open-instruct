@@ -279,7 +279,8 @@ class LLMRayActor:
         **kwargs,
     ):
         self.logger = logger_utils.setup_logger(__name__)
-        self.logger.setLevel(logging.DEBUG)  # Set to DEBUG for debugging
+        if verbose:
+            self.logger.setLevel(logging.DEBUG)
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inference_batch_size = inference_batch_size
@@ -337,8 +338,34 @@ class LLMRayActor:
         self.request_outputs = {}
         self.request_outputs_lock = asyncio.Lock()  # Lock for thread-safe access
 
-        # Create prefetch task
-        self.prefetch_task = asyncio.create_task(self._prefetch_requests())
+        # Prefetch task is started lazily from async methods
+        self.prefetch_task = None
+
+    async def _ensure_prefetch_started(self):
+        """Start the background prefetch task if not already running."""
+        if self.prefetch_task is None or self.prefetch_task.done():
+            # Ensure engine is initialized before prefetching
+            await self._ensure_engine_initialized()
+            self.prefetch_task = asyncio.create_task(self._prefetch_requests())
+
+    async def _q_get_async(self):
+        """Get from Ray queue asynchronously with compatibility fallback."""
+        # Prefer native async API if available
+        get_async = getattr(self.prompt_queue, "get_async", None)
+        if callable(get_async):
+            return await get_async()
+        # Fallback: poll via a background thread with timeout
+        while True:
+            # If a weight sync is requested, yield control so caller can stop
+            if await self._should_stop():
+                await asyncio.sleep(0.1)
+                # Returning None signals caller to re-check should_stop and continue
+                return None
+            try:
+                return await asyncio.to_thread(self.prompt_queue.get, timeout=1.0)
+            except Exception:
+                # Likely timeout; just loop
+                await asyncio.sleep(0.05)
 
     async def _should_stop(self) -> bool:
         now = time.perf_counter()
@@ -378,12 +405,23 @@ class LLMRayActor:
                 continue
 
             self.logger.debug(f"Waiting for request from queue (active_tasks={current_unfinished})")
-            request = await self.prompt_queue.get_async()
+            request = await self._q_get_async()
+            if request is None:
+                # Likely should_stop; continue loop to honor stop semantics
+                continue
 
             # Check again AFTER getting request but BEFORE adding to engine
             if await self._should_stop():
-                # Put the request back in the queue for later processing
-                self.prompt_queue.put(request)
+                # Put the request back in the queue for later processing (non-blocking if possible)
+                put_nowait = getattr(self.prompt_queue, "put_nowait", None)
+                try:
+                    if callable(put_nowait):
+                        put_nowait(request)
+                    else:
+                        self.prompt_queue.put(request)
+                except Exception:
+                    # As a last resort, fall back to blocking put
+                    self.prompt_queue.put(request)
                 self.logger.debug(f"Weight sync in progress, putting request back in queue")
                 await asyncio.sleep(0.1)
                 continue
@@ -676,8 +714,9 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
-        # Ensure engine is initialized
+        # Ensure engine and prefetch are initialized
         await self._ensure_engine_initialized()
+        await self._ensure_prefetch_started()
 
         iteration_count = 0
         total_processed = 0
@@ -781,6 +820,7 @@ class LLMRayActor:
 
     async def ready(self):
         await self._ensure_engine_initialized()
+        await self._ensure_prefetch_started()
         return True
 
     async def get_kv_cache_info(self):
@@ -791,20 +831,23 @@ class LLMRayActor:
 
         # Use the same calculation as vLLM's executor_base.py
         # Reference: https://github.com/vllm-project/vllm/blob/b6553be1bc75f046b00046a4ad7576364d03c835/vllm/executor/executor_base.py#L119-L120
-        num_gpu_blocks = engine.cache_config.num_gpu_blocks
-        block_size = engine.cache_config.block_size
-        max_model_len = engine.model_config.max_model_len
+        retries = 5
+        for attempt in range(retries):
+            num_gpu_blocks = engine.cache_config.num_gpu_blocks
+            block_size = engine.cache_config.block_size
+            max_model_len = engine.model_config.max_model_len
 
-        # Check if values are initialized
-        if num_gpu_blocks is None or num_gpu_blocks == 0:
-            logger.warning("num_gpu_blocks not initialized yet, returning default value")
-            return 1.0
+            if num_gpu_blocks is not None and num_gpu_blocks != 0:
+                # Calculate max concurrency using vLLM's formula
+                max_concurrency = (num_gpu_blocks * block_size) / max_model_len
+                logger.info(f"Calculated max_concurrency: {max_concurrency}")
+                return int(max_concurrency)
 
-        # Calculate max concurrency using vLLM's formula
-        max_concurrency = (num_gpu_blocks * block_size) / max_model_len
+            # Not initialized yet; wait a bit
+            await asyncio.sleep(0.2)
 
-        logger.info(f"Calculated max_concurrency: {max_concurrency}")
-        return max_concurrency
+        logger.warning("num_gpu_blocks not initialized after retries, returning default value 1")
+        return 1
 
 
 def get_cuda_arch_list() -> str:
