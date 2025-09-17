@@ -76,6 +76,8 @@ class MCPTool(Tool):
         mcp_timeout: int = 180,
         base_url: str | None = None,
         number_documents_to_search: int = 10,
+        use_localized_snippets: bool = False,
+        context_chars: int = 6000,
         *args,
         **kwargs,
     ):
@@ -107,6 +109,10 @@ class MCPTool(Tool):
                 filtered_kwargs["base_url"] = base_url
             if "number_documents_to_search" in valid_params:
                 filtered_kwargs["number_documents_to_search"] = number_documents_to_search
+            if "use_localized_snippets" in valid_params:
+                filtered_kwargs["use_localized_snippets"] = use_localized_snippets
+            if "context_chars" in valid_params:
+                filtered_kwargs["context_chars"] = context_chars
             # basically, we want to defer as much as possible to the mcp tool.
             # this 'tool' actually just passes everything down to the mcp tool.
             self.mcp_tools.append(mcp_tool_cls(
