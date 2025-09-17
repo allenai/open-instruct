@@ -769,11 +769,16 @@ class LLMRayActor:
                         base_request_id = _extract_base_request_id(task_name)
                         completed_base_request_ids.add(base_request_id)
 
-                # Only check the requests that just had tasks complete
+                # Check any base requests that just had tasks complete
                 if completed_base_request_ids:
-                    processed_count = await self._check_and_process_completed_requests(
-                        list(completed_base_request_ids)
-                    )
+                    processed_count = await self._check_and_process_completed_requests(list(completed_base_request_ids))
+                    total_processed += processed_count
+
+                # Opportunistically flush any requests that are already complete
+                # (e.g., completed earlier in a different iteration)
+                if self.request_outputs:
+                    all_base_request_ids = list(self.request_outputs.keys())
+                    processed_count = await self._check_and_process_completed_requests(all_base_request_ids)
                     total_processed += processed_count
 
                 if self.verbose and iteration_count % 100 == 0:
@@ -785,9 +790,9 @@ class LLMRayActor:
             if not self.inflight_updates:
                 await asyncio.gather(*self.active_tasks.values(), return_exceptions=True)
 
-            # Process any remaining completed requests only if inflight_updates is False
-            if not self.inflight_updates:
-                # Check all requests by passing all base request IDs
+            # Always process any remaining completed requests on exit
+            # (prefetch is paused by should_stop, so this is safe)
+            if self.request_outputs:
                 all_base_request_ids = list(self.request_outputs.keys())
                 processed_count = await self._check_and_process_completed_requests(all_base_request_ids)
                 total_processed += processed_count
