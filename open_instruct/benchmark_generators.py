@@ -144,12 +144,17 @@ def save_benchmark_results_to_csv(
         "response_length": args.response_length,
         "total_time": total_time,
         "total_generation_time": agg_results["total_generation_time"],
+        "total_weight_sync_time": agg_results["total_weight_sync_time"],
         "generation_time_percentage": (agg_results["total_generation_time"] / total_time) * 100,
+        "weight_sync_time_percentage": (agg_results["total_weight_sync_time"] / total_time) * 100
+        if total_time > 0
+        else 0,
         "total_tokens": agg_results["total_num_new_tokens"],
         "avg_tokens_per_second": agg_results["avg_tokens_per_second"],
         "avg_mfu": agg_results["avg_mfu"],
         "avg_mbu": agg_results["avg_mbu"],
         "avg_generation_time_per_batch": agg_results["avg_generation_time"],
+        "avg_weight_sync_time_per_batch": agg_results["avg_weight_sync_time"],
         "avg_new_tokens_per_sample": agg_results["total_num_new_tokens"]
         / (len(results) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout),
     }
@@ -630,11 +635,50 @@ def setup_vllm_engines(
         results_queue=inference_results_Q,
         actor_manager=actor_manager,
         inference_batch_size=args.inference_batch_size,
+        inflight_updates=args.inflight_updates,
     )
 
     logger.info("vLLM engines ready")
 
     return vllm_engines, param_prompt_Q, inference_results_Q, actor_manager
+
+
+def simulate_weight_sync(
+    actor_manager: ray.actor.ActorHandle, vllm_engines: list[ray.actor.ActorHandle], args: grpo_fast.Args
+) -> float:
+    """Simulate weight sync by pausing all actors.
+
+    Returns:
+        float: Time taken for the weight sync simulation in seconds
+    """
+    sync_start = time.perf_counter()
+
+    # Set actors to stop
+    ray.get(actor_manager.set_should_stop.remote(True))
+    logger.debug("Set should_stop to True for weight sync simulation")
+
+    # Wait for all engines to acknowledge stop by calling process_from_queue
+    # which will return 0 when stopped
+    stopped_refs = [engine.process_from_queue.remote(timeout=1) for engine in vllm_engines]
+    results = utils.ray_get_with_progress(
+        stopped_refs, desc="Waiting for engines to stop for weight sync", enable=args.verbose
+    )
+
+    # Verify all engines stopped (returned 0)
+    for i, result in enumerate(results):
+        if result != 0:
+            logger.warning(f"Engine {i} processed {result} requests while stopping")
+
+    # Sleep for 1 second to simulate weight sync time (from wandb metrics)
+    time.sleep(1.0)
+
+    # Resume actors
+    ray.get(actor_manager.set_should_stop.remote(False))
+    logger.debug("Set should_stop to False after weight sync simulation")
+
+    sync_time = time.perf_counter() - sync_start
+    logger.info(f"Weight sync simulation took {sync_time:.2f}s")
+    return sync_time
 
 
 def generate_thread(vllm_engines: list[ray.actor.ActorHandle], stop_event: threading.Event) -> None:
@@ -690,6 +734,7 @@ def run_benchmark(
     vllm_engines: list[ray.actor.ActorHandle],
     param_prompt_Q: ray_queue.Queue,
     inference_results_Q: ray_queue.Queue,
+    actor_manager: ray.actor.ActorHandle,
     args: grpo_fast.Args,
     model_config: model_utils.ModelConfig,
     timestamp: int,
@@ -706,6 +751,10 @@ def run_benchmark(
         max_tokens=args.response_length,
         top_p=args.vllm_top_p,
         n=args.num_samples_per_prompt_rollout,
+        seed=args.seed,
+        include_stop_str_in_output=True,
+        skip_special_tokens=False,
+        stop=args.stop_strings,
         # IMPORTANT: Set output_kind to FINAL_ONLY to ensure vLLM V1 properly handles n>1
         # With the default CUMULATIVE mode, vLLM V1 returns separate outputs for each
         # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode
@@ -775,8 +824,11 @@ def run_benchmark(
             # Collect all results for this batch (one per prompt)
             batch_results = [inference_results_Q.get() for _ in range(args.num_unique_prompts_rollout)]
 
+            # Simulate weight sync between batches
+            weight_sync_time = simulate_weight_sync(actor_manager, vllm_engines, args)
             completion_time = time.perf_counter()
-            # Calculate generation time from the earliest request start time
+
+            # Calculate generation time from the earliest request start time (inclusive of sync)
             earliest_start_time = min(result.start_time for result in batch_results if result.start_time)
             batch_generation_time = completion_time - earliest_start_time if earliest_start_time else 0
 
@@ -803,6 +855,7 @@ def run_benchmark(
             result_dict = {
                 "tokens_per_second": tokens_per_second,
                 "generation_time": batch_generation_time,
+                "weight_sync_time": weight_sync_time,
                 "num_new_tokens": total_new_tokens,
                 "finish_reasons": collections.Counter(all_finish_reasons),
                 "response_lengths": all_response_lengths,
@@ -836,6 +889,7 @@ def run_benchmark(
                 f"MFU: {result_dict['mfu']:.2f}%, "
                 f"MBU: {result_dict['mbu']:.2f}%, "
                 f"generation time: {batch_generation_time:.2f}s, "
+                f"weight sync time: {weight_sync_time:.2f}s, "
                 f"total new tokens: {total_new_tokens}"
             )
 
@@ -858,6 +912,7 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "total_mbu": 0.0,
         "total_tokens_per_second": 0.0,
         "total_generation_time": 0.0,
+        "total_weight_sync_time": 0.0,
         "total_num_new_tokens": 0,
         "finish_reasons": collections.defaultdict(int),
         "response_lengths": [],
@@ -873,6 +928,8 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
                 aggregated_results["total_tokens_per_second"] += value
             elif key == "generation_time":
                 aggregated_results["total_generation_time"] += value
+            elif key == "weight_sync_time":
+                aggregated_results["total_weight_sync_time"] += value
             elif key == "num_new_tokens":
                 aggregated_results["total_num_new_tokens"] += value
             elif key == "finish_reasons":
@@ -890,6 +947,7 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     aggregated_results["avg_mfu"] = aggregated_results["total_mfu"] / num_results
     aggregated_results["avg_mbu"] = aggregated_results["total_mbu"] / num_results
     aggregated_results["avg_generation_time"] = aggregated_results["total_generation_time"] / num_results
+    aggregated_results["avg_weight_sync_time"] = aggregated_results["total_weight_sync_time"] / num_results
     return aggregated_results
 
 
@@ -913,6 +971,7 @@ def print_summary(
     print(f"Max tokens: {args.response_length}")
     print("-" * 60)
     print(f"Total time (main benchmark): {agg_results['total_generation_time']:.2f}s")
+    print(f"Total weight sync time: {agg_results['total_weight_sync_time']:.2f}s")
     print(f"Total new tokens generated: {agg_results['total_num_new_tokens']}")
     print("-" * 60)
     print(f"Average results over {len(results)} main benchmark batches:")
@@ -920,6 +979,7 @@ def print_summary(
     print(f"Average MFU: {agg_results['avg_mfu']:.2f}%")
     print(f"Average MBU: {agg_results['avg_mbu']:.2f}%")
     print(f"Average generation time per batch: {agg_results['avg_generation_time']:.2f}s")
+    print(f"Average weight sync time per batch: {agg_results['avg_weight_sync_time']:.2f}s")
     print(f"Average new tokens per sample: {avg_new_tokens_per_sample:.2f} tokens")
 
     max_length = np.max(agg_results["response_lengths"])
@@ -1000,7 +1060,9 @@ def main() -> None:
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
     save_config(args, tokenizer_config, model_config, timestamp)
-    run_benchmark(dataset, vllm_engines, param_prompt_Q, inference_results_Q, args, model_config, timestamp)
+    run_benchmark(
+        dataset, vllm_engines, param_prompt_Q, inference_results_Q, actor_manager, args, model_config, timestamp
+    )
 
     cleanup(vllm_engines, actor_manager)
 
