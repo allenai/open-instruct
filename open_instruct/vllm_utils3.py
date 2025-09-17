@@ -445,7 +445,7 @@ class LLMRayActor:
 
         Wraps the async generator to return a single RequestOutput.
         """
-        generator = self.llm_engine.add_request(request_id, prompt, sampling_params)
+        generator = await self.llm_engine.add_request(request_id, prompt, sampling_params)
         outputs = [output async for output in generator if output.finished]
         assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
         return outputs[0]
