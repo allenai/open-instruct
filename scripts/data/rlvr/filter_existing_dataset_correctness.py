@@ -13,6 +13,7 @@ source configs/beaker_configs/code_api_setup.sh
 """
 import argparse
 import json
+import os
 from functools import partial
 from multiprocessing import Pool, cpu_count, set_start_method
 
@@ -83,41 +84,90 @@ def main():
         type=str,
         help="Give a dataset name to push this data to the hub."
     )
-    parser.add_argument(
-        "--code_api_url",
-        default=None,
-        type=str,
-        help="Give a code api url to use for code verifier."
-    )
-    parser.add_argument(
-        "--code_max_execution_time",
-        default=1.0,
-        type=float,
-        help="Give a max execution time for code verifier."
-    )
+    # -- llm judge
     parser.add_argument(
         "--llm_judge_model",
-        default=None,
+        default="azure/gpt-4o-mini-standard",
         type=str,
-        help="Give a llm judge model to use for llm verifier."
+        help="the model to use for the llm judge"
     )
     parser.add_argument(
         "--llm_judge_max_tokens",
         default=2048,
         type=int,
-        help="Give a max tokens for llm judge."
+        help="the max tokens to use for the llm judge"
+    )
+    parser.add_argument(
+        "--llm_judge_max_context_length",
+        default=8192,
+        type=int,
+        help="the max context length to use for the llm judge"
     )
     parser.add_argument(
         "--llm_judge_temperature",
         default=1.0,
         type=float,
-        help="Give a temperature for llm judge."
+        help="the temperature to use for the llm judge"
     )
     parser.add_argument(
         "--llm_judge_timeout",
         default=60,
         type=int,
-        help="Give a timeout for llm judge."
+        help="the timeout to use for the llm judge"
+    )
+
+    # -- code verifier
+    parser.add_argument(
+        "--code_api_url",
+        default=os.environ.get("CODE_API_URL", "http://localhost:1234") + "/test_program",
+        type=str,
+        help="the api url to use for the code verifier"
+    )
+    parser.add_argument(
+        "--code_max_execution_time",
+        default=1.0,
+        type=float,
+        help="the max execution time to use for the code verifier"
+    )
+    parser.add_argument(
+        "--code_pass_rate_reward_threshold",
+        default=0.0,
+        type=float,
+        help="the pass rate reward threshold for the code verifier. If pass rate is less than this threshold, reward is 0.0, otherwise reward is pass rate"
+    )
+    parser.add_argument(
+        "--code_apply_perf_penalty",
+        default=False,
+        type=bool,
+        help="whether to apply a performance penalty to the code verifier"
+    )
+
+    # -- max length verifier
+    parser.add_argument(
+        "--max_length_verifier_max_length",
+        default=32768,
+        type=int,
+        help="the max length to use for the max length verifier"
+    )
+
+    # -- non stop penalty
+    parser.add_argument(
+        "--non_stop_penalty",
+        default=False,
+        type=bool,
+        help="whether to penalize responses which did not finish generation"
+    )
+    parser.add_argument(
+        "--non_stop_penalty_value",
+        default=0.0,
+        type=float,
+        help="the reward value for responses which did not finish generation"
+    )
+    parser.add_argument(
+        "--remap_verifier",
+        default=None,
+        type=str,
+        help="Remap verifier like string_f1=general-quality_ref. Currently can only remap once."
     )
     parser.add_argument(
         "--seed",
