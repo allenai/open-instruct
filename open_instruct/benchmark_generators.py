@@ -752,6 +752,9 @@ def run_benchmark(
         top_p=args.vllm_top_p,
         n=args.num_samples_per_prompt_rollout,
         seed=args.seed,
+        include_stop_str_in_output=True,
+        skip_special_tokens=False,
+        stop=args.stop_strings,
         # IMPORTANT: Set output_kind to FINAL_ONLY to ensure vLLM V1 properly handles n>1
         # With the default CUMULATIVE mode, vLLM V1 returns separate outputs for each
         # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode
