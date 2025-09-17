@@ -2054,9 +2054,8 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ model update group setup successfully =========")
 
-    # Set vLLM engines in ActorManager for metrics collection
+    # Pass vllm_engine refs to actor manager for monitoring.
     ray.get(actor_manager.set_vllm_engines.remote(vllm_engines))
-    logger.info("======== ✅ vLLM engines set in ActorManager for metrics collection =========")
 
     return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager
 
