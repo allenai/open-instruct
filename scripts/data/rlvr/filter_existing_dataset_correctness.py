@@ -20,20 +20,25 @@ from multiprocessing import Pool, cpu_count, set_start_method
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-from open_instruct.ground_truth_utils import build_all_verifiers
+from open_instruct.ground_truth_utils import build_all_verifiers, LMJudgeVerifier
 
 
 def _avg_correctness(sample, reward_fn_mapping):
     """
     Compute the mean correctness for one sample (called in worker).
     """
-    dataset = sample["dataset"][0]
-    gt = sample["ground_truth"][0]
-    outputs = sample["output"]
+    dataset = sample["dataset"][0] if type(sample["dataset"]) == list else sample["dataset"]
+    gt = sample["ground_truth"][0] if type(sample["ground_truth"]) == list else sample["ground_truth"]
+    outputs = sample["outputs"]
 
     reward_fn = reward_fn_mapping[dataset]
-    scores = [reward_fn(None, o, gt).score for o in outputs]
-    return sum(scores) / len(scores) if scores else 0.0
+    if isinstance(reward_fn, LMJudgeVerifier):
+        scores = [reward_fn(None, o, gt, sample["prompt"]).score if o else 0.0 for o in outputs]
+    else:
+        scores = [reward_fn(None, o, gt).score if o else 0.0 for o in outputs]
+
+    overall_score = sum(scores) / len(scores) if scores else 0.0
+    return overall_score, scores
 
 
 def load_samples(files):
@@ -87,7 +92,7 @@ def main():
     # -- llm judge
     parser.add_argument(
         "--llm_judge_model",
-        default="azure/gpt-4o-mini-standard",
+        default="hosted_vllm/Qwen/Qwen3-32B",
         type=str,
         help="the model to use for the llm judge"
     )
@@ -111,7 +116,7 @@ def main():
     )
     parser.add_argument(
         "--llm_judge_timeout",
-        default=60,
+        default=600,
         type=int,
         help="the timeout to use for the llm judge"
     )
@@ -197,13 +202,14 @@ def main():
     chunk_size = 1  # Tune for workload size
 
     with Pool(processes=workers) as pool:
-        avg_scores = list(
+        scored_outputs = list(
             tqdm(
                 pool.imap(avg_correctness, samples, chunksize=chunk_size),
                 total=len(samples),
                 desc="Scoring"
             )
         )
+        avg_scores, scores = zip(*scored_outputs)
 
     # Simple diagnostic plot
     plt.hist(avg_scores, bins=100)
@@ -215,10 +221,12 @@ def main():
     lower_bound = args.lower_bound
     upper_bound = args.upper_bound
     # Filter out everything outside of this range
-    filtered_samples = [
-        sample for sample, score in zip(samples, avg_scores)
-        if lower_bound <= score <= upper_bound
-    ]
+    filtered_samples = []
+    for sample, avg_score, full_scores in zip(samples, avg_scores, scores):
+        if lower_bound <= avg_score <= upper_bound:
+            sample["scores"] = full_scores
+            filtered_samples.append(sample)
+
     print(
         f"Filtered {len(samples) - len(filtered_samples)} samples out of {len(samples)}"
     )
