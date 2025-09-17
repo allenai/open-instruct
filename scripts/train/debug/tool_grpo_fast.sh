@@ -17,6 +17,7 @@ uv run python mason.py \
        --description "Single GPU on Beaker with tool use test script." \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
+	--timeout "1h" \
        --priority urgent \
        --preemptible \
        --num_nodes 1 \

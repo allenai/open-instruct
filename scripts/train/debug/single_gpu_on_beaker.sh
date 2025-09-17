@@ -11,6 +11,7 @@ uv run python mason.py \
        --cluster ai2/jupiter \
        --cluster ai2/saturn \
        --non_resumable \
+       --timeout "20m" \
        --image "$BEAKER_IMAGE" \
        --description "Single GPU on Beaker test script." \
        --pure_docker_mode \
