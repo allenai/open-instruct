@@ -684,7 +684,7 @@ class LLMRayActor:
                 # Wait for any task to complete or timeout
                 done, pending = await asyncio.wait(
                     self.active_tasks.values() if self.active_tasks else [],
-                    timeout=timeout / 1000,
+                    timeout=timeout,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
 
