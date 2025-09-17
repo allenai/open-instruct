@@ -357,22 +357,29 @@ class LLMRayActor:
         # Prefer native async API if available
         get_async = getattr(self.prompt_queue, "get_async", None)
         if callable(get_async):
+            logger.info(f"[_q_get_async] Using native async get from queue: {self.prompt_queue}")
             return await get_async()
         # Fallback: poll via a background thread with timeout
+        attempt = 0
         while True:
+            attempt += 1
             # If a weight sync is requested, yield control so caller can stop
             if await self._should_stop():
                 await asyncio.sleep(0.1)
                 # Returning None signals caller to re-check should_stop and continue
                 return None
             try:
-                self.logger.debug(f"[_q_get_async] Attempting to get from prompt_queue: {self.prompt_queue}")
+                if attempt % 100 == 1:  # Log every 100 attempts
+                    logger.info(
+                        f"[_q_get_async] Attempt {attempt}: Trying to get from prompt_queue: {self.prompt_queue}"
+                    )
                 result = await asyncio.to_thread(self.prompt_queue.get, timeout=1.0)
-                self.logger.debug(f"[_q_get_async] Got result from queue: {type(result)}")
+                logger.info(f"[_q_get_async] ✅ Got request after {attempt} attempts! Type: {type(result)}")
                 return result
             except Exception as e:
                 # Likely timeout; just loop
-                self.logger.debug(f"[_q_get_async] Queue get timeout or error: {e}")
+                if attempt % 100 == 1:  # Log every 100 attempts
+                    logger.debug(f"[_q_get_async] Timeout on attempt {attempt}: {e}")
                 await asyncio.sleep(0.05)
 
     async def _should_stop(self) -> bool:
@@ -439,12 +446,15 @@ class LLMRayActor:
                 await asyncio.sleep(0.1)
                 continue
 
-            self.logger.debug("Got request from queue, adding to engine")
+            self.logger.info("[_prefetch_requests] Adding request to engine...")
             await self._add_request(request)
 
     async def _add_request(self, request: PromptRequest):
         """Add a request to the async LLM engine."""
         request_id = make_request_id(request)
+        logger.info(
+            f"[_add_request] 🎯 Adding request to engine: request_id={request_id}, is_eval={request.is_eval}, n={request.generation_config.n}"
+        )
         sampling_params = request.generation_config.clone()
         sampling_params.n = 1  # Use n=1 for tool processing
         self.request_metadata[request_id] = {
@@ -458,18 +468,25 @@ class LLMRayActor:
         }
 
         tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
+        logger.info(f"[_add_request] Creating {request.generation_config.n} sub-requests")
         for j in range(request.generation_config.n):
             sub_sampling_params = sampling_params.clone()  # Already has n=1
             if request.generation_config.seed is not None:
                 sub_sampling_params.seed = request.generation_config.seed + j
             sub_request_id = f"{request_id}_{j}"
 
+            logger.info(
+                f"[_add_request] Creating task for sub-request {j + 1}/{request.generation_config.n}: {sub_request_id}"
+            )
             # Create a task to process this sub-request with its ID as the name
             task = asyncio.create_task(
                 self._process_request(sub_request_id, request_id, tokens_prompt, sub_sampling_params, j),
                 name=sub_request_id,
             )
             self.active_tasks[sub_request_id] = task
+            logger.info(
+                f"[_add_request] ✅ Task created and added to active_tasks. Total active: {len(self.active_tasks)}"
+            )
 
     def _insert_result_to_queue(self, result, is_eval: bool):
         """Insert result into the appropriate queue with blocking put."""

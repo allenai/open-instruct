@@ -2113,8 +2113,13 @@ def split_and_insert_batch(
     is_eval: bool,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    for idx, query, ground_truth, dataset, raw_query in zip(
-        batch.indices, batch.queries, batch.ground_truths, batch.datasets, batch.raw_queries
+    logger.info(
+        f"[split_and_insert_batch] 📤 Starting to insert {len(batch.indices)} prompts for step {training_step}, is_eval={is_eval}"
+    )
+    logger.info(f"[split_and_insert_batch] Queue object: {param_prompt_Q}")
+
+    for i, (idx, query, ground_truth, dataset, raw_query) in enumerate(
+        zip(batch.indices, batch.queries, batch.ground_truths, batch.datasets, batch.raw_queries)
     ):
         pending_queries_map.insert(idx, query, ground_truth, dataset, raw_query)
         prompt_req = PromptRequest(
@@ -2124,11 +2129,17 @@ def split_and_insert_batch(
             dataset_index=idx,
             is_eval=is_eval,
         )
-        logger.debug(
-            f"[send_prompts_to_param_queue] 📨 Putting prompt request: step={training_step}, idx={idx}, is_eval={is_eval}"
+        logger.info(
+            f"[split_and_insert_batch] Putting prompt {i + 1}/{len(batch.indices)}: step={training_step}, idx={idx}, is_eval={is_eval}"
         )
-        param_prompt_Q.put(prompt_req)
-        logger.debug(f"[send_prompts_to_param_queue] ✅ Successfully queued prompt for idx={idx}")
+        try:
+            param_prompt_Q.put(prompt_req)
+            logger.info(f"[split_and_insert_batch] ✅ Successfully queued prompt for idx={idx}")
+        except Exception as e:
+            logger.error(f"[split_and_insert_batch] ❌ Failed to queue prompt for idx={idx}: {e}")
+            raise
+
+    logger.info(f"[split_and_insert_batch] ✅ Finished inserting all {len(batch.indices)} prompts")
 
 
 def load_data_from_packing_thread(
@@ -2225,18 +2236,17 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
     while not stop_event.is_set():
         iteration += 1
         with Timer("🔥 Generation time") as timer:
-            logger.debug(
-                f"[Generate Thread] Iteration {iteration}: Calling process_from_queue on {len(vllm_engines)} engines"
-            )
             processed_results = ray_get_with_progress(
                 [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
                 desc=f"[Generate Thread] Iteration {iteration}: Waiting for vLLM engines to process",
                 enable=args.verbose,
             )
             num_processed = sum(int(result) for result in processed_results)
-            logger.info(
-                f"[Generate Thread] Iteration {iteration}: Processed {num_processed} requests across all engines"
-            )
+            # Only log every 100 iterations or when something was actually processed
+            if iteration % 100 == 0 or num_processed > 0:
+                logger.info(
+                    f"[Generate Thread] Iteration {iteration}: Processed {num_processed} requests across all engines"
+                )
             # Suppress timing output if nothing was processed
             if num_processed == 0:
                 timer.noop = True
