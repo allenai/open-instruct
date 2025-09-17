@@ -44,12 +44,13 @@ for model_name_or_path in "$@"; do
         --cluster ai2/ceres \
         --cluster ai2/jupiter \
         --cluster ai2/saturn \
-	--non_resumable \
+	      --non_resumable \
         --image "$image_name" \
         --description "Running benchmark with response length of $response_length at commit $git_hash on branch $git_branch with model $model_name_or_path." \
         --pure_docker_mode \
         --workspace ai2/open-instruct-dev \
-	--preemptible \
+      	--preemptible \
+        --priority urgent \
         --priority high \
         --num_nodes 1 \
         --max_retries 0 \
@@ -65,12 +66,13 @@ for model_name_or_path in "$@"; do
             --max_token_length 10240 \
             --max_prompt_token_length 2048 \
             --temperature 1.0 \
-	    --verbose True \
+	          --verbose False \
             --response_length "$response_length" \
             --vllm_top_p 0.9 \
             --num_unique_prompts_rollout 2 \
             --num_samples_per_prompt_rollout 4 \
             --vllm_num_engines 1 \
+	    --inflight_updates True \
             --vllm_tensor_parallel_size 1 \
             --vllm_gpu_memory_utilization 0.9 \
             --pack_length 40000 \

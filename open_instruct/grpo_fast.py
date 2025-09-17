@@ -248,6 +248,8 @@ class Args:
     """the lower clip range"""
     clip_higher: float = 0.2
     """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
+    inflight_updates: bool = False
+    """Enable immediate stopping of request processing when should_stop is set, allowing for quick pausing and resumption"""
     kl_estimator: Literal["kl1", "kl2", "kl3", "kl4"] = "kl3"
     """the KL estimator to use"""
     pack_length: int = 512
@@ -2033,6 +2035,7 @@ def create_model_and_optimizer(
         actor_manager=actor_manager,
         inference_batch_size=args.inference_batch_size,
         use_fp8_kv_cache=args.use_fp8_kv_cache,
+        inflight_updates=args.inflight_updates,
         verbose=args.verbose,
     )
 
