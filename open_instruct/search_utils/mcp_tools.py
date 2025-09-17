@@ -74,6 +74,7 @@ class MCPTool(Tool):
         end_str: str | None = None,
         mcp_timeout: int = 180,
         base_url: str | None = None,
+        number_documents_to_search: int = 10,
         *args,
         **kwargs,
     ):
@@ -103,6 +104,8 @@ class MCPTool(Tool):
             }
             if "base_url" in valid_params:
                 filtered_kwargs["base_url"] = base_url
+            if "number_documents_to_search" in valid_params:
+                filtered_kwargs["number_documents_to_search"] = number_documents_to_search
             # basically, we want to defer as much as possible to the mcp tool.
             # this 'tool' actually just passes everything down to the mcp tool.
             self.mcp_tools.append(mcp_tool_cls(
@@ -128,6 +131,7 @@ class MCPTool(Tool):
         error = None
         found_tool = False
         text_output = ""
+        tool_used_name = None
         try:
             for mcp_tool in self.mcp_tools:
                 if mcp_tool.tool_parser.has_calls(trunc_prompt, mcp_tool.name):
@@ -149,6 +153,7 @@ class MCPTool(Tool):
                     # wrap in the tags
                     text_output = mcp_tool.tool_parser.format_result(text_output, document_tool_output)
                     found_tool = True
+                    tool_used_name = mcp_tool.name
                     break
         except Exception as e:
             error = str(e)
@@ -187,7 +192,7 @@ class MCPTool(Tool):
                 )
 
         if document_tool_output.error:
-            print(f"Error from mcp tool: {document_tool_output.error}")
+            print(f"Error from mcp tool {tool_used_name}: {document_tool_output.error}")
             print("Returning error output anyway.")
         # munge into format that open-instruct likes.
         return ToolOutput(
