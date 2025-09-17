@@ -128,6 +128,7 @@ class MCPTool(Tool):
         error = None
         found_tool = False
         text_output = ""
+        tool_used_name = None
         try:
             for mcp_tool in self.mcp_tools:
                 if mcp_tool.tool_parser.has_calls(trunc_prompt, mcp_tool.name):
@@ -149,6 +150,7 @@ class MCPTool(Tool):
                     # wrap in the tags
                     text_output = mcp_tool.tool_parser.format_result(text_output, document_tool_output)
                     found_tool = True
+                    tool_used_name = mcp_tool.name
                     break
         except Exception as e:
             error = str(e)
@@ -187,7 +189,7 @@ class MCPTool(Tool):
                 )
 
         if document_tool_output.error:
-            print(f"Error from mcp tool: {document_tool_output.error}")
+            print(f"Error from mcp tool {tool_used_name}: {document_tool_output.error}")
             print("Returning error output anyway.")
         # munge into format that open-instruct likes.
         return ToolOutput(
