@@ -17,6 +17,7 @@
 
 import asyncio
 import dataclasses
+import logging
 import os
 import time
 from collections import defaultdict
@@ -278,6 +279,7 @@ class LLMRayActor:
         **kwargs,
     ):
         self.logger = logger_utils.setup_logger(__name__)
+        self.logger.setLevel(logging.DEBUG)  # Set to DEBUG for debugging
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inference_batch_size = inference_batch_size
