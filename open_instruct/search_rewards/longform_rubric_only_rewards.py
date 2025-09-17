@@ -93,6 +93,21 @@ def compute_general_rubric_reward(response: str, ground_truth: Dict[str, Any]) -
     
     if extracted_answer is None:
         result["error"] = "Failed to extract answer from response"
+        result["reward"] = 0.0
+        
+        # Create zero scores for all rubrics in the ground truth
+        rubrics = ground_truth["rubrics"]
+        rubric_scores_by_title = {}
+        for rubric in rubrics:
+            title = rubric.get("title", rubric["description"])
+            rubric_scores_by_title[title] = 0.0
+        
+        result["log_values"] = {
+            "rubric_reward": 0.0,
+            "format_correct_has_answer": 0.0,
+            "num_rubrics": len(rubrics),
+            "rubric_scores_by_title": rubric_scores_by_title,
+        }
         return result
 
     # Compute per-rubric scores grouped by title (this includes all the expensive scoring)
