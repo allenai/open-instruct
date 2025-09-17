@@ -312,6 +312,10 @@ for TASK in "${TASKS[@]}"; do
         BATCH_SIZE=$BATCH_SIZE_OTHER
         GPU_COUNT=$GPU_COUNT_OTHER
         MODEL_TYPE=$MODEL_TYPE_OTHER
+    elif [[ "$TASK" == "multiturn*" ]]; then
+        BATCH_SIZE=1000
+        MODEL_TYPE="--model-type vllm"
+        GPU_COUNT="$NUM_GPUS"
     else
         BATCH_SIZE=$BATCH_SIZE_VLLM
         MODEL_TYPE="--model-type vllm"
