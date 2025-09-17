@@ -21,6 +21,7 @@ uv run python mason.py \
        --num_nodes 1 \
        --max_retries 0 \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+       --env VLLM_LOGGING_LEVEL=WARNING \
        --budget ai2/oe-adapt \
        --gpus 1 \
        --task_name open_instruct-single_gpu_test \

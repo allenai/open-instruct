@@ -772,20 +772,9 @@ class LLMRayActor:
 
         # Use the same calculation as vLLM's executor_base.py
         # Reference: https://github.com/vllm-project/vllm/blob/b6553be1bc75f046b00046a4ad7576364d03c835/vllm/executor/executor_base.py#L119-L120
-        cache_config = engine.cache_config
-        model_config = engine.model_config
-
-        # Debug logging
-        import logging
-
-        logger = logging.getLogger(__name__)
-        logger.info(f"cache_config.num_gpu_blocks: {cache_config.num_gpu_blocks}")
-        logger.info(f"cache_config.block_size: {cache_config.block_size}")
-        logger.info(f"model_config.max_model_len: {model_config.max_model_len}")
-
-        num_gpu_blocks = cache_config.num_gpu_blocks
-        block_size = cache_config.block_size
-        max_model_len = model_config.max_model_len
+        num_gpu_blocks = engine.cache_config.num_gpu_blocks
+        block_size = engine.cache_config.block_size
+        max_model_len = engine.model_config.max_model_len
 
         # Check if values are initialized
         if num_gpu_blocks is None or num_gpu_blocks == 0:
