@@ -360,6 +360,9 @@ class LLMRayActor:
 
     async def _prefetch_requests(self):
         """Prefetches requests from queue."""
+        # Ensure engine is initialized before processing any requests
+        await self._ensure_engine_initialized()
+
         while True:
             # Check if we need more requests
             current_unfinished = len(self.active_tasks)
