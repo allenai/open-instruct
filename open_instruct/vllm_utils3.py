@@ -20,8 +20,8 @@ import os
 import queue
 import time
 from collections import defaultdict, deque
-from dataclasses import dataclass
 from concurrent import futures
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Union
 
@@ -691,6 +691,8 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
+        iteration_count = 0
+        total_processed = 0
 
         while not self._should_exit():
             iteration_count += 1
@@ -936,22 +938,6 @@ class LLMRayActor:
                 outputs=[],
                 finished=True,
             )
-
-            # Track request statistics
-            if not metadata["is_eval"]:
-                # Extract response lengths for each sample
-                response_lengths = [len(output.token_ids) for output in final_output.outputs]
-                self.request_stats.append(
-                    RequestStats(
-                        prompt_length=metadata["prompt_tokens"],
-                        response_lengths=response_lengths,
-                        generation_time=end_time - metadata["start_time"],
-                        num_samples=len(response_lengths),
-                        timestamp=metadata["start_time"],
-                    )
-                )
-
-            self._insert_result_to_queue(result, is_eval=metadata["is_eval"])
 
         # Add the completion output (with index field already set if needed)
         self.request_outputs[base_request_id].outputs.append(complete_output)
