@@ -363,43 +363,74 @@ async def _generate_instance_wise_adaptive_rubrics(responses, ground_truths, num
     return adaptive_rubrics
 
 
-def update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubrics, rubric_buffer=None):
+def update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubrics, rubric_buffer=None, num_samples_per_prompt_rollout=8):
     """
     Assume ground_truths in a format of
     {
         "query": <question>,
         "rubrics": [
             {
-                "criterion": <criterion>,
-                "score": <score>,
+                "description": <description>,
+                "weight": <weight>,
             }
         ]
     }
     Update the ground_truths with the adaptive rubrics
     """
     valid_adaptive_rubric_rate = 0.0
-    for ground_truth, rubrics in zip(ground_truths, adaptive_rubrics):
+    num_ground_truths = []
+    num_adaptive_rubrics = []
+    
+    # Expand adaptive_rubrics to match ground_truths structure
+    # Each adaptive rubric applies to num_samples_per_prompt_rollout ground truths
+    expanded_adaptive_rubrics = []
+    for rubric in adaptive_rubrics:
+        for _ in range(num_samples_per_prompt_rollout):
+            expanded_adaptive_rubrics.append(rubric)
+    
+    for i, (ground_truth, rubrics) in enumerate(zip(ground_truths, expanded_adaptive_rubrics)):
         if rubrics is None:
             continue
-        if isinstance(ground_truth, list):
+        
+        # Handle the case where ground_truth is wrapped in a list
+        is_wrapped_in_list = isinstance(ground_truth, list)
+        if is_wrapped_in_list:
             # hacky fix for the data transformation that wraps the ground truth in a list
-            ground_truth = ground_truth[0]
-        ground_truth = json.loads(ground_truth)
-        print("Ground truth: ", ground_truth)
-        print("Adaptive rubrics: ", rubrics)
-        positive_rubrics = rubrics["positive_rubrics"]
-        negative_rubrics = rubrics["negative_rubrics"]
-        ground_truth["rubrics"] = []
+            ground_truth_str = ground_truth[0]
+        else:
+            ground_truth_str = ground_truth
+            
+        ground_truth_obj = json.loads(ground_truth_str)
+        
+        print(f"Ground truth: {ground_truth_obj}\nAdaptive rubrics: {rubrics}")
+        positive_rubrics = rubrics["positive_rubrics"] if "positive_rubrics" in rubrics else []
+        negative_rubrics = rubrics["negative_rubrics"] if "negative_rubrics" in rubrics else []
+        
+        num_ground_truths.append(len(ground_truth_obj["rubrics"]))
+        num_adaptive_rubrics.append(len(positive_rubrics) + len(negative_rubrics))
+        
+        # Replace the original rubrics with adaptive rubrics
+        ground_truth_obj["rubrics"] = []
         for rubric in positive_rubrics:
-            ground_truth["rubrics"].append({
-                "criterion": rubric["ingredient"],
-                "score": 1.0,
+            ground_truth_obj["rubrics"].append({
+                "description": rubric["ingredient"],
+                "weight": 1.0,
             })
         for rubric in negative_rubrics:
-            ground_truth["rubrics"].append({
-                "criterion": rubric["ingredient"],
-                "score": -1.0,
+            ground_truth_obj["rubrics"].append({
+                "description": rubric["ingredient"],
+                "weight": -1.0,
             })
+        
+        # Convert back to JSON string and update the original list
+        updated_ground_truth_str = json.dumps(ground_truth_obj)
+        if is_wrapped_in_list:
+            ground_truths[i] = [updated_ground_truth_str]
+        else:
+            ground_truths[i] = updated_ground_truth_str
+            
         valid_adaptive_rubric_rate += 1.0
     valid_adaptive_rubric_rate /= len(ground_truths)
-    return ground_truths, valid_adaptive_rubric_rate
+    avg_num_ground_truths = sum(num_ground_truths) / len(num_ground_truths)
+    avg_num_adaptive_rubrics = sum(num_adaptive_rubrics) / len(num_adaptive_rubrics)
+    return ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics

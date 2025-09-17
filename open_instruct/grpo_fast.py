@@ -1249,7 +1249,7 @@ def data_preparation_thread(
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
             scores, reward_metrics = asyncio.run(
                 reward_fn(
-                    responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries
+                    responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries, is_training=True
                 )
             )
             scores = np.array(scores)
@@ -2071,6 +2071,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                         eval_finish_reasons,
                         eval_infos,
                         source_datasets=eval_original_dataset_names,
+                        is_training=False,
                     )
                 )
                 eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
@@ -2238,6 +2239,7 @@ if __name__ == "__main__":
         queries: Optional[List[str]] = None,
         source_datasets: Optional[List[str]] = None,
         rubric_buffer: Optional[Dict[str, List[Dict[str, float]]]] = None,
+        is_training: bool = True,
     ) -> List[float]:
         num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
         good_outputs = [
@@ -2264,12 +2266,14 @@ if __name__ == "__main__":
                     scores[i] = rl_rag_format_scores[i] + scores[i]
                 metrics["val/rl_rag_format_scores"] = np.array(rl_rag_format_scores).mean()
 
-        if args.apply_adaptive_rubric_reward:
+        if args.apply_adaptive_rubric_reward and is_training:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating adaptive rubric reward"):
                 adaptive_rubric_scores = await _generate_instance_wise_adaptive_rubrics(decoded_responses, ground_truths, args.num_samples_per_prompt_rollout)
-                # TODO: add the rubrics to the ground truth
-                ground_truths, valid_adaptive_rubric_rate = update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubric_scores, rubric_buffer=None)
-                metrics["val/valid_adaptive_rubric_rate"] = valid_adaptive_rubric_rate
+                # TODO: incorporate the rubric buffer
+                ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics = update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubric_scores, rubric_buffer=None, num_samples_per_prompt_rollout=args.num_samples_per_prompt_rollout)
+                metrics["objective/valid_adaptive_rubric_rate"] = valid_adaptive_rubric_rate
+                metrics["objective/avg_num_ground_truths"] = avg_num_ground_truths
+                metrics["objective/avg_num_adaptive_rubrics"] = avg_num_adaptive_rubrics
                 
                 
         if args.apply_verifiable_reward:
