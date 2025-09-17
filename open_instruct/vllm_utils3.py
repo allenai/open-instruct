@@ -376,15 +376,13 @@ class LLMRayActor:
             self._inflight_ref = ref
 
             try:
-                # Use ray.wait in a thread to avoid blocking the event loop
-                ready, _ = await asyncio.to_thread(ray.wait, [ref], 0.1)
-                if ready:
-                    value = await asyncio.to_thread(ray.get, ready[0])
-                    self._should_stop_value = bool(value)
-                    self._last_should_stop_update = now
-                else:
-                    # Cancel to avoid leaked tasks if not ready in time
-                    ray.cancel(ref, force=True)
+                # Use asyncio.wait_for to properly handle timeout in async context
+                value = await asyncio.wait_for(ref, timeout=0.1)
+                self._should_stop_value = bool(value)
+                self._last_should_stop_update = now
+            except asyncio.TimeoutError:
+                # Cancel to avoid leaked tasks if not ready in time
+                ray.cancel(ref, force=True)
             finally:
                 self._inflight_ref = None
 
@@ -425,11 +423,11 @@ class LLMRayActor:
                 except Exception:
                     # As a last resort, fall back to blocking put
                     self.prompt_queue.put(request)
-                self.logger.debug(f"Weight sync in progress, putting request back in queue")
+                self.logger.debug("Weight sync in progress, putting request back in queue")
                 await asyncio.sleep(0.1)
                 continue
 
-            self.logger.debug(f"Got request from queue, adding to engine")
+            self.logger.debug("Got request from queue, adding to engine")
             await self._add_request(request)
 
     async def _add_request(self, request: PromptRequest):
@@ -514,10 +512,14 @@ class LLMRayActor:
         async for output in generator:
             iteration_count += 1
             if iteration_count % 100 == 0:
-                logger.info(f"[generate_one_completion] Iteration {iteration_count} for {request_id}, finished={output.finished}")
+                logger.info(
+                    f"[generate_one_completion] Iteration {iteration_count} for {request_id}, finished={output.finished}"
+                )
             if output.finished:
                 outputs.append(output)
-                logger.info(f"[generate_one_completion] Request {request_id} finished after {iteration_count} iterations")
+                logger.info(
+                    f"[generate_one_completion] Request {request_id} finished after {iteration_count} iterations"
+                )
                 break
 
         assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
@@ -662,7 +664,9 @@ class LLMRayActor:
                 )
 
             self.request_outputs[base_request_id].outputs.append(complete_output)
-            logger.info(f"[_process_request] Added output for {sub_request_id} to {base_request_id}, total outputs: {len(self.request_outputs[base_request_id].outputs)}")
+            logger.info(
+                f"[_process_request] Added output for {sub_request_id} to {base_request_id}, total outputs: {len(self.request_outputs[base_request_id].outputs)}"
+            )
 
     async def _check_and_process_completed_requests(self, base_request_ids: List[str]):
         """Check request_outputs for completed requests and process them.
@@ -753,15 +757,26 @@ class LLMRayActor:
                     self.prefetch_task.result()  # This will raise if the task failed
 
                 # Wait for any task to complete or timeout
+                # Include prefetch task so we detect failures immediately
+                tasks_to_wait = list(self.active_tasks.values()) if self.active_tasks else []
+                if self.prefetch_task and not self.prefetch_task.done():
+                    tasks_to_wait.append(self.prefetch_task)
+
                 done, pending = await asyncio.wait(
-                    self.active_tasks.values() if self.active_tasks else [],
-                    timeout=timeout,
+                    tasks_to_wait if tasks_to_wait else [asyncio.sleep(timeout)],
+                    timeout=timeout if tasks_to_wait else None,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
 
                 # Process completed tasks and collect their base request IDs
                 completed_base_request_ids = set()
                 for task in done:
+                    # Check if this is the prefetch task
+                    if task == self.prefetch_task:
+                        # This will raise if the prefetch task failed
+                        task.result()
+                        continue
+
                     await task  # Get result or raise exception
 
                     # Remove the completed task using its name
@@ -774,7 +789,9 @@ class LLMRayActor:
 
                 # Check any base requests that just had tasks complete
                 if completed_base_request_ids:
-                    processed_count = await self._check_and_process_completed_requests(list(completed_base_request_ids))
+                    processed_count = await self._check_and_process_completed_requests(
+                        list(completed_base_request_ids)
+                    )
                     total_processed += processed_count
 
                 # Opportunistically flush any requests that are already complete
