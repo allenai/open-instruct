@@ -433,7 +433,7 @@ class LLMRayActor:
     async def _ensure_engine_initialized(self):
         """Ensure the AsyncLLMEngine is initialized."""
         if self.llm_engine is None:
-            self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=False)
+            self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=True)
 
     async def generate_one_completion(
         self, request_id: str, prompt: vllm.TokensPrompt, sampling_params: vllm.SamplingParams
@@ -657,9 +657,6 @@ class LLMRayActor:
         # Ensure engine is initialized
         await self._ensure_engine_initialized()
 
-        # Start the AsyncLLMEngine background loop
-        self.llm_engine.start_background_loop()
-
         iteration_count = 0
         total_processed = 0
 
@@ -713,9 +710,6 @@ class LLMRayActor:
                 all_base_request_ids = list(self.request_outputs.keys())
                 processed_count = await self._check_and_process_completed_requests(all_base_request_ids)
                 total_processed += processed_count
-
-            # Stop the AsyncLLMEngine background loop
-            self.llm_engine.shutdown_background_loop()
 
             # Count total processed
             return total_processed
