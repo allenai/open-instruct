@@ -171,7 +171,7 @@ class MCPTool(Tool):
                     end_str="\n</snippet>",
                 )
             elif error is not None:
-                print(f"MCP {tool_used_name} Tool Error: {error}")
+                print(f"MCP {tool_used_name} with {trunc_prompt} Tool Error: {error}")
                 return ToolOutput(
                     output=error,
                     called=False,
