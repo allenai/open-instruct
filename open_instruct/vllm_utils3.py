@@ -502,8 +502,21 @@ class LLMRayActor:
 
         Wraps the async generator to return a single RequestOutput.
         """
+        logger.info(f"[generate_one_completion] Adding request {request_id} to engine")
         generator = await self.llm_engine.add_request(request_id, prompt, sampling_params)
-        outputs = [output async for output in generator if output.finished]
+        logger.info(f"[generate_one_completion] Got generator for {request_id}, starting iteration")
+
+        outputs = []
+        iteration_count = 0
+        async for output in generator:
+            iteration_count += 1
+            if iteration_count % 100 == 0:
+                logger.info(f"[generate_one_completion] Iteration {iteration_count} for {request_id}, finished={output.finished}")
+            if output.finished:
+                outputs.append(output)
+                logger.info(f"[generate_one_completion] Request {request_id} finished after {iteration_count} iterations")
+                break
+
         assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
         return outputs[0]
 
@@ -537,9 +550,13 @@ class LLMRayActor:
         current_prompt = prompt
         current_sampling_params = sampling_params
 
+        logger.info(f"[_process_request] Starting processing for {sub_request_id}")
+
         while True:
             # Generate completion
+            logger.info(f"[_process_request] Calling generate_one_completion for {sub_request_id}")
             output = await self.generate_one_completion(sub_request_id, current_prompt, current_sampling_params)
+            logger.info(f"[_process_request] Completed generate_one_completion for {sub_request_id}")
 
             # Fix the index field
             assert len(output.outputs) == 1, f"{len(output.outputs)=}"
@@ -642,6 +659,7 @@ class LLMRayActor:
                 )
 
             self.request_outputs[base_request_id].outputs.append(complete_output)
+            logger.info(f"[_process_request] Added output for {sub_request_id} to {base_request_id}, total outputs: {len(self.request_outputs[base_request_id].outputs)}")
 
     async def _check_and_process_completed_requests(self, base_request_ids: List[str]):
         """Check request_outputs for completed requests and process them.
@@ -693,10 +711,12 @@ class LLMRayActor:
                 self.request_outputs.pop(base_request_id)
 
                 # Process and insert result (still within lock for consistency)
+                logger.info(f"[_check_and_process_completed_requests] Processing completed request {base_request_id}")
                 result, is_eval = process_completed_request(
                     base_request_id, ordered_outs, {}, current_time, self.tools, self.request_metadata
                 )
                 self._insert_result_to_queue(result, is_eval=is_eval)
+                logger.info(f"[_check_and_process_completed_requests] Inserted result for {base_request_id} to queue")
 
                 # Clean up metadata
                 self.request_metadata.pop(base_request_id, None)
