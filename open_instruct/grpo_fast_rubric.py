@@ -448,6 +448,8 @@ class Args:
     """Whether to normalize the rubric scores per rubric"""
     use_rubric_buffer: bool = False
     """Whether to use the rubric buffer"""
+    max_active_rubrics: int = 5
+    """Maximum number of active rubrics to keep in the buffer"""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
@@ -1738,9 +1740,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             else:
                 gt = json.loads(ex[GROUND_TRUTHS_KEY])
             rubric_buffer[gt['query']] = {
-                'active_rubrics': [],  # Start with empty active rubrics since we append to original GT rubrics
-                'inactive_rubrics': [],  # Empty list for inactive rubrics
-                'persistent_rubrics': gt['rubrics']
+                'active_rubrics': [],  # Start empty, adaptive rubrics will be added here
+                'inactive_rubrics': [],
+                'persistent_rubrics': gt['rubrics'],  # Original GT rubrics go here
+                'static_rubrics': gt['rubrics'],  # Keep a copy of original GT rubrics
             }
     
 
@@ -2243,6 +2246,7 @@ if __name__ == "__main__":
 
     if args.apply_adaptive_rubric_reward:
         from open_instruct.search_rewards.utils.rubric_utils import _generate_instance_wise_adaptive_rubrics, update_ground_truths_with_adaptive_rubrics
+        from open_instruct.search_rewards.longform_rubric_only_rewards import create_rubric_key
 
     async def reward_fn(
         responses: List[torch.Tensor],
@@ -2283,7 +2287,7 @@ if __name__ == "__main__":
 
         if args.apply_adaptive_rubric_reward and is_training:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating adaptive rubric reward"):
-                adaptive_rubric_scores = await _generate_instance_wise_adaptive_rubrics(decoded_responses, ground_truths, args.num_samples_per_prompt_rollout)
+                adaptive_rubric_scores = await _generate_instance_wise_adaptive_rubrics(decoded_responses, ground_truths, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer)
                 # Update ground truths with adaptive rubrics and incorporate rubric buffer
                 ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, avg_num_active_buffer_rubrics, rubric_buffer = update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubric_scores, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer)
                 metrics["objective/valid_adaptive_rubric_rate"] = valid_adaptive_rubric_rate
@@ -2390,11 +2394,15 @@ if __name__ == "__main__":
                 print(f"  - Empty entries: {empty_count}")
                 
                 if rubric_scores_by_title:
-                    all_titles = set()
+                    all_keys = set()
                     for entry in rubric_scores_by_title:
                         if entry:
-                            all_titles.update(entry.keys())
-                    print(f"  - Unique rubric titles found: {sorted(all_titles)}")
+                            all_keys.update(entry.keys())
+                    print(f"  - Unique rubric keys found: {len(all_keys)} keys")
+                    # Show first few keys for debugging
+                    if all_keys:
+                        sample_keys = sorted(list(all_keys))[:5]
+                        print(f"  - Sample keys: {sample_keys}")
                 
                 # Check what datasets we have
                 if hasattr(datasets, '__len__') and len(datasets) > 0:
@@ -2402,24 +2410,24 @@ if __name__ == "__main__":
                 
                 # Strategy: Apply normalization to available rubric scores, then map them back
                 # Step 1: Collect all available rubric scores for normalization
-                title_scores = {}
+                rubric_key_scores = {}
                 for response_scores in rubric_scores_by_title:
                     if response_scores:
-                        for title, score in response_scores.items():
-                            if title not in title_scores:
-                                title_scores[title] = []
-                            title_scores[title].append(score)
+                        for rubric_key, score in response_scores.items():
+                            if rubric_key not in rubric_key_scores:
+                                rubric_key_scores[rubric_key] = []
+                            rubric_key_scores[rubric_key].append(score)
                 
-                # Step 2: Compute per-title mean and std from available scores
-                title_stats = {}
-                for title, scores_list in title_scores.items():
+                # Step 2: Compute per-rubric-key mean and std from available scores
+                rubric_key_stats = {}
+                for rubric_key, scores_list in rubric_key_scores.items():
                     scores_array = np.array(scores_list)
-                    title_stats[title] = {
+                    rubric_key_stats[rubric_key] = {
                         "mean": scores_array.mean(),
                         "std": scores_array.std()
                     }
                 
-                print(f"[DEBUG] Computed stats for {len(title_stats)} rubric titles")
+                print(f"[DEBUG] Computed stats for {len(rubric_key_stats)} unique rubric keys")
                 
                 # Step 3: Create a full-length advantages array (initialized to 0)
                 final_advantages = [0.0] * len(scores)
@@ -2429,40 +2437,35 @@ if __name__ == "__main__":
                 print(f"[DEBUG] Applying advantages to first {len(rubric_scores_by_title)} responses")
                 
                 for i, response_scores in enumerate(rubric_scores_by_title):
-                    # if i >= len(scores):
-                    #     print(f"[WARNING] Rubric score index {i} exceeds scores length {len(scores)}, skipping")
-                    #     break
-                        
-                    # if response_scores:
-                    #     # Get weights from ground truth for this response
-                    #     try:
-                    # Handle case where ground_truths[i] might be wrapped in a list
                     ground_truth_item = ground_truths[i]
                     if isinstance(ground_truth_item, list):
                         ground_truth_item = ground_truth_item[0]
                     test_case = json.loads(ground_truth_item)
+                    query = test_case.get("query", "")
                     rubrics = test_case.get("rubrics", [])
                     
-                    # Create title->weight mapping
-                    title_weights = {}
+                    # Create rubric_key->weight mapping
+                    rubric_key_weights = {}
                     for rubric in rubrics:
-                        title = rubric.get("title", rubric["description"])
-                        if title not in title_weights:
-                            title_weights[title] = []
-                        title_weights[title].append(rubric["weight"])
+                        # Import the helper function here to avoid circular imports
+                        from open_instruct.search_rewards.longform_rubric_only_rewards import create_rubric_key
+                        rubric_key = create_rubric_key(query, rubric)
+                        if rubric_key not in rubric_key_weights:
+                            rubric_key_weights[rubric_key] = []
+                        rubric_key_weights[rubric_key].append(rubric["weight"])
                     
-                    # Average weights for titles with multiple rubrics
-                    for title in title_weights:
-                        title_weights[title] = np.mean(title_weights[title])
+                    # Average weights for rubric keys with multiple rubrics (though this should be rare now)
+                    for rubric_key in rubric_key_weights:
+                        rubric_key_weights[rubric_key] = np.mean(rubric_key_weights[rubric_key])
                     
                     if args.normalize_rubric_scores:
                         # Compute per-rubric weighted normalized scores
                         weighted_scores = []
                         total_weight = 0.0
-                        for j, (title, score) in enumerate(response_scores.items()):
-                            if title in title_stats:
-                                stats = title_stats[title]
-                                weight = title_weights.get(title, 1.0)
+                        for rubric_key, score in response_scores.items():
+                            if rubric_key in rubric_key_stats:
+                                stats = rubric_key_stats[rubric_key]
+                                weight = rubric_key_weights.get(rubric_key, 1.0)
                                 
                                 if stats["std"] > 0:
                                     normalized_score = (score - stats["mean"]) / stats["std"]
@@ -2473,9 +2476,9 @@ if __name__ == "__main__":
                                 if weight > 0:
                                     total_weight += weight
                                 
-                                if j == 0:
-                                    print(f"[DEBUG] Response {i}: title_stats = {stats}")
-                                    print(f"[DEBUG] Response {i}: title_weights = {weight}")
+                                if i == 0:
+                                    print(f"[DEBUG] Response {i}: rubric_key_stats = {stats}")
+                                    print(f"[DEBUG] Response {i}: rubric_key_weights = {weight}")
                                     print(f"[DEBUG] Response {i}: response_scores = {score}")
                                     print(f"[DEBUG] Response {i}: weighted_scores = {weighted_scores}")
                     
@@ -2484,28 +2487,22 @@ if __name__ == "__main__":
                         final_advantages[i] = final_advantage
                         scores[i] = final_advantage
                         print(f"[DEBUG] Response {i}: Per-rubric normalized advantage = {final_advantage:.4f}")
-                        #     else:
-                        #         final_advantages[i] = scores[i]
-                            
-                        # except (json.JSONDecodeError, KeyError, IndexError) as e:
-                        #     print(f"[DEBUG] Response {i}: failed to compute advantage: {e}")
-                        #     final_advantages[i] = scores[i]
                 
                 # Log average of rubric means and stds
-                if title_stats:
-                    avg_mean = np.mean([stats["mean"] for stats in title_stats.values()])
-                    avg_std = np.mean([stats["std"] for stats in title_stats.values()])
-                    metrics["rubric_titles/avg_mean"] = avg_mean
-                    metrics["rubric_titles/avg_std"] = avg_std
+                if rubric_key_stats:
+                    avg_mean = np.mean([stats["mean"] for stats in rubric_key_stats.values()])
+                    avg_std = np.mean([stats["std"] for stats in rubric_key_stats.values()])
+                    metrics["rubric_keys/avg_mean"] = avg_mean
+                    metrics["rubric_keys/avg_std"] = avg_std
                     
-                    num_all_zero_rubrics_ratio = sum(1 for stats in title_stats.values() if stats["mean"] == 0 and stats["std"] == 0) / len(title_stats)
-                    num_all_same_value_non_zero_rubrics_ratio = sum(1 for stats in title_stats.values() if stats["mean"] > 0 and stats["std"] == 0) / len(title_stats)
-                    metrics["rubric_titles/num_all_zero_rubrics_ratio"] = num_all_zero_rubrics_ratio
-                    metrics["rubric_titles/num_all_same_value_non_zero_rubrics_ratio"] = num_all_same_value_non_zero_rubrics_ratio
+                    num_all_zero_rubrics_ratio = sum(1 for stats in rubric_key_stats.values() if stats["mean"] == 0 and stats["std"] == 0) / len(rubric_key_stats)
+                    num_all_same_value_non_zero_rubrics_ratio = sum(1 for stats in rubric_key_stats.values() if stats["mean"] > 0 and stats["std"] == 0) / len(rubric_key_stats)
+                    metrics["rubric_keys/num_all_zero_rubrics_ratio"] = num_all_zero_rubrics_ratio
+                    metrics["rubric_keys/num_all_same_value_non_zero_rubrics_ratio"] = num_all_same_value_non_zero_rubrics_ratio
                     
                     if args.normalize_rubric_scores:
                         advantage_corr = np.corrcoef(final_advantages, original_scores)[0, 1]
-                        metrics["rubric_titles/advantage_corr"] = advantage_corr
+                        metrics["rubric_keys/advantage_corr"] = advantage_corr
                     
                     
                 print(f"[DEBUG] Applied rubric normalization: {len([a for a in final_advantages if a != 0])} non-zero advantages")
@@ -2515,7 +2512,68 @@ if __name__ == "__main__":
                 # The idea is to select the adaptive rubrics that has the highest std of scores of the current round of scoring.
                 # TODO: once selected, keep the rubrics with high std in "active_rubrics" and move the rest to the "inactive_rubrics" field of the rubric buffer
                 if args.apply_adaptive_rubric_reward and rubric_buffer is not None:
-                    rubric_buffer["active_rubrics"] = []
+                    # Collect rubrics to move based on their stats (much smaller iteration)
+                    rubrics_to_deactivate = []  # (query, rubric) pairs to move to inactive
+                    rubrics_by_query_std = {}   # query -> [(rubric, std)] for ranking
+                    
+                    # Iterate through the smaller rubric_key_stats instead of large rubric_buffer
+                    for rubric_key, stats in rubric_key_stats.items():
+                        # Find which query and rubric this key corresponds to
+                        for query, buffer_data in rubric_buffer.items():
+                            active_rubrics = buffer_data.get("active_rubrics", [])
+                            for rubric in active_rubrics:
+                                if create_rubric_key(query, rubric) == rubric_key:
+                                    if stats["std"] == 0:
+                                        # Mark for deactivation
+                                        rubrics_to_deactivate.append((query, rubric))
+                                    else:
+                                        # Track for potential ranking/filtering
+                                        if query not in rubrics_by_query_std:
+                                            rubrics_by_query_std[query] = []
+                                        rubrics_by_query_std[query].append((rubric, stats["std"]))
+                                    break
+                            else:
+                                continue
+                            break
+                    
+                    # Move zero-std rubrics to inactive
+                    moved_count = 0
+                    for query, rubric in rubrics_to_deactivate:
+                        buffer_data = rubric_buffer[query]
+                        if rubric in buffer_data["active_rubrics"]:
+                            buffer_data["active_rubrics"].remove(rubric)
+                            buffer_data["inactive_rubrics"].append(rubric)
+                            moved_count += 1
+                    
+                    # Apply max_active_rubrics cap per query
+                    capped_count = 0
+                    for query, rubric_std_pairs in rubrics_by_query_std.items():
+                        buffer_data = rubric_buffer[query]
+                        active_rubrics = buffer_data["active_rubrics"]
+                        
+                        if len(active_rubrics) > args.max_active_rubrics:
+                            # Sort by std descending and keep only top max_active_rubrics
+                            rubric_std_pairs.sort(key=lambda x: x[1], reverse=True)
+                            
+                            # Find rubric keys to keep (top std ones)
+                            rubric_keys_to_keep = set(create_rubric_key(query, rubric) for rubric, _ in rubric_std_pairs[:args.max_active_rubrics])
+                            
+                            # Move excess rubrics to inactive
+                            new_active = []
+                            for rubric in active_rubrics:
+                                rubric_key = create_rubric_key(query, rubric)
+                                if rubric_key in rubric_keys_to_keep or rubric_key not in rubric_key_stats:
+                                    # Keep high-std rubrics or rubrics without stats
+                                    new_active.append(rubric)
+                                else:
+                                    # Move low-std rubrics to inactive
+                                    buffer_data["inactive_rubrics"].append(rubric)
+                                    capped_count += 1
+                            
+                            buffer_data["active_rubrics"] = new_active
+                    
+                    if moved_count > 0 or capped_count > 0:
+                        print(f"[Adaptive Rubric Filtering] Moved {moved_count} zero-std rubrics and {capped_count} low-std rubrics to inactive")
 
         return scores, metrics, rubric_buffer
 

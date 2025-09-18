@@ -2,6 +2,7 @@ import os
 from typing import Any, Dict, Optional, Tuple
 import json
 import asyncio
+import hashlib
 import logging
 import litellm
 from open_instruct.search_rewards.utils.format_utils import extract_answer_context_citations
@@ -10,6 +11,14 @@ from open_instruct.search_rewards.utils.search_utils import score_num_in_context
 
 LOGGER = logging.getLogger(__name__)
 
+
+def create_rubric_key(question: str, rubric: dict) -> str:
+    """Create a unique key for a question-rubric pair to avoid title collisions."""
+    # Combine question and rubric description for uniqueness
+    content = f"{question}||{rubric['description']}||{rubric.get('title', '')}"
+    # Create a short hash for efficiency
+    hash_obj = hashlib.md5(content.encode('utf-8'))
+    return hash_obj.hexdigest()[:12]  # Use first 12 chars for readability
 
 
 """
@@ -97,10 +106,11 @@ def compute_general_rubric_reward(response: str, ground_truth: Dict[str, Any]) -
         
         # Create zero scores for all rubrics in the ground truth
         rubrics = ground_truth["rubrics"]
+        question = ground_truth["query"]
         rubric_scores_by_title = {}
         for rubric in rubrics:
-            title = rubric.get("title", rubric["description"])
-            rubric_scores_by_title[title] = 0.0
+            rubric_key = create_rubric_key(question, rubric)
+            rubric_scores_by_title[rubric_key] = 0.0
         
         result["log_values"] = {
             "rubric_reward": 0.0,
@@ -145,15 +155,15 @@ async def _compute_rubric_scores_and_reward(response: str, ground_truth: Dict[st
     task_to_rubric_mapping = []
     
     for rubric in rubrics:
-        title = rubric.get("title", rubric["description"])  # Fallback to description if no title
+        rubric_key = create_rubric_key(question, rubric)
         
-        if title not in title_groups:
-            title_groups[title] = {"scores": [], "weights": []}
+        if rubric_key not in title_groups:
+            title_groups[rubric_key] = {"scores": [], "weights": []}
         
         # Create async task for scoring this rubric
         task = _score_property_async(response, question, rubric["description"])
         tasks.append(task)
-        task_to_rubric_mapping.append((title, rubric))
+        task_to_rubric_mapping.append((rubric_key, rubric))
     
     # Execute all scoring tasks in parallel (this is the expensive part, done only once)
     scores = await asyncio.gather(*tasks)
@@ -163,18 +173,18 @@ async def _compute_rubric_scores_and_reward(response: str, ground_truth: Dict[st
     overall_weighted_sum = 0.0
     overall_total_weight = 0.0
     
-    for score, (title, rubric) in zip(scores, task_to_rubric_mapping):
+    for score, (rubric_key, rubric) in zip(scores, task_to_rubric_mapping):
         # Add to title groups
-        title_groups[title]["scores"].append(score)
-        title_groups[title]["weights"].append(rubric["weight"])
+        title_groups[rubric_key]["scores"].append(score)
+        title_groups[rubric_key]["weights"].append(rubric["weight"])
         
         # Add to overall weighted sum
         overall_weighted_sum += score * rubric["weight"]
         if rubric["weight"] > 0:
             overall_total_weight += rubric["weight"]
     
-    # Compute weighted average for each title group
-    for title, group_data in title_groups.items():
+    # Compute weighted average for each rubric key group
+    for rubric_key, group_data in title_groups.items():
         scores_list = group_data["scores"]
         weights_list = group_data["weights"]
         
@@ -182,9 +192,9 @@ async def _compute_rubric_scores_and_reward(response: str, ground_truth: Dict[st
             # Compute weighted average
             weighted_sum = sum(s * w for s, w in zip(scores_list, weights_list))
             total_weight = sum(w for w in weights_list if w > 0)
-            title_scores[title] = weighted_sum / max(total_weight, 1.0)
+            title_scores[rubric_key] = weighted_sum / max(total_weight, 1.0)
         else:
-            title_scores[title] = 0.0
+            title_scores[rubric_key] = 0.0
     
     # Compute overall weighted reward
     overall_reward = overall_weighted_sum / max(overall_total_weight, 1.0)

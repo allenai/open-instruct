@@ -348,7 +348,7 @@ async def generate_instance_wise_adaptive_rubrics(question, response_list, exist
     return obj
 
 
-async def _generate_instance_wise_adaptive_rubrics(responses, ground_truths, num_samples_per_prompt_rollout):
+async def _generate_instance_wise_adaptive_rubrics(responses, ground_truths, num_samples_per_prompt_rollout, rubric_buffer=None):
     # Optimized: Use direct indexing instead of dictionary grouping
     # Responses are structured as [prompt1_resp1, prompt1_resp2, ..., prompt2_resp1, prompt2_resp2, ...]
     
@@ -367,8 +367,12 @@ async def _generate_instance_wise_adaptive_rubrics(responses, ground_truths, num
         
         # Get the question from the first ground truth in this group
         question = ground_truths[start_idx][query_key]
-        existing_rubrics = ground_truths[start_idx]["rubrics"]
-        existing_rubrics_str = json.dumps(existing_rubrics)
+        if rubric_buffer is None:
+            existing_rubrics = ground_truths[start_idx]["rubrics"]
+            existing_rubrics_str = json.dumps(existing_rubrics)
+        else:
+            existing_rubrics = rubric_buffer[question]["active_rubrics"]
+            existing_rubrics_str = json.dumps(existing_rubrics)
         
         # Get all responses for this question
         response_list = responses[start_idx:end_idx]
@@ -413,6 +417,9 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, all_adaptive_rubri
         for _ in range(num_samples_per_prompt_rollout):
             expanded_adaptive_rubrics.append(rubric)
     
+    # Track processed queries to avoid duplicate buffer updates
+    processed_queries = set()
+    
     for i, (ground_truth, adaptive_rubrics) in enumerate(zip(ground_truths, expanded_adaptive_rubrics)):
         if adaptive_rubrics is None:
             continue
@@ -435,8 +442,8 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, all_adaptive_rubri
         num_ground_truths.append(len(ground_truth_obj["rubrics"]))
         num_adaptive_rubrics.append(len(positive_rubrics) + len(negative_rubrics))
         
-        # Update rubric buffer with newly generated adaptive rubrics
-        if rubric_buffer is not None and query in rubric_buffer:
+        # Update rubric buffer with newly generated adaptive rubrics (only once per query)
+        if rubric_buffer is not None and query in rubric_buffer and query not in processed_queries:
             print(f"Updating rubric buffer for query {query}; before update, there is {len(rubric_buffer[query]['active_rubrics'])} active rubrics and {len(rubric_buffer[query]['inactive_rubrics'])} inactive rubrics")
             # Convert new adaptive rubrics to the buffer format
             new_active_rubrics = []
@@ -456,7 +463,10 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, all_adaptive_rubri
             # Append new rubrics to active_rubrics in buffer
             rubric_buffer[query]["active_rubrics"].extend(new_active_rubrics)
             num_active_buffer_rubrics.append(len(new_active_rubrics))
+            processed_queries.add(query)  # Mark this query as processed
             
+        # Always use rubrics from buffer if available (for all rollouts of this query)
+        if rubric_buffer is not None and query in rubric_buffer:
             # Keep original rubrics and append active rubrics from buffer
             ground_truth_obj["rubrics"] = rubric_buffer[query]["persistent_rubrics"] + rubric_buffer[query]["active_rubrics"]
         else:
