@@ -6,7 +6,6 @@ import copy
 import re
 import time
 import traceback
-import warnings
 from collections import defaultdict
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor  # add import for async execution
@@ -18,8 +17,6 @@ from rich.console import Console
 from tqdm import tqdm
 from vllm import LLM, PoolingParams, PoolingRequestOutput, PromptType, RequestOutput, SamplingParams, TokensPrompt
 from vllm.lora.request import LoRARequest
-from vllm.model_executor.guided_decoding.guided_fields import GuidedDecodingRequest
-from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sampling_params import RequestOutputKind
 
 
@@ -151,18 +148,11 @@ class ToolUseLLM(LLM):
         *,
         use_tqdm: Union[bool, Callable[..., tqdm]] = True,
         lora_request: Optional[Union[Sequence[LoRARequest], LoRARequest]],
-        prompt_adapter_request: Optional[PromptAdapterRequest],
+        prompt_adapter_request: Optional[Any],
         tokenization_kwargs: Optional[dict[str, Any]] = None,
-        guided_options: Optional[GuidedDecodingRequest] = None,
         priority: Optional[list[int]] = None,
     ) -> None:
         """@vwxyzjn: we keep everything the same except override the sampling params to have n=1 for `ToolUseLLM`"""
-        if guided_options is not None:
-            warnings.warn(
-                "guided_options_request is deprecated, use SamplingParams.guided_decoding instead",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
         if isinstance(prompts, (str, dict)):
             # Convert a single prompt to a list.
@@ -176,8 +166,6 @@ class ToolUseLLM(LLM):
 
         for sp in params if isinstance(params, Sequence) else (params,):
             if isinstance(sp, SamplingParams):
-                self._add_guided_params(sp, guided_options)
-
                 # We only care about the final output
                 sp.output_kind = RequestOutputKind.FINAL_ONLY
 
