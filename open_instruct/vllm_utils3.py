@@ -615,9 +615,7 @@ class LLMRayActor:
     async def _ensure_engine_initialized(self):
         """Ensure the AsyncLLMEngine is initialized."""
         if self.llm_engine is None:
-            # Don't start the engine loop automatically - we'll control it manually
-            # This prevents the 60-second timeout when idle
-            self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=False)
+            self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=True)
 
     async def generate_one_completion(
         self, request_id: str, prompt: vllm.TokensPrompt, sampling_params: vllm.SamplingParams
@@ -937,10 +935,6 @@ class LLMRayActor:
         iteration_count = 0
         total_processed = 0
 
-        # Start the engine background loop manually
-        logger.info("[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Starting vLLM engine background loop")
-        self.llm_engine.start_background_loop()
-
         try:
             # Run indefinitely until should_exit is true (no timeout)
             while not await self._should_exit():
@@ -1034,10 +1028,6 @@ class LLMRayActor:
                     self.logger.info(f"process_from_queue iteration {iteration_count}: active_tasks={active_tasks}")
 
         finally:
-            # Shutdown the engine background loop when we exit
-            logger.info("[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Shutting down vLLM engine background loop")
-            self.llm_engine.shutdown_background_loop()
-
             # With background futures, tasks persist across calls
             # Only wait for them if inflight_updates is False
             if not self.inflight_updates:
