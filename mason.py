@@ -252,12 +252,12 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
     env_vars = []
     additional_env_var_names = [var["name"] for var in additional_env_vars]
     if "RAY_CGRAPH_get_timeout" not in additional_env_var_names:
-        env_vars.append(beaker.EnvVar(name="RAY_CGRAPH_get_timeout",
+        env_vars.append(beaker.BeakerEnvVar(name="RAY_CGRAPH_get_timeout",
                                       value="300"))
     # Add user-specified environment variables first
     for env_var in additional_env_vars:
         env_vars.append(
-            beaker.EnvVar(
+            beaker.BeakerEnvVar(
                 name=env_var["name"],
                 value=env_var["value"]
             )
@@ -265,7 +265,7 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
     # add user-specific secrets
     for secret in additional_secrets:
         env_vars.append(
-            beaker.EnvVar(
+            beaker.BeakerEnvVar(
                 name=secret["name"],
                 secret=secret["value"],
             )
@@ -284,14 +284,14 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
     for useful_secret in useful_secrets:
         if f"{whoami}_{useful_secret}" in beaker_secrets:
             env_vars.append(
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name=useful_secret,
                     secret=f"{whoami}_{useful_secret}",
                 )
             )
         elif useful_secret in beaker_secrets:
             env_vars.append(
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name=useful_secret,
                     secret=useful_secret,
                 )
@@ -300,7 +300,7 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
      # use the user's PATH; including the conda / python PATH
     if not pure_docker_mode:
         env_vars.extend([
-            beaker.EnvVar(
+            beaker.BeakerEnvVar(
                 name="PATH",
                 value=os.getenv("PATH"),
             ),
@@ -309,34 +309,34 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
     # if all cluster is in weka, we mount the weka
     if all(c in WEKA_CLUSTERS for c in cluster):
         env_vars.extend([
-            beaker.EnvVar(
+            beaker.BeakerEnvVar(
                 name="HF_HOME",
                 value="/weka/oe-adapt-default/allennlp/.cache/huggingface",
             ),
-            beaker.EnvVar(
+            beaker.BeakerEnvVar(
                 name="HF_DATASETS_CACHE",
                 value="/weka/oe-adapt-default/allennlp/.cache/huggingface",
             ),
-            beaker.EnvVar(
+            beaker.BeakerEnvVar(
                 name="HF_HUB_CACHE",
                 value="/weka/oe-adapt-default/allennlp/.cache/hub",
             ),
-            beaker.EnvVar(
+            beaker.BeakerEnvVar(
                 name="CHECKPOINT_OUTPUT_DIR",
                 value=f"/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/{global_wandb_id}",
             ),
         ])
         if num_nodes > 1:
             env_vars.extend([
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_SOCKET_IFNAME",
                     value="ib",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_IB_HCA",
                     value="^=mlx5_bond_0",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_DEBUG",
                     value="INFO",
                 ),
@@ -345,130 +345,130 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
 
     elif all(c in GCP_CLUSTERS for c in cluster):
         env_vars.extend([
-            beaker.EnvVar(
+            beaker.BeakerEnvVar(
                 name="HF_HOME",
                 value="/filestore/.cache/huggingface",
             ),
-            beaker.EnvVar(
+            beaker.BeakerEnvVar(
                 name="HF_DATASETS_CACHE",
                 value="/filestore/.cache/huggingface",
             ),
-            beaker.EnvVar(
+            beaker.BeakerEnvVar(
                 name="HF_HUB_CACHE",
                 value="/filestore/.cache/hub",
             ),
-            beaker.EnvVar(
+            beaker.BeakerEnvVar(
                 name="HF_HUB_ENABLE_HF_TRANSFER",
                 value="0", # we disable it because GCP is weird on uploading to the hub
             ),
         ])
         if num_nodes > 1:
             env_vars.extend([
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="LD_LIBRARY_PATH",
                     value=r"/var/lib/tcpxo/lib64:${LD_LIBRARY_PATH}",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_CROSS_NIC",
                     value="0",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_ALGO",
                     value="Ring,Tree",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_PROTO",
                     value="Simple",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_MIN_NCHANNELS",
                     value="4",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_P2P_NET_CHUNKSIZE",
                     value="524288",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_P2P_PCI_CHUNKSIZE",
                     value="524288",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_P2P_NVL_CHUNKSIZE",
                     value="1048576",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_FASTRAK_NUM_FLOWS",
                     value="2",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL",
                     value="0",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_BUFFSIZE",
                     value="8388608",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_FASTRAK_USE_SNAP",
                     value="1",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="CUDA_VISIBLE_DEVICES",
                     value="0,1,2,3,4,5,6,7",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_NET_GDR_LEVEL",
                     value="PIX",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING",
                     value="0",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_TUNER_PLUGIN",
                     value="libnccl-tuner.so",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_TUNER_CONFIG_PATH",
                     value="/var/lib/tcpxo/lib64/a3plus_tuner_config.textproto",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE",
                     value="/var/lib/tcpxo/lib64/a3plus_guest_config.textproto",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS",
                     value="600000",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_NVLS_ENABLE",
                     value="0",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_DEBUG",
                     value="WARN",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_FASTRAK_CTRL_DEV",
                     value="enp0s12",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_FASTRAK_IFNAME",
                     value="enp6s0,enp7s0,enp13s0,enp14s0,enp134s0,enp135s0,enp141s0,enp142s0",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_SOCKET_IFNAME",
                     value="enp0s12",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_USE_SNAP",
                     value="1",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_FASTRAK_USE_LLCM",
                     value="1",
                 ),
-                beaker.EnvVar(
+                beaker.BeakerEnvVar(
                     name="NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY",
                     value="/dev/aperture_devices",
                 ),
@@ -479,11 +479,11 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
 
     if resumable:
         env_vars.extend([
-            beaker.EnvVar(
+            beaker.BeakerEnvVar(
                 name="WANDB_RUN_ID",
                 value=global_wandb_id,
             ),
-            beaker.EnvVar(
+            beaker.BeakerEnvVar(
                 name="WANDB_RESUME",
                 value="allow",
             ),
@@ -493,7 +493,7 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
     # torch compile caching seems consistently broken, but the actual compiling isn't.
     # Not sure why, for now we have disabled the caching (VLLM_DISABLE_COMPILE_CACHE=1).
     env_vars.extend([
-        beaker.EnvVar(
+        beaker.BeakerEnvVar(
             name="VLLM_DISABLE_COMPILE_CACHE",
             value="1",
         ),
@@ -508,25 +508,25 @@ def get_datasets(beaker_datasets, cluster: List[str]):
     # if all cluster is in weka, we mount the weka
     if all(c in WEKA_CLUSTERS for c in cluster):
         res = [
-            beaker.DataMount(
-                source=beaker.DataSource(weka="oe-adapt-default"),
+            beaker.BeakerDataMount(
+                source=beaker.BeakerDataSource(weka="oe-adapt-default"),
                 mount_path="/weka/oe-adapt-default",
             ),
-            beaker.DataMount(
-                source=beaker.DataSource(weka="oe-training-default"),
+            beaker.BeakerDataMount(
+                source=beaker.BeakerDataSource(weka="oe-training-default"),
                 mount_path="/weka/oe-training-default",
             ),
         ]
     elif all(c in GCP_CLUSTERS for c in cluster):
         res = [
-            beaker.DataMount(
-                source=beaker.DataSource(host_path="/mnt/filestore_1"),
+            beaker.BeakerDataMount(
+                source=beaker.BeakerDataSource(host_path="/mnt/filestore_1"),
                 mount_path="/filestore",
             ),
         ]
     for beaker_dataset in beaker_datasets:
-        to_append = beaker.DataMount(
-            source=beaker.DataSource(beaker=beaker_dataset["beaker"]),
+        to_append = beaker.BeakerDataMount(
+            source=beaker.BeakerDataSource(beaker=beaker_dataset["beaker"]),
             mount_path=beaker_dataset["mount_path"],
         )
         res.append(to_append)
@@ -840,17 +840,17 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         constraints = beaker.BeakerConstraints(cluster=args.cluster)
     spec = beaker.BeakerTaskSpec(
         name=f"{args.task_name}__{i}",
-        image=beaker.ImageSource(beaker=args.image),
+        image=beaker.BeakerImageSource(beaker=args.image),
         command=['/bin/bash', '-c'],
         arguments=[full_command],
-        result=beaker.ResultSpec(path="/output"),
+        result=beaker.BeakerResultSpec(path="/output"),
         datasets=get_datasets(args.beaker_datasets, args.cluster),
-        context=beaker.TaskContext(priority=beaker.Priority(args.priority),
+        context=beaker.BeakerTaskContext(priority=beaker.BeakerPriority(args.priority),
                                    preemptible=args.preemptible),
         constraints=constraints,
         env_vars=get_env_vars(args.pure_docker_mode, args.cluster, beaker_secrets,
                             whoami, resumable, args.num_nodes, args.env, args.secret),
-        resources=beaker.TaskResources(gpu_count=args.gpus),
+        resources=beaker.BeakerTaskResources(gpu_count=args.gpus),
         replicas=args.num_nodes,
     )
     if args.num_nodes > 1:
