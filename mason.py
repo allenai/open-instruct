@@ -882,7 +882,7 @@ def main():
         else:
             beaker_client = beaker.Beaker.from_env()
         beaker_secrets = [secret.name for secret in beaker_client.secret.list()]
-        whoami = beaker_client.account.whoami().name
+        whoami = beaker_client.user.get().name
 
     full_commands = [make_internal_command(command, args, whoami, is_external_user) for command in commands]
     if is_external_user:
