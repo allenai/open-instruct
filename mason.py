@@ -881,7 +881,7 @@ def main():
             beaker_client = beaker.Beaker.from_env(default_workspace=args.workspace)
         else:
             beaker_client = beaker.Beaker.from_env()
-        beaker_secrets = [secret.name for secret in beaker_client.workspace.secrets()]
+        beaker_secrets = [secret.name for secret in beaker_client.secret.list()]
         whoami = beaker_client.account.whoami().name
 
     full_commands = [make_internal_command(command, args, whoami, is_external_user) for command in commands]
