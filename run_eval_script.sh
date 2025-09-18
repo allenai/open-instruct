@@ -32,7 +32,7 @@ for i in "${!MODEL_PATHS[@]}"; do
     
     # Run the evaluation command
     python scripts/submit_eval_jobs.py \
-        --cluster ai2/jupiter ai2/saturn ai2/neptune ai2/ceres \
+        --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale ai2/ceres-cirrascale \
         --is_tuned \
         --priority urgent \
         --preemptible \
