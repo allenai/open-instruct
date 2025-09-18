@@ -741,7 +741,7 @@ class LLMRayActor:
             tool_called = True
 
             # Prepare tool output tokens
-            tokenizer = self.llm_engine.engine.tokenizer
+            tokenizer = await self.llm_engine.get_tokenizer()
             tool_output_token_ids = tokenizer.encode(
                 "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
             )
@@ -760,7 +760,7 @@ class LLMRayActor:
             )
 
             prompt_and_tool_output_token = prompt_token_ids_list + request_token_ids_list + tool_output_token_ids
-            excess = len(prompt_and_tool_output_token) - self.llm_engine.engine.model_config.max_model_len
+            excess = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len
             if excess > 0:
                 tool_output_token_ids = tool_output_token_ids[:-excess]
                 can_continue = False
@@ -944,10 +944,7 @@ class LLMRayActor:
                 if self.prefetch_task.done():
                     self.prefetch_task.result()  # This will raise if the task failed
 
-                # Health check for vLLM engine background task
-                if self.llm_engine._background_loop_task.done():
-                    # This will raise if the background task failed
-                    self.llm_engine._background_loop_task.result()
+                # V1 engine manages background loop internally, no need to check
 
                 # Check background futures for completion
                 completed_base_request_ids = set()
@@ -1073,22 +1070,21 @@ class LLMRayActor:
         timeout_minutes=120,
     ):
         await self._ensure_engine_initialized()
-        # AsyncLLMEngine doesn't implement collective_rpc_async, so we need to
-        # call the synchronous version on the underlying engine directly
-        return self.llm_engine.engine.collective_rpc(
+        # V1 AsyncLLMEngine has async collective_rpc
+        return await self.llm_engine.collective_rpc(
             "init_process_group",
             args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
         )
 
     async def update_weight(self, name, dtype, shape, empty_cache=False):
         await self._ensure_engine_initialized()
-        # Use synchronous collective_rpc on the underlying engine
-        return self.llm_engine.engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        # V1 AsyncLLMEngine has async collective_rpc
+        return await self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     async def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
         await self._ensure_engine_initialized()
-        # Use synchronous collective_rpc on the underlying engine
-        return self.llm_engine.engine.collective_rpc(
+        # V1 AsyncLLMEngine has async collective_rpc
+        return await self.llm_engine.collective_rpc(
             "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
 
@@ -1113,8 +1109,8 @@ class LLMRayActor:
         """Get KV cache max concurrency from the vLLM engine."""
         await self._ensure_engine_initialized()
 
-        # Get vLLM configuration
-        config = await self.llm_engine.get_vllm_config()
+        # Access vllm_config directly as a property (no await needed)
+        config = self.llm_engine.vllm_config
 
         # Get cache configuration values
         num_gpu_blocks = config.cache_config.num_gpu_blocks
