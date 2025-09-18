@@ -10,7 +10,7 @@ import httpx
 import httpcore
 
 try:
-    from mcp_agents.tool_interface.mcp_tools import MassiveServeSearchTool, SemanticScholarSnippetSearchTool, SerperSearchTool, Crawl4AIBrowseTool
+    from mcp_agents.tool_interface.mcp_tools import MassiveServeSearchTool, SemanticScholarSnippetSearchTool, SerperSearchTool, Crawl4AIBrowseTool, SerperBrowseTool
 except ImportError as e:
     print(f"Failed to import mcp_agents. Please install from the source code:\n{e}")
     raise e
@@ -22,7 +22,8 @@ MCP_TOOL_REGISTRY = {
     "snippet_search": SemanticScholarSnippetSearchTool,
     "google_search": SerperSearchTool,
     "massive_serve": MassiveServeSearchTool,
-    "browse_webpage": Crawl4AIBrowseTool
+    # "browse_webpage": Crawl4AIBrowseTool # for now, some issues with using this.
+    "browse_webpage": SerperBrowseTool
 }
 
 def truncate_at_second_last_stop(text: str, stops: list[str]) -> str:
@@ -75,6 +76,8 @@ class MCPTool(Tool):
         mcp_timeout: int = 180,
         base_url: str | None = None,
         number_documents_to_search: int = 10,
+        use_localized_snippets: bool = False,
+        context_chars: int = 6000,
         *args,
         **kwargs,
     ):
@@ -106,6 +109,10 @@ class MCPTool(Tool):
                 filtered_kwargs["base_url"] = base_url
             if "number_documents_to_search" in valid_params:
                 filtered_kwargs["number_documents_to_search"] = number_documents_to_search
+            if "use_localized_snippets" in valid_params:
+                filtered_kwargs["use_localized_snippets"] = use_localized_snippets
+            if "context_chars" in valid_params:
+                filtered_kwargs["context_chars"] = context_chars
             # basically, we want to defer as much as possible to the mcp tool.
             # this 'tool' actually just passes everything down to the mcp tool.
             self.mcp_tools.append(mcp_tool_cls(
@@ -144,7 +151,7 @@ class MCPTool(Tool):
                             break
                         except (httpcore.RemoteProtocolError, httpx.ReadError, ConnectionError, TimeoutError, asyncio.TimeoutError) as e:
                             last_exc = e
-                            print(f"Error: {e}, retrying...")
+                            print(f"{mcp_tool.name} Error: {e}, retrying...")
                             if attempt + 1 >= self.max_retries:
                                 raise
                             time.sleep(self.retry_backoff * (2 ** attempt))
@@ -160,6 +167,7 @@ class MCPTool(Tool):
         if document_tool_output is None:
             if error is None and not found_tool:
                 error = "No valid tool calls found."
+                print(f"MCP Tool Error: {error}")
                 return ToolOutput(
                     output=error,
                     called=False,
@@ -170,6 +178,7 @@ class MCPTool(Tool):
                     end_str="\n</snippet>",
                 )
             elif error is not None:
+                print(f"MCP {tool_used_name} with {trunc_prompt} Tool Error: {error}")
                 return ToolOutput(
                     output=error,
                     called=False,
@@ -180,7 +189,7 @@ class MCPTool(Tool):
                     end_str="\n</snippet>",
                 )
             else:
-                print(f"Unknown error, no MCP response and no error found.")
+                print(f"MCP {tool_used_name} Tool Error: Unknown error, no MCP response and no error found.")
                 return ToolOutput(
                     output="Unknown error, no MCP response and no error found.",
                     called=False,
@@ -192,7 +201,7 @@ class MCPTool(Tool):
                 )
 
         if document_tool_output.error:
-            print(f"Error from mcp tool {tool_used_name}: {document_tool_output.error}")
+            print(f"MCP {tool_used_name} Tool Error: {document_tool_output.error}")
             print("Returning error output anyway.")
         # munge into format that open-instruct likes.
         return ToolOutput(
