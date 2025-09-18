@@ -455,7 +455,10 @@ class LLMRayActor:
 
     async def _PROFILE_PREFETCH_GET_REQUEST(self):
         """Profiling wrapper for prefetch request get."""
-        return await self._q_get_async()
+        logger.info("[_PROFILE_PREFETCH_GET_REQUEST] Attempting to get request from queue")
+        result = await self._q_get_async()
+        logger.info(f"[_PROFILE_PREFETCH_GET_REQUEST] Got result: {type(result)}")
+        return result
 
     async def _add_request(self, request: PromptRequest):
         """Add a request to the async LLM engine."""
@@ -522,10 +525,6 @@ class LLMRayActor:
         Returns:
             bool: True if the loop should exit, False otherwise.
         """
-        # Never exit - let generate_thread control the lifecycle
-        return False
-
-        # Original logic (disabled to prevent early exit):
         # Check stop condition first
         stop_requested = await self._should_stop()
 
@@ -817,9 +816,10 @@ class LLMRayActor:
 
         iteration_count = 0
         total_processed = 0
+        start_time = time.perf_counter()
 
         try:
-            while not await self._should_exit():
+            while not await self._should_exit() and (time.perf_counter() - start_time) < timeout:
                 iteration_count += 1
 
                 # Health check for prefetch task
@@ -837,6 +837,9 @@ class LLMRayActor:
                     )
                 else:
                     # No active tasks, just sleep for a bit
+                    # Log this to understand why we have no active tasks
+                    if iteration_count % 10 == 0:
+                        self.logger.info(f"[process_from_queue] No active tasks, iteration {iteration_count}")
                     await asyncio.sleep(1)
                     done = set()
 
