@@ -450,6 +450,10 @@ class Args:
     """Whether to use the rubric buffer"""
     max_active_rubrics: int = 5
     """Maximum number of active rubrics to keep in the buffer"""
+    use_static_rubrics_as_persistent_rubrics: bool = True
+    """Whether to use the static rubrics as persistent rubrics"""
+    add_static_rubrics_to_active_rubrics_every_n_steps: int = 10
+    """How often to add the static rubrics to the active rubrics"""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
@@ -1257,9 +1261,30 @@ def data_preparation_thread(
             scores, reward_metrics, rubric_buffer = asyncio.run(
                 reward_fn(
                     responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries, 
-                    rubric_buffer=rubric_buffer, is_training=True
+                    rubric_buffer=rubric_buffer, is_training=True, training_step=training_step
                 )
             )
+            
+            # Add static rubrics to active rubrics every N steps when use_static_rubrics_as_persistent_rubrics is False
+            if (rubric_buffer is not None and 
+                not args.use_static_rubrics_as_persistent_rubrics and 
+                training_step % args.add_static_rubrics_to_active_rubrics_every_n_steps == 0):
+                
+                added_count = 0
+                for query, buffer_data in rubric_buffer.items():
+                    static_rubrics = buffer_data.get("static_rubrics", [])
+                    active_rubrics = buffer_data.get("active_rubrics", [])
+                    
+                    # Check each static rubric and add if not already in active rubrics
+                    for static_rubric in static_rubrics:
+                        # Check if this rubric is already in active rubrics (avoid duplicates)
+                        if static_rubric not in active_rubrics:
+                            active_rubrics.append(static_rubric)
+                            added_count += 1
+                
+                if added_count > 0:
+                    print(f"[Static Rubric Addition] Added {added_count} static rubrics to active rubrics at step {training_step}")
+            
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
@@ -1740,9 +1765,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             else:
                 gt = json.loads(ex[GROUND_TRUTHS_KEY])
             rubric_buffer[gt['query']] = {
-                'active_rubrics': [],  # Start empty, adaptive rubrics will be added here
+                'active_rubrics': [] if args.use_static_rubrics_as_persistent_rubrics else gt['rubrics'], 
                 'inactive_rubrics': [],
-                'persistent_rubrics': gt['rubrics'],  # Original GT rubrics go here
+                'persistent_rubrics': gt['rubrics'] if args.use_static_rubrics_as_persistent_rubrics else [],  # Forced to use every time
                 'static_rubrics': gt['rubrics'],  # Keep a copy of original GT rubrics
             }
     
@@ -2090,6 +2115,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                         source_datasets=eval_original_dataset_names,
                         rubric_buffer=None,  # No rubric buffer for evaluation
                         is_training=False,
+                        training_step=training_step,
                     )
                 )
                 eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
@@ -2259,6 +2285,7 @@ if __name__ == "__main__":
         source_datasets: Optional[List[str]] = None,
         rubric_buffer: Optional[Dict[str, List[Dict[str, float]]]] = None,
         is_training: bool = True,
+        training_step: Optional[int] = None,
     ) -> List[float]:
         num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
         good_outputs = [
