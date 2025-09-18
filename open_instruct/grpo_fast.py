@@ -410,7 +410,7 @@ class Args:
 
     # search-tool specific settings
     # rl-rag tool settings. These are shared across different tools.
-    number_documents_to_search: int = 3
+    number_documents_to_search: int = 10
     """The maximum number of documents to retrieve for each query."""
     search_api_endpoint: Optional[str] = None
     """The API endpoint for the search engine."""
