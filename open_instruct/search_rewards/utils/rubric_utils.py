@@ -115,7 +115,7 @@ def _score_rubric(response: str, ground_truth: Dict[str, Any], use_general_rubri
         ground_truth: Dictionary containing the question and rubrics
         
     Returns:
-        Dictionary mapping rubric handles to their scores (0.0 to 1.0)
+        Dictionary mapping rubric titles to their scores (0.0 to 1.0)
     """
     question = ground_truth["Question"] if "Question" in ground_truth else ground_truth["query"]
     
@@ -231,87 +231,101 @@ Return a score on a scale of 0 to 2 indicating how appropriate the response is b
         return 0.0, []
 
 
+
 INSTANCE_WISE_RUBRIC_GENERATION_PROMPT = """
-You are an expert evaluator that generates adaptive rubrics for assessing model responses to a given question.
+You are an expert evaluator generating adaptive rubrics to assess model responses.
 
 ## Task
-Analyze the provided question and model responses to identify key evaluation criteria that distinguish high-quality from low-quality answers.
+Identify the most discriminative criteria that distinguish high-quality from low-quality answers. Capture subtle quality differences that existing rubrics miss.
 
-## Output Structure
-Create rubric elements with two components:
-- **Ingredient**: A detailed, specific description of what makes a response excellent or problematic
-- **Handle**: A concise, abstract label for the ingredient (keep general, not question-specific)
+## Output Components
+- **Description**: Detailed, specific description of what makes a response excellent/problematic
+- **Title**: Concise abstract label (general, not question-specific)
 
 ## Categories
-Group elements into:
-1. **Positive Rubrics**: Excellence indicators that distinguish superior responses
-2. **Negative Rubrics**: Common failure patterns that degrade response quality
+1. **Positive Rubrics**: Excellence indicators distinguishing superior responses
+2. **Negative Rubrics**: Critical flaws definitively degrading quality
 
-## Guidelines
-1. **Discriminative**: Focus on criteria that clearly differentiate response quality levels
-2. **Question-Relevant**: Positive rubrics should enhance helpfulness and accuracy for the specific question type
-3. **Generalizable**: Negative rubrics should address common failure modes applicable across similar questions
-4. **Actionable**: Each criterion should provide clear guidance for improvement
-5. **Specific**: Avoid vague descriptors; be precise about what constitutes good/bad performance
+## Core Guidelines
 
-## Rubric Selection Strategy
-Generate 0-10 total rubrics (positive + negative combined). Decide the distribution based on what would most improve model performance:
-- **More positive rubrics** when responses show potential but lack key excellence indicators
-- **More negative rubrics** when responses have systematic failure patterns that need addressing
-- **Balanced mix** when both strengths to amplify and weaknesses to address are present
+### 1. Discriminative Power
+- Focus ONLY on criteria meaningfully separating quality levels
+- Each rubric must distinguish between otherwise similar responses
+- Exclude generic criteria applying equally to all responses
 
-## Response Format
-Return a JSON object structured as follows containing 3 keys: "question", "positive_rubrics", "negative_rubrics":
+### 2. Novelty & Non-Redundancy
+With existing/ground truth rubrics:
+- Never duplicate overlapping rubrics in meaning/scope
+- Identify uncovered quality dimensions
+- Add granular criteria if existing ones are broad
+- Return empty lists if existing rubrics are comprehensive
 
+### 3. Avoid Mirror Rubrics
+Never create positive/negative versions of same criterion:
+- ❌ "Provides clear explanations" + "Lacks clear explanations"
+- ✅ Choose only the more discriminative direction
+
+### 4. Conservative Negative Rubrics
+- Identify clear failure modes, not absence of excellence
+- Response penalized if it exhibits ANY negative rubric behavior
+- Focus on active mistakes vs missing features
+
+## Selection Strategy
+
+### Quantity: 1-5 total rubrics (fewer high-quality > many generic)
+
+### Distribution Based on Response Patterns:
+- **More positive**: Responses lack sophistication but avoid major errors
+- **More negative**: Systematic failure patterns present
+- **Balanced**: Both excellence gaps and failure modes exist
+- **Empty lists**: Existing rubrics already comprehensive
+
+## Analysis Process
+1. Group responses by quality level
+2. Find factors separating higher/lower clusters
+3. Check if factors covered by existing rubrics
+4. Select criteria with highest discriminative value
+
+## Output Format
 ```json
 {
-  "question": "<the original question>",
+  "question": "<original question verbatim>",
   "positive_rubrics": [
-    {
-      "ingredient": "<detailed description of excellence indicator>",
-      "handle": "<concise abstract label>"
-    }
+    {"description": "<detailed excellence description>", "title": "<abstract label>"}
   ],
   "negative_rubrics": [
-    {
-      "ingredient": "<detailed description of failure pattern>",
-      "handle": "<concise abstract label>"
-    }
+    {"description": "<detailed failure description>", "title": "<abstract label>"}
   ]
 }
 ```
 
-## Example Rubric Elements
+## Examples
 
-**Positive Example:**
+**Positive:**
 ```json
-{
-  "ingredient": "Provides step-by-step reasoning that clearly connects evidence to conclusions, making the logical flow easy to follow",
-  "handle": "Clear Reasoning Chain"
-}
+{"description": "Anticipates and addresses potential edge cases or exceptions to the main solution, demonstrating thorough problem understanding", "title": "Edge Case Handling"}
 ```
 
-**Negative Example:**
+**Negative:**
 ```json
-{
-  "ingredient": "Makes unsupported claims or presents speculation as fact without acknowledging uncertainty",
-  "handle": "Unsupported Assertions"
-}
+{"description": "Conflates correlation with causation when interpreting data or making recommendations", "title": "Causal Misattribution"}
 ```
 
-## Input Format
-You will receive the following inputs:
-- **Question**: The original question that the model responses are attempting to answer
-- **Responses**: Multiple model responses (Response 1, Response 2, etc.) that need evaluation
-- **Existing Rubrics** (optional): Previously generated rubrics for similar questions
+## Inputs
+1. **Question**: Original question being answered
+2. **Responses**: Multiple model responses (Response 1, Response 2, etc.)
+3. **Existing Rubrics** (optional): Previously generated/ground truth rubrics
 
-## Important Notes
-- If existing rubrics are provided, avoid creating duplicate or highly similar rubric elements
-- Focus on identifying new evaluation criteria that complement the existing rubrics
-- If no new distinguishing criteria can be identified beyond existing rubrics, you may return empty arrays
+## Critical Reminders
+- Each rubric must distinguish between actual provided responses
+- Exclude rubrics applying equally to all responses
+- Prefer empty lists over redundancy when existing rubrics are comprehensive
+- Focus on observable, objective, actionable criteria
+- Quality over quantity: 2 excellent rubrics > 5 mediocre ones
 
-Analyze the given question and responses, then generate the most impactful rubrics that capture key quality differentiators.
+Generate only the most impactful, non-redundant rubrics revealing meaningful quality differences.
 """
+
 
 async def generate_instance_wise_adaptive_rubrics(question, response_list, existing_rubrics=None):
     
@@ -353,13 +367,15 @@ async def _generate_instance_wise_adaptive_rubrics(responses, ground_truths, num
         
         # Get the question from the first ground truth in this group
         question = ground_truths[start_idx][query_key]
+        existing_rubrics = ground_truths[start_idx]["rubrics"]
+        existing_rubrics_str = json.dumps(existing_rubrics)
         
         # Get all responses for this question
         response_list = responses[start_idx:end_idx]
         answer_list = [extract_answer_context_citations(response)[1] for response in response_list]
         answer_list = [answer for answer in answer_list if answer is not None]
         # Create task for parallel execution
-        task = generate_instance_wise_adaptive_rubrics(question, response_list)
+        task = generate_instance_wise_adaptive_rubrics(question, response_list, existing_rubrics_str)
         tasks.append(task)
     
     # Execute all tasks in parallel
@@ -368,7 +384,7 @@ async def _generate_instance_wise_adaptive_rubrics(responses, ground_truths, num
     return adaptive_rubrics
 
 
-def update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubrics, rubric_buffer=None, num_samples_per_prompt_rollout=8):
+def update_ground_truths_with_adaptive_rubrics(ground_truths, all_adaptive_rubrics, num_samples_per_prompt_rollout, rubric_buffer=None):
     """
     Assume ground_truths in a format of
     {
@@ -388,16 +404,17 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubrics, 
     valid_adaptive_rubric_rate = 0.0
     num_ground_truths = []
     num_adaptive_rubrics = []
+    num_active_buffer_rubrics = []
     
     # Expand adaptive_rubrics to match ground_truths structure
     # Each adaptive rubric applies to num_samples_per_prompt_rollout ground truths
     expanded_adaptive_rubrics = []
-    for rubric in adaptive_rubrics:
+    for rubric in all_adaptive_rubrics:
         for _ in range(num_samples_per_prompt_rollout):
             expanded_adaptive_rubrics.append(rubric)
     
-    for i, (ground_truth, rubrics) in enumerate(zip(ground_truths, expanded_adaptive_rubrics)):
-        if rubrics is None:
+    for i, (ground_truth, adaptive_rubrics) in enumerate(zip(ground_truths, expanded_adaptive_rubrics)):
+        if adaptive_rubrics is None:
             continue
         
         # Handle the case where ground_truth is wrapped in a list
@@ -411,51 +428,53 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubrics, 
         ground_truth_obj = json.loads(ground_truth_str)
         query = ground_truth_obj["query"]
         
-        print(f"Ground truth: {ground_truth_obj}\nAdaptive rubrics: {rubrics}")
-        positive_rubrics = rubrics["positive_rubrics"] if "positive_rubrics" in rubrics else []
-        negative_rubrics = rubrics["negative_rubrics"] if "negative_rubrics" in rubrics else []
+        print(f"Ground truth: {ground_truth_obj}\nAdaptive rubrics: {adaptive_rubrics}")
+        positive_rubrics = adaptive_rubrics["positive_rubrics"] if "positive_rubrics" in adaptive_rubrics else []
+        negative_rubrics = adaptive_rubrics["negative_rubrics"] if "negative_rubrics" in adaptive_rubrics else []
         
         num_ground_truths.append(len(ground_truth_obj["rubrics"]))
         num_adaptive_rubrics.append(len(positive_rubrics) + len(negative_rubrics))
         
-        # Always keep the original ground truth rubrics
-        original_rubrics = ground_truth_obj["rubrics"].copy()
-        
         # Update rubric buffer with newly generated adaptive rubrics
         if rubric_buffer is not None and query in rubric_buffer:
+            print(f"Updating rubric buffer for query {query}; before update, there is {len(rubric_buffer[query]['active_rubrics'])} active rubrics and {len(rubric_buffer[query]['inactive_rubrics'])} inactive rubrics")
             # Convert new adaptive rubrics to the buffer format
             new_active_rubrics = []
             for rubric in positive_rubrics:
                 new_active_rubrics.append({
-                    "description": rubric["ingredient"],
+                    "description": rubric["description"],
                     "weight": 1.0,
-                    "handle": rubric["handle"]
+                    "title": rubric["title"]
                 })
             for rubric in negative_rubrics:
                 new_active_rubrics.append({
-                    "description": rubric["ingredient"],
+                    "description": rubric["description"],
                     "weight": -1.0,
-                    "handle": rubric["handle"]
+                    "title": rubric["title"]
                 })
             
             # Append new rubrics to active_rubrics in buffer
             rubric_buffer[query]["active_rubrics"].extend(new_active_rubrics)
+            num_active_buffer_rubrics.append(len(new_active_rubrics))
             
             # Keep original rubrics and append active rubrics from buffer
-            ground_truth_obj["rubrics"] = original_rubrics + rubric_buffer[query]["active_rubrics"]
+            ground_truth_obj["rubrics"] = rubric_buffer[query]["persistent_rubrics"] + rubric_buffer[query]["active_rubrics"]
         else:
             print(f"No buffer found for query {query}, using newly generated rubrics")
             # Keep original rubrics and append newly generated adaptive rubrics
+            original_rubrics = ground_truth_obj["rubrics"].copy()
             additional_rubrics = []
             for rubric in positive_rubrics:
                 additional_rubrics.append({
-                    "description": rubric["ingredient"],
+                    "description": rubric["description"],
                     "weight": 1.0,
+                    "title": rubric["title"]
                 })
             for rubric in negative_rubrics:
                 additional_rubrics.append({
-                    "description": rubric["ingredient"],
+                    "description": rubric["description"],
                     "weight": -1.0,
+                    "title": rubric["title"]
                 })
             ground_truth_obj["rubrics"] = original_rubrics + additional_rubrics
         
@@ -467,7 +486,9 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubrics, 
             ground_truths[i] = updated_ground_truth_str
             
         valid_adaptive_rubric_rate += 1.0
+    
     valid_adaptive_rubric_rate /= len(ground_truths)
     avg_num_ground_truths = sum(num_ground_truths) / len(num_ground_truths)
     avg_num_adaptive_rubrics = sum(num_adaptive_rubrics) / len(num_adaptive_rubrics)
-    return ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, rubric_buffer
+    avg_num_active_buffer_rubrics = sum(num_active_buffer_rubrics) / len(num_active_buffer_rubrics) if num_active_buffer_rubrics else 0.0
+    return ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, avg_num_active_buffer_rubrics, rubric_buffer

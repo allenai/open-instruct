@@ -445,7 +445,9 @@ class Args:
     apply_adaptive_rubric_reward: bool = False
     """Whether to apply adaptive rubric reward"""
     normalize_rubric_scores: bool = False
-    """Whether to normalize the rubric scores"""
+    """Whether to normalize the rubric scores per rubric"""
+    use_rubric_buffer: bool = False
+    """Whether to use the rubric buffer"""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
@@ -1250,7 +1252,7 @@ def data_preparation_thread(
                 print()
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
-            scores, reward_metrics = asyncio.run(
+            scores, reward_metrics, rubric_buffer = asyncio.run(
                 reward_fn(
                     responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries, 
                     rubric_buffer=rubric_buffer, is_training=True
@@ -1724,7 +1726,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     
     # Initialize rubric buffer
     rubric_buffer = None
-    if args.apply_adaptive_rubric_reward:
+    if args.apply_adaptive_rubric_reward and args.use_rubric_buffer:
         print("🚨 Applying adaptive rubric reward")
         print("Example of ground truth:")
         print(train_dataset[0][GROUND_TRUTHS_KEY])
@@ -1737,7 +1739,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 gt = json.loads(ex[GROUND_TRUTHS_KEY])
             rubric_buffer[gt['query']] = {
                 'active_rubrics': [],  # Start with empty active rubrics since we append to original GT rubrics
-                'inactive_rubrics': []  # Empty list for inactive rubrics
+                'inactive_rubrics': [],  # Empty list for inactive rubrics
+                'persistent_rubrics': gt['rubrics']
             }
     
 
@@ -2073,7 +2076,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 eval_original_dataset_names = eval_dataset[DATASET_ORIGIN_KEY]
 
                 
-                eval_scores, eval_reward_metrics = asyncio.run(
+                eval_scores, eval_reward_metrics, _ = asyncio.run(
                     reward_fn(
                         eval_responses,
                         eval_decoded_responses,
@@ -2282,11 +2285,11 @@ if __name__ == "__main__":
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating adaptive rubric reward"):
                 adaptive_rubric_scores = await _generate_instance_wise_adaptive_rubrics(decoded_responses, ground_truths, args.num_samples_per_prompt_rollout)
                 # Update ground truths with adaptive rubrics and incorporate rubric buffer
-                ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, rubric_buffer = update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubric_scores, rubric_buffer=rubric_buffer, num_samples_per_prompt_rollout=args.num_samples_per_prompt_rollout)
+                ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, avg_num_active_buffer_rubrics, rubric_buffer = update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubric_scores, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer)
                 metrics["objective/valid_adaptive_rubric_rate"] = valid_adaptive_rubric_rate
                 metrics["objective/avg_num_ground_truths"] = avg_num_ground_truths
                 metrics["objective/avg_num_adaptive_rubrics"] = avg_num_adaptive_rubrics
-                
+                metrics["objective/avg_num_active_buffer_rubrics"] = avg_num_active_buffer_rubrics
                 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
@@ -2362,30 +2365,19 @@ if __name__ == "__main__":
                     if finish_reasons[i] != "stop":
                         scores[i] = args.non_stop_penalty_value
         
-        if (args.apply_adaptive_rubric_reward or args.normalize_rubric_scores) and is_training:
-            with Timer("[Rubric-wise Advantage Computation] Compute advantages for each rubric inside the reward function"):
+        if is_training:
+            with Timer("[Rubric-wise Normalization Computation] Compute normalization for each rubric inside the reward function"):
                 rubric_scores_by_title = log_values.get("rubric_scores_by_title", [])
                 
-                # Debug logging to understand length mismatch
-                print(f"[DEBUG] scores length: {len(scores)}")
-                print(f"[DEBUG] rubric_scores_by_title length: {len(rubric_scores_by_title)}")
-                print(f"[DEBUG] decoded_responses length: {len(decoded_responses)}")
-                print(f"[DEBUG] ground_truths length: {len(ground_truths)}")
-                
-                # Debug: Always show the lengths for debugging
-                print(f"[DEBUG] About to process rubric advantages:")
-                print(f"  - scores: {len(scores)}")
-                print(f"  - rubric_scores_by_title: {len(rubric_scores_by_title)}")
-                
-                # Debug the mismatch - let's understand what's happening
-                print(f"[DEBUG] Investigating length mismatch:")
+                # Check lengths
+                print(f"[DEBUG] Investigating whether there is a length mismatch:")
                 print(f"  - decoded_responses: {len(decoded_responses)}")
                 print(f"  - ground_truths: {len(ground_truths)}")
                 print(f"  - datasets: {len(datasets) if hasattr(datasets, '__len__') else 'N/A'}")
                 print(f"  - scores: {len(scores)}")
                 print(f"  - rubric_scores_by_title: {len(rubric_scores_by_title)}")
                 
-                # Let's examine rubric_scores_by_title in detail
+                # Examine rubric_scores_by_title in detail
                 print(f"[DEBUG] Complete rubric_scores_by_title content:")
                 for i, entry in enumerate(rubric_scores_by_title):
                     print(f"  [{i}]: {entry}")
@@ -2404,30 +2396,9 @@ if __name__ == "__main__":
                             all_titles.update(entry.keys())
                     print(f"  - Unique rubric titles found: {sorted(all_titles)}")
                 
-                # Let's also check what datasets we have
+                # Check what datasets we have
                 if hasattr(datasets, '__len__') and len(datasets) > 0:
                     print(f"[DEBUG] First 5 datasets: {datasets[:5]}")
-                
-                # Let's examine ground_truths to see if they have rubrics
-                print(f"[DEBUG] Checking ground_truths for rubrics:")
-                rubric_count = 0
-                for i, gt in enumerate(ground_truths[:5]):
-                    try:
-                        if isinstance(gt, list):
-                            gt = gt[0]
-                        parsed = json.loads(gt)
-                        has_rubrics = "rubrics" in parsed
-                        num_rubrics = len(parsed.get("rubrics", []))
-                        print(f"  [{i}]: has_rubrics={has_rubrics}, num_rubrics={num_rubrics}")
-                        if has_rubrics:
-                            rubric_count += 1
-                    except:
-                        print(f"  [{i}]: failed to parse")
-                print(f"[DEBUG] Total ground_truths with rubrics in first 5: {rubric_count}")
-                
-                # Now let's proceed but create a mapping to handle the mismatch
-                # The key insight: rubric_scores_by_title contains scores for responses that were successfully processed
-                # We need to figure out which responses these correspond to
                 
                 # Strategy: Apply normalization to available rubric scores, then map them back
                 # Step 1: Collect all available rubric scores for normalization
@@ -2452,75 +2423,73 @@ if __name__ == "__main__":
                 
                 # Step 3: Create a full-length advantages array (initialized to 0)
                 final_advantages = [0.0] * len(scores)
+                original_scores = scores.copy()
                 
-                # Step 4: Apply advantages only to responses that have rubric scores
-                # The key assumption: rubric_scores_by_title corresponds to the FIRST N responses that have valid rubrics
-                # This is a reasonable assumption based on how apply_verifiable_reward processes responses sequentially
-                
+                # Step 4: Apply per rubric group advantages
                 print(f"[DEBUG] Applying advantages to first {len(rubric_scores_by_title)} responses")
                 
                 for i, response_scores in enumerate(rubric_scores_by_title):
-                    if i >= len(scores):
-                        print(f"[WARNING] Rubric score index {i} exceeds scores length {len(scores)}, skipping")
-                        break
+                    # if i >= len(scores):
+                    #     print(f"[WARNING] Rubric score index {i} exceeds scores length {len(scores)}, skipping")
+                    #     break
                         
-                    if response_scores:
-                        # Get weights from ground truth for this response
-                        try:
-                            # Handle case where ground_truths[i] might be wrapped in a list
-                            ground_truth_item = ground_truths[i]
-                            if isinstance(ground_truth_item, list):
-                                ground_truth_item = ground_truth_item[0]
-                            test_case = json.loads(ground_truth_item)
-                            rubrics = test_case.get("rubrics", [])
+                    # if response_scores:
+                    #     # Get weights from ground truth for this response
+                    #     try:
+                    # Handle case where ground_truths[i] might be wrapped in a list
+                    ground_truth_item = ground_truths[i]
+                    if isinstance(ground_truth_item, list):
+                        ground_truth_item = ground_truth_item[0]
+                    test_case = json.loads(ground_truth_item)
+                    rubrics = test_case.get("rubrics", [])
+                    
+                    # Create title->weight mapping
+                    title_weights = {}
+                    for rubric in rubrics:
+                        title = rubric.get("title", rubric["description"])
+                        if title not in title_weights:
+                            title_weights[title] = []
+                        title_weights[title].append(rubric["weight"])
+                    
+                    # Average weights for titles with multiple rubrics
+                    for title in title_weights:
+                        title_weights[title] = np.mean(title_weights[title])
+                    
+                    if args.normalize_rubric_scores:
+                        # Compute per-rubric weighted normalized scores
+                        weighted_scores = []
+                        total_weight = 0.0
+                        for j, (title, score) in enumerate(response_scores.items()):
+                            if title in title_stats:
+                                stats = title_stats[title]
+                                weight = title_weights.get(title, 1.0)
+                                
+                                if stats["std"] > 0:
+                                    normalized_score = (score - stats["mean"]) / stats["std"]
+                                else:
+                                    normalized_score = 0.0
+                                
+                                weighted_scores.append(normalized_score * weight)
+                                if weight > 0:
+                                    total_weight += weight
+                                
+                                if j == 0:
+                                    print(f"[DEBUG] Response {i}: title_stats = {stats}")
+                                    print(f"[DEBUG] Response {i}: title_weights = {weight}")
+                                    print(f"[DEBUG] Response {i}: response_scores = {score}")
+                                    print(f"[DEBUG] Response {i}: weighted_scores = {weighted_scores}")
+                    
+                        # Weighted average
+                        final_advantage = sum(weighted_scores) / max(total_weight, 1.0)
+                        final_advantages[i] = final_advantage
+                        scores[i] = final_advantage
+                        print(f"[DEBUG] Response {i}: Per-rubric normalized advantage = {final_advantage:.4f}")
+                        #     else:
+                        #         final_advantages[i] = scores[i]
                             
-                            # Create title->weight mapping
-                            title_weights = {}
-                            for rubric in rubrics:
-                                title = rubric.get("title", rubric["description"])
-                                if title not in title_weights:
-                                    title_weights[title] = []
-                                title_weights[title].append(rubric["weight"])
-                            
-                            # Average weights for titles with multiple rubrics
-                            for title in title_weights:
-                                title_weights[title] = np.mean(title_weights[title])
-                            
-                            # Compute weighted normalized scores
-                            weighted_scores = []
-                            total_weight = 0.0
-                            for title, score in response_scores.items():
-                                if title in title_stats:
-                                    stats = title_stats[title]
-                                    weight = title_weights.get(title, 1.0)
-                                    
-                                    if stats["std"] > 0:
-                                        normalized_score = (score - stats["mean"]) / stats["std"]
-                                    else:
-                                        normalized_score = 0.0
-                                    
-                                    weighted_scores.append(normalized_score * weight)
-                                    if weight > 0:
-                                        total_weight += weight
-                            
-                            # Weighted average
-                            final_advantage = sum(weighted_scores) / max(total_weight, 1.0)
-                            final_advantages[i] = final_advantage
-                            print(f"[DEBUG] Response {i}: advantage = {final_advantage:.4f}")
-                            
-                        except (json.JSONDecodeError, KeyError, IndexError) as e:
-                            print(f"[DEBUG] Response {i}: failed to compute advantage: {e}")
-                            final_advantages[i] = 0.0
-                
-                # Step 5: Apply advantages to all scores (most will be 0)
-                print(f"[DEBUG] Applying {len(final_advantages)} advantages to {len(scores)} scores")
-                for i, advantage in enumerate(final_advantages):
-                    scores[i] += advantage
-                
-                # Step 6: Log stats
-                for title, stats in title_stats.items():
-                    metrics[f"rubric_titles/{title}_mean"] = stats["mean"]
-                    metrics[f"rubric_titles/{title}_std"] = stats["std"]
+                        # except (json.JSONDecodeError, KeyError, IndexError) as e:
+                        #     print(f"[DEBUG] Response {i}: failed to compute advantage: {e}")
+                        #     final_advantages[i] = scores[i]
                 
                 # Log average of rubric means and stds
                 if title_stats:
@@ -2528,6 +2497,16 @@ if __name__ == "__main__":
                     avg_std = np.mean([stats["std"] for stats in title_stats.values()])
                     metrics["rubric_titles/avg_mean"] = avg_mean
                     metrics["rubric_titles/avg_std"] = avg_std
+                    
+                    num_all_zero_rubrics_ratio = sum(1 for stats in title_stats.values() if stats["mean"] == 0 and stats["std"] == 0) / len(title_stats)
+                    num_all_same_value_non_zero_rubrics_ratio = sum(1 for stats in title_stats.values() if stats["mean"] > 0 and stats["std"] == 0) / len(title_stats)
+                    metrics["rubric_titles/num_all_zero_rubrics_ratio"] = num_all_zero_rubrics_ratio
+                    metrics["rubric_titles/num_all_same_value_non_zero_rubrics_ratio"] = num_all_same_value_non_zero_rubrics_ratio
+                    
+                    if args.normalize_rubric_scores:
+                        advantage_corr = np.corrcoef(final_advantages, original_scores)[0, 1]
+                        metrics["rubric_titles/advantage_corr"] = advantage_corr
+                    
                     
                 print(f"[DEBUG] Applied rubric normalization: {len([a for a in final_advantages if a != 0])} non-zero advantages")
             
@@ -2538,6 +2517,6 @@ if __name__ == "__main__":
                 if args.apply_adaptive_rubric_reward and rubric_buffer is not None:
                     rubric_buffer["active_rubrics"] = []
 
-        return scores, metrics
+        return scores, metrics, rubric_buffer
 
     main(args, tokenizer_config, model_config, reward_fn)
