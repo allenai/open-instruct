@@ -1112,27 +1112,22 @@ class LLMRayActor:
     async def get_kv_cache_info(self):
         """Get KV cache max concurrency from the vLLM engine."""
         await self._ensure_engine_initialized()
-        # AsyncLLMEngine wraps the underlying LLMEngine
-        engine = self.llm_engine.engine
 
-        # Use the same calculation as vLLM's executor_base.py
-        # Reference: https://github.com/vllm-project/vllm/blob/b6553be1bc75f046b00046a4ad7576364d03c835/vllm/executor/executor_base.py#L119-L120
-        retries = 5
-        for attempt in range(retries):
-            num_gpu_blocks = engine.cache_config.num_gpu_blocks
-            block_size = engine.cache_config.block_size
-            max_model_len = engine.model_config.max_model_len
+        # Get vLLM configuration
+        config = await self.llm_engine.get_vllm_config()
 
-            if num_gpu_blocks is not None and num_gpu_blocks != 0:
-                # Calculate max concurrency using vLLM's formula
-                max_concurrency = (num_gpu_blocks * block_size) / max_model_len
-                logger.info(f"Calculated max_concurrency: {max_concurrency}")
-                return int(max_concurrency)
+        # Get cache configuration values
+        num_gpu_blocks = config.cache_config.num_gpu_blocks
+        block_size = config.cache_config.block_size
+        max_model_len = config.model_config.max_model_len
 
-            # Not initialized yet; wait a bit
-            await asyncio.sleep(0.2)
+        if num_gpu_blocks is not None and num_gpu_blocks != 0:
+            # Calculate max concurrency using vLLM's formula
+            max_concurrency = (num_gpu_blocks * block_size) / max_model_len
+            logger.info(f"Calculated max_concurrency: {max_concurrency}")
+            return int(max_concurrency)
 
-        logger.warning("num_gpu_blocks not initialized after retries, returning default value 1")
+        logger.warning("num_gpu_blocks not initialized, returning default value 1")
         return 1
 
 
