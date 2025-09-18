@@ -373,7 +373,7 @@ class LLMRayActor:
                     logger.info(
                         f"[_q_get_async] Attempt {attempt}: Trying to get from prompt_queue: {self.prompt_queue}"
                     )
-                result = await asyncio.to_thread(self.prompt_queue.get, timeout=1.0)
+                result = await self._PROFILE_PROMPT_QUEUE_GET()
                 logger.info(f"[_q_get_async] ✅ Got request after {attempt} attempts! Type: {type(result)}")
                 return result
             except Exception as e:
@@ -381,6 +381,10 @@ class LLMRayActor:
                 if attempt % 100 == 1:  # Log every 100 attempts
                     logger.debug(f"[_q_get_async] Timeout on attempt {attempt}: {e}")
                 await asyncio.sleep(0.05)
+
+    async def _PROFILE_PROMPT_QUEUE_GET(self):
+        """Profiling wrapper for prompt queue get operation."""
+        return await asyncio.to_thread(self.prompt_queue.get, timeout=1.0)
 
     async def _should_stop(self) -> bool:
         now = time.perf_counter()
@@ -417,11 +421,11 @@ class LLMRayActor:
             # Check if we need more requests
             current_unfinished = len(self.active_tasks)
             if current_unfinished >= self.inference_batch_size:
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.1)  # Short sleep to check more frequently
                 continue
 
             self.logger.debug(f"Waiting for request from queue (active_tasks={current_unfinished})")
-            request = await self._q_get_async()
+            request = await self._PROFILE_PREFETCH_GET_REQUEST()
             if request is None:
                 # Likely should_stop; continue loop to honor stop semantics
                 continue
@@ -448,6 +452,10 @@ class LLMRayActor:
 
             self.logger.info("[_prefetch_requests] Adding request to engine...")
             await self._add_request(request)
+
+    async def _PROFILE_PREFETCH_GET_REQUEST(self):
+        """Profiling wrapper for prefetch request get."""
+        return await self._q_get_async()
 
     async def _add_request(self, request: PromptRequest):
         """Add a request to the async LLM engine."""
@@ -498,11 +506,15 @@ class LLMRayActor:
         logger.info(f"[_insert_result_to_queue] Queue object: {results_queue}")
         logger.info(f"[_insert_result_to_queue] Result type: {type(result)}")
         try:
-            results_queue.put(result)
+            self._PROFILE_RESULTS_QUEUE_PUT(results_queue, result, queue_type)
             logger.info(f"[_insert_result_to_queue] ✅ Successfully put result into {queue_type} queue")
         except Exception as e:
             logger.error(f"[_insert_result_to_queue] ❌ Failed to put result into {queue_type} queue: {e}")
             raise
+
+    def _PROFILE_RESULTS_QUEUE_PUT(self, results_queue, result, queue_type):
+        """Profiling wrapper for results queue put operation."""
+        results_queue.put(result)
 
     async def _should_exit(self) -> bool:
         """Determine if the processing loop should exit.
@@ -522,6 +534,10 @@ class LLMRayActor:
 
         # Case 2: stop requested and no pending work - exit
         if stop_requested and active_tasks == 0:
+            return True
+
+        # Case 3: no work left at all - exit
+        if active_tasks == 0:
             return True
 
         # Otherwise, continue processing
@@ -713,6 +729,10 @@ class LLMRayActor:
         if not base_request_ids:
             return 0
 
+        return await self._PROFILE_CHECK_COMPLETED_REQUESTS(base_request_ids)
+
+    async def _PROFILE_CHECK_COMPLETED_REQUESTS(self, base_request_ids: List[str]):
+        """Profiling wrapper for checking completed requests."""
         processed_count = 0
         current_time = time.perf_counter()
 
@@ -783,6 +803,10 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
+        return await self._PROFILE_PROCESS_FROM_QUEUE_MAIN(timeout)
+
+    async def _PROFILE_PROCESS_FROM_QUEUE_MAIN(self, timeout: float):
+        """Profiling wrapper for main process_from_queue logic."""
         # Ensure engine and prefetch are initialized
         await self._ensure_engine_initialized()
         await self._ensure_prefetch_started()
