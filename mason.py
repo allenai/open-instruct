@@ -906,7 +906,7 @@ def main():
         retry=beaker.BeakerRetrySpec(allowed_task_retries=args.max_retries)
     )
     exp = beaker_client.experiment.create(spec=experiment_spec)
-    console.log(f"Kicked off Beaker job. https://beaker.org/ex/{exp.id}")
+    console.log(f"Kicked off Beaker job. https://beaker.org/ex/{exp.experiment.id}")
 
 
 if __name__ == "__main__":
