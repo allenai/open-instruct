@@ -20,6 +20,7 @@ import dataclasses
 import logging
 import os
 import time
+import traceback
 from collections import defaultdict
 from concurrent import futures
 from datetime import timedelta
@@ -732,7 +733,7 @@ class LLMRayActor:
             )
 
             prompt_and_tool_output_token = prompt_token_ids_list + request_token_ids_list + tool_output_token_ids
-            excess = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len
+            excess = len(prompt_and_tool_output_token) - self.llm_engine.engine.model_config.max_model_len
             if excess > 0:
                 tool_output_token_ids = tool_output_token_ids[:-excess]
                 can_continue = False
@@ -938,7 +939,14 @@ class LLMRayActor:
                 completed_base_request_ids = set()
                 for task in done:
                     logger.info(f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] About to await completed task {task}")
-                    await task  # Get result or raise exception
+                    try:
+                        await task  # Get result or raise exception
+                    except Exception as e:
+                        # Log the error with full traceback and re-raise to crash the process
+                        logger.error(f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Task {task} failed with exception: {e}")
+                        logger.error(f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Full traceback:\n{traceback.format_exc()}")
+                        logger.error("[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Re-raising to crash the Ray actor")
+                        raise
                     logger.info(f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed awaiting task {task}")
 
                     # Remove the completed task using its name
