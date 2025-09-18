@@ -55,6 +55,7 @@ import shutil
 import socket
 import threading
 import time
+import traceback
 from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
@@ -1398,6 +1399,9 @@ def accumulate_inference_batches(
     all_ground_truths = []
     all_datasets = []
     all_raw_queries = []
+    logger.info(
+        f"[accumulate_inference_batches] 🔍 Starting to accumulate {num_prompts} prompts from queue: {inference_results_Q}"
+    )
     for i in tqdm(
         range(num_prompts),
         total=num_prompts,
@@ -1405,7 +1409,17 @@ def accumulate_inference_batches(
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     ):
-        result = inference_results_Q.get(timeout=timeout)
+        logger.info(
+            f"[accumulate_inference_batches] 🕓 Waiting for result {i + 1}/{num_prompts} from inference_results_Q"
+        )
+        try:
+            result = inference_results_Q.get(timeout=timeout)
+            logger.info(
+                f"[accumulate_inference_batches] ✅ Got result {i + 1}/{num_prompts}: type={type(result)}, dataset_index={getattr(result, 'dataset_index', 'unknown')}"
+            )
+        except Exception as e:
+            logger.error(f"[accumulate_inference_batches] ❌ Failed to get result {i + 1}/{num_prompts}: {e}")
+            raise
 
         if isinstance(result, ShutdownSentinel):
             return result, None
@@ -1846,6 +1860,12 @@ def data_preparation_thread(
             logger.warning(f"No responses in batch {training_step}.")
 
         # Put the packed sequences and metrics into the output queue
+        logger.info(
+            f"[data_preparation_thread] 📦 Putting packed data into packed_sequences_Q for step {training_step}"
+        )
+        logger.info(
+            f"[data_preparation_thread]   - B={B}, responses_count={len(responses)}, num_new_tokens={num_new_tokens}"
+        )
         packed_sequences_Q.put(
             {
                 "packed_sequences": packed_sequences,  # for debugging purposes
@@ -1856,6 +1876,7 @@ def data_preparation_thread(
                 "B": B,
             }
         )
+        logger.info(f"[data_preparation_thread] ✅ Successfully put packed data for step {training_step}")
 
 
 def setup_runtime_variables(args: Args) -> Args:
@@ -2093,19 +2114,33 @@ def split_and_insert_batch(
     is_eval: bool,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    for idx, query, ground_truth, dataset, raw_query in zip(
-        batch.indices, batch.queries, batch.ground_truths, batch.datasets, batch.raw_queries
+    logger.info(
+        f"[split_and_insert_batch] 📤 Starting to insert {len(batch.indices)} prompts for step {training_step}, is_eval={is_eval}"
+    )
+    logger.info(f"[split_and_insert_batch] Queue object: {param_prompt_Q}")
+
+    for i, (idx, query, ground_truth, dataset, raw_query) in enumerate(
+        zip(batch.indices, batch.queries, batch.ground_truths, batch.datasets, batch.raw_queries)
     ):
         pending_queries_map.insert(idx, query, ground_truth, dataset, raw_query)
-        param_prompt_Q.put(
-            PromptRequest(
-                prompt=query,
-                generation_config=generation_config,
-                training_step=training_step,
-                dataset_index=idx,
-                is_eval=is_eval,
-            )
+        prompt_req = PromptRequest(
+            prompt=query,
+            generation_config=generation_config,
+            training_step=training_step,
+            dataset_index=idx,
+            is_eval=is_eval,
         )
+        logger.info(
+            f"[split_and_insert_batch] Putting prompt {i + 1}/{len(batch.indices)}: step={training_step}, idx={idx}, is_eval={is_eval}"
+        )
+        try:
+            param_prompt_Q.put(prompt_req)
+            logger.info(f"[split_and_insert_batch] ✅ Successfully queued prompt for idx={idx}")
+        except Exception as e:
+            logger.error(f"[split_and_insert_batch] ❌ Failed to queue prompt for idx={idx}: {e}")
+            raise
+
+    logger.info(f"[split_and_insert_batch] ✅ Finished inserting all {len(batch.indices)} prompts")
 
 
 def load_data_from_packing_thread(
@@ -2118,12 +2153,18 @@ def load_data_from_packing_thread(
                 logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
                 return None, {}, num_total_tokens
             try:
+                logger.info(f"[Main Thread] 🕓 Waiting for packed_sequences_Q.get (queue={packed_sequences_Q})")
                 packed_data = packed_sequences_Q.get(timeout=30.0)
+                logger.info(
+                    f"[Main Thread] ✅ Got packed data: B={packed_data.get('B', 'unknown')}, responses_count={packed_data.get('responses_count', 'unknown')}"
+                )
                 break
             except Empty:
                 # check that everything is still alive
                 health_check_fn()
-                logger.warning("[Main Thread] Timeout waiting for packed sequences. Retrying...")
+                logger.warning(
+                    "[Main Thread] ⚠️ Timeout waiting for packed sequences. Queue might be empty or blocked. Retrying..."
+                )
         data_thread_metrics = packed_data["metrics"]
         B = packed_data["B"]
         collated_data = packed_data["collated_data"]
@@ -2150,64 +2191,82 @@ def weight_sync_thread(
     if resume_training_step > 1:
         weight_sync_trigger_event.set()
 
-    while not stop_event.is_set():
-        # Wait for weight sync trigger from main thread
-        if not weight_sync_trigger_event.wait(timeout=1.0):
-            continue
+    try:
+        while not stop_event.is_set():
+            # Wait for weight sync trigger from main thread
+            if not weight_sync_trigger_event.wait(timeout=1.0):
+                continue
 
-        # Clear the event for next iteration
-        weight_sync_trigger_event.clear()
+            # Clear the event for next iteration
+            weight_sync_trigger_event.clear()
 
-        with Timer("[Weight Sync]") as timer:
-            logger.debug("[Weight Sync Thread] Starting weight sync")
+            with Timer("[Weight Sync]") as timer:
+                logger.debug("[Weight Sync Thread] Starting weight sync")
 
-            # Set actors to stop
-            ray.get(actor_manager.set_should_stop.remote(True))
-            logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
+                # Set actors to stop
+                ray.get(actor_manager.set_should_stop.remote(True))
+                logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
 
-            # Broadcast weights to vLLM engines
-            # First get the futures
-            weight_broadcast_futures: List[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+                # Broadcast weights to vLLM engines
+                # First get the futures
+                weight_broadcast_futures: List[ray.ObjectRef] = [
+                    m.broadcast_to_vllm.remote() for m in policy_group.models
+                ]
 
-            # Wait for all weight updates to complete
-            ray_get_with_progress(
-                weight_broadcast_futures,
-                desc="[Weight Sync Thread] Waiting for weight updates to complete",
-                enable=args.verbose,
-            )
+                # Wait for all weight updates to complete
+                ray_get_with_progress(
+                    weight_broadcast_futures,
+                    desc="[Weight Sync Thread] Waiting for weight updates to complete",
+                    enable=args.verbose,
+                )
 
-            # Allow actors to resume
-            ray.get(actor_manager.set_should_stop.remote(False))
-            logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
+                # Allow actors to resume
+                ray.get(actor_manager.set_should_stop.remote(False))
+                logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
 
-        try:
-            weight_sync_metrics_Q.put_nowait({"time/weight_sync": timer.duration})
-        except Full:
-            logger.warning("[Weight Sync Thread] weight sync metrics queue full, skipping metric")
-
-    logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
+            try:
+                weight_sync_metrics_Q.put_nowait({"time/weight_sync": timer.duration})
+            except Full:
+                logger.warning("[Weight Sync Thread] weight sync metrics queue full, skipping metric")
+    except Exception as e:
+        logger.error(f"[Weight Sync Thread] ❌ Fatal error in weight sync thread: {e}")
+        logger.error(f"[Weight Sync Thread] Full traceback:\n{traceback.format_exc()}")
+        # Re-raise to ensure the future.result() will propagate the error
+        raise
+    finally:
+        logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
 
 
 def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q):
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
-    while not stop_event.is_set():
-        with Timer("🔥 Generation time") as timer:
-            processed_results = ray_get_with_progress(
-                [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
-                desc="[Generate Thread] Waiting for vLLM engines to process",
-                enable=args.verbose,
-            )
-            num_processed = sum(int(result) for result in processed_results)
-            # Suppress timing output if nothing was processed
-            if num_processed == 0:
-                timer.noop = True
-        if num_processed > 0:
-            try:
-                generate_metrics_Q.put_nowait({"time/generation": timer.duration})
-            except Full:
-                logger.warning("[Generate Thread] generate metrics queue full, skipping metric")
-    logger.info("[Generate Thread] 🛑 Stopping generation thread")
+    logger.info(f"[Generate Thread] Number of vLLM engines: {len(vllm_engines)}")
+    iteration = 0
+    try:
+        while not stop_event.is_set():
+            iteration += 1
+            with Timer("🔥 Generation time") as timer:
+                processed_results = ray_get_with_progress(
+                    [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
+                    desc=f"[Generate Thread] Iteration {iteration}: Waiting for vLLM engines to process",
+                    enable=args.verbose,
+                )
+                num_processed = sum(int(result) for result in processed_results)
+                # Suppress timing output if nothing was processed
+                if num_processed == 0:
+                    timer.noop = True
+            if num_processed > 0:
+                try:
+                    generate_metrics_Q.put_nowait({"time/generation": timer.duration})
+                except Full:
+                    logger.warning("[Generate Thread] generate metrics queue full, skipping metric")
+    except Exception as e:
+        logger.error(f"[Generate Thread] ❌ Fatal error in generation thread: {e}")
+        logger.error(f"[Generate Thread] Full traceback:\n{traceback.format_exc()}")
+        # Re-raise to ensure the future.result() will propagate the error
+        raise
+    finally:
+        logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
 def one_training_step(
