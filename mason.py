@@ -899,7 +899,7 @@ def main():
         console.print(Text(full_command))
     if is_external_user:
         return
-    experiment_spec = beaker.ExperimentSpec(
+    experiment_spec = beaker.BeakerExperimentSpec(
         description=args.description,
         tasks=[make_task_spec(args, full_command, i, beaker_secrets, whoami, args.resumable) for i, full_command in enumerate(full_commands)],
         budget=args.budget,
