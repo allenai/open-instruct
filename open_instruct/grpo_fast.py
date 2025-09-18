@@ -2242,11 +2242,6 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
                 enable=args.verbose,
             )
             num_processed = sum(int(result) for result in processed_results)
-            # Only log every 100 iterations or when something was actually processed
-            if iteration % 100 == 0 or num_processed > 0:
-                logger.info(
-                    f"[Generate Thread] Iteration {iteration}: Processed {num_processed} requests across all engines"
-                )
             # Suppress timing output if nothing was processed
             if num_processed == 0:
                 timer.noop = True

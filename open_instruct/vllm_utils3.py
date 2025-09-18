@@ -349,7 +349,9 @@ class LLMRayActor:
         """Start the background prefetch task if not already running."""
         if self.prefetch_task is None or self.prefetch_task.done():
             # Ensure engine is initialized before prefetching
+            logger.info("[_ensure_prefetch_started] About to await _ensure_engine_initialized before prefetching")
             await self._ensure_engine_initialized()
+            logger.info("[_ensure_prefetch_started] Completed _ensure_engine_initialized, creating prefetch task")
             self.prefetch_task = asyncio.create_task(self._prefetch_requests())
 
     async def _q_get_async(self):
@@ -358,14 +360,20 @@ class LLMRayActor:
         get_async = getattr(self.prompt_queue, "get_async", None)
         if callable(get_async):
             logger.info(f"[_q_get_async] Using native async get from queue: {self.prompt_queue}")
-            return await get_async()
+            logger.info("[_q_get_async] About to await get_async()")
+            result = await get_async()
+            logger.info("[_q_get_async] Completed get_async()")
+            return result
         # Fallback: poll via a background thread with timeout
         attempt = 0
         while True:
             attempt += 1
             # If a weight sync is requested, yield control so caller can stop
+            logger.info(f"[_q_get_async] Attempt {attempt}: About to await _should_stop() check")
             if await self._should_stop():
+                logger.info("[_q_get_async] Should stop is True, about to await asyncio.sleep(0.1)")
                 await asyncio.sleep(0.1)
+                logger.info("[_q_get_async] Completed asyncio.sleep(0.1) after should_stop")
                 # Returning None signals caller to re-check should_stop and continue
                 return None
             try:
@@ -373,18 +381,25 @@ class LLMRayActor:
                     logger.info(
                         f"[_q_get_async] Attempt {attempt}: Trying to get from prompt_queue: {self.prompt_queue}"
                     )
+                logger.info(f"[_q_get_async] Attempt {attempt}: About to await _PROFILE_PROMPT_QUEUE_GET")
                 result = await self._PROFILE_PROMPT_QUEUE_GET()
+                logger.info(f"[_q_get_async] Completed _PROFILE_PROMPT_QUEUE_GET on attempt {attempt}")
                 logger.info(f"[_q_get_async] ✅ Got request after {attempt} attempts! Type: {type(result)}")
                 return result
             except Exception as e:
                 # Likely timeout; just loop
                 if attempt % 100 == 1:  # Log every 100 attempts
                     logger.debug(f"[_q_get_async] Timeout on attempt {attempt}: {e}")
+                logger.info(f"[_q_get_async] About to await asyncio.sleep(0.05) after exception on attempt {attempt}")
                 await asyncio.sleep(0.05)
+                logger.info(f"[_q_get_async] Completed asyncio.sleep(0.05) after exception on attempt {attempt}")
 
     async def _PROFILE_PROMPT_QUEUE_GET(self):
         """Profiling wrapper for prompt queue get operation."""
-        return await asyncio.to_thread(self.prompt_queue.get, timeout=1.0)
+        logger.info("[_PROFILE_PROMPT_QUEUE_GET] About to await asyncio.to_thread for prompt_queue.get")
+        result = await asyncio.to_thread(self.prompt_queue.get, timeout=1.0)
+        logger.info("[_PROFILE_PROMPT_QUEUE_GET] Completed asyncio.to_thread for prompt_queue.get")
+        return result
 
     async def _should_stop(self) -> bool:
         now = time.perf_counter()
@@ -396,7 +411,9 @@ class LLMRayActor:
 
             try:
                 # Use asyncio.wait_for to properly handle timeout in async context
+                logger.info("[_should_stop] About to await asyncio.wait_for on should_stop remote ref")
                 value = await asyncio.wait_for(ref, timeout=0.1)
+                logger.info(f"[_should_stop] Completed asyncio.wait_for, value={value}")
                 self._should_stop_value = bool(value)
                 self._last_should_stop_update = now
             except asyncio.TimeoutError:
@@ -410,22 +427,35 @@ class LLMRayActor:
     async def _prefetch_requests(self):
         """Prefetches requests from queue."""
         # Ensure engine is initialized before processing any requests
+        logger.info("[_prefetch_requests] About to await _ensure_engine_initialized")
         await self._ensure_engine_initialized()
+        logger.info("[_prefetch_requests] Completed _ensure_engine_initialized")
 
         while True:
             # Don't consume requests during weight sync (regardless of inflight_updates)
+            logger.info("[_prefetch_requests] About to await _should_stop() check")
             if await self._should_stop():
+                logger.info("[_prefetch_requests] Should stop is True, about to await asyncio.sleep(0.1)")
                 await asyncio.sleep(0.1)
+                logger.info("[_prefetch_requests] Completed asyncio.sleep(0.1) after should_stop")
                 continue
 
             # Check if we need more requests
             current_unfinished = len(self.active_tasks)
             if current_unfinished >= self.inference_batch_size:
+                logger.info(
+                    f"[_prefetch_requests] Batch full ({current_unfinished}/{self.inference_batch_size}), about to await asyncio.sleep(0.1)"
+                )
                 await asyncio.sleep(0.1)  # Short sleep to check more frequently
+                logger.info("[_prefetch_requests] Completed asyncio.sleep(0.1) for batch full")
                 continue
 
             self.logger.debug(f"Waiting for request from queue (active_tasks={current_unfinished})")
+            logger.info(
+                f"[_prefetch_requests] About to await _PROFILE_PREFETCH_GET_REQUEST (active_tasks={current_unfinished})"
+            )
             request = await self._PROFILE_PREFETCH_GET_REQUEST()
+            logger.info("[_prefetch_requests] Completed _PROFILE_PREFETCH_GET_REQUEST")
             if request is None:
                 # Likely should_stop; continue loop to honor stop semantics
                 continue
@@ -435,7 +465,9 @@ class LLMRayActor:
             )
 
             # Check again AFTER getting request but BEFORE adding to engine
+            logger.info("[_prefetch_requests] About to await second _should_stop() check after getting request")
             if await self._should_stop():
+                logger.info("[_prefetch_requests] Should stop is True after getting request")
                 # Put the request back in the queue for later processing (non-blocking if possible)
                 put_nowait = getattr(self.prompt_queue, "put_nowait", None)
                 try:
@@ -447,16 +479,22 @@ class LLMRayActor:
                     # As a last resort, fall back to blocking put
                     self.prompt_queue.put(request)
                 self.logger.debug("Weight sync in progress, putting request back in queue")
+                logger.info("[_prefetch_requests] About to await asyncio.sleep(0.1) after putting request back")
                 await asyncio.sleep(0.1)
+                logger.info("[_prefetch_requests] Completed asyncio.sleep(0.1) after putting request back")
                 continue
 
             self.logger.info("[_prefetch_requests] Adding request to engine...")
+            logger.info("[_prefetch_requests] About to await _add_request")
             await self._add_request(request)
+            logger.info("[_prefetch_requests] Completed _add_request")
 
     async def _PROFILE_PREFETCH_GET_REQUEST(self):
         """Profiling wrapper for prefetch request get."""
         logger.info("[_PROFILE_PREFETCH_GET_REQUEST] Attempting to get request from queue")
+        logger.info("[_PROFILE_PREFETCH_GET_REQUEST] About to await _q_get_async")
         result = await self._q_get_async()
+        logger.info("[_PROFILE_PREFETCH_GET_REQUEST] Completed _q_get_async")
         logger.info(f"[_PROFILE_PREFETCH_GET_REQUEST] Got result: {type(result)}")
         return result
 
@@ -559,11 +597,13 @@ class LLMRayActor:
         Wraps the async generator to return a single RequestOutput.
         """
         logger.info(f"[generate_one_completion] Adding request {request_id} to engine")
+        logger.info(f"[generate_one_completion] About to await add_request for {request_id}")
         generator = await self.llm_engine.add_request(request_id, prompt, sampling_params)
         logger.info(f"[generate_one_completion] Got generator for {request_id}, starting iteration")
 
         outputs = []
         iteration_count = 0
+        logger.info(f"[generate_one_completion] About to start async iteration over generator for {request_id}")
         async for output in generator:
             iteration_count += 1
             if iteration_count % 100 == 0:
@@ -615,6 +655,7 @@ class LLMRayActor:
         while True:
             # Generate completion
             logger.info(f"[_process_request] Calling generate_one_completion for {sub_request_id}")
+            logger.info(f"[_process_request] About to await generate_one_completion for {sub_request_id}")
             output = await self.generate_one_completion(sub_request_id, current_prompt, current_sampling_params)
             logger.info(f"[_process_request] Completed generate_one_completion for {sub_request_id}")
 
@@ -644,7 +685,9 @@ class LLMRayActor:
 
             tool, stop_str = tool_info
 
+            logger.info(f"[_process_request] About to await asyncio.to_thread for tool execution on {sub_request_id}")
             tool_result = await asyncio.to_thread(tool, output.outputs[0].text)
+            logger.info(f"[_process_request] Completed asyncio.to_thread for tool execution on {sub_request_id}")
 
             # Update tracking
             num_calls += 1
@@ -707,7 +750,9 @@ class LLMRayActor:
             setattr(complete_output, "tool_called", tool_called)
 
         # Add to request_outputs with lock
+        logger.info(f"[_process_request] About to acquire request_outputs_lock for {sub_request_id}")
         async with self.request_outputs_lock:
+            logger.info(f"[_process_request] Acquired request_outputs_lock for {sub_request_id}")
             if base_request_id not in self.request_outputs:
                 self.request_outputs[base_request_id] = vllm.RequestOutput(
                     request_id=base_request_id,
@@ -732,6 +777,9 @@ class LLMRayActor:
         if not base_request_ids:
             return 0
 
+        logger.info(
+            f"[_check_and_process_completed_requests] About to await _PROFILE_CHECK_COMPLETED_REQUESTS with {len(base_request_ids)} requests"
+        )
         return await self._PROFILE_CHECK_COMPLETED_REQUESTS(base_request_ids)
 
     async def _PROFILE_CHECK_COMPLETED_REQUESTS(self, base_request_ids: List[str]):
@@ -740,7 +788,11 @@ class LLMRayActor:
         current_time = time.perf_counter()
 
         # Acquire lock once for entire operation
+        logger.info(
+            f"[_PROFILE_CHECK_COMPLETED_REQUESTS] About to acquire request_outputs_lock for {len(base_request_ids)} requests"
+        )
         async with self.request_outputs_lock:
+            logger.info("[_PROFILE_CHECK_COMPLETED_REQUESTS] Acquired request_outputs_lock")
             for base_request_id in base_request_ids:
                 # Skip if not in outputs or metadata
                 if base_request_id not in self.request_outputs or base_request_id not in self.request_metadata:
@@ -806,13 +858,19 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
+        logger.info(f"[process_from_queue] About to await _PROFILE_PROCESS_FROM_QUEUE_MAIN with timeout={timeout}")
         return await self._PROFILE_PROCESS_FROM_QUEUE_MAIN(timeout)
 
     async def _PROFILE_PROCESS_FROM_QUEUE_MAIN(self, timeout: float):
         """Profiling wrapper for main process_from_queue logic."""
         # Ensure engine and prefetch are initialized
+        logger.info("[_PROFILE_PROCESS_FROM_QUEUE_MAIN] About to await _ensure_engine_initialized")
         await self._ensure_engine_initialized()
+        logger.info(
+            "[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed _ensure_engine_initialized, about to await _ensure_prefetch_started"
+        )
         await self._ensure_prefetch_started()
+        logger.info("[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed _ensure_prefetch_started")
 
         iteration_count = 0
         total_processed = 0
@@ -832,21 +890,31 @@ class LLMRayActor:
 
                 if tasks_to_wait:
                     # Wait for generation tasks with timeout
+                    logger.info(
+                        f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] About to await asyncio.wait for {len(tasks_to_wait)} tasks"
+                    )
                     done, pending = await asyncio.wait(
                         tasks_to_wait, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    logger.info(
+                        f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed asyncio.wait, {len(done)} done, {len(pending)} pending"
                     )
                 else:
                     # No active tasks, just sleep for a bit
                     # Log this to understand why we have no active tasks
                     if iteration_count % 10 == 0:
                         self.logger.info(f"[process_from_queue] No active tasks, iteration {iteration_count}")
+                    logger.info("[_PROFILE_PROCESS_FROM_QUEUE_MAIN] About to await asyncio.sleep(1) - no active tasks")
                     await asyncio.sleep(1)
+                    logger.info("[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed asyncio.sleep(1)")
                     done = set()
 
                 # Process completed tasks and collect their base request IDs
                 completed_base_request_ids = set()
                 for task in done:
+                    logger.info(f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] About to await completed task {task}")
                     await task  # Get result or raise exception
+                    logger.info(f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed awaiting task {task}")
 
                     # Remove the completed task using its name
                     task_name = task.get_name()
@@ -858,8 +926,14 @@ class LLMRayActor:
 
                 # Check any base requests that just had tasks complete
                 if completed_base_request_ids:
+                    logger.info(
+                        f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] About to await _check_and_process_completed_requests for {len(completed_base_request_ids)} base requests"
+                    )
                     processed_count = await self._check_and_process_completed_requests(
                         list(completed_base_request_ids)
+                    )
+                    logger.info(
+                        f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed _check_and_process_completed_requests, processed {processed_count}"
                     )
                     total_processed += processed_count
 
@@ -867,7 +941,13 @@ class LLMRayActor:
                 # (e.g., completed earlier in a different iteration)
                 if self.request_outputs:
                     all_base_request_ids = list(self.request_outputs.keys())
+                    logger.info(
+                        f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] About to await opportunistic _check_and_process_completed_requests for {len(all_base_request_ids)} base requests"
+                    )
                     processed_count = await self._check_and_process_completed_requests(all_base_request_ids)
+                    logger.info(
+                        f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed opportunistic check, processed {processed_count}"
+                    )
                     total_processed += processed_count
 
                 if self.verbose and iteration_count % 10000 == 0:
@@ -877,13 +957,21 @@ class LLMRayActor:
         finally:
             # Wait for all active tasks to complete only if inflight_updates is False
             if not self.inflight_updates:
+                logger.info(
+                    f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] About to await asyncio.gather for {len(self.active_tasks)} active tasks (cleanup)"
+                )
                 await asyncio.gather(*self.active_tasks.values(), return_exceptions=True)
+                logger.info("[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed asyncio.gather for active tasks")
 
             # Always process any remaining completed requests on exit
             # (prefetch is paused by should_stop, so this is safe)
             if self.request_outputs:
                 all_base_request_ids = list(self.request_outputs.keys())
+                logger.info(
+                    f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] About to await final _check_and_process_completed_requests for {len(all_base_request_ids)} base requests"
+                )
                 processed_count = await self._check_and_process_completed_requests(all_base_request_ids)
+                logger.info(f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed final check, processed {processed_count}")
                 total_processed += processed_count
 
             # Count total processed
