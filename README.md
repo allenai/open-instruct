@@ -12,8 +12,8 @@ We also support some evaluations natively in the codebase, but these are now unm
 
 The lastest details on open post-training are found in [TÜLU 3: Pushing Frontiers in Open Language Model Post-Training](https://arxiv.org/abs/2411.15124).
 
-Please see our first paper [How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources](https://arxiv.org/abs/2306.04751) for more thoughts behind this project and our initial findings. 
-Please see our second paper [Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2](https://arxiv.org/abs/2311.10702) for results using Llama-2 models and direct preference optimization. We are still working on more models. 
+Please see our first paper [How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources](https://arxiv.org/abs/2306.04751) for more thoughts behind this project and our initial findings.
+Please see our second paper [Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2](https://arxiv.org/abs/2311.10702) for results using Llama-2 models and direct preference optimization. We are still working on more models.
 For more recent results involving PPO and DPO please see our third paper [Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback](https://arxiv.org/abs/2406.09279).
 
 <p align="center" width="100%">
@@ -63,7 +63,7 @@ docker build . \
 
 # if you are internally at AI2, you can create a beaker image like this:
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
-beaker image delete $beaker_user/open_instruct_dev 
+beaker image delete $beaker_user/open_instruct_dev
 beaker image create open_instruct_dev -n open_instruct_dev -w ai2/$beaker_user
 ```
 
@@ -76,23 +76,19 @@ After having setup the environment, you are ready to launch some experiments. We
 
 ### Finetuning
 
-You can run the following commands for getting started:
+You can run the following command for getting started:
 
 ```bash
-# quick debugging run using 1 GPU
-bash scripts/train/finetune/mini.sh
 # train an 8B tulu3 model using 8 GPU
-bash scripts/train/finetune/tulu_finetune_mix.sh
+bash scripts/train/tulu3/finetune_8b.sh
 ```
 
 
 ### Preference Tuning
 
 ```bash
-# quick debugging run using 1 GPU
-bash scripts/train/dpo/mini.sh
 # train an 8B tulu3 model using 8 GPU
-bash scripts/train/dpo/tulu_preference_mix.sh
+bash scripts/train/tulu3/dpo_8b.sh
 ```
 
 
@@ -101,9 +97,7 @@ bash scripts/train/dpo/tulu_preference_mix.sh
 ```bash
 # quick debugging run using 1 GPU (0.5 for inference, 0.5 for training)
 # here we are using a small model, so it's prob not gonna train good models, but it's easy to test run and print stuff.
-bash scripts/train/rlvr/ppo_mini.sh
-bash scripts/train/rlvr/ppo2_mini.sh # experimental support (ppo2 adds kl to loss directly instead of using KL penalty in rewards)
-bash scripts/train/rlvr/grpo_mini.sh
+bash scripts/train/debug/single_gpu_on_beaker.sh
 
 # train an 8B tulu3 model using 8 GPU (1 for inference, 7 for training)
 bash scripts/train/rlvr/tulu_rlvr.sh
@@ -126,7 +120,7 @@ Run the tests with `uv run pytest`.
 ### Repo structure
 ```
 ├── assets/                     <- Images, licenses, etc.
-├── configs/                    
+├── configs/
 |     ├── beaker_configs/       <- AI2 Beaker configs
 |     ├── ds_configs/           <- DeepSpeed configs
 |     └── train_configs/        <- Training configs
@@ -165,7 +159,7 @@ If you used this repository or our models, please cite our work:
 Tulu 1:
 ```bibtex
 @misc{wang2023far,
-   title={How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources}, 
+   title={How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources},
    author={Yizhong Wang and Hamish Ivison and Pradeep Dasigi and Jack Hessel and Tushar Khot and Khyathi Raghavi Chandu and David Wadden and Kelsey MacMillan and Noah A. Smith and Iz Beltagy and Hannaneh Hajishirzi},
    year={2023},
    eprint={2306.04751},
@@ -177,7 +171,7 @@ Tulu 1:
 Tulu 2:
 ```bibtex
 @misc{ivison2023camels,
-      title={Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2}, 
+      title={Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2},
       author={Hamish Ivison and Yizhong Wang and Valentina Pyatkin and Nathan Lambert and Matthew Peters and Pradeep Dasigi and Joel Jang and David Wadden and Noah A. Smith and Iz Beltagy and Hannaneh Hajishirzi},
       year={2023},
       eprint={2311.10702},
@@ -189,7 +183,7 @@ Tulu 2:
 Tulu 2.5:
 ```bibtex
 @misc{ivison2024unpacking,
-      title={Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback}, 
+      title={Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback},
       author={Hamish Ivison and Yizhong Wang and Jiacheng Liu and Zeqiu Wu and Valentina Pyatkin and Nathan Lambert and Noah A. Smith and Yejin Choi and Hannaneh Hajishirzi},
       year={2024},
       eprint={2406.09279},
