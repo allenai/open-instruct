@@ -522,6 +522,10 @@ class LLMRayActor:
         Returns:
             bool: True if the loop should exit, False otherwise.
         """
+        # Never exit - let generate_thread control the lifecycle
+        return False
+
+        # Original logic (disabled to prevent early exit):
         # Check stop condition first
         stop_requested = await self._should_stop()
 
