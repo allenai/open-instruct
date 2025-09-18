@@ -27,7 +27,7 @@ cluster=ai2/jupiter-cirrascale-2
 
 NUM_GPUS=${NUM_GPUS:-8}
 
-python mason.py \
+uv run python mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
     --workspace ai2/tulu-thinker \
