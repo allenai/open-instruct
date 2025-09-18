@@ -945,9 +945,28 @@ class LLMRayActor:
                 # Process completed tasks and collect their base request IDs
                 completed_base_request_ids = set()
                 for task in done:
+                    task_name = task.get_name()
+
+                    # Check if task was cancelled before trying to await it
+                    if task.cancelled():
+                        logger.warning(
+                            f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Task {task_name} was cancelled, removing from active tasks"
+                        )
+                        if task_name in self.active_tasks:
+                            self.active_tasks.pop(task_name, None)
+                        continue
+
                     logger.info(f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] About to await completed task {task}")
                     try:
                         await task  # Get result or raise exception
+                    except asyncio.CancelledError:
+                        # Task was cancelled after being marked done but before we could await it
+                        logger.warning(
+                            f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Task {task_name} raised CancelledError, removing from active tasks"
+                        )
+                        if task_name in self.active_tasks:
+                            self.active_tasks.pop(task_name, None)
+                        continue
                     except Exception as e:
                         # Log the error with full traceback and re-raise to crash the process
                         logger.error(f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Task {task} failed with exception: {e}")
@@ -957,7 +976,6 @@ class LLMRayActor:
                     logger.info(f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed awaiting task {task}")
 
                     # Remove the completed task using its name
-                    task_name = task.get_name()
                     if task_name in self.active_tasks:
                         self.active_tasks.pop(task_name, None)
                         # Extract base request ID from task name (e.g., "train_1_43039_2" -> "train_1_43039")
