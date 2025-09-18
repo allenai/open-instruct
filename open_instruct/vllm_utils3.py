@@ -631,19 +631,45 @@ class LLMRayActor:
 
         outputs = []
         iteration_count = 0
-        logger.info(f"[generate_one_completion] About to start async iteration over generator for {request_id}")
-        async for output in generator:
-            iteration_count += 1
-            if iteration_count % 100 == 0:
-                logger.info(
-                    f"[generate_one_completion] Iteration {iteration_count} for {request_id}, finished={output.finished}"
-                )
-            if output.finished:
-                outputs.append(output)
-                logger.info(
-                    f"[generate_one_completion] Request {request_id} finished after {iteration_count} iterations"
-                )
-                break
+
+        # Check if we're using v1 API (returns RequestOutputCollector) or v0 API (returns AsyncGenerator)
+        if hasattr(generator, "get"):
+            # v1 API: RequestOutputCollector
+            logger.info(f"[generate_one_completion] Using v1 API for {request_id}")
+            finished = False
+            while not finished:
+                iteration_count += 1
+                # Try get_nowait first, then await get() if nothing available
+                output = generator.get_nowait()
+                if output is None:
+                    output = await generator.get()
+
+                if iteration_count % 100 == 0:
+                    logger.info(
+                        f"[generate_one_completion] Iteration {iteration_count} for {request_id}, finished={output.finished}"
+                    )
+
+                finished = output.finished
+                if finished:
+                    outputs.append(output)
+                    logger.info(
+                        f"[generate_one_completion] Request {request_id} finished after {iteration_count} iterations"
+                    )
+        else:
+            # v0 API: AsyncGenerator
+            logger.info(f"[generate_one_completion] Using v0 API for {request_id}")
+            async for output in generator:
+                iteration_count += 1
+                if iteration_count % 100 == 0:
+                    logger.info(
+                        f"[generate_one_completion] Iteration {iteration_count} for {request_id}, finished={output.finished}"
+                    )
+                if output.finished:
+                    outputs.append(output)
+                    logger.info(
+                        f"[generate_one_completion] Request {request_id} finished after {iteration_count} iterations"
+                    )
+                    break
 
         assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
         return outputs[0]

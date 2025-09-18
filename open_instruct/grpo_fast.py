@@ -55,6 +55,7 @@ import shutil
 import socket
 import threading
 import time
+import traceback
 from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
@@ -2190,42 +2191,50 @@ def weight_sync_thread(
     if resume_training_step > 1:
         weight_sync_trigger_event.set()
 
-    while not stop_event.is_set():
-        # Wait for weight sync trigger from main thread
-        if not weight_sync_trigger_event.wait(timeout=1.0):
-            continue
+    try:
+        while not stop_event.is_set():
+            # Wait for weight sync trigger from main thread
+            if not weight_sync_trigger_event.wait(timeout=1.0):
+                continue
 
-        # Clear the event for next iteration
-        weight_sync_trigger_event.clear()
+            # Clear the event for next iteration
+            weight_sync_trigger_event.clear()
 
-        with Timer("[Weight Sync]") as timer:
-            logger.debug("[Weight Sync Thread] Starting weight sync")
+            with Timer("[Weight Sync]") as timer:
+                logger.debug("[Weight Sync Thread] Starting weight sync")
 
-            # Set actors to stop
-            ray.get(actor_manager.set_should_stop.remote(True))
-            logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
+                # Set actors to stop
+                ray.get(actor_manager.set_should_stop.remote(True))
+                logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
 
-            # Broadcast weights to vLLM engines
-            # First get the futures
-            weight_broadcast_futures: List[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+                # Broadcast weights to vLLM engines
+                # First get the futures
+                weight_broadcast_futures: List[ray.ObjectRef] = [
+                    m.broadcast_to_vllm.remote() for m in policy_group.models
+                ]
 
-            # Wait for all weight updates to complete
-            ray_get_with_progress(
-                weight_broadcast_futures,
-                desc="[Weight Sync Thread] Waiting for weight updates to complete",
-                enable=args.verbose,
-            )
+                # Wait for all weight updates to complete
+                ray_get_with_progress(
+                    weight_broadcast_futures,
+                    desc="[Weight Sync Thread] Waiting for weight updates to complete",
+                    enable=args.verbose,
+                )
 
-            # Allow actors to resume
-            ray.get(actor_manager.set_should_stop.remote(False))
-            logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
+                # Allow actors to resume
+                ray.get(actor_manager.set_should_stop.remote(False))
+                logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
 
-        try:
-            weight_sync_metrics_Q.put_nowait({"time/weight_sync": timer.duration})
-        except Full:
-            logger.warning("[Weight Sync Thread] weight sync metrics queue full, skipping metric")
-
-    logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
+            try:
+                weight_sync_metrics_Q.put_nowait({"time/weight_sync": timer.duration})
+            except Full:
+                logger.warning("[Weight Sync Thread] weight sync metrics queue full, skipping metric")
+    except Exception as e:
+        logger.error(f"[Weight Sync Thread] ❌ Fatal error in weight sync thread: {e}")
+        logger.error(f"[Weight Sync Thread] Full traceback:\n{traceback.format_exc()}")
+        # Re-raise to ensure the future.result() will propagate the error
+        raise
+    finally:
+        logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
 
 
 def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q):
@@ -2233,24 +2242,31 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
     logger.info("[Generate Thread] 🚀 Starting generation thread")
     logger.info(f"[Generate Thread] Number of vLLM engines: {len(vllm_engines)}")
     iteration = 0
-    while not stop_event.is_set():
-        iteration += 1
-        with Timer("🔥 Generation time") as timer:
-            processed_results = ray_get_with_progress(
-                [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
-                desc=f"[Generate Thread] Iteration {iteration}: Waiting for vLLM engines to process",
-                enable=args.verbose,
-            )
-            num_processed = sum(int(result) for result in processed_results)
-            # Suppress timing output if nothing was processed
-            if num_processed == 0:
-                timer.noop = True
-        if num_processed > 0:
-            try:
-                generate_metrics_Q.put_nowait({"time/generation": timer.duration})
-            except Full:
-                logger.warning("[Generate Thread] generate metrics queue full, skipping metric")
-    logger.info("[Generate Thread] 🛑 Stopping generation thread")
+    try:
+        while not stop_event.is_set():
+            iteration += 1
+            with Timer("🔥 Generation time") as timer:
+                processed_results = ray_get_with_progress(
+                    [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
+                    desc=f"[Generate Thread] Iteration {iteration}: Waiting for vLLM engines to process",
+                    enable=args.verbose,
+                )
+                num_processed = sum(int(result) for result in processed_results)
+                # Suppress timing output if nothing was processed
+                if num_processed == 0:
+                    timer.noop = True
+            if num_processed > 0:
+                try:
+                    generate_metrics_Q.put_nowait({"time/generation": timer.duration})
+                except Full:
+                    logger.warning("[Generate Thread] generate metrics queue full, skipping metric")
+    except Exception as e:
+        logger.error(f"[Generate Thread] ❌ Fatal error in generation thread: {e}")
+        logger.error(f"[Generate Thread] Full traceback:\n{traceback.format_exc()}")
+        # Re-raise to ensure the future.result() will propagate the error
+        raise
+    finally:
+        logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
 def one_training_step(
