@@ -67,9 +67,9 @@ python open_instruct/grpo_fast.py \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 1024000 \
-    --deepspeed_stage 2 \
-    --num_learners_per_node 2 \
-    --vllm_num_engines 2 \
+    --deepspeed_stage 3 \
+    --num_learners_per_node 4 \
+    --vllm_num_engines 4 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \

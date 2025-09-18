@@ -1,7 +1,7 @@
 # full integration mix
 # dataset_mix="saurabh5/rlvr_acecoder_filtered 63033 hamishivi/rlvr_orz_math_57k_collected 56878 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2 56878 allenai/IF_multi_constraints_upto5 56878"
 # math only mix
-dataset_mix="stellalisy/DAPO-Math-14k-Processed-RLVR_random 56878"
+dataset_mix="stellalisy/rlvr_orz_math_57k_collected_random 56878"
 
 # all evals
 # evals="minerva_math::hamish_zs_reasoning,gsm8k::zs_cot_latex,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,ifeval::hamish_zs_reasoning,popqa::hamish_zs_reasoning,mmlu:cot::hamish_zs_reasoning,alpaca_eval_v3::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,mbppplus:0-shot-chat::tulu-thinker,codex_humanevalplus:0-shot-chat-v1::tulu-thinker"
@@ -10,12 +10,12 @@ evals="minerva_math::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,a
 
 # all I've changed with the checkpoints is the config.json, model_type=olmo3 and architectures is OLMo3ForCausalLM 
 model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/lucas/olmo25_7b_lc_64k_6T_M100B_r5-midtrain_round3_qwenlike_s2pdf_gzip2080_just-synth-cwe-yake_yarn-fullonly_10B-c6bda7ae/step2385-hf"
-gs_model_name="olmo2.5-6T-LC_midtrain_round3"
+gs_model_name="olmo2.5-6T-LC_midtrain_round3_with_yarn"
 #
 # model_name_or_path="/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/olmo3-hparam-search/olmo2.5-LC-R3-olmo2-tulu3-mix-num_3"
 # gs_model_name="olmo2.5-lc-r3-jacobsft-mix3"
 
-exp_name="grpo_spurious_dapo_nochat_${gs_model_name}"
+exp_name="grpo_spurious_1m_${gs_model_name}"
 EXP_NAME=${EXP_NAME:-${exp_name}}
 
 
@@ -63,7 +63,7 @@ python open_instruct/grpo_fast.py \
     --response_length 6144 \
     --pack_length 8192 \
     --model_name_or_path ${model_name_or_path} \
-    --chat_template_name olmo_thinker_r1_style_nochat \
+    --chat_template_name olmo_thinker_r1_style \
     --stop_strings "</answer>" \
     --non_stop_penalty False \
     --temperature 1.0 \
