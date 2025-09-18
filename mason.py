@@ -903,7 +903,7 @@ def main():
         description=args.description,
         tasks=[make_task_spec(args, full_command, i, beaker_secrets, whoami, args.resumable) for i, full_command in enumerate(full_commands)],
         budget=args.budget,
-        retry=beaker.RetrySpec(allowed_task_retries=args.max_retries)
+        retry=beaker.BeakerRetrySpec(allowed_task_retries=args.max_retries)
     )
     exp = beaker_client.experiment.create(spec=experiment_spec)
     console.log(f"Kicked off Beaker job. https://beaker.org/ex/{exp.id}")
