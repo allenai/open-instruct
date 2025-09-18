@@ -875,19 +875,26 @@ class LLMRayActor:
 
         return processed_count
 
-    async def process_from_queue(self, timeout: float = 60.0):
+    async def process_from_queue(self, timeout: float = None):
         """Run generation loop using AsyncLLMEngine.
 
         Runs continuously until should_stop is set, periodically adding new requests
         and yielding control to allow weight synchronization.
 
+        Args:
+            timeout: Ignored. Kept for backward compatibility. The loop runs indefinitely.
+
         Returns:
             int: Number of requests processed
         """
-        logger.info(f"[process_from_queue] About to await _PROFILE_PROCESS_FROM_QUEUE_MAIN with timeout={timeout}")
-        return await self._PROFILE_PROCESS_FROM_QUEUE_MAIN(timeout)
+        if timeout is not None:
+            logger.warning(
+                f"[process_from_queue] timeout parameter ({timeout}) is ignored - loop runs indefinitely until should_stop"
+            )
+        logger.info("[process_from_queue] About to await _PROFILE_PROCESS_FROM_QUEUE_MAIN")
+        return await self._PROFILE_PROCESS_FROM_QUEUE_MAIN()
 
-    async def _PROFILE_PROCESS_FROM_QUEUE_MAIN(self, timeout: float):
+    async def _PROFILE_PROCESS_FROM_QUEUE_MAIN(self):
         """Profiling wrapper for main process_from_queue logic."""
         # Ensure engine and prefetch are initialized
         logger.info("[_PROFILE_PROCESS_FROM_QUEUE_MAIN] About to await _ensure_engine_initialized")
@@ -900,10 +907,10 @@ class LLMRayActor:
 
         iteration_count = 0
         total_processed = 0
-        start_time = time.perf_counter()
 
         try:
-            while not await self._should_exit() and (time.perf_counter() - start_time) < timeout:
+            # Run indefinitely until should_exit is true (no timeout)
+            while not await self._should_exit():
                 iteration_count += 1
 
                 # Health check for prefetch task
@@ -919,9 +926,9 @@ class LLMRayActor:
                     logger.info(
                         f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] About to await asyncio.wait for {len(tasks_to_wait)} tasks"
                     )
-                    done, pending = await asyncio.wait(
-                        tasks_to_wait, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
-                    )
+                    # Use a short timeout (1 second) to check for completed tasks frequently
+                    # This allows us to check should_exit regularly without blocking too long
+                    done, pending = await asyncio.wait(tasks_to_wait, timeout=1.0, return_when=asyncio.FIRST_COMPLETED)
                     logger.info(
                         f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed asyncio.wait, {len(done)} done, {len(pending)} pending"
                     )
