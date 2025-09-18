@@ -524,10 +524,6 @@ class LLMRayActor:
         if stop_requested and active_tasks == 0:
             return True
 
-        # Case 3: no work left at all - exit
-        if active_tasks == 0:
-            return True
-
         # Otherwise, continue processing
         return False
 
