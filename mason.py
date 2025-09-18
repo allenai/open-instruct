@@ -845,7 +845,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         arguments=[full_command],
         result=beaker.BeakerResultSpec(path="/output"),
         datasets=get_datasets(args.beaker_datasets, args.cluster),
-        context=beaker.BeakerTaskContext(priority=beaker.BeakerJobPriority(args.priority),
+        context=beaker.BeakerTaskContext(priority=beaker.BeakerJobPriority[args.priority],
                                    preemptible=args.preemptible),
         constraints=constraints,
         env_vars=get_env_vars(args.pure_docker_mode, args.cluster, beaker_secrets,
