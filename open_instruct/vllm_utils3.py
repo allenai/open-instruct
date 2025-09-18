@@ -19,6 +19,7 @@ import asyncio
 import dataclasses
 import logging
 import os
+import threading
 import time
 import traceback
 from collections import defaultdict
@@ -346,6 +347,23 @@ class LLMRayActor:
         # Prefetch task is started lazily from async methods
         self.prefetch_task = None
 
+        # Background event loop for persistent task execution
+        self.background_loop = asyncio.new_event_loop()
+        self.background_thread = threading.Thread(
+            target=self._run_background_loop, daemon=True, name="vllm-background-processor"
+        )
+        self.background_thread.start()
+        self.background_futures = {}  # sub_request_id -> concurrent.futures.Future
+        self.background_futures_lock = threading.Lock()  # Thread-safe access to futures dict
+
+    def _run_background_loop(self):
+        """Run the background event loop in a separate thread."""
+        asyncio.set_event_loop(self.background_loop)
+        try:
+            self.background_loop.run_forever()
+        finally:
+            self.background_loop.close()
+
     async def _ensure_prefetch_started(self):
         """Start the background prefetch task if not already running."""
         if self.prefetch_task is None or self.prefetch_task.done():
@@ -442,7 +460,8 @@ class LLMRayActor:
                 continue
 
             # Check if we need more requests
-            current_unfinished = len(self.active_tasks)
+            with self.background_futures_lock:
+                current_unfinished = len(self.background_futures)
             if current_unfinished >= self.inference_batch_size:
                 logger.info(
                     f"[_prefetch_requests] Batch full ({current_unfinished}/{self.inference_batch_size}), about to await asyncio.sleep(0.1)"
@@ -526,16 +545,23 @@ class LLMRayActor:
             sub_request_id = f"{request_id}_{j}"
 
             logger.info(
-                f"[_add_request] Creating task for sub-request {j + 1}/{request.generation_config.n}: {sub_request_id}"
+                f"[_add_request] Scheduling task in background loop for sub-request {j + 1}/{request.generation_config.n}: {sub_request_id}"
             )
-            # Create a task to process this sub-request with its ID as the name
-            task = asyncio.create_task(
+
+            # Schedule the coroutine in the background event loop
+            future = asyncio.run_coroutine_threadsafe(
                 self._process_request(sub_request_id, request_id, tokens_prompt, sub_sampling_params, j),
-                name=sub_request_id,
+                self.background_loop,
             )
-            self.active_tasks[sub_request_id] = task
+
+            # Store future reference with thread-safe lock
+            with self.background_futures_lock:
+                self.background_futures[sub_request_id] = future
+                # Keep active_tasks for compatibility
+                self.active_tasks[sub_request_id] = future
+
             logger.info(
-                f"[_add_request] ✅ Task created and added to active_tasks. Total active: {len(self.active_tasks)}"
+                f"[_add_request] ✅ Task scheduled in background loop. Total active: {len(self.background_futures)}"
             )
 
     def _insert_result_to_queue(self, result, is_eval: bool):
@@ -572,7 +598,8 @@ class LLMRayActor:
             return True
 
         # Check for pending work
-        active_tasks = len(self.active_tasks)
+        with self.background_futures_lock:
+            active_tasks = len(self.background_futures)
 
         # Case 2: stop requested and no pending work - exit
         if stop_requested and active_tasks == 0:
@@ -917,70 +944,52 @@ class LLMRayActor:
                 if self.prefetch_task.done():
                     self.prefetch_task.result()  # This will raise if the task failed
 
-                # Wait for any task to complete or timeout
-                # Only wait for actual generation tasks, not the prefetch task
-                tasks_to_wait = list(self.active_tasks.values()) if self.active_tasks else []
+                # Check background futures for completion
+                completed_base_request_ids = set()
 
-                if tasks_to_wait:
-                    # Wait for generation tasks with timeout
-                    logger.info(
-                        f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] About to await asyncio.wait for {len(tasks_to_wait)} tasks"
-                    )
-                    # Use a short timeout (1 second) to check for completed tasks frequently
-                    # This allows us to check should_exit regularly without blocking too long
-                    done, pending = await asyncio.wait(tasks_to_wait, timeout=1.0, return_when=asyncio.FIRST_COMPLETED)
-                    logger.info(
-                        f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed asyncio.wait, {len(done)} done, {len(pending)} pending"
-                    )
-                else:
-                    # No active tasks, just sleep for a bit
-                    # Log this to understand why we have no active tasks
+                # Use a copy of the dict to avoid modification during iteration
+                with self.background_futures_lock:
+                    futures_to_check = dict(self.background_futures)
+
+                for sub_request_id, future in futures_to_check.items():
+                    if future.done():
+                        logger.info(f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Background future {sub_request_id} is done")
+
+                        try:
+                            # Get result or exception from the future
+                            future.result(timeout=0)  # No timeout needed since it's done
+                            logger.info(
+                                f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Successfully got result from {sub_request_id}"
+                            )
+
+                            # Extract base request ID and mark for processing
+                            base_request_id = _extract_base_request_id(sub_request_id)
+                            completed_base_request_ids.add(base_request_id)
+
+                        except Exception as e:
+                            # Log the error with full traceback and re-raise to crash the process
+                            logger.error(
+                                f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Future {sub_request_id} failed with exception: {e}"
+                            )
+                            logger.error(
+                                f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Full traceback:\n{traceback.format_exc()}"
+                            )
+                            logger.error("[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Re-raising to crash the Ray actor")
+                            raise
+                        finally:
+                            # Remove completed future
+                            with self.background_futures_lock:
+                                self.background_futures.pop(sub_request_id, None)
+                                self.active_tasks.pop(sub_request_id, None)
+
+                # If no futures to check, sleep briefly
+                if not futures_to_check:
                     if iteration_count % 10 == 0:
                         self.logger.info(f"[process_from_queue] No active tasks, iteration {iteration_count}")
-                    logger.info("[_PROFILE_PROCESS_FROM_QUEUE_MAIN] About to await asyncio.sleep(1) - no active tasks")
-                    await asyncio.sleep(1)
-                    logger.info("[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed asyncio.sleep(1)")
-                    done = set()
-
-                # Process completed tasks and collect their base request IDs
-                completed_base_request_ids = set()
-                for task in done:
-                    task_name = task.get_name()
-
-                    # Check if task was cancelled before trying to await it
-                    if task.cancelled():
-                        logger.warning(
-                            f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Task {task_name} was cancelled, removing from active tasks"
-                        )
-                        if task_name in self.active_tasks:
-                            self.active_tasks.pop(task_name, None)
-                        continue
-
-                    logger.info(f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] About to await completed task {task}")
-                    try:
-                        await task  # Get result or raise exception
-                    except asyncio.CancelledError:
-                        # Task was cancelled after being marked done but before we could await it
-                        logger.warning(
-                            f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Task {task_name} raised CancelledError, removing from active tasks"
-                        )
-                        if task_name in self.active_tasks:
-                            self.active_tasks.pop(task_name, None)
-                        continue
-                    except Exception as e:
-                        # Log the error with full traceback and re-raise to crash the process
-                        logger.error(f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Task {task} failed with exception: {e}")
-                        logger.error(f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Full traceback:\n{traceback.format_exc()}")
-                        logger.error("[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Re-raising to crash the Ray actor")
-                        raise
-                    logger.info(f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed awaiting task {task}")
-
-                    # Remove the completed task using its name
-                    if task_name in self.active_tasks:
-                        self.active_tasks.pop(task_name, None)
-                        # Extract base request ID from task name (e.g., "train_1_43039_2" -> "train_1_43039")
-                        base_request_id = _extract_base_request_id(task_name)
-                        completed_base_request_ids.add(base_request_id)
+                    await asyncio.sleep(0.1)
+                else:
+                    # Brief sleep to avoid busy-waiting
+                    await asyncio.sleep(0.01)
 
                 # Check any base requests that just had tasks complete
                 if completed_base_request_ids:
@@ -1009,18 +1018,29 @@ class LLMRayActor:
                     total_processed += processed_count
 
                 if self.verbose and iteration_count % 10000 == 0:
-                    active_tasks = len(self.active_tasks)
+                    with self.background_futures_lock:
+                        active_tasks = len(self.background_futures)
                     self.logger.info(f"process_from_queue iteration {iteration_count}: active_tasks={active_tasks}")
 
         finally:
-            # Wait for all active tasks to complete only if inflight_updates is False
+            # With background futures, tasks persist across calls
+            # Only wait for them if inflight_updates is False
             if not self.inflight_updates:
                 logger.info(
-                    f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] About to await asyncio.gather for {len(self.active_tasks)} active tasks (cleanup)"
+                    f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Waiting for {len(self.background_futures)} background futures to complete"
                 )
-                # Don't use return_exceptions=True - we want to fail loudly if tasks have errors
-                await asyncio.gather(*self.active_tasks.values())
-                logger.info("[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed asyncio.gather for active tasks")
+                # Wait for all background futures to complete
+                with self.background_futures_lock:
+                    futures_to_wait = list(self.background_futures.values())
+
+                for future in futures_to_wait:
+                    try:
+                        future.result()  # This will raise if the task failed
+                    except Exception as e:
+                        logger.error(f"Background future failed during cleanup: {e}")
+                        raise
+
+                logger.info("[_PROFILE_PROCESS_FROM_QUEUE_MAIN] All background futures completed")
 
             # Always process any remaining completed requests on exit
             # (prefetch is paused by should_stop, so this is safe)
