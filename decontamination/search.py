@@ -323,13 +323,13 @@ def main():
         ("deepmind/math_dataset", None, "test", ["question"], 50),
         ("allenai/IFBench_test", None, "train", ["prompt"], None),
         ("cais/hle", None, "test", ["question"], None),
-        ("m-a-p/SuperGPQA", None, "train", ["question"], None), BIG
-        ("BBEH/bbeh", None, "train", ["input"], None), BIG
+        ("m-a-p/SuperGPQA", None, "train", ["question"], None),
+        ("BBEH/bbeh", None, "train", ["input"], None),
         # not currently really evaluated but decontam anyway.
         ("AI-MO/aimo-validation-amc", None, "train", ["problem"], None),
         ("math-ai/olympiadbench", None, "test", ["question"], None),
         ("cruxeval-org/cruxeval", None, "test", ["code"], None),
-        ("hamishivi/codeeditorbench_prompts", None, "train", ["prompt"], None), BIG
+        ("hamishivi/codeeditorbench_prompts", None, "train", ["prompt"], None),
         ("cais/wmdp", None, "test", ["question"], None),
         ("ByteDance-Seed/BeyondAIME", None, "test", ["problem"], None),
         ("hamishivi/strong_reject_data", None, "train", ["jailbroken_prompt"], None),
