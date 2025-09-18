@@ -663,12 +663,27 @@ class LLMRayActor:
             assert len(output.outputs) == 1, f"{len(output.outputs)=}"
             output.outputs[0] = dataclasses.replace(output.outputs[0], index=index)
 
+            # Validate token_ids type early - fail fast if vLLM returns unexpected type
+            assert hasattr(output.outputs[0], "token_ids"), "Output missing token_ids attribute"
+            assert isinstance(output.outputs[0].token_ids, (list, tuple)), (
+                f"Expected token_ids to be list or tuple, got {type(output.outputs[0].token_ids)}"
+            )
+
             # Initialize or extend request_output
             if request_output is None:
                 request_output = output
+                # Ensure token_ids is a mutable list, not a tuple
+                if isinstance(request_output.outputs[0].token_ids, tuple):
+                    request_output.outputs[0].token_ids = list(request_output.outputs[0].token_ids)
             else:
-                # Extend the token_ids in the existing CompletionOutput
-                request_output.outputs[0].token_ids.extend(output.outputs[0].token_ids)
+                # Ensure request_output.token_ids is a list before extending
+                if isinstance(request_output.outputs[0].token_ids, tuple):
+                    request_output.outputs[0].token_ids = list(request_output.outputs[0].token_ids)
+                # Convert output token_ids to list if needed, then extend
+                tokens_to_add = output.outputs[0].token_ids
+                if isinstance(tokens_to_add, tuple):
+                    tokens_to_add = list(tokens_to_add)
+                request_output.outputs[0].token_ids.extend(tokens_to_add)
 
             masks.extend([1] * len(output.outputs[0].token_ids))
 
@@ -704,9 +719,19 @@ class LLMRayActor:
             )
 
             # Check context length
-            prompt_and_tool_output_token = (
-                output.prompt_token_ids + request_output.outputs[0].token_ids + tool_output_token_ids
+            # Ensure all components are lists before concatenation
+            prompt_token_ids_list = (
+                list(output.prompt_token_ids)
+                if isinstance(output.prompt_token_ids, tuple)
+                else output.prompt_token_ids
             )
+            request_token_ids_list = (
+                list(request_output.outputs[0].token_ids)
+                if isinstance(request_output.outputs[0].token_ids, tuple)
+                else request_output.outputs[0].token_ids
+            )
+
+            prompt_and_tool_output_token = prompt_token_ids_list + request_token_ids_list + tool_output_token_ids
             excess = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len
             if excess > 0:
                 tool_output_token_ids = tool_output_token_ids[:-excess]
@@ -960,7 +985,8 @@ class LLMRayActor:
                 logger.info(
                     f"[_PROFILE_PROCESS_FROM_QUEUE_MAIN] About to await asyncio.gather for {len(self.active_tasks)} active tasks (cleanup)"
                 )
-                await asyncio.gather(*self.active_tasks.values(), return_exceptions=True)
+                # Don't use return_exceptions=True - we want to fail loudly if tasks have errors
+                await asyncio.gather(*self.active_tasks.values())
                 logger.info("[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed asyncio.gather for active tasks")
 
             # Always process any remaining completed requests on exit
