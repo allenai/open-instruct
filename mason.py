@@ -838,7 +838,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         constraints = beaker.BeakerConstraints(hostname=args.hostname)
     else:
         constraints = beaker.BeakerConstraints(cluster=args.cluster)
-    spec = beaker.TaskSpec(
+    spec = beaker.BeakerTaskSpec(
         name=f"{args.task_name}__{i}",
         image=beaker.ImageSource(beaker=args.image),
         command=['/bin/bash', '-c'],
