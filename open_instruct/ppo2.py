@@ -1828,8 +1828,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
 
 if __name__ == "__main__":
-    from open_instruct import utils
-
     utils.check_oe_eval_internal()
 
     parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
