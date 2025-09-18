@@ -8,7 +8,7 @@ dependencies = [
     "accelerate>=1.1.1",
     "antlr4-python3-runtime==4.11",
     "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
-    "datasets>=3.1.0",
+    "datasets>=3.1.0,<4.0.0",
     "debugpy>=1.8.13",
     "deepspeed==0.15.4", # 0.16.0 bugs out https://github.com/microsoft/DeepSpeed/issues/6793
     "hf-transfer>=0.1.8",
@@ -24,10 +24,13 @@ dependencies = [
     "tensorboard>=2.18.0",
     "torch==2.7.0",
     "transformers>=4.52.4",
-    "vllm==0.9.1",    
+    "vllm==0.9.1",
     "wandb==0.18.1",
     "langdetect==1.0.9",
-    "immutabledict==1.2.0"
+    "immutabledict==1.2.0",
+    "spacy==3.8.7",
+    "elasticsearch>=9.1.1",
+    "en-core-web-lg",
 ]
 
 [build-system]
@@ -42,6 +45,8 @@ py-modules = ["open_instruct"]
 torch = [
   { index = "pytorch-cu128", marker = "platform_system != 'Darwin'"},
 ]
+en-core-web-lg = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl" }
+
 
 [[tool.uv.index]]
 name = "pytorch-cu128"

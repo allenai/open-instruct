@@ -291,17 +291,15 @@ def main():
     eval_sets = [
         # (dataset, subset, split, fields, limit)
           # Olmo 3 New Dev Evals
-        ("allenai/omega-500-with-prompt", None, "train", ["prompt"], None),
         ("livecodebench/code_generation_lite", None, "test", ["question_content"], None),  # v3 is dev, v6 is test, load full for full decontam. Needs trust_remote_code=True
-        ("allenai/aime-2021-2025", None, "train", ["problem"], None),
+        ("HuggingFaceH4/aime_2024", None, "train", ["problem"], None),
+        ("yentinglin/aime_2025", "default", "train", ["problem"], None),
         ("allenai/ZebraLogicBench-private", "grid_mode", "test", ["puzzle"], None),
-        # TODO: Omega
         ("allenai/multilingual_mbpp", None, "test", ["text"], None),
         # Tulu 3 Dev evals
         ("cais/mmlu", "all", "test", ["question"], None),
         ("openai/openai_humaneval", None, "test", ["prompt"], None),
         ("openai/gsm8k", "main", "test", ["question"], None),
-        ("ucinlp/drop", None, "validation", ["passage", "question"], None),
         ("EleutherAI/hendrycks_math", None, "test", ["problem"], None),
         ("google/IFEval", None, "train", ["prompt"], None),
         ("akariasai/PopQA", None, "test", ["subj", "prop", "obj"], None),
@@ -313,6 +311,10 @@ def main():
         ("allenai/tulu-3-trustllm-jailbreaktrigger-eval", None, "test", ["prompt"], None),
         ("allenai/tulu-3-harmbench-eval", None, "test", ["Behavior"], None),
         ("allenai/tulu-3-do-anything-now-eval", None, "test", ["prompt"], None),
+        ("hamishivi/toxigen-prompts", None, "train", ["prompt"], None),
+        ("walledai/XSTest", None, "test", ["prompt"], None),
+        ("basicv8vc/SimpleQA", None, "test", ["problem"], None),
+        ("hamishivi/omega-all-test-prompts", None, "train", ["prompt"], None),
         # Test evals
         ("TIGER-Lab/MMLU-Pro", None, "test", ["question"], None),
         ("Idavidrein/gpqa", "gpqa_extended", "train", ["Question"], None),
@@ -320,6 +322,19 @@ def main():
         ("bigcode/bigcodebench", None, "v0.1.2", ["instruct_prompt"], None),
         ("deepmind/math_dataset", None, "test", ["question"], 50),
         ("allenai/IFBench_test", None, "train", ["prompt"], None),
+        ("cais/hle", None, "test", ["question"], None),
+        # ("m-a-p/SuperGPQA", None, "train", ["question"], None), BIG
+        # ("BBEH/bbeh", None, "train", ["input"], None), BIG
+        # not currently really evaluated but decontam anyway.
+        ("AI-MO/aimo-validation-amc", None, "train", ["problem"], None),
+        ("math-ai/olympiadbench", None, "test", ["question"], None),
+        ("cruxeval-org/cruxeval", None, "test", ["code"], None),
+        # ("hamishivi/codeeditorbench_prompts", None, "train", ["prompt"], None), BIG
+        ("cais/wmdp", None, "test", ["question"], None),
+        ("ByteDance-Seed/BeyondAIME", None, "test", ["problem"], None),
+        ("hamishivi/strong_reject_data", None, "train", ["jailbroken_prompt"], None),
+        ("hamishivi/bbq_prompts", None, "train", ["prompt"], None),
+
     ] if args.dataset is None else [
         (args.dataset, args.subset, args.split, args.field, args.limit)
     ]
