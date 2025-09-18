@@ -803,26 +803,22 @@ class LLMRayActor:
                     self.prefetch_task.result()  # This will raise if the task failed
 
                 # Wait for any task to complete or timeout
-                # Include prefetch task so we detect failures immediately
+                # Only wait for actual generation tasks, not the prefetch task
                 tasks_to_wait = list(self.active_tasks.values()) if self.active_tasks else []
-                if self.prefetch_task and not self.prefetch_task.done():
-                    tasks_to_wait.append(self.prefetch_task)
 
-                done, pending = await asyncio.wait(
-                    tasks_to_wait if tasks_to_wait else [asyncio.sleep(timeout)],
-                    timeout=timeout if tasks_to_wait else None,
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
+                if tasks_to_wait:
+                    # Wait for generation tasks with timeout
+                    done, pending = await asyncio.wait(
+                        tasks_to_wait, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+                    )
+                else:
+                    # No active tasks, just sleep for a bit
+                    await asyncio.sleep(1)
+                    done = set()
 
                 # Process completed tasks and collect their base request IDs
                 completed_base_request_ids = set()
                 for task in done:
-                    # Check if this is the prefetch task
-                    if task == self.prefetch_task:
-                        # This will raise if the prefetch task failed
-                        task.result()
-                        continue
-
                     await task  # Get result or raise exception
 
                     # Remove the completed task using its name
@@ -847,7 +843,7 @@ class LLMRayActor:
                     processed_count = await self._check_and_process_completed_requests(all_base_request_ids)
                     total_processed += processed_count
 
-                if self.verbose and iteration_count % 100 == 0:
+                if self.verbose and iteration_count % 10000 == 0:
                     active_tasks = len(self.active_tasks)
                     self.logger.info(f"process_from_queue iteration {iteration_count}: active_tasks={active_tasks}")
 
