@@ -835,9 +835,9 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         raise ValueError("GCP clusters do not have the dev filesystem, please use a proper image")
 
     if args.hostname is not None:
-        constraints = beaker.Constraints(hostname=args.hostname)
+        constraints = beaker.BeakerConstraints(hostname=args.hostname)
     else:
-        constraints = beaker.Constraints(cluster=args.cluster)
+        constraints = beaker.BeakerConstraints(cluster=args.cluster)
     spec = beaker.TaskSpec(
         name=f"{args.task_name}__{i}",
         image=beaker.ImageSource(beaker=args.image),
