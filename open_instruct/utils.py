@@ -1632,14 +1632,15 @@ def check_oe_eval_internal():
     This is needed because oe-eval-internal is required for certain evaluation tasks
     but is only available internally at AI2.
     """
-    # Check if we're running in Beaker by looking for the BEAKER_EXPERIMENT_ID env var
-    if os.environ.get("BEAKER_EXPERIMENT_ID"):
-        # We're in Beaker, check if oe-eval-internal exists
-        oe_eval_path = "/stage/oe-eval-internal"
-        if not os.path.exists(oe_eval_path):
-            raise RuntimeError(
-                "Running in Beaker but oe-eval-internal directory is not found. "
-                "The oe-eval-internal repository is required for evaluation tasks "
-                "when running in Beaker. Please ensure the Docker image was built "
-                "with access to the oe-eval-internal repository."
-            )
+    # Return early if not running in Beaker
+    if not os.environ.get("BEAKER_EXPERIMENT_ID"):
+        return
+
+    # We're in Beaker, check if oe-eval-internal exists
+    if not os.path.exists("/stage/oe-eval-internal"):
+        raise RuntimeError(
+            "Running in Beaker but oe-eval-internal directory is not found. "
+            "The oe-eval-internal repository is required for evaluation tasks "
+            "when running in Beaker. Please ensure the Docker image was built "
+            "with access to the oe-eval-internal repository."
+        )
