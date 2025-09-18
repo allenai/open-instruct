@@ -512,7 +512,7 @@ CHAT_TEMPLATES = {
         "{{- '<|im_start|>assistant\n' -}}"
         "{%- endif -%}"
         "{%- endfor -%}"
-    )
+    ),
     "olmo_thinker": (
         "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
         "{% if not has_system %}"
