@@ -7,6 +7,12 @@ from datetime import date
 
 import yaml
 
+# Check for oe-eval-internal when running in Beaker
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from open_instruct.utils import check_oe_eval_internal
+check_oe_eval_internal()
+
 ########################################
 
 # Helper functions.

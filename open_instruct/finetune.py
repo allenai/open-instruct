@@ -1010,6 +1010,10 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
 
 if __name__ == "__main__":
+    from open_instruct import utils
+
+    utils.check_oe_eval_internal()
+
     parser = ArgumentParserPlus((FlatArguments, TokenizerConfig))
     args, tc = parser.parse_args_into_dataclasses()
     main(args, tc)
