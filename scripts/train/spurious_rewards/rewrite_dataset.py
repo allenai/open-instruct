@@ -8,7 +8,7 @@ print(type(ds["train"]))
 breakpoint()
 
 def to_random(example):
-    example["dataset"][0] = "random"
+    example["dataset"] = ["random"]
     return example
 
 ds["train"] = ds["train"].map(to_random)
