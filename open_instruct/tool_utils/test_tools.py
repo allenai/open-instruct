@@ -1,3 +1,6 @@
+import multiprocessing
+import subprocess
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -58,8 +61,40 @@ class TestMaxCallsExceededTool(unittest.TestCase):
 
 
 class TestPythonCodeTool(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        """Start the tool server for integration tests."""
+        cls.server_process = None
+        cls.use_real_server = False  # Set to True to test with real server
+
+        if cls.use_real_server:
+            # Start the server in a subprocess
+            cls.server_process = subprocess.Popen(
+                ["uv", "run", "uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1212"],
+                cwd="open_instruct/tool_utils",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True  # Create new process group
+            )
+            # Wait for server to start
+            time.sleep(3)
+            cls.api_endpoint = "http://localhost:1212/execute"
+        else:
+            cls.api_endpoint = "http://test-api.com/execute"
+
+    @classmethod
+    def tearDownClass(cls):
+        """Stop the tool server."""
+        if cls.server_process:
+            cls.server_process.terminate()
+            try:
+                cls.server_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                cls.server_process.kill()
+                cls.server_process.wait()
+
     def setUp(self):
-        self.api_endpoint = "http://test-api.com/execute"
+        self.api_endpoint = self.__class__.api_endpoint
         self.tool = PythonCodeTool(api_endpoint=self.api_endpoint, start_str="<code>", end_str="</code>")
 
     def test_initialization(self):
@@ -201,5 +236,83 @@ print("executed")
             )
 
 
+class TestPythonCodeToolIntegration(unittest.TestCase):
+    """Integration tests that use the real tool server."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Start the real tool server for integration tests."""
+        # Start the server in a subprocess
+        cls.server_process = subprocess.Popen(
+            ["uv", "run", "uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1213"],
+            cwd="open_instruct/tool_utils",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True  # Create new process group
+        )
+        # Wait for server to start
+        time.sleep(3)
+        cls.api_endpoint = "http://localhost:1213/execute"
+
+    @classmethod
+    def tearDownClass(cls):
+        """Stop the tool server."""
+        if cls.server_process:
+            cls.server_process.terminate()
+            try:
+                cls.server_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                cls.server_process.kill()
+                cls.server_process.wait()
+
+    def setUp(self):
+        self.tool = PythonCodeTool(
+            api_endpoint=self.api_endpoint,
+            start_str="<code>",
+            end_str="</code>"
+        )
+
+    def test_real_code_execution(self):
+        """Test actual code execution with the real server."""
+        prompt = """<code>
+print("Hello from integration test!")
+print(2 + 2)
+</code>"""
+
+        result = self.tool(prompt)
+
+        self.assertTrue(result.called)
+        self.assertIn("Hello from integration test!", result.output)
+        self.assertIn("4", result.output)
+        self.assertFalse(result.timeout)
+        self.assertEqual(result.error, "")
+
+    def test_real_code_with_error(self):
+        """Test code with syntax error using real server."""
+        prompt = """<code>
+print("unclosed string
+</code>"""
+
+        result = self.tool(prompt)
+
+        self.assertTrue(result.called)
+        self.assertTrue(len(result.error) > 0 or "Error" in result.output)
+
+    def test_real_timeout(self):
+        """Test timeout handling with real server."""
+        prompt = """<code>
+import time
+time.sleep(5)
+</code>"""
+
+        result = self.tool(prompt)
+
+        self.assertTrue(result.called)
+        self.assertTrue(result.timeout)
+        self.assertIn("Timeout", result.output)
+
+
 if __name__ == "__main__":
+    # Run only unit tests by default
+    # To run integration tests, use: python test_tools.py TestPythonCodeToolIntegration
     unittest.main()
