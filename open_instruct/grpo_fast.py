@@ -2781,22 +2781,6 @@ def run_training(
 
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
-    import subprocess
-    import sys
-
-    vllm_commit_hash = "d2a30a2d933226d3951ad98cb5de0c74e2e64826"
-    logger.info(f"vLLM version: {vllm.__version__}")
-
-    result = subprocess.run([sys.executable, "-m", "pip", "freeze"], capture_output=True, text=True, check=True)
-    for line in result.stdout.split("\n"):
-        if "vllm" in line.lower():
-            logger.info(f"vLLM pip freeze entry: {line}")
-            if vllm_commit_hash[:8] not in line:
-                raise RuntimeError(f"vLLM is not installed from expected commit {vllm_commit_hash}. Found: {line}")
-            break
-    else:
-        raise RuntimeError("vLLM not found in pip freeze output")
-
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
