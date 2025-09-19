@@ -9,7 +9,7 @@ dataset_mix="stellalisy/rlvr_orz_math_57k_collected_random 56878"
 evals="minerva_math::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,aime:zs_cot_r1::pass_at_32_2024_temp1,aime:zs_cot_r1::pass_at_32_2025_temp1"
 
 # all I've changed with the checkpoints is the config.json, model_type=olmo3 and architectures is OLMo3ForCausalLM
-model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/lucas/olmo25_7b_lc_64k_6T_M100B_r5-midtrain_round3_qwenlike_s2pdf_gzip2080_just-synth-cwe-yake_yarn-fullonly_10B-c6bda7ae/step2385-hf"
+model_name_or_path="/weka/oe-adapt-default/finbarrt/olmo25_7b-hf-olmo3-test"
 gs_model_name="olmo2.5-6T-LC_midtrain_round3_with_yarn"
 #
 # model_name_or_path="/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/olmo3-hparam-search/olmo2.5-LC-R3-olmo2-tulu3-mix-num_3"
