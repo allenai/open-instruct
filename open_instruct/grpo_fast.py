@@ -448,6 +448,16 @@ class Args:
     """Whether to evaluate the closed book answer"""
     apply_adaptive_rubric_reward: bool = False
     """Whether to apply adaptive rubric reward"""
+    normalize_rubric_scores: bool = False
+    """Whether to normalize the rubric scores per rubric"""
+    use_rubric_buffer: bool = False
+    """Whether to use the rubric buffer"""
+    max_active_rubrics: int = 5
+    """Maximum number of active rubrics to keep in the buffer"""
+    use_static_rubrics_as_persistent_rubrics: bool = True
+    """Whether to use the static rubrics as persistent rubrics"""
+    add_static_rubrics_to_active_rubrics_every_n_steps: int = 10
+    """How often to add the static rubrics to the active rubrics"""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
@@ -1204,6 +1214,7 @@ def data_preparation_thread(
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
+    rubric_buffer: Optional[Dict] = None,
 ):
     for training_step in range(1, num_training_steps + 1):
         # Get next batch of prompts and responses
@@ -1250,12 +1261,36 @@ def data_preparation_thread(
                     print(f"  Has answer tags: {has_answer_tags}")
                 print()
 
+        # Add static rubrics to active rubrics every N steps when use_static_rubrics_as_persistent_rubrics is False
+        if (rubric_buffer is not None and 
+            not args.use_static_rubrics_as_persistent_rubrics and 
+            training_step % args.add_static_rubrics_to_active_rubrics_every_n_steps == 0):
+            
+            added_count = 0
+            for query, buffer_data in rubric_buffer.items():
+                static_rubrics = buffer_data.get("static_rubrics", [])
+                active_rubrics = buffer_data.get("active_rubrics", [])
+                
+                # Check each static rubric and add if not already in active rubrics
+                for static_rubric in static_rubrics:
+                    # Check if this rubric is already in active rubrics (avoid duplicates)
+                    if static_rubric not in active_rubrics:
+                        active_rubrics.append(static_rubric)
+                        added_count += 1
+            
+            if added_count > 0:
+                print(f"[Adaptive Rubric Management] Added {added_count} static rubrics to active rubrics at step {training_step}")
+
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
-            scores, reward_metrics = asyncio.run(
+            result = asyncio.run(
                 reward_fn(
-                    responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries, is_training=True
+                    responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries, rubric_buffer=rubric_buffer, is_training=True, training_step=training_step
                 )
             )
+            if len(result) == 3:
+                scores, reward_metrics, rubric_buffer = result
+            else:
+                scores, reward_metrics = result
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
@@ -1722,17 +1757,25 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     if args.cache_dataset_only:
         return
     
-    if args.apply_adaptive_rubric_reward:
+    # Initialize rubric buffer
+    rubric_buffer = None
+    if args.apply_adaptive_rubric_reward and args.use_rubric_buffer:
         print("🚨 Applying adaptive rubric reward")
         print("Example of ground truth:")
         print(train_dataset[0][GROUND_TRUTHS_KEY])
+        # Initialize rubric buffer with active and inactive rubrics for each query
         rubric_buffer = {}
         for ex in train_dataset:
             if isinstance(ex[GROUND_TRUTHS_KEY], list):
                 gt = json.loads(ex[GROUND_TRUTHS_KEY][0])
             else:
                 gt = json.loads(ex[GROUND_TRUTHS_KEY])
-            rubric_buffer[gt['query']] = gt['rubrics']
+            rubric_buffer[gt['query']] = {
+                'active_rubrics': [] if args.use_static_rubrics_as_persistent_rubrics else gt['rubrics'], 
+                'inactive_rubrics': [],
+                'persistent_rubrics': gt['rubrics'] if args.use_static_rubrics_as_persistent_rubrics else [],  # Forced to use every time
+                'static_rubrics': gt['rubrics'],  # Keep a copy of original GT rubrics
+            }
     
 
     # ------------------------------------------------------------
@@ -1895,6 +1938,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             args,
             tokenizer,
             args.num_training_steps,
+            rubric_buffer,
         ),
     )
     packing_thread.start()
@@ -2066,7 +2110,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 eval_original_dataset_names = eval_dataset[DATASET_ORIGIN_KEY]
 
                 
-                eval_scores, eval_reward_metrics = asyncio.run(
+                eval_result = asyncio.run(
                     reward_fn(
                         eval_responses,
                         eval_decoded_responses,
@@ -2078,6 +2122,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                         is_training=False,
                     )
                 )
+                if len(eval_result) == 3:
+                    eval_scores, eval_reward_metrics, _ = eval_result
+                else:
+                    eval_scores, eval_reward_metrics = eval_result
                 eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
                 
                 # Calculate per-dataset eval scores
@@ -2232,6 +2280,7 @@ if __name__ == "__main__":
 
     if args.apply_adaptive_rubric_reward:
         from open_instruct.search_rewards.utils.rubric_utils import _generate_instance_wise_adaptive_rubrics, update_ground_truths_with_adaptive_rubrics
+        from open_instruct.search_rewards.longform_rubric_only_rewards import create_rubric_key
 
     async def reward_fn(
         responses: List[torch.Tensor],
@@ -2244,6 +2293,7 @@ if __name__ == "__main__":
         source_datasets: Optional[List[str]] = None,
         rubric_buffer: Optional[Dict[str, List[Dict[str, float]]]] = None,
         is_training: bool = True,
+        training_step: Optional[int] = None,
     ) -> List[float]:
         num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
         good_outputs = [
@@ -2272,12 +2322,13 @@ if __name__ == "__main__":
 
         if args.apply_adaptive_rubric_reward and is_training:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating adaptive rubric reward"):
-                adaptive_rubric_scores = await _generate_instance_wise_adaptive_rubrics(decoded_responses, ground_truths, args.num_samples_per_prompt_rollout)
-                # TODO: incorporate the rubric buffer
-                ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, _ = update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubric_scores, rubric_buffer=None, num_samples_per_prompt_rollout=args.num_samples_per_prompt_rollout)
+                adaptive_rubric_scores = await _generate_instance_wise_adaptive_rubrics(decoded_responses, ground_truths, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer)
+                # Update ground truths with adaptive rubrics and incorporate rubric buffer
+                ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, avg_num_active_buffer_rubrics, rubric_buffer = update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubric_scores, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer)
                 metrics["objective/valid_adaptive_rubric_rate"] = valid_adaptive_rubric_rate
                 metrics["objective/avg_num_ground_truths"] = avg_num_ground_truths
                 metrics["objective/avg_num_adaptive_rubrics"] = avg_num_adaptive_rubrics
+                metrics["objective/avg_num_active_buffer_rubrics"] = avg_num_active_buffer_rubrics
                 
                 
         if args.apply_verifiable_reward:
@@ -2313,7 +2364,15 @@ if __name__ == "__main__":
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
                 # log anything additional
                 for key, value in log_values.items():
-                    metrics[f"objective/reward_log_values/{key}"] = np.array(value).mean()
+                    if key == "rubric_scores_by_title":
+                        # do not log rubric scores by title
+                        continue
+                    # Check if all values in the list are numeric (not dictionaries)
+                    if value and all(isinstance(v, (int, float, np.number)) for v in value):
+                        metrics[f"objective/reward_log_values/{key}"] = np.array(value).mean()
+                    else:
+                        # Skip non-numeric values (like dictionaries) or log them differently
+                        print(f"Skipping non-numeric log_values key '{key}' with value types: {[type(v).__name__ for v in value[:3]]}")  # Show first 3 types for debugging
                 # reshuffle around per_func rewards
                 per_func_lists = defaultdict(list)
                 for reward_dict in per_func_rewards:
@@ -2351,6 +2410,146 @@ if __name__ == "__main__":
                     if finish_reasons[i] != "stop":
                         scores[i] = args.non_stop_penalty_value
 
-        return scores, metrics
+        # Rubric buffer management: filter out zero-std rubrics and manage active/inactive rubrics
+        if args.apply_adaptive_rubric_reward and is_training and rubric_buffer is not None and training_step is not None:
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Managing rubric buffer"):
+                # Collect rubric statistics for filtering
+                rubric_key_stats = {}
+                
+                # Process verifiable rewards to get per-rubric statistics
+                if args.apply_verifiable_reward and 'per_rubric_rewards' in log_values:
+                    per_rubric_rewards = log_values['per_rubric_rewards']
+                    
+                    # Group rewards by query
+                    rewards_by_query = {}
+                    for i, (query, rubrics) in enumerate(zip(queries or [], ground_truths)):
+                        if isinstance(rubrics, str):
+                            rubrics = json.loads(rubrics)
+                        elif isinstance(rubrics, list) and len(rubrics) > 0 and isinstance(rubrics[0], str):
+                            rubrics = json.loads(rubrics[0])
+                        
+                        if query not in rewards_by_query:
+                            rewards_by_query[query] = []
+                        
+                        # Get the rewards for this specific response
+                        if i < len(per_rubric_rewards):
+                            rewards_by_query[query].append(per_rubric_rewards[i])
+                    
+                    # Create rubric_key->weight mapping
+                    rubric_key_weights = {}
+                    for rubric in rubrics:
+                        # Import the helper function here to avoid circular imports
+                        from open_instruct.search_rewards.longform_rubric_only_rewards import create_rubric_key
+                        rubric_key = create_rubric_key(query, rubric)
+                        if rubric_key not in rubric_key_weights:
+                            rubric_key_weights[rubric_key] = []
+                        rubric_key_weights[rubric_key].append(rubric["weight"])
+                    
+                    # Average weights for rubric keys with multiple rubrics (though this should be rare now)
+                    for rubric_key in rubric_key_weights:
+                        rubric_key_weights[rubric_key] = np.mean(rubric_key_weights[rubric_key])
+                    
+                    if args.normalize_rubric_scores:
+                        # Compute per-rubric weighted normalized scores
+                        for query, query_rewards_list in rewards_by_query.items():
+                            for query_rewards in query_rewards_list:
+                                for rubric_key, reward_list in query_rewards.items():
+                                    if rubric_key not in rubric_key_stats:
+                                        rubric_key_stats[rubric_key] = {"rewards": [], "weights": []}
+                                    
+                                    # Normalize by weight
+                                    weight = rubric_key_weights.get(rubric_key, 1.0)
+                                    normalized_rewards = [r / weight if weight > 0 else r for r in reward_list]
+                                    rubric_key_stats[rubric_key]["rewards"].extend(normalized_rewards)
+                                    rubric_key_stats[rubric_key]["weights"].extend([weight] * len(reward_list))
+                    else:
+                        # Use raw scores
+                        for query, query_rewards_list in rewards_by_query.items():
+                            for query_rewards in query_rewards_list:
+                                for rubric_key, reward_list in query_rewards.items():
+                                    if rubric_key not in rubric_key_stats:
+                                        rubric_key_stats[rubric_key] = {"rewards": [], "weights": []}
+                                    
+                                    weight = rubric_key_weights.get(rubric_key, 1.0)
+                                    rubric_key_stats[rubric_key]["rewards"].extend(reward_list)
+                                    rubric_key_stats[rubric_key]["weights"].extend([weight] * len(reward_list))
+                    
+                    # Compute statistics for each rubric key
+                    for rubric_key in rubric_key_stats:
+                        rewards = np.array(rubric_key_stats[rubric_key]["rewards"])
+                        if len(rewards) > 0:
+                            rubric_key_stats[rubric_key]["mean"] = rewards.mean()
+                            rubric_key_stats[rubric_key]["std"] = rewards.std()
+                            rubric_key_stats[rubric_key]["count"] = len(rewards)
+                        else:
+                            rubric_key_stats[rubric_key]["mean"] = 0.0
+                            rubric_key_stats[rubric_key]["std"] = 0.0
+                            rubric_key_stats[rubric_key]["count"] = 0
+                
+                # Filter rubrics based on statistics
+                if rubric_key_stats and training_step % 10 == 0:  # Filter every 10 steps
+                    rubrics_to_deactivate = []
+                    rubrics_by_query_std = {}
+                    
+                    # Find rubrics with zero std (no learning signal)
+                    for rubric_key, stats in rubric_key_stats.items():
+                        # Find which query and rubric this key corresponds to
+                        for query, buffer_data in rubric_buffer.items():
+                            active_rubrics = buffer_data.get("active_rubrics", [])
+                            for rubric in active_rubrics:
+                                if create_rubric_key(query, rubric) == rubric_key:
+                                    if stats["std"] == 0:
+                                        # Mark for deactivation
+                                        rubrics_to_deactivate.append((query, rubric))
+                                    else:
+                                        # Track for potential ranking/filtering
+                                        if query not in rubrics_by_query_std:
+                                            rubrics_by_query_std[query] = []
+                                        rubrics_by_query_std[query].append((rubric, stats["std"]))
+                                    break
+                            else:
+                                continue
+                            break
+                    
+                    # Move zero-std rubrics to inactive
+                    moved_count = 0
+                    for query, rubric in rubrics_to_deactivate:
+                        buffer_data = rubric_buffer[query]
+                        if rubric in buffer_data["active_rubrics"]:
+                            buffer_data["active_rubrics"].remove(rubric)
+                            buffer_data["inactive_rubrics"].append(rubric)
+                            moved_count += 1
+                    
+                    # Apply max_active_rubrics cap per query
+                    capped_count = 0
+                    for query, rubric_std_pairs in rubrics_by_query_std.items():
+                        buffer_data = rubric_buffer[query]
+                        active_rubrics = buffer_data["active_rubrics"]
+                        
+                        if len(active_rubrics) > args.max_active_rubrics:
+                            # Sort by std descending and keep only top max_active_rubrics
+                            rubric_std_pairs.sort(key=lambda x: x[1], reverse=True)
+                            
+                            # Find rubric keys to keep (top std ones)
+                            rubric_keys_to_keep = set(create_rubric_key(query, rubric) for rubric, _ in rubric_std_pairs[:args.max_active_rubrics])
+                            
+                            # Move excess rubrics to inactive
+                            new_active = []
+                            for rubric in active_rubrics:
+                                rubric_key = create_rubric_key(query, rubric)
+                                if rubric_key in rubric_keys_to_keep or rubric_key not in rubric_key_stats:
+                                    # Keep high-std rubrics or rubrics without stats
+                                    new_active.append(rubric)
+                                else:
+                                    # Move low-std rubrics to inactive
+                                    buffer_data["inactive_rubrics"].append(rubric)
+                                    capped_count += 1
+                            
+                            buffer_data["active_rubrics"] = new_active
+                    
+                    if moved_count > 0 or capped_count > 0:
+                        print(f"[Adaptive Rubric Filtering] Moved {moved_count} zero-std rubrics and {capped_count} low-std rubrics to inactive")
+
+        return scores, metrics, rubric_buffer
 
     main(args, tokenizer_config, model_config, reward_fn)
