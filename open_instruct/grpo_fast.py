@@ -2514,11 +2514,9 @@ def make_reward_fn(args: Args) -> Callable:
 
 
 def cleanup_judge_clients():
-    """Cleans up all LLM judge clients and shutdown Ray."""
+    """Cleans up all LLM judge clients."""
     asyncio.run(cleanup_all_llm_judge_clients())
     logger.info("✅ LLM judge clients cleaned up")
-    ray.shutdown()
-    logger.info("✅ Ray shut down")
 
 
 def cleanup_training_resources(
@@ -2553,6 +2551,17 @@ def cleanup_training_resources(
 
     # Clean up judge clients
     cleanup_judge_clients()
+
+    # Shutdown Ray only from the main process (rank 0) or when DDP isn't initialized
+    try:
+        is_ddp = dist.is_available() and dist.is_initialized()
+        is_rank0 = (not is_ddp) or (dist.get_rank() == 0)
+        if is_rank0 and ray.is_initialized():
+            logger.info("Shutting down Ray...")
+            ray.shutdown()
+            logger.info("✅ Ray shut down")
+    except Exception as e:
+        logger.warning(f"Ray shutdown failed: {e}")
 
     # Clean up distributed process group if it was initialized
     if dist.is_initialized():
@@ -2909,6 +2918,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
 
 if __name__ == "__main__":
+    utils.check_oe_eval_internal()
+
     parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
     assert isinstance(args, Args)
