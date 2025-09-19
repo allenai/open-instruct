@@ -239,13 +239,6 @@ class FlatArguments:
             "Useful if tokenization process is long. Default is 1800 seconds (30 minutes)."
         },
     )
-    reduce_loss: str = field(
-        default="mean",
-        metadata={
-            "help": "How to reduce loss over tokens. Options are 'mean' or 'sum'."
-            "Using 'sum' can improve chat model performance."
-        },
-    )
     resume_from_checkpoint: Optional[str] = field(
         default=None, metadata={"help": "If the training should continue from a checkpoint folder."}
     )
@@ -337,8 +330,6 @@ class FlatArguments:
     )
 
     def __post_init__(self):
-        if self.reduce_loss not in ["mean", "sum"]:
-            raise ValueError("reduce_loss must be either 'mean' or 'sum'")
         if self.dataset_name is None and self.dataset_mixer is None and self.dataset_mixer_list is None:
             raise ValueError("Need either a dataset name, dataset mixer, or dataset mixer list.")
         if (
@@ -552,7 +543,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         elif args.use_liger_kernel:
             from liger_kernel.transformers import AutoLigerKernelForCausalLM
 
-            fused_linear_cross_entropy = args.reduce_loss == "mean"
             logger.info(f"Attempting to apply liger-kernel. {fused_linear_cross_entropy=}")
 
             # Supported models: https://github.com/linkedin/Liger-Kernel/blob/main/src/liger_kernel/transformers/monkey_patch.py#L948
@@ -565,7 +555,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
                 # liger-kernel specific args
-                fused_linear_cross_entropy=fused_linear_cross_entropy,
+                fused_linear_cross_entropy=True,
             )
         else:
             model = AutoModelForCausalLM.from_pretrained(
@@ -787,36 +777,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     # Standard forward pass
                     outputs = model(**batch, use_cache=False)
 
-                if args.reduce_loss == "mean":
-                    loss = outputs.loss
-                else:
-                    # reduce loss is sum
-                    # this ensures that we weight all tokens in the dataset equally,
-                    # rather than weighting each overall example equally when
-                    # using high amounts of gradient accumulation.
-                    # this can result in > 5 point improvements in AlpacaEval
-                    # see https://github.com/huggingface/transformers/issues/24725 for
-                    # more discussion and details.
-                    logits = outputs.logits
-                    labels = batch["labels"]
-                    # Shift so that tokens < n predict n
-                    shift_logits = logits[..., :-1, :].contiguous()
-                    shift_labels = labels[..., 1:].contiguous()
-                    # Release logits to avoid memory leak
-                    del logits
-
-                    # Flatten the tokens
-                    loss_fct = torch.nn.CrossEntropyLoss(reduction="sum")
-                    shift_logits = shift_logits.view(-1, embedding_size)
-                    shift_labels = shift_labels.view(-1)
-                    # Enable model parallelism
-                    shift_labels = shift_labels.to(shift_logits.device)
-                    loss = loss_fct(shift_logits, shift_labels)
-                    # Release shift_logits to avoid memory leak
-                    del shift_logits
-                    if args.load_balancing_loss:
-                        aux_loss = args.load_balancing_weight * outputs.aux_loss
-                        loss += aux_loss
+                loss = outputs.loss
                 del outputs
 
                 # We keep track of the loss at each logged step
@@ -900,22 +861,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     #    period.  We want the avg over each optimizer step (which scales with the
                     #    global batch size), and the average loss per token and per prediction
                     #    token (which are roughly independent of global batch size).
-                    if args.reduce_loss == "mean":
-                        total_fwd_passes = (
-                            args.logging_steps * args.gradient_accumulation_steps * accelerator.num_processes
-                        )
-                        avg_loss = sum_loss / total_fwd_passes
-                        metrics_to_log["train_loss"] = avg_loss
-                    else:
-                        avg_loss = sum_loss / total_tokens_this_log_period
-                        # The loss per pred tok is the closest analogue to what we report as the
-                        # avg_loss in the "mean" case
-                        avg_loss_per_pred_tok = sum_loss / pred_tokens_this_log_period
-                        total_optim_steps = args.logging_steps * accelerator.num_processes
-                        avg_sum_loss = sum_loss / total_optim_steps
-                        metrics_to_log["train_sum_loss"] = avg_sum_loss
-                        metrics_to_log["train_loss_per_total_tok"] = avg_loss
-                        metrics_to_log["train_loss_per_pred_tok"] = avg_loss_per_pred_tok
+                    total_fwd_passes = (
+                        args.logging_steps * args.gradient_accumulation_steps * accelerator.num_processes
+                    )
+                    avg_loss = sum_loss / total_fwd_passes
+                    metrics_to_log["train_loss"] = avg_loss
                     if args.verbose:
                         sec_per_step = (time.time() - start_time) / (completed_steps - resume_step)
                         steps_remaining = args.max_train_steps - completed_steps
