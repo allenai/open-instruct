@@ -23,7 +23,7 @@ dependencies = [
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch>=2.8.0,<2.9.0",
-    "transformers==4.56.2",
+    "transformers @ git+https://github.com/huggingface/transformers.git@8076e755e532dcf4083fc7a869be8d3418b9078c",
     "vllm @ git+https://github.com/finbarrtimbers/vllm.git@cb25e298c0c7871264d56b3a70287549ebed9bd2",
     "wandb==0.18.1",
     "langdetect==1.0.9",
