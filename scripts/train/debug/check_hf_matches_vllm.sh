@@ -14,7 +14,8 @@ uv run python mason.py \
        --description "Check HF matches vLLM test script." \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
-       --priority urgent \
+       --preemptible \
+       --priority high \
        --num_nodes 1 \
        --max_retries 0 \
        --env VLLM_ENABLE_V1_MULTIPROCESSING=0 \
