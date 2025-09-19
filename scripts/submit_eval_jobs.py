@@ -65,10 +65,10 @@ def adjust_gpus(task_spec, experiment_group, model_name, gpu_multiplier):
 # Launcher
 
 WEKA_CLUSTERS = [
-    "ai2/jupiter",
-    "ai2/saturn",
-    "ai2/neptune",
-    "ai2/ceres"
+    "ai2/jupiter-cirrascale-2",
+    "ai2/saturn-cirrascale",
+    "ai2/neptune-cirrascale",
+    "ai2/ceres-cirrascale"
 ]
 
 
