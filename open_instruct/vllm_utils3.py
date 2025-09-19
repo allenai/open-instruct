@@ -620,34 +620,8 @@ class LLMRayActor:
         # Use generate() instead of add_request() to ensure output handler is started
         # Note: generate() expects (prompt, sampling_params, request_id) in that order
         generator = self.llm_engine.generate(prompt, sampling_params, request_id)
-        logger.info(f"[generate_one_completion] Got generator for {request_id}, starting iteration")
 
-        outputs = []
-        iteration_count = 0
-        timeout_seconds = 300  # 5 minute timeout per request
-
-        # The generate() method always returns an AsyncGenerator
-        logger.info(f"[generate_one_completion] Using async generator for {request_id}")
-
-        try:
-            async with asyncio.timeout(timeout_seconds):
-                async for output in generator:
-                    iteration_count += 1
-                    if iteration_count % 100 == 0:
-                        logger.info(
-                            f"[generate_one_completion] Iteration {iteration_count} for {request_id}, finished={output.finished}"
-                        )
-                    if output.finished:
-                        outputs.append(output)
-                        logger.info(
-                            f"[generate_one_completion] Request {request_id} finished after {iteration_count} iterations"
-                        )
-                        break
-        except asyncio.TimeoutError:
-            logger.error(f"[generate_one_completion] Timeout after {timeout_seconds}s for request {request_id}")
-            logger.error(f"[generate_one_completion] Processed {iteration_count} iterations before timeout")
-            raise RuntimeError(f"Request {request_id} timed out after {timeout_seconds} seconds")
-
+        outputs = [output async for output in generator if output.finished]
         assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
         return outputs[0]
 
