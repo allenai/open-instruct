@@ -9,9 +9,7 @@ MODEL_PATHS=(
 )
 
 MODEL_NAMES=(
-    "FlexOlmo-4x7B-RT-midtraining-lr2e-2"
-    "FlexOlmo-4x7B-RT-midtraining-lr2e-3"
-    "FlexOlmo-4x7B-RT-midtraining-lr2e-4"
+    "Experts-SFTed-RT-merged"
 )
 
 # Check that arrays have the same length
