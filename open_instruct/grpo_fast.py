@@ -248,6 +248,8 @@ class Args:
     """the lower clip range"""
     clip_higher: float = 0.2
     """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
+    inflight_updates: bool = False
+    """Enable immediate stopping of request processing when should_stop is set, allowing for quick pausing and resumption"""
     kl_estimator: Literal["kl1", "kl2", "kl3", "kl4"] = "kl3"
     """the KL estimator to use"""
     pack_length: int = 512
@@ -1995,7 +1997,7 @@ def create_model_and_optimizer(
                 # Add tool end string to stop_strings
                 args.stop_strings.append(tool.end_str)
             elif tool.lower() == "code":
-                from open_instruct.tool_utils.tool_vllm import PythonCodeTool
+                from open_instruct.tool_utils.tools import PythonCodeTool
 
                 tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
                 tool_objects[tool.end_str] = tool
@@ -2033,6 +2035,7 @@ def create_model_and_optimizer(
         actor_manager=actor_manager,
         inference_batch_size=args.inference_batch_size,
         use_fp8_kv_cache=args.use_fp8_kv_cache,
+        inflight_updates=args.inflight_updates,
         verbose=args.verbose,
     )
 
@@ -2511,11 +2514,9 @@ def make_reward_fn(args: Args) -> Callable:
 
 
 def cleanup_judge_clients():
-    """Cleans up all LLM judge clients and shutdown Ray."""
+    """Cleans up all LLM judge clients."""
     asyncio.run(cleanup_all_llm_judge_clients())
     logger.info("✅ LLM judge clients cleaned up")
-    ray.shutdown()
-    logger.info("✅ Ray shut down")
 
 
 def cleanup_training_resources(
@@ -2550,6 +2551,17 @@ def cleanup_training_resources(
 
     # Clean up judge clients
     cleanup_judge_clients()
+
+    # Shutdown Ray only from the main process (rank 0) or when DDP isn't initialized
+    try:
+        is_ddp = dist.is_available() and dist.is_initialized()
+        is_rank0 = (not is_ddp) or (dist.get_rank() == 0)
+        if is_rank0 and ray.is_initialized():
+            logger.info("Shutting down Ray...")
+            ray.shutdown()
+            logger.info("✅ Ray shut down")
+    except Exception as e:
+        logger.warning(f"Ray shutdown failed: {e}")
 
     # Clean up distributed process group if it was initialized
     if dist.is_initialized():
@@ -2906,6 +2918,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
 
 if __name__ == "__main__":
+    utils.check_oe_eval_internal()
+
     parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
     assert isinstance(args, Args)
