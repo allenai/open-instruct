@@ -1621,7 +1621,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 )
                 tool_objects[tool.end_str] = tool
             elif tool.lower() == "code":
-                from open_instruct.tool_utils.tool_vllm import PythonCodeTool
+                from open_instruct.tool_utils.tools import PythonCodeTool
 
                 tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
                 tool_objects[tool.end_str] = tool
