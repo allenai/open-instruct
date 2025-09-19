@@ -944,19 +944,13 @@ class LLMRayActor:
             logger.warning(
                 f"[process_from_queue] timeout parameter ({timeout}) is ignored - loop runs indefinitely until should_stop"
             )
-        logger.info("[process_from_queue] About to await _PROFILE_PROCESS_FROM_QUEUE_MAIN")
         return await self._PROFILE_PROCESS_FROM_QUEUE_MAIN()
 
     async def _PROFILE_PROCESS_FROM_QUEUE_MAIN(self):
         """Profiling wrapper for main process_from_queue logic."""
         # Ensure engine and prefetch are initialized
-        logger.info("[_PROFILE_PROCESS_FROM_QUEUE_MAIN] About to await _ensure_engine_initialized")
         await self._ensure_engine_initialized()
-        logger.info(
-            "[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed _ensure_engine_initialized, about to await _ensure_prefetch_started"
-        )
         await self._ensure_prefetch_started()
-        logger.info("[_PROFILE_PROCESS_FROM_QUEUE_MAIN] Completed _ensure_prefetch_started")
 
         iteration_count = 0
         total_processed = 0
