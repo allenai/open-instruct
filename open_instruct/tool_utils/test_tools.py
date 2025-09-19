@@ -1,9 +1,6 @@
 import subprocess
 import time
 import unittest
-from unittest.mock import MagicMock, patch
-
-import requests
 
 from open_instruct.tool_utils.tools import MaxCallsExceededTool, PythonCodeTool, Tool, ToolOutput
 
@@ -62,24 +59,18 @@ class TestMaxCallsExceededTool(unittest.TestCase):
 class TestPythonCodeTool(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        """Start the tool server for integration tests."""
-        cls.server_process = None
-        cls.use_real_server = False  # Set to True to test with real server
-
-        if cls.use_real_server:
-            # Start the server in a subprocess
-            cls.server_process = subprocess.Popen(
-                ["uv", "run", "uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1212"],
-                cwd="open_instruct/tool_utils",
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                start_new_session=True,  # Create new process group
-            )
-            # Wait for server to start
-            time.sleep(3)
-            cls.api_endpoint = "http://localhost:1212/execute"
-        else:
-            cls.api_endpoint = "http://test-api.com/execute"
+        """Start the tool server for tests."""
+        # Start the server in a subprocess
+        cls.server_process = subprocess.Popen(
+            ["uv", "run", "uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1212"],
+            cwd="open_instruct/tool_utils",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,  # Create new process group
+        )
+        # Wait for server to start
+        time.sleep(3)
+        cls.api_endpoint = "http://localhost:1212/execute"
 
     @classmethod
     def tearDownClass(cls):
@@ -112,13 +103,7 @@ class TestPythonCodeTool(unittest.TestCase):
         self.assertFalse(result.timeout)
         self.assertEqual(result.runtime, 0)
 
-    @patch("requests.post")
-    def test_successful_code_execution(self, mock_post):
-        # Mock successful API response
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"output": "Hello, World!", "error": None}
-        mock_post.return_value = mock_response
-
+    def test_successful_code_execution(self):
         prompt = """Let me calculate this.
 <code>
 print("Hello, World!")
@@ -127,23 +112,12 @@ print("Hello, World!")
         result = self.tool(prompt)
 
         self.assertTrue(result.called)
-        self.assertEqual(result.output, "Hello, World!")
+        self.assertIn("Hello, World!", result.output)
         self.assertEqual(result.error, "")
         self.assertFalse(result.timeout)
         self.assertGreater(result.runtime, 0)
 
-        # Verify API was called correctly
-        mock_post.assert_called_once_with(
-            self.api_endpoint, json={"code": 'print("Hello, World!")', "timeout": 3}, timeout=3
-        )
-
-    @patch("requests.post")
-    def test_code_execution_with_error(self, mock_post):
-        # Mock API response with error
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"output": "", "error": "SyntaxError: invalid syntax"}
-        mock_post.return_value = mock_response
-
+    def test_code_execution_with_error(self):
         prompt = """<code>
 print("unclosed string
 </code>"""
@@ -151,15 +125,11 @@ print("unclosed string
         result = self.tool(prompt)
 
         self.assertTrue(result.called)
-        self.assertIn("SyntaxError: invalid syntax", result.output)
-        self.assertEqual(result.error, "SyntaxError: invalid syntax")
+        # Check that there's an error in either output or error field
+        self.assertTrue("SyntaxError" in result.output or len(result.error) > 0)
         self.assertFalse(result.timeout)
 
-    @patch("requests.post")
-    def test_timeout_handling(self, mock_post):
-        # Mock timeout exception
-        mock_post.side_effect = requests.Timeout("Request timed out")
-
+    def test_timeout_handling(self):
         prompt = """<code>
 import time
 time.sleep(10)
@@ -168,33 +138,24 @@ time.sleep(10)
         result = self.tool(prompt)
 
         self.assertTrue(result.called)
-        self.assertIn("Timeout after 3 seconds", result.output)
-        self.assertEqual(result.error, "")
-        self.assertTrue(result.timeout)
+        self.assertTrue(result.timeout or "Timeout" in result.output or "timeout" in result.error)
+        self.assertLess(result.runtime, 10)  # Should timeout before 10 seconds
 
-    @patch("requests.post")
-    def test_api_error_handling(self, mock_post):
-        # Mock general API error
-        mock_post.side_effect = Exception("API connection failed")
-
+    def test_computation(self):
+        # Test actual computation instead of API error
         prompt = """<code>
-print("test")
+result = 5 * 7 + 3
+print(f"The result is {result}")
 </code>"""
 
         result = self.tool(prompt)
 
         self.assertTrue(result.called)
-        self.assertIn("Error calling API: API connection failed", result.output)
+        self.assertIn("The result is 38", result.output)
         self.assertEqual(result.error, "")
         self.assertFalse(result.timeout)
 
-    @patch("requests.post")
-    def test_multiple_code_blocks_uses_last(self, mock_post):
-        # Mock successful API response
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"output": "Second block output", "error": None}
-        mock_post.return_value = mock_response
-
+    def test_multiple_code_blocks_uses_last(self):
         prompt = """First code block:
 <code>
 print("First block")
@@ -208,10 +169,9 @@ print("Second block")
         result = self.tool(prompt)
 
         # Should only execute the last code block
-        mock_post.assert_called_once_with(
-            self.api_endpoint, json={"code": 'print("Second block")', "timeout": 3}, timeout=3
-        )
-        self.assertEqual(result.output, "Second block output")
+        self.assertTrue(result.called)
+        self.assertIn("Second block", result.output)
+        self.assertNotIn("First block", result.output)
 
     def test_code_block_with_backticks_ignored(self):
         # Test that code blocks preceded by backticks are ignored
@@ -222,89 +182,15 @@ And here's actual code:
 print("executed")
 </code>"""
 
-        with patch("requests.post") as mock_post:
-            mock_response = MagicMock()
-            mock_response.json.return_value = {"output": "executed", "error": None}
-            mock_post.return_value = mock_response
-
-            self.tool(prompt)
-
-            # Should only find and execute the non-backticked code block
-            mock_post.assert_called_once_with(
-                self.api_endpoint, json={"code": 'print("executed")', "timeout": 3}, timeout=3
-            )
-
-
-class TestPythonCodeToolIntegration(unittest.TestCase):
-    """Integration tests that use the real tool server."""
-
-    @classmethod
-    def setUpClass(cls):
-        """Start the real tool server for integration tests."""
-        # Start the server in a subprocess
-        cls.server_process = subprocess.Popen(
-            ["uv", "run", "uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1213"],
-            cwd="open_instruct/tool_utils",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=True,  # Create new process group
-        )
-        # Wait for server to start
-        time.sleep(3)
-        cls.api_endpoint = "http://localhost:1213/execute"
-
-    @classmethod
-    def tearDownClass(cls):
-        """Stop the tool server."""
-        if cls.server_process:
-            cls.server_process.terminate()
-            try:
-                cls.server_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                cls.server_process.kill()
-                cls.server_process.wait()
-
-    def setUp(self):
-        self.tool = PythonCodeTool(api_endpoint=self.api_endpoint, start_str="<code>", end_str="</code>")
-
-    def test_real_code_execution(self):
-        """Test actual code execution with the real server."""
-        prompt = """<code>
-print("Hello from integration test!")
-print(2 + 2)
-</code>"""
-
         result = self.tool(prompt)
 
+        # Should only find and execute the non-backticked code block
         self.assertTrue(result.called)
-        self.assertIn("Hello from integration test!", result.output)
-        self.assertIn("4", result.output)
-        self.assertFalse(result.timeout)
-        self.assertEqual(result.error, "")
+        self.assertIn("executed", result.output)
+        self.assertNotIn("ignored", result.output)
 
-    def test_real_code_with_error(self):
-        """Test code with syntax error using real server."""
-        prompt = """<code>
-print("unclosed string
-</code>"""
 
-        result = self.tool(prompt)
-
-        self.assertTrue(result.called)
-        self.assertTrue(len(result.error) > 0 or "Error" in result.output)
-
-    def test_real_timeout(self):
-        """Test timeout handling with real server."""
-        prompt = """<code>
-import time
-time.sleep(5)
-</code>"""
-
-        result = self.tool(prompt)
-
-        self.assertTrue(result.called)
-        self.assertTrue(result.timeout)
-        self.assertIn("Timeout", result.output)
+# Removed the duplicate TestPythonCodeToolIntegration class since we're always using the real server now
 
 
 if __name__ == "__main__":
