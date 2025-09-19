@@ -53,7 +53,7 @@ from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, DataCollatorForSeq2Seq, get_scheduler
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils
+from open_instruct import logger_utils, utils
 from open_instruct.dataset_transformation import (
     INPUT_IDS_KEY,
     TOKENIZED_SFT_DATASET_KEYS,
@@ -960,6 +960,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
 
 if __name__ == "__main__":
+    utils.check_oe_eval_internal()
+
     parser = ArgumentParserPlus((FlatArguments, TokenizerConfig))
     args, tc = parser.parse_args_into_dataclasses()
     main(args, tc)

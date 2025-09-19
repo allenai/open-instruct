@@ -85,6 +85,7 @@ from transformers import (
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
+from open_instruct import utils
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -1977,6 +1978,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
 
 if __name__ == "__main__":
+    utils.check_oe_eval_internal()
+
     parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
     assert isinstance(args, Args)
