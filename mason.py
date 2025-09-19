@@ -835,9 +835,9 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         raise ValueError("GCP clusters do not have the dev filesystem, please use a proper image")
 
     if args.hostname is not None:
-        constraints = beaker.Constraints(hostname=args.hostname)
+        constraints = beaker.BeakerConstraints(hostname=args.hostname)
     else:
-        constraints = beaker.Constraints(cluster=args.cluster)
+        constraints = beaker.BeakerConstraints(cluster=args.cluster)
     spec = beaker.TaskSpec(
         name=f"{args.task_name}__{i}",
         image=beaker.ImageSource(beaker=args.image),
@@ -881,8 +881,8 @@ def main():
             beaker_client = beaker.Beaker.from_env(default_workspace=args.workspace)
         else:
             beaker_client = beaker.Beaker.from_env()
-        beaker_secrets = [secret.name for secret in beaker_client.workspace.secrets()]
-        whoami = beaker_client.account.whoami().name
+        beaker_secrets = [secret.name for secret in beaker_client.secret.list()]
+        whoami = beaker_client.user.get().name
 
     full_commands = [make_internal_command(command, args, whoami, is_external_user) for command in commands]
     if is_external_user:
@@ -899,7 +899,7 @@ def main():
         console.print(Text(full_command))
     if is_external_user:
         return
-    experiment_spec = beaker.ExperimentSpec(
+    experiment_spec = beaker.BeakerExperimentSpec(
         description=args.description,
         tasks=[make_task_spec(args, full_command, i, beaker_secrets, whoami, args.resumable) for i, full_command in enumerate(full_commands)],
         budget=args.budget,
