@@ -28,7 +28,7 @@ dependencies = [
     "wandb==0.18.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
-    "flash-attn>=2.8.0.post2; platform_system != 'Darwin'",
+    "flash-attn>=2.8.3; platform_system != 'Darwin'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
 ]
 
