@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Define base output directory
+BASE_OUTPUT_DIR="s3://ai2-sewonm/sanjaya/post_training_eval_results"
+
 # Define model paths and names arrays
 MODEL_PATHS=(
     "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/FlexOlmo-4x7B-RT-midtraining-lr2e-2/step9537-hf"
@@ -47,7 +50,7 @@ for i in "${!MODEL_PATHS[@]}"; do
         --skip_oi_evals \
         --gpu_multiplier 2 \
         --oe_eval_tasks mmlu:cot::hamish_zs_reasoning,popqa::hamish_zs_reasoning,simpleqa::tulu-thinker,bbh:cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,minerva_math::hamish_zs_reasoning,gsm8k::zs_cot_latex,aime:zs_cot_r1::pass_at_32_2024_temp1,aime:zs_cot_r1::pass_at_32_2025_temp1,codex_humanevalplus:0-shot-chat::tulu-thinker,mbppplus:0-shot-chat::tulu-thinker,alpaca_eval_v3::hamish_zs_reasoning,ifeval::hamish_zs_reasoning \
-        --s3_output_dir s3://ai2-sewonm/sanjaya/post_training_eval_results/ \
+        --s3_output_dir "${BASE_OUTPUT_DIR}/${MODEL_NAME}/" \
         --location "$MODEL_PATH" \
         --model_name "$MODEL_NAME-temp_suite"
     
