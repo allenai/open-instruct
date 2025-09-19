@@ -624,7 +624,8 @@ class LLMRayActor:
         logger.info(f"[generate_one_completion] About to call generate for {request_id}")
 
         # Use generate() instead of add_request() to ensure output handler is started
-        generator = self.llm_engine.generate(request_id, prompt, sampling_params)
+        # Note: generate() expects (prompt, sampling_params, request_id) in that order
+        generator = self.llm_engine.generate(prompt, sampling_params, request_id)
         logger.info(f"[generate_one_completion] Got generator for {request_id}, starting iteration")
 
         outputs = []
