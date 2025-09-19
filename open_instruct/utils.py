@@ -1623,3 +1623,24 @@ def check_runtime_leaks(
         for name, (count, rtype) in cache.items():
             if count > 0:
                 leak_logger.warning(f"Leaked {rtype} resources: {count}")
+
+
+def check_oe_eval_internal():
+    """Check if oe-eval-internal is available when running in Beaker.
+
+    Raises an error if we're running in Beaker but oe-eval-internal is not present.
+    This is needed because oe-eval-internal is required for certain evaluation tasks
+    but is only available internally at AI2.
+    """
+    # Return early if not running in Beaker
+    if not os.environ.get("BEAKER_EXPERIMENT_ID"):
+        return
+
+    # We're in Beaker, check if oe-eval-internal exists
+    if not os.path.exists("/stage/oe-eval-internal"):
+        raise RuntimeError(
+            "Running in Beaker but oe-eval-internal directory is not found. "
+            "The oe-eval-internal repository is required for evaluation tasks "
+            "when running in Beaker. Please ensure the Docker image was built "
+            "with access to the oe-eval-internal repository."
+        )
