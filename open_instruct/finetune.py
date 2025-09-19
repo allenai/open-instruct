@@ -543,7 +543,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         elif args.use_liger_kernel:
             from liger_kernel.transformers import AutoLigerKernelForCausalLM
 
-            logger.info(f"Attempting to apply liger-kernel. {fused_linear_cross_entropy=}")
+            logger.info("Attempting to apply liger-kernel. fused_linear_cross_entropy=True")
 
             # Supported models: https://github.com/linkedin/Liger-Kernel/blob/main/src/liger_kernel/transformers/monkey_patch.py#L948
             model = AutoLigerKernelForCausalLM.from_pretrained(
@@ -773,6 +773,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             with accelerator.accumulate(model):
                 if args.load_balancing_loss:
                     outputs = model(**batch, use_cache=False, output_router_logits=True)
+                    total_aux_loss += outputs.aux_loss.detach().float()
                 else:
                     # Standard forward pass
                     outputs = model(**batch, use_cache=False)
@@ -783,8 +784,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 # We keep track of the loss at each logged step
                 total_loss += loss.detach().float()
                 accelerator.backward(loss)
-                if args.load_balancing_loss:
-                    total_aux_loss += aux_loss.detach().float()
                 # clip gradient norm. don't do this with deepspeed
                 if accelerator.sync_gradients and args.clip_grad_norm > 0:
                     accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
@@ -803,7 +802,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     total_tokens_including_padding = accelerator.gather(total_token_including_padding).sum().item()
                     total_tokens_this_log_period = accelerator.gather(local_total_tokens_this_log_period).sum().item()
                     local_total_tokens_this_log_period.zero_()
-                    pred_tokens_this_log_period = accelerator.gather(local_pred_tokens_this_log_period).sum().item()
+                    accelerator.gather(local_pred_tokens_this_log_period).sum().item()
                     local_pred_tokens_this_log_period.zero_()
 
                     avg_tokens_per_batch = (
