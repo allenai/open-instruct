@@ -23,7 +23,7 @@ uv run python mason.py \
        --budget ai2/oe-adapt \
        --gpus 1 \
        -- python scripts/check-hf-matches-vllm.py \
-          --model-name-or-path meta-llama/Llama-3.2-1B \
+          --model-name-or-path /weka/oe-adapt-default/finbarrt/olmo25_7b-hf-olmo3-test \
           --max-new-tokens 32 \
           --dtype auto \
           --vllm-compilation-level 0
