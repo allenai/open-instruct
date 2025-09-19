@@ -922,10 +922,6 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
-        if timeout is not None:
-            logger.warning(
-                f"[process_from_queue] timeout parameter ({timeout}) is ignored - loop runs indefinitely until should_stop"
-            )
         return await self._PROFILE_PROCESS_FROM_QUEUE_MAIN()
 
     async def _PROFILE_PROCESS_FROM_QUEUE_MAIN(self):
