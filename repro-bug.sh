@@ -1,3 +1,11 @@
+#!/bin/bash
+
+# Get the Beaker username to construct the image name
+BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+
+echo "Using Beaker image: $BEAKER_IMAGE"
+
 # full integration mix
 # dataset_mix="saurabh5/rlvr_acecoder_filtered 63033 hamishivi/rlvr_orz_math_57k_collected 56878 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2 56878 allenai/IF_multi_constraints_upto5 56878"
 # math only mix
@@ -33,7 +41,7 @@ uv run python mason.py \
     --workspace ai2/tulu-thinker \
     --priority high \
     --pure_docker_mode \
-    --image stellal/open_instruct_dev_2 \
+    --image "$BEAKER_IMAGE" \
     --preemptible \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
