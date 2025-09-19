@@ -75,13 +75,14 @@ class TestPythonCodeTool(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         """Stop the tool server."""
-        if cls.server_process:
-            cls.server_process.terminate()
-            try:
-                cls.server_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                cls.server_process.kill()
-                cls.server_process.wait()
+        if not cls.server_process:
+            return
+        cls.server_process.terminate()
+        try:
+            cls.server_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            cls.server_process.kill()
+            cls.server_process.wait()
 
     def setUp(self):
         self.api_endpoint = self.__class__.api_endpoint
