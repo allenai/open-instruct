@@ -388,11 +388,8 @@ class LLMRayActor:
         while True:
             attempt += 1
             # If a weight sync is requested, yield control so caller can stop
-            logger.info(f"[_q_get_async] Attempt {attempt}: About to await _should_stop() check")
             if await self._should_stop():
-                logger.info("[_q_get_async] Should stop is True, about to await asyncio.sleep(0.1)")
                 await asyncio.sleep(0.1)
-                logger.info("[_q_get_async] Completed asyncio.sleep(0.1) after should_stop")
                 # Returning None signals caller to re-check should_stop and continue
                 return None
             try:
@@ -400,18 +397,14 @@ class LLMRayActor:
                     logger.info(
                         f"[_q_get_async] Attempt {attempt}: Trying to get from prompt_queue: {self.prompt_queue}"
                     )
-                logger.info(f"[_q_get_async] Attempt {attempt}: About to await _PROFILE_PROMPT_QUEUE_GET")
                 result = await self._PROFILE_PROMPT_QUEUE_GET()
-                logger.info(f"[_q_get_async] Completed _PROFILE_PROMPT_QUEUE_GET on attempt {attempt}")
                 logger.info(f"[_q_get_async] ✅ Got request after {attempt} attempts! Type: {type(result)}")
                 return result
             except Exception as e:
                 # Likely timeout; just loop
                 if attempt % 100 == 1:  # Log every 100 attempts
                     logger.debug(f"[_q_get_async] Timeout on attempt {attempt}: {e}")
-                logger.info(f"[_q_get_async] About to await asyncio.sleep(0.05) after exception on attempt {attempt}")
                 await asyncio.sleep(0.05)
-                logger.info(f"[_q_get_async] Completed asyncio.sleep(0.05) after exception on attempt {attempt}")
 
     async def _PROFILE_PROMPT_QUEUE_GET(self):
         """Profiling wrapper for prompt queue get operation."""
@@ -430,9 +423,7 @@ class LLMRayActor:
 
             try:
                 # Use asyncio.wait_for to properly handle timeout in async context
-                logger.info("[_should_stop] About to await asyncio.wait_for on should_stop remote ref")
                 value = await asyncio.wait_for(ref, timeout=0.1)
-                logger.info(f"[_should_stop] Completed asyncio.wait_for, value={value}")
                 self._should_stop_value = bool(value)
                 self._last_should_stop_update = now
             except asyncio.TimeoutError:
