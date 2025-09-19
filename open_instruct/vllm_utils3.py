@@ -295,6 +295,9 @@ class LLMRayActor:
         else:
             self.executor = None
 
+        # Force use of vLLM v1 engine which has better async support
+        os.environ["VLLM_USE_V1"] = "1"
+
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
