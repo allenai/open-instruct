@@ -448,15 +448,11 @@ class LLMRayActor:
         # Ensure engine is initialized before processing any requests
         logger.info("[_prefetch_requests] About to await _ensure_engine_initialized")
         await self._ensure_engine_initialized()
-        logger.info("[_prefetch_requests] Completed _ensure_engine_initialized")
 
         while True:
             # Don't consume requests during weight sync (regardless of inflight_updates)
-            logger.info("[_prefetch_requests] About to await _should_stop() check")
             if await self._should_stop():
-                logger.info("[_prefetch_requests] Should stop is True, about to await asyncio.sleep(0.1)")
                 await asyncio.sleep(0.1)
-                logger.info("[_prefetch_requests] Completed asyncio.sleep(0.1) after should_stop")
                 continue
 
             # Check if we need more requests
@@ -625,51 +621,37 @@ class LLMRayActor:
         Wraps the async generator to return a single RequestOutput.
         """
         logger.info(f"[generate_one_completion] Adding request {request_id} to engine")
-        logger.info(f"[generate_one_completion] About to await add_request for {request_id}")
-        generator = await self.llm_engine.add_request(request_id, prompt, sampling_params)
+        logger.info(f"[generate_one_completion] About to call generate for {request_id}")
+
+        # Use generate() instead of add_request() to ensure output handler is started
+        generator = self.llm_engine.generate(request_id, prompt, sampling_params)
         logger.info(f"[generate_one_completion] Got generator for {request_id}, starting iteration")
 
         outputs = []
         iteration_count = 0
+        timeout_seconds = 300  # 5 minute timeout per request
 
-        # Check if we're using v1 API (returns RequestOutputCollector) or v0 API (returns AsyncGenerator)
-        if hasattr(generator, "get"):
-            # v1 API: RequestOutputCollector
-            logger.info(f"[generate_one_completion] Using v1 API for {request_id}")
-            finished = False
-            while not finished:
-                iteration_count += 1
-                # Try get_nowait first, then await get() if nothing available
-                output = generator.get_nowait()
-                if output is None:
-                    output = await generator.get()
+        # The generate() method always returns an AsyncGenerator
+        logger.info(f"[generate_one_completion] Using async generator for {request_id}")
 
-                if iteration_count % 100 == 0:
-                    logger.info(
-                        f"[generate_one_completion] Iteration {iteration_count} for {request_id}, finished={output.finished}"
-                    )
-
-                finished = output.finished
-                if finished:
-                    outputs.append(output)
-                    logger.info(
-                        f"[generate_one_completion] Request {request_id} finished after {iteration_count} iterations"
-                    )
-        else:
-            # v0 API: AsyncGenerator
-            logger.info(f"[generate_one_completion] Using v0 API for {request_id}")
-            async for output in generator:
-                iteration_count += 1
-                if iteration_count % 100 == 0:
-                    logger.info(
-                        f"[generate_one_completion] Iteration {iteration_count} for {request_id}, finished={output.finished}"
-                    )
-                if output.finished:
-                    outputs.append(output)
-                    logger.info(
-                        f"[generate_one_completion] Request {request_id} finished after {iteration_count} iterations"
-                    )
-                    break
+        try:
+            async with asyncio.timeout(timeout_seconds):
+                async for output in generator:
+                    iteration_count += 1
+                    if iteration_count % 100 == 0:
+                        logger.info(
+                            f"[generate_one_completion] Iteration {iteration_count} for {request_id}, finished={output.finished}"
+                        )
+                    if output.finished:
+                        outputs.append(output)
+                        logger.info(
+                            f"[generate_one_completion] Request {request_id} finished after {iteration_count} iterations"
+                        )
+                        break
+        except asyncio.TimeoutError:
+            logger.error(f"[generate_one_completion] Timeout after {timeout_seconds}s for request {request_id}")
+            logger.error(f"[generate_one_completion] Processed {iteration_count} iterations before timeout")
+            raise RuntimeError(f"Request {request_id} timed out after {timeout_seconds} seconds")
 
         assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
         return outputs[0]
