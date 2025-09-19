@@ -1,4 +1,3 @@
-import multiprocessing
 import subprocess
 import time
 import unittest
@@ -74,7 +73,7 @@ class TestPythonCodeTool(unittest.TestCase):
                 cwd="open_instruct/tool_utils",
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                start_new_session=True  # Create new process group
+                start_new_session=True,  # Create new process group
             )
             # Wait for server to start
             time.sleep(3)
@@ -248,7 +247,7 @@ class TestPythonCodeToolIntegration(unittest.TestCase):
             cwd="open_instruct/tool_utils",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            start_new_session=True  # Create new process group
+            start_new_session=True,  # Create new process group
         )
         # Wait for server to start
         time.sleep(3)
@@ -266,11 +265,7 @@ class TestPythonCodeToolIntegration(unittest.TestCase):
                 cls.server_process.wait()
 
     def setUp(self):
-        self.tool = PythonCodeTool(
-            api_endpoint=self.api_endpoint,
-            start_str="<code>",
-            end_str="</code>"
-        )
+        self.tool = PythonCodeTool(api_endpoint=self.api_endpoint, start_str="<code>", end_str="</code>")
 
     def test_real_code_execution(self):
         """Test actual code execution with the real server."""
