@@ -126,7 +126,6 @@ print("unclosed string
         result = self.tool(prompt)
 
         self.assertTrue(result.called)
-        # Check that there's an error in either output or error field
         self.assertTrue("SyntaxError" in result.output or len(result.error) > 0)
         self.assertFalse(result.timeout)
 
@@ -143,7 +142,6 @@ time.sleep(10)
         self.assertLess(result.runtime, 10)  # Should timeout before 10 seconds
 
     def test_computation(self):
-        # Test actual computation instead of API error
         prompt = """<code>
 result = 5 * 7 + 3
 print(f"The result is {result}")
@@ -168,14 +166,11 @@ print("Second block")
 </code>"""
 
         result = self.tool(prompt)
-
-        # Should only execute the last code block
         self.assertTrue(result.called)
         self.assertIn("Second block", result.output)
         self.assertNotIn("First block", result.output)
 
     def test_code_block_with_backticks_ignored(self):
-        # Test that code blocks preceded by backticks are ignored
         prompt = """Here's some inline code: `<code>print("ignored")</code>`
 
 And here's actual code:
@@ -184,17 +179,10 @@ print("executed")
 </code>"""
 
         result = self.tool(prompt)
-
-        # Should only find and execute the non-backticked code block
         self.assertTrue(result.called)
         self.assertIn("executed", result.output)
         self.assertNotIn("ignored", result.output)
 
 
-# Removed the duplicate TestPythonCodeToolIntegration class since we're always using the real server now
-
-
 if __name__ == "__main__":
-    # Run only unit tests by default
-    # To run integration tests, use: python test_tools.py TestPythonCodeToolIntegration
     unittest.main()
