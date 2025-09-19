@@ -5,8 +5,8 @@ BASE_OUTPUT_DIR="s3://ai2-sewonm/sanjaya/post_training_eval_results"
 
 # Define model paths and names arrays
 MODEL_PATHS=(
-    "/weka/oe-training-default/ai2-llm/checkpoints/sanjaya/olmo2-7B-sft/math_expert/step594-hf",
-    "/weka/oe-training-default/ai2-llm/checkpoints/sanjaya/olmo2-7B-sft/code_expert/step150-hf",
+    "/weka/oe-training-default/ai2-llm/checkpoints/sanjaya/olmo2-7B-sft/math_expert/step594-hf"
+    "/weka/oe-training-default/ai2-llm/checkpoints/sanjaya/olmo2-7B-sft/code_expert/step150-hf"
 )
 
 MODEL_NAMES=(
