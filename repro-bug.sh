@@ -63,7 +63,6 @@ python open_instruct/grpo_fast.py \
     --response_length 6144 \
     --pack_length 8192 \
     --model_name_or_path ${model_name_or_path} \
-    --model_name_or_path allenai/olmo3 \
     --chat_template_name olmo_thinker_r1_style \
     --stop_strings "</answer>" \
     --non_stop_penalty False \
