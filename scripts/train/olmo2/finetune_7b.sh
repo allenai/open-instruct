@@ -30,7 +30,6 @@ python mason.py \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
-    --reduce_loss sum \
     --report_to wandb \
     --with_tracking \
     --logging_steps 1 \
