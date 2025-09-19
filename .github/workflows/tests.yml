@@ -90,4 +90,4 @@ jobs:
       - name: Set up Python
         run: uv sync --frozen
       - name: Run unit tests
-        run: uv run --frozen pytest -n auto
+        run: uv run --frozen pytest
