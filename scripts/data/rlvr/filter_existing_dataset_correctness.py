@@ -13,26 +13,33 @@ source configs/beaker_configs/code_api_setup.sh
 """
 import argparse
 import json
+import os
 from functools import partial
 from multiprocessing import Pool, cpu_count, set_start_method
+from datasets import load_dataset
 
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-from open_instruct.ground_truth_utils import build_all_verifiers
+from open_instruct.ground_truth_utils import build_all_verifiers, LMJudgeVerifier
 
 
 def _avg_correctness(sample, reward_fn_mapping):
     """
     Compute the mean correctness for one sample (called in worker).
     """
-    dataset = sample["dataset"][0]
-    gt = sample["ground_truth"][0]
-    outputs = sample["output"]
+    dataset = sample["dataset"][0] if type(sample["dataset"]) == list else sample["dataset"]
+    gt = sample["ground_truth"][0] if type(sample["ground_truth"]) == list else sample["ground_truth"]
+    outputs = sample["outputs"]
 
     reward_fn = reward_fn_mapping[dataset]
-    scores = [reward_fn(None, o, gt).score for o in outputs]
-    return sum(scores) / len(scores) if scores else 0.0
+    if isinstance(reward_fn, LMJudgeVerifier):
+        scores = [reward_fn(None, o, gt, sample["prompt"]).score if o else 0.0 for o in outputs]
+    else:
+        scores = [reward_fn(None, o, gt).score if o else 0.0 for o in outputs]
+
+    overall_score = sum(scores) / len(scores) if scores else 0.0
+    return overall_score, scores
 
 
 def load_samples(files):
@@ -83,41 +90,95 @@ def main():
         type=str,
         help="Give a dataset name to push this data to the hub."
     )
-    parser.add_argument(
-        "--code_api_url",
-        default=None,
-        type=str,
-        help="Give a code api url to use for code verifier."
-    )
-    parser.add_argument(
-        "--code_max_execution_time",
-        default=1.0,
-        type=float,
-        help="Give a max execution time for code verifier."
-    )
+    # -- llm judge
     parser.add_argument(
         "--llm_judge_model",
-        default=None,
+        default="hosted_vllm/Qwen/Qwen3-32B",
         type=str,
-        help="Give a llm judge model to use for llm verifier."
+        help="the model to use for the llm judge"
     )
     parser.add_argument(
         "--llm_judge_max_tokens",
         default=2048,
         type=int,
-        help="Give a max tokens for llm judge."
+        help="the max tokens to use for the llm judge"
+    )
+    parser.add_argument(
+        "--llm_judge_max_context_length",
+        default=8192,
+        type=int,
+        help="the max context length to use for the llm judge"
     )
     parser.add_argument(
         "--llm_judge_temperature",
         default=1.0,
         type=float,
-        help="Give a temperature for llm judge."
+        help="the temperature to use for the llm judge"
     )
     parser.add_argument(
         "--llm_judge_timeout",
-        default=60,
+        default=600,
         type=int,
-        help="Give a timeout for llm judge."
+        help="the timeout to use for the llm judge"
+    )
+
+    # -- code verifier
+    parser.add_argument(
+        "--code_api_url",
+        default=os.environ.get("CODE_API_URL", "http://localhost:1234") + "/test_program",
+        type=str,
+        help="the api url to use for the code verifier"
+    )
+    parser.add_argument(
+        "--code_max_execution_time",
+        default=1.0,
+        type=float,
+        help="the max execution time to use for the code verifier"
+    )
+    parser.add_argument(
+        "--code_pass_rate_reward_threshold",
+        default=0.0,
+        type=float,
+        help="the pass rate reward threshold for the code verifier. If pass rate is less than this threshold, reward is 0.0, otherwise reward is pass rate"
+    )
+    parser.add_argument(
+        "--code_apply_perf_penalty",
+        default=False,
+        type=bool,
+        help="whether to apply a performance penalty to the code verifier"
+    )
+
+    # -- max length verifier
+    parser.add_argument(
+        "--max_length_verifier_max_length",
+        default=32768,
+        type=int,
+        help="the max length to use for the max length verifier"
+    )
+
+    # -- non stop penalty
+    parser.add_argument(
+        "--non_stop_penalty",
+        default=False,
+        type=bool,
+        help="whether to penalize responses which did not finish generation"
+    )
+    parser.add_argument(
+        "--non_stop_penalty_value",
+        default=0.0,
+        type=float,
+        help="the reward value for responses which did not finish generation"
+    )
+    parser.add_argument(
+        "--remap_verifier",
+        default=None,
+        type=str,
+        help="Remap verifier like string_f1=general-quality_ref. Currently can only remap once."
+    )
+    parser.add_argument(
+        "--skip_llm_judge",
+        action="store_true",
+        help="Skip any samples that require LLM judge verification."
     )
     parser.add_argument(
         "--seed",
@@ -142,18 +203,28 @@ def main():
 
     samples = list(load_samples(args.files))
 
+    if args.skip_llm_judge:
+        new_samples = []
+        for s in samples:
+            dataset = s["dataset"][0] if type(s["dataset"]) == list else s["dataset"]
+            if not isinstance(reward_fn_mapping[dataset], LMJudgeVerifier):
+                new_samples.append(s)
+        print(f"Skipping {len(samples) - len(new_samples)} samples that require LLM judge verification.")
+        samples = new_samples
+
     # Multiprocess pool
     workers = min(cpu_count(), 32)  # Cap if you don’t want 128 cores
     chunk_size = 1  # Tune for workload size
 
     with Pool(processes=workers) as pool:
-        avg_scores = list(
+        scored_outputs = list(
             tqdm(
                 pool.imap(avg_correctness, samples, chunksize=chunk_size),
                 total=len(samples),
                 desc="Scoring"
             )
         )
+        avg_scores, scores = zip(*scored_outputs)
 
     # Simple diagnostic plot
     plt.hist(avg_scores, bins=100)
@@ -165,10 +236,12 @@ def main():
     lower_bound = args.lower_bound
     upper_bound = args.upper_bound
     # Filter out everything outside of this range
-    filtered_samples = [
-        sample for sample, score in zip(samples, avg_scores)
-        if lower_bound <= score <= upper_bound
-    ]
+    filtered_samples = []
+    for sample, avg_score, full_scores in zip(samples, avg_scores, scores):
+        if lower_bound <= avg_score <= upper_bound:
+            sample["scores"] = full_scores
+            filtered_samples.append(sample)
+
     print(
         f"Filtered {len(samples) - len(filtered_samples)} samples out of {len(samples)}"
     )
