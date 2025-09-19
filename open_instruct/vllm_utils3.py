@@ -39,7 +39,6 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
-from vllm.v1 import kv_cache_interface
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
