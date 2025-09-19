@@ -56,33 +56,22 @@ def parse_env_var(env_var_str: str) -> Dict[str, str]:
     return {"name": name, "value": value}
 
 WEKA_CLUSTERS = [
-    "ai2/jupiter-cirrascale-2",
     "ai2/jupiter",
     "ai2/saturn-cirrascale",
-    "ai2/titan-cirrascale",
     "ai2/titan",
-    "ai2/neptune-cirrascale",
     "ai2/neptune",
-    "ai2/ceres-cirrascale",
     "ai2/ceres",
-    "ai2/triton-cirrascale",
     "ai2/triton",
-    "ai2/rhea-cirrascale",
     "ai2/rhea",
 ]
 GCP_CLUSTERS = [
-    "ai2/augusta-google-1",
     "ai2/augusta"
 ]
 
 INTERCONNECT_CLUSTERS = [
-    "ai2/jupiter-cirrascale-2",
     "ai2/jupiter",
-    "ai2/ceres-cirrascale",
     "ai2/ceres",
-    "ai2/titan-cirrascale",
     "ai2/titan",
-    "ai2/augusta-google-1",
     "ai2/augusta",
 ]
 

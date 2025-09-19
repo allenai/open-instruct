@@ -76,11 +76,11 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
 RUN uv run --no-sync -m nltk.downloader punkt punkt_tab
 
 # Copy all application code at the end
-COPY eval eval
 COPY configs configs
 COPY scripts scripts
 COPY mason.py mason.py
-COPY oe-eval-internal oe-eval-internal
+# Copy oe-eval-internal if it exists (wildcard pattern won't fail if missing)
+COPY oe-eval-interna[l] oe-eval-internal/
 COPY open_instruct open_instruct
 
 # Add build arguments for git information
