@@ -17,6 +17,11 @@ REWARD_WEIGHTS = {
     "num_search_turns_reward": 0.1,
 }
 
+REWARD_WEIGHTS_WITHOUT_CITATION = {
+    "rubric_reward": 0.6,
+    "format_reward": 0.2,
+    "num_search_turns_reward": 0.2,
+}
 
 def compute_longform_averaged_outcome_reward(
         response: str, 
@@ -24,6 +29,7 @@ def compute_longform_averaged_outcome_reward(
         question: str, 
         mcp_parser_name: Optional[str] = None, 
         use_general_rubric: bool = False,
+        no_citation_reward: bool = False,
     ) -> Dict[str, Any]:
     extracted_context, extracted_answer, extracted_citations = extract_answer_context_citations(response)
     result = {
@@ -56,12 +62,19 @@ def compute_longform_averaged_outcome_reward(
     result["rubric_reward"] = rubric_reward
     
     # score citation (include 0.1 weighted citation format reward)
-    citation_reward = score_in_context_citations(question, response, extracted_citations)
+    if not no_citation_reward:
+        citation_reward = score_in_context_citations(question, response, extracted_citations)
+    else:
+        citation_reward = 0.0
     result["citation_reward"] = citation_reward
     
     # compute reward
     reward = 0.0
-    for key, weight in REWARD_WEIGHTS.items():
+    if no_citation_reward:
+        weights = REWARD_WEIGHTS_WITHOUT_CITATION
+    else:
+        weights = REWARD_WEIGHTS
+    for key, weight in weights.items():
         reward += weight * result[key]
     result["reward"] = reward
     
@@ -73,6 +86,7 @@ async def compute_longform_averaged_outcome_reward_async(
         ground_truth: Dict[str, Any], 
         question: str, mcp_parser_name: Optional[str] = None, 
         use_general_rubric: bool = False,
+        no_citation_reward: bool = False,
     ) -> Dict[str, Any]:
     extracted_context, extracted_answer, extracted_citations = extract_answer_context_citations(response)
     result = {
@@ -107,12 +121,19 @@ async def compute_longform_averaged_outcome_reward_async(
     result["rubric_reward"] = rubric_reward
     
     # score citation (include 0.1 weighted citation format reward)
-    citation_reward = score_in_context_citations(question, response, extracted_citations)
+    if not no_citation_reward:
+        citation_reward = score_in_context_citations(question, response, extracted_citations)
+    else:
+        citation_reward = 0.0
     result["citation_reward"] = citation_reward
     
     # compute reward
     reward = 0.0
-    for key, weight in REWARD_WEIGHTS.items():
+    if no_citation_reward:
+        weights = REWARD_WEIGHTS_WITHOUT_CITATION
+    else:
+        weights = REWARD_WEIGHTS
+    for key, weight in weights.items():
         reward += weight * result[key]
     result["reward"] = reward
     

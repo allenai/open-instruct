@@ -18,6 +18,11 @@ REWARD_WEIGHTS = {
     "format_reward": 0.2,
     "num_search_turns_reward": 0.1,
 }
+REWARD_WEIGHTS_WITHOUT_CITATION = {
+    "rubric_reward": 0.6,
+    "format_reward": 0.2,
+    "num_search_turns_reward": 0.2,
+}
 
 
 def create_rubric_key(question: str, rubric: dict) -> str:
@@ -141,7 +146,7 @@ def compute_weighted_rubric_reward(response: str, ground_truth: Dict[str, Any]) 
     return result
 
 
-def compute_weighted_rubric_reward_with_citation_and_format_reward(response: str, ground_truth: Dict[str, Any], mcp_parser_name: Optional[str] = None, use_general_rubric: bool = False) -> Dict[str, Any]:
+def compute_weighted_rubric_reward_with_citation_and_format_reward(response: str, ground_truth: Dict[str, Any], mcp_parser_name: Optional[str] = None, use_general_rubric: bool = False, no_citation_reward: bool = False) -> Dict[str, Any]:
     """
     Compute a comprehensive reward score that includes rubric, citation, format, and search turn rewards.
     
@@ -200,7 +205,11 @@ def compute_weighted_rubric_reward_with_citation_and_format_reward(response: str
         
         # Compute final reward using only format and search turn rewards
         reward = 0.0
-        for key, weight in REWARD_WEIGHTS.items():
+        if no_citation_reward:
+            weights = REWARD_WEIGHTS_WITHOUT_CITATION
+        else:
+            weights = REWARD_WEIGHTS
+        for key, weight in weights.items():
             if key in result["log_values"]:
                 reward += weight * result["log_values"][key]
         result["reward"] = reward
@@ -208,18 +217,25 @@ def compute_weighted_rubric_reward_with_citation_and_format_reward(response: str
         return result
 
     # Compute per-rubric scores grouped by title using existing logic
-    rubric_scores_by_title, rubric_reward = asyncio.run(_compute_rubric_scores_and_reward(extracted_answer, ground_truth))
+    rubric_scores_by_title, rubric_reward = asyncio.run(_compute_rubric_scores_and_reward(extracted_answer, ground_truth, use_general_rubric=use_general_rubric))
     result["log_values"]["rubric_reward"] = rubric_reward
     result["log_values"]["rubric_scores_by_title"] = rubric_scores_by_title
     result["log_values"]["format_correct_has_answer"] = 1.0
     
     # Score citation reward (copied from longform_averaged_outcome_rewards)
-    citation_reward = score_in_context_citations(question, response, extracted_citations)
+    if not no_citation_reward:
+        citation_reward = score_in_context_citations(question, response, extracted_citations)
+    else:
+        citation_reward = 0.0
     result["log_values"]["citation_reward"] = citation_reward
     
     # Compute final weighted reward
     reward = 0.0
-    for key, weight in REWARD_WEIGHTS.items():
+    if no_citation_reward:
+        weights = REWARD_WEIGHTS_WITHOUT_CITATION
+    else:
+        weights = REWARD_WEIGHTS
+    for key, weight in weights.items():
         if key in result["log_values"]:
             reward += weight * result["log_values"][key]
     result["reward"] = reward
@@ -227,7 +243,7 @@ def compute_weighted_rubric_reward_with_citation_and_format_reward(response: str
     return result
 
 
-async def _compute_rubric_scores_and_reward(response: str, ground_truth: Dict[str, Any]) -> Tuple[Dict[str, float], float]:
+async def _compute_rubric_scores_and_reward(response: str, ground_truth: Dict[str, Any], use_general_rubric: bool = False) -> Tuple[Dict[str, float], float]:
     """
     Compute both per-rubric scores grouped by title AND the overall weighted reward in a single pass.
     
@@ -248,19 +264,32 @@ async def _compute_rubric_scores_and_reward(response: str, ground_truth: Dict[st
     tasks = []
     task_to_rubric_mapping = []
     
-    for rubric in rubrics:
-        rubric_key = create_rubric_key(question, rubric)
-        
-        if rubric_key not in title_groups:
-            title_groups[rubric_key] = {"scores": [], "weights": []}
-        
-        # Create async task for scoring this rubric
-        task = _score_property_async(response, question, rubric["description"])
-        tasks.append(task)
-        task_to_rubric_mapping.append((rubric_key, rubric))
+    if use_general_rubric:
+            general_rubric = """(1) Overall Comprehensiveness: The report should cover content as comprehensively as possible
+                (2) Thoroughness of Discussion: Each section should be discussed thoroughly, not just superficially
+                (3) Factuality: There should be minimal factual errors
+                (4) Coherence: The discussion should stay focused and relevant to the topic"""
+            task = _score_property_async(response, question, general_rubric)
+            tasks.append(task)
+            task_to_rubric_mapping.append(("general_rubric", general_rubric))
+    else:
+        for rubric in rubrics:
+            rubric_key = create_rubric_key(question, rubric)
+            
+            if rubric_key not in title_groups:
+                title_groups[rubric_key] = {"scores": [], "weights": []}
+            
+            # Create async task for scoring this rubric   
+            task = _score_property_async(response, question, rubric["description"])
+            tasks.append(task)
+            task_to_rubric_mapping.append((rubric_key, rubric))
     
     # Execute all scoring tasks in parallel (this is the expensive part, done only once)
     scores = await asyncio.gather(*tasks)
+    
+    if use_general_rubric:
+        title_scores = {"general_rubric": scores[0]}
+        return title_scores, scores[0]
     
     # Organize results by title and compute overall reward simultaneously
     title_scores = {}

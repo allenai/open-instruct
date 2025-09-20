@@ -70,7 +70,7 @@ async def _score_property_async(response: str, question: str, prop: str) -> floa
     :return: score between 0 and 1 after normalizing the LLM score
     """
     system_prompt = """You will be given a question someone asked (in <question></question> tags) and the corresponding response (in <response></response> tags) given to them by an assistant.  You will then be given a specific criterion of the response to evaluate (in <criterion></criterion> tags).
-Return a score based on the given criterion.  Judge only the specified aspect(s), not any other qualities of the answer.  Output JSON in the format: {{"score": x}}."""
+Return a score on a scale of 0 to 2 indicating how appropriate the response is based on the given criterion. Judge only the specified aspect(s), not any other qualities of the answer.  Output JSON in the format: {{"score": x}}."""
     user_prompt = (
         f"""<question>{question}</question>\n<response>{response}</response>\n<criterion>{prop}</criterion>"""
     )

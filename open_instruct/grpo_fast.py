@@ -458,6 +458,8 @@ class Args:
     """Whether to use the static rubrics as persistent rubrics"""
     add_static_rubrics_to_active_rubrics_every_n_steps: int = 10
     """How often to add the static rubrics to the active rubrics"""
+    no_citation_reward: bool = False
+    """Whether to not apply citation reward"""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"

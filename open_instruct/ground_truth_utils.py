@@ -104,6 +104,8 @@ class RubricVerifierConfig(VerifierConfig):
     """Whether to evaluate the closed book answer"""
     mcp_parser_name: Optional[str] = None
     """The name of the MCP parser to use."""
+    no_citation_reward: bool = False
+    """Whether to not apply citation reward"""
 
 @dataclass
 class VerificationResult:
@@ -1144,7 +1146,7 @@ class RLRAGLongFormGeneralRubricVerifier(VerifierFunction):
         test_case = json.loads(label)
         
         # result = compute_weighted_rubric_reward(prediction, test_case)
-        result = compute_weighted_rubric_reward_with_citation_and_format_reward(prediction, test_case)
+        result = compute_weighted_rubric_reward_with_citation_and_format_reward(prediction, test_case, mcp_parser_name=self.verifier_config.mcp_parser_name, use_general_rubric=self.verifier_config.use_general_rubric, no_citation_reward=self.verifier_config.no_citation_reward)
         score = result["reward"]
         
         return VerificationResult(score=score, log_values=result["log_values"])
@@ -1169,7 +1171,7 @@ class RLRAGLongFormAveragedOutcomeVerifier(VerifierFunction):
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> VerificationResult:
         test_case = json.loads(label)
-        result = compute_longform_averaged_outcome_reward(prediction, test_case, query, mcp_parser_name=self.verifier_config.mcp_parser_name, use_general_rubric=self.verifier_config.use_general_rubric)
+        result = compute_longform_averaged_outcome_reward(prediction, test_case, query, mcp_parser_name=self.verifier_config.mcp_parser_name, use_general_rubric=self.verifier_config.use_general_rubric, no_citation_reward=self.verifier_config.no_citation_reward)
         score = result["reward"]
         return VerificationResult(score=score, log_values=result)
 
@@ -1193,7 +1195,7 @@ class RLRAGLongFormAveragedOutcomeNewVerifier(VerifierFunction):
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> VerificationResult:
         test_case = json.loads(label)
-        result = asyncio.run(compute_longform_averaged_outcome_reward_async(prediction, test_case, query, mcp_parser_name=self.verifier_config.mcp_parser_name, use_general_rubric=self.verifier_config.use_general_rubric))
+        result = asyncio.run(compute_longform_averaged_outcome_reward_async(prediction, test_case, query, mcp_parser_name=self.verifier_config.mcp_parser_name, use_general_rubric=self.verifier_config.use_general_rubric, no_citation_reward=self.verifier_config.no_citation_reward))
         score = result["reward"]
         return VerificationResult(score=score, log_values=result)
     
