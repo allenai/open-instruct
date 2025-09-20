@@ -27,11 +27,16 @@ def extract_json_from_response(response: str) -> Optional[Dict[str, Any]]:
             return json.loads(cleaned_json)
         except json.JSONDecodeError:
             try:
-                # Last resort: try adding closing brackets (for incomplete arrays/objects)
-                return json.loads(json_str + "]}")
+                # Fix doubled braces (e.g., '{{' -> '{', '}}' -> '}')
+                fixed_braces = json_str.replace('{{', '{').replace('}}', '}')
+                return json.loads(fixed_braces)
             except json.JSONDecodeError:
-                LOGGER.warning(f"Could not decode JSON from response: {repr(json_str)}")
-                return None
+                try:
+                    # Last resort: try adding closing brackets (for incomplete arrays/objects)
+                    return json.loads(json_str + "]}")
+                except json.JSONDecodeError:
+                    LOGGER.warning(f"Could not decode JSON from response: {repr(json_str)}")
+                    return None
 
 
 def run_chatopenai(
