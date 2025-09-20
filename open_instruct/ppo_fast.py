@@ -1746,7 +1746,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 or training_step == args.num_training_steps
             ):
                 maybe_update_beaker_description(
-                    current_step=training_step,
+                    current_step=0 if training_step == resume_training_step else training_step,
                     total_steps=args.num_training_steps,
                     start_time=training_start_time,
                     wandb_url=wandb_url,

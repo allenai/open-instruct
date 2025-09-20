@@ -1908,7 +1908,6 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
             tags=[args.exp_name] + get_wandb_tags(),
         )
         wandb_url = wandb.run.get_url()
-        maybe_update_beaker_description(wandb_url=wandb_url)
 
     return beaker_config, wandb_url
 
@@ -2595,6 +2594,7 @@ def run_training(
     generate_metrics_Q,
     weight_sync_metrics_Q,
     actor_manager: ActorManager,
+    training_start_time: float,
     checkpoint_state=None,
 ):
     if resume_training_step > 1:
@@ -2661,7 +2661,6 @@ def run_training(
         num_total_tokens = 0
 
     num_total_tokens = 0
-    training_start_time = time.time()  # Track overall training start time
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
@@ -2671,7 +2670,7 @@ def run_training(
             or training_step == args.num_training_steps
         ):
             maybe_update_beaker_description(
-                current_step=training_step,
+                current_step=0 if training_step == resume_training_step else training_step,
                 total_steps=args.num_training_steps,
                 start_time=training_start_time,
                 wandb_url=wandb_url,
@@ -2823,6 +2822,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         )
     )
 
+    # Update beaker description with initial progress now that we have resume_training_step
+    if wandb_url:
+        training_start_time = time.time()  # Track overall training start time
+        maybe_update_beaker_description(
+            current_step=0, total_steps=args.num_training_steps, start_time=training_start_time, wandb_url=wandb_url
+        )
+
     generation_configs = create_generation_configs(args)
 
     checkpoint_state = None
@@ -2886,6 +2892,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             generate_metrics_Q,
             weight_sync_metrics_Q,
             actor_manager,
+            training_start_time,
             checkpoint_state,
         )
     finally:
