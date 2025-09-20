@@ -107,7 +107,7 @@ async def compute_longform_averaged_outcome_reward_async(
     result["rubric_reward"] = rubric_reward
     
     # score citation (include 0.1 weighted citation format reward)
-    citation_reward = await score_in_context_citations_async(question, response, extracted_citations)
+    citation_reward = score_in_context_citations(question, response, extracted_citations)
     result["citation_reward"] = citation_reward
     
     # compute reward
