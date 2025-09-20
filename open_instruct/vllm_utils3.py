@@ -19,8 +19,9 @@ import dataclasses
 import os
 import queue
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from concurrent import futures
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Union
 
@@ -48,6 +49,187 @@ from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
+
+
+@dataclass
+class RequestStats:
+    """Statistics for a single request."""
+
+    prompt_length: int
+    response_lengths: list[int]  # One per sample
+    generation_time: float
+    num_samples: int
+    timestamp: float
+
+
+class ModelDims:
+    """Model dimensions for MFU/MBU calculations."""
+
+    def __init__(
+        self,
+        num_layers: int,
+        hidden_size: int,
+        intermediate_size: int,
+        vocab_size: int,
+        num_attn_heads: int,
+        num_kv_heads: int = None,
+    ):
+        self.num_layers = num_layers
+        self.hidden_size = hidden_size
+        self.intermediate_size = intermediate_size
+        self.vocab_size = vocab_size
+        self.num_attn_heads = num_attn_heads
+        self.num_kv_heads = num_kv_heads if num_kv_heads is not None else num_attn_heads
+
+        self.FLOP_PER_MAC = 2
+        self.SOFTMAX_FLOPS_PER_SCORE = 4
+        self.head_dim = self.hidden_size // self.num_attn_heads
+
+    def attn_flops(self, query_len: int, kv_len: int) -> int:
+        d = self.head_dim
+        mul = self.FLOP_PER_MAC
+        q_proj = mul * query_len * self.hidden_size * self.hidden_size
+        kv_proj = mul * 2 * query_len * self.hidden_size * (self.num_kv_heads * d)
+        qk = mul * self.num_attn_heads * query_len * kv_len * d
+        softmax = self.SOFTMAX_FLOPS_PER_SCORE * self.num_attn_heads * query_len * kv_len
+        av = mul * self.num_attn_heads * query_len * kv_len * d
+        out_proj = mul * query_len * self.hidden_size * self.hidden_size
+        return q_proj + kv_proj + qk + softmax + av + out_proj
+
+    def mlp_flops(self, seq_len: int) -> int:
+        mul = self.FLOP_PER_MAC
+        first = mul * seq_len * self.hidden_size * self.intermediate_size
+        act = seq_len * self.intermediate_size
+        second = mul * seq_len * self.intermediate_size * self.hidden_size
+        return first + act + second
+
+    def prefill_flops(self, prompt_lengths: list[int]) -> int:
+        total = 0
+        for L in prompt_lengths:
+            total += self.num_layers * (self.attn_flops(L, L) + self.mlp_flops(L))
+            total += self.FLOP_PER_MAC * self.hidden_size * self.vocab_size
+        return total
+
+    def decode_flops(self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int = 1) -> int:
+        total = 0
+        response_idx = 0
+        for P in prompt_lengths:
+            for _ in range(samples_per_prompt):
+                R = response_lengths[response_idx]
+                total += R * self.num_layers * self.mlp_flops(seq_len=1)
+                for t in range(R):
+                    kv_len = P + t + 1
+                    total += self.num_layers * self.attn_flops(query_len=1, kv_len=kv_len)
+                total += R * self.FLOP_PER_MAC * self.hidden_size * self.vocab_size
+                response_idx += 1
+        return total
+
+    def flops(self, prompt_lengths: list[int], response_lengths: list[int] = None, samples_per_prompt: int = 1) -> int:
+        total = self.prefill_flops(prompt_lengths)
+        if response_lengths is not None:
+            total += self.decode_flops(prompt_lengths, response_lengths, samples_per_prompt)
+        return total
+
+    def memory_bytes(
+        self,
+        prompt_lengths: list[int],
+        response_lengths: list[int] = None,
+        samples_per_prompt: int = 1,
+        dtype_bytes: int = 2,
+    ) -> int:
+        """Calculate total memory bytes for prefill and decode."""
+        # Weight memory for prefill (batched)
+        num_prefill_batches = len(prompt_lengths)
+        weight_bytes = self._weight_memory_bytes(num_prefill_batches, dtype_bytes)
+
+        # KV cache writes for prefill
+        total_prefill_tokens = sum(prompt_lengths)
+        kv_write_bytes = self._kv_cache_write_bytes(total_prefill_tokens, dtype_bytes)
+
+        total_bytes = weight_bytes + kv_write_bytes
+
+        if response_lengths is not None:
+            # Weight memory for decode
+            unique_positions = 0
+            response_idx = 0
+            for _ in prompt_lengths:
+                prompt_responses = response_lengths[response_idx : response_idx + samples_per_prompt]
+                response_idx += samples_per_prompt
+                unique_positions += max(prompt_responses) if prompt_responses else 0
+
+            weight_bytes_decode = self._weight_memory_bytes(unique_positions, dtype_bytes)
+
+            # KV writes for all decode tokens
+            total_decode_tokens = sum(response_lengths)
+            kv_write_bytes_decode = self._kv_cache_write_bytes(total_decode_tokens, dtype_bytes)
+
+            # KV reads during decode
+            kv_read_bytes = self._kv_cache_read_bytes(
+                prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes
+            )
+
+            total_bytes += weight_bytes_decode + kv_write_bytes_decode + kv_read_bytes
+
+        return total_bytes
+
+    def _weight_memory_bytes(self, num_tokens: int, dtype_bytes: int = 2) -> int:
+        hidden_kv = self.num_kv_heads * self.head_dim
+        w_q = self.hidden_size * self.hidden_size
+        w_k = self.hidden_size * hidden_kv
+        w_v = self.hidden_size * hidden_kv
+        w_o = self.hidden_size * self.hidden_size
+        w_up = self.hidden_size * self.intermediate_size
+        w_dn = self.intermediate_size * self.hidden_size
+        per_layer_weight_bytes = (w_q + w_k + w_v + w_o + w_up + w_dn) * dtype_bytes
+        return self.num_layers * num_tokens * per_layer_weight_bytes
+
+    def _kv_cache_write_bytes(self, num_tokens: int, dtype_bytes: int = 2) -> int:
+        kv_write_bytes_per_token = 2 * self.num_kv_heads * self.head_dim * dtype_bytes
+        return self.num_layers * num_tokens * kv_write_bytes_per_token
+
+    def _kv_cache_read_bytes(
+        self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int = 1, dtype_bytes: int = 2
+    ) -> int:
+        kv_read_terms = 0
+        response_idx = 0
+        for P in prompt_lengths:
+            prompt_responses = []
+            for _ in range(samples_per_prompt):
+                prompt_responses.append(response_lengths[response_idx])
+                response_idx += 1
+            max_response_length = max(prompt_responses) if prompt_responses else 0
+            kv_read_terms += max_response_length * samples_per_prompt * P
+            for R in prompt_responses:
+                kv_read_terms += R * (R - 1) // 2
+        kv_bytes_per_token = 2 * self.num_kv_heads * self.head_dim * dtype_bytes
+        return self.num_layers * kv_bytes_per_token * kv_read_terms
+
+
+def get_gpu_specs():
+    """Get GPU specifications for MFU/MBU calculations."""
+    if not torch.cuda.is_available():
+        return None
+
+    device_name = torch.cuda.get_device_name(0).lower()
+
+    # GPU specs with FP16/BF16 TFLOPS and memory bandwidth
+    gpu_specs = {
+        "a100": {"flops": 312e12, "memory_bandwidth": 1.6e12},
+        "h100": {"flops": 990e12, "memory_bandwidth": 3.35e12},
+        "a6000": {"flops": 155e12, "memory_bandwidth": 768e9},
+        "l40s": {"flops": 362e12, "memory_bandwidth": 864e9},
+        "v100": {"flops": 125e12, "memory_bandwidth": 900e9},
+        "4090": {"flops": 165e12, "memory_bandwidth": 1008e9},
+        "3090": {"flops": 71e12, "memory_bandwidth": 936e9},
+    }
+
+    # Try to match GPU model
+    for gpu_name, specs in gpu_specs.items():
+        if gpu_name in device_name:
+            return specs
+
+    # Default fallback for unknown GPUs
+    return {"flops": 100e12, "memory_bandwidth": 1e12}
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -338,17 +520,27 @@ class LLMRayActor:
         eval_results_queue=None,
         actor_manager=None,
         inference_batch_size: Optional[int] = None,
+        actor_index: int = 0,
+        max_request_stats: int = 1000,
         inflight_updates: bool = False,
         verbose: bool = False,
         **kwargs,
     ):
         self.logger = logger_utils.setup_logger(__name__)
+        self.actor_id = str(actor_index)
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inference_batch_size = inference_batch_size
         self.inflight_updates = inflight_updates
         self.verbose = verbose
         self.request_metadata = {}
+        self._step_counter = 0
+
+        # Request statistics tracking
+        self.max_request_stats = max_request_stats
+        self.request_stats = deque(maxlen=max_request_stats)
+        self.model_dims = None  # Will be initialized after engine creation
+        self.gpu_specs = get_gpu_specs()
         self.vllm_active_requests = set()  # Track all requests currently in vLLM
 
         if self.tools:
@@ -385,6 +577,9 @@ class LLMRayActor:
 
         self.llm_engine = vllm.LLMEngine.from_engine_args(engine_args)
 
+        # Initialize model dimensions for MFU/MBU calculations
+        self._init_model_dims()
+
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
@@ -394,11 +589,24 @@ class LLMRayActor:
         self._last_should_stop_update = float("-inf")
         self._should_stop_value = False
         self._should_stop_timeout_s = 5
-
         self._executor = futures.ThreadPoolExecutor(max_workers=1)
         self._prefetch_future = self._executor.submit(self._prefetch_worker)
         self.tracking = _init_tool_tracking()
         self.request_outputs = {}
+
+    def _init_model_dims(self):
+        """Initialize model dimensions from the loaded model config."""
+        # Get model config from engine
+        hf_config = self.llm_engine.model_config.hf_config
+
+        self.model_dims = ModelDims(
+            num_layers=hf_config.num_hidden_layers,
+            hidden_size=hf_config.hidden_size,
+            intermediate_size=hf_config.intermediate_size,
+            vocab_size=hf_config.vocab_size,
+            num_attn_heads=hf_config.num_attention_heads,
+            num_kv_heads=getattr(hf_config, "num_key_value_heads", None),
+        )
 
     def _should_stop(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
@@ -483,11 +691,8 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
-
-        # Use persistent instance variables for tracking and outputs
-        # This ensures state is maintained across multiple calls
-        total_processed = 0
         iteration_count = 0
+        total_processed = 0
 
         while not self._should_exit():
             iteration_count += 1
@@ -495,6 +700,12 @@ class LLMRayActor:
             # Health check: ensure prefetch worker is alive. This will raise if it has crashed.
             if self._prefetch_future.done():
                 self._prefetch_future.result()
+            # Log actor status every 1000 steps
+            if self._step_counter % 1000 == 0 and self.actor_manager is not None:
+                unfinished_requests = self.llm_engine.get_num_unfinished_requests()
+                self.actor_manager.report_actor_status.remote(
+                    self.actor_id, unfinished_requests, self.inference_batch_size
+                )
 
             self._poll_tool_futures(self.tracking, self.llm_engine.tokenizer)
             current_time = time.time()
@@ -872,6 +1083,71 @@ class LLMRayActor:
     def ready(self):
         return True
 
+    def get_engine_metrics(self):
+        """Get comprehensive metrics from the vLLM engine."""
+        # Get GPU memory usage
+        gpu_memory_allocated = torch.cuda.memory_allocated(0)  # bytes
+        gpu_memory_reserved = torch.cuda.memory_reserved(0)  # bytes
+        gpu_memory_total = torch.cuda.get_device_properties(0).total_memory
+        gpu_memory_usage_percent = (gpu_memory_reserved / gpu_memory_total) * 100
+
+        # Get engine stats if available
+        engine_stats = getattr(self.llm_engine, "stats", {})
+
+        # Get KV cache info
+        kv_cache_info = self.get_kv_cache_info()
+
+        # Build prompt and response length lists from all tracked requests
+        all_prompt_lengths = []
+        all_response_lengths = []
+        samples_per_prompt_list = []
+        total_generation_time = 0
+
+        for stats in self.request_stats:
+            all_prompt_lengths.append(stats.prompt_length)
+            all_response_lengths.extend(stats.response_lengths)
+            samples_per_prompt_list.append(stats.num_samples)
+            total_generation_time += stats.generation_time
+
+        # Calculate MFU/MBU if we have data
+        if total_generation_time > 0 and all_prompt_lengths:
+            # Single call to calculate total FLOPs
+            total_flops = self.model_dims.flops(
+                all_prompt_lengths,
+                all_response_lengths,
+                samples_per_prompt=1,  # Response lengths already expanded per sample
+            )
+
+            # Single call to calculate total memory bytes
+            total_memory_bytes = self.model_dims.memory_bytes(
+                all_prompt_lengths,
+                all_response_lengths,
+                samples_per_prompt=1,  # Response lengths already expanded per sample
+            )
+
+            # MFU = (FLOPs / time) / peak_FLOPS * 100
+            flops_per_second = total_flops / total_generation_time
+            mfu_estimate = min(100.0, (flops_per_second / self.gpu_specs["flops"]) * 100)
+
+            # MBU = (Memory bytes / time) / peak_bandwidth * 100
+            bytes_per_second = total_memory_bytes / total_generation_time
+            mbu_estimate = min(100.0, (bytes_per_second / self.gpu_specs["memory_bandwidth"]) * 100)
+        else:
+            mfu_estimate = "n/a"
+            mbu_estimate = "n/a"
+
+        return {
+            "gpu_memory_allocated_gb": gpu_memory_allocated / (1024**3),
+            "gpu_memory_reserved_gb": gpu_memory_reserved / (1024**3),
+            "gpu_memory_total_gb": gpu_memory_total / (1024**3),
+            "gpu_memory_usage_percent": gpu_memory_usage_percent,
+            "kv_cache_max_concurrency": kv_cache_info,
+            "mfu_estimate": mfu_estimate,
+            "mbu_estimate": mbu_estimate,
+            "num_request_stats": len(self.request_stats),
+            "engine_stats": engine_stats,
+        }
+
     def get_kv_cache_info(self):
         """Get KV cache max concurrency from the vLLM engine."""
         kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
@@ -1035,6 +1311,7 @@ def create_vllm_engines(
                 tools=tools,
                 max_tool_calls=max_tool_calls_dict,
                 inference_batch_size=inference_batch_size,
+                actor_index=i,
                 inflight_updates=inflight_updates,
                 kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
                 calculate_kv_scales=use_fp8_kv_cache,
