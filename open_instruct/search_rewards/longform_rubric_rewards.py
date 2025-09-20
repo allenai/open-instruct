@@ -4,12 +4,20 @@ import json
 import asyncio
 import hashlib
 import logging
-import litellm
-from open_instruct.search_rewards.utils.format_utils import extract_answer_context_citations
+from open_instruct.search_rewards.utils.format_utils import extract_answer_context_citations, compute_format_reward
 from open_instruct.search_rewards.utils.rubric_utils import _score_rubric
 from open_instruct.search_rewards.utils.search_utils import score_num_in_context_search_turns
+from open_instruct.search_rewards.utils.citation_utils import score_in_context_citations
 
 LOGGER = logging.getLogger(__name__)
+
+# Reward weights for combining different reward components
+REWARD_WEIGHTS = {
+    "rubric_reward": 0.5,
+    "citation_reward": 0.2,
+    "format_reward": 0.2,
+    "num_search_turns_reward": 0.1,
+}
 
 
 def create_rubric_key(question: str, rubric: dict) -> str:
@@ -80,7 +88,7 @@ def compute_rubric_reward(response: str, ground_truth: Dict[str, Any], use_gener
     return result
 
 
-def compute_general_rubric_reward(response: str, ground_truth: Dict[str, Any]) -> Dict[str, Any]:
+def compute_weighted_rubric_reward(response: str, ground_truth: Dict[str, Any]) -> Dict[str, Any]:
     """
     Compute a reward score for a response based on a test case.
     """
@@ -130,6 +138,92 @@ def compute_general_rubric_reward(response: str, ground_truth: Dict[str, Any]) -
         "num_rubrics": num_rubrics,
         "rubric_scores_by_title": rubric_scores_by_title,
         }
+    return result
+
+
+def compute_weighted_rubric_reward_with_citation_and_format_reward(response: str, ground_truth: Dict[str, Any], mcp_parser_name: Optional[str] = None, use_general_rubric: bool = False) -> Dict[str, Any]:
+    """
+    Compute a comprehensive reward score that includes rubric, citation, format, and search turn rewards.
+    
+    This function uses the current module's rubric computation logic and adds citation, format, 
+    and search turn rewards copied from the longform_averaged_outcome_rewards module.
+    
+    Args:
+        response: The response text to score
+        ground_truth: Dictionary containing the question and other ground truth data
+        mcp_parser_name: Optional parser name for format scoring
+        use_general_rubric: Whether to use general rubric scoring
+        
+    Returns:
+        Dictionary containing reward components and overall reward
+    """
+    num_rubrics = len(ground_truth["rubrics"])
+    question = ground_truth.get("query") or ground_truth.get("Question", "")
+    
+    # Extract answer, context, and citations from response
+    extracted_context, extracted_answer, extracted_citations = extract_answer_context_citations(response)
+    
+    # Initialize result structure
+    result = {
+        "reward": 0.0,
+        "log_values": {
+            "format_correct_has_answer": 0.0,
+            "rubric_reward": 0.0,
+            "citation_reward": 0.0,
+            "format_reward": 0.0,
+            "num_search_turns_reward": 0.0,
+            "num_rubrics": num_rubrics,
+        },
+        "error": None,
+    }
+    
+    # Score format reward (copied from longform_averaged_outcome_rewards)
+    format_reward = compute_format_reward(response, mcp_parser_name=mcp_parser_name)
+    result["log_values"]["format_reward"] = format_reward
+    
+    # Score num search turns reward (copied from longform_averaged_outcome_rewards)
+    num_search_turns_reward, num_search_turns = score_num_in_context_search_turns(extracted_context, mcp_parser_name=mcp_parser_name)
+    result["log_values"]["num_search_turns_reward"] = num_search_turns_reward
+    
+    if extracted_answer is None:
+        result["error"] = "Failed to extract answer from response"
+        result["reward"] = 0.0
+        
+        # Create zero scores for all rubrics in the ground truth
+        rubrics = ground_truth["rubrics"]
+        rubric_scores_by_title = {}
+        for rubric in rubrics:
+            rubric_key = create_rubric_key(question, rubric)
+            rubric_scores_by_title[rubric_key] = 0.0
+        
+        result["log_values"]["rubric_scores_by_title"] = rubric_scores_by_title
+        
+        # Compute final reward using only format and search turn rewards
+        reward = 0.0
+        for key, weight in REWARD_WEIGHTS.items():
+            if key in result["log_values"]:
+                reward += weight * result["log_values"][key]
+        result["reward"] = reward
+        
+        return result
+
+    # Compute per-rubric scores grouped by title using existing logic
+    rubric_scores_by_title, rubric_reward = asyncio.run(_compute_rubric_scores_and_reward(extracted_answer, ground_truth))
+    result["log_values"]["rubric_reward"] = rubric_reward
+    result["log_values"]["rubric_scores_by_title"] = rubric_scores_by_title
+    result["log_values"]["format_correct_has_answer"] = 1.0
+    
+    # Score citation reward (copied from longform_averaged_outcome_rewards)
+    citation_reward = score_in_context_citations(question, response, extracted_citations)
+    result["log_values"]["citation_reward"] = citation_reward
+    
+    # Compute final weighted reward
+    reward = 0.0
+    for key, weight in REWARD_WEIGHTS.items():
+        if key in result["log_values"]:
+            reward += weight * result["log_values"][key]
+    result["reward"] = reward
+    
     return result
 
 

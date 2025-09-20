@@ -38,7 +38,7 @@ from open_instruct.math_utils import (
 )
 from open_instruct.search_rewards.old_rewards.openscholar_rewards import compute_paper_reward
 from open_instruct.search_rewards.longform_hle_rewards import compute_hle_reward
-from open_instruct.search_rewards.longform_rubric_only_rewards import compute_rubric_reward, compute_general_rubric_reward
+from open_instruct.search_rewards.longform_rubric_rewards import compute_rubric_reward, compute_weighted_rubric_reward, compute_weighted_rubric_reward_with_citation_and_format_reward
 from open_instruct.search_rewards.longform_averaged_outcome_rewards import compute_longform_averaged_outcome_reward, compute_longform_averaged_outcome_reward_async
 from open_instruct.search_rewards.longform_finegrained_rewards_v1 import compute_longform_finegrained_reward
 from open_instruct.search_rewards.longform_finegrained_rewards_v2 import compute_longform_finegrained_reward_v2
@@ -1143,7 +1143,8 @@ class RLRAGLongFormGeneralRubricVerifier(VerifierFunction):
     ) -> VerificationResult:
         test_case = json.loads(label)
         
-        result = compute_general_rubric_reward(prediction, test_case)
+        # result = compute_weighted_rubric_reward(prediction, test_case)
+        result = compute_weighted_rubric_reward_with_citation_and_format_reward(prediction, test_case)
         score = result["reward"]
         
         return VerificationResult(score=score, log_values=result["log_values"])
@@ -1273,6 +1274,7 @@ class RLRAGToyCaseMultiDatasetAveragedVerifier(VerifierFunction):
             score=result["score"],
             log_values=result["log_values"],
         )
+
 
 def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     """
