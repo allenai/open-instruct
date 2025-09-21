@@ -442,7 +442,7 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
-    "olmo_simple_thinker_r1_style": (
+    "olmo_thinker_r1_style_nochat": (
         "A conversation between user and assistant. "
         "The user asks a question, and the assistant solves it. "
         "The assistant first thinks and reasons about the question "
