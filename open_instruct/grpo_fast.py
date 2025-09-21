@@ -1003,7 +1003,7 @@ class PolicyTrainerRayProcess(RayProcess):
                                 ref_logprob=ref_logprob,
                             )
                         )
-                    self.replay_buffer.extend(replay_buffer_list)
+            self.replay_buffer.extend(replay_buffer_list)
 
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
@@ -2100,7 +2100,9 @@ def prepare_prompts(
     return batch
 
 
-def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event):
+def load_data_from_packing_thread(
+    packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event, replay_buffer: ReplayBuffer
+):
     """Get the packed sequences with advantages from the packing thread."""
     with Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
         while True:
