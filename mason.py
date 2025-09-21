@@ -56,33 +56,22 @@ def parse_env_var(env_var_str: str) -> Dict[str, str]:
     return {"name": name, "value": value}
 
 WEKA_CLUSTERS = [
-    "ai2/jupiter-cirrascale-2",
     "ai2/jupiter",
     "ai2/saturn-cirrascale",
-    "ai2/titan-cirrascale",
     "ai2/titan",
-    "ai2/neptune-cirrascale",
     "ai2/neptune",
-    "ai2/ceres-cirrascale",
     "ai2/ceres",
-    "ai2/triton-cirrascale",
     "ai2/triton",
-    "ai2/rhea-cirrascale",
     "ai2/rhea",
 ]
 GCP_CLUSTERS = [
-    "ai2/augusta-google-1",
     "ai2/augusta"
 ]
 
 INTERCONNECT_CLUSTERS = [
-    "ai2/jupiter-cirrascale-2",
     "ai2/jupiter",
-    "ai2/ceres-cirrascale",
     "ai2/ceres",
-    "ai2/titan-cirrascale",
     "ai2/titan",
-    "ai2/augusta-google-1",
     "ai2/augusta",
 ]
 
@@ -217,7 +206,7 @@ def get_args():
     # can resume if the command is in OPEN_INSTRUCT_RESUMABLES and --non_resumable is not set
     is_resumable = _commands_include_resumable_target(commands) and not mason_args.non_resumable
     if not is_resumable and not mason_args.non_resumable:
-        console.warning("--non_resumable is not set, but the command is not in OPEN_INSTRUCT_RESUMABLES, so the job will not be resumable")
+        console.log("--non_resumable is not set, but the command is not in OPEN_INSTRUCT_RESUMABLES, so the job will not be resumable")
     setattr(mason_args, "resumable", is_resumable)
 
     return mason_args, commands
@@ -261,10 +250,8 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
                 whoami: str, resumable: bool, num_nodes: int, additional_env_vars: List[Dict[str, str]],
                 additional_secrets: List[Dict[str, str]]):
     env_vars = []
-    if "VLLM_ATTENTION_BACKEND" not in additional_env_vars:
-        env_vars.append(beaker.EnvVar(name="VLLM_ATTENTION_BACKEND",
-                                      value="FLASHINFER"))
-    if "RAY_CGRAPH_get_timeout" not in additional_env_vars:
+    additional_env_var_names = [var["name"] for var in additional_env_vars]
+    if "RAY_CGRAPH_get_timeout" not in additional_env_var_names:
         env_vars.append(beaker.EnvVar(name="RAY_CGRAPH_get_timeout",
                                       value="300"))
     # Add user-specified environment variables first

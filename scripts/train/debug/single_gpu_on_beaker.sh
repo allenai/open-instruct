@@ -8,18 +8,17 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 
 uv run python mason.py \
        --cluster ai2/jupiter-cirrascale-2 \
-       --cluster ai2/augusta-google-1 \
        --cluster ai2/saturn-cirrascale \
+       --cluster ai2/ceres-cirrascale \
        --image "$BEAKER_IMAGE" \
+       --description "Single GPU on Beaker test script." \
        --pure_docker_mode \
-       --workspace ai2/tulu-thinker \
-       --priority high \
-       --preemptible \
+       --workspace ai2/open-instruct-dev \
+       --priority urgent \
        --num_nodes 1 \
        --max_retries 0 \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --budget ai2/oe-adapt \
-       --no-host-networking \
        --gpus 1 \
 	   -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
@@ -38,12 +37,14 @@ uv run python mason.py \
     --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
     --temperature 0.7 \
+    --inflight_updates True \
     --ground_truths_key ground_truth \
     --chat_template_name r1_simple_chat_postpend_think \
     --learning_rate 3e-7 \
     --total_episodes 200 \
     --deepspeed_stage 2 \
     --with_tracking \
+    --update_progress_every 1 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
     --vllm_tensor_parallel_size 1 \

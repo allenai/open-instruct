@@ -14,9 +14,10 @@ uv run python mason.py \
        --cluster ai2/augusta-google-1 \
        --cluster ai2/saturn-cirrascale \
        --image "$BEAKER_IMAGE" \
+       --description "Single GPU on Beaker with tool use test script." \
        --pure_docker_mode \
-       --workspace ai2/tulu-thinker \
-       --priority high \
+       --workspace ai2/open-instruct-dev \
+       --priority urgent \
        --preemptible \
        --num_nodes 1 \
        --max_retries 0 \
@@ -34,6 +35,7 @@ uv run python mason.py \
     --max_prompt_token_length 512 \
     --response_length 512 \
     --pack_length 1024 \
+    --inflight_updates True \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
@@ -45,7 +47,7 @@ uv run python mason.py \
     --sft_messages_key messages \
     --exp_name 0605_general_tool_use_without_good_outputs \
     --learning_rate 5e-7 \
-    --total_episodes 500_000 \
+    --total_episodes 3_200 \
     --deepspeed_stage 2 \
     --with_tracking \
     --num_epochs 1 \
@@ -66,10 +68,11 @@ uv run python mason.py \
     --num_mini_batches 1 \
     --lr_scheduler_type constant \
     --save_freq 100 \
+    --update_progress_every 1 \
     --try_launch_beaker_eval_jobs_on_weka False \
     --vllm_num_engines 1 \
     --max_tool_calls 5 \
     --vllm_enable_prefix_caching \
     --tools code search \
-    --search_api_endpoint "http://saturn-cs-aus-232.reviz.ai2.in:44177/search" \
+    --search_api_endpoint "http://neptune-cs-aus-258.reviz.ai2.in:43189/search" \
     --code_tool_api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute
