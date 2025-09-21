@@ -5,13 +5,11 @@ BASE_OUTPUT_DIR="s3://ai2-sewonm/sanjaya/post_training_eval_results"
 
 # Define model paths and names arrays
 MODEL_PATHS=(
-    "/weka/oe-training-default/ai2-llm/checkpoints/sanjaya/olmo2-7B-sft/math_expert/step594-hf"
-    "/weka/oe-training-default/ai2-llm/checkpoints/sanjaya/olmo2-7B-sft/code_expert/step150-hf"
+    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/OLMo2-7b-flex-base-merged-math-code-RT-experts-sft/step9537-hf"
 )
 
 MODEL_NAMES=(
-    "SFTed-Math-Expert"
-    "SFTed-Code-Expert"
+    "Merged-SFTedExperts"
 )
 
 # Check that arrays have the same length
