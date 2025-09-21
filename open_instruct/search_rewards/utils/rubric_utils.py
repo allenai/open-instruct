@@ -79,7 +79,7 @@ Return a score on a scale of 0 to 2 indicating how appropriate the response is b
         f"""<question>{question}</question>\n<response>{response}</response>\n<criterion>{prop}</criterion>"""
     )
     
-    print("🚼 [Debug] Judge inputs: ", system_prompt, user_prompt)
+    # print("🚼 [Debug] Judge inputs: ", system_prompt, user_prompt)
 
     # wrap in try-except to handle litellm API errors
     # these might just be ephemeral, so we don't want to crash the whole training job.
@@ -89,7 +89,7 @@ Return a score on a scale of 0 to 2 indicating how appropriate the response is b
             user_prompt=user_prompt,
             model_name=os.environ.get("RUBRIC_JUDGE_MODEL", "gpt-4.1"),
         )
-        print("🚼 [Debug] Judge response: ", resp)
+        # print("🚼 [Debug] Judge response: ", resp)
         obj = extract_json_from_response(resp)
         if not obj:
             return 0.0

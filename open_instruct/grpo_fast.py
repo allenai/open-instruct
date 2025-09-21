@@ -462,6 +462,10 @@ class Args:
     """Whether to not apply citation reward"""
     use_likert_rubric: bool = False
     """Whether to use the likert rubric"""
+    eval_at_step: int = -1
+    """The step to evaluate the model"""
+    eval_timeout: int = 600
+    """Timeout in seconds for evaluation (especially step 0 evaluation)"""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
@@ -1203,11 +1207,19 @@ def vllm_generate_thread(
         inference_results_Q.put((response_ids, finish_reasons, masks, info))
 
         # Evaluate the model
-        if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
+        if eval_prompt_token_ids is not None and ((training_step - 1) % eval_freq == 0 or args.eval_at_step == training_step):
             response_ids, finish_reasons, masks, info = generate_with_engines(
                 eval_prompt_token_ids, eval_generation_config
             )
             evaluation_inference_results_Q.put((response_ids, finish_reasons, masks, info))
+    
+    # Handle step 0 evaluation if requested
+    if args.eval_at_step == 0 and eval_prompt_token_ids is not None:
+        print("[vLLM Generate Thread] 📊 Running step 0 evaluation before training starts")
+        response_ids, finish_reasons, masks, info = generate_with_engines(
+            eval_prompt_token_ids, eval_generation_config
+        )
+        evaluation_inference_results_Q.put((response_ids, finish_reasons, masks, info))
 
 
 def data_preparation_thread(
@@ -1959,6 +1971,110 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
     num_total_tokens = 0
     start_time = time.time()
+    
+    # Handle step 0 evaluation if requested
+    if args.eval_at_step == 0 and eval_dataset is not None:
+        print("=" * 100)
+        print("[Main Thread] 📊 Running step 0 evaluation before training starts")
+        print("=" * 100)
+        
+        # Wait for step 0 evaluation to complete
+        try:
+            eval_responses, eval_finish_reasons, masks, eval_infos = evaluation_inference_results_Q.get(timeout=args.eval_timeout)
+            print("[Main Thread] 📊 Step 0 evaluation responses received")
+
+            eval_sequence_lengths = np.array([len(response) for response in eval_responses])
+            eval_decoded_responses = tokenizer.batch_decode(eval_responses, skip_special_tokens=True)
+            eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_finish_reasons) / len(
+                eval_finish_reasons
+            )
+
+            # get and log evaluation metrics
+            eval_original_dataset_names = eval_dataset[DATASET_ORIGIN_KEY]
+
+            eval_result = asyncio.run(
+                reward_fn(
+                    eval_responses,
+                    eval_decoded_responses,
+                    eval_ground_truths,
+                    eval_dataset_names,
+                    eval_finish_reasons,
+                    eval_infos,
+                    source_datasets=eval_original_dataset_names,
+                    is_training=False,
+                )
+            )
+            if len(eval_result) == 3:
+                eval_scores, eval_reward_metrics, _ = eval_result
+            else:
+                eval_scores, eval_reward_metrics = eval_result
+            eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
+            
+            # Calculate per-dataset eval scores
+            per_dataset_scores = {}
+            if eval_dataset_names is not None:
+                from collections import defaultdict
+                dataset_scores = defaultdict(list)
+                
+                for score, dataset_name in zip(eval_scores, eval_dataset_names):
+                    # Convert dataset_name to string if it's a list
+                    if isinstance(dataset_name, list):
+                        dataset_name_str = "_".join(str(x) for x in dataset_name)
+                    else:
+                        dataset_name_str = str(dataset_name)
+                    dataset_scores[dataset_name_str].append(score)
+                
+                dataset_means = []
+                for dataset_name, scores in dataset_scores.items():
+                    dataset_mean = np.array(scores).mean()
+                    per_dataset_scores[f"eval/scores_{dataset_name}"] = dataset_mean
+                    dataset_means.append(dataset_mean)
+                
+                # Add macro average (equal weight to each test set)
+                if dataset_means:
+                    per_dataset_scores["eval/scores_macro"] = np.array(dataset_means).mean()
+            
+            eval_metrics = {
+                "eval/scores": np.array(eval_scores).mean(),
+                "eval/sequence_lengths": eval_sequence_lengths.mean(),
+                "eval/sequence_lengths_min": eval_sequence_lengths.min(),
+                "eval/sequence_lengths_max": eval_sequence_lengths.max(),
+                "eval/stop_rate": eval_stop_rate,
+                **eval_reward_metrics,
+                **per_dataset_scores,
+            }
+            print_rich_single_line_metrics(eval_metrics)
+            
+            # Log step 0 evaluation metrics with episode = 0
+            for key, value in eval_metrics.items():
+                writer.add_scalar(key, value, 0)
+            
+            # Also log to W&B if tracking is enabled
+            if args.with_tracking:
+                wandb.log(eval_metrics, step=0)
+            
+            table = {}
+            table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
+            table["response"] = eval_decoded_responses
+            table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
+            table["scores"] = eval_scores
+            table["ground_truth"] = eval_ground_truths
+            if eval_dataset_names is not None:
+                table["dataset"] = eval_dataset_names
+            df = pd.DataFrame(table)
+            if args.with_tracking:
+                wandb.log({"step_0_sample_completions": wandb.Table(dataframe=df)}, step=0)
+            else:
+                print_rich_table(df.iloc[:1])
+            del table
+            
+            print("=" * 100)
+            print("[Main Thread] ✅ Step 0 evaluation completed")
+            print("=" * 100)
+            
+        except Empty:
+            print("[Main Thread] ⚠️  Step 0 evaluation responses not received within timeout")
+    
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
             print("-" * 100)
@@ -2098,7 +2214,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             try:
                 # timeout 0.01 if this is the last training step or we're not evaluating
                 # otherwise, wait to get the last evaluation generations (long timeout just in case)
-                timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else 100
+                timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else args.eval_timeout
                 eval_responses, eval_finish_reasons, masks, eval_infos = evaluation_inference_results_Q.get(
                     timeout=timeout
                 )
