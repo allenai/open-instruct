@@ -12,7 +12,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 
-def _score_property(response: str, question: str, prop: str) -> float:
+def _score_property(response: str, question: str, prop: str, system_prompt: str = None, user_prompt: str = None, score_scale: float = 2.0) -> float:
     """
     Score the response as per the annotation rubric/criterion represented here by ``prop``.
     The score is calculated by asking an LLM to judge the response for satisfaction of the rubric/criterion
@@ -22,11 +22,13 @@ def _score_property(response: str, question: str, prop: str) -> float:
     :param prop: the rubric/criterion to be satisfied
     :return: score between 0 and 1 after normalizing the LLM score
     """
-    system_prompt = """You will be given a question someone asked (in <question></question> tags) and the corresponding response (in <response></response> tags) given to them by an assistant.  You will then be given a specific criterion of the response to evaluate (in <criterion></criterion> tags).
-Return a score on a scale of 0 to 2 indicating how appropriate the response is based on the given criterion.  Judge only the specified aspect(s), not any other qualities of the answer.  Output JSON in the format: {{"score": x}}."""
-    user_prompt = (
-        f"""<question>{question}</question>\n<response>{response}</response>\n<criterion>{prop}</criterion>"""
-    )
+    if system_prompt is None:
+        system_prompt = """You will be given a question someone asked (in <question></question> tags) and the corresponding response (in <response></response> tags) given to them by an assistant.  You will then be given a specific criterion of the response to evaluate (in <criterion></criterion> tags).
+    Return a score on a scale of 0 to 2 indicating how appropriate the response is based on the given criterion.  Judge only the specified aspect(s), not any other qualities of the answer.  Output JSON in the format: {{"score": x}}."""
+    if user_prompt is None:
+        user_prompt = (
+            f"""<question>{question}</question>\n<response>{response}</response>\n<criterion>{prop}</criterion>"""
+        )
 
     # wrap in try-except to handle litellm API errors
     # these might just be ephemeral, so we don't want to crash the whole training job.
@@ -49,7 +51,7 @@ Return a score on a scale of 0 to 2 indicating how appropriate the response is b
         # Validate that score is a number
         try:
             score = float(obj["score"])
-            return score / 2.0
+            return score / score_scale
         except (ValueError, TypeError) as e:
             LOGGER.warning(f"Invalid score value in response: {obj['score']}, error: {e}")
             return 0.0
@@ -60,7 +62,7 @@ Return a score on a scale of 0 to 2 indicating how appropriate the response is b
     
 
 
-async def _score_property_async(response: str, question: str, prop: str) -> float:
+async def _score_property_async(response: str, question: str, prop: str, system_prompt: str = None, user_prompt: str = None, score_scale: float = 2.0) -> float:
     """
     Score the response as per the annotation rubric/criterion represented here by ``prop``.
     The score is calculated by asking an LLM to judge the response for satisfaction of the rubric/criterion.
@@ -69,11 +71,15 @@ async def _score_property_async(response: str, question: str, prop: str) -> floa
     :param prop: the rubric/criterion to be satisfied
     :return: score between 0 and 1 after normalizing the LLM score
     """
-    system_prompt = """You will be given a question someone asked (in <question></question> tags) and the corresponding response (in <response></response> tags) given to them by an assistant.  You will then be given a specific criterion of the response to evaluate (in <criterion></criterion> tags).
+    if system_prompt is None:
+        system_prompt = """You will be given a question someone asked (in <question></question> tags) and the corresponding response (in <response></response> tags) given to them by an assistant.  You will then be given a specific criterion of the response to evaluate (in <criterion></criterion> tags).
 Return a score on a scale of 0 to 2 indicating how appropriate the response is based on the given criterion. Judge only the specified aspect(s), not any other qualities of the answer.  Output JSON in the format: {{"score": x}}."""
-    user_prompt = (
+    if user_prompt is None:
+        user_prompt = (
         f"""<question>{question}</question>\n<response>{response}</response>\n<criterion>{prop}</criterion>"""
     )
+    
+    print("🚼 [Debug] Judge inputs: ", system_prompt, user_prompt)
 
     # wrap in try-except to handle litellm API errors
     # these might just be ephemeral, so we don't want to crash the whole training job.
@@ -83,7 +89,7 @@ Return a score on a scale of 0 to 2 indicating how appropriate the response is b
             user_prompt=user_prompt,
             model_name=os.environ.get("RUBRIC_JUDGE_MODEL", "gpt-4.1"),
         )
-
+        print("🚼 [Debug] Judge response: ", resp)
         obj = extract_json_from_response(resp)
         if not obj:
             return 0.0
@@ -96,7 +102,7 @@ Return a score on a scale of 0 to 2 indicating how appropriate the response is b
         # Validate that score is a number
         try:
             score = float(obj["score"])
-            return score / 2.0
+            return score / score_scale
         except (ValueError, TypeError) as e:
             LOGGER.warning(f"Invalid score value in response: {obj['score']}, error: {e}")
             return 0.0
@@ -106,7 +112,7 @@ Return a score on a scale of 0 to 2 indicating how appropriate the response is b
         return 0.0
     
     
-def _score_rubric(response: str, ground_truth: Dict[str, Any], use_general_rubric: bool = False) -> Dict[str, float]:
+def _score_rubric(response: str, ground_truth: Dict[str, Any], use_general_rubric: bool = False, use_likert_rubric: bool = False) -> Dict[str, float]:
     """
     Score the response against all rubrics in the ground truth.
     
@@ -121,7 +127,26 @@ def _score_rubric(response: str, ground_truth: Dict[str, Any], use_general_rubri
     
     rubric_scores = {}
     
-    if use_general_rubric:
+    if use_likert_rubric:
+        system_prompt = """You are an expert evaluator. Given a user prompt and a generated response, please rate the overall quality of the response on a scale of 1 to 10, where 1 is very poor and 10 is excellent.
+Start your response with a valid JSON object that starts with "```json" and ends with "```". The JSON object should contain a single key "score" and the value should be an integer between 1 and 10.
+Example response:
+```json
+{
+"score": 8
+}```"""
+        user_prompt = f"""Given the following prompt, and response, please rate the overall quality of the response on a scale of 1 to 10.
+<prompt>
+{question}
+</prompt>   
+<response>
+{response}
+</response>
+Your JSON Evaluation:"""
+        score = _score_property(None, None, None, system_prompt=system_prompt, user_prompt=user_prompt, score_scale=10.0)
+        rubric_scores["likert"] = score
+        return rubric_scores
+    elif use_general_rubric:
         general_rubric = """(1) Overall Comprehensiveness: The report should cover content as comprehensively as possible
 (2) Thoroughness of Discussion: Each section should be discussed thoroughly, not just superficially
 (3) Factuality: There should be minimal factual errors

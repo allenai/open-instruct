@@ -460,6 +460,8 @@ class Args:
     """How often to add the static rubrics to the active rubrics"""
     no_citation_reward: bool = False
     """Whether to not apply citation reward"""
+    use_likert_rubric: bool = False
+    """Whether to use the likert rubric"""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"

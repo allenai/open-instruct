@@ -106,6 +106,8 @@ class RubricVerifierConfig(VerifierConfig):
     """The name of the MCP parser to use."""
     no_citation_reward: bool = False
     """Whether to not apply citation reward"""
+    use_likert_rubric: bool = False
+    """Whether to use the likert rubric"""
 
 @dataclass
 class VerificationResult:
@@ -1146,7 +1148,11 @@ class RLRAGLongFormGeneralRubricVerifier(VerifierFunction):
         test_case = json.loads(label)
         
         # result = compute_weighted_rubric_reward(prediction, test_case)
-        result = compute_weighted_rubric_reward_with_citation_and_format_reward(prediction, test_case, mcp_parser_name=self.verifier_config.mcp_parser_name, use_general_rubric=self.verifier_config.use_general_rubric, no_citation_reward=self.verifier_config.no_citation_reward)
+        result = compute_weighted_rubric_reward_with_citation_and_format_reward(prediction, test_case, 
+                                                                                mcp_parser_name=self.verifier_config.mcp_parser_name, 
+                                                                                use_general_rubric=self.verifier_config.use_general_rubric, 
+                                                                                no_citation_reward=self.verifier_config.no_citation_reward,
+                                                                                use_likert_rubric=self.verifier_config.use_likert_rubric)
         score = result["reward"]
         
         return VerificationResult(score=score, log_values=result["log_values"])
@@ -1171,7 +1177,12 @@ class RLRAGLongFormAveragedOutcomeVerifier(VerifierFunction):
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> VerificationResult:
         test_case = json.loads(label)
-        result = compute_longform_averaged_outcome_reward(prediction, test_case, query, mcp_parser_name=self.verifier_config.mcp_parser_name, use_general_rubric=self.verifier_config.use_general_rubric, no_citation_reward=self.verifier_config.no_citation_reward)
+        result = compute_longform_averaged_outcome_reward(prediction, test_case, query, 
+                                                          mcp_parser_name=self.verifier_config.mcp_parser_name, 
+                                                          use_general_rubric=self.verifier_config.use_general_rubric, 
+                                                          no_citation_reward=self.verifier_config.no_citation_reward,
+                                                          use_likert_rubric=self.verifier_config.use_likert_rubric,
+                                                          )
         score = result["reward"]
         return VerificationResult(score=score, log_values=result)
 

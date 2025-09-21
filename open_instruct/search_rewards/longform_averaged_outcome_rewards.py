@@ -30,6 +30,7 @@ def compute_longform_averaged_outcome_reward(
         mcp_parser_name: Optional[str] = None, 
         use_general_rubric: bool = False,
         no_citation_reward: bool = False,
+        use_likert_rubric: bool = False,
     ) -> Dict[str, Any]:
     extracted_context, extracted_answer, extracted_citations = extract_answer_context_citations(response)
     result = {
@@ -53,7 +54,7 @@ def compute_longform_averaged_outcome_reward(
         return result
     
     # score rubric
-    rubric_scores = _score_rubric(extracted_answer, ground_truth, use_general_rubric=use_general_rubric)
+    rubric_scores = _score_rubric(extracted_answer, ground_truth, use_general_rubric=use_general_rubric, use_likert_rubric=use_likert_rubric)
     if len(rubric_scores) == 0:
         print("🔥 No rubric scores found")
         rubric_reward = 0.0

@@ -146,7 +146,7 @@ def compute_weighted_rubric_reward(response: str, ground_truth: Dict[str, Any]) 
     return result
 
 
-def compute_weighted_rubric_reward_with_citation_and_format_reward(response: str, ground_truth: Dict[str, Any], mcp_parser_name: Optional[str] = None, use_general_rubric: bool = False, no_citation_reward: bool = False) -> Dict[str, Any]:
+def compute_weighted_rubric_reward_with_citation_and_format_reward(response: str, ground_truth: Dict[str, Any], mcp_parser_name: Optional[str] = None, use_general_rubric: bool = False, no_citation_reward: bool = False, use_likert_rubric: bool = False) -> Dict[str, Any]:
     """
     Compute a comprehensive reward score that includes rubric, citation, format, and search turn rewards.
     
@@ -217,7 +217,7 @@ def compute_weighted_rubric_reward_with_citation_and_format_reward(response: str
         return result
 
     # Compute per-rubric scores grouped by title using existing logic
-    rubric_scores_by_title, rubric_reward = asyncio.run(_compute_rubric_scores_and_reward(extracted_answer, ground_truth, use_general_rubric=use_general_rubric))
+    rubric_scores_by_title, rubric_reward = asyncio.run(_compute_rubric_scores_and_reward(extracted_answer, ground_truth, use_general_rubric=use_general_rubric, use_likert_rubric=use_likert_rubric))
     result["log_values"]["rubric_reward"] = rubric_reward
     result["log_values"]["rubric_scores_by_title"] = rubric_scores_by_title
     result["log_values"]["format_correct_has_answer"] = 1.0
@@ -243,7 +243,7 @@ def compute_weighted_rubric_reward_with_citation_and_format_reward(response: str
     return result
 
 
-async def _compute_rubric_scores_and_reward(response: str, ground_truth: Dict[str, Any], use_general_rubric: bool = False) -> Tuple[Dict[str, float], float]:
+async def _compute_rubric_scores_and_reward(response: str, ground_truth: Dict[str, Any], use_general_rubric: bool = False, use_likert_rubric: bool = False) -> Tuple[Dict[str, float], float]:
     """
     Compute both per-rubric scores grouped by title AND the overall weighted reward in a single pass.
     
@@ -264,7 +264,27 @@ async def _compute_rubric_scores_and_reward(response: str, ground_truth: Dict[st
     tasks = []
     task_to_rubric_mapping = []
     
-    if use_general_rubric:
+    
+    if use_likert_rubric:
+        system_prompt = """You are an expert evaluator. Given a user prompt and a generated response, please rate the overall quality of the response on a scale of 1 to 10, where 1 is very poor and 10 is excellent.
+Start your response with a valid JSON object that starts with "```json" and ends with "```". The JSON object should contain a single key "score" and the value should be an integer between 1 and 10.
+Example response:
+```json
+{
+"score": 8
+}```"""
+        user_prompt = f"""Given the following prompt, and response, please rate the overall quality of the response on a scale of 1 to 10.
+<prompt>
+{question}
+</prompt>   
+<response>
+{response}
+</response>
+Your JSON Evaluation:"""
+        task = _score_property_async(response, question, None, system_prompt=system_prompt, user_prompt=user_prompt, score_scale=10.0)
+        tasks.append(task)
+        task_to_rubric_mapping.append(("likert_rubric", system_prompt))
+    elif use_general_rubric:
             general_rubric = """(1) Overall Comprehensiveness: The report should cover content as comprehensively as possible
                 (2) Thoroughness of Discussion: Each section should be discussed thoroughly, not just superficially
                 (3) Factuality: There should be minimal factual errors
@@ -287,7 +307,10 @@ async def _compute_rubric_scores_and_reward(response: str, ground_truth: Dict[st
     # Execute all scoring tasks in parallel (this is the expensive part, done only once)
     scores = await asyncio.gather(*tasks)
     
-    if use_general_rubric:
+    if use_likert_rubric:
+        title_scores = {"likert_rubric": scores[0]}
+        return title_scores, scores[0]
+    elif use_general_rubric:
         title_scores = {"general_rubric": scores[0]}
         return title_scores, scores[0]
     

@@ -181,6 +181,8 @@ def run_litellm(
     chat_kwargs["top_p"] = chat_kwargs.get("top_p", 1.0)
     chat_kwargs["frequency_penalty"] = chat_kwargs.get("frequency_penalty", 0.0)
     chat_kwargs["presence_penalty"] = chat_kwargs.get("presence_penalty", 0.0)
+    chat_kwargs["num_retries"] = chat_kwargs.get("num_retries", 5)
+    chat_kwargs["fallbacks"] = chat_kwargs.get("fallbacks", ["gpt-4.1-mini"])
 
     # Prepare messages
     msgs = (
@@ -231,6 +233,8 @@ async def run_litellm_async(
     chat_kwargs["top_p"] = chat_kwargs.get("top_p", 1.0)
     chat_kwargs["frequency_penalty"] = chat_kwargs.get("frequency_penalty", 0.0)
     chat_kwargs["presence_penalty"] = chat_kwargs.get("presence_penalty", 0.0)
+    chat_kwargs["num_retries"] = chat_kwargs.get("num_retries", 5)
+    chat_kwargs["fallbacks"] = chat_kwargs.get("fallbacks", ["gpt-4.1-mini"])
 
     # Prepare messages
     msgs = (
