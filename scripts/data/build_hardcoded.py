@@ -37,18 +37,18 @@ python scripts/data/build_hardcoded.py \
 """
 
 # --- Configuration ---
-SOURCE_DATASET_REPO = "allenai/hardcoded-seed"
+SOURCE_DATASET_REPO = "allenai/hardcoded-seed-olmo3"
 DEFAULT_TARGET_NAMESPACE = "allenai" # Or your HF username
 
 # --- Default Placeholder Values ---
 DEFAULT_PLACEHOLDERS = {
-    "<|MODEL_NAME|>": "OLMo 2",
-    "<|POSTTRAIN_RECIPE|>": "Tülu 3.1",
-    "<|CONTEXT_LENGTH|>": 4096,
-    "<|BASE_MODEL|>": "OLMo 2",
-    "<|DATE_CUTOFF|>": "November 2024",
+    "<|MODEL_NAME|>": "Olmo",
+    "<|POSTTRAIN_RECIPE|>": "Olmo",
+    "<|CONTEXT_LENGTH|>": 65536,
+    "<|BASE_MODEL|>": "Olmo",
+    "<|DATE_CUTOFF|>": "December 2024",
     "<|LICENSE|>": "Apache 2.0",
-    "<|WEIGHTS_LINK|>": "",  # New placeholder for model weights link
+    "<|WEIGHTS_LINK|>": "https://huggingface.co/allenai",  # New placeholder for model weights link
 }
 
 # Map argparse argument names to placeholder keys
@@ -120,8 +120,7 @@ def parse_arguments():
     parser.add_argument(
         "--system_prompt_template",
         type=str,
-        default="You are <|MODEL_NAME|>, a helpful assistant built by Ai2. Your date cutoff is <|DATE_CUTOFF|> and you do not have access to external tools such as search and running code, but you're very happy to help users find their way with it." +
-                ("<|WEIGHTS_LINK|>" and " The model weights are available at <|WEIGHTS_LINK|>." or ""),
+        default="You are <|MODEL_NAME|>, a helpful function-calling AI assistant built by Ai2. Your date cutoff is <|DATE_CUTOFF|>, and your model weights are available at <|WEIGHTS_LINK|>.",
         help="Optional text for the system prompt. Can contain placeholders like <|MODEL_NAME|>."
     )
     parser.add_argument(
