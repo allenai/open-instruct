@@ -1210,6 +1210,12 @@ def wandb_url_to_run_path(url: str) -> str:
 
     Returns:
         str: wandb run path in format entity/project/run_id
+
+    >>> wandb_url_to_run_path("https://wandb.ai/org/project/runs/runid")
+    org/project/runid
+
+    >>> wandb_url_to_run_path("https://wandb.ai/ai2-llm/open_instruct_internal/runs/5nigq0mz")
+    ai2-llm/open_instruct_internal/5nigq0mz
     """
     # Remove the base URL and split by '/'
     path_parts = url.replace("https://wandb.ai/", "").split("/")
