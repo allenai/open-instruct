@@ -1201,7 +1201,7 @@ python scripts/submit_eval_jobs.py \
     print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
 
 
-def wandb_url_to_run_path(url):
+def wandb_url_to_run_path(url: str) -> str:
     """
     Convert a wandb URL to a wandb run path.
 
