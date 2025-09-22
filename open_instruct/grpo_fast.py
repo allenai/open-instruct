@@ -407,7 +407,7 @@ class Args:
     """the docker image for evaluation for oe-eval"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
-    oe_eval_log_to_wandb: bool = False
+    oe_eval_log_to_wandb: bool = True
     """Whether to log oe-eval results to wandb as run.summary"""
 
     # Evaluation behavior
