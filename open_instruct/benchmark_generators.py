@@ -540,14 +540,52 @@ class ModelDims:
 
 
 def load_model_dims(model_name: str) -> ModelDims:
-    cfg = transformers.AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+    """Load model dimensions from model config.
+
+    Supports:
+    - Hugging Face model names
+    - Local checkpoint directories
+    - GCS paths (gs://...)
+    """
+    import json
+    import os
+    import subprocess
+
+    # Check if it's a GCS path
+    if model_name.startswith("gs://"):
+        # Download config.json from GCS
+        config_path = os.path.join(model_name, "config.json")
+        try:
+            # Use gsutil to cat the config file directly
+            result = subprocess.run(["gsutil", "cat", config_path], capture_output=True, text=True, check=True)
+            config_dict = json.loads(result.stdout)
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"Failed to load config from GCS: {e}")
+            # Fall back to trying as HF model name
+            cfg = transformers.AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+            config_dict = cfg.to_dict()
+    # Check if it's a local directory with config.json
+    elif os.path.isdir(model_name):
+        config_path = os.path.join(model_name, "config.json")
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                config_dict = json.load(f)
+        else:
+            # Fall back to transformers loading
+            cfg = transformers.AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+            config_dict = cfg.to_dict()
+    else:
+        # Assume it's a Hugging Face model name
+        cfg = transformers.AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+        config_dict = cfg.to_dict()
+
     return ModelDims(
-        num_layers=cfg.num_hidden_layers,
-        hidden_size=cfg.hidden_size,
-        intermediate_size=cfg.intermediate_size,
-        vocab_size=cfg.vocab_size,
-        num_attn_heads=cfg.num_attention_heads,
-        num_kv_heads=getattr(cfg, "num_key_value_heads", None),
+        num_layers=config_dict["num_hidden_layers"],
+        hidden_size=config_dict["hidden_size"],
+        intermediate_size=config_dict["intermediate_size"],
+        vocab_size=config_dict["vocab_size"],
+        num_attn_heads=config_dict["num_attention_heads"],
+        num_kv_heads=config_dict.get("num_key_value_heads"),  # This one can be optional
     )
 
 

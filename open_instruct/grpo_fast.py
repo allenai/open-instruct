@@ -82,7 +82,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
-from open_instruct import logger_utils, vllm_utils3
+from open_instruct import benchmark_generators, logger_utils, rl_utils2, vllm_utils3
 from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
@@ -111,7 +111,6 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
-from open_instruct.rl_utils2 import Timer, pack_sequences
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -144,6 +143,20 @@ INVALID_LOGPROB = 1.0
 
 class ShutdownSentinel:
     """Sentinel value to signal thread shutdown via queue."""
+
+
+@dataclass
+class PackedData:
+    """Container for packed sequences and associated metadata."""
+
+    packed_sequences: rl_utils2.PackedSequences
+    collated_data: list  # Collated training data for each device
+    metrics: dict  # Training metrics
+    responses_count: int  # Number of responses
+    num_new_tokens: int  # Total number of new tokens
+    B: int  # Batch size
+    prompt_lengths: list[int]  # List of prompt lengths
+    response_lengths: list[int]  # List of response lengths
 
 
 @dataclass
@@ -918,7 +931,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
-        with Timer("Inference Calculation", noop=self.rank != 0):
+        with rl_utils2.Timer("Inference Calculation", noop=self.rank != 0):
             with torch.no_grad():
                 for i in range(len(collated_query_responses)):
                     query_response = collated_query_responses[i]
@@ -948,7 +961,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # from the generator (note that async mode means these are a bit diff!)
         old_logprobs = [None for _ in range(len(collated_query_responses))]
         if num_mini_batches > 1:
-            with Timer("Old logprobs Calculation", noop=self.rank != 0):
+            with rl_utils2.Timer("Old logprobs Calculation", noop=self.rank != 0):
                 with torch.no_grad():
                     for i in range(len(collated_query_responses)):
                         query_response = collated_query_responses[i]
@@ -975,7 +988,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
-        with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
+        with rl_utils2.Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             kl1_stats = torch.zeros(len(collated_query_responses))
             kl2_stats = torch.zeros(len(collated_query_responses))
             kl3_stats = torch.zeros(len(collated_query_responses))
@@ -1505,7 +1518,7 @@ def data_preparation_thread(
 ):
     for training_step in range(resume_training_step, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
-        with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
+        with rl_utils2.Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
             result, batch = accumulate_inference_batches(
                 inference_results_Q,
                 pending_queries_map,
@@ -1547,14 +1560,14 @@ def data_preparation_thread(
             ):
                 result.responses[i].append(tokenizer.eos_token_id)
                 result.masks[i].append(1)  # never mask the eos token for
-        with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
+        with rl_utils2.Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
             decoded_queries = batch.raw_queries
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
                 result.finish_reasons
             )
 
-        with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
+        with rl_utils2.Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
             scores, reward_metrics = asyncio.run(
                 reward_fn(
                     result.responses,
@@ -1578,7 +1591,7 @@ def data_preparation_thread(
             else:
                 raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
-        with Timer("📦 [Data Preparation Thread] Filtering sequences"):
+        with rl_utils2.Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved
             max_possible_score = 0
             if args.apply_verifiable_reward:
@@ -1625,7 +1638,7 @@ def data_preparation_thread(
                 finish_reasons = [finish_reasons[i] for i in stop_idxes]
 
             if args.fill_completions:
-                with Timer("⏱ [Data Preparation Thread] Refill completions"):
+                with rl_utils2.Timer("⏱ [Data Preparation Thread] Refill completions"):
                     current_batch_size = len(scores)
                     original_prompt_cnt = original_batch_size // args.num_samples_per_prompt_rollout
                     current_prompt_cnt = current_batch_size // args.num_samples_per_prompt_rollout
@@ -1679,8 +1692,8 @@ def data_preparation_thread(
                 f"({all_zero_groups / total_groups:.1%})"
             )
 
-        with Timer("📦 [Data Preparation Thread] Packing sequences"):
-            packed_sequences = pack_sequences(
+        with rl_utils2.Timer("📦 [Data Preparation Thread] Packing sequences"):
+            packed_sequences = rl_utils2.pack_sequences(
                 queries=batch.queries,
                 responses=responses,
                 masks=masks,
@@ -1701,7 +1714,7 @@ def data_preparation_thread(
         # if we have less batches than world size, we need to pad out so each world is fine
         # ideally, you should avoid this since its wasting computation.
         if args.allow_world_padding:
-            with Timer("🤺 [Data Preparation Thread] Padding sequences for world size"):
+            with rl_utils2.Timer("🤺 [Data Preparation Thread] Padding sequences for world size"):
                 shortfall = args.world_size - len(packed_sequences.query_responses)
                 if shortfall > 0:
                     logger.warning(
@@ -1723,7 +1736,7 @@ def data_preparation_thread(
                         packed_sequences.response_masks.append(dummy_response_mask)
                         packed_sequences.advantages.append(dummy_advantage)
 
-        with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
+        with rl_utils2.Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
             B = (
                 len(packed_sequences.query_responses) // args.world_size
             )  # essentially doing `drop_last=True`, which is fine.
@@ -1847,14 +1860,16 @@ def data_preparation_thread(
 
         # Put the packed sequences and metrics into the output queue
         packed_sequences_Q.put(
-            {
-                "packed_sequences": packed_sequences,  # for debugging purposes
-                "collated_data": collated_data,
-                "metrics": metrics,
-                "responses_count": len(responses),
-                "num_new_tokens": num_new_tokens,
-                "B": B,
-            }
+            PackedData(
+                packed_sequences=packed_sequences,
+                collated_data=collated_data,
+                metrics=metrics,
+                responses_count=len(responses),
+                num_new_tokens=num_new_tokens,
+                B=B,
+                prompt_lengths=[len(q) for q in batch.queries],
+                response_lengths=[len(r) for r in responses],
+            )
         )
 
 
@@ -2110,13 +2125,17 @@ def split_and_insert_batch(
 
 def load_data_from_packing_thread(
     packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event, health_check_fn: Callable[[], None]
-):
-    """Get the packed sequences with advantages from the packing thread."""
-    with Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
+) -> tuple[list, dict, int, PackedData]:
+    """Get the packed sequences with advantages from the packing thread.
+
+    Returns:
+        Tuple of (collated_data, data_thread_metrics, num_total_tokens, packed_data)
+    """
+    with rl_utils2.Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
         while True:
             if stop_event.is_set():
                 logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
-                return None, {}, num_total_tokens
+                return None, {}, num_total_tokens, None
             try:
                 packed_data = packed_sequences_Q.get(timeout=30.0)
                 break
@@ -2124,16 +2143,16 @@ def load_data_from_packing_thread(
                 # check that everything is still alive
                 health_check_fn()
                 logger.warning("[Main Thread] Timeout waiting for packed sequences. Retrying...")
-        data_thread_metrics = packed_data["metrics"]
-        B = packed_data["B"]
-        collated_data = packed_data["collated_data"]
-        num_total_tokens += packed_data["num_new_tokens"]
+        data_thread_metrics = packed_data.metrics
+        B = packed_data.B
+        collated_data = packed_data.collated_data
+        num_total_tokens += packed_data.num_new_tokens
 
     data_thread_metrics["time/trainer_idling"] = timer.duration
     if B == 0:
         logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-        return None, data_thread_metrics, num_total_tokens
-    return collated_data, data_thread_metrics, num_total_tokens
+        return None, data_thread_metrics, num_total_tokens, packed_data
+    return collated_data, data_thread_metrics, num_total_tokens, packed_data
 
 
 def weight_sync_thread(
@@ -2158,7 +2177,7 @@ def weight_sync_thread(
         # Clear the event for next iteration
         weight_sync_trigger_event.clear()
 
-        with Timer("[Weight Sync]") as timer:
+        with rl_utils2.Timer("[Weight Sync]") as timer:
             logger.debug("[Weight Sync Thread] Starting weight sync")
 
             # Set actors to stop
@@ -2192,7 +2211,7 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
     """Thread function that repeatedly calls process_from_queue on vllm engines."""
     logger.info("[Generate Thread] 🚀 Starting generation thread")
     while not stop_event.is_set():
-        with Timer("🔥 Generation time") as timer:
+        with rl_utils2.Timer("🔥 Generation time") as timer:
             processed_results = ray_get_with_progress(
                 [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
                 desc="[Generate Thread] Waiting for vLLM engines to process",
@@ -2210,25 +2229,89 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
     logger.info("[Generate Thread] 🛑 Stopping generation thread")
 
 
+def calculate_mfu_mbu(
+    model_dims: benchmark_generators.ModelDims, packed_data: PackedData, train_duration: float, args: Args
+) -> dict[str, float]:
+    """Calculate Model FLOPs Utilization (MFU) and Model Bandwidth Utilization (MBU).
+
+    Args:
+        model_dims: Model dimensions for FLOPs/memory calculations
+        packed_data: Packed data containing batch information
+        train_duration: Duration of the training step in seconds
+        args: Training arguments
+
+    Returns:
+        Dictionary with 'mfu' and 'mbu' keys as percentages
+    """
+    assert model_dims is not None, "model_dims must not be None"
+    assert packed_data is not None, "packed_data must not be None"
+    assert train_duration > 0, f"train_duration must be positive, got {train_duration}"
+    assert packed_data.prompt_lengths, "prompt_lengths must not be empty"
+    assert packed_data.response_lengths, "response_lengths must not be empty"
+
+    # Get GPU specifications
+    device_name = benchmark_generators.get_device_name(torch.cuda.get_device_name(0))
+    device_flops = benchmark_generators.GPU_SPECS[device_name]["flops"]
+    device_memory_bandwidth = benchmark_generators.GPU_SPECS[device_name]["memory_bandwidth"]
+
+    # For GRPO, we have multiple samples per prompt
+    # prompt_lengths contains lengths for unique prompts
+    # response_lengths contains lengths for all samples (num_prompts * samples_per_prompt)
+    assert (
+        len(packed_data.response_lengths) == len(packed_data.prompt_lengths) * args.num_samples_per_prompt_rollout
+    ), (
+        f"Expected {len(packed_data.prompt_lengths) * args.num_samples_per_prompt_rollout} response lengths, "
+        f"got {len(packed_data.response_lengths)}"
+    )
+
+    # Calculate FLOPs with proper handling of samples_per_prompt
+    # Note: prompt prefill is only done once per unique prompt, not per sample
+    total_flops = model_dims.flops(
+        prompt_lengths=packed_data.prompt_lengths,
+        response_lengths=packed_data.response_lengths,
+        samples_per_prompt=args.num_samples_per_prompt_rollout,
+    )
+
+    # MFU = (FLOPs / time) / peak_FLOPS * 100
+    flops_per_second = total_flops / train_duration
+    mfu = 100 * flops_per_second / device_flops
+
+    # Calculate memory bandwidth utilization
+    total_memory_bytes = model_dims.memory_bytes(
+        prompt_lengths=packed_data.prompt_lengths,
+        response_lengths=packed_data.response_lengths,
+        samples_per_prompt=args.num_samples_per_prompt_rollout,
+    )
+
+    # MBU = (Memory bytes / time) / peak_bandwidth * 100
+    bytes_per_second = total_memory_bytes / train_duration
+    mbu = 100 * bytes_per_second / device_memory_bandwidth
+
+    return {"mfu": mfu, "mbu": mbu}
+
+
 def one_training_step(
     args: Args,
     policy_group: ModelGroup,
-    collated_data,
-    tokenizer,
-    data_thread_metrics,
-    episode,
-    training_step,
-    num_total_tokens,
-    start_time,
-    train_dataset,
-    wandb_url,
-    chat_template_name,
-    actor_manager=None,
-    iter_dataloader=None,
-):
+    collated_data: list,
+    tokenizer: PreTrainedTokenizer,
+    data_thread_metrics: dict,
+    episode: int,
+    training_step: int,
+    num_total_tokens: int,
+    start_time: float,
+    train_dataset: datasets.Dataset,
+    wandb_url: str,
+    chat_template_name: str,
+    actor_manager: Optional[ActorManager] = None,
+    iter_dataloader: Optional[Any] = None,
+    model_config: Optional[ModelConfig] = None,
+    packed_data: Optional[PackedData] = None,
+    model_dims: Optional[benchmark_generators.ModelDims] = None,
+) -> None:
     """Train the model for one step."""
     update_ref_policy_future = []
-    with Timer("[Main Thread] 🗡️ Training") as train_timer:
+    with rl_utils2.Timer("[Main Thread] 🗡️ Training") as train_timer:
         metrics_list: List[dict[str, float]] = ray_get_with_progress(
             [
                 policy_group.models[i].train.remote(
@@ -2249,7 +2332,7 @@ def one_training_step(
 
     save_time = 0
     if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
-        with Timer("[Main Thread] 🗡️ Saving model") as timer:
+        with rl_utils2.Timer("[Main Thread] 🗡️ Saving model") as timer:
             checkpoint_dir = f"{args.output_dir}_checkpoints"
             step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
             logger.info(f"Saving model at step {training_step} to {step_dir}")
@@ -2269,20 +2352,26 @@ def one_training_step(
         save_time += timer.duration
 
     if len(update_ref_policy_future) > 0:
-        with Timer("[Main Thread] 🔃 Updating reference policy"):
+        with rl_utils2.Timer("[Main Thread] 🔃 Updating reference policy"):
             ray_get_with_progress(update_ref_policy_future, desc="Updating reference policy")
 
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
 
     average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
     total_time = time.perf_counter() - start_time
+
+    # Calculate MFU and MBU
+    utilization_metrics = calculate_mfu_mbu(model_dims, packed_data, train_timer.duration, args)
+
     metrics = {
         "episode": episode,
         "global_step": episode,
         "training_step": training_step,
         "val/num_total_tokens": num_total_tokens,
         "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
-        "tokens_per_second": num_total_tokens / total_time,
+        "learner_tokens_per_second": num_total_tokens / total_time,
+        "learner_mfu": utilization_metrics["mfu"],
+        "learner_mbu": utilization_metrics["mbu"],
         "time/total": total_time,
         "time/training": train_timer.duration,
         "time/saving": save_time,
@@ -2398,7 +2487,7 @@ def save_final_model(
 ):
     """Save the final model and launch evaluation jobs if configured."""
     logger.info(f"Saving final model at step {training_step} to {args.output_dir}")
-    with Timer("[Main Thread] 🗡️ Saving model"):
+    with rl_utils2.Timer("[Main Thread] 🗡️ Saving model"):
         ray_get_with_progress(
             [
                 policy_group.models[i].save_model.remote(args.output_dir, chat_template_name, tokenizer)
@@ -2457,7 +2546,7 @@ def make_reward_fn(args: Args) -> Callable:
         metrics = {}
 
         if args.apply_r1_style_format_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
+            with rl_utils2.Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
                 format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
                 if len(format_scores) != len(scores):
                     raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
@@ -2466,7 +2555,7 @@ def make_reward_fn(args: Args) -> Callable:
                 metrics["val/format_scores"] = np.array(format_scores).mean()
 
         if args.apply_verifiable_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
+            with rl_utils2.Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
                 verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
                     reward_fn_mapping,
                     responses,
@@ -2502,7 +2591,7 @@ def make_reward_fn(args: Args) -> Callable:
 
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
         if args.non_stop_penalty:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty"):
+            with rl_utils2.Timer("[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty"):
                 assert len(finish_reasons) == len(scores)
                 for i in range(len(finish_reasons)):
                     if finish_reasons[i] != "stop":
@@ -2703,7 +2792,7 @@ def run_training(
             )
 
         # The generate_thread is now handling vLLM processing asynchronously
-        collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
+        collated_data, data_thread_metrics, num_total_tokens, packed_data = load_data_from_packing_thread(
             packed_sequences_Q, num_total_tokens, stop_event, health_check_fn
         )
         if collated_data is None:
@@ -2730,6 +2819,9 @@ def run_training(
             tc.chat_template_name,
             actor_manager,
             iter_dataloader,
+            model_config,
+            packed_data,
+            model_dims,  # noqa: F821
         )
 
         # Checkpoint after one_training_step (or even if it was skipped)
@@ -2739,7 +2831,7 @@ def run_training(
             and training_step % args.checkpoint_state_freq == 0
             and args.checkpoint_state_dir is not None
         ):
-            with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
+            with rl_utils2.Timer("[Main Thread] 🗡️ Saving checkpoint state"):
                 # Save comprehensive client state including ShufflingIterator state
                 client_state = {
                     "training_step": training_step,
@@ -2794,6 +2886,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
     if args.cache_dataset_only:
         return
+
+    # Load model dimensions for MFU/MBU calculations
+    model_dims = benchmark_generators.load_model_dims(model_config.model_name_or_path)  # noqa: F841
 
     pprint([args, model_config])
 
