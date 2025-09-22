@@ -16,6 +16,7 @@ import json
 from functools import partial
 from multiprocessing import Pool, cpu_count, set_start_method
 
+from datasets import load_dataset
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
@@ -85,7 +86,7 @@ def main():
     )
     parser.add_argument(
         "--code_api_url",
-        default=None,
+        default="http://127.0.0.1:8000/test_program",
         type=str,
         help="Give a code api url to use for code verifier."
     )
@@ -94,6 +95,17 @@ def main():
         default=1.0,
         type=float,
         help="Give a max execution time for code verifier."
+    )
+    parser.add_argument(
+        "--code_pass_rate_reward_threshold",
+        default=1.0,
+        type=float,
+        help="Threshold for pass rate; below this the code verifier returns 0.0."
+    )
+    parser.add_argument(
+        "--code_apply_perf_penalty",
+        action="store_true",
+        help="If set, apply a runtime-based performance penalty to passing code tests."
     )
     parser.add_argument(
         "--llm_judge_model",
@@ -106,6 +118,12 @@ def main():
         default=2048,
         type=int,
         help="Give a max tokens for llm judge."
+    )
+    parser.add_argument(
+        "--llm_judge_max_context_length",
+        default=128000,
+        type=int,
+        help="Max context length for the LLM judge model."
     )
     parser.add_argument(
         "--llm_judge_temperature",
@@ -124,6 +142,18 @@ def main():
         default=42,
         type=int,
         help="Give a seed for llm judge."
+    )
+    parser.add_argument(
+        "--max_length_verifier_max_length",
+        default=32768,
+        type=int,
+        help="Max length used by max-length style verifiers."
+    )
+    parser.add_argument(
+        "--remap_verifier",
+        default=None,
+        type=str,
+        help="Optional mapping old=new to remap a verifier name."
     )
     args = parser.parse_args()
     if args.lower_bound == 0 and args.upper_bound == 1:
