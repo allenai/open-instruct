@@ -15,7 +15,6 @@ uv run accelerate launch \
     --output_dir output/ \
     --report_to wandb \
     --logging_steps 1 \
-    --reduce_loss sum \
     --model_revision main \
     --dataset_mixer_list allenai/tulu-3-sft-personas-algebra 100 \
     --add_bos \
