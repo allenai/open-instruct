@@ -31,6 +31,7 @@ dependencies = [
     "flash-attn>=2.8.3; platform_system != 'Darwin'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
     "runai-model-streamer>=0.14.0",
+    "runai-model-streamer-gcs>=0.14.0",
 ]
 
 [build-system]
