@@ -82,7 +82,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
-from open_instruct import benchmark_generators, logger_utils, rl_utils2, vllm_utils3
+from open_instruct import logger_utils, rl_utils2, vllm_utils3
 from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
@@ -112,20 +112,24 @@ from open_instruct.model_utils import (
 )
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.utils import (
+    GPU_SPECS,
     ArgumentParserPlus,
     BeakerRuntimeConfig,
+    ModelDims,
     RayProcess,
     _z3_params_to_fetch,
     calibrate_checkpoint_state_dir,
     clean_last_n_checkpoints_deepspeed,
     download_latest_checkpoint_from_gs,
     get_beaker_whoami,
+    get_device_name,
     get_eval_ds_config,
     get_optimizer_grouped_parameters,
     get_train_ds_config,
     get_wandb_tags,
     is_beaker_job,
     launch_ai2_evals_on_weka,
+    load_model_dims,
     maybe_get_beaker_config,
     maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
@@ -2230,7 +2234,7 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
 
 
 def calculate_mfu_mbu(
-    model_dims: benchmark_generators.ModelDims, packed_data: PackedData, train_duration: float, args: Args
+    model_dims: Optional[ModelDims], packed_data: PackedData, train_duration: float, args: Args
 ) -> dict[str, float]:
     """Calculate Model FLOPs Utilization (MFU) and Model Bandwidth Utilization (MBU).
 
@@ -2250,9 +2254,9 @@ def calculate_mfu_mbu(
     assert packed_data.response_lengths, "response_lengths must not be empty"
 
     # Get GPU specifications
-    device_name = benchmark_generators.get_device_name(torch.cuda.get_device_name(0))
-    device_flops = benchmark_generators.GPU_SPECS[device_name]["flops"]
-    device_memory_bandwidth = benchmark_generators.GPU_SPECS[device_name]["memory_bandwidth"]
+    device_name = get_device_name(torch.cuda.get_device_name(0))
+    device_flops = GPU_SPECS[device_name]["flops"]
+    device_memory_bandwidth = GPU_SPECS[device_name]["memory_bandwidth"]
 
     # For GRPO, we have multiple samples per prompt
     # prompt_lengths contains lengths for unique prompts
@@ -2307,7 +2311,7 @@ def one_training_step(
     iter_dataloader: Optional[Any] = None,
     model_config: Optional[ModelConfig] = None,
     packed_data: Optional[PackedData] = None,
-    model_dims: Optional[benchmark_generators.ModelDims] = None,
+    model_dims: Optional[ModelDims] = None,
 ) -> None:
     """Train the model for one step."""
     update_ref_policy_future = []
@@ -2887,7 +2891,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         return
 
     # Load model dimensions for MFU/MBU calculations
-    model_dims = benchmark_generators.load_model_dims(model_config.model_name_or_path)  # noqa: F841
+    model_dims = load_model_dims(model_config.model_name_or_path)  # noqa: F841
 
     pprint([args, model_config])
 
