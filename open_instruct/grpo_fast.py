@@ -2358,7 +2358,7 @@ def one_training_step(
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
 
     average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
-    total_time = time.perf_counter() - start_time
+    step_time = time.perf_counter() - start_time
 
     # Calculate MFU and MBU
     utilization_metrics = calculate_mfu_mbu(model_dims, packed_data, train_timer.duration, args)
@@ -2369,10 +2369,10 @@ def one_training_step(
         "training_step": training_step,
         "val/num_total_tokens": num_total_tokens,
         "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
-        "learner_tokens_per_second": num_total_tokens / total_time,
+        "learner_tokens_per_second": packed_data["num_new_tokens"] / step_time,
         "learner_mfu": utilization_metrics["mfu"],
         "learner_mbu": utilization_metrics["mbu"],
-        "time/total": total_time,
+        "time/step_total": step_time,
         "time/training": train_timer.duration,
         "time/saving": save_time,
         **data_thread_metrics,
@@ -2749,7 +2749,6 @@ def run_training(
     else:
         num_total_tokens = 0
 
-    num_total_tokens = 0
     training_start_time = time.time()  # Track overall training start time
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
