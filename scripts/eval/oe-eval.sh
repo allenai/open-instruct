@@ -128,7 +128,7 @@ fi
 WANDB_ARG=""
 if [[ -n "$WANDB_RUN_PATH" ]]; then
     beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
-    WANDB_ARG="--wandb-run-path $WANDB_RUN_PATH --gantry-secret-wandb-api-key ${beaker_user}_WANDB_API_KEY"
+    WANDB_ARG=" --wandb-run-path $WANDB_RUN_PATH --gantry-secret-wandb-api-key ${beaker_user}_WANDB_API_KEY"
 fi
 
 DATALAKE_ARGS=""
@@ -137,7 +137,7 @@ if [[ -n "$RUN_ID" ]]; then
 fi
 if [[ -n "$STEP" ]]; then
     DATALAKE_ARGS+=",step=$STEP"
-    WANDB_ARG+="--wandb-run-step $STEP"
+    WANDB_ARG+=" --wandb-run-step $STEP"
 fi
 
 # Set HF_UPLOAD_ARG only if UPLOAD_TO_HF is specified
