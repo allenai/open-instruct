@@ -592,13 +592,15 @@ class LLMRayActor:
         current_prompt = prompt
         current_sampling_params = sampling_params
 
-        logger.info(f"[_process_request] Starting processing for {sub_request_id}")
+        logger.info(f"[_process_request] ENTER {sub_request_id} - base_request_id={base_request_id}, index={index}, tools_enabled={bool(self.tools)}")
+        loop_iteration = 0
 
         while True:
+            loop_iteration += 1
             # Generate completion
-            logger.info(f"[_process_request] Calling generate_one_completion for {sub_request_id}")
+            logger.info(f"[_process_request] {sub_request_id} - Loop iteration {loop_iteration}: About to await generate_one_completion")
             output = await self.generate_one_completion(sub_request_id, current_prompt, current_sampling_params)
-            logger.info(f"[_process_request] Completed generate_one_completion for {sub_request_id}")
+            logger.info(f"[_process_request] {sub_request_id} - Loop iteration {loop_iteration}: Returned from generate_one_completion")
 
             # Fix the index field
             assert len(output.outputs) == 1, f"{len(output.outputs)=}"
@@ -618,15 +620,18 @@ class LLMRayActor:
                 break
 
             # Check if any tool was triggered
+            logger.info(f"[_process_request] {sub_request_id} - Checking for triggered tools")
             tool_info = get_triggered_tool(
                 output.outputs[0].text, self.tools, self.max_tool_calls, num_calls, current_sampling_params
             )
             if tool_info is None:
+                logger.info(f"[_process_request] {sub_request_id} - No tool triggered, breaking from loop")
                 break  # No tool triggered - request is complete
 
             tool, stop_str = tool_info
-
+            logger.info(f"[_process_request] {sub_request_id} - Tool triggered: {stop_str}, about to await asyncio.to_thread for tool execution")
             tool_result = await asyncio.to_thread(tool, output.outputs[0].text)
+            logger.info(f"[_process_request] {sub_request_id} - Tool execution completed, output length: {len(tool_result.output) if tool_result.output else 0}")
 
             # Update tracking
             num_calls += 1
@@ -669,12 +674,14 @@ class LLMRayActor:
             # Check if we can continue
             new_sample_tokens = current_sampling_params.max_tokens - len(masks)
             if not can_continue or new_sample_tokens <= 0:
+                logger.info(f"[_process_request] {sub_request_id} - Cannot continue (can_continue={can_continue}, new_sample_tokens={new_sample_tokens}), breaking from loop")
                 break
 
             # Prepare for next iteration
             current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token)
             current_sampling_params = current_sampling_params.clone()
             current_sampling_params.max_tokens = new_sample_tokens
+            logger.info(f"[_process_request] {sub_request_id} - Continuing to next iteration with new_sample_tokens={new_sample_tokens}")
             # Continue the while loop with new prompt
 
         # Attach tool metadata if tools are enabled
@@ -689,8 +696,10 @@ class LLMRayActor:
             setattr(complete_output, "tool_called", tool_called)
 
         # Add to request_outputs with lock
+        logger.info(f"[_process_request] {sub_request_id} - Acquiring request_outputs_lock")
         async with self.request_outputs_lock:
             if base_request_id not in self.request_outputs:
+                logger.info(f"[_process_request] {sub_request_id} - Creating new request_outputs entry for {base_request_id}")
                 self.request_outputs[base_request_id] = vllm.RequestOutput(
                     request_id=base_request_id,
                     prompt=request_output.prompt,
@@ -701,9 +710,11 @@ class LLMRayActor:
                 )
 
             self.request_outputs[base_request_id].outputs.append(complete_output)
+            outputs_count = len(self.request_outputs[base_request_id].outputs)
             logger.info(
-                f"[_process_request] Added output for {sub_request_id} to {base_request_id}, total outputs: {len(self.request_outputs[base_request_id].outputs)}"
+                f"[_process_request] {sub_request_id} - Added output to {base_request_id}, total outputs: {outputs_count}, lock released"
             )
+        logger.info(f"[_process_request] EXIT {sub_request_id} - Successfully completed")
 
     async def _check_and_process_completed_requests(self, base_request_ids: List[str]):
         """Check request_outputs for completed requests and process them.
