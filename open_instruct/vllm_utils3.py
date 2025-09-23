@@ -651,7 +651,16 @@ class LLMRayActor:
             tool_error += "" if tool_result.error is None else tool_result.error
             tool_output_str += tool_result.output
             tool_runtime += tool_result.runtime
-            tool_called = True
+        tool_called = True
+
+        # If the tool wasn't actually invoked (e.g., MaxCallsExceededTool fallback),
+        # we should not attempt to continue the request. Matching the main branch
+        # lifecycle prevents endless resubmissions of the same sub-request.
+        force_stop = not tool_result.called
+        if force_stop:
+            logger.info(
+                f"[_process_request] {sub_request_id} - Tool result flagged as not called; will finalize without continuation"
+            )
 
             # Prepare tool output tokens
             logger.info(f"[_process_request] {sub_request_id} - About to access self.llm_engine.engine.tokenizer")
@@ -686,6 +695,8 @@ class LLMRayActor:
             excess = len(prompt_and_tool_output_token) - max_len
             logger.info(f"[_process_request] {sub_request_id} - Calculated excess={excess}")
 
+            can_continue = not force_stop
+
             if excess > 0:
                 tool_output_token_ids = tool_output_token_ids[:-excess]
                 can_continue = False
@@ -693,8 +704,9 @@ class LLMRayActor:
                     f"[_process_request] {sub_request_id} - Line 662: Truncated tool output due to excess, can_continue=False"
                 )
             else:
-                can_continue = True
-                logger.info(f"[_process_request] {sub_request_id} - Line 664: No excess, can_continue=True")
+                logger.info(
+                    f"[_process_request] {sub_request_id} - Line 664: No excess, can_continue={can_continue}"
+                )
 
             # Check max_tokens limit
             logger.info(
