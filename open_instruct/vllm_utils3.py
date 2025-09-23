@@ -667,8 +667,10 @@ class LLMRayActor:
             )
 
             # Check context length
+            # Convert prompt_token_ids to list if it's a tuple (VLLM returns tuples)
+            prompt_token_ids_list = list(output.prompt_token_ids) if isinstance(output.prompt_token_ids, tuple) else output.prompt_token_ids
             prompt_and_tool_output_token = (
-                output.prompt_token_ids + request_output.outputs[0].token_ids + tool_output_token_ids
+                prompt_token_ids_list + request_output.outputs[0].token_ids + tool_output_token_ids
             )
 
             logger.info(
