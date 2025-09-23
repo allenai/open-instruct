@@ -400,14 +400,6 @@ class LLMRayActor:
         self.tracking = _init_tool_tracking()
         self.request_outputs = {}
 
-    def get_model_config(self):
-        """Get the vLLM model config from the engine."""
-        return self.llm_engine.model_config
-
-    def get_vllm_config(self):
-        """Get the full vLLM config including parallel_config."""
-        return self.llm_engine.vllm_config
-
     def get_model_dims_dict(self):
         """Get only the model dimensions as a simple dict without loading weights."""
         model_config = self.llm_engine.model_config

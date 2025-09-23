@@ -1509,10 +1509,9 @@ def accumulate_inference_batches(
         for response in result.responses:
             response_lengths.append(len(response))
 
-        if result.token_statistics:
-            total_prompt_tokens += result.token_statistics.num_prompt_tokens
-            total_response_tokens += result.token_statistics.num_response_tokens
-            max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
+        total_prompt_tokens += result.token_statistics.num_prompt_tokens
+        total_response_tokens += result.token_statistics.num_response_tokens
+        max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
 
     current_time = time.perf_counter()
     total_generation_time = (
@@ -1530,11 +1529,11 @@ def accumulate_inference_batches(
         num_prompt_tokens=total_prompt_tokens,
         num_response_tokens=total_response_tokens,
         generation_time=total_generation_time,
-        mfu=mfu if model_dims else None,
-        mbu=mbu if model_dims else None,
-        earliest_start_time=earliest_start_time if earliest_start_time != float("inf") else None,
-        total_flops=total_flops if model_dims else None,
-        total_memory_bytes=total_memory_bytes if model_dims else None,
+        mfu=mfu,
+        mbu=mbu,
+        earliest_start_time=earliest_start_time,
+        total_flops=total_flops,
+        total_memory_bytes=total_memory_bytes,
     )
 
     # Create combined RequestInfo
@@ -2913,21 +2912,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     )
 
     # Get the model dimensions from one of the engines without loading weights
-    def log_gpu_memory(stage: str):
-        """Log GPU memory usage using torch."""
-        if torch.cuda.is_available():
-            for i in range(torch.cuda.device_count()):
-                allocated = torch.cuda.memory_allocated(i) / (1024**3)
-                reserved = torch.cuda.memory_reserved(i) / (1024**3)
-                total = torch.cuda.get_device_properties(i).total_memory / (1024**3)
-                free = total - reserved
-                logger.info(f"GPU {i} memory {stage}: Allocated={allocated:.2f}GB, Reserved={reserved:.2f}GB, Free={free:.2f}GB, Total={total:.2f}GB")
-
-    log_gpu_memory("BEFORE getting model dims")
     model_dims_dict = ray.get(vllm_engines[0].get_model_dims_dict.remote())
-    log_gpu_memory("AFTER getting model dims dict")
     model_dims = utils.ModelDims(**model_dims_dict)
-    log_gpu_memory("AFTER creating ModelDims")
 
     generation_configs = create_generation_configs(args)
 
