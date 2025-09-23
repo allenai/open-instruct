@@ -1513,10 +1513,9 @@ def accumulate_inference_batches(
         total_response_tokens += result.token_statistics.num_response_tokens
         max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
 
-    current_time = time.perf_counter()
-    total_generation_time = (
-        current_time - earliest_start_time if earliest_start_time != float("inf") else max_generation_time
-    )
+    # Use the maximum generation time across engines since they work in parallel
+    # This avoids including queue overhead and accumulation time in MFU/MBU calculations
+    total_generation_time = max_generation_time
 
     # Calculate total number of GPUs used in vLLM
     num_gpus = args.vllm_num_engines * args.vllm_tensor_parallel_size
