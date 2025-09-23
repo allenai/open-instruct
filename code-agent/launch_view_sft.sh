@@ -1,0 +1,64 @@
+exp_name=rlvr_code_view_tool_sft
+    python mason.py \
+        --cluster ai2/jupiter-cirrascale-2 \
+        --image saurabhs/open-coding-agent \
+        --workspace ai2/open-coding-agent-dev \
+        --priority urgent \
+        --num_nodes 4 \
+        --gs_model_name saurabhs/ethans-Qwen3-8B-nothink \
+        --description "rlvr code view tool sft" \
+        --max_retries 0 \
+        --auto_output_dir_path /weka/oe-adapt-default/saurabhs/repos/open-instruct-3/output \
+        --auto_checkpoint_state_dir /weka/oe-adapt-default/saurabhs/repos/open-instruct-3/checkpoints \
+        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+        --env VLLM_ENGINE_INIT_TIMEOUT=900 \
+        --budget ai2/oe-adapt \
+        --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
+        --exp_name ${exp_name} \
+        --beta 0.0 \
+        --num_samples_per_prompt_rollout 8 \
+        --num_unique_prompts_rollout 72 \
+        --num_mini_batches 4 \
+        --num_epochs 1 \
+        --learning_rate 1e-6 \
+        --per_device_train_batch_size 1 \
+        --output_dir /output \
+        --kl_estimator kl3 \
+        --dataset_mixer_list saurabh5/rlvr-code-view-tool-new-first-turn-only-user 1.0 \
+        --dataset_mixer_list_splits train \
+        --dataset_mixer_eval_list saurabh5/rlvr-code-view-tool-new-first-turn-only-user 16 \
+        --dataset_mixer_eval_list_splits train \
+        --max_token_length 10240 \
+        --max_prompt_token_length 2048 \
+        --response_length 32768 \
+        --pack_length 35840 \
+        --model_name_or_path  /weka/oe-adapt-default/ethans/llm-weights/Qwen3.2-8B-nothink \
+        --chat_template_name chatml \
+        --non_stop_penalty False \
+        --temperature 1.0 \
+        --ground_truths_key ground_truth \
+        --sft_messages_key messages \
+        --total_episodes 1200000 \
+        --deepspeed_stage 3 \
+        --num_learners_per_node 8 \
+        --vllm_num_engines 24 \
+        --vllm_tensor_parallel_size 1 \
+        --backend_timeout 180 \
+        --lr_scheduler_type constant \
+        --apply_verifiable_reward true \
+        --code_agent_api_endpoint \$CODE_API_URL/view_file \
+        --seed 42 \
+        --save_freq 25 \
+        --try_launch_beaker_eval_jobs_on_weka False \
+        --gradient_checkpointing \
+        --with_tracking \
+        --tools code_agent \
+        --vllm_enable_prefix_caching \
+        --max_tool_calls 15 \
+        --vllm_top_p 0.95 \
+        --log_rollouts_to_file True \
+        --max_rollout_logs_per_step 10 \
+        --dataset_skip_cache True \
+        --checkpoint_state_freq 25 \
+        --allow_world_padding True \
+        --log_rollouts_to_file "/weka/oe-adapt-default/saurabhs/repos/open-instruct-coding-agent/rollouts"

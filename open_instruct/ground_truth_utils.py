@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import string
+import warnings
 import weakref
 from abc import ABC, abstractmethod
 from collections import Counter
@@ -25,6 +26,9 @@ from litellm import acompletion
 from open_instruct import logger_utils
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.IFEvalG import instructions_registry
+from open_instruct.tool_utils.swe_tool_parser import Argument as SWEArgument
+from open_instruct.tool_utils.swe_tool_parser import Command as SWECommand
+from open_instruct.tool_utils.swe_tool_parser import FunctionCallingParser
 from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_TOKEN, build_messages
 from open_instruct.math_utils import (
     get_unnormalized_answer,
@@ -939,7 +943,145 @@ class CodeVerifier(VerifierFunction):
             type: The VerifierConfig class or its subclass
         """
         return CodeVerifierConfig
+class CodeSearchVerifier(VerifierFunction):
+    """
+    Simple verifier checks in the model makes a call to the CodeSearchTool in tool_utils.tool_vllm.py
+    Checks that the call looks are the correct file and spans the buggy lines
+    """
 
+    def __init__(self, verifier_config: VerifierConfig) -> None:
+        super().__init__("code_search", verifier_config=verifier_config, weight=1.0)
+
+    def parse_tool_calls(self, prediction: str) -> List[Dict[str, Any]]:
+        """Parse and validate tool calls using FunctionCallingParser.
+        Accepts <tool_call> {"name": ..., "arguments": {...}} </tool_call> blocks.
+        Validates each call against a minimal schema for str_replace_editor (view only).
+        Returns only validated calls as dictionaries identical to the model JSON.
+        """
+        tool_call_pattern = r"<tool_call>\s*(.*?)\s*</tool_call>"
+        tool_calls = re.findall(tool_call_pattern, prediction, re.DOTALL)
+
+        # Minimal command schema for the code-view tool
+        str_replace_editor_cmd = SWECommand(
+            name="str_replace_editor",
+            docstring="Custom tool for viewing files; only 'view' is supported here.",
+            arguments=[
+                SWEArgument(
+                    name="command", type="string", description="The command to run", required=True, enum=["view"]
+                ),
+                SWEArgument(
+                    name="path", type="string", description="Absolute path to file or directory", required=True
+                ),
+                SWEArgument(
+                    name="view_range",
+                    type="array",
+                    description="[start, end] line numbers when viewing a file",
+                    required=True,
+                    items={"type": "integer"},
+                ),
+                SWEArgument(name="repo_name", type="string", description="Optional repository name", required=False),
+            ],
+        )
+        parser = FunctionCallingParser()
+
+        parsed_calls: List[Dict[str, Any]] = []
+
+        def _fallback_parse(raw_str: str) -> Optional[Dict[str, Any]]:
+            try:
+                m_name = re.search(r'"name"\s*:\s*"([^"]+)"', raw_str)
+                if not m_name:
+                    return None
+                name = m_name.group(1)
+                m_args = re.search(r'("arguments"\s*:\s*\{)|(?:arguments\s*=\s*\{)', raw_str)
+                if not m_args:
+                    return {"name": name, "arguments": {}}
+                start = m_args.end() - 1
+                depth = 0
+                end = None
+                for i in range(start, len(raw_str)):
+                    ch = raw_str[i]
+                    if ch == "{":
+                        depth += 1
+                    elif ch == "}":
+                        depth -= 1
+                        if depth == 0:
+                            end = i + 1
+                            break
+                if end is None:
+                    return None
+                args_str = raw_str[start:end]
+                arguments = json.loads(args_str)
+                return {"name": name, "arguments": arguments}
+            except Exception:
+                return None
+
+        for raw in tool_calls:
+            data = None
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError as e:
+                data = _fallback_parse(raw)
+                if data is None:
+                    warnings.warn(
+                        f"Failed to parse tool call JSON and fallback failed. Raw content: {raw}, Error: {e}"
+                    )
+                    continue
+            try:
+                # Build LiteLLM-style function call wrapper expected by the parser
+                model_response = {
+                    "message": prediction,
+                    "tool_calls": [{"function": {"name": data.get("name"), "arguments": data.get("arguments", {})}}],
+                }
+                # Validate; throws on schema issues
+                _thought, _action = parser(model_response, commands=[str_replace_editor_cmd], strict=True)
+                parsed_calls.append(data)
+            except Exception as e:
+                warnings.warn(f"Skipping invalid tool call: {e}")
+
+        return parsed_calls
+
+    async def async_call(
+        self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
+    ) -> VerificationResult:
+        buggy_info = json.loads(label)
+        bug_fn_file = buggy_info["bug_fn_file"]
+        bug_fn_line_start = buggy_info["line_start"]
+        bug_fn_line_end = buggy_info["line_end"]
+
+        # parse the tool calls
+        tool_calls = self.parse_tool_calls(prediction)
+        score = 0.0
+        for tool_call in tool_calls:
+            # check if any of the tools calls identify the correct file and span the buggy lines
+            if "view_range" not in tool_call["arguments"]:
+                continue
+            tool_file = tool_call["arguments"]["path"]
+            tool_line_start = tool_call["arguments"]["view_range"][0]
+            tool_line_end = tool_call["arguments"]["view_range"][1]
+            if (
+                (tool_file.endswith(bug_fn_file) or bug_fn_file.endswith(tool_file))
+                and tool_line_start <= bug_fn_line_start
+                and tool_line_end >= bug_fn_line_end
+            ):
+                score = 1.0
+        return VerificationResult(score=score)
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
+    ) -> VerificationResult:
+        """
+        Synchronously verify code search operations.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                raise RuntimeError(
+                    "Cannot call synchronous __call__ method from within an async context. Use async_call instead."
+                )
+            else:
+                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+        except RuntimeError:
+            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
 
 def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     """

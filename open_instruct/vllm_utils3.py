@@ -21,6 +21,7 @@ import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+import json
 from typing import Any, Dict, List, Optional, Union
 
 import ray
@@ -82,7 +83,7 @@ def _init_tool_tracking():
     }
 
 
-def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, executor):
+def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, executor, tool_context=None):
     """
     Handle a finished output. Returns the output if it should be added to results,
     or None if it's being held for tool processing.
@@ -110,8 +111,17 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
                 tool = tools[stop_str]
             else:
                 tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
+            
+            augmented_text = o.text
+            if tool_context:
+                try:
+                    ctx_payload = tool_context if isinstance(tool_context, str) else json.dumps(tool_context)
+                    augmented_text = o.text + f"\n<!--tool_context:{ctx_payload}-->"
+                except Exception as e:
+                    logger.warning(f"Failed to attach tool context: {tool_context} {e}")
+                    augmented_text = o.text
 
-            future = executor.submit(tool, o.text)
+            future = executor.submit(tool, augmented_text)
             tracking["pending_tool_futures"][output.request_id] = (future, o, output)
 
             return None  # Output is being held for tool processing
@@ -322,11 +332,17 @@ def init_process_group(
 
 
 def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, request_metadata: dict):
-    """Add a request to the LLM engine."""
+    """Add a request to the LLM engine.
+
+    If `request.tool_contexts` is provided (list with one optional string), append
+    a hidden HTML comment carrying this context to the end of the prompt tokens so
+    downstream tools (e.g., CodeAgentTool) can read it from the prompt text.
+    """
     prefix = "eval" if request.is_eval else "train"
     request_id = f"{prefix}_{request.training_step}_{request.dataset_index}"
     sampling_params = request.generation_config.clone()
     sampling_params.n = 1  # Use n=1 for tool processing
+    # Store basic metadata
     request_metadata[request_id] = {
         "is_eval": request.is_eval,
         "dataset_index": request.dataset_index,
@@ -337,7 +353,29 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
         "start_time": time.perf_counter(),
     }
 
-    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
+    # Optionally append a hidden tool context to the prompt token ids
+    prompt_token_ids = list(request.prompt)
+    tool_context_str: Optional[str] = None
+    if getattr(request, "tool_contexts", None):
+        # Expect a list of length 1 for single prompt
+        tool_context_str = request.tool_contexts[0]
+        if tool_context_str:
+            try:
+                comment = f"<!--tool_context:{tool_context_str}-->"
+                extra_ids = llm_engine.tokenizer.encode(comment, add_special_tokens=False)
+                prompt_token_ids.extend(extra_ids)
+                # Record that we changed the prompt length for accurate accounting
+                request_metadata[request_id]["prompt_tokens"] = len(prompt_token_ids)
+            except Exception as e:
+                # If tokenization fails, fallback without context
+                logger.warning(f"Failed to encode tool_context for {request_id}: {e}")
+                tool_context_str = None
+
+    # Record the tool_context in metadata for returning with results
+    if tool_context_str is not None:
+        request_metadata[request_id]["tool_context"] = tool_context_str
+
+    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_token_ids, cache_salt=request_id)
     for j in range(request.generation_config.n):
         sub_sampling_params = sampling_params.clone()  # Already has n=1
         if request.generation_config.seed is not None:
@@ -474,6 +512,7 @@ class LLMRayActor:
                         self.request_metadata[base_req_id]["sampling_params"],
                         self.max_tool_calls,
                         self.executor,
+                        self.request_metadata[base_req_id].get("tool_context"),
                     )
                     # Result is None when we do more tool processing.
                     if result is not None:
@@ -510,6 +549,11 @@ class LLMRayActor:
                 ),
                 start_time=metadata["start_time"],
             )
+            # Attach tool_contexts to the result if present
+            tool_ctx = metadata.get("tool_context")
+            if tool_ctx is not None:
+                num_outs = len(result.responses)
+                result.tool_contexts = [tool_ctx for _ in range(num_outs)]
             self._insert_result_to_queue(result, is_eval=metadata["is_eval"])
 
         return len(request_outputs)

@@ -35,6 +35,7 @@ class GenerationResult:
     training_step: Optional[int] = None
     token_statistics: Optional[TokenStatistics] = None
     start_time: Optional[float] = None
+    tool_contexts: Optional[List[Optional[str]]] = None
 
 
 @dataclass
@@ -52,3 +53,4 @@ class PromptRequest:
     dataset_index: Optional[int] = None
     is_eval: bool = False
     start_time: Optional[float] = None
+    tool_contexts: Optional[List[Optional[str]]] = None

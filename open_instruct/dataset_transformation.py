@@ -535,6 +535,28 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    "chatml": (
+        '<|im_start|>system\n'
+        'You are a helpful assistant that can interact with a computer to analyze code.\n\n'
+        '# Tools\n\n'
+        'You may call one or more functions to assist with the user query.\n\n'
+        'You are provided with function signatures within <tools></tools> XML tags:\n'
+        '<tools>\n'
+        '{"type": "function", "function": {"name": "bash", "description": "runs the given command directly in bash", "parameters": {"type": "object", "properties": {"command": {"type": "string", "description": "The bash command to execute."}}, "required": ["command"]}}}\n'
+        '{"type": "function", "function": {"name": "str_replace_editor", "description": "Custom tool for viewing files * State is persistent across command calls and discussions with the user * If `path` is a file, `view` displays the result of applying `cat -n`. If `path` is a directory, `view` lists non-hidden files and directories up to 2 levels deep * If a `command` generates a long output, it will be truncated and marked with `<response clipped>`\\n", "parameters": {"type": "object", "properties": {"command": {"type": "string", "description": "The commands to run. The only allowed option is: `view`.", "enum": ["view"]}, "path": {"type": "string", "description": "Absolute path to file or directory, e.g. `/testbed/file.py` or `/testbed`."}, "view_range": {"type": "array", "description": "Optional parameter of `view` command when `path` points to a file. If none is given, the full file is shown. If provided, the file will be shown in the indicated line number range, e.g. [11, 12] will show lines 11 and 12. Indexing at 1 to start. Setting `[start_line, -1]` shows all lines from `start_line` to the end of the file.", "items": {"type": "integer"}}}, "required": ["command", "path"]}}}\n'
+        '{"type": "function", "function": {"name": "submit", "description": "submits the current file", "parameters": {"type": "object", "properties": {}, "required": []}}}\n'
+        '</tools>\n\n'
+        'For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n'
+        '<tool_call>\n'
+        '{"name": <function-name>, "arguments": <args-json-object>}\n'
+        '</tool_call><|im_end|>\n'
+        "{% for message in messages %}"
+        "{{ '<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endfor %}"
+        "{% if add_generation_prompt %}"
+        "{{ '<|im_start|>assistant\n' }}"
+        "{% endif %}"
+    ),
 }
 # flake8: noqa
 

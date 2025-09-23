@@ -3,6 +3,7 @@ python open_instruct/tool_utils/tool_vllm.py
 """
 
 import copy
+import json
 import re
 import time
 import traceback
@@ -22,6 +23,10 @@ from vllm.model_executor.guided_decoding.guided_fields import GuidedDecodingRequ
 from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sampling_params import RequestOutputKind
 
+from open_instruct.tool_utils.swe_tool_parser import Argument as SWEArgument
+from open_instruct.tool_utils.swe_tool_parser import Command as SWECommand
+from open_instruct.tool_utils.swe_tool_parser import FunctionCallingParser
+
 
 @dataclass
 class ToolOutput:
@@ -30,8 +35,9 @@ class ToolOutput:
     error: str
     timeout: bool
     runtime: float
-    start_str: str = "<output>\n"
-    end_str: str = "\n</output>"
+    terminate: bool = False  # If True, terminate generation immediately
+    start_str: str = "<tool_response>\n"
+    end_str: str = "\n</tool_response>"
 
 
 class Tool:
@@ -45,7 +51,14 @@ class Tool:
 
 class MaxCallsExceededTool(Tool):
     def __call__(self, prompt: str) -> ToolOutput:
-        return ToolOutput(output="Max tool calls exceeded.", called=False, error="", timeout=False, runtime=0)
+        return ToolOutput(
+            output="Max tool calls exceeded. Terminating generation.",
+            called=True,
+            error="",
+            timeout=False,
+            runtime=0,
+            terminate=True
+        )
 
 
 class PythonCodeTool(Tool):
@@ -130,6 +143,294 @@ class PythonCodeTool(Tool):
             output="\n".join(all_outputs), called=True, error=error, timeout=timeout, runtime=time.time() - start_time
         )
 
+class CodeAgentTool(Tool):
+    def __init__(self, api_endpoint: str, repo_name: str = None, *args, **kwargs):
+        # api_endpoint is the full endpoint for view_file. We'll derive base URL for /run_bash
+        self.api_endpoint = api_endpoint
+        # Compute base URL (strip trailing path like /view_file)
+        try:
+            if api_endpoint.endswith("/view_file"):
+                self.base_api = api_endpoint[: -len("/view_file")]
+            else:
+                self.base_api = api_endpoint.rsplit("/", 1)[0]
+        except Exception:
+            self.base_api = api_endpoint
+        self.repo_name = repo_name
+        super().__init__(*args, **kwargs)
+
+    def __call__(self, prompt: str) -> ToolOutput:
+        """
+        Use the code agent tool to view files of a repo.
+        The prompt will contain tool calls with file paths to view.
+        Expected formats:
+        <tool_call>
+        {"name": "str_replace_editor", "arguments": {"command": "view", "path": "/testbed/starlette/config.py", "view_range": [121, 138], "repo_name": "encode/starlette"}}
+        </tool_call>
+        or
+        <tool_call>
+        {"name": "str_replace_editor", "arguments": {"command": "view", "path": "/testbed/starlette/config.py", "repo_name": "encode/starlette"}}
+        </tool_call>
+        The repo_name should be provided in the tool call. If not provided, will fallback to "testbed".
+        """
+
+        # Extract optional hidden per-request tool context appended by the engine
+        # Pattern: <!--tool_context:{...}-->
+        ctx_match = re.search(r"<!--tool_context:(.*?)-->", prompt, re.DOTALL)
+        tool_ctx = {}
+        if ctx_match:
+            try:
+                tool_ctx = json.loads(ctx_match.group(1))
+            except Exception:
+                tool_ctx = {}
+
+        # Find tool calls in the prompt
+        tool_call_pattern = r"<tool_call>\s*(.*?)\s*</tool_call>"
+        tool_calls = re.findall(tool_call_pattern, prompt, re.DOTALL)
+        # Fallback: support XML-style self-closing tags like
+        # <str_replace_editor command="view" path="/testbed/file.py" />
+        if not tool_calls:
+            xml_calls = re.findall(r"<([a-zA-Z_][\w]*)\s+([^/>]*?)\s*/>", prompt)
+            # Convert to pseudo JSON strings for unified processing below
+            for name, attrs in xml_calls:
+                kvs = dict(re.findall(r"([a-zA-Z_][\w]*)=\"([^\"]*)\"", attrs))
+                tool_calls.append(json.dumps({"name": name, "arguments": kvs}))
+
+        if not tool_calls:
+            return ToolOutput(output="", called=False, error="", timeout=False, runtime=0)
+
+        all_outputs = []
+        error = ""
+        start_time = time.time()
+        timeout = False
+
+        # Prepare parser and command schemas (bash + str_replace_editor)
+        parser = FunctionCallingParser()
+        bash_cmd_schema = SWECommand(
+            name="bash",
+            docstring="runs the given command directly in bash",
+            arguments=[
+                SWEArgument(name="command", type="string", description="The bash command to execute.", required=True),
+                SWEArgument(name="path", type="string", description="Optional working dir", required=False),
+                SWEArgument(name="cwd", type="string", description="Optional working dir", required=False),
+                SWEArgument(name="repo_name", type="string", description="Optional repo name", required=False),
+                SWEArgument(name="base_commit", type="string", description="Optional base commit", required=False),
+                SWEArgument(
+                    name="patches",
+                    type="array",
+                    description="Optional patches",
+                    required=False,
+                    items={"type": "string"},
+                ),
+            ],
+        )
+        str_replace_editor_schema = SWECommand(
+            name="str_replace_editor",
+            docstring=(
+                "Custom tool for viewing/editing files. If path is a file, view displays cat -n. "
+                "If path is a directory, view lists non-hidden files/dirs up to 2 levels."
+            ),
+            arguments=[
+                SWEArgument(
+                    name="command",
+                    type="string",
+                    description="The command to run",
+                    required=True,
+                    enum=["view", "create", "str_replace", "insert", "undo_edit"],
+                ),
+                SWEArgument(
+                    name="path", type="string", description="Absolute path to file or directory", required=True
+                ),
+                SWEArgument(
+                    name="view_range",
+                    type="array",
+                    description="[start,end] when viewing a file",
+                    required=False,
+                    items={"type": "integer"},
+                ),
+                SWEArgument(name="file_text", type="string", description="File contents for create", required=False),
+                SWEArgument(name="old_str", type="string", description="Old string for replace", required=False),
+                SWEArgument(
+                    name="new_str", type="string", description="New string for replace/insert", required=False
+                ),
+                SWEArgument(
+                    name="insert_line", type="integer", description="Insertion line (0-indexed)", required=False
+                ),
+                SWEArgument(name="repo_name", type="string", description="Optional repo name", required=False),
+                SWEArgument(name="base_commit", type="string", description="Optional base commit", required=False),
+                SWEArgument(
+                    name="patches",
+                    type="array",
+                    description="Optional patches",
+                    required=False,
+                    items={"type": "string"},
+                ),
+            ],
+        )
+        submit_schema = SWECommand(
+            name="submit", docstring="Signal that the task is complete and submit the solution.", arguments=[]
+        )
+
+        for tool_call_str in tool_calls:
+            try:
+                # Parse the JSON tool call
+                tool_call = json.loads(tool_call_str)
+
+                # Build a LiteLLM-style wrapper and validate with FunctionCallingParser
+                model_response = {
+                    "message": prompt,
+                    "tool_calls": [
+                        {"function": {"name": tool_call.get("name"), "arguments": tool_call.get("arguments", {})}}
+                    ],
+                }
+                name = tool_call.get("name", "")
+                if name == "bash":
+                    _thought, _action = parser(model_response, commands=[bash_cmd_schema], strict=True)
+                elif name == "submit":
+                    _thought, _action = parser(model_response, commands=[submit_schema], strict=True)
+                else:
+                    # default to str_replace_editor schema
+                    _thought, _action = parser(model_response, commands=[str_replace_editor_schema], strict=True)
+
+                args = tool_call.get("arguments", {})
+                # Normalize key variants for bash
+                if name == "bash" and "cmd" in args and "command" not in args:
+                    args["command"] = args["cmd"]
+                command = args.get("command")
+
+                # Extract common arguments
+                path = args.get("path", "")
+                view_range = args.get("view_range", None)
+                patches = args.get("patches", None)
+                base_commit = args.get("base_commit", None)
+                bash_cmd = args.get("command") or args.get("cmd")
+                cwd = args.get("cwd")
+
+                # Keep the path as-is - the API will handle normalization
+                # We don't strip /testbed anymore since API expects testbed/... paths
+
+                # Extract repo_name from the tool call arguments or fallback to context
+                repo_name = args.get("repo_name") or tool_ctx.get("repo_name")
+
+                # Fallback to instance variable if not in tool call
+                if not repo_name:
+                    repo_name = self.repo_name
+
+                # For instances from sample data, extract repo name from extra_fields if available
+                if not repo_name and "extra_fields" in tool_call.get("arguments", {}):
+                    repo_name = tool_call["arguments"]["extra_fields"].get("repo_name")
+
+                # Do not force a misleading default. If still missing,
+                # let the server attempt inference based on paths/cwd.
+
+                # If not provided in the call, fallback to context for base_commit and patches
+                if base_commit is None:
+                    base_commit = tool_ctx.get("base_commit")
+                if patches is None:
+                    patches = tool_ctx.get("patches")
+
+                timeout_seconds = 60
+                if name == "bash":
+                    if not bash_cmd:
+                        raise ValueError("Missing 'command' for bash function call")
+
+                    # Retry logic for API gateway errors
+                    max_retries = 2
+                    response = None
+                    for attempt in range(max_retries):
+                        try:
+                            response = requests.post(
+                                f"{self.base_api}/run_bash",
+                                json={
+                                    "repo_name": repo_name,
+                                    "cmd": bash_cmd,
+                                    "cwd": path or cwd,
+                                    "base_commit": base_commit,
+                                    "patches": patches,
+                                    "timeout_seconds": timeout_seconds,
+                                },
+                                timeout=timeout_seconds,
+                            )
+                            if response.status_code in [502, 503, 504]:
+                                if attempt < max_retries - 1:
+                                    time.sleep(1)  # Brief pause before retry
+                                    continue
+                                else:
+                                    # Return a cleaner error message instead of HTML
+                                    content = f"OBSERVATION:\nAPI error (status {response.status_code}): Gateway timeout or service unavailable. Please try again.\n"
+                                    all_outputs.append(content)
+                                    response = None  # Mark as failed
+                            break
+                        except requests.exceptions.RequestException as e:
+                            if attempt < max_retries - 1:
+                                time.sleep(1)
+                                continue
+                            else:
+                                content = f"OBSERVATION:\nAPI connection error: {str(e)}\n"
+                                all_outputs.append(content)
+                                response = None  # Mark as failed
+                elif name == "submit":
+                    # Submit should terminate generation immediately
+                    content = "OBSERVATION:\nSubmission received. Task marked as complete.\n"
+                    all_outputs.append(content)
+                    # Set terminate flag to stop generation
+                    return ToolOutput(
+                        output="\n\n".join(all_outputs) if all_outputs else content,
+                        called=True,
+                        error="",
+                        timeout=False,
+                        runtime=time.time() - start_time,
+                        terminate=True,  # Signal to terminate generation
+                    )
+                else:
+                    # str_replace_editor commands routed to /edit_file (including view)
+                    payload = {
+                        "repo_name": repo_name,
+                        "command": command,
+                        "path": path,
+                        "view_range": view_range,
+                        "file_text": args.get("file_text"),
+                        "old_str": args.get("old_str"),
+                        "new_str": args.get("new_str"),
+                        "insert_line": args.get("insert_line"),
+                        "base_commit": base_commit,
+                        "patches": patches,
+                    }
+                    response = requests.post(f"{self.base_api}/edit_file", json=payload, timeout=timeout_seconds)
+
+                # Only process response if we have one
+                if response is not None:
+                    if response.status_code == 200:
+                        result = response.json()
+                        content = result.get("content", "")
+                        all_outputs.append(content)
+                    else:
+                        error_msg = f"API error (status {response.status_code}): {response.text}"
+                        all_outputs.append(error_msg)
+                        error = error_msg
+
+            except requests.Timeout:
+                all_outputs.append("Timeout viewing file")
+                timeout = True
+                break
+            except json.JSONDecodeError as e:
+                error_msg = f"Invalid JSON in tool call: {e}"
+                all_outputs.append(error_msg)
+                error = error_msg
+            except Exception as e:
+                error_msg = f"Error processing tool call: {str(e)}"
+                all_outputs.append(error_msg)
+                error = error_msg
+
+        runtime = time.time() - start_time
+        called = len(tool_calls) > 0
+
+        return ToolOutput(
+            output="\n\n".join(all_outputs) if all_outputs else "",
+            called=called,
+            error=error,
+            timeout=timeout,
+            runtime=runtime,
+        )
 
 class ToolUseLLM(LLM):
     def __init__(self, tools: dict[str, Tool] = None, max_tool_calls: Union[int, dict[str, int]] = 4, *args, **kwargs):
@@ -142,7 +443,11 @@ class ToolUseLLM(LLM):
         # Initialize executor and store for pending tool calls
         self.executor = ThreadPoolExecutor(max_workers=20)
         self.pending_tool_futures = {}
+        self._tool_contexts: Optional[list[Optional[str]]] = None
         super().__init__(*args, **kwargs)
+
+    def set_tool_contexts(self, tool_contexts: Optional[list[Optional[str]]]):
+        self._tool_contexts = tool_contexts
 
     def _validate_and_add_requests(
         self,
@@ -243,6 +548,14 @@ class ToolUseLLM(LLM):
                     tool_output_token_ids = tokenizer.encode(
                         "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
                     )
+                    # If the tool requests termination, append a stop string and prevent further requests
+                    terminate_generation = getattr(tool_result, "terminate", False)
+                    if terminate_generation:
+                        try:
+                            stop_tokens = tokenizer.encode("<endoftext>", add_special_tokens=False)
+                        except Exception:
+                            stop_tokens = []
+                        tool_output_token_ids = tool_output_token_ids + stop_tokens
                     timeout[req_id] = tool_result.timeout
                     tool_error[req_id] += "" if tool_result.error is None else tool_result.error
                     tool_output[req_id] += tool_result.output
@@ -274,6 +587,8 @@ class ToolUseLLM(LLM):
                     masks[req_id].extend([0] * len(tool_output_token_ids))
                     new_sample_tokens = self.single_n_sampling_params.max_tokens - len(masks[req_id])
                     can_make_new_request = can_make_new_request and new_sample_tokens > 0
+                    if terminate_generation:
+                        can_make_new_request = False
                     if can_make_new_request:
                         try:
                             new_sampling_params = copy.deepcopy(self.single_n_sampling_params)

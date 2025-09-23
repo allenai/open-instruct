@@ -58,7 +58,7 @@ import time
 from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
-from datetime import timedelta
+from datetime import timedelta, datetime
 from queue import Empty, Full, Queue
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
 
@@ -140,6 +140,44 @@ logger = logger_utils.setup_logger(__name__)
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
+
+def log_rollouts(
+    queries: List[str], responses: List[str], training_step: int, output_dir: str, max_logs: int = 10
+):
+    """Log prompts and completions to a JSON file for debugging and analysis."""
+    from pathlib import Path
+
+    # Hardcode rollout logs directory as requested, ignoring provided output_dir
+    rollout_log_dir = Path(output_dir)
+    rollout_log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create filename with timestamp and step info
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = rollout_log_dir / f"rollouts_step_{training_step}_{timestamp}.jsonl"
+
+    # Limit the number of logs to avoid huge files
+    num_to_log = min(len(queries), max_logs)
+
+    # Prepare data for logging
+    rollout_data = []
+    for i in range(num_to_log):
+        rollout_data.append(
+            {
+                "index": i,
+                "training_step": training_step,
+                "timestamp": timestamp,
+                "query": queries[i],
+                "response": responses[i],
+                "response_length": len(responses[i]),
+            }
+        )
+
+    # Write to file in JSONL format for easy streaming
+    with open(log_file, "w") as f:
+        for entry in rollout_data:
+            f.write(json.dumps(entry) + "\n")
+
+    logger.info(f"📝 Logged {len(rollout_data)} rollouts to {log_file}")
 
 
 class ShutdownSentinel:
@@ -412,13 +450,18 @@ class Args:
 
     # Tool settings
     tools: Optional[List[str]] = None
-    """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
-    max_tool_calls: List[int] = field(default_factory=lambda: [5])
+    """If set, use the tool mapped to the string. Currently supports `search`, `code`, and `code_agent`"""
+    max_tool_calls: List[int] = field(default_factory=lambda: [15])
     """Maximum number of tool calls allowed. If a list is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
     mask_tool_use: bool = True
     """Whether to mask the tool output. By default on."""
     only_reward_good_outputs: bool = False
     """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
+
+    log_rollouts_to_file: Optional[str] = None
+    """Whether to log rollouts to a file. By default off."""
+    max_rollout_logs_per_step: int = 10
+    """maximum number of rollout examples to log per step (to avoid huge files)"""
 
     # rl-rag specific settngs
     number_documents_to_search: int = 3
@@ -428,6 +471,10 @@ class Args:
 
     # code-tool specific settings
     code_tool_api_endpoint: Optional[str] = None
+
+    #code agent specific settings
+    code_agent_api_endpoint: Optional[str] = None
+    """The API endpoint for the code view tool (defaults to code_tool_api_endpoint if not set)."""
 
     def __post_init__(self):
         if os.environ.get("VLLM_USE_V1") == "0":
@@ -480,7 +527,7 @@ class Args:
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
         if self.tools is not None and len(self.tools) > 0:
             for tool in self.tools:
-                if tool not in ["search", "code"]:
+                if tool not in ["search", "code", "code_agent"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
 
@@ -1158,6 +1205,12 @@ class PolicyTrainerRayProcess(RayProcess):
         if self.rank == 0:
             os.makedirs(output_dir, exist_ok=True)
 
+        if hasattr(model_to_save, "generation_config"):
+            if not model_to_save.generation_config.do_sample:
+                model_to_save.generation_config.temperature = None
+                model_to_save.generation_config.top_p = None
+                model_to_save.generation_config.top_k = None
+
         # save model weights for ZeRO2/3
         if hasattr(model_to_save, "module"):
             model_to_save = model_to_save.module
@@ -1551,6 +1604,9 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
                 result.finish_reasons
             )
+            # log the rollouts to a file
+            if args.log_rollouts_to_file is not None:
+                log_rollouts(decoded_queries, decoded_responses, training_step, args.log_rollouts_to_file, args.max_rollout_logs_per_step)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
             scores, reward_metrics = asyncio.run(
@@ -2001,6 +2057,23 @@ def create_model_and_optimizer(
                 tool_objects[tool.end_str] = tool
                 # Add tool end string to stop_strings
                 args.stop_strings.append(tool.end_str)
+            elif tool.lower() == "code_agent":
+                from open_instruct.tool_utils.tool_vllm import CodeAgentTool
+
+                # Use code_agent_api_endpoint if set, otherwise fall back to code_tool_api_endpoint
+                api_endpoint = args.code_agent_api_endpoint
+                if not api_endpoint:
+                    raise ValueError("code_agent tool requires --code_agent_api_endpoint to be set")
+
+                tool = CodeAgentTool(
+                    start_str="<tool_call>",
+                    end_str="</tool_call>",
+                    api_endpoint=api_endpoint,
+                    repo_name=None,  # Repo name will be provided in the tool call by the model
+                )
+                tool_objects[tool.end_str] = tool
+                # Add tool end string to stop_strings
+                args.stop_strings.append(tool.end_str)
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 
@@ -2080,6 +2153,28 @@ def create_generation_configs(args: Args):
     return {"train": generation_config, "eval": eval_generation_config}
 
 
+def _extract_tool_contexts(raw_queries: List[Optional[str]]) -> List[Optional[str]]:
+    """Extract tool contexts from raw query strings if present.
+
+    Looks for an HTML comment of the form <!--tool_context:{...}-->
+    and returns the JSON payload string; otherwise returns None.
+    """
+    import re
+
+    contexts: List[Optional[str]] = []
+    pattern = re.compile(r"<!--tool_context:(.*?)-->", re.DOTALL)
+    for rq in raw_queries:
+        if not rq:
+            contexts.append(None)
+            continue
+        m = pattern.search(rq)
+        if m:
+            contexts.append(m.group(1))
+        else:
+            contexts.append(None)
+    return contexts
+
+
 def split_and_insert_batch(
     batch: Batch,
     training_step: int,
@@ -2088,11 +2183,20 @@ def split_and_insert_batch(
     generation_config,
     is_eval: bool,
 ) -> None:
-    """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    for idx, query, ground_truth, dataset, raw_query in zip(
-        batch.indices, batch.queries, batch.ground_truths, batch.datasets, batch.raw_queries
+    """Split a batch into multiple inference batches and insert individual prompts into queues and mapping.
+
+    Also attaches per-sample tool context (if present in the raw query) to the request
+    so the vLLM tool layer can consume it.
+    """
+    # Derive per-sample tool contexts from raw queries if available
+    tool_contexts: List[Optional[str]] = _extract_tool_contexts(batch.raw_queries or [])
+
+    for i, (idx, query, ground_truth, dataset, raw_query) in enumerate(
+        zip(batch.indices, batch.queries, batch.ground_truths, batch.datasets, batch.raw_queries)
     ):
         pending_queries_map.insert(idx, query, ground_truth, dataset, raw_query)
+        # For a single prompt, pass a list of one tool_context (matching PromptRequest schema)
+        per_request_ctx = [tool_contexts[i]] if i < len(tool_contexts) else [None]
         param_prompt_Q.put(
             PromptRequest(
                 prompt=query,
@@ -2100,6 +2204,7 @@ def split_and_insert_batch(
                 training_step=training_step,
                 dataset_index=idx,
                 is_eval=is_eval,
+                tool_contexts=per_request_ctx,
             )
         )
 

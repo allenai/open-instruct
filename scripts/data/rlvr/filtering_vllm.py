@@ -1,10 +1,10 @@
 '''
 python mason.py \
-  --cluster ai2/jupiter-cirrascale-2 --image nathanl/open_instruct_auto \
-  --workspace ai2/tulu-thinker \
+  --cluster ai2/saturn ai2/neptune --image nathanl/open_instruct_auto \
+  --workspace ai2/oe-adapt-code \
   --priority high \
   --preemptible \
-  --gpus 1 \
+  --gpus 0 \
   --num_nodes 1 \
   --max_retries 0 \
   -- python scripts/data/rlvr/filtering_vllm.py \
