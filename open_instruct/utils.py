@@ -1703,8 +1703,8 @@ class ModelDims:
             hidden_size=hidden_size,
             intermediate_size=intermediate_size,
             vocab_size=model_config.get_vocab_size(),
-            num_attn_heads=model_config.get_num_attention_heads(),
-            num_kv_heads=model_config.get_num_kv_heads(),
+            num_attn_heads=model_config.get_num_attention_heads(vllm_config.parallel_config),
+            num_kv_heads=model_config.get_num_kv_heads(vllm_config.parallel_config),
         )
 
     @property
