@@ -905,7 +905,7 @@ class LLMRayActor:
                     )
                 else:
                     # No active tasks, just sleep for a bit
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(10)
                     done = set()
 
                 # Process completed tasks and collect their base request IDs
