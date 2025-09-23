@@ -2176,7 +2176,6 @@ def weight_sync_thread(
                 weight_broadcast_futures,
                 desc="[Weight Sync Thread] Waiting for weight updates to complete",
                 enable=args.verbose,
-                collect_timings=True,
             )
 
             # Allow actors to resume
