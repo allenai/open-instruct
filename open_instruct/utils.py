@@ -1693,10 +1693,15 @@ class ModelDims:
     def from_vllm_config(cls, vllm_config: vllm.config.VllmConfig) -> "ModelDims":
         """Create ModelDims from a vLLM config object."""
         model_config = vllm_config.model_config
+        hidden_size = model_config.get_hidden_size()
+
+        # Try to get intermediate_size, default to 4x hidden_size if not present
+        intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
+
         return cls(
             num_layers=model_config.get_num_layers(vllm_config.parallel_config),
-            hidden_size=model_config.get_hidden_size(),
-            intermediate_size=model_config.get_intermediate_size(),
+            hidden_size=hidden_size,
+            intermediate_size=intermediate_size,
             vocab_size=model_config.get_vocab_size(),
             num_attn_heads=model_config.get_num_attention_heads(),
             num_kv_heads=model_config.get_num_kv_heads(),
