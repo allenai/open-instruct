@@ -9,11 +9,11 @@ class TokenStatistics:
     num_prompt_tokens: int
     num_response_tokens: int
     generation_time: float
-    mfu: float
-    mbu: float
-    earliest_start_time: float
-    total_flops: int
-    total_memory_bytes: int
+    mfu: Optional[float] = None
+    mbu: Optional[float] = None
+    earliest_start_time: Optional[float] = None
+    total_flops: Optional[int] = None
+    total_memory_bytes: Optional[int] = None
 
 
 @dataclass

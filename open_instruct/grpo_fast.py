@@ -1514,11 +1514,11 @@ def accumulate_inference_batches(
         num_prompt_tokens=total_prompt_tokens,
         num_response_tokens=total_response_tokens,
         generation_time=total_generation_time,
-        mfu=mfu,
-        mbu=mbu,
-        earliest_start_time=earliest_start_time if earliest_start_time != float("inf") else 0.0,
-        total_flops=total_flops,
-        total_memory_bytes=total_memory_bytes,
+        mfu=mfu if model_dims else None,
+        mbu=mbu if model_dims else None,
+        earliest_start_time=earliest_start_time if earliest_start_time != float("inf") else None,
+        total_flops=total_flops if model_dims else None,
+        total_memory_bytes=total_memory_bytes if model_dims else None,
     )
 
     # Create combined RequestInfo
