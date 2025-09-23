@@ -803,6 +803,7 @@ class LLMRayActor:
             return 0
 
         processed_count = 0
+        dispatch_items: list[tuple[str, GenerationResult, bool]] = []
         current_time = time.perf_counter()
 
         # Acquire lock once for entire operation
@@ -843,7 +844,7 @@ class LLMRayActor:
                 # Remove from request_outputs
                 self.request_outputs.pop(base_request_id)
 
-                # Process and insert result (still within lock for consistency)
+                # Process result while still holding the lock, but defer queue writes until afterwards.
                 logger.info(f"[_check_and_process_completed_requests] Processing completed request {base_request_id}")
                 result, is_eval = process_completed_request(
                     base_request_id, ordered_outs, {}, current_time, self.tools, self.request_metadata
@@ -851,13 +852,18 @@ class LLMRayActor:
                 logger.info(
                     f"[_check_and_process_completed_requests] Processed result type: {type(result)}, is_eval: {is_eval}"
                 )
-                self._insert_result_to_queue(result, is_eval=is_eval)
-                logger.info(f"[_check_and_process_completed_requests] Inserted result for {base_request_id} to queue")
 
-                # Clean up metadata
+                # Clean up metadata before leaving the lock to avoid races with new tasks.
                 self.request_metadata.pop(base_request_id, None)
 
+                dispatch_items.append((base_request_id, result, is_eval))
                 processed_count += 1
+
+        for base_request_id, result, is_eval in dispatch_items:
+            self._insert_result_to_queue(result, is_eval=is_eval)
+            logger.info(
+                f"[_check_and_process_completed_requests] Inserted result for {base_request_id} to queue"
+            )
 
         return processed_count
 
