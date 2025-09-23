@@ -1828,6 +1828,10 @@ def data_preparation_thread(
                 **reward_metrics,
             }
 
+            # Add actor tokens per second metric
+            total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
+            metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
+
         if args.save_traces:
             traces = {
                 "scores": scores.tolist(),
@@ -2368,6 +2372,13 @@ def maybe_evaluate(
         }
         if "time/generation" in eval_generate_metrics:
             eval_metrics["eval/generation_time"] = eval_generate_metrics["time/generation"]
+
+        # Add actor tokens per second metric for evaluation
+        total_tokens = (
+            eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
+        )
+        eval_metrics["eval/actor_tokens_per_second"] = total_tokens / eval_result.token_statistics.generation_time
+
         print_rich_single_line_metrics(eval_metrics)
 
         table = {}
