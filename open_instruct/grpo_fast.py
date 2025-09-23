@@ -2910,7 +2910,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         )
     )
 
-    # Get the vLLM config from one of the engines and create ModelDims
+    # Get the model dimensions from one of the engines without loading weights
     def log_gpu_memory(stage: str):
         """Log GPU memory usage using torch."""
         if torch.cuda.is_available():
@@ -2921,10 +2921,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
                 free = total - reserved
                 logger.info(f"GPU {i} memory {stage}: Allocated={allocated:.2f}GB, Reserved={reserved:.2f}GB, Free={free:.2f}GB, Total={total:.2f}GB")
 
-    log_gpu_memory("BEFORE getting vLLM config")
-    vllm_config = ray.get(vllm_engines[0].get_vllm_config.remote())
-    log_gpu_memory("AFTER getting vLLM config")
-    model_dims = utils.ModelDims.from_vllm_config(vllm_config)
+    log_gpu_memory("BEFORE getting model dims")
+    model_dims_dict = ray.get(vllm_engines[0].get_model_dims_dict.remote())
+    log_gpu_memory("AFTER getting model dims dict")
+    model_dims = utils.ModelDims(**model_dims_dict)
     log_gpu_memory("AFTER creating ModelDims")
 
     generation_configs = create_generation_configs(args)
