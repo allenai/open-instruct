@@ -642,10 +642,15 @@ class LLMRayActor:
             tool_called = True
 
             # Prepare tool output tokens
+            logger.info(f"[_process_request] {sub_request_id} - About to access self.llm_engine.engine.tokenizer")
             tokenizer = self.llm_engine.engine.tokenizer
+            logger.info(f"[_process_request] {sub_request_id} - Successfully got tokenizer, about to encode tool output")
+            tool_output_text = "<output>\n" + tool_result.output + "</output>\n"
+            logger.info(f"[_process_request] {sub_request_id} - Encoding text: {tool_output_text[:100]}...")
             tool_output_token_ids = tokenizer.encode(
-                "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+                tool_output_text, add_special_tokens=False
             )
+            logger.info(f"[_process_request] {sub_request_id} - Successfully encoded tool output, got {len(tool_output_token_ids)} tokens")
 
             # Check context length
             prompt_and_tool_output_token = (
