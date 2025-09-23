@@ -16,7 +16,7 @@ import json
 from functools import partial
 from multiprocessing import Pool, cpu_count, set_start_method
 
-from datasets import load_dataset
+from datasets import Dataset
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
@@ -86,7 +86,7 @@ def main():
     )
     parser.add_argument(
         "--code_api_url",
-        default="http://127.0.0.1:8000/test_program",
+        default="http://127.0.0.1:1234/test_program",
         type=str,
         help="Give a code api url to use for code verifier."
     )
@@ -155,6 +155,12 @@ def main():
         type=str,
         help="Optional mapping old=new to remap a verifier name."
     )
+    parser.add_argument(
+        "--split",
+        type=str,
+        default="train",
+        help="Split to use on upload"
+    )
     args = parser.parse_args()
     if args.lower_bound == 0 and args.upper_bound == 1:
         print("Upper bound is 1 and lower bound is 0. No filtering will be done, is this intended?")
@@ -210,7 +216,7 @@ def main():
                 f.write(json.dumps(sample) + "\n")
 
     if args.push_to_hub is not None:
-        dataset = load_dataset(args.dataset, split=args.split)
+        dataset = Dataset.from_list(filtered_samples)
         dataset.push_to_hub(args.push_to_hub)
 
 
