@@ -543,6 +543,13 @@ class LLMRayActor:
 
         Wraps the async generator to return a single RequestOutput.
         """
+        # Check if request_id is already in use (race condition check)
+        if hasattr(self.llm_engine, '_request_tracker'):
+            tracker = self.llm_engine._request_tracker
+            if hasattr(tracker, '_request_streams'):
+                assert request_id not in tracker._request_streams, \
+                    f"Request ID {request_id} still exists in _request_streams! Race condition detected."
+
         logger.info(f"[generate_one_completion] Adding request {request_id} to engine")
         generator = await self.llm_engine.add_request(request_id, prompt, sampling_params)
         logger.info(f"[generate_one_completion] Got generator for {request_id}, starting iteration")
