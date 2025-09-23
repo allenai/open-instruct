@@ -1890,6 +1890,8 @@ def data_preparation_thread(
                 "val/good_outputs_rate": np.array(good_outputs).mean(),
                 "val/tool_runtimes_rate": np.array(result.request_info.tool_runtimes).mean(),
                 "val/tool_calleds_rate": np.array(result.request_info.tool_calleds).mean(),
+                "actor_mfu": result.token_statistics.mfu,
+                "actor_mbu": result.token_statistics.mbu,
                 "time/getting_response": getting_response_time,
                 **reward_metrics,
             }
