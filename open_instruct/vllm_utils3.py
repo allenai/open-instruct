@@ -400,6 +400,10 @@ class LLMRayActor:
         self.tracking = _init_tool_tracking()
         self.request_outputs = {}
 
+    def get_model_config(self):
+        """Get the vLLM model config from the engine."""
+        return self.llm_engine.model_config
+
     def _should_stop(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
             should_stop_ref = self.actor_manager.should_stop.remote()

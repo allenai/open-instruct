@@ -2884,8 +2884,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
     pprint([args, model_config])
 
-    model_dims = utils.load_model_dims(model_config.model_name_or_path)
-
     # Initialize Ray before creating Ray objects
     ray.init(dashboard_host="0.0.0.0")
 
@@ -2911,6 +2909,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             evaluation_inference_results_Q,
         )
     )
+
+    # Get the vLLM model config from one of the engines and create ModelDims
+    vllm_model_config = ray.get(vllm_engines[0].get_model_config.remote())
+    model_dims = utils.ModelDims.from_vllm_config(vllm_model_config)
 
     generation_configs = create_generation_configs(args)
 

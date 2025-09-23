@@ -403,8 +403,9 @@ def run_benchmark(
     generation_future = executor.submit(generate_thread, vllm_engines, stop_event)
 
     results = []
-    # Load model dimensions first to get device info
-    model_dims = utils.load_model_dims(model_config.model_name_or_path)
+    # Get the vLLM model config from one of the engines and create ModelDims
+    vllm_model_config = ray.get(vllm_engines[0].get_model_config.remote())
+    model_dims = utils.ModelDims.from_vllm_config(vllm_model_config)
 
     # Submit warmup batch first
     logger.info("Submitting warmup batch...")

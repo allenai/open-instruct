@@ -53,7 +53,7 @@ import numpy as np
 import ray
 import requests
 import torch
-import transformers
+import vllm.config
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
@@ -1689,6 +1689,18 @@ class ModelDims:
             "num_attn_heads must be divisible by num_kv_heads (GQA/MQA)"
         )
 
+    @classmethod
+    def from_vllm_config(cls, vllm_model_config: vllm.config.ModelConfig) -> "ModelDims":
+        """Create ModelDims from a vLLM model config object."""
+        return cls(
+            num_layers=vllm_model_config.get_num_layers(),
+            hidden_size=vllm_model_config.get_hidden_size(),
+            intermediate_size=vllm_model_config.get_intermediate_size(),
+            vocab_size=vllm_model_config.get_vocab_size(),
+            num_attn_heads=vllm_model_config.get_num_attention_heads(),
+            num_kv_heads=vllm_model_config.get_num_kv_heads(),
+        )
+
     @property
     def head_dim(self) -> int:
         return self.hidden_size // self.num_attn_heads
@@ -1991,26 +2003,6 @@ class ModelDims:
             total += self.decode_memory_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
 
         return total
-
-
-def load_model_dims(model_name: str) -> ModelDims:
-    cfg = transformers.AutoConfig.from_pretrained(model_name, trust_remote_code=True)
-    # Handle different config attribute names across model types
-    intermediate_size = getattr(cfg, "intermediate_size", None)
-    if intermediate_size is None:
-        # For GPT2 and similar models, estimate from n_inner
-        intermediate_size = getattr(cfg, "n_inner", None)
-        if intermediate_size is None:
-            # Default to 4x hidden size if not specified
-            intermediate_size = cfg.hidden_size * 4
-    return ModelDims(
-        num_layers=cfg.num_hidden_layers,
-        hidden_size=cfg.hidden_size,
-        intermediate_size=intermediate_size,
-        vocab_size=cfg.vocab_size,
-        num_attn_heads=cfg.num_attention_heads,
-        num_kv_heads=getattr(cfg, "num_key_value_heads", None),
-    )
 
 
 def get_device_name(device_name: str) -> str:
