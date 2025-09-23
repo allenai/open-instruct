@@ -680,11 +680,11 @@ class LLMRayActor:
             )
             logger.info(f"[_process_request] {sub_request_id} - Successfully concatenated, total length: {len(prompt_and_tool_output_token)}")
 
-            logger.info(
-                f"[_process_request] {sub_request_id} - Line 659: About to calculate excess, max_model_len={self.llm_engine.model_config.max_model_len}"
-            )
-            excess = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len
-            logger.info(f"[_process_request] {sub_request_id} - Line 659: Calculated excess={excess}")
+            logger.info(f"[_process_request] {sub_request_id} - About to get max_model_len from llm_engine.engine")
+            max_len = self.llm_engine.engine.model_config.max_model_len
+            logger.info(f"[_process_request] {sub_request_id} - Got max_model_len: {max_len}")
+            excess = len(prompt_and_tool_output_token) - max_len
+            logger.info(f"[_process_request] {sub_request_id} - Calculated excess={excess}")
 
             if excess > 0:
                 tool_output_token_ids = tool_output_token_ids[:-excess]
