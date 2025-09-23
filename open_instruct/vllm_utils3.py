@@ -651,23 +651,21 @@ class LLMRayActor:
             tool_error += "" if tool_result.error is None else tool_result.error
             tool_output_str += tool_result.output
             tool_runtime += tool_result.runtime
-        tool_called = True
+            tool_called = True
 
-        # If the tool wasn't actually invoked (e.g., MaxCallsExceededTool fallback),
-        # we should not attempt to continue the request. Matching the main branch
-        # lifecycle prevents endless resubmissions of the same sub-request.
-        force_stop = not tool_result.called
-        if force_stop:
-            logger.info(
-                f"[_process_request] {sub_request_id} - Tool result flagged as not called; will finalize without continuation"
-            )
+            # If the tool wasn't actually invoked (e.g., MaxCallsExceededTool fallback),
+            # we should not attempt to continue the request. Matching the main branch
+            # lifecycle prevents endless resubmissions of the same sub-request.
+            force_stop = not tool_result.called
+            if force_stop:
+                logger.info(
+                    f"[_process_request] {sub_request_id} - Tool result flagged as not called; will finalize without continuation"
+                )
 
             # Prepare tool output tokens
             logger.info(f"[_process_request] {sub_request_id} - About to access self.llm_engine.engine.tokenizer")
             tokenizer = self.llm_engine.engine.tokenizer
-            logger.info(
-                f"[_process_request] {sub_request_id} - Successfully got tokenizer, about to encode tool output"
-            )
+            logger.info(f"[_process_request] {sub_request_id} - Successfully got tokenizer, about to encode tool output")
             tool_output_text = "<output>\n" + tool_result.output + "</output>\n"
             logger.info(f"[_process_request] {sub_request_id} - Encoding text: {tool_output_text[:100]}...")
             tool_output_token_ids = tokenizer.encode(tool_output_text, add_special_tokens=False)
@@ -676,18 +674,29 @@ class LLMRayActor:
             )
 
             # Check context length
-            # Convert prompt_token_ids to list if it's a tuple (VLLM returns tuples)
-            logger.info(f"[_process_request] {sub_request_id} - About to check and convert prompt_token_ids type: {type(output.prompt_token_ids)}")
-            prompt_token_ids_list = list(output.prompt_token_ids) if isinstance(output.prompt_token_ids, tuple) else output.prompt_token_ids
-            logger.info(f"[_process_request] {sub_request_id} - prompt_token_ids_list type: {type(prompt_token_ids_list)}, len: {len(prompt_token_ids_list)}")
-            logger.info(f"[_process_request] {sub_request_id} - request_output.outputs[0].token_ids type: {type(request_output.outputs[0].token_ids)}, len: {len(request_output.outputs[0].token_ids)}")
-            logger.info(f"[_process_request] {sub_request_id} - tool_output_token_ids type: {type(tool_output_token_ids)}, len: {len(tool_output_token_ids)}")
+            logger.info(
+                f"[_process_request] {sub_request_id} - About to check and convert prompt_token_ids type: {type(output.prompt_token_ids)}"
+            )
+            prompt_token_ids_list = (
+                list(output.prompt_token_ids) if isinstance(output.prompt_token_ids, tuple) else output.prompt_token_ids
+            )
+            logger.info(
+                f"[_process_request] {sub_request_id} - prompt_token_ids_list type: {type(prompt_token_ids_list)}, len: {len(prompt_token_ids_list)}"
+            )
+            logger.info(
+                f"[_process_request] {sub_request_id} - request_output.outputs[0].token_ids type: {type(request_output.outputs[0].token_ids)}, len: {len(request_output.outputs[0].token_ids)}"
+            )
+            logger.info(
+                f"[_process_request] {sub_request_id} - tool_output_token_ids type: {type(tool_output_token_ids)}, len: {len(tool_output_token_ids)}"
+            )
 
             logger.info(f"[_process_request] {sub_request_id} - About to concatenate token lists")
             prompt_and_tool_output_token = (
                 prompt_token_ids_list + request_output.outputs[0].token_ids + tool_output_token_ids
             )
-            logger.info(f"[_process_request] {sub_request_id} - Successfully concatenated, total length: {len(prompt_and_tool_output_token)}")
+            logger.info(
+                f"[_process_request] {sub_request_id} - Successfully concatenated, total length: {len(prompt_and_tool_output_token)}"
+            )
 
             logger.info(f"[_process_request] {sub_request_id} - About to get max_model_len from llm_engine.engine")
             max_len = self.llm_engine.engine.model_config.max_model_len
