@@ -805,6 +805,7 @@ class LLMRayActor:
 
                 # Check if this request has all N outputs
                 if len(request_output.outputs) != expected_n:
+                    logger.info(f"[WAITING] Request {base_request_id} has {len(request_output.outputs)}/{expected_n} outputs, waiting for more completions")
                     continue
 
                 # Build ordered outputs
@@ -918,6 +919,8 @@ class LLMRayActor:
                     self.logger.info(f"process_from_queue iteration {iteration_count}: active_tasks={active_tasks}")
 
         finally:
+            logger.info(f"[process_from_queue] EXITING - active_tasks={len(self.active_tasks)}, request_outputs={len(self.request_outputs)}, total_processed={total_processed}")
+
             # Wait for all active tasks to complete only if inflight_updates is False
             if not self.inflight_updates:
                 await asyncio.gather(*self.active_tasks.values(), return_exceptions=True)
@@ -930,6 +933,7 @@ class LLMRayActor:
                 total_processed += processed_count
 
             # Count total processed
+            logger.info(f"[process_from_queue] FINAL EXIT - total_processed={total_processed}")
             return total_processed
 
     async def init_process_group(
