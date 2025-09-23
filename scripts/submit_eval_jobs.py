@@ -672,20 +672,14 @@ if args.run_oe_eval_experiments:
         oe_eval_cmd += f" --run-id {args.run_id}"
     if args.step:
         oe_eval_cmd += f" --step {args.step}"
-    # Note: Router analysis is not supported with OE eval system due to configuration limitations
-    # Router analysis is only available for standard eval tasks (mmlu, bbh, gsm, etc.)
     if args.collect_router_stats:
-        print("Warning: Router analysis is not supported with OE eval experiments.")
-        print("Router analysis is only available for standard eval tasks (mmlu, bbh, gsm, etc.).")
-        print("To use router analysis, run standard evals without --run_oe_eval_experiments.")
-    # if args.collect_router_stats:
-    #     oe_eval_cmd += f" --collect_router_stats"
-    #     oe_eval_cmd += f" --router_stats_output_dir /output/router_stats"
-    #     oe_eval_cmd += f" --model_name {args.model_name}"
-    #     oe_eval_cmd += f" --top_k {args.router_stats_top_k}"
-    #     oe_eval_cmd += f" --layers {args.router_stats_layers}"
-    #     if args.router_stats_track_token_mapping:
-    #         oe_eval_cmd += f" --track_token_expert_mapping"
+        oe_eval_cmd += f" --collect_router_stats"
+        oe_eval_cmd += f" --router_stats_output_dir /output/router_stats"
+        oe_eval_cmd += f" --model_name {args.model_name}"
+        oe_eval_cmd += f" --top_k {args.router_stats_top_k}"
+        oe_eval_cmd += f" --layers {args.router_stats_layers}"
+        if args.router_stats_track_token_mapping:
+            oe_eval_cmd += f" --track_token_expert_mapping"
     # add string with number of gpus
     num_gpus = task_spec['resources']['gpuCount']
     # if num_gpus > 1, double it again for oe-eval configs

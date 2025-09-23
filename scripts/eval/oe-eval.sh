@@ -85,13 +85,13 @@ while [[ "$#" -gt 0 ]]; do
         --cluster) CLUSTER="$2"; shift ;;
         --process-output) PROCESS_OUTPUT="$2"; shift ;;
         --remote-output-dir) REMOTE_OUTPUT_DIR="$2"; shift ;;
-        # Router analysis arguments are not supported with OE eval system
-        --collect_router_stats) echo "Warning: Router analysis not supported with OE eval system"; ;;
-        --router_stats_output_dir) shift ;;  # Skip this argument
-        --model_name) shift ;;  # Skip this argument  
-        --top_k) shift ;;  # Skip this argument
-        --layers) shift ;;  # Skip this argument
-        --track_token_expert_mapping) ;;  # Skip this argument
+        # Router analysis arguments - pass through environment variables
+        --collect_router_stats) COLLECT_ROUTER_STATS="true" ;;
+        --router_stats_output_dir) ROUTER_STATS_OUTPUT_DIR="$2"; shift ;;
+        --model_name) ROUTER_MODEL_NAME="$2"; shift ;;
+        --top_k) ROUTER_TOP_K="$2"; shift ;;
+        --layers) ROUTER_LAYERS="$2"; shift ;;
+        --track_token_expert_mapping) ROUTER_TRACK_TOKEN_MAPPING="true" ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
@@ -287,7 +287,26 @@ if [[ -n "$PROCESS_OUTPUT" ]]; then
 fi
 MODEL_ARGS+="}"
 
-# Router analysis is not supported with OE eval system
+# Set router analysis environment variables if enabled
+if [[ "$COLLECT_ROUTER_STATS" == "true" ]]; then
+    export COLLECT_ROUTER_STATS="true"
+    if [[ -n "$ROUTER_STATS_OUTPUT_DIR" ]]; then
+        export ROUTER_STATS_OUTPUT_DIR="$ROUTER_STATS_OUTPUT_DIR"
+    fi
+    if [[ -n "$ROUTER_MODEL_NAME" ]]; then
+        export ROUTER_MODEL_NAME="$ROUTER_MODEL_NAME"
+    fi
+    if [[ -n "$ROUTER_TOP_K" ]]; then
+        export ROUTER_TOP_K="$ROUTER_TOP_K"
+    fi
+    if [[ -n "$ROUTER_LAYERS" ]]; then
+        export ROUTER_LAYERS="$ROUTER_LAYERS"
+    fi
+    if [[ "$ROUTER_TRACK_TOKEN_MAPPING" == "true" ]]; then
+        export ROUTER_TRACK_TOKEN_MAPPING="true"
+    fi
+    echo "Router analysis enabled for OE eval experiments"
+fi
 # Source the non-AI2 models list for bfcl
 source "$(dirname "$0")/bfcl_supported_models.sh"
 
