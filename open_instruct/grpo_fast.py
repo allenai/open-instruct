@@ -2279,7 +2279,7 @@ def one_training_step(
 
     average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
     step_time = time.perf_counter() - start_time
-    total_training_time = time.time() - training_start_time
+    total_training_time = time.perf_counter() - training_start_time
     metrics = {
         "episode": episode,
         "global_step": episode,
@@ -2666,7 +2666,7 @@ def run_training(
     else:
         num_total_tokens = 0
 
-    training_start_time = time.time()  # Track overall training start time
+    training_start_time = time.perf_counter()  # Track overall training start time
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
