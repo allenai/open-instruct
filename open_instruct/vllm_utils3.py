@@ -668,10 +668,17 @@ class LLMRayActor:
 
             # Check context length
             # Convert prompt_token_ids to list if it's a tuple (VLLM returns tuples)
+            logger.info(f"[_process_request] {sub_request_id} - About to check and convert prompt_token_ids type: {type(output.prompt_token_ids)}")
             prompt_token_ids_list = list(output.prompt_token_ids) if isinstance(output.prompt_token_ids, tuple) else output.prompt_token_ids
+            logger.info(f"[_process_request] {sub_request_id} - prompt_token_ids_list type: {type(prompt_token_ids_list)}, len: {len(prompt_token_ids_list)}")
+            logger.info(f"[_process_request] {sub_request_id} - request_output.outputs[0].token_ids type: {type(request_output.outputs[0].token_ids)}, len: {len(request_output.outputs[0].token_ids)}")
+            logger.info(f"[_process_request] {sub_request_id} - tool_output_token_ids type: {type(tool_output_token_ids)}, len: {len(tool_output_token_ids)}")
+
+            logger.info(f"[_process_request] {sub_request_id} - About to concatenate token lists")
             prompt_and_tool_output_token = (
                 prompt_token_ids_list + request_output.outputs[0].token_ids + tool_output_token_ids
             )
+            logger.info(f"[_process_request] {sub_request_id} - Successfully concatenated, total length: {len(prompt_and_tool_output_token)}")
 
             logger.info(
                 f"[_process_request] {sub_request_id} - Line 659: About to calculate excess, max_model_len={self.llm_engine.model_config.max_model_len}"
