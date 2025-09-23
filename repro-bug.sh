@@ -29,7 +29,7 @@ EXP_NAME=${EXP_NAME:-${exp_name}}
 
 # cluster
 # cluster=ai2/augusta-google-1
-cluster=ai2/jupiter-cirrascale-2
+cluster=ai2/jupiter
 # cluster=ai2/ceres-cirrascale
 # cluster=ai2/neptune-cirrascale
 
