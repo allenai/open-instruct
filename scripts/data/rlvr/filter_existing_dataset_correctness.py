@@ -11,6 +11,7 @@ python scripts/data/rlvr/filter_existing_dataset_correctness.py \
 If you have code data, you might have to launch code server too before running:
 source configs/beaker_configs/code_api_setup.sh
 """
+import os
 import argparse
 import json
 from functools import partial
@@ -86,7 +87,7 @@ def main():
     )
     parser.add_argument(
         "--code_api_url",
-        default="http://127.0.0.1:1234/test_program",
+        default=os.environ.get("CODE_API_URL", "http://localhost:1234") + "/test_program"
         type=str,
         help="Give a code api url to use for code verifier."
     )
@@ -121,7 +122,7 @@ def main():
     )
     parser.add_argument(
         "--llm_judge_max_context_length",
-        default=128000,
+        default=128_000,
         type=int,
         help="Max context length for the LLM judge model."
     )
