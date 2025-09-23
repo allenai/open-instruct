@@ -2381,7 +2381,7 @@ def maybe_evaluate(
         eval_generate_metrics = {}
         try:
             eval_generate_metrics = generate_metrics_Q.get_nowait()
-        except Empty, TimeoutError:
+        except (Empty, TimeoutError):
             logger.info("[Main Thread] didn't get eval generation metrics")
 
         eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
@@ -2427,7 +2427,7 @@ def maybe_evaluate(
         else:
             print_rich_table(df.iloc[:1])
         del table
-    except Empty, TimeoutError:
+    except (Empty, TimeoutError):
         logger.warning("[Main Thread] 🙈 Evaluation responses not received")
 
 
