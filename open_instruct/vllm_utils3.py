@@ -756,9 +756,6 @@ class LLMRayActor:
 
                 # Process and insert result (still within lock for consistency)
                 logger.info(f"[_check_and_process_completed_requests] Processing completed request {base_request_id}")
-                logger.info(
-                    f"[_check_and_process_completed_requests] Metadata for {base_request_id}: {self.request_metadata.get(base_request_id, 'Not found')}"
-                )
                 result, is_eval = process_completed_request(
                     base_request_id, ordered_outs, {}, current_time, self.tools, self.request_metadata
                 )
