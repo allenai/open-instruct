@@ -2911,8 +2911,21 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     )
 
     # Get the vLLM config from one of the engines and create ModelDims
+    def log_gpu_memory(stage: str):
+        """Log GPU memory usage using torch."""
+        if torch.cuda.is_available():
+            for i in range(torch.cuda.device_count()):
+                allocated = torch.cuda.memory_allocated(i) / (1024**3)
+                reserved = torch.cuda.memory_reserved(i) / (1024**3)
+                total = torch.cuda.get_device_properties(i).total_memory / (1024**3)
+                free = total - reserved
+                logger.info(f"GPU {i} memory {stage}: Allocated={allocated:.2f}GB, Reserved={reserved:.2f}GB, Free={free:.2f}GB, Total={total:.2f}GB")
+
+    log_gpu_memory("BEFORE getting vLLM config")
     vllm_config = ray.get(vllm_engines[0].get_vllm_config.remote())
+    log_gpu_memory("AFTER getting vLLM config")
     model_dims = utils.ModelDims.from_vllm_config(vllm_config)
+    log_gpu_memory("AFTER creating ModelDims")
 
     generation_configs = create_generation_configs(args)
 
