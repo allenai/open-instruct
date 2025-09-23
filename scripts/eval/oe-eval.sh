@@ -85,12 +85,13 @@ while [[ "$#" -gt 0 ]]; do
         --cluster) CLUSTER="$2"; shift ;;
         --process-output) PROCESS_OUTPUT="$2"; shift ;;
         --remote-output-dir) REMOTE_OUTPUT_DIR="$2"; shift ;;
-        --collect_router_stats) COLLECT_ROUTER_STATS="true" ;;
-        --router_stats_output_dir) ROUTER_STATS_OUTPUT_DIR="$2"; shift ;;
-        --model_name) ROUTER_MODEL_NAME="$2"; shift ;;
-        --top_k) ROUTER_TOP_K="$2"; shift ;;
-        --layers) ROUTER_LAYERS="$2"; shift ;;
-        --track_token_expert_mapping) ROUTER_TRACK_TOKEN_MAPPING="true" ;;
+        # Router analysis arguments are not supported with OE eval system
+        --collect_router_stats) echo "Warning: Router analysis not supported with OE eval system"; ;;
+        --router_stats_output_dir) shift ;;  # Skip this argument
+        --model_name) shift ;;  # Skip this argument  
+        --top_k) shift ;;  # Skip this argument
+        --layers) shift ;;  # Skip this argument
+        --track_token_expert_mapping) ;;  # Skip this argument
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
@@ -279,31 +280,14 @@ GPU_COUNT="$NUM_GPUS"
 GPU_COUNT_OTHER=$((NUM_GPUS * 2))
 MODEL_TYPE_OTHER=""
 
-# Build model args JSON with optional process_output and router analysis
+# Build model args JSON with optional process_output
 MODEL_ARGS="{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"trust_remote_code\": \"true\""
 if [[ -n "$PROCESS_OUTPUT" ]]; then
     MODEL_ARGS+=", \"process_output\": \"${PROCESS_OUTPUT}\""
 fi
-# Add router analysis arguments if enabled
-if [[ "$COLLECT_ROUTER_STATS" == "true" ]]; then
-    MODEL_ARGS+=", \"collect_router_stats\": true"
-    if [[ -n "$ROUTER_STATS_OUTPUT_DIR" ]]; then
-        MODEL_ARGS+=", \"router_stats_output_dir\": \"${ROUTER_STATS_OUTPUT_DIR}\""
-    fi
-    if [[ -n "$ROUTER_MODEL_NAME" ]]; then
-        MODEL_ARGS+=", \"model_name\": \"${ROUTER_MODEL_NAME}\""
-    fi
-    if [[ -n "$ROUTER_TOP_K" ]]; then
-        MODEL_ARGS+=", \"top_k\": ${ROUTER_TOP_K}"
-    fi
-    if [[ -n "$ROUTER_LAYERS" ]]; then
-        MODEL_ARGS+=", \"layers\": \"${ROUTER_LAYERS}\""
-    fi
-    if [[ "$ROUTER_TRACK_TOKEN_MAPPING" == "true" ]]; then
-        MODEL_ARGS+=", \"track_token_expert_mapping\": true"
-    fi
-fi
 MODEL_ARGS+="}"
+
+# Router analysis is not supported with OE eval system
 # Source the non-AI2 models list for bfcl
 source "$(dirname "$0")/bfcl_supported_models.sh"
 
