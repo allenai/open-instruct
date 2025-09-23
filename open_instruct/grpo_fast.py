@@ -2397,6 +2397,7 @@ def maybe_evaluate(
     eval_generation_config,
     generate_metrics_Q: Queue,
     num_eval_prompts: int,
+    model_dims: utils.ModelDims,
     actor_manager=None,
 ):
     """Optionally evaluate the model."""
@@ -2413,7 +2414,7 @@ def maybe_evaluate(
             training_step,
             eval_generation_config,
             num_prompts=num_eval_prompts,
-            model_dims=None,
+            model_dims=model_dims,
             actor_manager=actor_manager,
             timeout=timeout,
         )
@@ -2858,6 +2859,7 @@ def run_training(
             generation_configs["eval"],
             generate_metrics_Q,
             len(eval_batch.queries) if eval_batch else 0,
+            model_dims,
             actor_manager,
         )
 
