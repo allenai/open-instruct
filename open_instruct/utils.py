@@ -1672,10 +1672,17 @@ class ModelDims:
     vocab_size: int
     num_attn_heads: int
     num_kv_heads: Optional[int] = None
+    device_name: Optional[str] = None
 
     def __post_init__(self):
         if self.num_kv_heads is None:
             self.num_kv_heads = self.num_attn_heads
+
+        if self.device_name is None:
+            import torch
+
+            if torch.cuda.is_available():
+                self.device_name = get_device_name(torch.cuda.get_device_name(0))
 
         assert self.hidden_size % self.num_attn_heads == 0, "hidden_size must be divisible by num_attn_heads"
         assert self.num_attn_heads % self.num_kv_heads == 0, (
@@ -1685,6 +1692,18 @@ class ModelDims:
     @property
     def head_dim(self) -> int:
         return self.hidden_size // self.num_attn_heads
+
+    @property
+    def device_flops(self) -> float:
+        assert self.device_name is not None, "device_name must be set"
+        assert self.device_name in GPU_SPECS, f"Unknown device: {self.device_name}"
+        return GPU_SPECS[self.device_name]["flops"]
+
+    @property
+    def device_memory_bandwidth(self) -> float:
+        assert self.device_name is not None, "device_name must be set"
+        assert self.device_name in GPU_SPECS, f"Unknown device: {self.device_name}"
+        return GPU_SPECS[self.device_name]["memory_bandwidth"]
 
     def attn_flops(self, query_len: int, kv_len: int) -> int:
         """FLOPs for one layer of self-attention given query_len and kv_len.
@@ -1976,10 +1995,18 @@ class ModelDims:
 
 def load_model_dims(model_name: str) -> ModelDims:
     cfg = transformers.AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+    # Handle different config attribute names across model types
+    intermediate_size = getattr(cfg, "intermediate_size", None)
+    if intermediate_size is None:
+        # For GPT2 and similar models, estimate from n_inner
+        intermediate_size = getattr(cfg, "n_inner", None)
+        if intermediate_size is None:
+            # Default to 4x hidden size if not specified
+            intermediate_size = cfg.hidden_size * 4
     return ModelDims(
         num_layers=cfg.num_hidden_layers,
         hidden_size=cfg.hidden_size,
-        intermediate_size=cfg.intermediate_size,
+        intermediate_size=intermediate_size,
         vocab_size=cfg.vocab_size,
         num_attn_heads=cfg.num_attention_heads,
         num_kv_heads=getattr(cfg, "num_key_value_heads", None),

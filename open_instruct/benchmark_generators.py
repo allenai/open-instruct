@@ -16,23 +16,19 @@ import pathlib
 import threading
 import time
 from concurrent import futures
-from typing import Any, ClassVar, Optional, Sequence
+from typing import Any, Optional
 
 import datasets
 import numpy as np
 import ray
 import torch
 import torch.utils.flop_counter
-import transformers
 import vllm
 from ray.util import queue as ray_queue
 
 from open_instruct import dataset_transformation, grpo_fast, logger_utils, model_utils, utils, vllm_utils3
 from open_instruct.actor_manager import ActorManager
 from open_instruct.queue_types import PromptRequest
-
-# GPU_SPECS moved to utils.py - use utils.GPU_SPECS instead
-
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -200,357 +196,6 @@ def free_all_gpu_memory(device: int | str = 0) -> None:
     free, total = torch.cuda.mem_get_info(dev)
     gib = 1024**3
     logger.info(f"[GPU {dev.index}] {free / gib:.2f} GiB free of {total / gib:.2f} GiB after cleanup")
-
-
-# ModelDims class moved to utils.py - use utils.ModelDims
-class ModelDimsPlaceholder:
-    num_layers: int
-    hidden_size: int
-    intermediate_size: int
-    vocab_size: int
-    num_attn_heads: int
-    num_kv_heads: Optional[int] = None
-
-    # Conventions (fixed; not switches)
-    FLOP_PER_MAC: ClassVar[int] = 2
-    # Approximate softmax cost per attention score:
-    # ~4 scalar ops/score: exp + subtract max (stabilization) + sum + divide.
-    SOFTMAX_FLOPS_PER_SCORE: ClassVar[int] = 4
-
-    def __post_init__(self):
-        if self.num_kv_heads is None:
-            self.num_kv_heads = self.num_attn_heads
-
-        assert self.hidden_size % self.num_attn_heads == 0, "hidden_size must be divisible by num_attn_heads"
-        assert self.num_attn_heads % self.num_kv_heads == 0, (
-            "num_attn_heads must be divisible by num_kv_heads (GQA/MQA)"
-        )
-
-    @property
-    def head_dim(self) -> int:
-        return self.hidden_size // self.num_attn_heads
-
-    def attn_flops(self, query_len: int, kv_len: int) -> int:
-        """FLOPs for one layer of self-attention given query_len and kv_len.
-
-        Assumptions:
-          - 1 MAC = 2 FLOPs (FLOP_PER_MAC).
-          - Efficient GQA/MQA K/V projections with width = num_kv_heads * head_dim.
-          - Softmax ≈ 4 FLOPs per score (see SOFTMAX_FLOPS_PER_SCORE).
-          - LayerNorms and minor ops ignored (dominated by matmuls).
-        """
-        d = self.head_dim
-        mul = self.FLOP_PER_MAC
-
-        # Projections for the query_len new tokens
-        q_proj = mul * query_len * self.hidden_size * self.hidden_size
-        kv_proj = mul * 2 * query_len * self.hidden_size * (self.num_kv_heads * d)  # GQA/MQA
-
-        # Scores and attention-weighted values
-        qk = mul * self.num_attn_heads * query_len * kv_len * d
-        softmax = self.SOFTMAX_FLOPS_PER_SCORE * self.num_attn_heads * query_len * kv_len
-        av = mul * self.num_attn_heads * query_len * kv_len * d
-
-        # Output projection
-        out_proj = mul * query_len * self.hidden_size * self.hidden_size
-
-        return q_proj + kv_proj + qk + softmax + av + out_proj
-
-    def mlp_flops(self, seq_len: int) -> int:
-        """Two matmuls dominate; activation cost under-counted on purpose."""
-        mul = self.FLOP_PER_MAC
-        first = mul * seq_len * self.hidden_size * self.intermediate_size
-        act = seq_len * self.intermediate_size  # under-counted on purpose
-        second = mul * seq_len * self.intermediate_size * self.hidden_size
-        return first + act + second
-
-    def prefill_flops(self, prompt_lengths: Sequence[int]) -> int:
-        """Prefill builds the KV cache; logits are computed once after each prompt."""
-        total = 0
-        for L in prompt_lengths:
-            total += self.num_layers * (self.attn_flops(L, L) + self.mlp_flops(L))
-            # Always include a single LM head after prefill (next-token logits)
-            total += self.FLOP_PER_MAC * self.hidden_size * self.vocab_size
-        return total
-
-    def decode_flops(
-        self, prompt_lengths: Sequence[int], response_lengths: Sequence[int], samples_per_prompt: int = 1
-    ) -> int:
-        """Decode/generation FLOPs.
-
-        Args:
-            prompt_lengths: List of prompt lengths (one per unique prompt)
-            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
-            samples_per_prompt: Number of samples generated per prompt
-
-        Embedding lookups are ignored by design.
-        """
-        assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
-            f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
-        )
-
-        total = 0
-        response_idx = 0
-        for P in prompt_lengths:
-            # Process all samples for this prompt
-            for _ in range(samples_per_prompt):
-                R = response_lengths[response_idx]
-                total += R * self.num_layers * self.mlp_flops(seq_len=1)
-                for t in range(R):
-                    kv_len = P + t + 1  # prompt + generated so far + current
-                    total += self.num_layers * self.attn_flops(query_len=1, kv_len=kv_len)
-                total += R * self.FLOP_PER_MAC * self.hidden_size * self.vocab_size
-                response_idx += 1
-        return total
-
-    def flops(
-        self,
-        prompt_lengths: Sequence[int],
-        response_lengths: Optional[Sequence[int]] = None,
-        samples_per_prompt: int = 1,
-    ) -> int:
-        """Total FLOPs for prefill and (optionally) decode.
-
-        Args:
-            prompt_lengths: List of prompt lengths (one per unique prompt)
-            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
-            samples_per_prompt: Number of samples generated per prompt
-        """
-        total = self.prefill_flops(prompt_lengths)
-        if response_lengths is not None:
-            total += self.decode_flops(prompt_lengths, response_lengths, samples_per_prompt)
-        return total
-
-    def weight_memory_bytes(self, num_tokens: int, dtype_bytes: int = 2) -> int:
-        """Memory bytes for reading model weights for a given number of tokens.
-
-        Args:
-            num_tokens: Number of tokens to process
-            dtype_bytes: Bytes per element (2 for FP16/BF16)
-
-        Returns:
-            Total bytes for weight reads across all layers
-        """
-        num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
-        head_dim = self.hidden_size // self.num_attn_heads
-        hidden_kv = num_kv * head_dim
-
-        # Per-layer weight params (Q, K, V, O, MLP up, MLP down)
-        w_q = self.hidden_size * self.hidden_size
-        w_k = self.hidden_size * hidden_kv
-        w_v = self.hidden_size * hidden_kv
-        w_o = self.hidden_size * self.hidden_size
-        w_up = self.hidden_size * self.intermediate_size
-        w_dn = self.intermediate_size * self.hidden_size
-
-        per_layer_weight_bytes = (w_q + w_k + w_v + w_o + w_up + w_dn) * dtype_bytes
-        return self.num_layers * num_tokens * per_layer_weight_bytes
-
-    def kv_cache_write_bytes(self, num_tokens: int, dtype_bytes: int = 2) -> int:
-        """Memory bytes for writing KV cache for a given number of tokens.
-
-        Args:
-            num_tokens: Number of tokens being cached
-            dtype_bytes: Bytes per element (2 for FP16/BF16)
-
-        Returns:
-            Total bytes for KV cache writes across all layers
-        """
-        num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
-        head_dim = self.hidden_size // self.num_attn_heads
-
-        # 2x for K and V
-        kv_write_bytes_per_token = 2 * num_kv * head_dim * dtype_bytes
-        return self.num_layers * num_tokens * kv_write_bytes_per_token
-
-    def kv_cache_read_bytes(
-        self,
-        prompt_lengths: Sequence[int],
-        response_lengths: Sequence[int],
-        samples_per_prompt: int = 1,
-        dtype_bytes: int = 2,
-    ) -> int:
-        """Memory bytes for reading KV cache during decode.
-
-        For each new token generated, we read all previous tokens' KV cache.
-        When generating multiple samples per prompt, the prompt KV cache is shared.
-
-        Args:
-            prompt_lengths: List of prompt lengths (one per unique prompt)
-            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
-            samples_per_prompt: Number of samples generated per prompt
-            dtype_bytes: Bytes per element (2 for FP16/BF16)
-
-        Returns:
-            Total bytes for KV cache reads during decode
-        """
-        assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
-            f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
-        )
-
-        num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
-        head_dim = self.hidden_size // self.num_attn_heads
-
-        # For batched sampling with shared prompt KV cache:
-        # - Prompt KV is read once per new token position across ALL samples (not per sample)
-        # - Each sample has its own KV for generated tokens
-        kv_read_terms = 0
-        response_idx = 0
-
-        for P in prompt_lengths:
-            # For this prompt, collect all response lengths
-            prompt_responses = []
-            for _ in range(samples_per_prompt):
-                prompt_responses.append(response_lengths[response_idx])
-                response_idx += 1
-
-            # Prompt KV reads: In synchronized batch generation with vLLM n>1,
-            # the prompt KV cache is stored once but each sample reads it independently.
-            # At each decoding position, each sample reads the prompt KV cache.
-            # Number of positions = max response length (all generate synchronously)
-            max_response_length = max(prompt_responses) if prompt_responses else 0
-            # Each of the samples_per_prompt samples reads prompt KV at each position
-            kv_read_terms += max_response_length * samples_per_prompt * P
-
-            # Per-sample generated KV reads: Each sample reads its own previously generated tokens
-            for R in prompt_responses:
-                # Each token in this sample reads its previously generated tokens
-                # sum_{i=0}^{R-1} i = R*(R-1)/2
-                kv_read_terms += R * (R - 1) // 2
-
-        # 2x for K and V
-        kv_bytes_per_token = 2 * num_kv * head_dim * dtype_bytes
-        return self.num_layers * kv_bytes_per_token * kv_read_terms
-
-    def prefill_memory_bytes(self, prompt_lengths: Sequence[int], dtype_bytes: int = 2) -> int:
-        """Memory bytes for prefill phase.
-
-        During prefill:
-        - Read weights once for the entire batch (batched matmul)
-        - Write KV cache for each token
-
-        Args:
-            prompt_lengths: List of prompt lengths
-            dtype_bytes: Bytes per element (2 for FP16/BF16)
-
-        Returns:
-            Total memory bytes for prefill
-        """
-        # In batched prefill, weights are read once for the entire operation,
-        # not once per token. We process all prompts in a single batch.
-        num_prefill_batches = len(prompt_lengths)  # Each prompt is a "batch"
-        weight_bytes = self.weight_memory_bytes(num_prefill_batches, dtype_bytes)
-
-        # KV cache is written for every token
-        total_prefill_tokens = sum(prompt_lengths)
-        kv_write_bytes = self.kv_cache_write_bytes(total_prefill_tokens, dtype_bytes)
-        return weight_bytes + kv_write_bytes
-
-    def decode_memory_bytes(
-        self,
-        prompt_lengths: Sequence[int],
-        response_lengths: Sequence[int],
-        samples_per_prompt: int = 1,
-        dtype_bytes: int = 2,
-    ) -> int:
-        """Memory bytes for decode/generation phase.
-
-        During decode:
-        - Read weights for each new token position (shared across samples in batch)
-        - Write KV cache for each new token
-        - Read all previous KV cache for attention
-
-        Args:
-            prompt_lengths: List of prompt lengths (one per unique prompt)
-            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
-            samples_per_prompt: Number of samples generated per prompt
-            dtype_bytes: Bytes per element (2 for FP16/BF16)
-
-        Returns:
-            Total memory bytes for decode
-        """
-        # In synchronized batch generation, weights are read once per position,
-        # not once per token. With multiple samples per prompt generating in parallel,
-        # we only need to read weights for the number of unique positions.
-        unique_positions = 0
-        response_idx = 0
-        for _ in prompt_lengths:
-            # Get response lengths for this prompt's samples
-            prompt_responses = response_lengths[response_idx : response_idx + samples_per_prompt]
-            response_idx += samples_per_prompt
-            # In synchronized generation, all samples generate the same number of positions
-            # (up to the max length among them)
-            unique_positions += max(prompt_responses) if prompt_responses else 0
-
-        weight_bytes = self.weight_memory_bytes(unique_positions, dtype_bytes)
-
-        # KV writes happen for all tokens (each sample writes its own KV)
-        total_decode_tokens = sum(response_lengths)
-        kv_write_bytes = self.kv_cache_write_bytes(total_decode_tokens, dtype_bytes)
-
-        kv_read_bytes = self.kv_cache_read_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
-        return weight_bytes + kv_write_bytes + kv_read_bytes
-
-    def memory_bytes(
-        self,
-        prompt_lengths: Sequence[int],
-        response_lengths: Optional[Sequence[int]] = None,
-        samples_per_prompt: int = 1,
-        dtype_bytes: int = 2,
-    ) -> int:
-        """Approximate total HBM bytes moved for prefill + decode.
-
-        Returns an integer number of bytes. Divide by elapsed seconds to get B/s;
-        compare against peak bandwidth to get utilization.
-
-        Args:
-            prompt_lengths: List of prompt lengths (one per unique prompt)
-            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
-            samples_per_prompt: Number of samples generated per prompt
-            dtype_bytes: Bytes per element (2 for FP16/BF16)
-
-        Returns:
-            Total memory bytes moved
-
-        Assumptions:
-          - Weights are read once per token per layer (Q,K,V,O + MLP up/down)
-          - KV cache: write K/V for every token; during decode, read all past K/V per new token
-          - When batching samples, prompt KV cache is shared across samples
-          - Embedding and LM head reads are ignored (usually dominated by matmul weight traffic)
-        """
-        total = self.prefill_memory_bytes(prompt_lengths, dtype_bytes)
-
-        if response_lengths is not None:
-            assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
-                f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
-            )
-
-            # Pass original prompt_lengths with samples_per_prompt to correctly handle shared KV cache
-            total += self.decode_memory_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
-
-        return total
-
-
-def load_model_dims(model_name: str) -> utils.ModelDims:
-    # Delegating to utils.load_model_dims
-    return utils.load_model_dims(model_name)
-
-
-def _old_load_model_dims(model_name: str) -> utils.ModelDims:
-    cfg = transformers.AutoConfig.from_pretrained(model_name, trust_remote_code=True)
-    return utils.ModelDims(
-        num_layers=cfg.num_hidden_layers,
-        hidden_size=cfg.hidden_size,
-        intermediate_size=cfg.intermediate_size,
-        vocab_size=cfg.vocab_size,
-        num_attn_heads=cfg.num_attention_heads,
-        num_kv_heads=getattr(cfg, "num_key_value_heads", None),
-    )
-
-
-def get_device_name(device_name: str) -> str:
-    # Delegating to utils.get_device_name
-    return utils.get_device_name(device_name)
 
 
 def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation.TokenizerConfig) -> datasets.Dataset:
@@ -758,9 +403,8 @@ def run_benchmark(
     generation_future = executor.submit(generate_thread, vllm_engines, stop_event)
 
     results = []
-    device_name = utils.get_device_name(torch.cuda.get_device_name(0))
-    device_flops = utils.GPU_SPECS[device_name]["flops"]
-    device_memory_bandwidth = utils.GPU_SPECS[device_name]["memory_bandwidth"]
+    # Load model dimensions first to get device info
+    model_dims = utils.load_model_dims(model_config.model_name_or_path)
 
     # Submit warmup batch first
     logger.info("Submitting warmup batch...")
@@ -779,7 +423,6 @@ def run_benchmark(
                 start_time=time.perf_counter(),
             )
         )
-    model_dims = utils.load_model_dims(model_config.model_name_or_path)
 
     try:
         logger.info("Running warmup batch...")
@@ -860,7 +503,7 @@ def run_benchmark(
 
             # MFU = (FLOPs / time) / peak_FLOPS * 100
             model_flops_per_second = model_flops / batch_generation_time if batch_generation_time > 0 else 0
-            result_dict["mfu"] = 100 * model_flops_per_second / device_flops
+            result_dict["mfu"] = 100 * model_flops_per_second / model_dims.device_flops
 
             # Calculate total memory bytes for all prompts and responses in the batch
             model_memory_bytes = model_dims.memory_bytes(
@@ -869,7 +512,7 @@ def run_benchmark(
 
             # MBU = (Memory bytes / time) / peak_bandwidth * 100
             model_bytes_per_second = model_memory_bytes / batch_generation_time if batch_generation_time > 0 else 0
-            result_dict["mbu"] = 100 * model_bytes_per_second / device_memory_bandwidth
+            result_dict["mbu"] = 100 * model_bytes_per_second / model_dims.device_memory_bandwidth
 
             save_completion_lengths([result_dict], timestamp, batch_idx)
             results.append(result_dict)
@@ -886,7 +529,7 @@ def run_benchmark(
         # Calculate total time for main benchmark only
         main_benchmark_time = sum(r["generation_time"] for r in results)
 
-        print_summary(results, main_benchmark_time, args, model_config)
+        print_summary(results, main_benchmark_time, args, model_config, model_dims)
         save_benchmark_results_to_csv(results, main_benchmark_time, args, model_config)
 
     finally:
@@ -942,7 +585,11 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def print_summary(
-    results: list[dict[str, Any]], total_time: float, args: grpo_fast.Args, model_config: model_utils.ModelConfig
+    results: list[dict[str, Any]],
+    total_time: float,
+    args: grpo_fast.Args,
+    model_config: model_utils.ModelConfig,
+    model_dims: utils.ModelDims,
 ) -> None:
     """Print benchmark summary statistics."""
 
@@ -979,11 +626,11 @@ def print_summary(
 
     print("-" * 60)
     print("HARDWARE SPECIFICATIONS:")
-    gpu_specs = utils.GPU_SPECS[utils.get_device_name(torch.cuda.get_device_name(0))]
     print(f"GPU device: {torch.cuda.get_device_name(0)}")
-    print(f"GPU peak FLOPs: {gpu_specs['flops'] / 1e12:.0f} TFLOPs")
+    print(f"GPU peak FLOPs: {model_dims.device_flops / 1e12:.0f} TFLOPs")
+    gpu_specs = utils.GPU_SPECS[model_dims.device_name]
     print(f"GPU memory size: {gpu_specs['memory_size'] / 1e9:.0f} GB")
-    print(f"GPU memory bandwidth: {gpu_specs['memory_bandwidth'] / 1e12:.2f} TB/s")
+    print(f"GPU memory bandwidth: {model_dims.device_memory_bandwidth / 1e12:.2f} TB/s")
 
     print("-" * 60)
     print("COMPLETION LENGTH STATISTICS:")
