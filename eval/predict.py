@@ -23,11 +23,97 @@ Then you can run this script with the following command:
 import argparse
 import json
 import os
+from pathlib import Path
 
 import torch
 import vllm
 
 from eval.utils import dynamic_import_function, generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model
+
+
+def generate_completions_with_router_stats(model, tokenizer, prompts, router_collector=None, **generation_kwargs):
+    """
+    Generate completions while optionally collecting router statistics.
+    This is a wrapper around the standard generate_completions function.
+    """
+    if router_collector is None:
+        # Use standard generation without router stats
+        return generate_completions(model, tokenizer, prompts, **generation_kwargs)
+    
+    # Custom generation with router stats collection
+    import tqdm
+    from eval.utils import KeyWordsCriteria
+    
+    generations = []
+    batch_size = generation_kwargs.get("batch_size", 1)
+    stop_id_sequences = generation_kwargs.get("stop_id_sequences", None)
+    add_special_tokens = generation_kwargs.get("add_special_tokens", True)
+    disable_tqdm = generation_kwargs.get("disable_tqdm", False)
+    
+    if not disable_tqdm:
+        progress = tqdm.tqdm(total=len(prompts), desc="Generating Completions")
+
+    num_return_sequences = generation_kwargs.get("num_return_sequences", 1)
+    
+    for i in range(0, len(prompts), batch_size):
+        batch_prompts = prompts[i:i+batch_size]
+        tokenized_prompts = tokenizer(batch_prompts, padding="longest", return_tensors="pt", add_special_tokens=add_special_tokens)
+        batch_input_ids = tokenized_prompts.input_ids
+        attention_mask = tokenized_prompts.attention_mask
+
+        if model.device.type == "cuda":
+            batch_input_ids = batch_input_ids.cuda()
+            attention_mask = attention_mask.cuda()
+
+        try:
+            # First, do a forward pass to collect router logits
+            with torch.no_grad():
+                forward_outputs = model(input_ids=batch_input_ids, attention_mask=attention_mask, output_router_logits=True)
+                router_logits = forward_outputs.get("router_logits", None)
+                
+                if router_logits is not None:
+                    # Get number of experts from model config
+                    num_experts = getattr(model.config, 'num_experts', 
+                                        getattr(model.config, 'num_local_experts', 64))
+                    router_collector.update(batch_input_ids, router_logits, num_experts)
+            
+            # Now generate normally
+            batch_outputs = model.generate(
+                input_ids=batch_input_ids,
+                attention_mask=attention_mask,
+                eos_token_id=tokenizer.eos_token_id,
+                stopping_criteria=[KeyWordsCriteria(stop_id_sequences)] if stop_id_sequences else None,
+                **{k: v for k, v in generation_kwargs.items() if k not in ['batch_size', 'stop_id_sequences', 'add_special_tokens', 'disable_tqdm']}
+            )
+
+            # Handle stopping criteria (same as original)
+            if stop_id_sequences:
+                for output_idx in range(batch_outputs.shape[0]):
+                    for token_idx in range(batch_input_ids.shape[1], batch_outputs.shape[1]):
+                        if any(batch_outputs[output_idx, token_idx: token_idx+len(stop_sequence)].tolist() == stop_sequence for stop_sequence in stop_id_sequences):
+                            batch_outputs[output_idx, token_idx:] = tokenizer.pad_token_id
+                            break
+
+            # Decode outputs (same as original)
+            batch_outputs = tokenizer.batch_decode(batch_outputs, skip_special_tokens=True)
+            batch_prompts = tokenizer.batch_decode(batch_input_ids, skip_special_tokens=True)
+            batch_prompts = [prompt for prompt in batch_prompts for _ in range(num_return_sequences)]
+            batch_generations = [
+                output[len(prompt):] for prompt, output in zip(batch_prompts, batch_outputs)
+            ]
+            
+        except Exception as e:
+            print("Error when generating completions for batch:")
+            print(batch_prompts)
+            print("Error message:")
+            print(e)
+            batch_generations = [""] * len(batch_prompts) * num_return_sequences
+
+        generations.extend(batch_generations)
+        if not disable_tqdm:
+            progress.update(len(batch_prompts))
+
+    return generations
 
 
 def parse_args():
@@ -112,6 +198,30 @@ def parse_args():
         type=float,
         default=1.0,
         help="top_p for sampling.")
+    # Router analysis arguments
+    parser.add_argument(
+        "--collect_router_stats",
+        action="store_true",
+        help="Collect MoE router statistics during evaluation.")
+    parser.add_argument(
+        "--router_stats_output_dir",
+        type=str,
+        default=None,
+        help="Output directory for router statistics.")
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default="olmoe",
+        help="Model name for router stats output structure.")
+    parser.add_argument(
+        "--top_k",
+        type=int,
+        default=8,
+        help="Top-k experts to track (8 for OLMoE, 2 for Mixtral).")
+    parser.add_argument(
+        "--track_token_expert_mapping",
+        action="store_true",
+        help="Track which tokens are assigned to which experts.")
     args = parser.parse_args()
 
     # model_name_or_path and openai_engine should be exclusive.
@@ -127,6 +237,21 @@ if __name__ == "__main__":
         output_dir = os.path.dirname(args.output_file)
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
+
+    # Initialize router stats collector if requested
+    router_collector = None
+    if args.collect_router_stats:
+        if args.router_stats_output_dir is None:
+            args.router_stats_output_dir = os.path.join(os.path.dirname(args.output_file), "router_stats")
+        
+        from eval.moe_router_stats import RouterStatsCollector
+        router_collector = RouterStatsCollector(
+            model_name=args.model_name,
+            top_k=args.top_k,
+            track_token_expert_mapping=args.track_token_expert_mapping,
+            selected_layers=[0, 7, 15]  # Default layers for OLMoE
+        )
+        print(f"Router statistics collection enabled. Output directory: {args.router_stats_output_dir}")
 
     # load the data
     for input_file in args.input_files:
@@ -153,6 +278,11 @@ if __name__ == "__main__":
                 raise ValueError("Either `messages` or `prompt` should be in the instance.")
             prompts.append(prompt)
         if args.use_vllm:
+            # Note: VLLM doesn't support router logits collection yet
+            if router_collector is not None:
+                print("Warning: Router statistics collection is not supported with VLLM. Disabling router stats collection.")
+                router_collector = None
+            
             model = vllm.LLM(
                 model=args.model_name_or_path,
                 tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
@@ -175,16 +305,31 @@ if __name__ == "__main__":
                 gptq_model=args.gptq,
                 use_fast_tokenizer=not args.use_slow_tokenizer,
             )
-            outputs = generate_completions(
-                model=model,
-                tokenizer=tokenizer,
-                prompts=prompts,
-                batch_size=args.batch_size,
-                max_new_tokens=args.max_new_tokens,
-                do_sample=args.do_sample,
-                temperature=args.temperature,
-                top_p=args.top_p,
-            )
+            
+            # Use router-aware generation if collector is provided
+            if router_collector is not None:
+                outputs = generate_completions_with_router_stats(
+                    model=model,
+                    tokenizer=tokenizer,
+                    prompts=prompts,
+                    router_collector=router_collector,
+                    batch_size=args.batch_size,
+                    max_new_tokens=args.max_new_tokens,
+                    do_sample=args.do_sample,
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                )
+            else:
+                outputs = generate_completions(
+                    model=model,
+                    tokenizer=tokenizer,
+                    prompts=prompts,
+                    batch_size=args.batch_size,
+                    max_new_tokens=args.max_new_tokens,
+                    do_sample=args.do_sample,
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                )
         with open(args.output_file, "w") as f:
             for instance, output in zip(instances, outputs):
                 instance["output"] = output
@@ -202,5 +347,16 @@ if __name__ == "__main__":
         )
     else:
         raise ValueError("Either model_name_or_path or openai_engine should be provided.")
+
+    # Save router statistics if collected
+    if router_collector is not None:
+        # Determine domain name from input file
+        input_file = args.input_files[0] if args.input_files else "unknown"
+        domain = os.path.splitext(os.path.basename(input_file))[0]
+        
+        # Save router stats in OLMoE-compatible format
+        router_collector.save_results(args.router_stats_output_dir, domain)
+        router_collector.print_summary()
+        print(f"Router statistics saved to: {args.router_stats_output_dir}")
 
     print("Done.")

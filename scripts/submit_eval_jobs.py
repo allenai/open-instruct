@@ -61,6 +61,27 @@ def adjust_gpus(task_spec, experiment_group, model_name, gpu_multiplier):
     return task_spec
 
 
+def add_router_analysis_args(task_spec, args):
+    """
+    Add router analysis arguments to task spec if router stats collection is enabled.
+    """
+    if args.collect_router_stats:
+        router_args = f"""
+            --collect_router_stats \
+            --router_stats_output_dir /output/router_stats \
+            --model_name {args.model_name} \
+            --top_k {args.router_stats_top_k} \
+            --layers {args.router_stats_layers}"""
+        
+        if args.router_stats_track_token_mapping:
+            router_args += " \\\n            --track_token_expert_mapping"
+        
+        # Add router args to the command
+        task_spec['arguments'][0] = task_spec['arguments'][0].rstrip() + router_args + " \\\n        "
+    
+    return task_spec
+
+
 ########################################
 # Launcher
 
@@ -119,6 +140,11 @@ parser.add_argument("--run_id", type=str, default=None, help="A unique run ID fo
 parser.add_argument("--oe_eval_stop_sequences", type=str, default=None, help="Comma-separated list of stop sequences for OE eval.")
 parser.add_argument("--process_output", type=str, default="r1_style", help="Process output type for OE eval (e.g., 'r1_style'). Defaults to 'r1_style', which should work for most of our models, including non-thinking ones.")
 parser.add_argument("--s3_output_dir", type=str, default=None, help="S3 output directory for evaluation results (e.g., 's3://bucket/path'). If provided, results will be uploaded to S3 after evaluation completes.")
+# Router analysis arguments
+parser.add_argument("--collect_router_stats", action="store_true", help="Collect MoE router statistics during evaluations.")
+parser.add_argument("--router_stats_top_k", type=int, default=8, help="Top-k experts to track for router analysis (8 for OLMoE, 2 for Mixtral).")
+parser.add_argument("--router_stats_layers", type=str, default="0,7,15", help="Comma-separated layer indices to track for router analysis.")
+parser.add_argument("--router_stats_track_token_mapping", action="store_true", help="Track which tokens are assigned to which experts.")
 args = parser.parse_args()
 
 
@@ -536,6 +562,9 @@ for experiment_group in experiment_groups:
         model_name=model_info[0],
         gpu_multiplier=args.gpu_multiplier,
     )
+    
+    # Add router analysis arguments if requested
+    task_spec = add_router_analysis_args(task_spec, args)
 
     # if using huggingface tokenizer template, replace the chat formatting function with hf tokenizer one
     # otherwise, try to guess what template to use based on model name
@@ -643,6 +672,14 @@ if args.run_oe_eval_experiments:
         oe_eval_cmd += f" --run-id {args.run_id}"
     if args.step:
         oe_eval_cmd += f" --step {args.step}"
+    if args.collect_router_stats:
+        oe_eval_cmd += f" --collect_router_stats"
+        oe_eval_cmd += f" --router_stats_output_dir /output/router_stats"
+        oe_eval_cmd += f" --model_name {args.model_name}"
+        oe_eval_cmd += f" --top_k {args.router_stats_top_k}"
+        oe_eval_cmd += f" --layers {args.router_stats_layers}"
+        if args.router_stats_track_token_mapping:
+            oe_eval_cmd += f" --track_token_expert_mapping"
     # add string with number of gpus
     num_gpus = task_spec['resources']['gpuCount']
     # if num_gpus > 1, double it again for oe-eval configs
