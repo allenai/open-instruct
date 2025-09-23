@@ -668,6 +668,12 @@ class LLMRayActor:
             logger.info(
                 f"[_process_request] {sub_request_id} - Line 655: About to create prompt_and_tool_output_token"
             )
+            logger.info(f"[_process_request] {sub_request_id} - output.prompt_token_ids type: {type(output.prompt_token_ids)}, len: {len(output.prompt_token_ids) if output.prompt_token_ids else 'None'}")
+            logger.info(f"[_process_request] {sub_request_id} - request_output: {request_output}")
+            logger.info(f"[_process_request] {sub_request_id} - request_output.outputs: {request_output.outputs}")
+            logger.info(f"[_process_request] {sub_request_id} - request_output.outputs[0]: {request_output.outputs[0]}")
+            logger.info(f"[_process_request] {sub_request_id} - request_output.outputs[0].token_ids type: {type(request_output.outputs[0].token_ids)}")
+            logger.info(f"[_process_request] {sub_request_id} - request_output.outputs[0].token_ids: {request_output.outputs[0].token_ids[:10] if request_output.outputs[0].token_ids else 'None'}...")
             prompt_and_tool_output_token = (
                 output.prompt_token_ids + request_output.outputs[0].token_ids + tool_output_token_ids
             )
