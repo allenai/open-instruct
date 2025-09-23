@@ -1371,7 +1371,8 @@ def calculate_utilization_metrics(
     prompt_lengths: list[int],
     response_lengths: list[int],
     total_generation_time: float,
-    samples_per_prompt: int = 1,
+    samples_per_prompt: int,
+    num_gpus: int,
 ) -> tuple[float, float, int, int]:
     """Calculate MFU and MBU metrics for model inference.
 
@@ -1381,6 +1382,7 @@ def calculate_utilization_metrics(
         response_lengths: List of response lengths
         total_generation_time: Total time taken for generation
         samples_per_prompt: Number of samples generated per prompt
+        num_gpus: Number of GPUs used for inference
 
     Returns:
         Tuple of (mfu, mbu, total_flops, total_memory_bytes)
@@ -1398,11 +1400,14 @@ def calculate_utilization_metrics(
         prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt
     )
 
-    # Calculate MFU and MBU
+    # Calculate MFU and MBU accounting for multiple GPUs
     flops_per_second = total_flops / total_generation_time
     bytes_per_second = total_memory_bytes / total_generation_time
-    mfu = 100 * flops_per_second / model_dims.device_flops
-    mbu = 100 * bytes_per_second / model_dims.device_memory_bandwidth
+    # Scale device capabilities by number of GPUs
+    total_device_flops = model_dims.device_flops * num_gpus
+    total_device_bandwidth = model_dims.device_memory_bandwidth * num_gpus
+    mfu = 100 * flops_per_second / total_device_flops
+    mbu = 100 * bytes_per_second / total_device_bandwidth
 
     return mfu, mbu, total_flops, total_memory_bytes
 
@@ -1414,9 +1419,9 @@ def accumulate_inference_batches(
     training_step: int,
     generation_config: vllm.SamplingParams,
     num_prompts: int,
+    model_dims: utils.ModelDims,
     actor_manager=None,
     timeout: Optional[float] = None,
-    model_dims: Optional[utils.ModelDims] = None,
 ) -> tuple[GenerationResult, Batch]:
     """Accumulate multiple inference results into a single training batch.
 
@@ -1497,8 +1502,7 @@ def accumulate_inference_batches(
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
 
-        if result.start_time and result.start_time < earliest_start_time:
-            earliest_start_time = result.start_time
+        earliest_start_time = min(earliest_start_time, result.start_time)
 
         prompt_lengths.append(len(all_queries[i]))
 
@@ -1515,15 +1519,11 @@ def accumulate_inference_batches(
         current_time - earliest_start_time if earliest_start_time != float("inf") else max_generation_time
     )
 
-    if model_dims and prompt_lengths and response_lengths and total_generation_time > 0:
-        mfu, mbu, total_flops, total_memory_bytes = calculate_utilization_metrics(
-            model_dims, prompt_lengths, response_lengths, total_generation_time, generation_config.n
-        )
-    else:
-        total_flops = 0
-        total_memory_bytes = 0
-        mfu = 0.0
-        mbu = 0.0
+    # Calculate total number of GPUs used in vLLM
+    num_gpus = args.vllm_num_engines * args.vllm_tensor_parallel_size
+    mfu, mbu, total_flops, total_memory_bytes = calculate_utilization_metrics(
+        model_dims, prompt_lengths, response_lengths, total_generation_time, generation_config.n, num_gpus
+    )
 
     # Create accumulated token statistics with MFU/MBU
     accumulated_stats = TokenStatistics(
@@ -1594,8 +1594,8 @@ def data_preparation_thread(
                 training_step,
                 generation_config,
                 num_prompts=args.num_unique_prompts_rollout,
-                actor_manager=actor_manager,
                 model_dims=model_dims,
+                actor_manager=actor_manager,
             )
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
@@ -2413,9 +2413,9 @@ def maybe_evaluate(
             training_step,
             eval_generation_config,
             num_prompts=num_eval_prompts,
+            model_dims=None,
             actor_manager=actor_manager,
             timeout=timeout,
-            model_dims=None,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -2910,9 +2910,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         )
     )
 
-    # Get the vLLM model config from one of the engines and create ModelDims
-    vllm_model_config = ray.get(vllm_engines[0].get_model_config.remote())
-    model_dims = utils.ModelDims.from_vllm_config(vllm_model_config)
+    # Get the vLLM config from one of the engines and create ModelDims
+    vllm_config = ray.get(vllm_engines[0].get_vllm_config.remote())
+    model_dims = utils.ModelDims.from_vllm_config(vllm_config)
 
     generation_configs = create_generation_configs(args)
 

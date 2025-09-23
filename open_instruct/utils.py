@@ -1690,15 +1690,16 @@ class ModelDims:
         )
 
     @classmethod
-    def from_vllm_config(cls, vllm_model_config: vllm.config.ModelConfig) -> "ModelDims":
-        """Create ModelDims from a vLLM model config object."""
+    def from_vllm_config(cls, vllm_config: vllm.config.VllmConfig) -> "ModelDims":
+        """Create ModelDims from a vLLM config object."""
+        model_config = vllm_config.model_config
         return cls(
-            num_layers=vllm_model_config.get_num_layers(),
-            hidden_size=vllm_model_config.get_hidden_size(),
-            intermediate_size=vllm_model_config.get_intermediate_size(),
-            vocab_size=vllm_model_config.get_vocab_size(),
-            num_attn_heads=vllm_model_config.get_num_attention_heads(),
-            num_kv_heads=vllm_model_config.get_num_kv_heads(),
+            num_layers=model_config.get_num_layers(vllm_config.parallel_config),
+            hidden_size=model_config.get_hidden_size(),
+            intermediate_size=model_config.get_intermediate_size(),
+            vocab_size=model_config.get_vocab_size(),
+            num_attn_heads=model_config.get_num_attention_heads(),
+            num_kv_heads=model_config.get_num_kv_heads(),
         )
 
     @property
