@@ -49,12 +49,19 @@ set -ex
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--task-suite TASK_SUITE] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>] [--process-output <process_output>] [--remote-output-dir <s3_path>]"
+    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--task-suite TASK_SUITE] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>] [--process-output <process_output>] [--remote-output-dir <s3_path>] [--collect_router_stats] [--router_stats_output_dir <output_dir>] [--model_name <model_name>] [--top_k <top_k>] [--layers <layers>] [--track_token_expert_mapping]"
     echo "TASK_SUITE should be one of: NEXT_MODEL_DEV, NEXT_MODEL_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN (default: NEXT_MODEL_DEV)"
     echo "TASKS should be a comma-separated list of task specifications (e.g., 'gsm8k::tulu,bbh:cot::tulu')"
     echo "STOP_SEQUENCES should be a comma-separated list of strings to stop generation at (e.g., '</answer>,\\n\\n')"
     echo "PROCESS_OUTPUT should be a string specifying how to process the model output (e.g., 'r1_style')"
     echo "REMOTE_OUTPUT_DIR should be an S3 path where results will be uploaded (e.g., 's3://bucket/path')"
+    echo "Router analysis options:"
+    echo "  --collect_router_stats: Enable MoE router statistics collection"
+    echo "  --router_stats_output_dir: Output directory for router statistics"
+    echo "  --model_name: Model name for router stats output structure"
+    echo "  --top_k: Top-k experts to track (8 for OLMoE, 2 for Mixtral)"
+    echo "  --layers: Comma-separated layer indices to track (default: 0,7,15)"
+    echo "  --track_token_expert_mapping: Track detailed token-to-expert mappings"
     exit 1
 }
 
@@ -78,6 +85,12 @@ while [[ "$#" -gt 0 ]]; do
         --cluster) CLUSTER="$2"; shift ;;
         --process-output) PROCESS_OUTPUT="$2"; shift ;;
         --remote-output-dir) REMOTE_OUTPUT_DIR="$2"; shift ;;
+        --collect_router_stats) COLLECT_ROUTER_STATS="true" ;;
+        --router_stats_output_dir) ROUTER_STATS_OUTPUT_DIR="$2"; shift ;;
+        --model_name) ROUTER_MODEL_NAME="$2"; shift ;;
+        --top_k) ROUTER_TOP_K="$2"; shift ;;
+        --layers) ROUTER_LAYERS="$2"; shift ;;
+        --track_token_expert_mapping) ROUTER_TRACK_TOKEN_MAPPING="true" ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
@@ -266,10 +279,29 @@ GPU_COUNT="$NUM_GPUS"
 GPU_COUNT_OTHER=$((NUM_GPUS * 2))
 MODEL_TYPE_OTHER=""
 
-# Build model args JSON with optional process_output
+# Build model args JSON with optional process_output and router analysis
 MODEL_ARGS="{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"trust_remote_code\": \"true\""
 if [[ -n "$PROCESS_OUTPUT" ]]; then
     MODEL_ARGS+=", \"process_output\": \"${PROCESS_OUTPUT}\""
+fi
+# Add router analysis arguments if enabled
+if [[ "$COLLECT_ROUTER_STATS" == "true" ]]; then
+    MODEL_ARGS+=", \"collect_router_stats\": true"
+    if [[ -n "$ROUTER_STATS_OUTPUT_DIR" ]]; then
+        MODEL_ARGS+=", \"router_stats_output_dir\": \"${ROUTER_STATS_OUTPUT_DIR}\""
+    fi
+    if [[ -n "$ROUTER_MODEL_NAME" ]]; then
+        MODEL_ARGS+=", \"model_name\": \"${ROUTER_MODEL_NAME}\""
+    fi
+    if [[ -n "$ROUTER_TOP_K" ]]; then
+        MODEL_ARGS+=", \"top_k\": ${ROUTER_TOP_K}"
+    fi
+    if [[ -n "$ROUTER_LAYERS" ]]; then
+        MODEL_ARGS+=", \"layers\": \"${ROUTER_LAYERS}\""
+    fi
+    if [[ "$ROUTER_TRACK_TOKEN_MAPPING" == "true" ]]; then
+        MODEL_ARGS+=", \"track_token_expert_mapping\": true"
+    fi
 fi
 MODEL_ARGS+="}"
 # Source the non-AI2 models list for bfcl
