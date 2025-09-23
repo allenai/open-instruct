@@ -592,15 +592,21 @@ class LLMRayActor:
         current_prompt = prompt
         current_sampling_params = sampling_params
 
-        logger.info(f"[_process_request] ENTER {sub_request_id} - base_request_id={base_request_id}, index={index}, tools_enabled={bool(self.tools)}")
+        logger.info(
+            f"[_process_request] ENTER {sub_request_id} - base_request_id={base_request_id}, index={index}, tools_enabled={bool(self.tools)}"
+        )
         loop_iteration = 0
 
         while True:
             loop_iteration += 1
             # Generate completion
-            logger.info(f"[_process_request] {sub_request_id} - Loop iteration {loop_iteration}: About to await generate_one_completion")
+            logger.info(
+                f"[_process_request] {sub_request_id} - Loop iteration {loop_iteration}: About to await generate_one_completion"
+            )
             output = await self.generate_one_completion(sub_request_id, current_prompt, current_sampling_params)
-            logger.info(f"[_process_request] {sub_request_id} - Loop iteration {loop_iteration}: Returned from generate_one_completion")
+            logger.info(
+                f"[_process_request] {sub_request_id} - Loop iteration {loop_iteration}: Returned from generate_one_completion"
+            )
 
             # Fix the index field
             assert len(output.outputs) == 1, f"{len(output.outputs)=}"
@@ -629,9 +635,13 @@ class LLMRayActor:
                 break  # No tool triggered - request is complete
 
             tool, stop_str = tool_info
-            logger.info(f"[_process_request] {sub_request_id} - Tool triggered: {stop_str}, about to await asyncio.to_thread for tool execution")
+            logger.info(
+                f"[_process_request] {sub_request_id} - Tool triggered: {stop_str}, about to await asyncio.to_thread for tool execution"
+            )
             tool_result = await asyncio.to_thread(tool, output.outputs[0].text)
-            logger.info(f"[_process_request] {sub_request_id} - Tool execution completed, output length: {len(tool_result.output) if tool_result.output else 0}")
+            logger.info(
+                f"[_process_request] {sub_request_id} - Tool execution completed, output length: {len(tool_result.output) if tool_result.output else 0}"
+            )
 
             # Update tracking
             num_calls += 1
@@ -644,49 +654,92 @@ class LLMRayActor:
             # Prepare tool output tokens
             logger.info(f"[_process_request] {sub_request_id} - About to access self.llm_engine.engine.tokenizer")
             tokenizer = self.llm_engine.engine.tokenizer
-            logger.info(f"[_process_request] {sub_request_id} - Successfully got tokenizer, about to encode tool output")
+            logger.info(
+                f"[_process_request] {sub_request_id} - Successfully got tokenizer, about to encode tool output"
+            )
             tool_output_text = "<output>\n" + tool_result.output + "</output>\n"
             logger.info(f"[_process_request] {sub_request_id} - Encoding text: {tool_output_text[:100]}...")
-            tool_output_token_ids = tokenizer.encode(
-                tool_output_text, add_special_tokens=False
+            tool_output_token_ids = tokenizer.encode(tool_output_text, add_special_tokens=False)
+            logger.info(
+                f"[_process_request] {sub_request_id} - Successfully encoded tool output, got {len(tool_output_token_ids)} tokens"
             )
-            logger.info(f"[_process_request] {sub_request_id} - Successfully encoded tool output, got {len(tool_output_token_ids)} tokens")
 
             # Check context length
+            logger.info(
+                f"[_process_request] {sub_request_id} - Line 655: About to create prompt_and_tool_output_token"
+            )
             prompt_and_tool_output_token = (
                 output.prompt_token_ids + request_output.outputs[0].token_ids + tool_output_token_ids
             )
+            logger.info(
+                f"[_process_request] {sub_request_id} - Line 658: Created prompt_and_tool_output_token with {len(prompt_and_tool_output_token)} tokens"
+            )
+
+            logger.info(
+                f"[_process_request] {sub_request_id} - Line 659: About to calculate excess, max_model_len={self.llm_engine.model_config.max_model_len}"
+            )
             excess = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len
+            logger.info(f"[_process_request] {sub_request_id} - Line 659: Calculated excess={excess}")
+
             if excess > 0:
                 tool_output_token_ids = tool_output_token_ids[:-excess]
                 can_continue = False
+                logger.info(
+                    f"[_process_request] {sub_request_id} - Line 662: Truncated tool output due to excess, can_continue=False"
+                )
             else:
                 can_continue = True
+                logger.info(f"[_process_request] {sub_request_id} - Line 664: No excess, can_continue=True")
 
             # Check max_tokens limit
+            logger.info(
+                f"[_process_request] {sub_request_id} - Line 667: Checking max_tokens limit, current_sampling_params.max_tokens={current_sampling_params.max_tokens}, len(masks)={len(masks)}"
+            )
             remaining = current_sampling_params.max_tokens - len(masks)
+            logger.info(f"[_process_request] {sub_request_id} - Line 668: remaining={remaining}")
+
             if remaining <= 0:
                 tool_output_token_ids = []
                 can_continue = False
+                logger.info(
+                    f"[_process_request] {sub_request_id} - Line 670: No remaining tokens, cleared tool output, can_continue=False"
+                )
             elif len(tool_output_token_ids) > remaining:
                 tool_output_token_ids = tool_output_token_ids[:remaining]
                 can_continue = False
+                logger.info(
+                    f"[_process_request] {sub_request_id} - Line 673: Truncated tool output to fit remaining, can_continue=False"
+                )
 
             # Add tool output to concatenated result
+            logger.info(
+                f"[_process_request] {sub_request_id} - Line 676: About to extend token_ids with {len(tool_output_token_ids)} tokens"
+            )
             request_output.outputs[0].token_ids.extend(tool_output_token_ids)
+            logger.info(f"[_process_request] {sub_request_id} - Line 677: Extended token_ids, about to extend masks")
             masks.extend([0] * len(tool_output_token_ids))
+            logger.info(f"[_process_request] {sub_request_id} - Line 678: Extended masks, total masks={len(masks)}")
 
             # Check if we can continue
+            logger.info(f"[_process_request] {sub_request_id} - Line 680: About to calculate new_sample_tokens")
             new_sample_tokens = current_sampling_params.max_tokens - len(masks)
+            logger.info(
+                f"[_process_request] {sub_request_id} - Line 681: new_sample_tokens={new_sample_tokens}, can_continue={can_continue}"
+            )
+
             if not can_continue or new_sample_tokens <= 0:
-                logger.info(f"[_process_request] {sub_request_id} - Cannot continue (can_continue={can_continue}, new_sample_tokens={new_sample_tokens}), breaking from loop")
+                logger.info(
+                    f"[_process_request] {sub_request_id} - Cannot continue (can_continue={can_continue}, new_sample_tokens={new_sample_tokens}), breaking from loop"
+                )
                 break
 
             # Prepare for next iteration
             current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output_token)
             current_sampling_params = current_sampling_params.clone()
             current_sampling_params.max_tokens = new_sample_tokens
-            logger.info(f"[_process_request] {sub_request_id} - Continuing to next iteration with new_sample_tokens={new_sample_tokens}")
+            logger.info(
+                f"[_process_request] {sub_request_id} - Continuing to next iteration with new_sample_tokens={new_sample_tokens}"
+            )
             # Continue the while loop with new prompt
 
         # Attach tool metadata if tools are enabled
@@ -704,7 +757,9 @@ class LLMRayActor:
         logger.info(f"[_process_request] {sub_request_id} - Acquiring request_outputs_lock")
         async with self.request_outputs_lock:
             if base_request_id not in self.request_outputs:
-                logger.info(f"[_process_request] {sub_request_id} - Creating new request_outputs entry for {base_request_id}")
+                logger.info(
+                    f"[_process_request] {sub_request_id} - Creating new request_outputs entry for {base_request_id}"
+                )
                 self.request_outputs[base_request_id] = vllm.RequestOutput(
                     request_id=base_request_id,
                     prompt=request_output.prompt,
