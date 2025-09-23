@@ -357,7 +357,6 @@ class LLMRayActor:
         # Prefer native async API if available
         get_async = getattr(self.prompt_queue, "get_async", None)
         if callable(get_async):
-            logger.info(f"[_q_get_async] Using native async get from queue: {self.prompt_queue}")
             return await get_async()
         # Fallback: poll via a background thread with timeout
         attempt = 0
@@ -369,17 +368,10 @@ class LLMRayActor:
                 # Returning None signals caller to re-check should_stop and continue
                 return None
             try:
-                if attempt % 100 == 1:  # Log every 100 attempts
-                    logger.info(
-                        f"[_q_get_async] Attempt {attempt}: Trying to get from prompt_queue: {self.prompt_queue}"
-                    )
                 result = await asyncio.to_thread(self.prompt_queue.get, timeout=1.0)
-                logger.info(f"[_q_get_async] ✅ Got request after {attempt} attempts! Type: {type(result)}")
                 return result
-            except Exception as e:
+            except Exception:
                 # Likely timeout; just loop
-                if attempt % 100 == 1:  # Log every 100 attempts
-                    logger.debug(f"[_q_get_async] Timeout on attempt {attempt}: {e}")
                 await asyncio.sleep(0.05)
 
     async def _should_stop(self) -> bool:
@@ -420,15 +412,10 @@ class LLMRayActor:
                 await asyncio.sleep(1)
                 continue
 
-            self.logger.debug(f"Waiting for request from queue (active_tasks={current_unfinished})")
             request = await self._q_get_async()
             if request is None:
                 # Likely should_stop; continue loop to honor stop semantics
                 continue
-
-            self.logger.info(
-                f"[_prefetch_requests] 📨 Got request from queue: step={getattr(request, 'training_step', 'unknown')}, idx={getattr(request, 'dataset_index', 'unknown')}, is_eval={getattr(request, 'is_eval', 'unknown')}"
-            )
 
             # Check again AFTER getting request but BEFORE adding to engine
             if await self._should_stop():
@@ -442,11 +429,9 @@ class LLMRayActor:
                 except Exception:
                     # As a last resort, fall back to blocking put
                     self.prompt_queue.put(request)
-                self.logger.debug("Weight sync in progress, putting request back in queue")
                 await asyncio.sleep(0.1)
                 continue
 
-            self.logger.info("[_prefetch_requests] Adding request to engine...")
             await self._add_request(request)
 
     async def _add_request(self, request: PromptRequest):
@@ -468,25 +453,18 @@ class LLMRayActor:
         }
 
         tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
-        logger.info(f"[_add_request] Creating {request.generation_config.n} sub-requests")
         for j in range(request.generation_config.n):
             sub_sampling_params = sampling_params.clone()  # Already has n=1
             if request.generation_config.seed is not None:
                 sub_sampling_params.seed = request.generation_config.seed + j
             sub_request_id = f"{request_id}_{j}"
 
-            logger.info(
-                f"[_add_request] Creating task for sub-request {j + 1}/{request.generation_config.n}: {sub_request_id}"
-            )
             # Create a task to process this sub-request with its ID as the name
             task = asyncio.create_task(
                 self._process_request(sub_request_id, request_id, tokens_prompt, sub_sampling_params, j),
                 name=sub_request_id,
             )
             self.active_tasks[sub_request_id] = task
-            logger.info(
-                f"[_add_request] ✅ Task created and added to active_tasks. Total active: {len(self.active_tasks)}"
-            )
 
     def _insert_result_to_queue(self, result, is_eval: bool):
         """Insert result into the appropriate queue with blocking put."""
@@ -520,13 +498,24 @@ class LLMRayActor:
         # Check for pending work
         active_tasks = len(self.active_tasks)
 
+        # Check if we have any in-progress completions in request_outputs
+        # This indicates we're still processing multi-part requests (e.g., with tools)
+        has_incomplete_requests = len(self.request_outputs) > 0
+
         # Case 2: stop requested and no pending work - exit
-        if stop_requested and active_tasks == 0:
+        if stop_requested and active_tasks == 0 and not has_incomplete_requests:
             return True
 
         # Case 3: no work left at all - exit
-        if active_tasks == 0:
-            return True
+        # Only exit if there are no active tasks AND no incomplete requests
+        # This prevents premature exit during tool processing when tasks briefly go to 0
+        if active_tasks == 0 and not has_incomplete_requests:
+            # Give the prefetch a chance to get more requests before deciding to exit
+            # This is important for tool use where there might be gaps between requests
+            await asyncio.sleep(0.5)
+            # Re-check after sleep
+            if len(self.active_tasks) == 0 and len(self.request_outputs) == 0:
+                return True
 
         # Otherwise, continue processing
         return False
@@ -544,11 +533,12 @@ class LLMRayActor:
         Wraps the async generator to return a single RequestOutput.
         """
         # Check if request_id is already in use (race condition check)
-        if hasattr(self.llm_engine, '_request_tracker'):
+        if hasattr(self.llm_engine, "_request_tracker"):
             tracker = self.llm_engine._request_tracker
-            if hasattr(tracker, '_request_streams'):
-                assert request_id not in tracker._request_streams, \
+            if hasattr(tracker, "_request_streams"):
+                assert request_id not in tracker._request_streams, (
                     f"Request ID {request_id} still exists in _request_streams! Race condition detected."
+                )
 
         logger.info(f"[generate_one_completion] Adding request {request_id} to engine")
         generator = await self.llm_engine.add_request(request_id, prompt, sampling_params)
