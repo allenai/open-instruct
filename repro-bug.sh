@@ -38,7 +38,7 @@ NUM_GPUS=${NUM_GPUS:-8}
 uv run python mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
-    --workspace ai2/tulu-thinker \
+    --workspace ai2/open-instruct-dev \
     --priority high \
     --pure_docker_mode \
     --image "$BEAKER_IMAGE" \
