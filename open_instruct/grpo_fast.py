@@ -1247,9 +1247,10 @@ class ModelGroup:
         ).remote(world_size, 0, 0, None, None)
 
         self.models.append(master_policy)
-        (master_addr, master_port), _ = ray_get_with_progress(
+        results, _ = ray_get_with_progress(
             [master_policy.get_master_addr_port.remote()], desc="Getting master address"
         )
+        (master_addr, master_port) = results[0]
 
         def get_bundle_index(rank, num_gpus_per_node):
             """given a rank and a list of num_gpus_per_node, return the index of the bundle that the rank belongs to"""
