@@ -484,6 +484,18 @@ for experiment_group in experiment_groups:
         # OLMo models can only output 2048 new tokens at most; default is 8192.
         if "olmo" in model_info[0] or args.olmo:
             task_spec['arguments'][0] += " --max_new_tokens 4096" # nol increased hardcode to 4096
+    elif experiment_group == "router_stats_gsm_bbh_mmlu":
+        task_spec['arguments'][0] = '''
+            python -m eval.moe_router_stats \
+            --model_name_or_path /model \
+            --evals gsm_direct bbh_cot mmlu_5shot \
+            --data_root /data \
+            --output_dir /output/router_stats \
+            --top_k 4 \
+            --layers 0,7,15 \
+            --use_chat_format \
+            --chat_formatting_function eval.templates.create_prompt_with_olmo_chat_format \
+        '''
 
     else:
         raise ValueError("experiment_group not supported")
