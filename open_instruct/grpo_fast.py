@@ -1375,6 +1375,7 @@ def accumulate_inference_batches(
     num_prompts: int,
     actor_manager=None,
     timeout: Optional[float] = None,
+    model_dims: Optional[utils.ModelDims] = None,
 ) -> tuple[GenerationResult, Batch]:
     """Accumulate multiple inference results into a single training batch.
 
@@ -1436,10 +1437,23 @@ def accumulate_inference_batches(
     combined_tool_runtimes = []
     combined_tool_calleds = []
 
-    # Initialize accumulated token statistics
-    accumulated_stats = TokenStatistics(num_prompt_tokens=0, num_response_tokens=0, generation_time=0)
+    # Calculate MFU/MBU metrics if model_dims is provided
+    earliest_start_time = float("inf")
+    prompt_lengths = []
+    response_lengths = []
 
-    for result in results:
+    # Get device information for MFU/MBU calculation
+    if model_dims:
+        device_name = utils.get_device_name(torch.cuda.get_device_name(0))
+        device_flops = utils.GPU_SPECS[device_name]["flops"]
+        device_memory_bandwidth = utils.GPU_SPECS[device_name]["memory_bandwidth"]
+
+    # Initialize variables for token statistics accumulation
+    total_prompt_tokens = 0
+    total_response_tokens = 0
+    max_generation_time = 0
+
+    for i, result in enumerate(results):
         combined_responses.extend(result.responses)
         combined_finish_reasons.extend(result.finish_reasons)
         combined_masks.extend(result.masks)
@@ -1450,12 +1464,62 @@ def accumulate_inference_batches(
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
 
+        # Track earliest start time
+        if result.start_time and result.start_time < earliest_start_time:
+            earliest_start_time = result.start_time
+
+        # Collect prompt lengths
+        prompt_lengths.append(len(all_queries[i]))
+
+        # Collect response lengths for each response in this result
+        for response in result.responses:
+            response_lengths.append(len(response))
+
         if result.token_statistics:
-            accumulated_stats.num_prompt_tokens += result.token_statistics.num_prompt_tokens
-            accumulated_stats.num_response_tokens += result.token_statistics.num_response_tokens
-            accumulated_stats.generation_time = max(
-                accumulated_stats.generation_time, result.token_statistics.generation_time
-            )
+            total_prompt_tokens += result.token_statistics.num_prompt_tokens
+            total_response_tokens += result.token_statistics.num_response_tokens
+            max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
+
+    # Calculate MFU/MBU metrics
+    current_time = time.perf_counter()
+    total_generation_time = (
+        current_time - earliest_start_time if earliest_start_time != float("inf") else max_generation_time
+    )
+
+    if model_dims and prompt_lengths and response_lengths:
+        # Calculate FLOPs and memory bytes
+        total_flops = model_dims.flops(prompt_lengths, response_lengths, samples_per_prompt=generation_config.n)
+        total_memory_bytes = model_dims.memory_bytes(
+            prompt_lengths, response_lengths, samples_per_prompt=generation_config.n
+        )
+
+        # Calculate MFU and MBU
+        if total_generation_time > 0:
+            flops_per_second = total_flops / total_generation_time
+            bytes_per_second = total_memory_bytes / total_generation_time
+            mfu = 100 * flops_per_second / device_flops
+            mbu = 100 * bytes_per_second / device_memory_bandwidth
+        else:
+            mfu = 0.0
+            mbu = 0.0
+    else:
+        # Default values if model_dims is not provided
+        total_flops = 0
+        total_memory_bytes = 0
+        mfu = 0.0
+        mbu = 0.0
+
+    # Create accumulated token statistics with MFU/MBU
+    accumulated_stats = TokenStatistics(
+        num_prompt_tokens=total_prompt_tokens,
+        num_response_tokens=total_response_tokens,
+        generation_time=total_generation_time,
+        mfu=mfu,
+        mbu=mbu,
+        earliest_start_time=earliest_start_time if earliest_start_time != float("inf") else 0.0,
+        total_flops=total_flops,
+        total_memory_bytes=total_memory_bytes,
+    )
 
     # Create combined RequestInfo
     combined_request_info = RequestInfo(
@@ -1502,6 +1566,7 @@ def data_preparation_thread(
     generation_config,
     resume_training_step: int,
     actor_manager=None,
+    model_dims: utils.ModelDims = None,
 ):
     for training_step in range(resume_training_step, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
@@ -1514,6 +1579,7 @@ def data_preparation_thread(
                 generation_config,
                 num_prompts=args.num_unique_prompts_rollout,
                 actor_manager=actor_manager,
+                model_dims=model_dims,
             )
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
@@ -2314,6 +2380,7 @@ def maybe_evaluate(
     generate_metrics_Q: Queue,
     num_eval_prompts: int,
     actor_manager=None,
+    model_dims: Optional[utils.ModelDims] = None,
 ):
     """Optionally evaluate the model."""
     try:
@@ -2331,6 +2398,7 @@ def maybe_evaluate(
             num_prompts=num_eval_prompts,
             actor_manager=actor_manager,
             timeout=timeout,
+            model_dims=model_dims,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -2595,6 +2663,7 @@ def run_training(
     generate_metrics_Q,
     weight_sync_metrics_Q,
     actor_manager: ActorManager,
+    model_dims: utils.ModelDims,
     checkpoint_state=None,
 ):
     if resume_training_step > 1:
@@ -2631,6 +2700,7 @@ def run_training(
         generation_configs["train"],
         resume_training_step,
         actor_manager,
+        model_dims,
     )
 
     logger.info("======== ✅ generation thread starts =========")
@@ -2772,6 +2842,7 @@ def run_training(
             generate_metrics_Q,
             len(eval_batch.queries) if eval_batch else 0,
             actor_manager,
+            model_dims,
         )
 
     if resume_training_step > args.num_training_steps:
@@ -2796,6 +2867,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         return
 
     pprint([args, model_config])
+
+    # Load ModelDims once for MFU/MBU calculations
+    model_dims = utils.load_model_dims(model_config.model_name_or_path)
 
     # Initialize Ray before creating Ray objects
     ray.init(dashboard_host="0.0.0.0")
@@ -2886,6 +2960,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             generate_metrics_Q,
             weight_sync_metrics_Q,
             actor_manager,
+            model_dims,
             checkpoint_state,
         )
     finally:

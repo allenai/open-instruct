@@ -31,15 +31,7 @@ from open_instruct import dataset_transformation, grpo_fast, logger_utils, model
 from open_instruct.actor_manager import ActorManager
 from open_instruct.queue_types import PromptRequest
 
-# For FLOPS, we assume bf16 and ignore sparsity.
-# Memory bandwidth values are peak theoretical bandwidth.
-GPU_SPECS = {
-    "a100": {"flops": 312e12, "memory_size": 80e9, "memory_bandwidth": 1.6e12},  # 1.6 TB/s HBM2e
-    "b200": {"flops": 2250e12, "memory_size": 192e9, "memory_bandwidth": 8e12},  # 8 TB/s HBM3e
-    "h100": {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12},  # 3.35 TB/s HBM3
-    "a6000": {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9},  # 768 GB/s GDDR6
-    "l40s": {"flops": 362e12, "memory_size": 48e9, "memory_bandwidth": 864e9},  # 864 GB/s GDDR6
-}
+# GPU_SPECS moved to utils.py - use utils.GPU_SPECS instead
 
 
 logger = logger_utils.setup_logger(__name__)
@@ -210,8 +202,8 @@ def free_all_gpu_memory(device: int | str = 0) -> None:
     logger.info(f"[GPU {dev.index}] {free / gib:.2f} GiB free of {total / gib:.2f} GiB after cleanup")
 
 
-@dataclasses.dataclass
-class ModelDims:
+# ModelDims class moved to utils.py - use utils.ModelDims
+class ModelDimsPlaceholder:
     num_layers: int
     hidden_size: int
     intermediate_size: int
@@ -539,9 +531,14 @@ class ModelDims:
         return total
 
 
-def load_model_dims(model_name: str) -> ModelDims:
+def load_model_dims(model_name: str) -> utils.ModelDims:
+    # Delegating to utils.load_model_dims
+    return utils.load_model_dims(model_name)
+
+
+def _old_load_model_dims(model_name: str) -> utils.ModelDims:
     cfg = transformers.AutoConfig.from_pretrained(model_name, trust_remote_code=True)
-    return ModelDims(
+    return utils.ModelDims(
         num_layers=cfg.num_hidden_layers,
         hidden_size=cfg.hidden_size,
         intermediate_size=cfg.intermediate_size,
@@ -552,15 +549,8 @@ def load_model_dims(model_name: str) -> ModelDims:
 
 
 def get_device_name(device_name: str) -> str:
-    tokens = device_name.lower().replace("-", " ").split()
-
-    filtered = [val for val in tokens if val not in ["nvidia", "80gb", "40gb", "48gb", "hbm3", "rtx", "sxm4", "pcie"]]
-
-    for token in filtered:
-        if token in GPU_SPECS:
-            return token
-
-    raise ValueError(f"Unsupported device name: {device_name}. Expected one of: {list(GPU_SPECS.keys())}")
+    # Delegating to utils.get_device_name
+    return utils.get_device_name(device_name)
 
 
 def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation.TokenizerConfig) -> datasets.Dataset:
@@ -768,9 +758,9 @@ def run_benchmark(
     generation_future = executor.submit(generate_thread, vllm_engines, stop_event)
 
     results = []
-    device_name = get_device_name(torch.cuda.get_device_name(0))
-    device_flops = GPU_SPECS[device_name]["flops"]
-    device_memory_bandwidth = GPU_SPECS[device_name]["memory_bandwidth"]
+    device_name = utils.get_device_name(torch.cuda.get_device_name(0))
+    device_flops = utils.GPU_SPECS[device_name]["flops"]
+    device_memory_bandwidth = utils.GPU_SPECS[device_name]["memory_bandwidth"]
 
     # Submit warmup batch first
     logger.info("Submitting warmup batch...")
@@ -789,7 +779,7 @@ def run_benchmark(
                 start_time=time.perf_counter(),
             )
         )
-    model_dims = load_model_dims(model_config.model_name_or_path)
+    model_dims = utils.load_model_dims(model_config.model_name_or_path)
 
     try:
         logger.info("Running warmup batch...")
@@ -989,7 +979,7 @@ def print_summary(
 
     print("-" * 60)
     print("HARDWARE SPECIFICATIONS:")
-    gpu_specs = GPU_SPECS[get_device_name(torch.cuda.get_device_name(0))]
+    gpu_specs = utils.GPU_SPECS[utils.get_device_name(torch.cuda.get_device_name(0))]
     print(f"GPU device: {torch.cuda.get_device_name(0)}")
     print(f"GPU peak FLOPs: {gpu_specs['flops'] / 1e12:.0f} TFLOPs")
     print(f"GPU memory size: {gpu_specs['memory_size'] / 1e9:.0f} GB")

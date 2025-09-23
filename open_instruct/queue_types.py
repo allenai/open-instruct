@@ -9,6 +9,11 @@ class TokenStatistics:
     num_prompt_tokens: int
     num_response_tokens: int
     generation_time: float
+    mfu: float
+    mbu: float
+    earliest_start_time: float
+    total_flops: int
+    total_memory_bytes: int
 
 
 @dataclass
