@@ -682,6 +682,8 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
     if "olmo" in config.model_type:
         if "olmo" in tc.chat_template_name:
             assert not tc.add_bos, "For newer OLMo chat templates, you must *not* run with `--add_bos`."
+        elif tc.chat_template_name == "none":
+            pass  # just assume the user knows what they're doing
         else:
             assert tc.add_bos, "For OLMo, you must run with `--add_bos`."
         assert tc.use_fast, "For OLMo, you must use fast tokenizer."
@@ -772,7 +774,7 @@ class TokenizerConfig:
     tokenizer_revision: Optional[str] = None
     trust_remote_code: bool = False
     use_fast: bool = True
-    chat_template_name: str = "tulu"
+    chat_template_name: str = "none"  # default to using the tokenizer chat template
     add_bos: bool = False
     get_tokenizer_fn: str = "get_tokenizer_tulu_v2_2"
 
@@ -1317,6 +1319,7 @@ class DatasetConfig:
     transform_fn: List[str] = field(default_factory=list)
     transform_fn_args: List[Dict[str, Any]] = field(default_factory=list)
     target_columns: Optional[List[str]] = None
+    dataset_config_seed: int = 42
 
     # for tracking purposes
     dataset_commit_hash: Optional[str] = None
@@ -1368,7 +1371,7 @@ class DatasetConfig:
         # Add randomly sampled extra samples
         if extra_samples > 0:
             # Use numpy for reproducible random sampling
-            rng = np.random.RandomState(42)  # Fixed seed for reproducibility
+            rng = np.random.RandomState(self.dataset_config_seed)
             extra_indices = rng.choice(original_size, size=extra_samples, replace=False)
             indices.extend(extra_indices.tolist())
 
