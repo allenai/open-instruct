@@ -2245,6 +2245,8 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
             # Suppress timing output if nothing was processed
             if num_processed == 0:
                 timer.noop = True
+                # Sleep for 10 seconds when no work was processed to avoid tight loop
+                time.sleep(10)
         if num_processed > 0:
             try:
                 generate_metrics_Q.put_nowait({"time/generation": timer.duration})
