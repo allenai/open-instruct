@@ -599,11 +599,14 @@ class LLMRayActor:
 
         while True:
             loop_iteration += 1
+            # Use iteration-specific request ID to avoid conflicts
+            iteration_request_id = f"{sub_request_id}_iter{loop_iteration}"
+
             # Generate completion
             logger.info(
-                f"[_process_request] {sub_request_id} - Loop iteration {loop_iteration}: About to await generate_one_completion"
+                f"[_process_request] {sub_request_id} - Loop iteration {loop_iteration}: About to await generate_one_completion with {iteration_request_id}"
             )
-            output = await self.generate_one_completion(sub_request_id, current_prompt, current_sampling_params)
+            output = await self.generate_one_completion(iteration_request_id, current_prompt, current_sampling_params)
             logger.info(
                 f"[_process_request] {sub_request_id} - Loop iteration {loop_iteration}: Returned from generate_one_completion"
             )
@@ -664,7 +667,9 @@ class LLMRayActor:
             # Prepare tool output tokens (mirror main behaviour; no extra fallback text)
             logger.info(f"[_process_request] {sub_request_id} - About to access self.llm_engine.engine.tokenizer")
             tokenizer = self.llm_engine.engine.tokenizer
-            logger.info(f"[_process_request] {sub_request_id} - Successfully got tokenizer, about to encode tool output")
+            logger.info(
+                f"[_process_request] {sub_request_id} - Successfully got tokenizer, about to encode tool output"
+            )
             tool_output_text = "<output>\n" + tool_result.output + "</output>\n"
             logger.info(f"[_process_request] {sub_request_id} - Encoding text: {tool_output_text[:100]}...")
             tool_output_token_ids = tokenizer.encode(tool_output_text, add_special_tokens=False)
@@ -677,7 +682,9 @@ class LLMRayActor:
                 f"[_process_request] {sub_request_id} - About to check and convert prompt_token_ids type: {type(output.prompt_token_ids)}"
             )
             prompt_token_ids_list = (
-                list(output.prompt_token_ids) if isinstance(output.prompt_token_ids, tuple) else output.prompt_token_ids
+                list(output.prompt_token_ids)
+                if isinstance(output.prompt_token_ids, tuple)
+                else output.prompt_token_ids
             )
             logger.info(
                 f"[_process_request] {sub_request_id} - prompt_token_ids_list type: {type(prompt_token_ids_list)}, len: {len(prompt_token_ids_list)}"
@@ -713,9 +720,7 @@ class LLMRayActor:
                     f"[_process_request] {sub_request_id} - Line 662: Truncated tool output due to excess, can_continue=False"
                 )
             else:
-                logger.info(
-                    f"[_process_request] {sub_request_id} - Line 664: No excess, can_continue={can_continue}"
-                )
+                logger.info(f"[_process_request] {sub_request_id} - Line 664: No excess, can_continue={can_continue}")
 
             # Check max_tokens limit
             logger.info(
@@ -827,7 +832,9 @@ class LLMRayActor:
 
                 # Check if this request has all N outputs
                 if len(request_output.outputs) != expected_n:
-                    logger.info(f"[WAITING] Request {base_request_id} has {len(request_output.outputs)}/{expected_n} outputs, waiting for more completions")
+                    logger.info(
+                        f"[WAITING] Request {base_request_id} has {len(request_output.outputs)}/{expected_n} outputs, waiting for more completions"
+                    )
                     continue
 
                 # Build ordered outputs
@@ -870,9 +877,7 @@ class LLMRayActor:
 
         for base_request_id, result, is_eval in dispatch_items:
             self._insert_result_to_queue(result, is_eval=is_eval)
-            logger.info(
-                f"[_check_and_process_completed_requests] Inserted result for {base_request_id} to queue"
-            )
+            logger.info(f"[_check_and_process_completed_requests] Inserted result for {base_request_id} to queue")
 
         return processed_count
 
@@ -946,7 +951,9 @@ class LLMRayActor:
                     self.logger.info(f"process_from_queue iteration {iteration_count}: active_tasks={active_tasks}")
 
         finally:
-            logger.info(f"[process_from_queue] EXITING - active_tasks={len(self.active_tasks)}, request_outputs={len(self.request_outputs)}, total_processed={total_processed}")
+            logger.info(
+                f"[process_from_queue] EXITING - active_tasks={len(self.active_tasks)}, request_outputs={len(self.request_outputs)}, total_processed={total_processed}"
+            )
 
             # Wait for all active tasks to complete only if inflight_updates is False
             if not self.inflight_updates:
