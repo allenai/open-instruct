@@ -2,7 +2,7 @@ base=SFT
 description="test of https://github.com/allenai/open-instruct/pull/631"
 exp_name=rlvr_tulu3.1_8b_${base}_grpo_fast_code
 python mason.py \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/augusta \
     --image saurabhs/code_dev \
     --pure_docker_mode \
     --workspace ai2/oe-adapt-code \

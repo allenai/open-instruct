@@ -12,7 +12,7 @@ Run this file to cache models in a shared HF cache
 (e.g., weka's `/weka/oe-adapt-default/allennlp/.cache/huggingface`)
 
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale ai2/neptune-cirrascale --image nathanl/open_instruct_auto --pure_docker_mode \
+    --cluster ai2/jupiter ai2/saturn ai2/neptune --image nathanl/open_instruct_auto --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority normal \
     --preemptible \

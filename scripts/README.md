@@ -93,7 +93,7 @@ You may want to add the `--exp_name`, the name that appears in the internal lead
 
 To use this for multi-node jobs, here is an example that runs IFT on 4 nodes:
 ```
-python scripts/submit_finetune_job.py --default_beaker_config configs/beaker_configs/default_finetune_multinode.yaml --config configs/train_configs/sft/tulu3_8b_preview_mix_v3.1.yaml --cluster ai2/jupiter-cirrascale-2 --workspace ai2/tulu-3-dev --num_nodes 4 --exp_name preview_mix
+python scripts/submit_finetune_job.py --default_beaker_config configs/beaker_configs/default_finetune_multinode.yaml --config configs/train_configs/sft/tulu3_8b_preview_mix_v3.1.yaml --cluster ai2/jupiter --workspace ai2/tulu-3-dev --num_nodes 4 --exp_name preview_mix
 ```
 
 3. `submit_dpo_job.py`: **Core script** for submitting DPO tuning jobs. It should behave like the finetune script, but additionally can take in beaker datasets to mount via `--datasets`, e.g.:
