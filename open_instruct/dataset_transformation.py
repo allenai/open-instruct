@@ -1665,6 +1665,7 @@ def get_cached_dataset_tulu_with_statistics(
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
     drop_dataset_source: bool = True,
+    dataset_config_seed: int = 42,
 ) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
     dcs = []
     if dataset_config_hash is None:
@@ -1692,6 +1693,7 @@ def get_cached_dataset_tulu_with_statistics(
                 transform_fn_args=transform_fn_args,
                 target_columns=target_columns,
                 frac_or_num_samples=frac_or_num_samples,
+                dataset_config_seed=dataset_config_seed,
             )
 
             # Calculate target size properly handling fractional upsampling
@@ -1737,6 +1739,7 @@ def get_cached_dataset_tulu(
     hf_entity: Optional[str] = None,
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
+    dataset_config_seed: int = 42,
 ) -> Dataset:
     return get_cached_dataset_tulu_with_statistics(
         dataset_mixer_list,
@@ -1750,6 +1753,7 @@ def get_cached_dataset_tulu(
         hf_entity,
         dataset_local_cache_dir,
         dataset_skip_cache,
+        dataset_config_seed,
     )[0]
 
 
