@@ -28,10 +28,10 @@ EXP_NAME=${EXP_NAME:-${exp_name}}
 
 
 # cluster
-# cluster=ai2/augusta-google-1
+# cluster=ai2/augusta
 cluster=ai2/jupiter
-# cluster=ai2/ceres-cirrascale
-# cluster=ai2/neptune-cirrascale
+# cluster=ai2/ceres
+# cluster=ai2/neptune
 
 NUM_GPUS=${NUM_GPUS:-8}
 

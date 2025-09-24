@@ -54,7 +54,7 @@ pytorch_model-00002-of-00004.bin  README.md
 
 ## Google Cloud Storage
 
-Let's use [https://wandb.ai/ai2-llm/open_instruct_public/runs/tyfe1095](https://wandb.ai/ai2-llm/open_instruct_public/runs/tyfe1095) as an example. Because this run was conducted on the `ai2/augusta-google-1`, `mason.py` automatically appends `--gs_bucket_path gs://ai2-llm/post-training/` to the training args (for external users you can try doing the same append). Then, the model was automatically uploaded to 
+Let's use [https://wandb.ai/ai2-llm/open_instruct_public/runs/tyfe1095](https://wandb.ai/ai2-llm/open_instruct_public/runs/tyfe1095) as an example. Because this run was conducted on the `ai2/augusta`, `mason.py` automatically appends `--gs_bucket_path gs://ai2-llm/post-training/` to the training args (for external users you can try doing the same append). Then, the model was automatically uploaded to 
 
 ```
 gs://ai2-llm/post-training//costah/output/tulu3_8b_dpo__1__1742613782
