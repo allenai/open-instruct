@@ -17,8 +17,8 @@ exp_name=rlvr_code_view_tool_sft
         --exp_name ${exp_name} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 8 \
-        --num_unique_prompts_rollout 72 \
-        --num_mini_batches 4 \
+        --num_unique_prompts_rollout 48 \
+        --num_mini_batches 1 \
         --num_epochs 1 \
         --learning_rate 1e-6 \
         --per_device_train_batch_size 1 \
@@ -28,10 +28,10 @@ exp_name=rlvr_code_view_tool_sft
         --dataset_mixer_list_splits train \
         --dataset_mixer_eval_list saurabh5/rlvr-code-view-tool-new-first-turn-only-user 16 \
         --dataset_mixer_eval_list_splits train \
-        --max_token_length 10240 \
-        --max_prompt_token_length 2048 \
-        --response_length 32768 \
-        --pack_length 35840 \
+        --max_token_length 4096 \
+        --max_prompt_token_length 4096 \
+        --response_length 16384 \
+        --pack_length 20480 \
         --model_name_or_path  /weka/oe-adapt-default/ethans/llm-weights/Qwen3.2-8B-nothink \
         --chat_template_name chatml \
         --non_stop_penalty False \

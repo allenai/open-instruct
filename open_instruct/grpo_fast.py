@@ -2262,24 +2262,33 @@ def weight_sync_thread(
         with Timer("[Weight Sync]") as timer:
             logger.debug("[Weight Sync Thread] Starting weight sync")
 
-            # Set actors to stop
-            ray.get(actor_manager.set_should_stop.remote(True))
-            logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
+            # Set actors to stop while we broadcast updated weights
+            try:
+                ray.get(actor_manager.set_should_stop.remote(True))
+                logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
 
-            # Broadcast weights to vLLM engines
-            # First get the futures
-            weight_broadcast_futures: List[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+                # Broadcast weights to vLLM engines
+                weight_broadcast_futures: List[ray.ObjectRef] = [
+                    m.broadcast_to_vllm.remote() for m in policy_group.models
+                ]
 
-            # Wait for all weight updates to complete
-            ray_get_with_progress(
-                weight_broadcast_futures,
-                desc="[Weight Sync Thread] Waiting for weight updates to complete",
-                enable=args.verbose,
-            )
-
-            # Allow actors to resume
-            ray.get(actor_manager.set_should_stop.remote(False))
-            logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
+                # Wait for all weight updates to complete
+                ray_get_with_progress(
+                    weight_broadcast_futures,
+                    desc="[Weight Sync Thread] Waiting for weight updates to complete",
+                    enable=args.verbose,
+                )
+            except Exception as exc:
+                logger.exception("[Weight Sync Thread] Error during weight sync: %s", exc)
+                raise
+            finally:
+                try:
+                    ray.get(actor_manager.set_should_stop.remote(False))
+                    logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
+                except Exception as resume_exc:
+                    logger.exception(
+                        "[Weight Sync Thread] Failed to reset should_stop flag after weight sync: %s", resume_exc
+                    )
 
         try:
             weight_sync_metrics_Q.put_nowait({"time/weight_sync": timer.duration})

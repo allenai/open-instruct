@@ -355,24 +355,13 @@ def add_request(request: PromptRequest, llm_engine: vllm.LLMEngine, tools, reque
 
     # Optionally append a hidden tool context to the prompt token ids
     prompt_token_ids = list(request.prompt)
-    tool_context_str: Optional[str] = None
-    if getattr(request, "tool_contexts", None):
-        # Expect a list of length 1 for single prompt
-        tool_context_str = request.tool_contexts[0]
-        if tool_context_str:
-            try:
-                comment = f"<!--tool_context:{tool_context_str}-->"
-                extra_ids = llm_engine.tokenizer.encode(comment, add_special_tokens=False)
-                prompt_token_ids.extend(extra_ids)
-                # Record that we changed the prompt length for accurate accounting
-                request_metadata[request_id]["prompt_tokens"] = len(prompt_token_ids)
-            except Exception as e:
-                # If tokenization fails, fallback without context
-                logger.warning(f"Failed to encode tool_context for {request_id}: {e}")
-                tool_context_str = None
-
-    # Record the tool_context in metadata for returning with results
-    if tool_context_str is not None:
+    tool_contexts = getattr(request, "tool_contexts", None) or []
+    tool_context_str: Optional[str]
+    if isinstance(tool_contexts, (list, tuple)):
+        tool_context_str = tool_contexts[0] if len(tool_contexts) > 0 else None
+    else:
+        tool_context_str = tool_contexts
+    if tool_context_str:
         request_metadata[request_id]["tool_context"] = tool_context_str
 
     tokens_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_token_ids, cache_salt=request_id)
@@ -581,7 +570,7 @@ class LLMRayActor:
             last_prompt_token_ids = last_output.prompt_token_ids
             last_token_ids = last_o.token_ids
             tool_output_token_ids = tokenizer.encode(
-                "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+                "<tool_response>\n" + tool_result.output + "</tool_response>\n", add_special_tokens=False
             )
             tracking["timeout"][req_id] = tool_result.timeout
             tracking["tool_error"][req_id] += "" if tool_result.error is None else tool_result.error

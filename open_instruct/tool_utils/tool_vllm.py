@@ -546,7 +546,7 @@ class ToolUseLLM(LLM):
                     last_prompt_token_ids = last_output.prompt_token_ids
                     last_token_ids = last_o.token_ids
                     tool_output_token_ids = tokenizer.encode(
-                        "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+                        "<tool_response>\n" + tool_result.output + "</tool_response>\n", add_special_tokens=False
                     )
                     # If the tool requests termination, append a stop string and prevent further requests
                     terminate_generation = getattr(tool_result, "terminate", False)
