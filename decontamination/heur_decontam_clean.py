@@ -99,6 +99,9 @@ except Exception:
 # ----------- Heuristics (all-spans) -----------
 GENERIC_STEM_WITH_NL = ["Which","of","the","following","statements","is","correct","?","\n"]
 GENERIC_STEM_NO_NL   = ["Which","of","the","following","statements","is","correct","?"]
+# Present the answer in LaTex format: \boxed{Your answer}
+GENERIC_STEM_MATH = ["Present", "the", "answer", "in", "LaTex", "format", ":", "\\boxed{Your", "answer", "}"]
+GENERIC_STEM_MATH = ["Present", "the", "answer", "in", "LaTex", "format", ":", "\\boxed{Your", "answer", "}", "\n"]
 
 def tokens_majority_len1(tokens: List[str]) -> bool:
     if not tokens: return False
@@ -107,7 +110,7 @@ def tokens_majority_len1(tokens: List[str]) -> bool:
     return sum(1 for t in cleaned if len(t) == 1) > (len(cleaned) / 2.0)
 
 def is_generic_stem(tokens: List[str]) -> bool:
-    return tokens == GENERIC_STEM_WITH_NL or tokens == GENERIC_STEM_NO_NL
+    return tokens == GENERIC_STEM_WITH_NL or tokens == GENERIC_STEM_NO_NL or tokens == GENERIC_STEM_MATH
 
 def analyze_spans_and_heuristics(matching_tokens, score) -> Tuple[bool, bool, bool]:
     """
@@ -176,6 +179,9 @@ def read_ngram_maps_for_file(path: str) -> Tuple[Dict[int, float], Dict[int, flo
             raw = raw.strip()
             if not raw:
                 continue
+            # Fast prefilter: skip lines that obviously have no matches without JSON parse
+            if b'"matches"' not in raw:
+                continue
             try:
                 d = _loads(raw)
             except Exception:
@@ -236,6 +242,14 @@ def main():
                     help="Old method: n-gram score > this value (strict >). Default 0.5")
     ap.add_argument("--new_match_threshold", type=float, default=0.5,
                     help="New method base threshold for non-verified datasets (strict >). 'verified' datasets use 0.85 hard override.")
+    ap.add_argument("--source_field", type=str, default="source",
+                    help="Per-sample field name in train dataset used to decide higher threshold.")
+    ap.add_argument("--source_match_substring", type=str, default="if_multi_constraints,All_Puzzles,math_dataset,omega,orz_math,dapo-math,acereason,deepscaler,mathsub",
+                    help="Comma-separated, case-insensitive substrings in source field that trigger the higher threshold (0.85).")
+    ap.add_argument("--disable_per_sample_source", action="store_true",
+                    help="If set, do not use per-sample source-based thresholds (use base threshold everywhere).")
+    ap.add_argument("--zebra_eval_min_threshold", type=float, default=0.85,
+                    help="If eval name contains 'zebra', enforce at least this threshold.")
     # outputs
     ap.add_argument("--per_eval_counts_tsv", required=True,
                     help="TSV: per train×eval, old vs new unique-row stripped counts")
@@ -251,9 +265,15 @@ def main():
     ap.add_argument("--hub_namespace", type=str, default="saumyamalik",
                     help="HF namespace for uploading decontaminated splits")
     # performance
-    ap.add_argument("--workers", type=int, default=0,
-                    help="Parallel file reading (0 = sequential)")
+    ap.add_argument("--workers", type=int, default=-1,
+                    help="Parallel file reading (-1 = auto cpu count, 0 = sequential)")
     args = ap.parse_args()
+    # If auto, default to using available CPUs for faster cache reads
+    if args.workers is None or args.workers < 0:
+        try:
+            args.workers = max(1, (os.cpu_count() or 1))
+        except Exception:
+            args.workers = 1
 
     # Accumulators: per (train, eval) maps (N-GRAM ONLY)
     per_pair_before: Dict[Tuple[str,str], Dict[int,float]] = defaultdict(dict)  # no heuristics
@@ -271,9 +291,9 @@ def main():
     # Read files
     if args.workers and args.workers > 0:
         import multiprocessing as mp
-        with mp.Pool(processes=args.workers) as pool:
+        with mp.Pool(processes=args.workers, maxtasksperchild=20) as pool:
             for ds, ev, before_map, after_map in tqdm(
-                pool.imap_unordered(worker_ngram_read, tasks),
+                pool.imap_unordered(worker_ngram_read, tasks, chunksize=max(1, len(tasks)//(args.workers*4) or 1)),
                 total=len(tasks),
                 desc="Reading n-gram caches"
             ):
@@ -299,19 +319,79 @@ def main():
                 if s > dst_a.get(oid, float("-inf")):
                     dst_a[oid] = s
 
-    # Threshold helpers
+    # Threshold helpers (optimized)
+    # Build per-dataset set of oids whose source contains the configured substring.
+    # Additionally, track oids whose source specifically contains 'omega' to apply a stricter threshold.
+    matching_oids_by_ds: Dict[str, set] = {}
+    omega_oids_by_ds: Dict[str, set] = {}
+    if not args.disable_per_sample_source and load_dataset is not None:
+        cache_subs = [s.strip().lower() for s in (args.source_match_substring or "").split(",") if s.strip()]
+        for ds in USABLE_TRAIN:
+            # Candidate oids: union across evals from per_pair_after keys
+            candidate_oids = set()
+            for ev in EVAL_SUFFIXES:
+                candidate_oids.update(per_pair_after.get((ds, ev), {}).keys())
+
+            if not candidate_oids:
+                matching_oids_by_ds[ds] = set()
+                continue
+
+            # Load only needed rows
+            try:
+                ds_obj = load_dataset(ds, split="train")
+            except Exception as e:
+                print(f"[source_map] Could not load {ds}: {e}", file=sys.stderr)
+                matching_oids_by_ds[ds] = set()
+                continue
+
+            positives = set()
+            omega_positives = set()
+            field = args.source_field
+            for oid in candidate_oids:
+                try:
+                    row = ds_obj[int(oid)]
+                    val = row.get(field) if isinstance(row, dict) else None
+                    if isinstance(val, str):
+                        low = val.lower()
+                        if any(sub in low for sub in cache_subs):
+                            positives.add(int(oid))
+                        if "omega" in low or "dapo-math" in low:
+                            omega_positives.add(int(oid))
+                except Exception:
+                    continue
+            matching_oids_by_ds[ds] = positives
+            omega_oids_by_ds[ds] = omega_positives
+
+    def new_threshold_for_sample(ds: str, ev: str, oid: int) -> float:
+        """Per-sample threshold for a given eval:
+        - If eval name contains 'zebra', enforce at least args.zebra_eval_min_threshold
+        - Else if sample source contains 'omega', use 0.95
+        - Else if sample matches other configured source substrings, use 0.85
+        - Else use args.new_match_threshold
+        """
+        if args.disable_per_sample_source:
+            base = args.new_match_threshold
+        else:
+            int_oid = int(oid)
+            if int_oid in omega_oids_by_ds.get(ds, set()):
+                base = 0.95
+            elif int_oid in matching_oids_by_ds.get(ds, set()):
+                base = 0.85
+            else:
+                base = args.new_match_threshold
+        # Eval-based bump: zebra, mmlu-pro, gpqa, ifbench, bbh, bbeh
+        if isinstance(ev, str):
+            ev_low = ev.lower()
+            if any(k in ev_low for k in ("zebra", "mmlu-pro", "gpqa", "ifbench", "bbh", "bbeh")):
+                return max(base, args.zebra_eval_min_threshold)
+        return base
     def old_ids_for_pair(ds: str, ev: str) -> set:
         # Old method: n-gram only, score > old_floor, no heuristics.
         return {oid for oid, s in per_pair_before.get((ds, ev), {}).items() if s > args.old_floor}
 
-    def new_threshold_for_train(ds: str) -> float:
-        # New method: if train dataset name contains "verified", force 0.85; else use new_match_threshold
-        return 0.85 if is_verified_dataset(ds) else args.new_match_threshold
-
     def new_ids_for_pair(ds: str, ev: str) -> set:
-        thr = new_threshold_for_train(ds)
-        # New method: n-gram only, after all-spans heuristic, score > dataset-specific threshold
-        return {oid for oid, s in per_pair_after.get((ds, ev), {}).items() if s > thr}
+        # New method: n-gram only, after all-spans heuristic, score > per-sample threshold
+        return {oid for oid, s in per_pair_after.get((ds, ev), {}).items() if s > new_threshold_for_sample(ds, ev, oid)}
 
     # --- Per train×eval counts (unique rows stripped) ---
     per_eval_rows = []
@@ -338,7 +418,7 @@ def main():
         new_removed_by_train[ds] = new_union  # for decontamination
         per_train_rows.append([
             ds, len(old_union), len(new_union), len(new_union) - len(old_union),
-            ("verified" if is_verified_dataset(ds) else "")
+            ""
         ])
     write_tsv(args.per_train_union_counts_tsv,
               ["train_dataset","old_union_stripped","new_union_stripped","delta_new_minus_old","note"],
@@ -350,11 +430,10 @@ def main():
     pivot_rows = []
     for ds in USABLE_TRAIN:
         row = [ds]
-        thr = new_threshold_for_train(ds)
         for ev in EVAL_SUFFIXES:
-            # count unique oids with after-map score > thr (n-gram + heuristics applied)
+            # count unique oids with after-map score > per-sample threshold (n-gram + heuristics applied)
             score_map = per_pair_after.get((ds, ev), {})
-            cnt = sum(1 for _oid, s in score_map.items() if s > thr)
+            cnt = sum(1 for _oid, s in score_map.items() if s > new_threshold_for_sample(ds, ev, _oid))
             row.append(cnt)
         pivot_rows.append(row)
     write_tsv(args.pivot_new_tsv, pivot_header, pivot_rows)
