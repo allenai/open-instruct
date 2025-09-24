@@ -49,6 +49,16 @@ from open_instruct.utils import ray_get_with_progress
 logger = logger_utils.setup_logger(__name__)
 
 
+@dataclasses.dataclass
+class ProcessedSubRequest:
+    """Result from processing a single sub-request."""
+
+    base_request_id: str
+    sub_request_id: str
+    index: int
+    request_output: vllm.RequestOutput
+
+
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
 # Turns out Ray doesnt necessarily place bundles together,
 # so this function is used to get the bundle indices of a placement group
@@ -340,10 +350,12 @@ class LLMRayActor:
         # Async tracking
         self.active_tasks = {}  # Track active async tasks
         self.request_outputs = {}
-        self.request_outputs_lock = asyncio.Lock()  # Lock for thread-safe access
+        self.result_queue = asyncio.Queue()  # Queue for passing results from _process_request to main thread
+        self.total_processed = 0  # Track total processed requests
 
         # Prefetch task is started lazily from async methods
         self.prefetch_task = None
+        self.result_processor_task = None
 
     async def _ensure_prefetch_started(self):
         """Start the background prefetch task if not already running."""
@@ -784,34 +796,73 @@ class LLMRayActor:
             setattr(complete_output, "tool_runtime", tool_runtime)
             setattr(complete_output, "tool_called", tool_called)
 
-        # Add to request_outputs with lock
-        logger.info(f"[_process_request] {sub_request_id} - Acquiring request_outputs_lock")
-        async with self.request_outputs_lock:
-            if base_request_id not in self.request_outputs:
+        # Push result to queue for processing by main thread
+        logger.info(f"[_process_request] {sub_request_id} - Pushing result to queue")
+        result = ProcessedSubRequest(
+            base_request_id=base_request_id, sub_request_id=sub_request_id, index=index, request_output=request_output
+        )
+        await self.result_queue.put(result)
+        logger.info(f"[_process_request] EXIT {sub_request_id} - Successfully completed")
+
+    async def _process_result_queue(self):
+        """Process results from the result queue and manage request_outputs.
+
+        This runs in a single task, so no locking is needed for request_outputs.
+        """
+        self.total_processed = 0  # Track total processed for proper reporting
+        while True:
+            try:
+                # Get result from queue with timeout to allow periodic checks
+                result = await asyncio.wait_for(self.result_queue.get(), timeout=1.0)
+
+                # Update request_outputs (no lock needed - single consumer)
+                base_request_id = result.base_request_id
+                if base_request_id not in self.request_outputs:
+                    logger.info(f"[_process_result_queue] Creating new request_outputs entry for {base_request_id}")
+                    self.request_outputs[base_request_id] = vllm.RequestOutput(
+                        request_id=base_request_id,
+                        prompt=result.request_output.prompt,
+                        prompt_token_ids=result.request_output.prompt_token_ids,
+                        prompt_logprobs=result.request_output.prompt_logprobs,
+                        outputs=[],
+                        finished=True,
+                    )
+
+                # Add the output with its index preserved
+                complete_output = result.request_output.outputs[0]
+                self.request_outputs[base_request_id].outputs.append(complete_output)
+                outputs_count = len(self.request_outputs[base_request_id].outputs)
                 logger.info(
-                    f"[_process_request] {sub_request_id} - Creating new request_outputs entry for {base_request_id}"
-                )
-                self.request_outputs[base_request_id] = vllm.RequestOutput(
-                    request_id=base_request_id,
-                    prompt=request_output.prompt,
-                    prompt_token_ids=request_output.prompt_token_ids,
-                    prompt_logprobs=request_output.prompt_logprobs,
-                    outputs=[],
-                    finished=True,
+                    f"[_process_result_queue] Added output for {result.sub_request_id} to {base_request_id}, total outputs: {outputs_count}"
                 )
 
-            self.request_outputs[base_request_id].outputs.append(complete_output)
-            outputs_count = len(self.request_outputs[base_request_id].outputs)
-            logger.info(
-                f"[_process_request] {sub_request_id} - Added output to {base_request_id}, total outputs: {outputs_count}, lock released"
-            )
-        logger.info(f"[_process_request] EXIT {sub_request_id} - Successfully completed")
+                # Check if this request is complete
+                if base_request_id in self.request_metadata:
+                    expected_n = self.request_metadata[base_request_id]["original_sampling_params"].n
+                    if outputs_count == expected_n:
+                        # Process and dispatch the completed request
+                        processed = await self._check_and_process_completed_requests([base_request_id])
+                        self.total_processed += processed
+
+            except asyncio.TimeoutError:
+                # Timeout is normal - allows us to check if we should exit
+                pass
+            except asyncio.CancelledError:
+                # Task was cancelled, exit cleanly
+                logger.info("[_process_result_queue] Task cancelled, exiting")
+                break
+            except Exception as e:
+                logger.error(f"[_process_result_queue] Error processing result: {e}")
+                # Continue processing other results
 
     async def _check_and_process_completed_requests(self, base_request_ids: List[str]):
         """Check request_outputs for completed requests and process them.
 
         Args:
             base_request_ids: List of specific base request IDs to check.
+
+        Note: This is now only called from _process_result_queue (single consumer),
+              so no locking is needed.
         """
         if not base_request_ids:
             return 0
@@ -820,66 +871,70 @@ class LLMRayActor:
         dispatch_items: list[tuple[str, GenerationResult, bool]] = []
         current_time = time.perf_counter()
 
-        # Acquire lock once for entire operation
-        async with self.request_outputs_lock:
-            for base_request_id in base_request_ids:
-                # Skip if not in outputs or metadata
-                if base_request_id not in self.request_outputs or base_request_id not in self.request_metadata:
-                    continue
+        # No lock needed - single consumer pattern
+        for base_request_id in base_request_ids:
+            # Skip if not in outputs or metadata
+            if base_request_id not in self.request_outputs or base_request_id not in self.request_metadata:
+                continue
 
-                request_output = self.request_outputs[base_request_id]
-                expected_n = self.request_metadata[base_request_id]["original_sampling_params"].n
+            request_output = self.request_outputs[base_request_id]
+            expected_n = self.request_metadata[base_request_id]["original_sampling_params"].n
 
-                # Check if this request has all N outputs
-                if len(request_output.outputs) != expected_n:
-                    logger.info(
-                        f"[WAITING] Request {base_request_id} has {len(request_output.outputs)}/{expected_n} outputs, waiting for more completions"
-                    )
-                    continue
-
-                # Build ordered outputs
-                ordered_outs = []
-                for j in range(expected_n):
-                    matching_output = None
-                    for comp_output in request_output.outputs:
-                        if hasattr(comp_output, "index") and comp_output.index == j:
-                            matching_output = comp_output
-                            break
-
-                    ordered_outs.append(
-                        vllm.RequestOutput(
-                            request_id=f"{base_request_id}_{j}",
-                            prompt=request_output.prompt,
-                            prompt_token_ids=request_output.prompt_token_ids,
-                            prompt_logprobs=request_output.prompt_logprobs,
-                            outputs=[matching_output],
-                            finished=True,
-                        )
-                    )
-
-                # Remove from request_outputs
-                self.request_outputs.pop(base_request_id)
-
-                # Process result while still holding the lock, but defer queue writes until afterwards.
-                logger.info(f"[_check_and_process_completed_requests] Processing completed request {base_request_id}")
-                result, is_eval = process_completed_request(
-                    base_request_id, ordered_outs, {}, current_time, self.tools, self.request_metadata
-                )
+            # Check if this request has all N outputs
+            if len(request_output.outputs) != expected_n:
                 logger.info(
-                    f"[_check_and_process_completed_requests] Processed result type: {type(result)}, is_eval: {is_eval}"
+                    f"[WAITING] Request {base_request_id} has {len(request_output.outputs)}/{expected_n} outputs, waiting for more completions"
+                )
+                continue
+
+            # Build ordered outputs
+            ordered_outs = []
+            for j in range(expected_n):
+                matching_output = None
+                for comp_output in request_output.outputs:
+                    if hasattr(comp_output, "index") and comp_output.index == j:
+                        matching_output = comp_output
+                        break
+
+                ordered_outs.append(
+                    vllm.RequestOutput(
+                        request_id=f"{base_request_id}_{j}",
+                        prompt=request_output.prompt,
+                        prompt_token_ids=request_output.prompt_token_ids,
+                        prompt_logprobs=request_output.prompt_logprobs,
+                        outputs=[matching_output],
+                        finished=True,
+                    )
                 )
 
-                # Clean up metadata before leaving the lock to avoid races with new tasks.
-                self.request_metadata.pop(base_request_id, None)
+            # Remove from request_outputs
+            self.request_outputs.pop(base_request_id)
 
-                dispatch_items.append((base_request_id, result, is_eval))
-                processed_count += 1
+            # Process result
+            logger.info(f"[_check_and_process_completed_requests] Processing completed request {base_request_id}")
+            result, is_eval = process_completed_request(
+                base_request_id, ordered_outs, {}, current_time, self.tools, self.request_metadata
+            )
+            logger.info(
+                f"[_check_and_process_completed_requests] Processed result type: {type(result)}, is_eval: {is_eval}"
+            )
+
+            # Clean up metadata
+            self.request_metadata.pop(base_request_id, None)
+
+            dispatch_items.append((base_request_id, result, is_eval))
+            processed_count += 1
 
         for base_request_id, result, is_eval in dispatch_items:
             self._insert_result_to_queue(result, is_eval=is_eval)
             logger.info(f"[_check_and_process_completed_requests] Inserted result for {base_request_id} to queue")
 
         return processed_count
+
+    async def _ensure_result_processor_started(self):
+        """Start the result processor task if not already running."""
+        if self.result_processor_task is None or self.result_processor_task.done():
+            self.result_processor_task = asyncio.create_task(self._process_result_queue())
 
     async def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using AsyncLLMEngine.
@@ -893,20 +948,22 @@ class LLMRayActor:
         # Ensure engine and prefetch are initialized
         await self._ensure_engine_initialized()
         await self._ensure_prefetch_started()
+        await self._ensure_result_processor_started()
 
         iteration_count = 0
-        total_processed = 0
 
         try:
             while not await self._should_exit():
                 iteration_count += 1
 
-                # Health check for prefetch task
+                # Health check for background tasks
                 if self.prefetch_task.done():
                     self.prefetch_task.result()  # This will raise if the task failed
+                if self.result_processor_task.done():
+                    self.result_processor_task.result()  # This will raise if the task failed
 
                 # Wait for any task to complete or timeout
-                # Only wait for actual generation tasks, not the prefetch task
+                # Only wait for actual generation tasks, not the background tasks
                 tasks_to_wait = list(self.active_tasks.values()) if self.active_tasks else []
 
                 if tasks_to_wait:
@@ -919,8 +976,7 @@ class LLMRayActor:
                     await asyncio.sleep(10)
                     done = set()
 
-                # Process completed tasks and collect their base request IDs
-                completed_base_request_ids = set()
+                # Process completed tasks
                 for task in done:
                     await task  # Get result or raise exception
 
@@ -928,45 +984,59 @@ class LLMRayActor:
                     task_name = task.get_name()
                     if task_name in self.active_tasks:
                         self.active_tasks.pop(task_name, None)
-                        # Extract base request ID from task name (e.g., "train_1_43039_2" -> "train_1_43039")
-                        base_request_id = _extract_base_request_id(task_name)
-                        completed_base_request_ids.add(base_request_id)
-
-                # Check any base requests that just had tasks complete
-                if completed_base_request_ids:
-                    processed_count = await self._check_and_process_completed_requests(
-                        list(completed_base_request_ids)
-                    )
-                    total_processed += processed_count
-
-                # Opportunistically flush any requests that are already complete
-                # (e.g., completed earlier in a different iteration)
-                if self.request_outputs:
-                    all_base_request_ids = list(self.request_outputs.keys())
-                    processed_count = await self._check_and_process_completed_requests(all_base_request_ids)
-                    total_processed += processed_count
+                        # Note: The result processor will handle checking for completion
+                        # We no longer need to track completed_base_request_ids here
 
                 if self.verbose and iteration_count % 10000 == 0:
                     active_tasks = len(self.active_tasks)
                     self.logger.info(f"process_from_queue iteration {iteration_count}: active_tasks={active_tasks}")
 
         finally:
+            # Get total processed from the result processor
+            total_processed = getattr(self, "total_processed", 0)
+
             logger.info(
                 f"[process_from_queue] EXITING - active_tasks={len(self.active_tasks)}, request_outputs={len(self.request_outputs)}, total_processed={total_processed}"
             )
+
+            # Stop the result processor
+            if self.result_processor_task and not self.result_processor_task.done():
+                self.result_processor_task.cancel()
+                try:
+                    await self.result_processor_task
+                except asyncio.CancelledError:
+                    pass
 
             # Wait for all active tasks to complete only if inflight_updates is False
             if not self.inflight_updates:
                 await asyncio.gather(*self.active_tasks.values(), return_exceptions=True)
 
+                # Process any remaining items in the result queue
+                while not self.result_queue.empty():
+                    try:
+                        result = await asyncio.wait_for(self.result_queue.get(), timeout=1.0)
+                        # Process this result manually
+                        base_request_id = result.base_request_id
+                        if base_request_id not in self.request_outputs:
+                            self.request_outputs[base_request_id] = vllm.RequestOutput(
+                                request_id=base_request_id,
+                                prompt=result.request_output.prompt,
+                                prompt_token_ids=result.request_output.prompt_token_ids,
+                                prompt_logprobs=result.request_output.prompt_logprobs,
+                                outputs=[],
+                                finished=True,
+                            )
+                        self.request_outputs[base_request_id].outputs.append(result.request_output.outputs[0])
+                    except asyncio.TimeoutError:
+                        break
+
             # Always process any remaining completed requests on exit
-            # (prefetch is paused by should_stop, so this is safe)
             if self.request_outputs:
                 all_base_request_ids = list(self.request_outputs.keys())
                 processed_count = await self._check_and_process_completed_requests(all_base_request_ids)
                 total_processed += processed_count
 
-            # Count total processed
+            # Final count
             logger.info(f"[process_from_queue] FINAL EXIT - total_processed={total_processed}")
             return total_processed
 
