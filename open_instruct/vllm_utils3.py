@@ -651,7 +651,10 @@ class LLMRayActor:
             tool_error += "" if tool_result.error is None else tool_result.error
             tool_output_str += tool_result.output
             tool_runtime += tool_result.runtime
-            tool_called = tool_result.called
+            # Match main-branch semantics: once a tool path is taken, mark the
+            # response as having used a tool regardless of the tool's internal
+            # called flag (e.g., MaxCallsExceededTool returns called=False).
+            tool_called = True
 
             # Check if tool was actually called (MaxCallsExceededTool returns called=False)
             if not tool_result.called:
