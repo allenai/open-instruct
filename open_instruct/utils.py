@@ -53,6 +53,7 @@ import numpy as np
 import ray
 import requests
 import torch
+import vllm.config
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
@@ -1644,3 +1645,379 @@ def check_oe_eval_internal():
             "when running in Beaker. Please ensure the Docker image was built "
             "with access to the oe-eval-internal repository."
         )
+
+
+# For FLOPS, we assume bf16 and ignore sparsity.
+# Memory bandwidth values are peak theoretical bandwidth.
+GPU_SPECS = {
+    "a100": {"flops": 312e12, "memory_size": 80e9, "memory_bandwidth": 1.6e12},  # 1.6 TB/s HBM2e
+    "b200": {"flops": 2250e12, "memory_size": 192e9, "memory_bandwidth": 8e12},  # 8 TB/s HBM3e
+    "h100": {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12},  # 3.35 TB/s HBM3
+    "a6000": {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9},  # 768 GB/s GDDR6
+    "l40s": {"flops": 362e12, "memory_size": 48e9, "memory_bandwidth": 864e9},  # 864 GB/s GDDR6
+}
+
+# Conventions for FLOPs calculations (fixed; not switches)
+FLOP_PER_MAC = 2
+# Approximate softmax cost per attention score:
+# ~4 scalar ops/score: exp + subtract max (stabilization) + sum + divide.
+SOFTMAX_FLOPS_PER_SCORE = 4
+
+
+@dataclasses.dataclass
+class ModelDims:
+    num_layers: int
+    hidden_size: int
+    intermediate_size: int
+    vocab_size: int
+    num_attn_heads: int
+    num_kv_heads: Optional[int] = None
+    device_name: Optional[str] = None
+
+    def __post_init__(self):
+        if self.num_kv_heads is None:
+            self.num_kv_heads = self.num_attn_heads
+
+        if self.device_name is None:
+            import torch
+
+            if torch.cuda.is_available():
+                self.device_name = get_device_name(torch.cuda.get_device_name(0))
+
+        assert self.hidden_size % self.num_attn_heads == 0, "hidden_size must be divisible by num_attn_heads"
+        assert self.num_attn_heads % self.num_kv_heads == 0, (
+            "num_attn_heads must be divisible by num_kv_heads (GQA/MQA)"
+        )
+
+    @classmethod
+    def from_vllm_config(cls, vllm_config: vllm.config.VllmConfig) -> "ModelDims":
+        """Create ModelDims from a vLLM config object."""
+        model_config = vllm_config.model_config
+        hidden_size = model_config.get_hidden_size()
+
+        # Try to get intermediate_size, default to 4x hidden_size if not present
+        intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
+
+        return cls(
+            num_layers=model_config.get_num_layers(vllm_config.parallel_config),
+            hidden_size=hidden_size,
+            intermediate_size=intermediate_size,
+            vocab_size=model_config.get_vocab_size(),
+            num_attn_heads=model_config.get_num_attention_heads(vllm_config.parallel_config),
+            num_kv_heads=model_config.get_num_kv_heads(vllm_config.parallel_config),
+        )
+
+    @property
+    def head_dim(self) -> int:
+        return self.hidden_size // self.num_attn_heads
+
+    @property
+    def device_flops(self) -> float:
+        assert self.device_name is not None, "device_name must be set"
+        assert self.device_name in GPU_SPECS, f"Unknown device: {self.device_name}"
+        return GPU_SPECS[self.device_name]["flops"]
+
+    @property
+    def device_memory_bandwidth(self) -> float:
+        assert self.device_name is not None, "device_name must be set"
+        assert self.device_name in GPU_SPECS, f"Unknown device: {self.device_name}"
+        return GPU_SPECS[self.device_name]["memory_bandwidth"]
+
+    def attn_flops(self, query_len: int, kv_len: int) -> int:
+        """FLOPs for one layer of self-attention given query_len and kv_len.
+
+        Assumptions:
+          - 1 MAC = 2 FLOPs (FLOP_PER_MAC).
+          - Efficient GQA/MQA K/V projections with width = num_kv_heads * head_dim.
+          - Softmax ≈ 4 FLOPs per score (see SOFTMAX_FLOPS_PER_SCORE).
+          - LayerNorms and minor ops ignored (dominated by matmuls).
+        """
+        d = self.head_dim
+        mul = FLOP_PER_MAC
+
+        # Projections for the query_len new tokens
+        q_proj = mul * query_len * self.hidden_size * self.hidden_size
+        kv_proj = mul * 2 * query_len * self.hidden_size * (self.num_kv_heads * d)  # GQA/MQA
+
+        # Scores and attention-weighted values
+        qk = mul * self.num_attn_heads * query_len * kv_len * d
+        softmax = SOFTMAX_FLOPS_PER_SCORE * self.num_attn_heads * query_len * kv_len
+        av = mul * self.num_attn_heads * query_len * kv_len * d
+
+        # Output projection
+        out_proj = mul * query_len * self.hidden_size * self.hidden_size
+
+        return q_proj + kv_proj + qk + softmax + av + out_proj
+
+    def mlp_flops(self, seq_len: int) -> int:
+        """Two matmuls dominate; activation cost under-counted on purpose."""
+        mul = FLOP_PER_MAC
+        first = mul * seq_len * self.hidden_size * self.intermediate_size
+        act = seq_len * self.intermediate_size  # under-counted on purpose
+        second = mul * seq_len * self.intermediate_size * self.hidden_size
+        return first + act + second
+
+    def prefill_flops(self, prompt_lengths: list[int]) -> int:
+        """Prefill builds the KV cache; logits are computed once after each prompt."""
+        total = 0
+        for L in prompt_lengths:
+            total += self.num_layers * (self.attn_flops(L, L) + self.mlp_flops(L))
+            # Always include a single LM head after prefill (next-token logits)
+            total += FLOP_PER_MAC * self.hidden_size * self.vocab_size
+        return total
+
+    def decode_flops(self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int = 1) -> int:
+        """Decode/generation FLOPs.
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+
+        Embedding lookups are ignored by design.
+        """
+        assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+            f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+        )
+
+        total = 0
+        response_idx = 0
+        for P in prompt_lengths:
+            # Process all samples for this prompt
+            for _ in range(samples_per_prompt):
+                R = response_lengths[response_idx]
+                total += R * self.num_layers * self.mlp_flops(seq_len=1)
+                for t in range(R):
+                    kv_len = P + t + 1  # prompt + generated so far + current
+                    total += self.num_layers * self.attn_flops(query_len=1, kv_len=kv_len)
+                total += R * FLOP_PER_MAC * self.hidden_size * self.vocab_size
+                response_idx += 1
+        return total
+
+    def flops(
+        self, prompt_lengths: list[int], response_lengths: Optional[list[int]] = None, samples_per_prompt: int = 1
+    ) -> int:
+        """Total FLOPs for prefill and (optionally) decode.
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+        """
+        total = self.prefill_flops(prompt_lengths)
+        if response_lengths is not None:
+            total += self.decode_flops(prompt_lengths, response_lengths, samples_per_prompt)
+        return total
+
+    def weight_memory_bytes(self, num_tokens: int, dtype_bytes: int = 2) -> int:
+        """Memory bytes for reading model weights for a given number of tokens.
+
+        Args:
+            num_tokens: Number of tokens to process
+            dtype_bytes: Bytes per element (2 for FP16/BF16)
+
+        Returns:
+            Total bytes for weight reads across all layers
+        """
+        num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
+        head_dim = self.hidden_size // self.num_attn_heads
+        hidden_kv = num_kv * head_dim
+
+        # Per-layer weight params (Q, K, V, O, MLP up, MLP down)
+        w_q = self.hidden_size * self.hidden_size
+        w_k = self.hidden_size * hidden_kv
+        w_v = self.hidden_size * hidden_kv
+        w_o = self.hidden_size * self.hidden_size
+        w_up = self.hidden_size * self.intermediate_size
+        w_dn = self.intermediate_size * self.hidden_size
+
+        per_layer_weight_bytes = (w_q + w_k + w_v + w_o + w_up + w_dn) * dtype_bytes
+        return self.num_layers * num_tokens * per_layer_weight_bytes
+
+    def kv_cache_write_bytes(self, num_tokens: int, dtype_bytes: int = 2) -> int:
+        """Memory bytes for writing KV cache for a given number of tokens.
+
+        Args:
+            num_tokens: Number of tokens being cached
+            dtype_bytes: Bytes per element (2 for FP16/BF16)
+
+        Returns:
+            Total bytes for KV cache writes across all layers
+        """
+        num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
+        head_dim = self.hidden_size // self.num_attn_heads
+
+        # 2x for K and V
+        kv_write_bytes_per_token = 2 * num_kv * head_dim * dtype_bytes
+        return self.num_layers * num_tokens * kv_write_bytes_per_token
+
+    def kv_cache_read_bytes(
+        self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int = 1, dtype_bytes: int = 2
+    ) -> int:
+        """Memory bytes for reading KV cache during decode.
+
+        For each new token generated, we read all previous tokens' KV cache.
+        When generating multiple samples per prompt, the prompt KV cache is shared.
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+            dtype_bytes: Bytes per element (2 for FP16/BF16)
+
+        Returns:
+            Total bytes for KV cache reads during decode
+        """
+        assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+            f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+        )
+
+        num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
+        head_dim = self.hidden_size // self.num_attn_heads
+
+        # For batched sampling with shared prompt KV cache:
+        # - Prompt KV is read once per new token position across ALL samples (not per sample)
+        # - Each sample has its own KV for generated tokens
+        kv_read_terms = 0
+        response_idx = 0
+
+        for P in prompt_lengths:
+            # For this prompt, collect all response lengths
+            prompt_responses = []
+            for _ in range(samples_per_prompt):
+                prompt_responses.append(response_lengths[response_idx])
+                response_idx += 1
+
+            # Prompt KV reads: In synchronized batch generation with vLLM n>1,
+            # the prompt KV cache is stored once but each sample reads it independently.
+            # At each decoding position, each sample reads the prompt KV cache.
+            # Number of positions = max response length (all generate synchronously)
+            max_response_length = max(prompt_responses) if prompt_responses else 0
+            # Each of the samples_per_prompt samples reads prompt KV at each position
+            kv_read_terms += max_response_length * samples_per_prompt * P
+
+            # Per-sample generated KV reads: Each sample reads its own previously generated tokens
+            for R in prompt_responses:
+                # Each token in this sample reads its previously generated tokens
+                # sum_{i=0}^{R-1} i = R*(R-1)/2
+                kv_read_terms += R * (R - 1) // 2
+
+        # 2x for K and V
+        kv_bytes_per_token = 2 * num_kv * head_dim * dtype_bytes
+        return self.num_layers * kv_bytes_per_token * kv_read_terms
+
+    def prefill_memory_bytes(self, prompt_lengths: list[int], dtype_bytes: int = 2) -> int:
+        """Memory bytes for prefill phase.
+
+        During prefill:
+        - Read weights once for the entire batch (batched matmul)
+        - Write KV cache for each token
+
+        Args:
+            prompt_lengths: List of prompt lengths
+            dtype_bytes: Bytes per element (2 for FP16/BF16)
+
+        Returns:
+            Total memory bytes for prefill
+        """
+        # In batched prefill, weights are read once for the entire operation,
+        # not once per token. We process all prompts in a single batch.
+        num_prefill_batches = len(prompt_lengths)  # Each prompt is a "batch"
+        weight_bytes = self.weight_memory_bytes(num_prefill_batches, dtype_bytes)
+
+        # KV cache is written for every token
+        total_prefill_tokens = sum(prompt_lengths)
+        kv_write_bytes = self.kv_cache_write_bytes(total_prefill_tokens, dtype_bytes)
+        return weight_bytes + kv_write_bytes
+
+    def decode_memory_bytes(
+        self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int = 1, dtype_bytes: int = 2
+    ) -> int:
+        """Memory bytes for decode/generation phase.
+
+        During decode:
+        - Read weights for each new token position (shared across samples in batch)
+        - Write KV cache for each new token
+        - Read all previous KV cache for attention
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+            dtype_bytes: Bytes per element (2 for FP16/BF16)
+
+        Returns:
+            Total memory bytes for decode
+        """
+        # In synchronized batch generation, weights are read once per position,
+        # not once per token. With multiple samples per prompt generating in parallel,
+        # we only need to read weights for the number of unique positions.
+        unique_positions = 0
+        response_idx = 0
+        for _ in prompt_lengths:
+            # Get response lengths for this prompt's samples
+            prompt_responses = response_lengths[response_idx : response_idx + samples_per_prompt]
+            response_idx += samples_per_prompt
+            # In synchronized generation, all samples generate the same number of positions
+            # (up to the max length among them)
+            unique_positions += max(prompt_responses) if prompt_responses else 0
+
+        weight_bytes = self.weight_memory_bytes(unique_positions, dtype_bytes)
+
+        # KV writes happen for all tokens (each sample writes its own KV)
+        total_decode_tokens = sum(response_lengths)
+        kv_write_bytes = self.kv_cache_write_bytes(total_decode_tokens, dtype_bytes)
+
+        kv_read_bytes = self.kv_cache_read_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
+        return weight_bytes + kv_write_bytes + kv_read_bytes
+
+    def memory_bytes(
+        self,
+        prompt_lengths: list[int],
+        response_lengths: Optional[list[int]] = None,
+        samples_per_prompt: int = 1,
+        dtype_bytes: int = 2,
+    ) -> int:
+        """Approximate total HBM bytes moved for prefill + decode.
+
+        Returns an integer number of bytes. Divide by elapsed seconds to get B/s;
+        compare against peak bandwidth to get utilization.
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+            dtype_bytes: Bytes per element (2 for FP16/BF16)
+
+        Returns:
+            Total memory bytes moved
+
+        Assumptions:
+          - Weights are read once per token per layer (Q,K,V,O + MLP up/down)
+          - KV cache: write K/V for every token; during decode, read all past K/V per new token
+          - When batching samples, prompt KV cache is shared across samples
+          - Embedding and LM head reads are ignored (usually dominated by matmul weight traffic)
+        """
+        total = self.prefill_memory_bytes(prompt_lengths, dtype_bytes)
+
+        if response_lengths is not None:
+            assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+                f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+            )
+
+            # Pass original prompt_lengths with samples_per_prompt to correctly handle shared KV cache
+            total += self.decode_memory_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
+
+        return total
+
+
+def get_device_name(device_name: str) -> str:
+    tokens = device_name.lower().replace("-", " ").split()
+
+    filtered = [val for val in tokens if val not in ["nvidia", "80gb", "40gb", "48gb", "hbm3", "rtx", "sxm4", "pcie"]]
+
+    for token in filtered:
+        if token in GPU_SPECS:
+            return token
+
+    raise ValueError(f"Unsupported device name: {device_name}. Expected one of: {list(GPU_SPECS.keys())}")

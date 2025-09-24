@@ -131,11 +131,37 @@ class TestGrpoFastBase(unittest.TestCase):
         """Create mock args object."""
         mock_args = Mock()
         mock_args.vllm_num_engines = num_engines
+        mock_args.vllm_tensor_parallel_size = 1
         mock_args.num_samples_per_prompt_rollout = num_samples
+        mock_args.verbose = False
         return mock_args
+
+    def create_mock_model_dims(self):
+        """Create mock ModelDims object for tests."""
+        # Create a simple mock ModelDims with minimal attributes
+        mock_dims = Mock(spec=utils.ModelDims)
+        mock_dims.num_layers = 32
+        mock_dims.hidden_size = 4096
+        mock_dims.intermediate_size = 11008
+        mock_dims.vocab_size = 32000
+        mock_dims.num_attn_heads = 32
+        mock_dims.num_kv_heads = 32
+        mock_dims.device_name = "h100"
+        mock_dims.device_flops = 989.5e12  # H100 peak FLOPs
+        mock_dims.device_memory_bandwidth = 3.35e12  # H100 memory bandwidth
+
+        # Mock the flops and memory_bytes methods
+        mock_dims.flops = Mock(return_value=1e12)  # Return 1 TFlop
+        mock_dims.memory_bytes = Mock(return_value=1e9)  # Return 1 GB
+
+        return mock_dims
 
     def create_mock_result(self, dataset_index, training_step, num_samples_per_prompt=1):
         """Create a mock GenerationResult."""
+        import time
+
+        from open_instruct.queue_types import TokenStatistics
+
         total_responses = num_samples_per_prompt
 
         return GenerationResult(
@@ -152,6 +178,10 @@ class TestGrpoFastBase(unittest.TestCase):
             ),
             dataset_index=dataset_index,
             training_step=training_step,
+            start_time=time.perf_counter(),
+            token_statistics=TokenStatistics(
+                num_prompt_tokens=10, num_response_tokens=3 * total_responses, generation_time=0.1
+            ),
         )
 
     def setup_and_split_batch(
@@ -541,6 +571,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         mock_generation_config = Mock()
         mock_generation_config.n = num_samples_per_prompt
 
+        mock_model_dims = self.create_mock_model_dims()
         combined_result, batch = grpo_fast.accumulate_inference_batches(
             inference_results_Q,
             pending_queries_map,
@@ -548,6 +579,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
             training_step=1,
             generation_config=mock_generation_config,
             num_prompts=num_prompts,
+            model_dims=mock_model_dims,
         )
 
         # Verify results work correctly even with out-of-order processing
@@ -641,6 +673,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                 mock_generation_config = Mock()
                 mock_generation_config.n = 1
 
+                mock_model_dims = self.create_mock_model_dims()
                 grpo_fast.accumulate_inference_batches(
                     inference_results_Q,
                     pending_queries_map,
@@ -648,6 +681,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                     training_step=1,
                     generation_config=mock_generation_config,
                     num_prompts=num_prompts,
+                    model_dims=mock_model_dims,
                 )
                 completed.set()
             except Exception:
