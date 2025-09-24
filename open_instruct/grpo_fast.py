@@ -2286,7 +2286,7 @@ def one_training_step(
         "training_step": training_step,
         "val/num_total_tokens": num_total_tokens,
         "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
-        "tokens_per_second": num_total_tokens / total_time,
+        "learner_tokens_per_second": num_total_tokens / total_time,
         "time/total": total_time,
         "time/training": train_timer.duration,
         "time/saving": save_time,
