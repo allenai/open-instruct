@@ -28,14 +28,8 @@ def _avg_correctness(sample, reward_fn_mapping):
     """
     Compute the mean correctness for one sample (called in worker).
     """
-    if type(sample["dataset"]) == list:
-        dataset = sample["dataset"][0]
-    else:
-        dataset = sample["dataset"]
-    if type(sample["ground_truth"]) == list:
-        gt = sample["ground_truth"][0]
-    else:
-        gt = sample["ground_truth"]
+    dataset = sample["dataset"][0] if isinstance(sample["dataset"], list) else sample["dataset"]
+    gt = sample["ground_truth"][0] if isinstance(sample["ground_truth"], list) else sample["ground_truth"]
     outputs = sample["output"]
 
     reward_fn = reward_fn_mapping[dataset]
