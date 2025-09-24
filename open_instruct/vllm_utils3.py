@@ -512,7 +512,8 @@ class LLMRayActor:
         if active_tasks == 0 and not has_incomplete_requests:
             # Give the prefetch a chance to get more requests before deciding to exit
             # This is important for tool use where there might be gaps between requests
-            await asyncio.sleep(0.5)
+            # In multi-node setups, requests take longer to propagate through Ray queues
+            await asyncio.sleep(5.0)
             # Re-check after sleep
             if len(self.active_tasks) == 0 and len(self.request_outputs) == 0:
                 return True
