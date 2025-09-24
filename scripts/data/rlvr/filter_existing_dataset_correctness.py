@@ -28,8 +28,14 @@ def _avg_correctness(sample, reward_fn_mapping):
     """
     Compute the mean correctness for one sample (called in worker).
     """
-    dataset = sample["dataset"][0]
-    gt = sample["ground_truth"][0]
+    if type(sample["dataset"]) == list:
+        dataset = sample["dataset"][0]
+    else:
+        dataset = sample["dataset"]
+    if type(sample["ground_truth"]) == list:
+        gt = sample["ground_truth"][0]
+    else:
+        gt = sample["ground_truth"]
     outputs = sample["output"]
 
     reward_fn = reward_fn_mapping[dataset]
@@ -87,7 +93,7 @@ def main():
     )
     parser.add_argument(
         "--code_api_url",
-        default=os.environ.get("CODE_API_URL", "http://localhost:1234") + "/test_program"
+        default=os.environ.get("CODE_API_URL", "http://localhost:1234") + "/test_program",
         type=str,
         help="Give a code api url to use for code verifier."
     )
