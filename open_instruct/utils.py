@@ -997,7 +997,7 @@ def maybe_update_beaker_description(
 
     if current_step is not None:
         progress_pct = (current_step / total_steps) * 100
-        elapsed_time = time.time() - start_time
+        elapsed_time = time.perf_counter() - start_time
 
         if current_step >= total_steps:
             time_str = format_eta(elapsed_time)

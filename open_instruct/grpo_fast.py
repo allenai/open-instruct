@@ -1828,6 +1828,9 @@ def data_preparation_thread(
                 **reward_metrics,
             }
 
+            total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
+            metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
+
         if args.save_traces:
             traces = {
                 "scores": scores.tolist(),
@@ -2116,7 +2119,7 @@ def load_data_from_packing_thread(
         while True:
             if stop_event.is_set():
                 logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
-                return None, {}, num_total_tokens
+                return None, {}, num_total_tokens, 0
             try:
                 packed_data = packed_sequences_Q.get(timeout=30.0)
                 break
@@ -2127,13 +2130,14 @@ def load_data_from_packing_thread(
         data_thread_metrics = packed_data["metrics"]
         B = packed_data["B"]
         collated_data = packed_data["collated_data"]
-        num_total_tokens += packed_data["num_new_tokens"]
+        num_step_tokens = packed_data["num_new_tokens"]
+        num_total_tokens += num_step_tokens
 
     data_thread_metrics["time/trainer_idling"] = timer.duration
     if B == 0:
         logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-        return None, data_thread_metrics, num_total_tokens
-    return collated_data, data_thread_metrics, num_total_tokens
+        return None, data_thread_metrics, num_total_tokens, 0
+    return collated_data, data_thread_metrics, num_total_tokens, num_step_tokens
 
 
 def weight_sync_thread(
@@ -2219,8 +2223,10 @@ def one_training_step(
     episode,
     training_step,
     num_total_tokens,
+    num_step_tokens,
     start_time,
     train_dataset,
+    training_start_time,
     wandb_url,
     chat_template_name,
     actor_manager=None,
@@ -2275,15 +2281,18 @@ def one_training_step(
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
 
     average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
-    total_time = time.perf_counter() - start_time
+    step_time = time.perf_counter() - start_time
+    total_training_time = time.perf_counter() - training_start_time
     metrics = {
         "episode": episode,
         "global_step": episode,
         "training_step": training_step,
         "val/num_total_tokens": num_total_tokens,
+        "val/num_step_tokens": num_step_tokens,
         "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
-        "tokens_per_second": num_total_tokens / total_time,
-        "time/total": total_time,
+        "learner_tokens_per_second_overall": num_total_tokens / total_training_time,
+        "learner_tokens_per_second_step": num_step_tokens / step_time,
+        "time/total": step_time,
         "time/training": train_timer.duration,
         "time/saving": save_time,
         **data_thread_metrics,
@@ -2368,6 +2377,12 @@ def maybe_evaluate(
         }
         if "time/generation" in eval_generate_metrics:
             eval_metrics["eval/generation_time"] = eval_generate_metrics["time/generation"]
+
+        total_tokens = (
+            eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
+        )
+        eval_metrics["eval/actor_tokens_per_second"] = total_tokens / eval_result.token_statistics.generation_time
+
         print_rich_single_line_metrics(eval_metrics)
 
         table = {}
@@ -2660,8 +2675,7 @@ def run_training(
     else:
         num_total_tokens = 0
 
-    num_total_tokens = 0
-    training_start_time = time.time()  # Track overall training start time
+    training_start_time = time.perf_counter()  # Track overall training start time
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
@@ -2703,7 +2717,7 @@ def run_training(
             )
 
         # The generate_thread is now handling vLLM processing asynchronously
-        collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
+        collated_data, data_thread_metrics, num_total_tokens, num_step_tokens = load_data_from_packing_thread(
             packed_sequences_Q, num_total_tokens, stop_event, health_check_fn
         )
         if collated_data is None:
@@ -2724,8 +2738,10 @@ def run_training(
             episode,
             training_step,
             num_total_tokens,
+            num_step_tokens,
             start_time,
             train_dataset,
+            training_start_time,
             wandb_url,
             tc.chat_template_name,
             actor_manager,
