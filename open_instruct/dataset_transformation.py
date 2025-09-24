@@ -653,15 +653,17 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
     # and saved together with the tokenizer to be used later.
-    if tc.chat_template_name in CHAT_TEMPLATES:
-        tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
-    else:
+    if tc.chat_template_name is None:
         try:
             tokenizer.chat_template = AutoTokenizer.from_pretrained(
                 tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
             ).chat_template
         except Exception:
             raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
+    elif tc.chat_template_name in CHAT_TEMPLATES:
+        tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
+    else:
+        raise ValueError(f"Could not find chat template for {tc.chat_template_name}.")
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -680,10 +682,10 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
     config = AutoConfig.from_pretrained(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision)
     # @vwxyzjn: "olmo" handles both `olmo2` and `olmoe`.
     if "olmo" in config.model_type:
-        if "olmo" in tc.chat_template_name:
-            assert not tc.add_bos, "For newer OLMo chat templates, you must *not* run with `--add_bos`."
-        elif tc.chat_template_name == "none":
+        if tc.chat_template_name is None:
             pass  # just assume the user knows what they're doing
+        elif "olmo" in tc.chat_template_name:
+            assert not tc.add_bos, "For newer OLMo chat templates, you must *not* run with `--add_bos`."
         else:
             assert tc.add_bos, "For OLMo, you must run with `--add_bos`."
         assert tc.use_fast, "For OLMo, you must use fast tokenizer."
@@ -774,7 +776,7 @@ class TokenizerConfig:
     tokenizer_revision: Optional[str] = None
     trust_remote_code: bool = False
     use_fast: bool = True
-    chat_template_name: str = "none"  # default to using the tokenizer chat template
+    chat_template_name: Optional[str] = None  # default to using the tokenizer chat template
     add_bos: bool = False
     get_tokenizer_fn: str = "get_tokenizer_tulu_v2_2"
 
