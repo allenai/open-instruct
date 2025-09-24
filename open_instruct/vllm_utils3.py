@@ -653,7 +653,7 @@ class LLMRayActor:
             tool_runtime += tool_result.runtime
             tool_called = True
 
-            # Prepare tool output tokens
+            # Prepare tool output tokens (mirror main behaviour; no extra fallback text)
             logger.info(f"[_process_request] {sub_request_id} - About to access self.llm_engine.engine.tokenizer")
             tokenizer = self.llm_engine.engine.tokenizer
             logger.info(f"[_process_request] {sub_request_id} - Successfully got tokenizer, about to encode tool output")
@@ -695,6 +695,7 @@ class LLMRayActor:
             excess = len(prompt_and_tool_output_token) - max_len
             logger.info(f"[_process_request] {sub_request_id} - Calculated excess={excess}")
 
+            # Default to continuing unless token limits cut us off
             can_continue = True
 
             if excess > 0:
