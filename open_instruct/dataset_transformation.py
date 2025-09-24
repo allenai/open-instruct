@@ -1753,6 +1753,7 @@ def get_cached_dataset_tulu(
         hf_entity,
         dataset_local_cache_dir,
         dataset_skip_cache,
+        True,
         dataset_config_seed,
     )[0]
 
