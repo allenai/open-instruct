@@ -1828,6 +1828,9 @@ def data_preparation_thread(
                 **reward_metrics,
             }
 
+            total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
+            metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
+
         if args.save_traces:
             traces = {
                 "scores": scores.tolist(),
@@ -2287,8 +2290,8 @@ def one_training_step(
         "val/num_total_tokens": num_total_tokens,
         "val/num_step_tokens": num_step_tokens,
         "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
-        "tokens_per_second_overall": num_total_tokens / total_training_time if total_training_time > 0 else 0,
-        "tokens_per_second_step": num_step_tokens / step_time if step_time > 0 else 0,
+        "learner_tokens_per_second_overall": num_total_tokens / total_training_time,
+        "learner_tokens_per_second_step": num_step_tokens / step_time,
         "time/total": step_time,
         "time/training": train_timer.duration,
         "time/saving": save_time,
@@ -2374,6 +2377,12 @@ def maybe_evaluate(
         }
         if "time/generation" in eval_generate_metrics:
             eval_metrics["eval/generation_time"] = eval_generate_metrics["time/generation"]
+
+        total_tokens = (
+            eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
+        )
+        eval_metrics["eval/actor_tokens_per_second"] = total_tokens / eval_result.token_statistics.generation_time
+
         print_rich_single_line_metrics(eval_metrics)
 
         table = {}

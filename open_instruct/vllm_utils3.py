@@ -497,7 +497,7 @@ class LLMRayActor:
                 self._prefetch_future.result()
 
             self._poll_tool_futures(self.tracking, self.llm_engine.tokenizer)
-            current_time = time.time()
+            current_time = time.perf_counter()
             if self.llm_engine.has_unfinished_requests():
                 for output in [o for o in self.llm_engine.step() if o.finished]:
                     # Fix the index field for all sub-requests
@@ -824,7 +824,7 @@ class LLMRayActor:
                 tracking["pending_tool_futures"].pop(req_id, None)
 
                 complete_output = tracking["concat_outputs"][req_id].outputs[0]
-                current_time = time.time()
+                current_time = time.perf_counter()
                 self._finalize_sub_request(req_id, last_output, complete_output, current_time)
                 # Don't add to dict_keys_to_delete since we already removed it
                 continue
