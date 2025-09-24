@@ -1153,7 +1153,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
     def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
         model_to_save = self.model
-        if "olmo" in chat_template_name:
+        if chat_template_name is not None and "olmo" in chat_template_name:
             # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
             model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
