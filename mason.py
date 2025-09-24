@@ -508,6 +508,10 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
             name="VLLM_DISABLE_COMPILE_CACHE",
             value="1",
         ),
+        beaker.EnvVar(
+            name="VLLM_USE_V1",
+            value="1",
+        ),
     ])
 
     return env_vars

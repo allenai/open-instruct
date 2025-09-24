@@ -705,8 +705,8 @@ class LLMRayActor:
                 f"[_process_request] {sub_request_id} - Successfully concatenated, total length: {len(prompt_and_tool_output_token)}"
             )
 
-            logger.info(f"[_process_request] {sub_request_id} - About to get max_model_len from llm_engine.engine")
-            max_len = self.llm_engine.engine.model_config.max_model_len
+            logger.info(f"[_process_request] {sub_request_id} - About to get max_model_len from llm_engine.vllm_config")
+            max_len = self.llm_engine.vllm_config.model_config.max_model_len
             logger.info(f"[_process_request] {sub_request_id} - Got max_model_len: {max_len}")
             excess = len(prompt_and_tool_output_token) - max_len
             logger.info(f"[_process_request] {sub_request_id} - Calculated excess={excess}")
@@ -983,24 +983,18 @@ class LLMRayActor:
         timeout_minutes=120,
     ):
         await self._ensure_engine_initialized()
-        # AsyncLLMEngine doesn't implement collective_rpc_async, so we need to
-        # call the synchronous version on the underlying engine directly
-        return self.llm_engine.engine.collective_rpc(
-            "init_process_group",
-            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
-        )
+        # V1 AsyncLLM doesn't expose engine directly, need to handle differently
+        raise NotImplementedError("collective_rpc not available in V1 AsyncLLM")
 
     async def update_weight(self, name, dtype, shape, empty_cache=False):
         await self._ensure_engine_initialized()
-        # Use synchronous collective_rpc on the underlying engine
-        return self.llm_engine.engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        # V1 AsyncLLM doesn't expose engine directly
+        raise NotImplementedError("update_weight not available in V1 AsyncLLM")
 
     async def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
         await self._ensure_engine_initialized()
-        # Use synchronous collective_rpc on the underlying engine
-        return self.llm_engine.engine.collective_rpc(
-            "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
-        )
+        # V1 AsyncLLM doesn't expose engine directly
+        raise NotImplementedError("update_weight_cuda_ipc not available in V1 AsyncLLM")
 
     async def reset_prefix_cache(self):
         await self._ensure_engine_initialized()
@@ -1022,16 +1016,17 @@ class LLMRayActor:
     async def get_kv_cache_info(self):
         """Get KV cache max concurrency from the vLLM engine."""
         await self._ensure_engine_initialized()
-        # AsyncLLMEngine wraps the underlying LLMEngine
-        engine = self.llm_engine.engine
+        # V1 AsyncLLM has vllm_config attribute
+        cache_config = self.llm_engine.vllm_config.cache_config
+        model_config = self.llm_engine.vllm_config.model_config
 
         # Use the same calculation as vLLM's executor_base.py
         # Reference: https://github.com/vllm-project/vllm/blob/b6553be1bc75f046b00046a4ad7576364d03c835/vllm/executor/executor_base.py#L119-L120
         retries = 5
         for attempt in range(retries):
-            num_gpu_blocks = engine.cache_config.num_gpu_blocks
-            block_size = engine.cache_config.block_size
-            max_model_len = engine.model_config.max_model_len
+            num_gpu_blocks = cache_config.num_gpu_blocks
+            block_size = cache_config.block_size
+            max_model_len = model_config.max_model_len
 
             if num_gpu_blocks is not None and num_gpu_blocks != 0:
                 # Calculate max concurrency using vLLM's formula
@@ -1139,9 +1134,8 @@ def create_vllm_engines(
                 num_cpus=num_gpus,
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
-                # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
                 runtime_env=ray.runtime_env.RuntimeEnv(
-                    env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "1", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
+                    env_vars={"TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
                 ),
             )
             .remote(
