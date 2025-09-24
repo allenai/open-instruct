@@ -651,7 +651,12 @@ class LLMRayActor:
             tool_error += "" if tool_result.error is None else tool_result.error
             tool_output_str += tool_result.output
             tool_runtime += tool_result.runtime
-            tool_called = True
+            tool_called = tool_result.called
+
+            # Check if tool was actually called (MaxCallsExceededTool returns called=False)
+            if not tool_result.called:
+                logger.info(f"[_process_request] {sub_request_id} - Tool returned called=False, breaking loop")
+                break
 
             # Prepare tool output tokens (mirror main behaviour; no extra fallback text)
             logger.info(f"[_process_request] {sub_request_id} - About to access self.llm_engine.engine.tokenizer")
