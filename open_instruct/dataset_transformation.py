@@ -1030,6 +1030,128 @@ def rlvr_tokenize_v3(
     return row
 
 
+def sft_tulu_tokenize_and_truncate_rl_rag_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
+    messages = row["conversations"]
+    if len(messages) == 0:
+        raise ValueError("messages field is empty.")
+    input_ids = tokenizer.apply_chat_template(
+        conversation=messages,
+        tokenize=True,
+        return_tensors="pt",
+        padding=False,
+        truncation=True,
+        max_length=max_seq_length,
+        add_generation_prompt=False,
+    )
+    labels = input_ids.clone()
+    # mask the non-assistant part for avoiding loss
+    for message_idx, message in enumerate(messages):
+        if message["role"] != "assistant":
+            # we calculate the start index of this non-assistant message
+            if message_idx == 0:
+                message_start_idx = 0
+            else:
+                message_start_idx = tokenizer.apply_chat_template(
+                    conversation=messages[:message_idx],  # here marks the end of the previous messages
+                    tokenize=True,
+                    return_tensors="pt",
+                    padding=False,
+                    truncation=True,
+                    max_length=max_seq_length,
+                    add_generation_prompt=False,
+                ).shape[1]
+            # next, we calculate the end index of this non-assistant message
+            if message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant":
+                # for intermediate messages that follow with an assistant message, we need to
+                # set `add_generation_prompt=True` to avoid the assistant generation prefix being included in the loss
+                # (e.g., `<|assistant|>`)
+                message_end_idx = tokenizer.apply_chat_template(
+                    conversation=messages[: message_idx + 1],
+                    tokenize=True,
+                    return_tensors="pt",
+                    padding=False,
+                    truncation=True,
+                    max_length=max_seq_length,
+                    add_generation_prompt=True,
+                ).shape[1]
+            else:
+                # for the last message or the message that doesn't follow with an assistant message,
+                # we don't need to add the assistant generation prefix
+                message_end_idx = tokenizer.apply_chat_template(
+                    conversation=messages[: message_idx + 1],
+                    tokenize=True,
+                    return_tensors="pt",
+                    padding=False,
+                    truncation=True,
+                    max_length=max_seq_length,
+                    add_generation_prompt=False,
+                ).shape[1]
+            # set the label to -100 for the non-assistant part
+            labels[:, message_start_idx:message_end_idx] = -100
+            if max_seq_length and message_end_idx >= max_seq_length:
+                break
+
+    # rl-rag specific logic: mask tokens strictly inside <tool_output> ... </tool_output>
+    start_tag = "<tool_output>"
+    end_tag = "</tool_output>"
+
+    # Helper to get tokenized length for any prefix of the conversation
+    def get_token_len_for(messages_slice: List[Dict[str, Any]]) -> int:
+        return tokenizer.apply_chat_template(
+            conversation=messages_slice,
+            tokenize=True,
+            return_tensors="pt",
+            padding=False,
+            truncation=True,
+            max_length=max_seq_length,
+            add_generation_prompt=False,
+        ).shape[1]
+
+    seq_len = input_ids.shape[1]
+    for message_idx, message in enumerate(messages):
+        content = message.get("content", "")
+        if not isinstance(content, str):
+            continue
+        search_from = 0
+        while True:
+            start_pos = content.find(start_tag, search_from)
+            if start_pos == -1:
+                break
+            end_pos = content.find(end_tag, start_pos + len(start_tag))
+            if end_pos == -1:
+                # Unbalanced tag; stop scanning this message
+                break
+
+            # Compute absolute token indices by re-tokenizing conversation prefixes
+            # Include the <tool_output> and </tool_output> tags themselves in the masked span
+            left_slice_before_start = content[: start_pos]
+            right_slice_after_end = content[: end_pos + len(end_tag)]
+
+            prefix_up_to_start = messages[:message_idx] + [
+                {"role": message["role"], "content": left_slice_before_start}
+            ]
+            prefix_up_to_end = messages[:message_idx] + [
+                {"role": message["role"], "content": right_slice_after_end}
+            ]
+
+            mask_start = get_token_len_for(prefix_up_to_start)
+            mask_end = get_token_len_for(prefix_up_to_end)
+
+            # Clamp to sequence length in case of truncation
+            mask_start = min(mask_start, seq_len)
+            mask_end = min(mask_end, seq_len)
+            if mask_start < mask_end:
+                labels[:, mask_start:mask_end] = -100
+
+            # Continue searching after this end tag
+            search_from = end_pos + len(end_tag)
+
+    attention_mask = torch.ones_like(input_ids)
+    row[INPUT_IDS_KEY] = input_ids.flatten()
+    row[LABELS_KEY] = labels.flatten()
+    row[ATTENTION_MASK_KEY] = attention_mask.flatten()
+    return row
+
 def rlvr_tokenize_rl_rag_v1(
     row: Dict[str, Any],
     tokenizer: PreTrainedTokenizer,
@@ -1119,6 +1241,7 @@ TRANSFORM_FNS = {
     "sft_tokenize_mask_out_prompt_v1": (sft_tokenize_mask_out_prompt_v1, "map"),
     "sft_filter_v1": (sft_filter_v1, "filter"),
     "sft_tulu_tokenize_and_truncate_v1": (sft_tulu_tokenize_and_truncate_v1, "map"),
+    "sft_tulu_tokenize_and_truncate_rl_rag_v1": (sft_tulu_tokenize_and_truncate_rl_rag_v1, "map"),
     "sft_tulu_filter_v1": (sft_tulu_filter_v1, "filter"),
     "preference_tokenize_v1": (preference_tokenize_v1, "map"),
     "preference_filter_v1": (preference_filter_v1, "filter"),
@@ -1678,6 +1801,32 @@ def test_get_cached_dataset_tulu_rlvr():
         assert dataset[i][INPUT_IDS_PROMPT_KEY] == gold_tokenized_dataset[i][INPUT_IDS_PROMPT_KEY]
     return True
 
+def test_rl_rag_sft_tokenize():
+    tc = TokenizerConfig(
+        tokenizer_name_or_path="Qwen/Qwen3-8B",
+        tokenizer_revision="main",
+        chat_template_name="tulu",
+        add_bos=False,
+    )
+    dataset_mixer_list = ["rl-rag/sft-mix-v20250921", "1.0"]
+    dataset_mixer_list_splits = ["train"]
+    dataset_transform_fn = ["sft_tulu_tokenize_and_truncate_rl_rag_v1", "rlvr_filter_v1"]
+    transform_fn_args = [
+        {"max_seq_length": 32768},
+        {},
+    ]
+    dataset = get_cached_dataset_tulu(
+        dataset_mixer_list,
+        dataset_mixer_list_splits,
+        tc,
+        dataset_transform_fn,
+        transform_fn_args,
+        dataset_skip_cache=True,
+    )
+    tokenizer = AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path)
+    # just examine the first example
+    print([x for x in dataset[0]['labels'] if x != -100])
+
 
 if __name__ == "__main__":
     test_sft_dpo_same_tokenizer()
@@ -1686,4 +1835,6 @@ if __name__ == "__main__":
     # test_get_cached_dataset_tulu_sft() # takes a long time to run
     # test_get_cached_dataset_tulu_preference() # takes a long time to run
     # test_get_cached_dataset_tulu_rlvr() # takes ~ 30 seconds
+    # test_rl_rag_sft_tokenize()
+
     print("All tests passed!")
