@@ -1169,9 +1169,9 @@ def sft_tulu_tokenize_and_truncate_rl_rag_v1(row: Dict[str, Any], tokenizer: Pre
     row[LABELS_KEY] = labels.flatten()
     row[ATTENTION_MASK_KEY] = attention_mask.flatten()
     # pop everything else
-    for k in row.keys():
-        if k != INPUT_IDS_KEY and k != LABELS_KEY and k != ATTENTION_MASK_KEY:
-            row.pop(k)
+    keys_to_pop = [k for k in row.keys() if k != INPUT_IDS_KEY and k != LABELS_KEY and k != ATTENTION_MASK_KEY]
+    for k in keys_to_pop:
+        row.pop(k)
     return row
 
 def rlvr_tokenize_rl_rag_v1(
