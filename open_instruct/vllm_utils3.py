@@ -1143,9 +1143,7 @@ def create_vllm_engines(
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
                 # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
-                runtime_env=ray.runtime_env.RuntimeEnv(
-                    env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
-                ),
+                runtime_env=ray.runtime_env.RuntimeEnv(env_vars={"TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}),
             )
             .remote(
                 model=pretrain,
