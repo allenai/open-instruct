@@ -371,7 +371,7 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
-    "qwen3_without_think": (
+    "qwen3_simplified": (
         "{%- if messages and messages[0].role == 'system' -%}\n"
         "<|im_start|>system\n"
         "{{ messages[0].content }}<|im_end|>\n"
