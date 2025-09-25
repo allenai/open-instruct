@@ -133,7 +133,7 @@ class FlatArguments:
     dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
     """The dataset splits to use for training"""
     dataset_transform_fn: list[str] = field(
-        default_factory=lambda: ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
+        default_factory=lambda: ["sft_tulu_tokenize_and_truncate_rl_rag_v1", "sft_tulu_filter_v1"]
     )
     """The list of transform functions to apply to the dataset."""
     dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS)
