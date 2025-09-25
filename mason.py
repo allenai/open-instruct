@@ -16,6 +16,12 @@ from rich.text import Text
 
 console = Console()
 
+# Default environment variables for all runs
+DEFAULT_ENV_VARS = [
+    ("VLLM_ENGINE_ITERATION_TIMEOUT_S", "3600"),  # 1 hour timeout to prevent AsyncEngineDeadError
+    ("RAY_CGRAPH_get_timeout", "300"),
+    ("VLLM_DISABLE_COMPILE_CACHE", "1"),
+]
 
 # ----------------------------------------------------------------------
 # Open Instruct logic
@@ -260,11 +266,10 @@ def parse_commands(command_args: List[str]) -> List[List[str]]:
 def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: List[str],
                 whoami: str, resumable: bool, num_nodes: int, additional_env_vars: List[Dict[str, str]],
                 additional_secrets: List[Dict[str, str]]):
-    env_vars = []
     additional_env_var_names = [var["name"] for var in additional_env_vars]
-    if "RAY_CGRAPH_get_timeout" not in additional_env_var_names:
-        env_vars.append(beaker.EnvVar(name="RAY_CGRAPH_get_timeout",
-                                      value="300"))
+
+    # Initialize with default environment variables (can be overridden by user-specified vars)
+    env_vars = [beaker.EnvVar(name=name, value=value) for name, value in DEFAULT_ENV_VARS if name not in additional_env_var_names]
     # Add user-specified environment variables first
     for env_var in additional_env_vars:
         env_vars.append(
@@ -499,16 +504,6 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
                 value="allow",
             ),
         ])
-
-    # by default, we turn off vllm compile cache
-    # torch compile caching seems consistently broken, but the actual compiling isn't.
-    # Not sure why, for now we have disabled the caching (VLLM_DISABLE_COMPILE_CACHE=1).
-    env_vars.extend([
-        beaker.EnvVar(
-            name="VLLM_DISABLE_COMPILE_CACHE",
-            value="1",
-        ),
-    ])
 
     return env_vars
 

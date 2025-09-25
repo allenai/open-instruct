@@ -906,6 +906,9 @@ class LLMRayActor:
                 if self.prefetch_task.done():
                     self.prefetch_task.result()  # This will raise if the task failed
 
+                # Check engine health - this will raise AsyncEngineDeadError if unhealthy
+                await self.llm_engine.check_health()
+
                 # Wait for any task to complete or timeout
                 # Only wait for actual generation tasks, not the prefetch task
                 tasks_to_wait = list(self.active_tasks.values()) if self.active_tasks else []
