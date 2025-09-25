@@ -1054,23 +1054,19 @@ def rlvr_tokenize_rl_rag_v1(
     row[raw_user_query_key] = user_messages_only[0]["content"]
     
     # RL-rag specific logic: add a question instruction.
+    # add this to the last user turn.
     if additional_question_instructions is not None:
         question_type = row[question_type_key].strip().lower()
-        if len(messages) > 1:
-            original_question = messages[1]["content"]
-            assert messages[1]["role"] == "user"
-        else:
-            original_question = messages[0]["content"]
-            assert messages[0]["role"] == "user"
-        messages[1]["content"] = original_question + "\n\n" + additional_question_instructions[question_type]
+        original_question = messages[-1]["content"]
+        assert messages[-1]["role"] == "user"
+        messages[-1]["content"] = original_question + "\n\n" + additional_question_instructions[question_type]
 
-    # only truncate last message if it's not an assistant message
-    if len(messages) == 1:
-        prompt = messages
-    elif messages[-1]["role"] != "assistant":
-        prompt = messages
-    else:
+    # truncate last message if its an assistant message
+    # sometimes useful for using one dataset for sft and rl.
+    if messages[-1]["role"] == "assistant":
         prompt = messages[:-1]
+    else:
+        prompt = messages
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,
         add_generation_prompt=True,
