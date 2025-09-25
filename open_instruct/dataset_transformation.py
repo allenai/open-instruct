@@ -371,6 +371,24 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    "qwen3_without_think": (
+        "{%- if messages and messages[0].role == 'system' -%}\n"
+        "<|im_start|>system\n"
+        "{{ messages[0].content }}<|im_end|>\n"
+        "{%- endif -%}\n"
+        "{%- for message in messages[1 if (messages and messages[0].role == 'system') else 0:] %}\n"
+        "{%- if message.content is string -%}\n"
+        "{%- set content = message.content -%}\n"
+        "{%- else -%}\n"
+        "{%- set content = '' -%}\n"
+        "{%- endif -%}\n"
+        "<|im_start|>{{ message.role }}\n"
+        "{{ content }}<|im_end|>\n"
+        "{%- endfor -%}\n"
+        "{%- if add_generation_prompt -%}\n"
+        "<|im_start|>assistant\n"
+        "{%- endif -%}\n"
+    )
 }
 # flake8: noqa
 
