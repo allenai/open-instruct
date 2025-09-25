@@ -127,7 +127,8 @@ fi
 # Set wandb run path to upload to wandb if available
 WANDB_ARG=""
 if [[ -n "$WANDB_RUN_PATH" ]]; then
-    beaker_user=$(beaker account whoami --format csv | cut -d',' -f2 | tail -n +2)
+    beaker_user=$(beaker account whoami --format text | awk 'NR==2 {print $2}')
+    echo "Assuming beaker user $beaker_user"
     if ! beaker secret list --workspace ai2/tulu-3-results | grep -q "${beaker_user}_WANDB_API_KEY"; then
         echo "WARNING: No ${beaker_user}_WANDB_API_KEY secret found in workspace ai2/tulu-3-results."
         echo "add your WANDB_API_KEY as a secret to this workspace in order to use --oe_eval_log_to_wandb"
