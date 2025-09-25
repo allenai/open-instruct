@@ -19,6 +19,7 @@ import asyncio
 import dataclasses
 import logging
 import os
+import threading
 import time
 from collections import defaultdict
 from concurrent import futures
@@ -344,6 +345,30 @@ class LLMRayActor:
 
         # Prefetch task is started lazily from async methods
         self.prefetch_task = None
+
+        # Create background event loop and thread
+        self.loop = asyncio.new_event_loop()
+        self.loop_thread = threading.Thread(target=self._run_event_loop, daemon=True)
+        self.loop_thread.start()
+        self._loop_ready = threading.Event()
+        # Wait for loop to be ready
+        self._loop_ready.wait(timeout=5.0)
+
+    def _run_event_loop(self):
+        """Run the event loop in a background thread."""
+        asyncio.set_event_loop(self.loop)
+        self._loop_ready.set()
+        try:
+            self.loop.run_forever()
+        finally:
+            self.loop.close()
+
+    def __del__(self):
+        """Cleanup the event loop and thread."""
+        if hasattr(self, "loop") and self.loop:
+            self.loop.call_soon_threadsafe(self.loop.stop)
+        if hasattr(self, "loop_thread") and self.loop_thread:
+            self.loop_thread.join(timeout=5.0)
 
     async def _ensure_prefetch_started(self):
         """Start the background prefetch task if not already running."""
@@ -882,7 +907,7 @@ class LLMRayActor:
 
         return processed_count
 
-    async def process_from_queue(self, timeout: float = 60.0):
+    async def _process_from_queue_async(self, timeout: float = 60.0):
         """Run generation loop using AsyncLLMEngine.
 
         Runs continuously until should_stop is set, periodically adding new requests
@@ -974,7 +999,20 @@ class LLMRayActor:
             logger.info(f"[process_from_queue] FINAL EXIT - total_processed={total_processed}")
             return total_processed
 
-    async def init_process_group(
+    def process_from_queue(self, timeout: float = 60.0):
+        """Synchronous wrapper for _process_from_queue_async.
+
+        Runs generation loop using AsyncLLMEngine.
+        Runs continuously until should_stop is set, periodically adding new requests
+        and yielding control to allow weight synchronization.
+
+        Returns:
+            int: Number of requests processed
+        """
+        future = asyncio.run_coroutine_threadsafe(self._process_from_queue_async(timeout), self.loop)
+        return future.result()
+
+    async def _init_process_group_async(
         self,
         master_address,
         master_port,
@@ -993,36 +1031,90 @@ class LLMRayActor:
             args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
         )
 
-    async def update_weight(self, name, dtype, shape, empty_cache=False):
+    def init_process_group(
+        self,
+        master_address,
+        master_port,
+        rank_offset,
+        world_size,
+        group_name,
+        backend,
+        use_ray=False,
+        timeout_minutes=120,
+    ):
+        """Synchronous wrapper for _init_process_group_async."""
+        future = asyncio.run_coroutine_threadsafe(
+            self._init_process_group_async(
+                master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes
+            ),
+            self.loop,
+        )
+        return future.result()
+
+    async def _update_weight_async(self, name, dtype, shape, empty_cache=False):
         await self._ensure_engine_initialized()
         # Use synchronous collective_rpc on the underlying engine
         return self.llm_engine.engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
-    async def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
+    def update_weight(self, name, dtype, shape, empty_cache=False):
+        """Synchronous wrapper for _update_weight_async."""
+        future = asyncio.run_coroutine_threadsafe(
+            self._update_weight_async(name, dtype, shape, empty_cache), self.loop
+        )
+        return future.result()
+
+    async def _update_weight_cuda_ipc_async(self, name, dtype, shape, ipc_handles, empty_cache=False):
         await self._ensure_engine_initialized()
         # Use synchronous collective_rpc on the underlying engine
         return self.llm_engine.engine.collective_rpc(
             "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
 
-    async def reset_prefix_cache(self):
+    def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
+        """Synchronous wrapper for _update_weight_cuda_ipc_async."""
+        future = asyncio.run_coroutine_threadsafe(
+            self._update_weight_cuda_ipc_async(name, dtype, shape, ipc_handles, empty_cache), self.loop
+        )
+        return future.result()
+
+    async def _reset_prefix_cache_async(self):
         await self._ensure_engine_initialized()
         await self.llm_engine.reset_prefix_cache()
 
-    async def sleep(self, level=1):
+    def reset_prefix_cache(self):
+        """Synchronous wrapper for _reset_prefix_cache_async."""
+        future = asyncio.run_coroutine_threadsafe(self._reset_prefix_cache_async(), self.loop)
+        return future.result()
+
+    async def _sleep_async(self, level=1):
         await self._ensure_engine_initialized()
         await self.llm_engine.sleep(level=level)
 
-    async def wake_up(self, tags: Optional[list[str]] = None):
+    def sleep(self, level=1):
+        """Synchronous wrapper for _sleep_async."""
+        future = asyncio.run_coroutine_threadsafe(self._sleep_async(level), self.loop)
+        return future.result()
+
+    async def _wake_up_async(self, tags: Optional[list[str]] = None):
         await self._ensure_engine_initialized()
         await self.llm_engine.wake_up(tags)
 
-    async def ready(self):
+    def wake_up(self, tags: Optional[list[str]] = None):
+        """Synchronous wrapper for _wake_up_async."""
+        future = asyncio.run_coroutine_threadsafe(self._wake_up_async(tags), self.loop)
+        return future.result()
+
+    async def _ready_async(self):
         await self._ensure_engine_initialized()
         await self._ensure_prefetch_started()
         return True
 
-    async def get_kv_cache_info(self):
+    def ready(self):
+        """Synchronous wrapper for _ready_async."""
+        future = asyncio.run_coroutine_threadsafe(self._ready_async(), self.loop)
+        return future.result()
+
+    async def _get_kv_cache_info_async(self):
         """Get KV cache max concurrency from the vLLM engine."""
         await self._ensure_engine_initialized()
         # AsyncLLMEngine wraps the underlying LLMEngine
@@ -1047,6 +1139,14 @@ class LLMRayActor:
 
         logger.warning("num_gpu_blocks not initialized after retries, returning default value 1")
         return 1
+
+    def get_kv_cache_info(self):
+        """Synchronous wrapper for _get_kv_cache_info_async.
+
+        Get KV cache max concurrency from the vLLM engine.
+        """
+        future = asyncio.run_coroutine_threadsafe(self._get_kv_cache_info_async(), self.loop)
+        return future.result()
 
 
 def get_cuda_arch_list() -> str:
