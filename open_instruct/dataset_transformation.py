@@ -1888,12 +1888,28 @@ class LocalDatasetTransformationCache:
             transformed_datasets.append(dataset)
             assert len(dataset) == len(untokenized_dataset), "Transformed and untokenized datasets should have the same length"
 
+            # add id
+            name = dc.dataset_name.split("/")[-1]
+            if "id" in untokenized_dataset.column_names:
+                base_vals = untokenized_dataset["id"]                  # list
+            elif "source_id" in untokenized_dataset.column_names:
+                base_vals = untokenized_dataset["source_id"]           # list
+            else:
+                base_vals = list(range(len(untokenized_dataset)))      # fallback: indices
+            # build the new id column
+            id_col = [f"{name}_{v}" for v in base_vals]
+            # replace or add the 'id' column
+            if "id" in untokenized_dataset.column_names:
+                untokenized_dataset = untokenized_dataset.remove_columns("id")
+            untokenized_dataset = untokenized_dataset.add_column("id", id_col)
+            print(f"Length of id_col: {len(id_col)}, Length of dataset: {len(untokenized_dataset)}")
             # drop columns 
-            columns_to_keep = dc.target_columns + ["messages", DATASET_ORIGIN_KEY] if dc.target_columns is not None else ["messages", DATASET_ORIGIN_KEY]
+            columns_to_keep = dc.target_columns + ["messages", DATASET_ORIGIN_KEY, "id"] if dc.target_columns is not None else ["messages", DATASET_ORIGIN_KEY, "id"]
             untokenized_dataset = untokenized_dataset.remove_columns(
                 [col for col in untokenized_dataset.column_names if col not in (columns_to_keep)]
             )   
             untransformed_datasets.append(untokenized_dataset)
+
 
             # Collect statistics for this dataset
             stats = {
@@ -1936,7 +1952,7 @@ class LocalDatasetTransformationCache:
         # Combine untransformed datasets
         combined_untransformed_datasets = concatenate_datasets(untransformed_datasets)
         print("Uploading untransformed dataset to hub for inspection...")
-        combined_untransformed_datasets.push_to_hub("saumyamalik/test-upload")
+        combined_untransformed_datasets.push_to_hub("allenai/olmo3-sft-nonreasoner-no-tool-use", private=True)
 
         # Prepare return statistics
         all_statistics = {"per_dataset_stats": dataset_statistics, "dataset_order": dataset_order}
