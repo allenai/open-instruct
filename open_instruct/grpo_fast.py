@@ -1372,54 +1372,68 @@ def calculate_utilization_metrics(
     response_lengths: list[int],
     total_generation_time: float,
     samples_per_prompt: int,
-    num_gpus: int,
-) -> tuple[float, float, int, int]:
-    """Calculate MFU and MBU metrics for model inference.
+    num_inference_gpus: int,
+    training_time: float,
+    num_training_gpus: int,
+) -> dict:
+    """Calculate MFU and MBU metrics for model inference and training.
 
     Args:
         model_dims: Model dimensions with device information
         prompt_lengths: List of prompt lengths
         response_lengths: List of response lengths
-        total_generation_time: Total time taken for generation
+        total_generation_time: Total time taken for generation (for actor metrics)
         samples_per_prompt: Number of samples generated per prompt
-        num_gpus: Number of GPUs used for inference
+        num_inference_gpus: Number of GPUs used for inference
+        training_time: Time taken for training step (for learner metrics)
+        num_training_gpus: Number of GPUs used for training (for learner metrics)
 
     Returns:
-        Tuple of (mfu, mbu, total_flops, total_memory_bytes)
+        Dict with the following keys:
+            - actor_mfu: Model FLOPs utilization for inference (percentage)
+            - actor_mbu: Model bandwidth utilization for inference (percentage)
+            - learner_mfu: Model FLOPs utilization for training (percentage)
     """
-    assert model_dims is not None, "model_dims must be provided"
-    assert prompt_lengths, "prompt_lengths must not be empty"
-    assert response_lengths, "response_lengths must not be empty"
     assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
         f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
     )
 
-    # Calculate FLOPs and memory bytes
-    total_flops = model_dims.flops(prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt)
-    total_memory_bytes = model_dims.memory_bytes(
+    # Calculate FLOPs and memory bytes for inference
+    actor_total_flops = model_dims.flops(prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt)
+    actor_total_memory_bytes = model_dims.memory_bytes(
         prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt
     )
 
     # Calculate MFU and MBU accounting for multiple GPUs
-    flops_per_second = total_flops / total_generation_time
-    bytes_per_second = total_memory_bytes / total_generation_time
+    flops_per_second = actor_total_flops / total_generation_time
+    bytes_per_second = actor_total_memory_bytes / total_generation_time
     # Scale device capabilities by number of GPUs
-    total_device_flops = model_dims.device_flops * num_gpus
-    total_device_bandwidth = model_dims.device_memory_bandwidth * num_gpus
-    mfu = 100 * flops_per_second / total_device_flops
-    mbu = 100 * bytes_per_second / total_device_bandwidth
+    total_device_flops = model_dims.device_flops * num_inference_gpus
+    total_device_bandwidth = model_dims.device_memory_bandwidth * num_inference_gpus
+    actor_mfu = 100 * flops_per_second / total_device_flops
+    actor_mbu = 100 * bytes_per_second / total_device_bandwidth
 
-    # Debug logging
-    logger.info(f"MFU/MBU Debug - total_generation_time: {total_generation_time:.6f}s")
-    logger.info(f"MFU/MBU Debug - total_flops: {total_flops:,}")
-    logger.info(f"MFU/MBU Debug - total_memory_bytes: {total_memory_bytes:,}")
-    logger.info(f"MFU/MBU Debug - flops_per_second: {flops_per_second:,.2f}")
-    logger.info(f"MFU/MBU Debug - bytes_per_second: {bytes_per_second:,.2f}")
-    logger.info(f"MFU/MBU Debug - total_device_flops: {total_device_flops:,}")
-    logger.info(f"MFU/MBU Debug - total_device_bandwidth: {total_device_bandwidth:,}")
-    logger.info(f"MFU/MBU Debug - MFU: {mfu:.2e}%, MBU: {mbu:.2e}%")
+    # Calculate learner/training metrics
+    # For training, we need to use total sequence lengths (prompt + response) since training
+    # processes the full sequences, not separate prefill/decode operations
+    total_sequence_lengths = [
+        prompt_lengths[i // samples_per_prompt] + response_len for i, response_len in enumerate(response_lengths)
+    ]
 
-    return mfu, mbu, total_flops, total_memory_bytes
+    # For training FLOPs, pass total sequence lengths as prompt_lengths with response_lengths=None
+    training_flops = model_dims.flops(
+        prompt_lengths=total_sequence_lengths,
+        response_lengths=None,
+        samples_per_prompt=1,  # Already expanded in total_sequence_lengths
+        is_training=True,
+    )
+
+    # Calculate training MFU
+    training_flops_per_second = training_flops / training_time
+    total_training_device_flops = model_dims.device_flops * num_training_gpus
+    learner_mfu = 100 * training_flops_per_second / total_training_device_flops
+
+    return {"actor_mfu": actor_mfu, "actor_mbu": actor_mbu, "learner_mfu": learner_mfu}
 
 
 def accumulate_inference_batches(
@@ -1448,7 +1462,8 @@ def accumulate_inference_batches(
         queue.Empty: If timeout is specified and no data is available within timeout.
 
     Returns:
-        Tuple of (combined_result, Batch with queries, ground_truths, datasets) or (ShutdownSentinel, None) if shutdown signal received
+        Tuple of (combined_result, Batch with queries, ground_truths, datasets, prompt_lengths, response_lengths)
+        or (ShutdownSentinel, None, None, None) if shutdown signal received
     """
     results = []
     all_queries = []
@@ -1465,7 +1480,7 @@ def accumulate_inference_batches(
         result = inference_results_Q.get(timeout=timeout)
 
         if isinstance(result, ShutdownSentinel):
-            return result, None
+            return result, None, None, None
 
         # Validate that each individual result has the expected number of responses
         assert len(result.responses) == generation_config.n, (
@@ -1527,22 +1542,11 @@ def accumulate_inference_batches(
     # This avoids including queue overhead and accumulation time in MFU/MBU calculations
     total_generation_time = max_generation_time
 
-    # Calculate total number of GPUs used in vLLM
-    num_gpus = args.vllm_num_engines * args.vllm_tensor_parallel_size
-    mfu, mbu, total_flops, total_memory_bytes = calculate_utilization_metrics(
-        model_dims, prompt_lengths, response_lengths, total_generation_time, generation_config.n, num_gpus
-    )
-
-    # Create accumulated token statistics with MFU/MBU
     accumulated_stats = TokenStatistics(
         num_prompt_tokens=total_prompt_tokens,
         num_response_tokens=total_response_tokens,
         generation_time=total_generation_time,
-        mfu=mfu,
-        mbu=mbu,
         earliest_start_time=earliest_start_time,
-        total_flops=total_flops,
-        total_memory_bytes=total_memory_bytes,
     )
 
     # Create combined RequestInfo
@@ -1576,7 +1580,7 @@ def accumulate_inference_batches(
         raw_queries=all_raw_queries,
         indices=None,  # Not meaningful for combined results
     )
-    return combined_result, batch
+    return combined_result, batch, prompt_lengths, response_lengths
 
 
 def data_preparation_thread(
@@ -1595,7 +1599,7 @@ def data_preparation_thread(
     for training_step in range(resume_training_step, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
-            result, batch = accumulate_inference_batches(
+            result, batch, prompt_lengths, response_lengths = accumulate_inference_batches(
                 inference_results_Q,
                 pending_queries_map,
                 args,
@@ -1914,8 +1918,6 @@ def data_preparation_thread(
                 "val/good_outputs_rate": np.array(good_outputs).mean(),
                 "val/tool_runtimes_rate": np.array(result.request_info.tool_runtimes).mean(),
                 "val/tool_calleds_rate": np.array(result.request_info.tool_calleds).mean(),
-                "actor_mfu": result.token_statistics.mfu,
-                "actor_mbu": result.token_statistics.mbu,
                 "time/getting_response": getting_response_time,
                 **reward_metrics,
             }
@@ -1949,6 +1951,8 @@ def data_preparation_thread(
                 "responses_count": len(responses),
                 "num_new_tokens": num_new_tokens,
                 "B": B,
+                "prompt_lengths": prompt_lengths,
+                "response_lengths": response_lengths,
             }
         )
 
@@ -2224,12 +2228,14 @@ def load_data_from_packing_thread(
         collated_data = packed_data["collated_data"]
         num_step_tokens = packed_data["num_new_tokens"]
         num_total_tokens += num_step_tokens
+        prompt_lengths = packed_data["prompt_lengths"]
+        response_lengths = packed_data["response_lengths"]
 
     data_thread_metrics["time/trainer_idling"] = timer.duration
     if B == 0:
         logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-        return None, data_thread_metrics, num_total_tokens, 0
-    return collated_data, data_thread_metrics, num_total_tokens, num_step_tokens
+        return None, data_thread_metrics, num_total_tokens, 0, None, None
+    return collated_data, data_thread_metrics, num_total_tokens, num_step_tokens, prompt_lengths, response_lengths
 
 
 def weight_sync_thread(
@@ -2321,6 +2327,9 @@ def one_training_step(
     training_start_time,
     wandb_url,
     chat_template_name,
+    model_dims: utils.ModelDims,
+    prompt_lengths: list[int],
+    response_lengths: list[int],
     actor_manager=None,
     iter_dataloader=None,
 ):
@@ -2375,6 +2384,21 @@ def one_training_step(
     average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
+
+    num_actor_gpus = args.vllm_num_engines * args.vllm_tensor_parallel_size
+    total_generation_time = data_thread_metrics["time/getting_response"]
+
+    utilization_metrics = calculate_utilization_metrics(
+        model_dims=model_dims,
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        total_generation_time=total_generation_time,
+        samples_per_prompt=args.num_samples_per_prompt_rollout,
+        num_inference_gpus=num_actor_gpus,
+        training_time=train_timer.duration,
+        num_training_gpus=args.world_size,
+    )
+
     metrics = {
         "episode": episode,
         "global_step": episode,
@@ -2389,6 +2413,7 @@ def one_training_step(
         "time/saving": save_time,
         **data_thread_metrics,
         **average_metrics,
+        **utilization_metrics,
     }
     # Print only scalar metrics
     scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (float, int))}
@@ -2424,7 +2449,7 @@ def maybe_evaluate(
         timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_every < 0) else 100
 
         # Accumulate evaluation results from all vLLM engines
-        eval_result, eval_batch = accumulate_inference_batches(
+        eval_result, eval_batch, _, _ = accumulate_inference_batches(
             evaluation_inference_results_Q,
             eval_pending_queries_map,
             args,
@@ -2813,8 +2838,8 @@ def run_training(
             )
 
         # The generate_thread is now handling vLLM processing asynchronously
-        collated_data, data_thread_metrics, num_total_tokens, num_step_tokens = load_data_from_packing_thread(
-            packed_sequences_Q, num_total_tokens, stop_event, health_check_fn
+        collated_data, data_thread_metrics, num_total_tokens, num_step_tokens, prompt_lengths, response_lengths = (
+            load_data_from_packing_thread(packed_sequences_Q, num_total_tokens, stop_event, health_check_fn)
         )
         if collated_data is None:
             continue
@@ -2840,6 +2865,9 @@ def run_training(
             training_start_time,
             wandb_url,
             tc.chat_template_name,
+            model_dims,
+            prompt_lengths,
+            response_lengths,
             actor_manager,
             iter_dataloader,
         )

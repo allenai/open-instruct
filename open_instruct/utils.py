@@ -1679,10 +1679,7 @@ class ModelDims:
             self.num_kv_heads = self.num_attn_heads
 
         if self.device_name is None:
-            import torch
-
-            if torch.cuda.is_available():
-                self.device_name = get_device_name(torch.cuda.get_device_name(0))
+            self.device_name = get_device_name(torch.cuda.get_device_name(0))
 
         assert self.hidden_size % self.num_attn_heads == 0, "hidden_size must be divisible by num_attn_heads"
         assert self.num_attn_heads % self.num_kv_heads == 0, (
@@ -1795,7 +1792,11 @@ class ModelDims:
         return total
 
     def flops(
-        self, prompt_lengths: list[int], response_lengths: Optional[list[int]] = None, samples_per_prompt: int = 1
+        self,
+        prompt_lengths: list[int],
+        response_lengths: Optional[list[int]] = None,
+        samples_per_prompt: int = 1,
+        is_training: bool = False,
     ) -> int:
         """Total FLOPs for prefill and (optionally) decode.
 
@@ -1803,10 +1804,14 @@ class ModelDims:
             prompt_lengths: List of prompt lengths (one per unique prompt)
             response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
             samples_per_prompt: Number of samples generated per prompt
+            is_training: If True, multiply FLOPs by 3 to account for forward and backward passes
         """
         total = self.prefill_flops(prompt_lengths)
         if response_lengths is not None:
             total += self.decode_flops(prompt_lengths, response_lengths, samples_per_prompt)
+        if is_training:
+            # Training includes forward pass (1x) + backward pass (2x)
+            total *= 3
         return total
 
     def weight_memory_bytes(self, num_tokens: int, dtype_bytes: int = 2) -> int:
