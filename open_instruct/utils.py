@@ -1679,10 +1679,7 @@ class ModelDims:
             self.num_kv_heads = self.num_attn_heads
 
         if self.device_name is None:
-            import torch
-
-            if torch.cuda.is_available():
-                self.device_name = get_device_name(torch.cuda.get_device_name(0))
+            self.device_name = get_device_name(torch.cuda.get_device_name(0))
 
         assert self.hidden_size % self.num_attn_heads == 0, "hidden_size must be divisible by num_attn_heads"
         assert self.num_attn_heads % self.num_kv_heads == 0, (
