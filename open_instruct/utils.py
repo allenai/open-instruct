@@ -1136,7 +1136,6 @@ def launch_ai2_evals_on_weka(
     gs_bucket_path: Optional[str] = None,
     eval_priority: Optional[str] = "normal",
     beaker_image: Optional[str] = None,
-    log_eval_to_wandb: bool = False,
 ) -> None:
     weka_cluster = "ai2/saturn-cirrascale ai2/neptune-cirrascale"
     gcp_cluster = "ai2/augusta-google-1"
@@ -1178,9 +1177,8 @@ python scripts/submit_eval_jobs.py \
 --skip_oi_evals"""
     if wandb_url is not None:
         command += f" --run_id {wandb_url}"
-        if log_eval_to_wandb:
-            wandb_run_path = wandb_url_to_run_path(wandb_url)
-            command += f" --wandb_run_path {wandb_run_path}"
+        wandb_run_path = wandb_url_to_run_path(wandb_url)
+        command += f" --wandb_run_path {wandb_run_path}"
     if oe_eval_max_length is not None:
         command += f" --oe_eval_max_length {oe_eval_max_length}"
     if training_step is not None:
