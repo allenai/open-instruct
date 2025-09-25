@@ -1414,11 +1414,17 @@ def calculate_utilization_metrics(
     actor_mbu = 100 * bytes_per_second / total_device_bandwidth
 
     # Calculate learner/training metrics
-    # For training, we use the same sequences but calculate FLOPs for training (forward + backward)
+    # For training, we need to use total sequence lengths (prompt + response) since training
+    # processes the full sequences, not separate prefill/decode operations
+    total_sequence_lengths = [
+        prompt_lengths[i // samples_per_prompt] + response_len for i, response_len in enumerate(response_lengths)
+    ]
+
+    # For training FLOPs, pass total sequence lengths as prompt_lengths with response_lengths=None
     training_flops = model_dims.flops(
-        prompt_lengths=prompt_lengths,
-        response_lengths=response_lengths,
-        samples_per_prompt=samples_per_prompt,
+        prompt_lengths=total_sequence_lengths,
+        response_lengths=None,
+        samples_per_prompt=1,  # Already expanded in total_sequence_lengths
         is_training=True,
     )
 
