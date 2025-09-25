@@ -42,7 +42,7 @@ python open_instruct/grpo_fast.py \
     --beta 0.0 \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 24 \
-    --num_mini_batches 4 \
+    --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
     --kl_estimator kl3 \
@@ -59,7 +59,7 @@ python open_instruct/grpo_fast.py \
     --stop_strings "</answer>" \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 192000 \
+    --total_episodes 38400 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 \
     --vllm_num_engines 24 \
@@ -76,6 +76,7 @@ python open_instruct/grpo_fast.py \
     --clip_higher 0.272 \
     --mask_truncated_completions True \
     --oe_eval_max_length 32000 \
+    --eval_priority high \
     --try_launch_beaker_eval_jobs_on_weka True \
     --oe_eval_tasks $EVALS \
     --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto
