@@ -9,6 +9,7 @@ class TokenStatistics:
     num_prompt_tokens: int
     num_response_tokens: int
     generation_time: float
+    earliest_start_time: Optional[float] = None
 
 
 @dataclass

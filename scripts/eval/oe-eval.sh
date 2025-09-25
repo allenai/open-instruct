@@ -128,7 +128,12 @@ fi
 WANDB_ARG=""
 if [[ -n "$WANDB_RUN_PATH" ]]; then
     beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
-    WANDB_ARG="--wandb-run-path $WANDB_RUN_PATH --gantry-secret-wandb-api-key ${beaker_user}_WANDB_API_KEY"
+    if ! beaker secret list --workspace ai2/tulu-3-results | grep -q "${beaker_user}_WANDB_API_KEY"; then
+        echo "WARNING: No ${beaker_user}_WANDB_API_KEY secret found in workspace ai2/tulu-3-results."
+        echo "add your WANDB_API_KEY as a secret to this workspace in order to use --oe_eval_log_to_wandb"
+    else
+        WANDB_ARG=" --wandb-run-path $WANDB_RUN_PATH --gantry-secret-wandb-api-key ${beaker_user}_WANDB_API_KEY"
+    fi
 fi
 
 DATALAKE_ARGS=""
@@ -137,7 +142,9 @@ if [[ -n "$RUN_ID" ]]; then
 fi
 if [[ -n "$STEP" ]]; then
     DATALAKE_ARGS+=",step=$STEP"
-    WANDB_ARG+="--wandb-run-step $STEP"
+    if [[ -n "$WANDB_ARG" ]]; then
+        WANDB_ARG+=" --wandb-run-step $STEP"
+    fi
 fi
 
 # Set HF_UPLOAD_ARG only if UPLOAD_TO_HF is specified

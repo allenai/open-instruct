@@ -400,6 +400,24 @@ class LLMRayActor:
         self.tracking = _init_tool_tracking()
         self.request_outputs = {}
 
+    def get_model_dims_dict(self):
+        """Get only the model dimensions as a simple dict without loading weights."""
+        model_config = self.llm_engine.model_config
+        parallel_config = self.llm_engine.vllm_config.parallel_config
+
+        # Extract only the necessary dimensions as simple Python types
+        hidden_size = model_config.get_hidden_size()
+        intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
+
+        return {
+            "num_layers": model_config.get_num_layers(parallel_config),
+            "hidden_size": hidden_size,
+            "intermediate_size": intermediate_size,
+            "vocab_size": model_config.get_vocab_size(),
+            "num_attn_heads": model_config.get_num_attention_heads(parallel_config),
+            "num_kv_heads": model_config.get_num_kv_heads(parallel_config),
+        }
+
     def _should_stop(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
             should_stop_ref = self.actor_manager.should_stop.remote()
@@ -497,7 +515,7 @@ class LLMRayActor:
                 self._prefetch_future.result()
 
             self._poll_tool_futures(self.tracking, self.llm_engine.tokenizer)
-            current_time = time.time()
+            current_time = time.perf_counter()
             if self.llm_engine.has_unfinished_requests():
                 for output in [o for o in self.llm_engine.step() if o.finished]:
                     # Fix the index field for all sub-requests
@@ -824,7 +842,7 @@ class LLMRayActor:
                 tracking["pending_tool_futures"].pop(req_id, None)
 
                 complete_output = tracking["concat_outputs"][req_id].outputs[0]
-                current_time = time.time()
+                current_time = time.perf_counter()
                 self._finalize_sub_request(req_id, last_output, complete_output, current_time)
                 # Don't add to dict_keys_to_delete since we already removed it
                 continue
