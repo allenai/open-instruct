@@ -40,6 +40,7 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
@@ -1022,31 +1023,47 @@ class LLMRayActor:
         await self._ensure_prefetch_started()
         return True
 
-    async def get_kv_cache_info(self):
-        """Get KV cache max concurrency from the vLLM engine."""
+    def get_kv_cache_info(self):
+        """Get KV cache max concurrency from the vLLM engine using v1 API."""
+        kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
+
+        vllm_config = self.llm_engine.vllm_config
+        gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
+        total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
+        available_memory = int(gpu_memory_utilization * total_gpu_memory)
+
+        # Use vLLM's v1 API to get KV cache configs
+        kv_cache_configs = kv_cache_utils.get_kv_cache_configs(vllm_config, kv_cache_specs, [available_memory])
+
+        if not kv_cache_configs:
+            return -1
+
+        # Get max concurrency using vLLM's function
+        max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(vllm_config, kv_cache_configs[0])
+
+        return int(max_concurrency)
+
+    async def get_kv_cache_info_async(self):
+        """Get KV cache max concurrency from the vLLM engine using v1 API (async version)."""
         await self._ensure_engine_initialized()
-        # AsyncLLMEngine wraps the underlying LLMEngine
-        engine = self.llm_engine.engine
 
-        # Use the same calculation as vLLM's executor_base.py
-        # Reference: https://github.com/vllm-project/vllm/blob/b6553be1bc75f046b00046a4ad7576364d03c835/vllm/executor/executor_base.py#L119-L120
-        retries = 5
-        for attempt in range(retries):
-            num_gpu_blocks = engine.cache_config.num_gpu_blocks
-            block_size = engine.cache_config.block_size
-            max_model_len = engine.model_config.max_model_len
+        kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
 
-            if num_gpu_blocks is not None and num_gpu_blocks != 0:
-                # Calculate max concurrency using vLLM's formula
-                max_concurrency = (num_gpu_blocks * block_size) / max_model_len
-                logger.info(f"Calculated max_concurrency: {max_concurrency}")
-                return int(max_concurrency)
+        vllm_config = self.llm_engine.vllm_config
+        gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
+        total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
+        available_memory = int(gpu_memory_utilization * total_gpu_memory)
 
-            # Not initialized yet; wait a bit
-            await asyncio.sleep(0.2)
+        # Use vLLM's v1 API to get KV cache configs
+        kv_cache_configs = kv_cache_utils.get_kv_cache_configs(vllm_config, kv_cache_specs, [available_memory])
 
-        logger.warning("num_gpu_blocks not initialized after retries, returning default value 1")
-        return 1
+        if not kv_cache_configs:
+            return -1
+
+        # Get max concurrency using vLLM's function
+        max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(vllm_config, kv_cache_configs[0])
+
+        return int(max_concurrency)
 
 
 def get_cuda_arch_list() -> str:
