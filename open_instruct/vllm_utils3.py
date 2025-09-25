@@ -40,7 +40,6 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
-from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
@@ -1024,26 +1023,13 @@ class LLMRayActor:
         return True
 
     async def get_kv_cache_info(self):
-        """Get KV cache max concurrency from the vLLM engine using v1 API."""
+        """Get KV cache max concurrency from the vLLM engine."""
         await self._ensure_engine_initialized()
 
-        kv_cache_specs = self.llm_engine.engine.model_executor.get_kv_cache_specs()
-
-        vllm_config = await self.llm_engine.get_vllm_config()
-        gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
-        total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
-        available_memory = int(gpu_memory_utilization * total_gpu_memory)
-
-        # Use vLLM's v1 API to get KV cache configs
-        kv_cache_configs = kv_cache_utils.get_kv_cache_configs(vllm_config, kv_cache_specs, [available_memory])
-
-        if not kv_cache_configs:
-            return -1
-
-        # Get max concurrency using vLLM's function
-        max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(vllm_config, kv_cache_configs[0])
-
-        return int(max_concurrency)
+        # v1 AsyncLLM doesn't expose model_executor, so we can't compute KV cache info
+        # Return -1 to indicate unavailable
+        logger.info("KV cache info not available for v1 AsyncLLM, returning -1")
+        return -1
 
 
 def get_cuda_arch_list() -> str:
