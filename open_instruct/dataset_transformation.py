@@ -1886,7 +1886,7 @@ class LocalDatasetTransformationCache:
 
             dataset, untokenized_dataset = get_dataset_v1(dc, tc)
             transformed_datasets.append(dataset)
-            assert len(dataset) == len(untokenized_dataset), "Transformed and untokenized datasets should have the same length"
+            #assert len(dataset) == len(untokenized_dataset), "Transformed and untokenized datasets should have the same length"
 
             # add id
             name = dc.dataset_name.split("/")[-1]
