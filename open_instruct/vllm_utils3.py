@@ -1023,33 +1023,13 @@ class LLMRayActor:
         await self._ensure_prefetch_started()
         return True
 
-    def get_kv_cache_info(self):
+    async def get_kv_cache_info(self):
         """Get KV cache max concurrency from the vLLM engine using v1 API."""
-        kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
-
-        vllm_config = self.llm_engine.vllm_config
-        gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
-        total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
-        available_memory = int(gpu_memory_utilization * total_gpu_memory)
-
-        # Use vLLM's v1 API to get KV cache configs
-        kv_cache_configs = kv_cache_utils.get_kv_cache_configs(vllm_config, kv_cache_specs, [available_memory])
-
-        if not kv_cache_configs:
-            return -1
-
-        # Get max concurrency using vLLM's function
-        max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(vllm_config, kv_cache_configs[0])
-
-        return int(max_concurrency)
-
-    async def get_kv_cache_info_async(self):
-        """Get KV cache max concurrency from the vLLM engine using v1 API (async version)."""
         await self._ensure_engine_initialized()
 
-        kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
+        kv_cache_specs = self.llm_engine.engine.model_executor.get_kv_cache_specs()
 
-        vllm_config = self.llm_engine.vllm_config
+        vllm_config = await self.llm_engine.get_vllm_config()
         gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
         total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
         available_memory = int(gpu_memory_utilization * total_gpu_memory)
