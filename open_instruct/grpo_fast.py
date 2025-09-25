@@ -1247,9 +1247,10 @@ class ModelGroup:
         ).remote(world_size, 0, 0, None, None)
 
         self.models.append(master_policy)
-        master_addr, master_port = ray_get_with_progress(
+        results, _ = ray_get_with_progress(
             [master_policy.get_master_addr_port.remote()], desc="Getting master address"
-        )[0]
+        )
+        (master_addr, master_port) = results[0]
 
         def get_bundle_index(rank, num_gpus_per_node):
             """given a rank and a list of num_gpus_per_node, return the index of the bundle that the rank belongs to"""
@@ -2138,7 +2139,8 @@ def create_model_and_optimizer(
         verbose=args.verbose,
     )
 
-    resume_training_step = ray_get_with_progress(inits, desc="Initializing models")[0] + 1
+    results, _ = ray_get_with_progress(inits, desc="Initializing models")
+    resume_training_step = results[0] + 1
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     logger.info("======== ✅ all models and vLLM engines initialized =========")
 
@@ -2271,8 +2273,8 @@ def weight_sync_thread(
             # First get the futures
             weight_broadcast_futures: List[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
 
-            # Wait for all weight updates to complete
-            ray_get_with_progress(
+            # Wait for all weight updates to complete and collect individual timings
+            _, actor_sync_times = ray_get_with_progress(
                 weight_broadcast_futures,
                 desc="[Weight Sync Thread] Waiting for weight updates to complete",
                 enable=args.verbose,
@@ -2282,8 +2284,17 @@ def weight_sync_thread(
             ray.get(actor_manager.set_should_stop.remote(False))
             logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
 
+        # Calculate distribution statistics
+        sync_time_stats = {
+            "time/weight_sync": timer.duration,
+            "time/weight_sync_mean": np.mean(actor_sync_times),
+            "time/weight_sync_min": np.min(actor_sync_times),
+            "time/weight_sync_max": np.max(actor_sync_times),
+            "time/weight_sync_median": np.median(actor_sync_times),
+        }
+
         try:
-            weight_sync_metrics_Q.put_nowait({"time/weight_sync": timer.duration})
+            weight_sync_metrics_Q.put_nowait(sync_time_stats)
         except Full:
             logger.warning("[Weight Sync Thread] weight sync metrics queue full, skipping metric")
 
@@ -2295,7 +2306,7 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
     logger.info("[Generate Thread] 🚀 Starting generation thread")
     while not stop_event.is_set():
         with Timer("🔥 Generation time") as timer:
-            processed_results = ray_get_with_progress(
+            processed_results, _ = ray_get_with_progress(
                 [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
                 desc="[Generate Thread] Waiting for vLLM engines to process",
                 enable=args.verbose,
@@ -2336,7 +2347,7 @@ def one_training_step(
     """Train the model for one step."""
     update_ref_policy_future = []
     with Timer("[Main Thread] 🗡️ Training") as train_timer:
-        metrics_list: List[dict[str, float]] = ray_get_with_progress(
+        metrics_list, _ = ray_get_with_progress(
             [
                 policy_group.models[i].train.remote(
                     **collated_data[i], pad_token_id=tokenizer.pad_token_id, num_mini_batches=args.num_mini_batches

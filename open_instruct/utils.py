@@ -81,8 +81,8 @@ def repeat_each(seq, k):
 
 def ray_get_with_progress(
     ray_refs: List[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: Optional[float] = None
-) -> List[Any]:
-    """Execute ray.get() with a progress bar using futures.
+):
+    """Execute ray.get() with a progress bar using futures and collect timings.
 
     Args:
         ray_refs: List of ray object references
@@ -91,23 +91,31 @@ def ray_get_with_progress(
         timeout: Optional timeout in seconds for all operations to complete
 
     Returns:
-        List of results in the same order as ray_refs
+        (results, completion_times)
+        - results: List of results in the same order as ray_refs
+        - completion_times: time from function start until each ref completed (seconds), aligned to ray_refs
 
     Raises:
         TimeoutError: If timeout is specified and operations don't complete in time
     """
+    t0 = time.perf_counter()
+
     ray_futures = [ref.future() for ref in ray_refs]
+    fut_to_idx = {f: i for i, f in enumerate(ray_futures)}
+
     results = [None] * len(ray_refs)
+    completion_times = [None] * len(ray_refs)
 
     futures_iter = futures.as_completed(ray_futures, timeout=timeout)
     if enable:
         futures_iter = tqdm(futures_iter, total=len(ray_futures), desc=desc, bar_format="{l_bar}{bar}{r_bar}\n")
 
     for future in futures_iter:
-        idx = ray_futures.index(future)
+        idx = fut_to_idx[future]
         results[idx] = future.result()
+        completion_times[idx] = time.perf_counter() - t0
 
-    return results
+    return results, completion_times
 
 
 """
