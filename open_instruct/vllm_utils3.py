@@ -545,20 +545,44 @@ class LLMRayActor:
         generator = await self.llm_engine.add_request(request_id, prompt, sampling_params)
         logger.info(f"[generate_one_completion] Got generator for {request_id}, starting iteration")
 
+        # Yield control to let the engine's background task start processing
+        await asyncio.sleep(0)
+
         outputs = []
         iteration_count = 0
-        async for output in generator:
-            iteration_count += 1
-            if iteration_count % 100 == 0:
-                logger.info(
-                    f"[generate_one_completion] Iteration {iteration_count} for {request_id}, finished={output.finished}"
-                )
-            if output.finished:
-                outputs.append(output)
-                logger.info(
-                    f"[generate_one_completion] Request {request_id} finished after {iteration_count} iterations"
-                )
+        total_wait_time = 0.0
+        max_wait_time = 600.0  # 10 minutes maximum wait
+
+        # Poll the generator with timeouts instead of blocking
+        while total_wait_time < max_wait_time:
+            try:
+                # Try to get next output with a short timeout
+                output = await asyncio.wait_for(generator.__anext__(), timeout=0.1)
+                iteration_count += 1
+                if iteration_count % 100 == 0:
+                    logger.info(
+                        f"[generate_one_completion] Iteration {iteration_count} for {request_id}, finished={output.finished}"
+                    )
+                if output.finished:
+                    outputs.append(output)
+                    logger.info(
+                        f"[generate_one_completion] Request {request_id} finished after {iteration_count} iterations"
+                    )
+                    break
+            except asyncio.TimeoutError:
+                # Yield control to background tasks
+                await asyncio.sleep(0)
+                total_wait_time += 0.1
+                if int(total_wait_time * 10) % 100 == 0:  # Log every 10 seconds
+                    logger.debug(f"[generate_one_completion] Still waiting for {request_id}, waited {total_wait_time:.1f}s")
+                continue
+            except StopAsyncIteration:
+                # Generator is exhausted
                 break
+
+        if not outputs:
+            logger.error(f"[generate_one_completion] Request {request_id} timed out after {total_wait_time:.1f}s")
+            raise TimeoutError(f"Request {request_id} timed out after {total_wait_time:.1f}s")
 
         assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
         return outputs[0]
