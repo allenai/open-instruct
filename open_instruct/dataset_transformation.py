@@ -1705,6 +1705,9 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         num_proc=num_proc,
         desc=f"Adding dataset source field for {dc.dataset_name}",
     )
+
+    # save a copy of the dataset pre-transformation
+    untokenized_dataset = copy.deepcopy(dataset)
     for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
         fn, fn_type = TRANSFORM_FNS[fn_name]
         # always pass in tokenizer and other args if needed
@@ -1716,7 +1719,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # Always preserve dataset_source if it exists
         if DATASET_ORIGIN_KEY in dataset.column_names and DATASET_ORIGIN_KEY not in target_columns:
             target_columns = target_columns + [DATASET_ORIGIN_KEY]
-
+        
         if fn_type == "map":
             dataset = dataset.map(
                 fn,
@@ -1736,7 +1739,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     if len(dataset) == 0:
         raise ValueError("No examples left after transformation")
-    return dataset
+    return dataset, untokenized_dataset
 
 
 def compute_config_hash(dcs: List[DatasetConfig], tc: TokenizerConfig) -> str:
@@ -1873,6 +1876,7 @@ class LocalDatasetTransformationCache:
 
         # Transform each dataset and collect statistics
         transformed_datasets = []
+        untransformed_datasets = []
         dataset_statistics = []
         dataset_order = []
 
@@ -1880,8 +1884,16 @@ class LocalDatasetTransformationCache:
             # Get initial dataset info
             initial_size = len(dc.dataset) if dc.dataset else 0
 
-            dataset = get_dataset_v1(dc, tc)
+            dataset, untokenized_dataset = get_dataset_v1(dc, tc)
             transformed_datasets.append(dataset)
+            assert len(dataset) == len(untokenized_dataset), "Transformed and untokenized datasets should have the same length"
+
+            # drop columns 
+            columns_to_keep = dc.target_columns + ["messages", DATASET_ORIGIN_KEY] if dc.target_columns is not None else ["messages", DATASET_ORIGIN_KEY]
+            untokenized_dataset = untokenized_dataset.remove_columns(
+                [col for col in untokenized_dataset.column_names if col not in (columns_to_keep)]
+            )   
+            untransformed_datasets.append(untokenized_dataset)
 
             # Collect statistics for this dataset
             stats = {
@@ -1920,6 +1932,11 @@ class LocalDatasetTransformationCache:
 
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
+
+        # Combine untransformed datasets
+        combined_untransformed_datasets = concatenate_datasets(untransformed_datasets)
+        print("Uploading untransformed dataset to hub for inspection...")
+        combined_untransformed_datasets.push_to_hub("saumyamalik/test-upload")
 
         # Prepare return statistics
         all_statistics = {"per_dataset_stats": dataset_statistics, "dataset_order": dataset_order}
@@ -1971,6 +1988,7 @@ def get_cached_dataset_tulu_with_statistics(
     dataset_skip_cache: bool = False,
     drop_dataset_source: bool = True,
 ) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
+    print("ENTERING GET CACHED DATASET TULU WITH STATISTICS")
     dcs = []
     if dataset_config_hash is None:
         if len(dataset_mixer_list_splits) == 1:
