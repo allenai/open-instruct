@@ -1145,7 +1145,6 @@ def launch_ai2_evals_on_weka(
     gs_bucket_path: Optional[str] = None,
     eval_priority: Optional[str] = "normal",
     beaker_image: Optional[str] = None,
-    log_eval_to_wandb: bool = False,
 ) -> None:
     weka_cluster = "ai2/saturn-cirrascale ai2/neptune-cirrascale"
     gcp_cluster = "ai2/augusta-google-1"

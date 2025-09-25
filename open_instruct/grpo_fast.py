@@ -407,8 +407,6 @@ class Args:
     """the docker image for evaluation for oe-eval"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
-    oe_eval_log_to_wandb: bool = False
-    """Whether to log oe-eval results to wandb as run.summary"""
 
     # Evaluation behavior
     eval_on_step_0: bool = False
@@ -1226,7 +1224,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 args.gs_bucket_path,
                 args.eval_priority,
                 args.oe_eval_beaker_image,
-                args.oe_eval_log_to_wandb,
             )
 
 
@@ -2369,7 +2366,7 @@ def one_training_step(
             )
 
     save_time = 0
-    if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
+    if args.save_freq > 0 and (training_step % args.save_freq == 0 or (training_step == 1 and args.eval_on_step_0)):
         with Timer("[Main Thread] 🗡️ Saving model") as timer:
             checkpoint_dir = f"{args.output_dir}_checkpoints"
             step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
