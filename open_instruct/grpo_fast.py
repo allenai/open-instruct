@@ -2559,7 +2559,6 @@ if __name__ == "__main__":
                     rubric_key_weights = {}
                     for rubric in rubrics:
                         # Import the helper function here to avoid circular imports
-                        from open_instruct.search_rewards.longform_rubric_rewards import create_rubric_key
                         rubric_key = create_rubric_key(query, rubric)
                         if rubric_key not in rubric_key_weights:
                             rubric_key_weights[rubric_key] = []
