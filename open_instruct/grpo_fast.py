@@ -1544,29 +1544,11 @@ def accumulate_inference_batches(
     # This avoids including queue overhead and accumulation time in MFU/MBU calculations
     total_generation_time = max_generation_time
 
-    # Calculate total number of GPUs used in vLLM
-    num_actor_gpus = args.vllm_num_engines * args.vllm_tensor_parallel_size
-    utilization_metrics = calculate_utilization_metrics(
-        model_dims,
-        prompt_lengths,
-        response_lengths,
-        total_generation_time,
-        generation_config.n,
-        num_actor_gpus,
-        training_time=0.0,
-        num_training_gpus=1,  # Dummy values for inference-only call
-    )
-
-    # Create accumulated token statistics with MFU/MBU
     accumulated_stats = TokenStatistics(
         num_prompt_tokens=total_prompt_tokens,
         num_response_tokens=total_response_tokens,
         generation_time=total_generation_time,
-        mfu=utilization_metrics["actor_mfu"],
-        mbu=utilization_metrics["actor_mbu"],
         earliest_start_time=earliest_start_time,
-        total_flops=utilization_metrics["actor_total_flops"],
-        total_memory_bytes=utilization_metrics["actor_total_memory_bytes"],
     )
 
     # Create combined RequestInfo
@@ -1938,8 +1920,6 @@ def data_preparation_thread(
                 "val/good_outputs_rate": np.array(good_outputs).mean(),
                 "val/tool_runtimes_rate": np.array(result.request_info.tool_runtimes).mean(),
                 "val/tool_calleds_rate": np.array(result.request_info.tool_calleds).mean(),
-                "actor_mfu": result.token_statistics.mfu,
-                "actor_mbu": result.token_statistics.mbu,
                 "time/getting_response": getting_response_time,
                 **reward_metrics,
             }
