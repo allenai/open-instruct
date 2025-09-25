@@ -83,8 +83,11 @@ GCP_CLUSTERS = [
 
 INTERCONNECT_CLUSTERS = [
     "ai2/jupiter-cirrascale-2",
+    "ai2/jupiter",
     "ai2/ceres-cirrascale",
+    "ai2/ceres"
     "ai2/augusta-google-1",
+    "ai2/augusta",
 ]
 
 
