@@ -2,7 +2,7 @@ import unittest
 
 import parameterized
 
-from open_instruct import benchmark_generators
+from open_instruct import utils
 
 
 class TestBenchmark(unittest.TestCase):
@@ -10,7 +10,7 @@ class TestBenchmark(unittest.TestCase):
         [("NVIDIA H100 80GB HBM3", "h100"), ("NVIDIA L40S", "l40s"), ("NVIDIA RTX A6000", "a6000")]
     )
     def test_get_device_name(self, device_name, expected):
-        result = benchmark_generators.get_device_name(device_name)
+        result = utils.get_device_name(device_name)
         self.assertEqual(result, expected)
 
 

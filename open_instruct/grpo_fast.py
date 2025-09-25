@@ -1153,7 +1153,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
     def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
         model_to_save = self.model
-        if "olmo" in chat_template_name:
+        if chat_template_name is not None and "olmo" in chat_template_name:
             # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
             model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
@@ -1366,6 +1366,76 @@ class PendingQueriesMap:
             return list(self._map.keys())
 
 
+def calculate_utilization_metrics(
+    model_dims: utils.ModelDims,
+    prompt_lengths: list[int],
+    response_lengths: list[int],
+    total_generation_time: float,
+    samples_per_prompt: int,
+    num_inference_gpus: int,
+    training_time: float,
+    num_training_gpus: int,
+) -> dict:
+    """Calculate MFU and MBU metrics for model inference and training.
+
+    Args:
+        model_dims: Model dimensions with device information
+        prompt_lengths: List of prompt lengths
+        response_lengths: List of response lengths
+        total_generation_time: Total time taken for generation (for actor metrics)
+        samples_per_prompt: Number of samples generated per prompt
+        num_inference_gpus: Number of GPUs used for inference
+        training_time: Time taken for training step (for learner metrics)
+        num_training_gpus: Number of GPUs used for training (for learner metrics)
+
+    Returns:
+        Dict with the following keys:
+            - actor_mfu: Model FLOPs utilization for inference (percentage)
+            - actor_mbu: Model bandwidth utilization for inference (percentage)
+            - learner_mfu: Model FLOPs utilization for training (percentage)
+    """
+    assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+        f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+    )
+
+    # Calculate FLOPs and memory bytes for inference
+    actor_total_flops = model_dims.flops(prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt)
+    actor_total_memory_bytes = model_dims.memory_bytes(
+        prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt
+    )
+
+    # Calculate MFU and MBU accounting for multiple GPUs
+    flops_per_second = actor_total_flops / total_generation_time
+    bytes_per_second = actor_total_memory_bytes / total_generation_time
+    # Scale device capabilities by number of GPUs
+    total_device_flops = model_dims.device_flops * num_inference_gpus
+    total_device_bandwidth = model_dims.device_memory_bandwidth * num_inference_gpus
+    actor_mfu = 100 * flops_per_second / total_device_flops
+    actor_mbu = 100 * bytes_per_second / total_device_bandwidth
+
+    # Calculate learner/training metrics
+    # For training, we need to use total sequence lengths (prompt + response) since training
+    # processes the full sequences, not separate prefill/decode operations
+    total_sequence_lengths = [
+        prompt_lengths[i // samples_per_prompt] + response_len for i, response_len in enumerate(response_lengths)
+    ]
+
+    # For training FLOPs, pass total sequence lengths as prompt_lengths with response_lengths=None
+    training_flops = model_dims.flops(
+        prompt_lengths=total_sequence_lengths,
+        response_lengths=None,
+        samples_per_prompt=1,  # Already expanded in total_sequence_lengths
+        is_training=True,
+    )
+
+    # Calculate training MFU
+    training_flops_per_second = training_flops / training_time
+    total_training_device_flops = model_dims.device_flops * num_training_gpus
+    learner_mfu = 100 * training_flops_per_second / total_training_device_flops
+
+    return {"actor_mfu": actor_mfu, "actor_mbu": actor_mbu, "learner_mfu": learner_mfu}
+
+
 def accumulate_inference_batches(
     inference_results_Q: ray_queue.Queue,
     pending_queries_map: PendingQueriesMap,
@@ -1373,6 +1443,7 @@ def accumulate_inference_batches(
     training_step: int,
     generation_config: vllm.SamplingParams,
     num_prompts: int,
+    model_dims: utils.ModelDims,
     actor_manager=None,
     timeout: Optional[float] = None,
 ) -> tuple[GenerationResult, Batch]:
@@ -1391,7 +1462,8 @@ def accumulate_inference_batches(
         queue.Empty: If timeout is specified and no data is available within timeout.
 
     Returns:
-        Tuple of (combined_result, Batch with queries, ground_truths, datasets) or (ShutdownSentinel, None) if shutdown signal received
+        Tuple of (combined_result, Batch with queries, ground_truths, datasets, prompt_lengths, response_lengths)
+        or (ShutdownSentinel, None, None, None) if shutdown signal received
     """
     results = []
     all_queries = []
@@ -1408,7 +1480,7 @@ def accumulate_inference_batches(
         result = inference_results_Q.get(timeout=timeout)
 
         if isinstance(result, ShutdownSentinel):
-            return result, None
+            return result, None, None, None
 
         # Validate that each individual result has the expected number of responses
         assert len(result.responses) == generation_config.n, (
@@ -1436,10 +1508,15 @@ def accumulate_inference_batches(
     combined_tool_runtimes = []
     combined_tool_calleds = []
 
-    # Initialize accumulated token statistics
-    accumulated_stats = TokenStatistics(num_prompt_tokens=0, num_response_tokens=0, generation_time=0)
+    earliest_start_time = float("inf")
+    prompt_lengths = []
+    response_lengths = []
 
-    for result in results:
+    total_prompt_tokens = 0
+    total_response_tokens = 0
+    max_generation_time = 0
+
+    for i, result in enumerate(results):
         combined_responses.extend(result.responses)
         combined_finish_reasons.extend(result.finish_reasons)
         combined_masks.extend(result.masks)
@@ -1450,12 +1527,27 @@ def accumulate_inference_batches(
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
 
-        if result.token_statistics:
-            accumulated_stats.num_prompt_tokens += result.token_statistics.num_prompt_tokens
-            accumulated_stats.num_response_tokens += result.token_statistics.num_response_tokens
-            accumulated_stats.generation_time = max(
-                accumulated_stats.generation_time, result.token_statistics.generation_time
-            )
+        earliest_start_time = min(earliest_start_time, result.start_time)
+
+        prompt_lengths.append(len(all_queries[i]))
+
+        for response in result.responses:
+            response_lengths.append(len(response))
+
+        total_prompt_tokens += result.token_statistics.num_prompt_tokens
+        total_response_tokens += result.token_statistics.num_response_tokens
+        max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
+
+    # Use the maximum generation time across engines since they work in parallel
+    # This avoids including queue overhead and accumulation time in MFU/MBU calculations
+    total_generation_time = max_generation_time
+
+    accumulated_stats = TokenStatistics(
+        num_prompt_tokens=total_prompt_tokens,
+        num_response_tokens=total_response_tokens,
+        generation_time=total_generation_time,
+        earliest_start_time=earliest_start_time,
+    )
 
     # Create combined RequestInfo
     combined_request_info = RequestInfo(
@@ -1488,7 +1580,7 @@ def accumulate_inference_batches(
         raw_queries=all_raw_queries,
         indices=None,  # Not meaningful for combined results
     )
-    return combined_result, batch
+    return combined_result, batch, prompt_lengths, response_lengths
 
 
 def data_preparation_thread(
@@ -1502,17 +1594,19 @@ def data_preparation_thread(
     generation_config,
     resume_training_step: int,
     actor_manager=None,
+    model_dims: utils.ModelDims = None,
 ):
     for training_step in range(resume_training_step, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
-            result, batch = accumulate_inference_batches(
+            result, batch, prompt_lengths, response_lengths = accumulate_inference_batches(
                 inference_results_Q,
                 pending_queries_map,
                 args,
                 training_step,
                 generation_config,
                 num_prompts=args.num_unique_prompts_rollout,
+                model_dims=model_dims,
                 actor_manager=actor_manager,
             )
             if isinstance(result, ShutdownSentinel):
@@ -1857,6 +1951,8 @@ def data_preparation_thread(
                 "responses_count": len(responses),
                 "num_new_tokens": num_new_tokens,
                 "B": B,
+                "prompt_lengths": prompt_lengths,
+                "response_lengths": response_lengths,
             }
         )
 
@@ -2132,12 +2228,14 @@ def load_data_from_packing_thread(
         collated_data = packed_data["collated_data"]
         num_step_tokens = packed_data["num_new_tokens"]
         num_total_tokens += num_step_tokens
+        prompt_lengths = packed_data["prompt_lengths"]
+        response_lengths = packed_data["response_lengths"]
 
     data_thread_metrics["time/trainer_idling"] = timer.duration
     if B == 0:
         logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-        return None, data_thread_metrics, num_total_tokens, 0
-    return collated_data, data_thread_metrics, num_total_tokens, num_step_tokens
+        return None, data_thread_metrics, num_total_tokens, 0, None, None
+    return collated_data, data_thread_metrics, num_total_tokens, num_step_tokens, prompt_lengths, response_lengths
 
 
 def weight_sync_thread(
@@ -2229,6 +2327,9 @@ def one_training_step(
     training_start_time,
     wandb_url,
     chat_template_name,
+    model_dims: utils.ModelDims,
+    prompt_lengths: list[int],
+    response_lengths: list[int],
     actor_manager=None,
     iter_dataloader=None,
 ):
@@ -2283,6 +2384,21 @@ def one_training_step(
     average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
+
+    num_actor_gpus = args.vllm_num_engines * args.vllm_tensor_parallel_size
+    total_generation_time = data_thread_metrics["time/getting_response"]
+
+    utilization_metrics = calculate_utilization_metrics(
+        model_dims=model_dims,
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        total_generation_time=total_generation_time,
+        samples_per_prompt=args.num_samples_per_prompt_rollout,
+        num_inference_gpus=num_actor_gpus,
+        training_time=train_timer.duration,
+        num_training_gpus=args.world_size,
+    )
+
     metrics = {
         "episode": episode,
         "global_step": episode,
@@ -2297,6 +2413,7 @@ def one_training_step(
         "time/saving": save_time,
         **data_thread_metrics,
         **average_metrics,
+        **utilization_metrics,
     }
     # Print only scalar metrics
     scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (float, int))}
@@ -2322,6 +2439,7 @@ def maybe_evaluate(
     eval_generation_config,
     generate_metrics_Q: Queue,
     num_eval_prompts: int,
+    model_dims: utils.ModelDims,
     actor_manager=None,
 ):
     """Optionally evaluate the model."""
@@ -2331,13 +2449,14 @@ def maybe_evaluate(
         timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_every < 0) else 100
 
         # Accumulate evaluation results from all vLLM engines
-        eval_result, eval_batch = accumulate_inference_batches(
+        eval_result, eval_batch, _, _ = accumulate_inference_batches(
             evaluation_inference_results_Q,
             eval_pending_queries_map,
             args,
             training_step,
             eval_generation_config,
             num_prompts=num_eval_prompts,
+            model_dims=model_dims,
             actor_manager=actor_manager,
             timeout=timeout,
         )
@@ -2610,6 +2729,7 @@ def run_training(
     generate_metrics_Q,
     weight_sync_metrics_Q,
     actor_manager: ActorManager,
+    model_dims: utils.ModelDims,
     checkpoint_state=None,
 ):
     if resume_training_step > 1:
@@ -2646,6 +2766,7 @@ def run_training(
         generation_configs["train"],
         resume_training_step,
         actor_manager,
+        model_dims,
     )
 
     logger.info("======== ✅ generation thread starts =========")
@@ -2717,8 +2838,8 @@ def run_training(
             )
 
         # The generate_thread is now handling vLLM processing asynchronously
-        collated_data, data_thread_metrics, num_total_tokens, num_step_tokens = load_data_from_packing_thread(
-            packed_sequences_Q, num_total_tokens, stop_event, health_check_fn
+        collated_data, data_thread_metrics, num_total_tokens, num_step_tokens, prompt_lengths, response_lengths = (
+            load_data_from_packing_thread(packed_sequences_Q, num_total_tokens, stop_event, health_check_fn)
         )
         if collated_data is None:
             continue
@@ -2744,6 +2865,9 @@ def run_training(
             training_start_time,
             wandb_url,
             tc.chat_template_name,
+            model_dims,
+            prompt_lengths,
+            response_lengths,
             actor_manager,
             iter_dataloader,
         )
@@ -2787,6 +2911,7 @@ def run_training(
             generation_configs["eval"],
             generate_metrics_Q,
             len(eval_batch.queries) if eval_batch else 0,
+            model_dims,
             actor_manager,
         )
 
@@ -2838,6 +2963,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             evaluation_inference_results_Q,
         )
     )
+
+    # Get the model dimensions from one of the engines without loading weights
+    model_dims_dict = ray.get(vllm_engines[0].get_model_dims_dict.remote())
+    model_dims = utils.ModelDims(**model_dims_dict)
 
     generation_configs = create_generation_configs(args)
 
@@ -2902,6 +3031,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             generate_metrics_Q,
             weight_sync_metrics_Q,
             actor_manager,
+            model_dims,
             checkpoint_state,
         )
     finally:
