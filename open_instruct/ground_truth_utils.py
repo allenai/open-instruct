@@ -174,6 +174,7 @@ def remove_thinking_section(prediction: str) -> str:
     prediction = prediction.replace("<|assistant|>", "").strip()
     # remove thinking section from the prediction
     prediction = prediction.split("</think>")[-1]
+    prediction = prediction.split("</reason>")[-1]
     # remove answer tags from the prediction
     prediction = prediction.replace("<answer>", "").replace("</answer>", "")
     return prediction.strip()
@@ -651,7 +652,7 @@ class LMJudgeVerifier(VerifierFunction):
 
         try:
             # remove anything between <think> and </think> including the tags using regex
-            pattern = r"<think>\s*.*?\s*</think>\s*"
+            pattern = r"(<think>|<reason>)\s*.*?\s*(</think>|</reason>)\s*"
             content = re.sub(pattern, "", completion.choices[0].message.content, flags=re.DOTALL)
             content = content.replace("<answer>", "").replace("</answer>", "")
             reasoning, score = self.extractor(content)
@@ -985,7 +986,7 @@ def soft_format_reward_func(responses: List[str], reward_scale: float = 1.0) -> 
 
     Returns a list of rewards scaled by reward_scale.
     """
-    pattern = r".*?</think>\s*<answer>.*?</answer>"
+    pattern = r".*?(</think>|</reason>)\s*<answer>.*?</answer>"
     matches = [re.match(pattern, r, re.DOTALL) for r in responses]
     return [reward_scale if match else 0.0 for match in matches]
 
