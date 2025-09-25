@@ -1795,7 +1795,11 @@ class ModelDims:
         return total
 
     def flops(
-        self, prompt_lengths: list[int], response_lengths: Optional[list[int]] = None, samples_per_prompt: int = 1
+        self,
+        prompt_lengths: list[int],
+        response_lengths: Optional[list[int]] = None,
+        samples_per_prompt: int = 1,
+        is_training: bool = False,
     ) -> int:
         """Total FLOPs for prefill and (optionally) decode.
 
@@ -1803,10 +1807,14 @@ class ModelDims:
             prompt_lengths: List of prompt lengths (one per unique prompt)
             response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
             samples_per_prompt: Number of samples generated per prompt
+            is_training: If True, multiply FLOPs by 3 to account for forward and backward passes
         """
         total = self.prefill_flops(prompt_lengths)
         if response_lengths is not None:
             total += self.decode_flops(prompt_lengths, response_lengths, samples_per_prompt)
+        if is_training:
+            # Training includes forward pass (1x) + backward pass (2x)
+            total *= 3
         return total
 
     def weight_memory_bytes(self, num_tokens: int, dtype_bytes: int = 2) -> int:
