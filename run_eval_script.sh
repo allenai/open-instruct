@@ -39,7 +39,7 @@ for i in "${!MODEL_PATHS[@]}"; do
         --run_oe_eval_experiments \
         --evaluate_on_weka \
         --run_id placeholder \
-        --workspace tulu-3-results \
+        --workspace ai2/flex2 \
         --oe_eval_max_length 4096 \
         --process_output r1_style \
         --beaker_image jacobm/flex-olmo-oe-eval-vllm \

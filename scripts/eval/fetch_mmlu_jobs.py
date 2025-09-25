@@ -11,7 +11,7 @@ from eval.utils import upload_results_to_hf
 parser = argparse.ArgumentParser()
 parser.add_argument("--prefix", type=str, required=True)
 parser.add_argument(
-    "--workspace", type=str, default="ai2/tulu-3-results", help="workspace to search for experiments"
+    "--workspace", type=str, default="ai2/flex2", help="workspace to search for experiments"
 )
 parser.add_argument("--upload_to_hf", type=str, default=None)  # set to allenai/tulu-3-results//results/<model_name> to upload
 args = parser.parse_args()

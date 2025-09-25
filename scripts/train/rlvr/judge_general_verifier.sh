@@ -2,7 +2,7 @@
 # first, launch the judge server:
 beaker experiment create configs/judge_configs/general_verifier_judge.yaml \
     --name general_judge \
-    --workspace ai2/tulu-3-results \
+    --workspace ai2/flex2 \
     --priority high
 
 # then get the machine url. We set

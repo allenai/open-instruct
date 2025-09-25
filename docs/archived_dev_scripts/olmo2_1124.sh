@@ -109,7 +109,7 @@ python scripts/submit_eval_jobs.py \
     --model_name hf-shanearora/i-am-a-good-open-base-model \
     --cluster ai2/jupiter-cirrascale-2 \
     --location shanearora/i-am-a-good-open-base-model  \
-    --workspace tulu-3-results \
+    --workspace ai2/flex2 \
     --preemptible \
     --use_hf_tokenizer_template \
     --beaker_image nathanl/open_instruct_auto \
@@ -125,7 +125,7 @@ python scripts/submit_eval_jobs.py \
     --location /weka/oe-adapt-default/costah/models/olmo1124/1203_13b_gsm_math_if_beta_0.1_lr_4e-7_16858 \
     --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
     --is_tuned \
-    --workspace "tulu-3-results" \
+    --workspace "ai2/flex2" \
     --priority high \
     --preemptible \
     --use_hf_tokenizer_template \
@@ -140,7 +140,7 @@ python scripts/submit_eval_jobs.py \
     --location {step_dir} \
     --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
     --is_tuned \
-    --workspace "tulu-3-results" \
+    --workspace "ai2/flex2" \
     --priority high \
     --preemptible \
     --use_hf_tokenizer_template \

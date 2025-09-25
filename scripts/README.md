@@ -61,13 +61,13 @@ beaker secret write -w ai2/tulu-2-improvements "${beaker_whoami}_HF_TOKEN" xxxx
 1. `submit_eval_jobs.py`: Submit eval jobs for tasks in `scripts/evals/`. For example, llama 3 tulu 2 and upload to the tulu-3 eval database.
 ```bash
 # submit evals on a model in beaker dataset
-python scripts/submit_eval_jobs.py --model_name llama_31_tulu_2_8b --location 01J4MGRSS3FM1J4E6XSH3459DK --is_tuned --workspace tulu-3-results --preemptible --use_hf_tokenizer_template --beaker_image nathanl/open_instruct_auto --upload_to_hf allenai/tulu-3-evals
+python scripts/submit_eval_jobs.py --model_name llama_31_tulu_2_8b --location 01J4MGRSS3FM1J4E6XSH3459DK --is_tuned --workspace ai2/flex2 --preemptible --use_hf_tokenizer_template --beaker_image nathanl/open_instruct_auto --upload_to_hf allenai/tulu-3-evals
 
 # submit evals on a model in huggingface; note you need to 1) prepend the model name with `hf-` and 2) replace `--location` with the hf repo id
-python scripts/submit_eval_jobs.py --model_name hf-llama_31_tulu_2_8b --location allenai/llama-3-tulu-2-8b --is_tuned --workspace tulu-3-results --preemptible --use_hf_tokenizer_template --beaker_image nathanl/open_instruct_auto --upload_to_hf allenai/tulu-3-evals
-python scripts/submit_eval_jobs.py --model_name hf-llama_31_tulu_2_8b --location vwxyzjn/online_dpo_tulu_2 --is_tuned --workspace tulu-3-results --preemptible --use_hf_tokenizer_template --beaker_image nathanl/open_instruct_auto --upload_to_hf allenai/tulu-3-evals
+python scripts/submit_eval_jobs.py --model_name hf-llama_31_tulu_2_8b --location allenai/llama-3-tulu-2-8b --is_tuned --workspace ai2/flex2 --preemptible --use_hf_tokenizer_template --beaker_image nathanl/open_instruct_auto --upload_to_hf allenai/tulu-3-evals
+python scripts/submit_eval_jobs.py --model_name hf-llama_31_tulu_2_8b --location vwxyzjn/online_dpo_tulu_2 --is_tuned --workspace ai2/flex2 --preemptible --use_hf_tokenizer_template --beaker_image nathanl/open_instruct_auto --upload_to_hf allenai/tulu-3-evals
 
-python scripts/submit_eval_jobs.py --model_name hf-online-dpo-llama-tulu2-longer --beaker_image costah/open_instruct_test --location vwxyzjn/online_dpo_vllm__allenai_llama-3-tulu-2-8b --hf_revision online_dpo_vllm__1__1724038538 --is_tuned --workspace tulu-3-results --preemptible --use_hf_tokenizer_template --upload_to_hf allenai/tulu-3-evals
+python scripts/submit_eval_jobs.py --model_name hf-online-dpo-llama-tulu2-longer --beaker_image costah/open_instruct_test --location vwxyzjn/online_dpo_vllm__allenai_llama-3-tulu-2-8b --hf_revision online_dpo_vllm__1__1724038538 --is_tuned --workspace ai2/flex2 --preemptible --use_hf_tokenizer_template --upload_to_hf allenai/tulu-3-evals
 
 ```
 Here, it is important to know that for using `oe-eval`, normally we run `--skip_oi_evals`, `run_safety_evaluations`, and `run_oe_eval_experiments`.

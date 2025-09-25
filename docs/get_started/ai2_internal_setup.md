@@ -144,7 +144,7 @@ python scripts/submit_eval_jobs.py \
     --priority high \
     --location $model \
     --is_tuned \
-    --workspace "tulu-3-results" \
+    --workspace "ai2/flex2" \
     --priority high \
     --preemptible \
     --use_hf_tokenizer_template \
@@ -168,7 +168,7 @@ python scripts/submit_eval_jobs.py \
     --priority high \
     --location $location \
     --is_tuned \
-    --workspace "tulu-3-results" \
+    --workspace "ai2/flex2" \
     --preemptible \
     --use_hf_tokenizer_template \
     --run_oe_eval_experiments \
@@ -189,7 +189,7 @@ python scripts/submit_eval_jobs.py \
     --location /weka/oe-adapt-default/costah/models/0129_grpo_math_kl_fix_zs_0.0_16_half-m_461_checkpoints/step_640 \
     --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
     --is_tuned \
-    --workspace "tulu-3-results" \
+    --workspace "ai2/flex2" \
     --priority high \
     --preemptible \
     --use_hf_tokenizer_template \
@@ -211,7 +211,7 @@ python scripts/submit_eval_jobs.py \
     --location gs://ai2-llm/post-training/allenai/Llama-3.1-Tulu-3.1-8B \
     --cluster ai2/augusta-google-1 \
     --is_tuned \
-    --workspace tulu-3-results \
+    --workspace ai2/flex2 \
     --preemptible \
     --use_hf_tokenizer_template \
     --beaker_image nathanl/open_instruct_auto \

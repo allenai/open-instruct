@@ -42,7 +42,7 @@ def main(args: Args, beaker_runtime_config: BeakerRuntimeConfig):
                 --model_name {args.model_name} \
                 --location {beaker_dataset_ids[-1]} \
                 --is_tuned \
-                --workspace tulu-3-results \
+                --workspace ai2/flex2 \
                 --preemptible \
                 --use_hf_tokenizer_template \
                 --beaker_image nathanl/open_instruct_auto \

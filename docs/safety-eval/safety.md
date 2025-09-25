@@ -11,7 +11,7 @@ An example command would be:
 python scripts/submit_eval_jobs.py \
     --model_name <model name> \
       --location <beaker id> \
-      --is_tuned --workspace tulu-3-results \
+      --is_tuned --workspace ai2/flex2 \
       --preemptible \
       --use_hf_tokenizer_template \
       --beaker_image nathanl/open_instruct_auto \
