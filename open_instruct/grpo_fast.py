@@ -2366,7 +2366,7 @@ def one_training_step(
             )
 
     save_time = 0
-    if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
+    if args.save_freq > 0 and (training_step % args.save_freq == 0 or (training_step == 1 and args.eval_on_step_0)):
         with Timer("[Main Thread] 🗡️ Saving model") as timer:
             checkpoint_dir = f"{args.output_dir}_checkpoints"
             step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
