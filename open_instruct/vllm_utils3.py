@@ -548,16 +548,11 @@ class LLMRayActor:
         # Yield control to let the engine's background task start processing
         await asyncio.sleep(0)
 
-        outputs = []
-        iteration_count = 0
-        total_wait_time = 0.0
-        max_wait_time = 600.0  # 10 minutes maximum wait
-
-        # Poll the generator with timeouts instead of blocking
-        while total_wait_time < max_wait_time:
-            try:
-                # Try to get next output with a short timeout
-                output = await asyncio.wait_for(generator.__anext__(), timeout=0.1)
+        # Create a task to consume the generator without corrupting it
+        async def consume_generator():
+            outputs = []
+            iteration_count = 0
+            async for output in generator:
                 iteration_count += 1
                 if iteration_count % 100 == 0:
                     logger.info(
@@ -569,20 +564,45 @@ class LLMRayActor:
                         f"[generate_one_completion] Request {request_id} finished after {iteration_count} iterations"
                     )
                     break
-            except asyncio.TimeoutError:
-                # Yield control to background tasks
-                await asyncio.sleep(0)
-                total_wait_time += 0.1
-                if int(total_wait_time * 10) % 100 == 0:  # Log every 10 seconds
-                    logger.debug(f"[generate_one_completion] Still waiting for {request_id}, waited {total_wait_time:.1f}s")
-                continue
-            except StopAsyncIteration:
-                # Generator is exhausted
-                break
+            return outputs, iteration_count
 
-        if not outputs:
+        # Start the consumption task
+        task = asyncio.create_task(consume_generator())
+
+        # Poll for task completion while yielding control to the event loop
+        total_wait_time = 0.0
+        max_wait_time = 600.0  # 10 minutes maximum wait
+        poll_interval = 0.1
+
+        while total_wait_time < max_wait_time:
+            if task.done():
+                # Task completed, get the results
+                try:
+                    outputs, iteration_count = await task
+                    break
+                except Exception as e:
+                    logger.error(f"[generate_one_completion] Task failed for {request_id}: {e}")
+                    raise
+
+            # Yield control to allow other tasks (like vLLM engine) to run
+            await asyncio.sleep(poll_interval)
+            total_wait_time += poll_interval
+
+            if int(total_wait_time * 10) % 100 == 0:  # Log every 10 seconds
+                logger.debug(f"[generate_one_completion] Still waiting for {request_id}, waited {total_wait_time:.1f}s")
+        else:
+            # Timeout reached, cancel the task
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
             logger.error(f"[generate_one_completion] Request {request_id} timed out after {total_wait_time:.1f}s")
             raise TimeoutError(f"Request {request_id} timed out after {total_wait_time:.1f}s")
+
+        if not outputs:
+            logger.error(f"[generate_one_completion] Request {request_id} completed but no outputs received")
+            raise RuntimeError(f"Request {request_id} completed but no outputs received")
 
         assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
         return outputs[0]
