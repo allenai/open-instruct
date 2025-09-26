@@ -489,6 +489,10 @@ class LLMRayActor:
                 self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=False)
                 logger.info("AsyncLLMEngine created successfully")
 
+                # Start the engine's background loop
+                await self.llm_engine.start_background_loop()
+                logger.info("AsyncLLMEngine background loop started")
+
             # Run initialization
             self.loop.run_until_complete(initialize())
 
@@ -689,23 +693,8 @@ class LLMRayActor:
             return False
 
         try:
-            while True:
+            while not should_exit():
                 iteration_count += 1
-
-                # Check if we should exit
-                if should_exit():
-                    # If no work, wait briefly for new requests before final exit check
-                    if len(self.active_tasks) == 0 and len(self.request_outputs) == 0:
-                        # Wait up to 5 seconds or until timeout, whichever is shorter
-                        remaining = timeout - (time.perf_counter() - start_time)
-                        wait_time = min(5.0, max(0, remaining))
-                        if wait_time > 0:
-                            time.sleep(wait_time)
-                        # Final check after wait
-                        if len(self.active_tasks) == 0 and len(self.request_outputs) == 0:
-                            break
-                    else:
-                        break
 
                 # Try to get a result from the thread-safe completion queue
                 # Use smaller timeout for queue.get to allow frequent exit checks
