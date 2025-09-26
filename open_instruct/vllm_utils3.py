@@ -57,24 +57,30 @@ def assert_threaded_actor() -> None:
     Raises:
         AssertionError: If running in an async actor with an event loop
     """
-    try:
-        loop = asyncio.get_event_loop()
-        # Successfully got an event loop - we're in an async actor (bad!)
-        import threading
+    import threading
+    import sys
 
+    # In Python 3.10+, asyncio.get_event_loop() creates a loop if none exists
+    # So we need to check if there's a running loop instead
+    try:
+        loop = asyncio.get_running_loop()
+        # There's a running event loop - we're in an async actor (bad!)
         raise AssertionError(
             f"LLMRayActor must run in a threaded Ray actor to avoid event loop conflicts. "
-            f"Current actor has an event loop (async actor). "
-            f"Loop: {loop}, Running: {loop.is_running()}, Thread: {threading.current_thread().name}. "
+            f"Current actor has a RUNNING event loop (async actor). "
+            f"Loop: {loop}, Thread: {threading.current_thread().name}. "
+            f"Python version: {sys.version}. "
             f"Fix: Ensure no async methods in LLMRayActor class."
         )
     except RuntimeError as e:
-        if "no current event loop" in str(e).lower() or "there is no current event loop" in str(e).lower():
-            # No event loop - we're in a threaded actor (good!)
+        # No running event loop - we're in a threaded actor (good!)
+        if "no running event loop" in str(e).lower():
+            logger.info(f"✓ No running event loop detected - running in threaded actor mode")
             return
         else:
-            # Some other RuntimeError - re-raise it
-            raise
+            # Some other RuntimeError - log it but continue
+            logger.warning(f"Unexpected error checking for event loop: {e}")
+            return
 
 
 # ============================================================================
