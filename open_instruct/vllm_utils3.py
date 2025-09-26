@@ -363,7 +363,7 @@ class LLMRayActor:
                 # Create AsyncLLMEngine in this event loop
                 logger.info("Starting AsyncLLMEngine initialization...")
                 self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(
-                    self.engine_args, start_engine_loop=True
+                    self.engine_args, start_engine_loop=False  # Use our thread's event loop, not a separate one
                 )
                 logger.info("AsyncLLMEngine created successfully")
 
