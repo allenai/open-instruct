@@ -483,18 +483,18 @@ class LLMRayActor:
             self.loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self.loop)
 
-            async def initialize():
-                logger.info("Starting AsyncLLMEngine initialization...")
-                # Create engine with OUR loop (start_engine_loop=False)
-                self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=False)
-                logger.info("AsyncLLMEngine created successfully")
+            # Create engine synchronously BEFORE entering async context
+            logger.info("Starting AsyncLLMEngine initialization...")
+            self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=False)
+            logger.info("AsyncLLMEngine created successfully")
 
-                # Start the engine's background loop
+            # Then start the background loop asynchronously
+            async def start_loop():
                 await self.llm_engine.start_background_loop()
                 logger.info("AsyncLLMEngine background loop started")
 
-            # Run initialization
-            self.loop.run_until_complete(initialize())
+            # Run the async part
+            self.loop.run_until_complete(start_loop())
 
             # Signal init complete
             self.init_complete.set()
