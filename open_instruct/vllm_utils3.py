@@ -345,17 +345,54 @@ class LLMRayActor:
         self.request_outputs = {}  # Accumulate outputs until all N samples complete
         self.request_outputs_lock = asyncio.Lock()  # Lock for thread-safe access
 
-        # Prefetch task is started lazily from async methods
-        self.prefetch_task = None
-        self.async_thread = None
-        self.async_loop = None
+        # Start async thread and initialize engine immediately
+        self._init_async_components()
 
-    async def _ensure_prefetch_started(self):
-        """Start the background prefetch task if not already running."""
-        if self.prefetch_task is None or self.prefetch_task.done():
-            # Ensure engine is initialized before prefetching
-            await self._ensure_engine_initialized()
-            self.prefetch_task = asyncio.create_task(self._prefetch_requests())
+    def _init_async_components(self):
+        """Initialize async components in a dedicated thread."""
+
+        init_complete = threading.Event()
+        init_error = [None]  # Use list to capture error from thread
+
+        def run_async_loop():
+            try:
+                # Create new event loop for this thread
+                self.async_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(self.async_loop)
+
+                # Create AsyncLLMEngine in this event loop
+                self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(
+                    self.engine_args, start_engine_loop=True
+                )
+
+                # Create and start the prefetch task
+                self.prefetch_task = self.async_loop.create_task(self._prefetch_requests())
+
+                # Signal successful initialization
+                init_complete.set()
+
+                # Run the event loop forever
+                self.async_loop.run_forever()
+
+            except Exception as e:
+                logger.error(f"Failed to initialize async components: {e}")
+                init_error[0] = e
+                init_complete.set()
+
+        # Start the async thread
+        self.async_thread = threading.Thread(target=run_async_loop, daemon=True)
+        self.async_thread.start()
+
+        # Wait for initialization to complete
+        if not init_complete.wait(timeout=30):
+            raise RuntimeError("Timeout waiting for async components to initialize")
+
+        # Check for initialization errors
+        if init_error[0] is not None:
+            raise RuntimeError(f"Failed to initialize async components: {init_error[0]}")
+
+        logger.info("Successfully initialized async components in dedicated thread")
+
 
     async def _q_get_async(self):
         """Get from Ray queue asynchronously with compatibility fallback."""
@@ -393,9 +430,6 @@ class LLMRayActor:
 
     async def _prefetch_requests(self):
         """Prefetches requests from queue."""
-        # Ensure engine is initialized before processing any requests
-        await self._ensure_engine_initialized()
-
         while True:
             # Don't consume requests during weight sync (regardless of inflight_updates)
             if await self._should_stop():
@@ -517,10 +551,6 @@ class LLMRayActor:
         # Otherwise, continue processing
         return False
 
-    async def _ensure_engine_initialized(self):
-        """Ensure the AsyncLLMEngine is initialized."""
-        if self.llm_engine is None:
-            self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=True)
 
     async def generate_one_completion(
         self, request_id: str, prompt: vllm.TokensPrompt, sampling_params: vllm.SamplingParams
@@ -848,35 +878,6 @@ class LLMRayActor:
 
         logger.info(f"[_process_request] EXIT {sub_request_id} - Successfully completed")
 
-    def _start_async_thread(self):
-        """Start a dedicated thread for running async components."""
-        if self.async_thread is not None:
-            return
-
-        def run_async_loop():
-            # Create a new event loop for this thread
-            self.async_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self.async_loop)
-
-            # Run the initialization
-            async def initialize_and_run():
-                await self._ensure_engine_initialized()
-                await self._ensure_prefetch_started()
-
-                # Keep the loop running
-                while True:
-                    await asyncio.sleep(1)
-
-            try:
-                self.async_loop.run_until_complete(initialize_and_run())
-            except Exception as e:
-                logger.error(f"Async thread failed: {e}")
-
-        self.async_thread = threading.Thread(target=run_async_loop, daemon=True)
-        self.async_thread.start()
-
-        # Wait for initialization
-        time.sleep(2)
 
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop pulling from completion queue.
@@ -887,9 +888,6 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
-        # Start the async components in a dedicated thread
-        self._start_async_thread()
-
         iteration_count = 0
         total_processed = 0
 
@@ -980,7 +978,6 @@ class LLMRayActor:
         use_ray=False,
         timeout_minutes=120,
     ):
-        await self._ensure_engine_initialized()
         # AsyncLLMEngine doesn't implement collective_rpc_async, so we need to
         # call the synchronous version on the underlying engine directly
         return self.llm_engine.engine.collective_rpc(
@@ -989,37 +986,30 @@ class LLMRayActor:
         )
 
     async def update_weight(self, name, dtype, shape, empty_cache=False):
-        await self._ensure_engine_initialized()
         # Use synchronous collective_rpc on the underlying engine
         return self.llm_engine.engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     async def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        await self._ensure_engine_initialized()
         # Use synchronous collective_rpc on the underlying engine
         return self.llm_engine.engine.collective_rpc(
             "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
 
     async def reset_prefix_cache(self):
-        await self._ensure_engine_initialized()
         await self.llm_engine.reset_prefix_cache()
 
     async def sleep(self, level=1):
-        await self._ensure_engine_initialized()
         await self.llm_engine.sleep(level=level)
 
     async def wake_up(self, tags: Optional[list[str]] = None):
-        await self._ensure_engine_initialized()
         await self.llm_engine.wake_up(tags)
 
     async def ready(self):
-        await self._ensure_engine_initialized()
-        await self._ensure_prefetch_started()
+        # Engine and prefetch are already initialized in __init__
         return True
 
     async def get_kv_cache_info(self):
         """Get KV cache max concurrency from the vLLM engine."""
-        await self._ensure_engine_initialized()
         # AsyncLLMEngine wraps the underlying LLMEngine
         engine = self.llm_engine.engine
 
