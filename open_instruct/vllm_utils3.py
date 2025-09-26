@@ -533,7 +533,7 @@ class LLMRayActor:
         """Synchronous prefetch that spawns async tasks."""
         while True:
             # Don't consume requests during weight sync
-            if self._should_stop_sync():
+            if self._should_stop():
                 time.sleep(0.1)
                 continue
 
@@ -553,7 +553,7 @@ class LLMRayActor:
                 continue
 
             # Check again AFTER getting request but BEFORE adding to engine
-            if self._should_stop_sync():
+            if self._should_stop():
                 # Put the request back in the queue
                 self.prompt_queue.put(request)
                 time.sleep(0.1)
@@ -562,8 +562,7 @@ class LLMRayActor:
             # Add the request by spawning async tasks
             self._add_request_sync(request)
 
-    def _should_stop_sync(self) -> bool:
-        """Synchronous version of _should_stop."""
+    def _should_stop(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
@@ -573,6 +572,32 @@ class LLMRayActor:
             else:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
+
+    def _should_exit(self) -> bool:
+        """Determine if the processing loop should exit.
+
+        Returns:
+            bool: True if the loop should exit, False otherwise.
+        """
+        # Check stop condition first (cheapest check)
+        stop_requested = self._should_stop()
+
+        # Case 1: inflight_updates enabled and stop requested - exit immediately
+        if self.inflight_updates and stop_requested:
+            return True
+
+        # Now check for pending work (only if needed)
+        if stop_requested:
+            # Need to check if we have pending work
+            active_tasks = len(self.active_tasks)
+            has_incomplete = len(self.request_outputs) > 0
+
+            # Case 2: stop requested and no pending work - exit
+            if active_tasks == 0 and not has_incomplete:
+                return True
+            # Otherwise, we have pending work and should continue
+
+        return False
 
     def _add_request_sync(self, request: PromptRequest):
         """Add a request by spawning async tasks."""
@@ -640,105 +665,20 @@ class LLMRayActor:
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop pulling from completion queue.
 
-        This is now a synchronous method that pulls completed results
-        from the thread-safe completion queue and dispatches them.
-
-        Args:
-            timeout: Maximum time to run in seconds
-
         Returns:
             int: Number of requests processed
         """
-        start_time = time.perf_counter()
-        iteration_count = 0
         total_processed = 0
 
-        # Helper to check should_stop synchronously
-        def should_stop():
-            if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
-                should_stop_ref = self.actor_manager.should_stop.remote()
-                ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
-                if ready_refs:
-                    self._should_stop_value = ray.get(ready_refs[0])
-                    self._last_should_stop_update = time.perf_counter()
-                else:
-                    ray.cancel(should_stop_ref)
-            return self._should_stop_value
+        while not self._should_exit():
+            try:
+                result, is_eval = self.completion_queue.get(timeout=1.0)
+                self._insert_result_to_queue(result, is_eval=is_eval)
+                total_processed += 1
+            except queue.Empty:
+                pass
 
-        # Helper to check should_exit conditions
-        def should_exit():
-            stop_requested = should_stop()
-
-            # Check timeout
-            if time.perf_counter() - start_time > timeout:
-                logger.info(f"[process_from_queue] Timeout reached after {timeout}s")
-                return True
-
-            # For inflight_updates, exit immediately on stop
-            if self.inflight_updates and stop_requested:
-                return True
-
-            # Check if there's any work left
-            active_tasks = len(self.active_tasks)
-            has_incomplete = len(self.request_outputs) > 0
-
-            # Exit if stop requested and no work
-            if stop_requested and active_tasks == 0 and not has_incomplete:
-                return True
-
-            # Exit if no work at all (but give time for new requests first)
-            if active_tasks == 0 and not has_incomplete:
-                return True
-
-            return False
-
-        try:
-            while not should_exit():
-                iteration_count += 1
-
-                # Try to get a result from the thread-safe completion queue
-                # Use smaller timeout for queue.get to allow frequent exit checks
-                remaining_time = timeout - (time.perf_counter() - start_time)
-                queue_timeout = min(1.0, max(0.1, remaining_time))
-
-                try:
-                    result, is_eval = self.completion_queue.get(timeout=queue_timeout)
-                    self._insert_result_to_queue(result, is_eval=is_eval)
-                    total_processed += 1
-                    logger.info(f"[process_from_queue] Processed result {total_processed}")
-
-                except queue.Empty:
-                    # Queue timeout, just continue to check exit conditions
-                    pass
-
-                if self.verbose and iteration_count % 10000 == 0:
-                    elapsed = time.perf_counter() - start_time
-                    self.logger.info(
-                        f"process_from_queue iteration {iteration_count}: total_processed={total_processed}, elapsed={elapsed:.1f}s"
-                    )
-
-        finally:
-            logger.info(f"[process_from_queue] EXITING - total_processed={total_processed}")
-
-            # If not inflight_updates, drain any remaining items
-            if not self.inflight_updates:
-                # Give tasks time to complete (but respect timeout)
-                remaining_time = timeout - (time.perf_counter() - start_time)
-                wait_time = min(2.0, max(0, remaining_time))
-                if wait_time > 0:
-                    time.sleep(wait_time)
-
-                # Drain the queue
-                while True:
-                    try:
-                        result, is_eval = self.completion_queue.get_nowait()
-                        self._insert_result_to_queue(result, is_eval=is_eval)
-                        total_processed += 1
-                    except queue.Empty:
-                        break
-
-            logger.info(f"[process_from_queue] FINAL EXIT - total_processed={total_processed}")
-            return total_processed
+        return total_processed
 
     def init_process_group(
         self,
