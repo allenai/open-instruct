@@ -57,7 +57,7 @@ def parse_env_var(env_var_str: str) -> Dict[str, str]:
 
 WEKA_CLUSTERS = [
     "ai2/jupiter",
-    "ai2/saturn-cirrascale",
+    "ai2/saturn",
     "ai2/titan",
     "ai2/neptune",
     "ai2/ceres",
