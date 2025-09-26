@@ -386,6 +386,15 @@ class LLMRayActor:
         verbose: bool = False,
         **kwargs,
     ):
+        # Debug: Check what methods Ray sees
+        import inspect
+        methods = inspect.getmembers(self.__class__, predicate=inspect.isfunction)
+        async_methods = [name for name, method in methods if inspect.iscoroutinefunction(method)]
+        if async_methods:
+            logger.error(f"Found async methods in LLMRayActor: {async_methods}")
+        else:
+            logger.info("No async methods found in LLMRayActor")
+
         # Ensure we're in a threaded actor
         assert_threaded_actor()
 
