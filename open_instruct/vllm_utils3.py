@@ -356,25 +356,29 @@ class LLMRayActor:
 
         def run_async_loop():
             try:
-                # Create new event loop for this thread
                 self.async_loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(self.async_loop)
 
-                # Create AsyncLLMEngine in this event loop
-                logger.info("Starting AsyncLLMEngine initialization...")
-                self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(
-                    self.engine_args, start_engine_loop=False  # Use our thread's event loop, not a separate one
-                )
-                logger.info("AsyncLLMEngine created successfully")
+                # Create everything inside async context
+                async def setup():
+                    logger.info("Starting AsyncLLMEngine initialization...")
+                    # Create engine INSIDE async context
+                    self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(
+                        self.engine_args, start_engine_loop=False
+                    )
+                    logger.info("AsyncLLMEngine created successfully")
 
-                # Signal successful initialization BEFORE starting prefetch
+                    # Start prefetch task
+                    logger.info("Starting prefetch task...")
+                    self.prefetch_task = asyncio.create_task(self._prefetch_requests())
+
+                # Run setup to completion
+                self.async_loop.run_until_complete(setup())
+
+                # Signal successful initialization
                 init_complete.set()
 
-                # Now start the prefetch task after init is complete
-                logger.info("Starting prefetch task...")
-                self.prefetch_task = self.async_loop.create_task(self._prefetch_requests())
-
-                # Run the event loop forever
+                # Keep the loop running
                 self.async_loop.run_forever()
 
             except Exception as e:
