@@ -51,6 +51,29 @@ from open_instruct.utils import ray_get_with_progress
 logger = logger_utils.setup_logger(__name__)
 
 
+def assert_threaded_actor() -> None:
+    """Assert that we're running in a threaded Ray actor (no event loop) vs async actor (has event loop).
+
+    Raises:
+        AssertionError: If running in an async actor with an event loop
+    """
+    try:
+        asyncio.get_event_loop()
+        # Successfully got an event loop - we're in an async actor (bad!)
+        raise AssertionError(
+            "LLMRayActor must run in a threaded Ray actor to avoid event loop conflicts. "
+            "Current actor has an event loop (async actor). "
+            "Fix: Use ray.remote(LLMRayActor).options(max_concurrency=1000)"
+        )
+    except RuntimeError as e:
+        if "no current event loop" in str(e).lower() or "there is no current event loop" in str(e).lower():
+            # No event loop - we're in a threaded actor (good!)
+            return
+        else:
+            # Some other RuntimeError - re-raise it
+            raise
+
+
 # ============================================================================
 # Free async functions for async operations
 # ============================================================================
@@ -363,9 +386,13 @@ class LLMRayActor:
         verbose: bool = False,
         **kwargs,
     ):
+        # Ensure we're in a threaded actor
+        assert_threaded_actor()
+
         self.logger = logger_utils.setup_logger(__name__)
         if verbose:
             self.logger.setLevel(logging.DEBUG)
+        self.logger.info("✓ Running in threaded Ray actor")
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inference_batch_size = inference_batch_size
