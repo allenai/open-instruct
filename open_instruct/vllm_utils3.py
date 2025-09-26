@@ -887,6 +887,7 @@ def create_vllm_engines(
         vllm_engines.append(
             ray.remote(LLMRayActor)
             .options(
+                max_concurrency=1000,  # Use threaded actor to avoid event loop conflicts
                 num_cpus=num_gpus,
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
