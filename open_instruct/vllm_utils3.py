@@ -19,6 +19,8 @@ import asyncio
 import dataclasses
 import logging
 import os
+import queue
+import threading
 import time
 from collections import defaultdict
 from concurrent import futures
@@ -287,6 +289,7 @@ class LLMRayActor:
         self.inflight_updates = inflight_updates
         self.verbose = verbose
         self.request_metadata = {}
+        self.completion_queue = queue.Queue()  # Thread-safe queue for completed GenerationResults
 
         if self.tools:
             self.executor = futures.ThreadPoolExecutor(max_workers=20)
@@ -339,11 +342,13 @@ class LLMRayActor:
 
         # Async tracking
         self.active_tasks = {}  # Track active async tasks
-        self.request_outputs = {}
+        self.request_outputs = {}  # Accumulate outputs until all N samples complete
         self.request_outputs_lock = asyncio.Lock()  # Lock for thread-safe access
 
         # Prefetch task is started lazily from async methods
         self.prefetch_task = None
+        self.async_thread = None
+        self.async_loop = None
 
     async def _ensure_prefetch_started(self):
         """Start the background prefetch task if not already running."""
@@ -375,24 +380,15 @@ class LLMRayActor:
                 await asyncio.sleep(0.05)
 
     async def _should_stop(self) -> bool:
-        now = time.perf_counter()
-
-        # Only refresh if the cached value is stale and we aren't already waiting on a result
-        if (now - self._last_should_stop_update) > self._should_stop_timeout_s and self._inflight_ref is None:
-            ref = self.actor_manager.should_stop.remote()
-            self._inflight_ref = ref
-
-            try:
-                # Use asyncio.wait_for to properly handle timeout in async context
-                value = await asyncio.wait_for(ref, timeout=0.1)
-                self._should_stop_value = bool(value)
-                self._last_should_stop_update = now
-            except asyncio.TimeoutError:
-                # Cancel to avoid leaked tasks if not ready in time
-                ray.cancel(ref, force=True)
-            finally:
-                self._inflight_ref = None
-
+        if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
+            should_stop_ref = self.actor_manager.should_stop.remote()
+            # Use ray.wait with timeout instead of asyncio.wait_for
+            ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
+            if ready_refs:
+                self._should_stop_value = ray.get(ready_refs[0])
+                self._last_should_stop_update = time.perf_counter()
+            else:
+                ray.cancel(should_stop_ref)
         return self._should_stop_value
 
     async def _prefetch_requests(self):
@@ -785,7 +781,7 @@ class LLMRayActor:
             setattr(complete_output, "tool_runtime", tool_runtime)
             setattr(complete_output, "tool_called", tool_called)
 
-        # Add to request_outputs with lock
+        # Add to request_outputs with lock and check for completion
         logger.info(f"[_process_request] {sub_request_id} - Acquiring request_outputs_lock")
         async with self.request_outputs_lock:
             if base_request_id not in self.request_outputs:
@@ -803,42 +799,18 @@ class LLMRayActor:
 
             self.request_outputs[base_request_id].outputs.append(complete_output)
             outputs_count = len(self.request_outputs[base_request_id].outputs)
+            expected_n = self.request_metadata[base_request_id]["original_sampling_params"].n
+
             logger.info(
-                f"[_process_request] {sub_request_id} - Added output to {base_request_id}, total outputs: {outputs_count}, lock released"
+                f"[_process_request] {sub_request_id} - Added output to {base_request_id}, total outputs: {outputs_count}/{expected_n}"
             )
-        logger.info(f"[_process_request] EXIT {sub_request_id} - Successfully completed")
 
-    async def _check_and_process_completed_requests(self, base_request_ids: List[str]):
-        """Check request_outputs for completed requests and process them.
-
-        Args:
-            base_request_ids: List of specific base request IDs to check.
-        """
-        if not base_request_ids:
-            return 0
-
-        processed_count = 0
-        dispatch_items: list[tuple[str, GenerationResult, bool]] = []
-        current_time = time.perf_counter()
-
-        # Acquire lock once for entire operation
-        async with self.request_outputs_lock:
-            for base_request_id in base_request_ids:
-                # Skip if not in outputs or metadata
-                if base_request_id not in self.request_outputs or base_request_id not in self.request_metadata:
-                    continue
-
-                request_output = self.request_outputs[base_request_id]
-                expected_n = self.request_metadata[base_request_id]["original_sampling_params"].n
-
-                # Check if this request has all N outputs
-                if len(request_output.outputs) != expected_n:
-                    logger.info(
-                        f"[WAITING] Request {base_request_id} has {len(request_output.outputs)}/{expected_n} outputs, waiting for more completions"
-                    )
-                    continue
+            # Check if this request is now complete (all N samples done)
+            if outputs_count == expected_n:
+                logger.info(f"[_process_request] {sub_request_id} - Request {base_request_id} is complete, processing")
 
                 # Build ordered outputs
+                request_output = self.request_outputs[base_request_id]
                 ordered_outs = []
                 for j in range(expected_n):
                     matching_output = None
@@ -858,119 +830,142 @@ class LLMRayActor:
                         )
                     )
 
-                # Remove from request_outputs
-                self.request_outputs.pop(base_request_id)
-
-                # Process result while still holding the lock, but defer queue writes until afterwards.
-                logger.info(f"[_check_and_process_completed_requests] Processing completed request {base_request_id}")
+                # Process the completed request
+                current_time = time.perf_counter()
                 result, is_eval = process_completed_request(
                     base_request_id, ordered_outs, {}, current_time, self.tools, self.request_metadata
                 )
-                logger.info(
-                    f"[_check_and_process_completed_requests] Processed result type: {type(result)}, is_eval: {is_eval}"
-                )
 
-                # Clean up metadata before leaving the lock to avoid races with new tasks.
+                # Clean up
+                self.request_outputs.pop(base_request_id)
                 self.request_metadata.pop(base_request_id, None)
 
-                dispatch_items.append((base_request_id, result, is_eval))
-                processed_count += 1
+                # Push to thread-safe completion queue
+                self.completion_queue.put((result, is_eval))
+                logger.info(
+                    f"[_process_request] {sub_request_id} - Pushed result for {base_request_id} to completion queue"
+                )
 
-        for base_request_id, result, is_eval in dispatch_items:
-            self._insert_result_to_queue(result, is_eval=is_eval)
-            logger.info(f"[_check_and_process_completed_requests] Inserted result for {base_request_id} to queue")
+        logger.info(f"[_process_request] EXIT {sub_request_id} - Successfully completed")
 
-        return processed_count
+    def _start_async_thread(self):
+        """Start a dedicated thread for running async components."""
+        if self.async_thread is not None:
+            return
 
-    async def process_from_queue(self, timeout: float = 60.0):
-        """Run generation loop using AsyncLLMEngine.
+        def run_async_loop():
+            # Create a new event loop for this thread
+            self.async_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.async_loop)
 
-        Runs continuously until should_stop is set, periodically adding new requests
-        and yielding control to allow weight synchronization.
+            # Run the initialization
+            async def initialize_and_run():
+                await self._ensure_engine_initialized()
+                await self._ensure_prefetch_started()
+
+                # Keep the loop running
+                while True:
+                    await asyncio.sleep(1)
+
+            try:
+                self.async_loop.run_until_complete(initialize_and_run())
+            except Exception as e:
+                logger.error(f"Async thread failed: {e}")
+
+        self.async_thread = threading.Thread(target=run_async_loop, daemon=True)
+        self.async_thread.start()
+
+        # Wait for initialization
+        time.sleep(2)
+
+    def process_from_queue(self, timeout: float = 60.0):
+        """Run generation loop pulling from completion queue.
+
+        This is now a synchronous method that pulls completed results
+        from the thread-safe completion queue and dispatches them.
 
         Returns:
             int: Number of requests processed
         """
-        # Ensure engine and prefetch are initialized
-        await self._ensure_engine_initialized()
-        await self._ensure_prefetch_started()
+        # Start the async components in a dedicated thread
+        self._start_async_thread()
 
         iteration_count = 0
         total_processed = 0
 
+        # Helper to check should_stop synchronously
+        def should_stop():
+            if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
+                should_stop_ref = self.actor_manager.should_stop.remote()
+                ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
+                if ready_refs:
+                    self._should_stop_value = ray.get(ready_refs[0])
+                    self._last_should_stop_update = time.perf_counter()
+                else:
+                    ray.cancel(should_stop_ref)
+            return self._should_stop_value
+
         try:
-            while not await self._should_exit():
+            while True:
                 iteration_count += 1
 
-                # Health check for prefetch task
-                if self.prefetch_task.done():
-                    self.prefetch_task.result()  # This will raise if the task failed
+                # Check if we should exit
+                stop_requested = should_stop()
 
-                # Check engine health - this will raise AsyncEngineDeadError if unhealthy
-                await self.llm_engine.check_health()
+                # For inflight_updates, exit immediately on stop
+                if self.inflight_updates and stop_requested:
+                    break
 
-                # Wait for any task to complete or timeout
-                # Only wait for actual generation tasks, not the prefetch task
-                tasks_to_wait = list(self.active_tasks.values()) if self.active_tasks else []
+                # Check if there's any work left
+                active_tasks = len(self.active_tasks)
+                has_incomplete = len(self.request_outputs) > 0
 
-                if tasks_to_wait:
-                    # Wait for generation tasks with timeout
-                    done, pending = await asyncio.wait(
-                        tasks_to_wait, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
-                    )
-                else:
-                    # No active tasks, just sleep for a bit
-                    await asyncio.sleep(10)
-                    done = set()
+                # Exit if stop requested and no work
+                if stop_requested and active_tasks == 0 and not has_incomplete:
+                    break
 
-                # Process completed tasks and collect their base request IDs
-                completed_base_request_ids = set()
-                for task in done:
-                    await task  # Get result or raise exception
+                # Exit if no work at all
+                if active_tasks == 0 and not has_incomplete:
+                    # Give time for new requests
+                    time.sleep(5.0)
+                    # Re-check
+                    if len(self.active_tasks) == 0 and len(self.request_outputs) == 0:
+                        break
 
-                    # Remove the completed task using its name
-                    task_name = task.get_name()
-                    if task_name in self.active_tasks:
-                        self.active_tasks.pop(task_name, None)
-                        # Extract base request ID from task name (e.g., "train_1_43039_2" -> "train_1_43039")
-                        base_request_id = _extract_base_request_id(task_name)
-                        completed_base_request_ids.add(base_request_id)
+                # Try to get a result from the thread-safe completion queue
+                try:
+                    # Use get with timeout
+                    result, is_eval = self.completion_queue.get(timeout=1.0)
+                    self._insert_result_to_queue(result, is_eval=is_eval)
+                    total_processed += 1
+                    logger.info(f"[process_from_queue] Processed result {total_processed}")
 
-                # Check any base requests that just had tasks complete
-                if completed_base_request_ids:
-                    processed_count = await self._check_and_process_completed_requests(
-                        list(completed_base_request_ids)
-                    )
-                    total_processed += processed_count
-
-                # Opportunistically flush any requests that are already complete
-                # (e.g., completed earlier in a different iteration)
-                if self.request_outputs:
-                    all_base_request_ids = list(self.request_outputs.keys())
-                    processed_count = await self._check_and_process_completed_requests(all_base_request_ids)
-                    total_processed += processed_count
+                except queue.Empty:
+                    # Queue timeout, just continue
+                    pass
 
                 if self.verbose and iteration_count % 10000 == 0:
-                    active_tasks = len(self.active_tasks)
-                    self.logger.info(f"process_from_queue iteration {iteration_count}: active_tasks={active_tasks}")
+                    self.logger.info(
+                        f"process_from_queue iteration {iteration_count}: total_processed={total_processed}"
+                    )
 
         finally:
-            logger.info(
-                f"[process_from_queue] EXITING - active_tasks={len(self.active_tasks)}, request_outputs={len(self.request_outputs)}, total_processed={total_processed}"
-            )
+            logger.info(f"[process_from_queue] EXITING - total_processed={total_processed}")
 
-            # Wait for all active tasks to complete only if inflight_updates is False
+            # If not inflight_updates, drain any remaining items
             if not self.inflight_updates:
-                await asyncio.gather(*self.active_tasks.values(), return_exceptions=True)
+                # Give tasks time to complete
+                time.sleep(2.0)
 
-            # Always process any remaining completed requests on exit
-            # (prefetch is paused by should_stop, so this is safe)
-            if self.request_outputs:
-                all_base_request_ids = list(self.request_outputs.keys())
-                processed_count = await self._check_and_process_completed_requests(all_base_request_ids)
-                total_processed += processed_count
+                # Drain the queue
+                while True:
+                    try:
+                        result, is_eval = self.completion_queue.get_nowait()
+                        self._insert_result_to_queue(result, is_eval=is_eval)
+                        total_processed += 1
+                    except queue.Empty:
+                        break
 
-            # Count total processed
             logger.info(f"[process_from_queue] FINAL EXIT - total_processed={total_processed}")
             return total_processed
 
