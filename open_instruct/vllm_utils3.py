@@ -89,87 +89,49 @@ async def process_request_async(
     sampling_params: vllm.SamplingParams,
     completion_queue: queue.Queue,
     request_metadata: dict,
-    request_outputs: dict,
-    request_outputs_lock: asyncio.Lock,
+    active_tasks: dict,
     tools: Optional[Dict[str, Tool]] = None,
 ):
     """Process a single async request and push to completion queue when ready."""
     logger.info(f"[process_request_async] START {sub_request_id}")
 
-    try:
-        # Generate completion
-        request_output = await generate_one_completion(llm_engine, sub_request_id, prompt, sampling_params)
+    # Generate completion
+    request_output = await generate_one_completion(llm_engine, sub_request_id, prompt, sampling_params)
 
-        # Process the output
-        complete_output = request_output.outputs[0]
+    # Process the output
+    complete_output = request_output.outputs[0]
 
-        # Extract the j index from sub_request_id (format: base_id_j)
-        j = int(sub_request_id.split("_")[-1])
-        # Use dataclasses.replace to create a new CompletionOutput with the correct index
-        complete_output = dataclasses.replace(complete_output, index=j)
+    # Extract the j index from sub_request_id (format: base_id_j)
+    j = int(sub_request_id.split("_")[-1])
+    # Use dataclasses.replace to create a new CompletionOutput with the correct index
+    complete_output = dataclasses.replace(complete_output, index=j)
 
-        # Add to request_outputs with lock and check for completion
-        async with request_outputs_lock:
-            if base_request_id not in request_outputs:
-                request_outputs[base_request_id] = vllm.RequestOutput(
-                    request_id=base_request_id,
-                    prompt=request_output.prompt,
-                    prompt_token_ids=request_output.prompt_token_ids,
-                    prompt_logprobs=request_output.prompt_logprobs,
-                    outputs=[],
-                    finished=True,
-                )
+    # Get expected_n from metadata
+    expected_n = request_metadata[base_request_id]["original_sampling_params"].n
 
-            request_outputs[base_request_id].outputs.append(complete_output)
-            outputs_count = len(request_outputs[base_request_id].outputs)
-            expected_n = request_metadata[base_request_id]["original_sampling_params"].n
+    # Clean up this sub-request from active_tasks
+    active_tasks.pop(sub_request_id, None)
 
-            logger.info(
-                f"[process_request_async] {sub_request_id} - Added output, total: {outputs_count}/{expected_n}"
-            )
+    # Create sub-request result with all needed metadata
+    sub_request_result = {
+        "base_request_id": base_request_id,
+        "sub_request_id": sub_request_id,
+        "j": j,
+        "expected_n": expected_n,
+        "request_output": vllm.RequestOutput(
+            request_id=sub_request_id,
+            prompt=request_output.prompt,
+            prompt_token_ids=request_output.prompt_token_ids,
+            prompt_logprobs=request_output.prompt_logprobs,
+            outputs=[complete_output],
+            finished=True,
+        ),
+        "tools": tools,
+    }
 
-            # Check if this request is now complete
-            if outputs_count == expected_n:
-                logger.info(f"[process_request_async] Request {base_request_id} is complete, processing")
-
-                # Build ordered outputs
-                request_output = request_outputs[base_request_id]
-                ordered_outs = []
-                for j in range(expected_n):
-                    matching_output = None
-                    for comp_output in request_output.outputs:
-                        if hasattr(comp_output, "index") and comp_output.index == j:
-                            matching_output = comp_output
-                            break
-
-                    ordered_outs.append(
-                        vllm.RequestOutput(
-                            request_id=f"{base_request_id}_{j}",
-                            prompt=request_output.prompt,
-                            prompt_token_ids=request_output.prompt_token_ids,
-                            prompt_logprobs=request_output.prompt_logprobs,
-                            outputs=[matching_output],
-                            finished=True,
-                        )
-                    )
-
-                # Process the completed request
-                current_time = time.perf_counter()
-                result, is_eval = process_completed_request(
-                    base_request_id, ordered_outs, {}, current_time, tools, request_metadata
-                )
-
-                # Clean up
-                request_outputs.pop(base_request_id)
-                request_metadata.pop(base_request_id, None)
-
-                # Push to completion queue
-                completion_queue.put((result, is_eval))
-                logger.info(f"[process_request_async] Pushed result for {base_request_id} to completion queue")
-
-    except Exception as e:
-        logger.error(f"[process_request_async] Error processing {sub_request_id}: {e}", exc_info=True)
-        raise
+    # Push sub-request to completion queue
+    completion_queue.put(sub_request_result)
+    logger.info(f"[process_request_async] Pushed sub-request {sub_request_id} to completion queue")
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -464,7 +426,6 @@ class LLMRayActor:
         # Async tracking for request accumulation
         self.active_tasks = {}  # Track active async tasks
         self.request_outputs = {}  # Accumulate outputs until all N samples complete
-        self.request_outputs_lock = asyncio.Lock()  # Lock for thread-safe access
 
         # Initialize async components with our own event loop
         self.init_complete = threading.Event()
@@ -640,8 +601,7 @@ class LLMRayActor:
                     sub_sampling_params,
                     self.completion_queue,
                     self.request_metadata,
-                    self.request_outputs,
-                    self.request_outputs_lock,
+                    self.active_tasks,
                     self.tools,
                 ),
                 self.loop,
@@ -675,9 +635,63 @@ class LLMRayActor:
 
         while not self._should_exit():
             try:
-                result, is_eval = self.completion_queue.get(timeout=1.0)
-                self._insert_result_to_queue(result, is_eval=is_eval)
-                total_processed += 1
+                sub_request = self.completion_queue.get(timeout=1.0)
+
+                # Check if it's a sub-request (dict) or already processed result (tuple)
+                if isinstance(sub_request, dict):
+                    # This is a sub-request that needs aggregation
+                    base_request_id = sub_request["base_request_id"]
+                    expected_n = sub_request["expected_n"]
+
+                    # Initialize accumulator if needed
+                    if base_request_id not in self.request_outputs:
+                        self.request_outputs[base_request_id] = {
+                            "outputs": [],
+                            "expected_n": expected_n,
+                            "tools": sub_request["tools"],
+                        }
+
+                    # Add this sub-request output
+                    self.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
+
+                    logger.info(
+                        f"[process_from_queue] Accumulated {len(self.request_outputs[base_request_id]['outputs'])}/{expected_n} for {base_request_id}"
+                    )
+
+                    # Check if all sub-requests are complete
+                    if len(self.request_outputs[base_request_id]["outputs"]) == expected_n:
+                        logger.info(
+                            f"[process_from_queue] All sub-requests complete for {base_request_id}, aggregating"
+                        )
+
+                        # Sort outputs by j index (extracted from request_id)
+                        outputs = self.request_outputs[base_request_id]["outputs"]
+                        ordered_outs = sorted(outputs, key=lambda x: int(x.request_id.split("_")[-1]))
+
+                        # Process the completed request
+                        current_time = time.perf_counter()
+                        result, is_eval = process_completed_request(
+                            base_request_id,
+                            ordered_outs,
+                            {},  # tracking dict (empty for now)
+                            current_time,
+                            self.request_outputs[base_request_id]["tools"],
+                            self.request_metadata,
+                        )
+
+                        # Clean up
+                        self.request_outputs.pop(base_request_id)
+                        self.request_metadata.pop(base_request_id, None)
+
+                        # Insert result to appropriate queue
+                        self._insert_result_to_queue(result, is_eval=is_eval)
+                        total_processed += 1
+                else:
+                    # Legacy path if something directly puts a tuple result
+                    result, is_eval = sub_request
+                    self._insert_result_to_queue(result, is_eval=is_eval)
+                    total_processed += 1
+
             except queue.Empty:
                 pass
 
