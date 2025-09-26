@@ -570,8 +570,16 @@ class LLMRayActor:
             last_prompt_token_ids = last_output.prompt_token_ids
             last_token_ids = last_o.token_ids
             tool_output_token_ids = tokenizer.encode(
-                "<tool_response>\n" + tool_result.output + "</tool_response>\n", add_special_tokens=False
+                "<|im_start|>user\n<tool_response>\n" + tool_result.output + "</tool_response>\n<|im_end|>\n<|im_start|>\n",
+                add_special_tokens=False,
             )
+            terminate_generation = getattr(tool_result, "terminate", False)
+            if terminate_generation:
+                try:
+                    stop_tokens = tokenizer.encode("<endoftext>", add_special_tokens=False)
+                except Exception:
+                    stop_tokens = []
+                tool_output_token_ids = tool_output_token_ids + stop_tokens
             tracking["timeout"][req_id] = tool_result.timeout
             tracking["tool_error"][req_id] += "" if tool_result.error is None else tool_result.error
             tracking["tool_output"][req_id] += tool_result.output
@@ -599,6 +607,8 @@ class LLMRayActor:
             tracking["masks"][req_id].extend([0] * len(tool_output_token_ids))
             new_sample_tokens = sampling_params.max_tokens - len(tracking["masks"][req_id])
             can_make_new_request = can_make_new_request and new_sample_tokens > 0
+            if terminate_generation:
+                can_make_new_request = False
 
             if can_make_new_request:
                 new_sampling_params = sampling_params.clone()

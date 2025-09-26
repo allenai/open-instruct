@@ -1043,6 +1043,9 @@ class CodeSearchVerifier(VerifierFunction):
     async def async_call(
         self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
     ) -> VerificationResult:
+        if "<tool_response>\nMax tool calls exceeded. Terminating generation.</tool_response>" in prediction:
+            return VerificationResult(score=0.0)
+        
         buggy_info = json.loads(label)
         bug_fn_file = buggy_info["bug_fn_file"]
         bug_fn_line_start = buggy_info["line_start"]

@@ -290,10 +290,12 @@ def _normalize_path(path: str, repo_name: Optional[str] = None) -> tuple[str, st
         s = full_path.lstrip("/")
         if s.startswith("repos/"):
             s = s[len("repos/") :]
-        # Remove the "owner/repo/" component
-        prefix = inferred_repo_name + "/"
-        if s.startswith(prefix):
-            full_path = s[len(prefix) :]
+        # Remove the "owner/repo" component (with or without trailing slash)
+        prefix = inferred_repo_name
+        if s == prefix:
+            full_path = ""
+        elif s.startswith(prefix + "/"):
+            full_path = s[len(prefix) + 1 :]
 
     # Default to current directory if empty
     if not full_path:

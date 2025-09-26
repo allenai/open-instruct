@@ -36,8 +36,8 @@ class ToolOutput:
     timeout: bool
     runtime: float
     terminate: bool = False  # If True, terminate generation immediately
-    start_str: str = "<tool_response>\n"
-    end_str: str = "\n</tool_response>"
+    start_str: str = "<|im_start|>user\n<tool_response>\n"
+    end_str: str = "</tool_response>\n<|im_end|>\n<|im_start|>\n"
 
 
 class Tool:
@@ -546,7 +546,7 @@ class ToolUseLLM(LLM):
                     last_prompt_token_ids = last_output.prompt_token_ids
                     last_token_ids = last_o.token_ids
                     tool_output_token_ids = tokenizer.encode(
-                        "<tool_response>\n" + tool_result.output + "</tool_response>\n", add_special_tokens=False
+                       "<|im_start|>user\n<tool_response>\n" + tool_result.output + "</tool_response>\n<|im_end|>\n<|im_start|>\n", add_special_tokens=False
                     )
                     # If the tool requests termination, append a stop string and prevent further requests
                     terminate_generation = getattr(tool_result, "terminate", False)
