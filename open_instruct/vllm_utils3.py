@@ -361,21 +361,24 @@ class LLMRayActor:
                 asyncio.set_event_loop(self.async_loop)
 
                 # Create AsyncLLMEngine in this event loop
+                logger.info("Starting AsyncLLMEngine initialization...")
                 self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(
                     self.engine_args, start_engine_loop=True
                 )
+                logger.info("AsyncLLMEngine created successfully")
 
-                # Create and start the prefetch task
-                self.prefetch_task = self.async_loop.create_task(self._prefetch_requests())
-
-                # Signal successful initialization
+                # Signal successful initialization BEFORE starting prefetch
                 init_complete.set()
+
+                # Now start the prefetch task after init is complete
+                logger.info("Starting prefetch task...")
+                self.prefetch_task = self.async_loop.create_task(self._prefetch_requests())
 
                 # Run the event loop forever
                 self.async_loop.run_forever()
 
             except Exception as e:
-                logger.error(f"Failed to initialize async components: {e}")
+                logger.error(f"Failed to initialize async components: {e}", exc_info=True)
                 init_error[0] = e
                 init_complete.set()
 
@@ -383,9 +386,9 @@ class LLMRayActor:
         self.async_thread = threading.Thread(target=run_async_loop, daemon=True)
         self.async_thread.start()
 
-        # Wait for initialization to complete
-        if not init_complete.wait(timeout=30):
-            raise RuntimeError("Timeout waiting for async components to initialize")
+        # Wait for initialization to complete (increased timeout for tool scripts)
+        if not init_complete.wait(timeout=120):
+            raise RuntimeError("Timeout waiting for async components to initialize after 120 seconds")
 
         # Check for initialization errors
         if init_error[0] is not None:
