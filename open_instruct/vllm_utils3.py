@@ -488,13 +488,9 @@ class LLMRayActor:
             self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=False)
             logger.info("AsyncLLMEngine created successfully")
 
-            # Then start the background loop asynchronously
-            async def start_loop():
-                await self.llm_engine.start_background_loop()
-                logger.info("AsyncLLMEngine background loop started")
-
-            # Run the async part
-            self.loop.run_until_complete(start_loop())
+            # Start the background loop (synchronous call)
+            self.llm_engine.start_background_loop()
+            logger.info("AsyncLLMEngine background loop started")
 
             # Signal init complete
             self.init_complete.set()
