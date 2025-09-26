@@ -16,6 +16,7 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 import asyncio
+import dataclasses
 import logging
 import os
 import queue
@@ -102,6 +103,11 @@ async def process_request_async(
         # Process the output
         complete_output = request_output.outputs[0]
 
+        # Extract the j index from sub_request_id (format: base_id_j)
+        j = int(sub_request_id.split("_")[-1])
+        # Use dataclasses.replace to create a new CompletionOutput with the correct index
+        complete_output = dataclasses.replace(complete_output, index=j)
+
         # Add to request_outputs with lock and check for completion
         async with request_outputs_lock:
             if base_request_id not in request_outputs:
@@ -163,6 +169,7 @@ async def process_request_async(
 
     except Exception as e:
         logger.error(f"[process_request_async] Error processing {sub_request_id}: {e}", exc_info=True)
+        raise
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
