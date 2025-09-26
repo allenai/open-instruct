@@ -11,7 +11,7 @@ uv run python mason.py \
         --workspace ai2/open-instruct-dev \
         --priority urgent \
 	--preemptible \
-	--timeout "30m" \
+	--timeout "6h" \
         --num_nodes 2 \
 	--description "Large (multi-node) test script." \
         --max_retries 0 \
