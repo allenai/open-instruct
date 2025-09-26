@@ -58,12 +58,14 @@ def assert_threaded_actor() -> None:
         AssertionError: If running in an async actor with an event loop
     """
     try:
-        asyncio.get_event_loop()
+        loop = asyncio.get_event_loop()
         # Successfully got an event loop - we're in an async actor (bad!)
+        import threading
         raise AssertionError(
-            "LLMRayActor must run in a threaded Ray actor to avoid event loop conflicts. "
-            "Current actor has an event loop (async actor). "
-            "Fix: Use ray.remote(LLMRayActor).options(max_concurrency=1000)"
+            f"LLMRayActor must run in a threaded Ray actor to avoid event loop conflicts. "
+            f"Current actor has an event loop (async actor). "
+            f"Loop: {loop}, Running: {loop.is_running()}, Thread: {threading.current_thread().name}. "
+            f"Fix: Ensure no async methods in LLMRayActor class."
         )
     except RuntimeError as e:
         if "no current event loop" in str(e).lower() or "there is no current event loop" in str(e).lower():
