@@ -61,6 +61,7 @@ def assert_threaded_actor() -> None:
         loop = asyncio.get_event_loop()
         # Successfully got an event loop - we're in an async actor (bad!)
         import threading
+
         raise AssertionError(
             f"LLMRayActor must run in a threaded Ray actor to avoid event loop conflicts. "
             f"Current actor has an event loop (async actor). "
@@ -390,6 +391,7 @@ class LLMRayActor:
     ):
         # Debug: Check what methods Ray sees
         import inspect
+
         methods = inspect.getmembers(self.__class__, predicate=inspect.isfunction)
         async_methods = [name for name, method in methods if inspect.iscoroutinefunction(method)]
         if async_methods:
