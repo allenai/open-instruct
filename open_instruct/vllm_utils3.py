@@ -498,28 +498,6 @@ class LLMRayActor:
             self.init_complete.set()  # Unblock waiting thread
             raise
 
-    async def _q_get_async(self):
-        """Get from Ray queue asynchronously with compatibility fallback."""
-        # Prefer native async API if available
-        get_async = getattr(self.prompt_queue, "get_async", None)
-        if callable(get_async):
-            return await get_async()
-        # Fallback: poll via a background thread with timeout
-        attempt = 0
-        while True:
-            attempt += 1
-            # If a weight sync is requested, yield control so caller can stop
-            if await self._should_stop():
-                await asyncio.sleep(0.1)
-                # Returning None signals caller to re-check should_stop and continue
-                return None
-            try:
-                result = await asyncio.to_thread(self.prompt_queue.get, timeout=1.0)
-                return result
-            except Exception:
-                # Likely timeout; just loop
-                await asyncio.sleep(0.05)
-
     def _prefetch_requests(self):
         """Synchronous prefetch that spawns async tasks."""
         while True:
