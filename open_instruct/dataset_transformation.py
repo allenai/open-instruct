@@ -454,9 +454,21 @@ CHAT_TEMPLATES = {
         "\n\n"
         "{% for message in messages %}"
         "{{ '\n\n' if not loop.first else '' }}"
-        "{{ message['role'].capitalize() + ': ' + message['content'] + '\n' }}"
+        "{{ message['role'] + ': ' + message['content'] + '\n' }}"
         "{% if loop.last and add_generation_prompt %}"
         "{{ 'assistant:\n<think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "olmo_thinker_dapo": (
+        "Solve the following math problem step by step. "
+        "The last line of your response should be of the form <answer> answer here </answer>. "
+        "\n\n"
+        "{% for message in messages %}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['content'] + '\n' }}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ 'Solving step by step:' }}"
         "{% endif %}"
         "{% endfor %}"
     ),
