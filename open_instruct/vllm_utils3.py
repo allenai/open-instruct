@@ -39,7 +39,6 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
-from vllm.v1 import kv_cache_interface
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
@@ -454,7 +453,9 @@ class LLMRayActor:
     def _insert_result_to_queue(self, result, is_eval: bool):
         """Insert result into the appropriate queue with blocking put."""
         results_queue = self.eval_results_queue if is_eval else self.results_queue
+        self.logger.info("About to try and put result into results_queue. This could block!")
         results_queue.put(result)
+        self.logger.info("Successfuly put result into results_queue.")
 
     def _should_exit(self) -> bool:
         """Determine if the processing loop should exit.
@@ -891,40 +892,22 @@ class LLMRayActor:
         return True
 
     def get_kv_cache_info(self):
-        """Get KV cache max concurrency from the vLLM engine."""
+        """Get KV cache max concurrency from the vLLM engine using v1 API."""
         kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
-        kv_cache_spec = kv_cache_specs[0]
-        # Group layers by their attention type (type_id) to handle models
-        # with sliding attention in some layers but not others
-        type_groups = defaultdict(list)
-        for layer_name, layer_spec in kv_cache_spec.items():
-            type_groups[layer_spec.type_id].append(layer_name)
-
-        grouped_layer_names = list(type_groups.values())
-
-        page_size = kv_cache_utils.get_uniform_page_size(kv_cache_spec)
 
         vllm_config = self.llm_engine.vllm_config
         gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
         total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
         available_memory = int(gpu_memory_utilization * total_gpu_memory)
 
-        num_blocks = kv_cache_utils.get_num_blocks(vllm_config, len(kv_cache_spec), available_memory, page_size)
+        # Use vLLM's v1 API to get KV cache configs
+        kv_cache_configs = kv_cache_utils.get_kv_cache_configs(vllm_config, kv_cache_specs, [available_memory])
 
-        per_layer_size = page_size * num_blocks
-        kv_cache_tensors = [
-            kv_cache_interface.KVCacheTensor(size=per_layer_size, shared_by=[layer_name])
-            for layer_name in kv_cache_spec
-        ]
+        if not kv_cache_configs:
+            return -1
 
-        kv_cache_config = kv_cache_interface.KVCacheConfig(
-            num_blocks=num_blocks,
-            kv_cache_tensors=kv_cache_tensors,
-            kv_cache_groups=kv_cache_utils.create_kv_cache_group_specs(kv_cache_spec, grouped_layer_names),
-        )
-        max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(
-            self.llm_engine.vllm_config, kv_cache_config
-        )
+        # Get max concurrency using vLLM's function
+        max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(vllm_config, kv_cache_configs[0])
 
         return int(max_concurrency)
 

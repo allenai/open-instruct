@@ -5,7 +5,7 @@ num_prompts=25376
 exp_name=rlvr_ace_fn_and_og_ocr_stdio_from_base_with_perf_penalty
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 uv run python mason.py \
-        --cluster ai2/jupiter-cirrascale-2 \
+        --cluster ai2/titan \
         --image "$BEAKER_IMAGE" \
 	--pure_docker_mode \
         --workspace ai2/open-instruct-dev \
@@ -19,6 +19,7 @@ uv run python mason.py \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
+	--add_bos \
         --num_samples_per_prompt_rollout 16 \
         --num_unique_prompts_rollout 32 \
         --num_mini_batches 1 \
@@ -34,7 +35,8 @@ uv run python mason.py \
         --max_prompt_token_length 2048 \
         --response_length 4096 \
         --pack_length 20480 \
-        --model_name_or_path Qwen/Qwen2.5-7B \
+        --model_name_or_path /weka/oe-adapt-default/finbarrt/stego32/step17000-hf \
+	--tokenizer_name_or_path "allenai/OLMo-2-1124-7B" \
         --chat_template_name tulu_thinker \
 	--inflight_updates True \
         --stop_strings "</answer>" \
