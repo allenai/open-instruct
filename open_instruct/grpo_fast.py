@@ -405,6 +405,8 @@ class Args:
     """the max generation length for evaluation for oe-eval"""
     oe_eval_beaker_image: Optional[str] = None
     """the docker image for evaluation for oe-eval"""
+    oe_eval_gpu_multiplier: Optional[int] = 1
+    """gpu mulitplier for eval jobs"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
 
@@ -1224,6 +1226,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 args.gs_bucket_path,
                 args.eval_priority,
                 args.oe_eval_beaker_image,
+                args.oe_eval_gpu_multiplier,
             )
 
 
