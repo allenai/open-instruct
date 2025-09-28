@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 import jsonlines
 import litellm
@@ -206,8 +206,9 @@ def run_litellm(
 
 async def run_litellm_async(
     model_name: str,
-    user_prompt: str,
+    user_prompt: Optional[str] = None,
     system_prompt: Optional[str] = None,
+    messages: Optional[List[Dict[str, str]]] = None,
     **chat_kwargs,
 ) -> str:
     """
@@ -237,14 +238,17 @@ async def run_litellm_async(
     chat_kwargs["fallbacks"] = chat_kwargs.get("fallbacks", ["gpt-4.1-mini"])
 
     # Prepare messages
-    msgs = (
-        [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-        if system_prompt is not None
-        else [{"role": "user", "content": user_prompt}]
-    )
+    if messages is not None:
+        msgs = messages
+    else:
+        msgs = (
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+            if system_prompt is not None
+            else [{"role": "user", "content": user_prompt}]
+        )
 
     # Create chat completion
     response = await litellm.acompletion(
