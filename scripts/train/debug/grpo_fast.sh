@@ -1,3 +1,19 @@
+#!/bin/bash
+
+python mason.py \
+    --task_name grpo_debug_small \
+    --cluster ai2/augusta \
+    --workspace ai2/oe-adapt-code \
+    --priority high \
+    --pure_docker_mode \
+    --image michaeln/open_instruct_2.5-rl0 \
+    --preemptible \
+    --num_nodes 1 \
+    --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+    --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
+    --gpus 1 \
+    --budget ai2/oe-adapt \
+    -- \
 uv run python open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --dataset_mixer_list_splits train \
@@ -18,19 +34,25 @@ uv run python open_instruct/grpo_fast.py \
     --ground_truths_key ground_truth \
     --chat_template_name r1_simple_chat_postpend_think \
     --learning_rate 3e-7 \
-    --total_episodes 200 \
+    --total_episodes 1600 \
     --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
     --vllm_tensor_parallel_size 1 \
-    --beta 0.01 \
+    --beta 0. \
     --seed 3 \
-    --local_eval_every 1 \
+    --local_eval_every 25 \
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.3 \
-    --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --single_gpu_mode \
     --push_to_hub false \
-    # --with_tracking
+    --with_tracking \
+    --save_freq 25 \
+    --eval_on_step_0 \
+    --oe_eval_max_length 512 \
+    --try_launch_beaker_eval_jobs_on_weka True \
+    --oe_eval_tasks gsm8k \
+    --oe_eval_beaker_image michaeln/oe_eval_olmo2_retrofit \
+    --eval_priority high
