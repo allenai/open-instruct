@@ -1,5 +1,6 @@
 import random
 import asyncio
+import torch
 from open_instruct.search_rewards.utils.run_utils import run_litellm_async
 
 
@@ -29,9 +30,28 @@ async def maybe_replace_on_policy_rollouts_with_partial_rollouts(
     num_rollouts_to_replace_per_prompt, 
     model_name="gpt-5",
     transform_fn_args=None,
+    tokenizer=None,
+    masks=None,
+    responses=None,
 ):
     """
     Among all on-policy rollouts per prompt, randomly substitue num_rollouts_to_replace_per_prompt rollouts' answers with external versions.
+    
+    Args:
+        queries: List of queries
+        decoded_responses: List of decoded response strings
+        num_samples_per_prompt_rollout: Number of samples per prompt
+        num_rollouts_to_replace_per_prompt: Number of rollouts to replace per prompt
+        model_name: Name of the external model to use for partial rollouts
+        transform_fn_args: Transform function arguments
+        tokenizer: Tokenizer for re-tokenizing responses (optional)
+        masks: List of masks corresponding to responses (optional)
+        responses: List of tokenized responses to update (optional)
+    
+    Returns:
+        If tokenizer, masks, and responses are provided: (modified_responses, updated_masks, updated_responses)
+        If tokenizer and masks are provided: (modified_responses, updated_masks)
+        Otherwise: modified_responses
     """
     num_prompts = len(decoded_responses) // num_samples_per_prompt_rollout
     
@@ -71,7 +91,7 @@ async def maybe_replace_on_policy_rollouts_with_partial_rollouts(
                 },
                 {
                     "role": "user",
-                    "content": original_query + "\n\n" + additional_question_instructions
+                    "content": original_query + "\n\n"  #+ additional_question_instructions["long_form"]
                 },
                 {
                     "role": "assistant",
@@ -91,14 +111,74 @@ async def maybe_replace_on_policy_rollouts_with_partial_rollouts(
                 rollout_length=8192,
                 temperature=1
             )
+            # print("🚼 [Debug] Original query:")
+            # print(original_query)
+            # print(original_response)
+            # print("🚼 [Debug] Partial rollout:")
+            # print(partial_rollouts[0])
             
-            print("🚼 [Debug] Original query: ", original_query, "\n\n", "Partial rollout: ", partial_rollouts[0])
-            
-            # Replace the original response with the partial rollout
-            modified_responses[global_idx] = partial_rollouts[0]
-            new_responses.append(partial_rollouts[0])
+            # Replace the original response with the concatenation of context and partial rollout
+            modified_responses[global_idx] = context + partial_rollouts[0]
+            new_responses.append(context + partial_rollouts[0])
 
-    return modified_responses
+    # Update masks and responses if tokenizer is provided
+    updated_masks = None
+    updated_responses = None
+    
+    if tokenizer is not None and masks is not None:
+        updated_masks = masks.copy()
+        original_decoded_responses = decoded_responses.copy()
+        
+        # Also update tokenized responses if provided
+        if responses is not None:
+            updated_responses = responses.copy()
+        
+        for i in range(len(modified_responses)):
+            if modified_responses[i] != original_decoded_responses[i]:
+                # This response was replaced, re-tokenize it
+                new_tokens = tokenizer.encode(modified_responses[i], return_tensors="pt").squeeze(0)
+                
+                # Update the tokenized responses if provided
+                if updated_responses is not None:
+                    updated_responses[i] = new_tokens
+                
+                # Update the mask to handle context + new answer concatenation
+                # The new response contains: original_context + new_generated_answer
+                # The context may contain tool calls (mask=0), so we need to preserve those mask values
+                
+                # Extract the context (everything before <answer>) from the original response
+                original_context = original_decoded_responses[i].split("<answer>")[0] if "<answer>" in original_decoded_responses[i] else ""
+                
+                if original_context:
+                    # Tokenize the original context to determine how many tokens it should have
+                    context_tokens = tokenizer.encode(original_context, return_tensors="pt").squeeze(0)
+                    context_token_count = len(context_tokens)
+                    
+                    # Get the original mask and preserve it for the context portion
+                    original_mask = updated_masks[i]
+                    
+                    # The context portion should use the original mask (up to context length)
+                    # The new answer portion should be all 1s (since it's generated by external model)
+                    if context_token_count <= len(original_mask):
+                        # Use original mask for context, pad with 1s for new answer
+                        context_mask = original_mask[:context_token_count]
+                        new_answer_mask = [1] * (len(new_tokens) - context_token_count)
+                        updated_masks[i] = context_mask + new_answer_mask
+                    else:
+                        # Context is longer than original mask (tokenization difference)
+                        # Use original mask + extend with 1s for remaining context + new answer
+                        updated_masks[i] = original_mask + [1] * (len(new_tokens) - len(original_mask))
+                else:
+                    # No context found, treat all tokens as new (shouldn't happen with partial rollouts)
+                    updated_masks[i] = [1] * len(new_tokens)
+
+    # Return appropriate combination based on what was provided
+    if updated_responses is not None:
+        return modified_responses, updated_masks, updated_responses
+    elif updated_masks is not None:
+        return modified_responses, updated_masks
+    else:
+        return modified_responses
 
 
 

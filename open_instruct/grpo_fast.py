@@ -466,6 +466,11 @@ class Args:
     """The step to evaluate the model"""
     eval_timeout: int = 600
     """Timeout in seconds for evaluation (especially step 0 evaluation)"""
+    mix_partial_rollouts: bool = False
+    """Whether to mix partial rollouts with additional supervision from other models"""
+    partial_rollouts_model_name: Optional[str] = "gpt-5"
+    """The model to use for partial rollouts"""
+    partial_rollouts_num_rollouts_to_replace: int = 1
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
@@ -1231,6 +1236,7 @@ def data_preparation_thread(
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
     rubric_buffer: Optional[Dict] = None,
+    transform_fn_args: Optional[List] = None,
 ):
     for training_step in range(1, num_training_steps + 1):
         # Get next batch of prompts and responses
@@ -1300,7 +1306,7 @@ def data_preparation_thread(
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
             result = asyncio.run(
                 reward_fn(
-                    responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries, rubric_buffer=rubric_buffer, is_training=True, training_step=training_step
+                    responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries, rubric_buffer=rubric_buffer, is_training=True, training_step=training_step, transform_fn_args=transform_fn_args, tokenizer=tokenizer, masks=masks
                 )
             )
             if len(result) == 3:
@@ -1955,6 +1961,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             tokenizer,
             args.num_training_steps,
             rubric_buffer,
+            transform_fn_args,
         ),
     )
     packing_thread.start()
@@ -2240,6 +2247,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                         eval_infos,
                         source_datasets=eval_original_dataset_names,
                         is_training=False,
+                        tokenizer=tokenizer,
+                        masks=None,  # No masks needed for evaluation
                     )
                 )
                 if len(eval_result) == 3:
@@ -2401,6 +2410,8 @@ if __name__ == "__main__":
     if args.apply_adaptive_rubric_reward:
         from open_instruct.search_rewards.utils.rubric_utils import _generate_instance_wise_adaptive_rubrics, update_ground_truths_with_adaptive_rubrics
         from open_instruct.search_rewards.longform_rubric_rewards import create_rubric_key
+    if args.mix_partial_rollouts:
+        from open_instruct.search_rewards.rollout_revision import maybe_replace_on_policy_rollouts_with_partial_rollouts
 
     async def reward_fn(
         responses: List[torch.Tensor],
@@ -2414,6 +2425,9 @@ if __name__ == "__main__":
         rubric_buffer: Optional[Dict[str, List[Dict[str, float]]]] = None,
         is_training: bool = True,
         training_step: Optional[int] = None,
+        transform_fn_args: Optional[List] = None,
+        tokenizer: Optional[PreTrainedTokenizer] = None,
+        masks: Optional[List[List[int]]] = None,
     ) -> List[float]:
         num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
         good_outputs = [
@@ -2439,6 +2453,29 @@ if __name__ == "__main__":
                 for i in range(len(rl_rag_format_scores)):
                     scores[i] = rl_rag_format_scores[i] + scores[i]
                 metrics["val/rl_rag_format_scores"] = np.array(rl_rag_format_scores).mean()
+
+        if args.mix_partial_rollouts and is_training:
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Generating partial rollouts"):
+                # Call the updated function that handles response replacement, mask updates, and re-tokenization
+                result = await maybe_replace_on_policy_rollouts_with_partial_rollouts(
+                    queries, 
+                    decoded_responses, 
+                    args.num_samples_per_prompt_rollout, 
+                    args.partial_rollouts_num_rollouts_to_replace, 
+                    args.partial_rollouts_model_name, 
+                    transform_fn_args=transform_fn_args,
+                    tokenizer=tokenizer,
+                    masks=masks,
+                    responses=responses
+                )
+                
+                # Handle the return value - could be responses, (responses, masks), or (responses, masks, tokenized_responses)
+                if isinstance(result, tuple) and len(result) == 3:
+                    decoded_responses, masks, responses = result
+                elif isinstance(result, tuple) and len(result) == 2:
+                    decoded_responses, masks = result
+                else:
+                    decoded_responses = result
 
         if args.apply_adaptive_rubric_reward and is_training:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating adaptive rubric reward"):
