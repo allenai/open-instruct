@@ -738,53 +738,86 @@ class LLMRayActor:
         use_ray=False,
         timeout_minutes=120,
     ):
-        import functools
+        import threading
 
-        async def _init_process_group_async():
-            func = functools.partial(
-                self.llm_engine.engine.collective_rpc,
-                "init_process_group",
-                args=(
-                    master_address,
-                    master_port,
-                    rank_offset,
-                    world_size,
-                    group_name,
-                    backend,
-                    use_ray,
-                    timeout_minutes,
-                ),
-            )
-            return await self.loop.run_in_executor(None, func)
+        result = [None]
+        exception = [None]
+        done_event = threading.Event()
 
-        future = asyncio.run_coroutine_threadsafe(_init_process_group_async(), self.loop)
-        return future.result()
+        def _run_collective_rpc():
+            try:
+                result[0] = self.llm_engine.engine.collective_rpc(
+                    "init_process_group",
+                    args=(
+                        master_address,
+                        master_port,
+                        rank_offset,
+                        world_size,
+                        group_name,
+                        backend,
+                        use_ray,
+                        timeout_minutes,
+                    ),
+                )
+            except Exception as e:
+                exception[0] = e
+            finally:
+                done_event.set()
+
+        self.loop.call_soon_threadsafe(_run_collective_rpc)
+        done_event.wait()
+
+        if exception[0]:
+            raise exception[0]
+        return result[0]
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        import functools
+        import threading
 
-        async def _update_weight_async():
-            func = functools.partial(
-                self.llm_engine.engine.collective_rpc, "update_weight", args=(name, dtype, shape, empty_cache)
-            )
-            return await self.loop.run_in_executor(None, func)
+        result = [None]
+        exception = [None]
+        done_event = threading.Event()
 
-        future = asyncio.run_coroutine_threadsafe(_update_weight_async(), self.loop)
-        return future.result()
+        def _run_collective_rpc():
+            try:
+                result[0] = self.llm_engine.engine.collective_rpc(
+                    "update_weight", args=(name, dtype, shape, empty_cache)
+                )
+            except Exception as e:
+                exception[0] = e
+            finally:
+                done_event.set()
+
+        self.loop.call_soon_threadsafe(_run_collective_rpc)
+        done_event.wait()
+
+        if exception[0]:
+            raise exception[0]
+        return result[0]
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        import functools
+        import threading
 
-        async def _update_weight_cuda_ipc_async():
-            func = functools.partial(
-                self.llm_engine.engine.collective_rpc,
-                "update_weight_cuda_ipc",
-                args=(name, dtype, shape, ipc_handles, empty_cache),
-            )
-            return await self.loop.run_in_executor(None, func)
+        result = [None]
+        exception = [None]
+        done_event = threading.Event()
 
-        future = asyncio.run_coroutine_threadsafe(_update_weight_cuda_ipc_async(), self.loop)
-        return future.result()
+        def _run_collective_rpc():
+            try:
+                result[0] = self.llm_engine.engine.collective_rpc(
+                    "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
+                )
+            except Exception as e:
+                exception[0] = e
+            finally:
+                done_event.set()
+
+        self.loop.call_soon_threadsafe(_run_collective_rpc)
+        done_event.wait()
+
+        if exception[0]:
+            raise exception[0]
+        return result[0]
 
     def reset_prefix_cache(self):
         # Run async operation in the dedicated event loop thread
