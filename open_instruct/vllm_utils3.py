@@ -51,17 +51,6 @@ from open_instruct.utils import ray_get_with_progress
 logger = logger_utils.setup_logger(__name__)
 
 
-def log_gpu_memory(logger, request_metadata, request_outputs, active_tasks):
-    """Log GPU memory stats and dictionary sizes."""
-    gpu_allocated = torch.cuda.memory_allocated() / 1024**3
-    gpu_reserved = torch.cuda.memory_reserved() / 1024**3
-    logger.info(
-        f"[Memory Stats] GPU: {gpu_allocated:.2f}/{gpu_reserved:.2f}GB (alloc/reserved), "
-        f"Dicts: metadata={len(request_metadata)}, outputs={len(request_outputs)}, "
-        f"tasks={len(active_tasks)}"
-    )
-
-
 def assert_threaded_actor() -> None:
     """Assert that we're running in a threaded Ray actor (no event loop) vs async actor (has event loop).
 
@@ -728,7 +717,10 @@ class LLMRayActor:
                     total_processed += 1
 
                 # Log memory stats after processing
-                log_gpu_memory(logger, self.request_metadata, self.request_outputs, self.active_tasks)
+                self.logger.info(
+                    f"[Memory Stats] Dicts: metadata={len(self.request_metadata)}, "
+                    f"outputs={len(self.request_outputs)}, tasks={len(self.active_tasks)}"
+                )
 
             except queue.Empty:
                 pass
