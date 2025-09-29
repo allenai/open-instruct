@@ -126,15 +126,15 @@ def pack_sequences(
         filtered_response = []
         filtered_mask = []
         filtered_logprobs = []
+        assert len(response_logprobs_unfiltered) >= len(response), (
+            f"Response {i}: Not enough logprobs after alignment. "
+            f"response_logprobs_unfiltered has {len(response_logprobs_unfiltered)} but response has {len(response)}"
+        )
         for j, (token, mask_val) in enumerate(zip(response, mask)):
             if token != pad_token_id:
                 filtered_response.append(token)
                 filtered_mask.append(mask_val)
-                if j < len(response_logprobs_unfiltered):
-                    filtered_logprobs.append(response_logprobs_unfiltered[j])
-                else:
-                    # This shouldn't happen after the alignment fix, but add NaN as safety
-                    filtered_logprobs.append(float("nan"))
+                filtered_logprobs.append(response_logprobs_unfiltered[j])
 
         response = filtered_response
         response_tool_mask = filtered_mask
