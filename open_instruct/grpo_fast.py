@@ -902,8 +902,7 @@ class PolicyTrainerRayProcess(RayProcess):
         to_device_inplace(collated_position_ids, self.device)
         to_device_inplace(collated_advantages, self.device)
         to_device_inplace(collated_response_masks, self.device)
-        if collated_vllm_logprobs is not None:
-            to_device_inplace(collated_vllm_logprobs, self.device)
+        to_device_inplace(collated_vllm_logprobs, self.device)
         # accumulation steps should always be at least 1
         accumulation_steps = max(math.ceil(len(collated_query_responses) / num_mini_batches - 0.5), 1)
         leftover = len(collated_query_responses) % accumulation_steps
@@ -914,8 +913,7 @@ class PolicyTrainerRayProcess(RayProcess):
             collated_position_ids = collated_position_ids[0:-leftover]
             collated_advantages = collated_advantages[0:-leftover]
             collated_response_masks = collated_response_masks[0:-leftover]
-            if collated_vllm_logprobs is not None:
-                collated_vllm_logprobs = collated_vllm_logprobs[0:-leftover]
+            collated_vllm_logprobs = collated_vllm_logprobs[0:-leftover]
             logger.warning(f"{leftover} samples are dropped due to batch size {num_mini_batches}")
 
         # recalculate the "real" number of mini-batches
@@ -1015,8 +1013,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     )
                     mb_new_logprobs = torch.masked_fill(mb_new_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
 
-                    # Compare vLLM logprobs with local logprobs if available
-                    if collated_vllm_logprobs is not None and epoch_idx == 0:
+                    # Compare vLLM logprobs with local logprobs on first epoch
+                    if epoch_idx == 0:
                         with torch.no_grad():
                             mb_vllm_logprobs = collated_vllm_logprobs[i][:, 1:]  # Skip the first token (prompt)
                             valid_mask = mb_response_masks_bool & (
@@ -1734,10 +1732,8 @@ def data_preparation_thread(
             masks = [result.masks[i] for i in non_zero_gradient_index]
             batch = batch[non_zero_gradient_index.tolist()]
             finish_reasons = [result.finish_reasons[i] for i in non_zero_gradient_index]
-            # Filter vLLM logprobs if available
-            vllm_logprobs = None
-            if result.logprobs is not None:
-                vllm_logprobs = [result.logprobs[i] for i in non_zero_gradient_index]
+            # Filter vLLM logprobs
+            vllm_logprobs = [result.logprobs[i] for i in non_zero_gradient_index]
             if args.mask_truncated_completions:
                 stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
                 num_truncated = len(finish_reasons) - len(stop_idxes)
@@ -1752,8 +1748,7 @@ def data_preparation_thread(
                 masks = [masks[i] for i in stop_idxes]
                 batch = batch[stop_idxes.tolist()]
                 finish_reasons = [finish_reasons[i] for i in stop_idxes]
-                if vllm_logprobs is not None:
-                    vllm_logprobs = [vllm_logprobs[i] for i in stop_idxes]
+                vllm_logprobs = [vllm_logprobs[i] for i in stop_idxes]
 
             if args.fill_completions:
                 with Timer("⏱ [Data Preparation Thread] Refill completions"):
@@ -1867,11 +1862,7 @@ def data_preparation_thread(
                 per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
                 per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
                 per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
-                per_device_packed_vllm_logprobs = (
-                    packed_sequences.vllm_logprobs[B * i : B * (i + 1)]
-                    if packed_sequences.vllm_logprobs is not None
-                    else None
-                )
+                per_device_packed_vllm_logprobs = packed_sequences.vllm_logprobs[B * i : B * (i + 1)]
 
                 # Shuffle the batch and collate the data
                 b_inds = np.random.permutation(len(per_device_packed_query_responses))
@@ -1881,7 +1872,7 @@ def data_preparation_thread(
                 collated_position_ids = []
                 collated_response_masks = []
                 collated_advantages = []
-                collated_vllm_logprobs = [] if per_device_packed_vllm_logprobs is not None else None
+                collated_vllm_logprobs = []
                 for j in range(0, len(per_device_packed_query_responses), args.per_device_train_batch_size):
                     micro_range = b_inds[j : j + args.per_device_train_batch_size]
                     collated_query_responses.append(
@@ -1904,10 +1895,9 @@ def data_preparation_thread(
                     collated_advantages.append(
                         collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0)
                     )
-                    if collated_vllm_logprobs is not None:
-                        collated_vllm_logprobs.append(
-                            collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0)
-                        )
+                    collated_vllm_logprobs.append(
+                        collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0)
+                    )
                 collated_data.append(
                     {
                         "collated_query_responses": collated_query_responses,

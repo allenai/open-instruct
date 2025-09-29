@@ -84,7 +84,7 @@ def pack_sequences(
     masks: List[List[int]],
     pack_length: int,
     pad_token_id: int,
-    vllm_logprobs: Optional[List[List[float]]] = None,
+    vllm_logprobs: List[List[float]],
 ) -> PackedSequences:
     assert not any(pad_token_id in query for query in queries)
     # TODO: for some reason vLLM *can* generate the padding token in the responses; investigate
@@ -97,7 +97,7 @@ def pack_sequences(
     dones = []
     num_actions = []
     packed_seq_lens = []
-    packed_vllm_logprobs = [] if vllm_logprobs is not None else None
+    packed_vllm_logprobs = []
     cur_data = []
     cur_tool_mask = []
     cur_response_mask = []
@@ -105,7 +105,7 @@ def pack_sequences(
     cur_packed_seq_lens = []
     cur_attention_mask = []
     cur_dones = []
-    cur_vllm_logprobs = [] if vllm_logprobs is not None else None
+    cur_vllm_logprobs = []
     offset = 0
     for i in range(len(queries)):
         query = queries[i]
@@ -119,16 +119,15 @@ def pack_sequences(
         query_response = query + response
         mask = query_tool_mask + response_tool_mask
 
-        # Process vLLM logprobs if available
-        if vllm_logprobs is not None:
-            # For query tokens, we set logprobs to 0, for response tokens we use vLLM logprobs
-            query_logprobs = [0.0] * len(query)
-            # Ensure we don't go out of bounds if vllm_logprobs[i] is shorter than response
-            response_logprobs = vllm_logprobs[i][: len(response)] if i < len(vllm_logprobs) else [0.0] * len(response)
-            # Pad if necessary
-            if len(response_logprobs) < len(response):
-                response_logprobs += [0.0] * (len(response) - len(response_logprobs))
-            combined_logprobs = query_logprobs + response_logprobs
+        # Process vLLM logprobs
+        # For query tokens, we set logprobs to 0, for response tokens we use vLLM logprobs
+        query_logprobs = [0.0] * len(query)
+        # Ensure we don't go out of bounds if vllm_logprobs[i] is shorter than response
+        response_logprobs = vllm_logprobs[i][: len(response)] if i < len(vllm_logprobs) else [0.0] * len(response)
+        # Pad if necessary
+        if len(response_logprobs) < len(response):
+            response_logprobs += [0.0] * (len(response) - len(response_logprobs))
+        combined_logprobs = query_logprobs + response_logprobs
         if len(query_response) + len(cur_data) > pack_length:
             query_responses.append(cur_data)
             tool_masks.append(cur_tool_mask)
@@ -137,8 +136,7 @@ def pack_sequences(
             num_actions.append(cur_num_actions)
             packed_seq_lens.append(cur_packed_seq_lens)
             dones.append(cur_dones)
-            if vllm_logprobs is not None:
-                packed_vllm_logprobs.append(cur_vllm_logprobs)
+            packed_vllm_logprobs.append(cur_vllm_logprobs)
             cur_data = []
             cur_tool_mask = []
             cur_response_mask = []
@@ -146,13 +144,11 @@ def pack_sequences(
             cur_num_actions = []
             cur_packed_seq_lens = []
             cur_dones = []
-            if vllm_logprobs is not None:
-                cur_vllm_logprobs = []
+            cur_vllm_logprobs = []
             offset = i
         cur_data.extend(query_response)
         cur_tool_mask.extend(mask)
-        if vllm_logprobs is not None:
-            cur_vllm_logprobs.extend(combined_logprobs)
+        cur_vllm_logprobs.extend(combined_logprobs)
         cur_num_actions.append(len(response))
         cur_packed_seq_lens.append(len(query_response))
 
@@ -171,8 +167,7 @@ def pack_sequences(
         num_actions.append(cur_num_actions)
         packed_seq_lens.append(cur_packed_seq_lens)
         dones.append(cur_dones)
-        if vllm_logprobs is not None:
-            packed_vllm_logprobs.append(cur_vllm_logprobs)
+        packed_vllm_logprobs.append(cur_vllm_logprobs)
     attention_masks_list = [torch.tensor(t) for t in attention_masks]
     return PackedSequences(
         query_responses=[torch.tensor(t) for t in query_responses],
@@ -184,7 +179,7 @@ def pack_sequences(
         packed_seq_lens=[torch.tensor(t) for t in packed_seq_lens],
         dones=[torch.tensor(t) for t in dones],
         tool_masks=[torch.tensor(t) for t in tool_masks],
-        vllm_logprobs=[torch.tensor(t) for t in packed_vllm_logprobs] if packed_vllm_logprobs is not None else None,
+        vllm_logprobs=[torch.tensor(t) for t in packed_vllm_logprobs],
     )
 
 
