@@ -117,6 +117,7 @@ parser.add_argument("--evaluate_on_weka", action="store_true", help="Evaluate OE
 # TODO: fix this logic at a future date
 
 parser.add_argument("--oe_eval_tasks", type=str, default=None, help="Evaluate OE eval on Beaker.")
+parser.add_argument("--output_dir", type=str, default=None, help="Eval results output directory.")
 parser.add_argument("--step", type=int, default=None, help="Step number for postgresql logging.")
 parser.add_argument("--run_id", type=str, default=None, help="A unique run ID for postgresql logging.")
 parser.add_argument("--oe_eval_stop_sequences", type=str, default=None, help="Comma-separated list of stop sequences for OE eval.")
@@ -627,6 +628,8 @@ if args.run_oe_eval_experiments:
         oe_eval_cmd += f" --revision {args.hf_revision}"
     if args.evaluate_on_weka:
         oe_eval_cmd += " --evaluate_on_weka"
+    if args.output_dir:
+        oe_eval_cmd += f" --output_dir {args.output_dir}"
     if args.oe_eval_tasks:
         oe_eval_cmd += f" --tasks {args.oe_eval_tasks}"
     if args.run_id:

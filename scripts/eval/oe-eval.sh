@@ -68,6 +68,7 @@ while [[ "$#" -gt 0 ]]; do
         --priority) PRIORITY="$2"; shift ;;
         --beaker-workspace) BEAKER_WORKSPACE="$2"; shift ;;
         --tasks) CUSTOM_TASKS="$2"; shift ;;
+	--output_dir) OUTPUT_DIR="$2"; shift ;;
         --evaluate_on_weka) EVALUATE_ON_WEKA="true" ;;
         --step) STEP="$2"; shift ;;
         --run-id) RUN_ID="$2"; shift ;;
@@ -144,6 +145,13 @@ if [[ -n "$REVISION" ]]; then
     REVISION_ARG="--revision $REVISION"
 else
     REVISION_ARG=""
+fi
+
+# Set OUTPUT_DIR if provided
+if [[ -n "$OUTPUT_DIR" ]]; then
+    OUTPUT_DIR="--output-dir $OUTPUT_DIR"
+else
+    OUTPUT_DIR=""
 fi
 
 # Define default tasks if no custom tasks provided
@@ -383,7 +391,8 @@ for TASK in "${TASKS[@]}"; do
             --beaker-image "$BEAKER_IMAGE" \
             --beaker-priority "$PRIORITY" \
             --push-datalake \
-            --datalake-tags "$DATALAKE_ARGS"
+            --datalake-tags "$DATALAKE_ARGS" \
+	    ${OUTPUT_DIR}
     else
         python oe-eval-internal/oe_eval/launch.py \
         --model "$MODEL_NAME" \
@@ -404,6 +413,7 @@ for TASK in "${TASKS[@]}"; do
         --beaker-image "$BEAKER_IMAGE" \
         --beaker-priority  "$PRIORITY" \
         --push-datalake \
-        --datalake-tags "$DATALAKE_ARGS"
+        --datalake-tags "$DATALAKE_ARGS" \
+	${OUTPUT_DIR}
     fi
 done
