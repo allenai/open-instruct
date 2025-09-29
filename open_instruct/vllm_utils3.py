@@ -740,7 +740,7 @@ class LLMRayActor:
     ):
         # Run CUDA operation in the thread where engine was created to ensure same CUDA context
         async def _init_process_group_async():
-            return await self.llm_engine.collective_rpc(
+            return self.llm_engine.engine.collective_rpc(
                 "init_process_group",
                 args=(
                     master_address,
@@ -761,7 +761,7 @@ class LLMRayActor:
     def update_weight(self, name, dtype, shape, empty_cache=False):
         # Run CUDA operation in the thread where engine was created to ensure same CUDA context
         async def _update_weight_async():
-            return await self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+            return self.llm_engine.engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
         # Schedule the async function to run in the event loop thread
         future = asyncio.run_coroutine_threadsafe(_update_weight_async(), self.loop)
@@ -770,7 +770,7 @@ class LLMRayActor:
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
         # Run CUDA operation in the thread where engine was created to ensure same CUDA context
         async def _update_weight_cuda_ipc_async():
-            return await self.llm_engine.collective_rpc(
+            return self.llm_engine.engine.collective_rpc(
                 "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
             )
 
