@@ -2,11 +2,11 @@
 
 # Define arrays for model names and paths
 MODEL_NAMES=(
-    "math-expert-sft-mixed"
+    "merged-RT-expert-SFT-math-mixed"
 )
 
 MODEL_PATHS=(
-    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/math-expert-sft-mixed/step1062-hf"
+    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/OLMo2-7b-flex-base-merged-math-code-RT-experts-sft-math-mixed/step9537-hf"
 )
 
 # Check that arrays have the same length
