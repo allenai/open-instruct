@@ -738,8 +738,6 @@ class LLMRayActor:
         use_ray=False,
         timeout_minutes=120,
     ):
-        import threading
-
         result = [None]
         exception = [None]
         done_event = threading.Event()
@@ -772,8 +770,6 @@ class LLMRayActor:
         return result[0]
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        import threading
-
         result = [None]
         exception = [None]
         done_event = threading.Event()
@@ -796,8 +792,6 @@ class LLMRayActor:
         return result[0]
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        import threading
-
         result = [None]
         exception = [None]
         done_event = threading.Event()
