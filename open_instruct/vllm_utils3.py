@@ -473,49 +473,56 @@ class LLMRayActor:
         self.active_tasks = {}  # Track active async tasks
         self.request_outputs = {}  # Accumulate outputs until all N samples complete
 
-        # Initialize async components with our own event loop
+        # Initialize AsyncLLMEngine in main thread to ensure CUDA context is shared
+        logger.info("Creating AsyncLLMEngine in main thread...")
+        self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=False)
+        logger.info("AsyncLLMEngine created successfully in main thread")
+
+        # Initialize async components
         self.init_complete = threading.Event()
         self.loop = None  # Will be set in thread
-        self.llm_engine = None  # Will be set in thread
 
-        # Start the async loop thread
-        self.loop_thread = threading.Thread(target=self._run_async_loop, daemon=True)
+        # Start the async loop thread (only for running the event loop)
+        self.loop_thread = threading.Thread(target=self._run_event_loop, daemon=True)
         self.loop_thread.start()
 
-        # Wait for engine initialization
-        if not self.init_complete.wait(timeout=120):
-            raise RuntimeError("Failed to initialize AsyncLLMEngine within 120 seconds")
+        # Wait for event loop to be ready
+        if not self.init_complete.wait(timeout=30):
+            raise RuntimeError("Failed to initialize event loop within 30 seconds")
+
+        # Start the background loop in the async context
+        logger.info("Starting AsyncLLMEngine background loop...")
+        future = asyncio.run_coroutine_threadsafe(self._start_background_loop_async(), self.loop)
+        future.result(timeout=30)
+        logger.info("AsyncLLMEngine background loop started")
 
         # Start synchronous prefetch thread
         self.prefetch_thread = threading.Thread(target=self._prefetch_requests, daemon=True)
         self.prefetch_thread.start()
 
-    def _run_async_loop(self):
-        """Run the async event loop in a dedicated thread."""
+    def _run_event_loop(self):
+        """Run the async event loop in a dedicated thread (no engine creation)."""
         try:
             # Create and set our event loop
             self.loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self.loop)
+            logger.info("Event loop created and set in thread")
 
-            # Create engine synchronously BEFORE entering async context
-            logger.info("Starting AsyncLLMEngine initialization...")
-            self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=False)
-            logger.info("AsyncLLMEngine created successfully")
-
-            # Start the background loop (synchronous call)
-            self.llm_engine.start_background_loop()
-            logger.info("AsyncLLMEngine background loop started")
-
-            # Signal init complete
+            # Signal that event loop is ready
             self.init_complete.set()
 
             # Keep loop running for async operations
             self.loop.run_forever()
 
         except Exception as e:
-            logger.error(f"Failed in async loop: {e}", exc_info=True)
+            logger.error(f"Failed in event loop: {e}", exc_info=True)
             self.init_complete.set()  # Unblock waiting thread
             raise
+
+    async def _start_background_loop_async(self):
+        """Start the AsyncLLMEngine background loop."""
+        self.llm_engine.start_background_loop()
+        logger.info("Background loop started in async context")
 
     def _prefetch_requests(self):
         """Synchronous prefetch that spawns async tasks."""
