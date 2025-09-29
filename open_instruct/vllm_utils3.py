@@ -669,9 +669,6 @@ class LLMRayActor:
         total_processed = 0
 
         while not self._should_exit():
-            # Log memory stats every loop iteration
-            log_gpu_memory(self.logger, self.request_metadata, self.request_outputs, self.active_tasks)
-
             try:
                 sub_request = self.completion_queue.get(timeout=1.0)
 
@@ -729,6 +726,9 @@ class LLMRayActor:
                     result, is_eval = sub_request
                     self._insert_result_to_queue(result, is_eval=is_eval)
                     total_processed += 1
+
+                # Log memory stats after processing
+                log_gpu_memory(self.logger, self.request_metadata, self.request_outputs, self.active_tasks)
 
             except queue.Empty:
                 pass
