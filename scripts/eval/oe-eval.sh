@@ -70,6 +70,7 @@ while [[ "$#" -gt 0 ]]; do
         --evaluate_on_weka) EVALUATE_ON_WEKA="true" ;;
         --step) STEP="$2"; shift ;;
         --run-id) RUN_ID="$2"; shift ;;
+        --wandb-run-path) WANDB_RUN_PATH="$2"; shift ;;
         --stop-sequences) STOP_SEQUENCES="$2"; shift ;;
         --beaker-image) BEAKER_IMAGE="$2"; shift ;;
         --cluster) CLUSTER="$2"; shift ;;
@@ -105,6 +106,7 @@ TASK_SUITE="${TASK_SUITE:-NEXT_MODEL_DEV}"
 PRIORITY="${PRIORITY:normal}"
 EVALUATE_ON_WEKA="${EVALUATE_ON_WEKA:-false}"
 RUN_ID="${RUN_ID:-}"
+WANDB_RUN_PATH="${WANDB_RUN_PATH:-}"
 STEP="${STEP:-}"
 
 # Process stop sequences if provided
@@ -122,12 +124,28 @@ if [[ -n "$STOP_SEQUENCES" ]]; then
     STOP_SEQUENCES_JSON+="]"
 fi
 
+# Set wandb run path to upload to wandb if available
+WANDB_ARG=""
+if [[ -n "$WANDB_RUN_PATH" ]]; then
+    beaker_user=$(beaker account whoami --format text | awk 'NR==2 {print $2}')
+    echo "Using WANDB_API_KEY from ${beaker_user}"
+    if ! beaker secret list --workspace ai2/tulu-3-results | grep -q "${beaker_user}_WANDB_API_KEY"; then
+        echo "WARNING: No ${beaker_user}_WANDB_API_KEY secret found in workspace ai2/tulu-3-results."
+        echo "add your WANDB_API_KEY as a secret to this workspace in order to log oe-eval results to wandb"
+    else
+        WANDB_ARG=" --wandb-run-path $WANDB_RUN_PATH --gantry-secret-wandb-api-key ${beaker_user}_WANDB_API_KEY"
+    fi
+fi
+
 DATALAKE_ARGS=""
 if [[ -n "$RUN_ID" ]]; then
     DATALAKE_ARGS+="run_id=$RUN_ID"
 fi
 if [[ -n "$STEP" ]]; then
     DATALAKE_ARGS+=",step=$STEP"
+    if [[ -n "$WANDB_ARG" ]]; then
+        WANDB_ARG+=" --wandb-run-step $STEP"
+    fi
 fi
 
 # Set HF_UPLOAD_ARG only if UPLOAD_TO_HF is specified
@@ -332,6 +350,7 @@ for TASK in "${TASKS[@]}"; do
             --gpus "$GPU_COUNT" \
             --gantry-args "$GANTRY_ARGS" \
             ${REVISION_ARG} \
+            ${WANDB_ARG} \
             --cluster "$CLUSTER" \
             --beaker-retries 2 \
             --beaker-image "$BEAKER_IMAGE" \
@@ -353,6 +372,7 @@ for TASK in "${TASKS[@]}"; do
         --gpus "$GPU_COUNT" \
         --gantry-args "$GANTRY_ARGS" \
         ${REVISION_ARG} \
+        ${WANDB_ARG} \
         --cluster ai2/augusta \
         --beaker-retries 2 \
         --beaker-image "$BEAKER_IMAGE" \

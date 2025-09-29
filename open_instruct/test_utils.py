@@ -230,6 +230,22 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertEqual(result[4], [True, False])
         self.assertEqual(result[5], [True, False])
 
+    @parameterized.expand(
+        [
+            ("https://wandb.ai/org/project/runs/runid", "org/project/runid"),
+            (
+                "https://wandb.ai/ai2-llm/open_instruct_internal/runs/5nigq0mz",
+                "ai2-llm/open_instruct_internal/5nigq0mz",
+            ),
+            (
+                "https://wandb.ai/ai2-llm/open_instruct_internal/runs/vjyp36sp",
+                "ai2-llm/open_instruct_internal/vjyp36sp",
+            ),
+        ]
+    )
+    def test_wandb_url_to_run_path(self, url: str, expected_run_path: str):
+        self.assertEqual(utils.wandb_url_to_run_path(url), expected_run_path)
+
 
 # useful for checking if public datasets are still available
 # class CheckTuluDatasetsTest(unittest.TestCase):
