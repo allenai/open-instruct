@@ -647,6 +647,7 @@ class PolicyTrainerRayProcess(RayProcess):
             attn_implementation="flash_attention_2",
             use_cache=False,
         )
+
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
         # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
@@ -667,6 +668,9 @@ class PolicyTrainerRayProcess(RayProcess):
             num_warmup_steps=warm_up_steps,
             num_training_steps=num_scheduler_steps,
         )
+
+        # Log memory before DeepSpeed initialization
+
         self.model, self.optimizer, _, self.scheduler = deepspeed.initialize(
             model=self.policy,
             optimizer=self.optimizer,
@@ -674,6 +678,7 @@ class PolicyTrainerRayProcess(RayProcess):
             lr_scheduler=scheduler,
             dist_init_required=True,
         )
+
         optimization_steps_done = 0
         if args.checkpoint_state_dir:
             # check if the dir exists
@@ -745,8 +750,11 @@ class PolicyTrainerRayProcess(RayProcess):
             attn_implementation="flash_attention_2",
             use_cache=False,
         )
+
         disable_dropout_in_model(self.ref_policy)
+
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
+
         self.ref_policy.eval()
 
         # Load reference policy checkpoint if available

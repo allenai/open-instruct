@@ -57,7 +57,7 @@ def parse_env_var(env_var_str: str) -> Dict[str, str]:
 
 WEKA_CLUSTERS = [
     "ai2/jupiter",
-    "ai2/saturn-cirrascale",
+    "ai2/saturn",
     "ai2/titan",
     "ai2/neptune",
     "ai2/ceres",
@@ -280,6 +280,7 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
         "AZURE_API_KEY",
         "AZURE_API_BASE",
         "ANTHROPIC_API_KEY",
+        "GOOGLE_APPLICATION_CREDENTIALS",
     ]
     for useful_secret in useful_secrets:
         if f"{whoami}_{useful_secret}" in beaker_secrets:
