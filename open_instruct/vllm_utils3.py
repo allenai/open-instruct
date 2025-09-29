@@ -98,24 +98,16 @@ async def generate_one_completion(
 
     outputs = []
     iteration_count = 0
-    last_log_time = time.time()
     async for output in generator:
         iteration_count += 1
-        current_time = time.time()
-        if iteration_count % 100 == 0 or (current_time - last_log_time) > 10:
+        if iteration_count % 100 == 0:
             logger.info(
-                f"[generate_one_completion] Iteration {iteration_count} for {request_id}, finished={output.finished}, time_since_last_log={current_time - last_log_time:.1f}s"
+                f"[generate_one_completion] Iteration {iteration_count} for {request_id}, finished={output.finished}"
             )
-            last_log_time = current_time
         if output.finished:
             outputs.append(output)
             logger.info(f"[generate_one_completion] Request {request_id} finished after {iteration_count} iterations")
             break
-
-    if len(outputs) == 0:
-        logger.error(
-            f"[generate_one_completion] Generator for {request_id} exited without producing output! iteration_count={iteration_count}"
-        )
 
     assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
     return outputs[0]
@@ -527,24 +519,7 @@ class LLMRayActor:
 
     def _prefetch_requests(self):
         """Synchronous prefetch that spawns async tasks."""
-        last_bg_check = time.time()
         while True:
-            # Periodically check background loop health
-            current_time = time.time()
-            if current_time - last_bg_check > 5:
-                if hasattr(self.llm_engine, "_background_loop_unshielded"):
-                    task = self.llm_engine._background_loop_unshielded
-                    if task:
-                        logger.info(
-                            f"[prefetch] Background loop task status: done={task.done()}, cancelled={task.cancelled()}, active_tasks={len(self.active_tasks)}"
-                        )
-                        if task.done() and not task.cancelled():
-                            try:
-                                task.result()
-                            except Exception as e:
-                                logger.error(f"[prefetch] Background loop task failed: {e}")
-                last_bg_check = current_time
-
             # Don't consume requests during weight sync
             if self._should_stop():
                 time.sleep(0.1)
@@ -763,100 +738,18 @@ class LLMRayActor:
         use_ray=False,
         timeout_minutes=120,
     ):
-        result = [None]
-        exception = [None]
-        done_event = threading.Event()
-
-        def _run_collective_rpc():
-            try:
-                result[0] = self.llm_engine.engine.collective_rpc(
-                    "init_process_group",
-                    args=(
-                        master_address,
-                        master_port,
-                        rank_offset,
-                        world_size,
-                        group_name,
-                        backend,
-                        use_ray,
-                        timeout_minutes,
-                    ),
-                )
-            except Exception as e:
-                exception[0] = e
-            finally:
-                done_event.set()
-
-        self.loop.call_soon_threadsafe(_run_collective_rpc)
-        done_event.wait()
-
-        if exception[0]:
-            raise exception[0]
-        return result[0]
+        return self.llm_engine.engine.collective_rpc(
+            "init_process_group",
+            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
+        )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        logger.info(f"[update_weight] START - name={name}, active_tasks={len(self.active_tasks)}")
-
-        result = [None]
-        exception = [None]
-        done_event = threading.Event()
-
-        def _run_collective_rpc():
-            try:
-                logger.info("[update_weight] Running collective_rpc on event loop thread")
-                logger.info(f"[update_weight] Background loop task: {self.llm_engine._background_loop_unshielded}")
-                logger.info(
-                    f"[update_weight] Task done: {self.llm_engine._background_loop_unshielded.done() if self.llm_engine._background_loop_unshielded else 'N/A'}"
-                )
-
-                result[0] = self.llm_engine.engine.collective_rpc(
-                    "update_weight", args=(name, dtype, shape, empty_cache)
-                )
-
-                logger.info("[update_weight] collective_rpc completed")
-                logger.info(
-                    f"[update_weight] Background loop task after: {self.llm_engine._background_loop_unshielded}"
-                )
-                logger.info(
-                    f"[update_weight] Task done after: {self.llm_engine._background_loop_unshielded.done() if self.llm_engine._background_loop_unshielded else 'N/A'}"
-                )
-            except Exception as e:
-                logger.error(f"[update_weight] Exception in collective_rpc: {e}")
-                exception[0] = e
-            finally:
-                done_event.set()
-
-        logger.info("[update_weight] Scheduling on event loop")
-        self.loop.call_soon_threadsafe(_run_collective_rpc)
-        logger.info("[update_weight] Waiting for completion")
-        done_event.wait()
-        logger.info(f"[update_weight] DONE - active_tasks={len(self.active_tasks)}")
-
-        if exception[0]:
-            raise exception[0]
-        return result[0]
+        return self.llm_engine.engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        result = [None]
-        exception = [None]
-        done_event = threading.Event()
-
-        def _run_collective_rpc():
-            try:
-                result[0] = self.llm_engine.engine.collective_rpc(
-                    "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
-                )
-            except Exception as e:
-                exception[0] = e
-            finally:
-                done_event.set()
-
-        self.loop.call_soon_threadsafe(_run_collective_rpc)
-        done_event.wait()
-
-        if exception[0]:
-            raise exception[0]
-        return result[0]
+        return self.llm_engine.engine.collective_rpc(
+            "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
+        )
 
     def reset_prefix_cache(self):
         # Run async operation in the dedicated event loop thread
