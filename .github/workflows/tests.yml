@@ -22,5 +22,14 @@ jobs:
           version: "0.8.6"
       - name: Set up Python
         run: uv sync --frozen
-      - name: Run unit tests
-        run: uv run --frozen pytest
+      - name: Run unit tests with coverage
+        run: uv run --frozen pytest --cov=open_instruct --cov-report=xml --cov-report=term
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false

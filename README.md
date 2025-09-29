@@ -1,4 +1,4 @@
-[![Beaker Experiment Launch](https://github.com/allenai/open-instruct/actions/workflows/beaker-experiment.yml/badge.svg)](https://github.com/allenai/open-instruct/actions/workflows/beaker-experiment.yml) [![build_open_instruct](https://github.com/allenai/open-instruct/actions/workflows/push-image.yml/badge.svg)](https://github.com/allenai/open-instruct/actions/workflows/push-image.yml)
+[![Beaker Experiment Launch](https://github.com/allenai/open-instruct/actions/workflows/beaker-experiment.yml/badge.svg)](https://github.com/allenai/open-instruct/actions/workflows/beaker-experiment.yml) [![build_open_instruct](https://github.com/allenai/open-instruct/actions/workflows/push-image.yml/badge.svg)](https://github.com/allenai/open-instruct/actions/workflows/push-image.yml) [![codecov](https://codecov.io/gh/allenai/open-instruct/graph/badge.svg?token=YOUR_TOKEN)](https://codecov.io/gh/allenai/open-instruct)
 
 # Training Open Instruction-Following Language Models
 
