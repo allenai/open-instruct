@@ -1016,7 +1016,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Compare vLLM logprobs with local logprobs
                     with torch.no_grad():
                         mb_vllm_logprobs = collated_vllm_logprobs[i][:, 1:]  # Skip the first token (prompt)
-                        valid_mask = mb_response_masks_bool & (mb_vllm_logprobs != 0)
+                        valid_mask = mb_response_masks_bool & ~torch.isnan(mb_vllm_logprobs)
                         logprob_diff = (mb_new_logprobs - mb_vllm_logprobs).abs()
                         masked_diff = torch.masked_fill(logprob_diff, ~valid_mask, 0.0)
                         mean_diff = masked_diff.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
