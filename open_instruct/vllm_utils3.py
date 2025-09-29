@@ -728,7 +728,7 @@ class LLMRayActor:
                     total_processed += 1
 
                 # Log memory stats after processing
-                log_gpu_memory(self.logger, self.request_metadata, self.request_outputs, self.active_tasks)
+                log_gpu_memory(logger, self.request_metadata, self.request_outputs, self.active_tasks)
 
             except queue.Empty:
                 pass
