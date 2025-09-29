@@ -142,78 +142,6 @@ api = HfApi()
 INVALID_LOGPROB = 1.0
 
 
-def log_gpu_memory(location: str, device: Optional[int] = None) -> None:
-    """Log detailed GPU memory usage information."""
-    if not torch.cuda.is_available():
-        logger.info(f"[{location}] CUDA not available")
-        return
-
-    if device is None:
-        device = torch.cuda.current_device()
-
-    # Get memory stats in GiB
-    total_memory = torch.cuda.get_device_properties(device).total_memory / (1024**3)
-    allocated = torch.cuda.memory_allocated(device) / (1024**3)
-    reserved = torch.cuda.memory_reserved(device) / (1024**3)
-    free = (torch.cuda.get_device_properties(device).total_memory - torch.cuda.memory_allocated(device)) / (1024**3)
-
-    # Get more detailed memory stats
-    memory_stats = torch.cuda.memory_stats(device)
-    num_alloc_retries = memory_stats.get("num_alloc_retries", 0)
-    num_ooms = memory_stats.get("num_ooms", 0)
-
-    logger.info(
-        f"[GPU Memory @ {location}] Device: {device}\n"
-        f"  Total GPU Memory: {total_memory:.2f} GiB\n"
-        f"  Allocated: {allocated:.2f} GiB ({allocated / total_memory * 100:.1f}%)\n"
-        f"  Reserved: {reserved:.2f} GiB ({reserved / total_memory * 100:.1f}%)\n"
-        f"  Free: {free:.2f} GiB ({free / total_memory * 100:.1f}%)\n"
-        f"  Reserved but unallocated: {reserved - allocated:.2f} GiB\n"
-        f"  Allocation retries: {num_alloc_retries}\n"
-        f"  OOM count: {num_ooms}"
-    )
-
-    # Try to get snapshot if available (for more detailed analysis)
-    try:
-        snapshot = torch.cuda.memory._snapshot()
-        if snapshot:
-            active_bytes = sum(
-                seg["allocated_size"] for seg in snapshot.get("segments", []) if seg.get("is_active", False)
-            )
-            logger.info(f"  Active segments total: {active_bytes / (1024**3):.2f} GiB")
-    except Exception:
-        pass  # Memory snapshot might not be available in all PyTorch versions
-
-    # Check for other processes using GPU
-    try:
-        import subprocess
-
-        result = subprocess.run(
-            ["nvidia-smi", "--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0 and result.stdout:
-            lines = result.stdout.strip().split("\n")
-            other_processes_memory = 0
-            current_pid = os.getpid()
-            for line in lines:
-                if line:
-                    parts = line.split(",")
-                    if len(parts) == 2:
-                        pid = int(parts[0].strip())
-                        memory_mb = int(parts[1].strip())
-                        if pid != current_pid:
-                            other_processes_memory += memory_mb
-            if other_processes_memory > 0:
-                logger.info(f"  Other processes using GPU: {other_processes_memory / 1024:.2f} GiB")
-    except Exception as e:
-        logger.debug(f"Could not query nvidia-smi: {e}")
-
-    logger.info(f"{'=' * 60}")
-
-
 class ShutdownSentinel:
     """Sentinel value to signal thread shutdown via queue."""
 
@@ -690,9 +618,6 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.cuda.set_device(self.local_rank)
         self.device = torch.device(self.local_rank)
 
-        # Log initial GPU memory state
-        log_gpu_memory(f"After device setup (rank {self.local_rank})", self.local_rank)
-
         # Set seeds for this worker (different per rank to avoid correlation)
         worker_seed = args.seed + self.local_rank
         torch.manual_seed(worker_seed)
@@ -724,9 +649,6 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = None
         logger.info(f"Deepspeed config: {dschf=}")
 
-        # Log memory before loading policy model
-        log_gpu_memory(f"Before loading policy model (rank {self.local_rank})", self.local_rank)
-
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
@@ -735,9 +657,6 @@ class PolicyTrainerRayProcess(RayProcess):
             use_cache=False,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
-
-        # Log memory after loading policy model
-        log_gpu_memory(f"After loading policy model (rank {self.local_rank})", self.local_rank)
 
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
@@ -761,7 +680,6 @@ class PolicyTrainerRayProcess(RayProcess):
         )
 
         # Log memory before DeepSpeed initialization
-        log_gpu_memory(f"Before DeepSpeed initialize (rank {self.local_rank})", self.local_rank)
 
         self.model, self.optimizer, _, self.scheduler = deepspeed.initialize(
             model=self.policy,
@@ -770,9 +688,6 @@ class PolicyTrainerRayProcess(RayProcess):
             lr_scheduler=scheduler,
             dist_init_required=True,
         )
-
-        # Log memory after DeepSpeed initialization
-        log_gpu_memory(f"After DeepSpeed initialize (rank {self.local_rank})", self.local_rank)
 
         optimization_steps_done = 0
         if args.checkpoint_state_dir:
@@ -838,9 +753,6 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = None
         logger.info(f"DeepSpeed config: {dschf=}")
 
-        # Log memory before loading reference model
-        log_gpu_memory(f"Before loading reference model (rank {self.local_rank})", self.local_rank)
-
         self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
@@ -850,18 +762,10 @@ class PolicyTrainerRayProcess(RayProcess):
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
 
-        # Log memory after loading reference model
-        log_gpu_memory(f"After loading reference model (rank {self.local_rank})", self.local_rank)
-
         disable_dropout_in_model(self.ref_policy)
-
-        # Log memory before DeepSpeed initialize for reference model
-        log_gpu_memory(f"Before DeepSpeed initialize for ref model (rank {self.local_rank})", self.local_rank)
 
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
 
-        # Log memory after DeepSpeed initialize for reference model
-        log_gpu_memory(f"After DeepSpeed initialize for ref model (rank {self.local_rank})", self.local_rank)
         self.ref_policy.eval()
 
         # Load reference policy checkpoint if available
