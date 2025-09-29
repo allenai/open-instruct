@@ -114,16 +114,33 @@ def pack_sequences(
         # remove padding (but using vllm so this should not be needed, but just in case)
         query_tool_mask = [1 for t in query if t != pad_token_id]
         query = [t for t in query if t != pad_token_id]
-        response_tool_mask = [t for i, t in enumerate(mask) if response[i] != pad_token_id]
-        response = [t for t in response if t != pad_token_id]
+
+        # Filter out padding tokens from response, mask, and logprobs together
+        response_logprobs_unfiltered = vllm_logprobs[i]
+        filtered_response = []
+        filtered_mask = []
+        filtered_logprobs = []
+        for j, (token, mask_val) in enumerate(zip(response, mask)):
+            if token != pad_token_id:
+                filtered_response.append(token)
+                filtered_mask.append(mask_val)
+                if j < len(response_logprobs_unfiltered):
+                    filtered_logprobs.append(response_logprobs_unfiltered[j])
+
+        response = filtered_response
+        response_tool_mask = filtered_mask
+        response_logprobs = filtered_logprobs
+
         query_response = query + response
         mask = query_tool_mask + response_tool_mask
 
         # Process vLLM logprobs
         # For query tokens, we set logprobs to None, for response tokens we use vLLM logprobs
         query_logprobs = [None] * len(query)
-        response_logprobs = vllm_logprobs[i]
-        assert len(response_logprobs) == len(response)
+        assert len(response_logprobs) == len(response), (
+            f"Response {i}: logprobs length {len(response_logprobs)} != response length {len(response)}. "
+            f"This usually happens when padding tokens are filtered from response but not from logprobs."
+        )
         combined_logprobs = query_logprobs + response_logprobs
         if len(query_response) + len(cur_data) > pack_length:
             query_responses.append(cur_data)
