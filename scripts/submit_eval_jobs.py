@@ -94,6 +94,8 @@ WEKA_CLUSTERS = [
 
 
 today = date.today().strftime("%m%d%Y")
+# Ensure latest Transformers (with flex_olmo) inside remote tasks/containers
+BOOTSTRAP = 'pip install --no-cache-dir "git+https://github.com/huggingface/transformers.git@main" && '
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--workspace", type=str, default="oe-adapt-general")
@@ -525,6 +527,9 @@ for experiment_group in experiment_groups:
 
     else:
         raise ValueError("experiment_group not supported")
+
+    # Prefix each task command with a bootstrap to ensure correct Transformers version
+    task_spec['arguments'][0] = BOOTSTRAP + task_spec['arguments'][0].lstrip()
 
     if model_info[0].startswith("hf-"):  # if it's a huggingface model, load it from the model hub
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", f"--model_name_or_path {model_info[1]} --hf_revision {args.hf_revision}")]
