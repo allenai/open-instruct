@@ -44,6 +44,7 @@ uv run python mason.py \
     --total_episodes 200 \
     --deepspeed_stage 2 \
     --with_tracking \
+    --use_vllm_logprobs True \
     --update_progress_every 1 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
