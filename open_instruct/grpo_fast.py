@@ -1799,6 +1799,7 @@ def data_preparation_thread(
                         )
 
                         finish_reasons += [finish_reasons[i] for i in sampled_indices]
+                        vllm_logprobs += [vllm_logprobs[i] for i in sampled_indices]
 
                         logger.info(
                             f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses"
