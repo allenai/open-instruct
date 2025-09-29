@@ -117,6 +117,12 @@ def pack_sequences(
 
         # Filter out padding tokens from response, mask, and logprobs together
         response_logprobs_unfiltered = vllm_logprobs[i]
+
+        # vLLM returns N tokens but N-1 logprobs (no logprob for first token)
+        # Add a None placeholder for the first token to maintain alignment
+        if len(response_logprobs_unfiltered) == len(response) - 1:
+            response_logprobs_unfiltered = [None] + response_logprobs_unfiltered
+
         filtered_response = []
         filtered_mask = []
         filtered_logprobs = []
@@ -126,6 +132,9 @@ def pack_sequences(
                 filtered_mask.append(mask_val)
                 if j < len(response_logprobs_unfiltered):
                     filtered_logprobs.append(response_logprobs_unfiltered[j])
+                else:
+                    # This shouldn't happen after the alignment fix, but add None as safety
+                    filtered_logprobs.append(None)
 
         response = filtered_response
         response_tool_mask = filtered_mask
@@ -139,7 +148,8 @@ def pack_sequences(
         query_logprobs = [None] * len(query)
         assert len(response_logprobs) == len(response), (
             f"Response {i}: logprobs length {len(response_logprobs)} != response length {len(response)}. "
-            f"This usually happens when padding tokens are filtered from response but not from logprobs."
+            f"Original lengths before filtering: response={len(responses[i])}, logprobs={len(vllm_logprobs[i])}. "
+            f"This can happen if vLLM returns N-1 logprobs for N tokens (missing first token logprob)."
         )
         combined_logprobs = query_logprobs + response_logprobs
         if len(query_response) + len(cur_data) > pack_length:
