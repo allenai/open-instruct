@@ -122,20 +122,8 @@ def pack_sequences(
         # Process vLLM logprobs
         # For query tokens, we set logprobs to None, for response tokens we use vLLM logprobs
         query_logprobs = [None] * len(query)
-
-        if i >= len(vllm_logprobs):
-            raise ValueError(
-                f"vllm_logprobs does not have logprobs for response {i}. Expected {len(responses)} responses."
-            )
-
-        response_logprobs = vllm_logprobs[i][: len(response)]
-
-        # Check that we have enough logprobs for the response
-        if len(response_logprobs) < len(response):
-            raise ValueError(
-                f"vllm_logprobs for response {i} has {len(response_logprobs)} values but response has {len(response)} tokens."
-            )
-
+        response_logprobs = vllm_logprobs[i]
+        assert len(response_logprobs) == len(response)
         combined_logprobs = query_logprobs + response_logprobs
         if len(query_response) + len(cur_data) > pack_length:
             query_responses.append(cur_data)

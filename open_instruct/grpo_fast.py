@@ -1023,7 +1023,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         max_diff = masked_diff.max()
                         std_diff = masked_diff[valid_mask].std() if valid_mask.sum() > 1 else 0.0
 
-                        # Log to local metrics
                         self.local_metrics.add("debug/vllm_vs_local_logprob_diff_mean", mean_diff.item())
                         self.local_metrics.add("debug/vllm_vs_local_logprob_diff_max", max_diff.item())
                         self.local_metrics.add("debug/vllm_vs_local_logprob_diff_std", std_diff.item())
@@ -1547,7 +1546,6 @@ def accumulate_inference_batches(
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
 
-        # Combine logprobs
         combined_logprobs.extend(result.logprobs)
 
         earliest_start_time = min(earliest_start_time, result.start_time)

@@ -170,10 +170,6 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
 
     logprobs = []
     for out in final_output.outputs:
-        if not hasattr(out, "logprobs") or out.logprobs is None:
-            raise ValueError(
-                "vLLM output does not contain logprobs. Ensure logprobs are enabled in generation config."
-            )
         logprobs.append(
             [logprob_dict[token_id].logprob for token_id, logprob_dict in zip(out.token_ids, out.logprobs)]
         )
