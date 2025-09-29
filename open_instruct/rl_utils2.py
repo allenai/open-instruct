@@ -119,9 +119,9 @@ def pack_sequences(
         response_logprobs_unfiltered = vllm_logprobs[i]
 
         # vLLM returns N tokens but N-1 logprobs (no logprob for first token)
-        # Add a None placeholder for the first token to maintain alignment
+        # Add a NaN placeholder for the first token to maintain alignment
         if len(response_logprobs_unfiltered) == len(response) - 1:
-            response_logprobs_unfiltered = [None] + response_logprobs_unfiltered
+            response_logprobs_unfiltered = [float("nan")] + response_logprobs_unfiltered
 
         filtered_response = []
         filtered_mask = []
@@ -133,8 +133,8 @@ def pack_sequences(
                 if j < len(response_logprobs_unfiltered):
                     filtered_logprobs.append(response_logprobs_unfiltered[j])
                 else:
-                    # This shouldn't happen after the alignment fix, but add None as safety
-                    filtered_logprobs.append(None)
+                    # This shouldn't happen after the alignment fix, but add NaN as safety
+                    filtered_logprobs.append(float("nan"))
 
         response = filtered_response
         response_tool_mask = filtered_mask
@@ -144,8 +144,8 @@ def pack_sequences(
         mask = query_tool_mask + response_tool_mask
 
         # Process vLLM logprobs
-        # For query tokens, we set logprobs to None, for response tokens we use vLLM logprobs
-        query_logprobs = [None] * len(query)
+        # For query tokens, we set logprobs to NaN, for response tokens we use vLLM logprobs
+        query_logprobs = [float("nan")] * len(query)
         assert len(response_logprobs) == len(response), (
             f"Response {i}: logprobs length {len(response_logprobs)} != response length {len(response)}. "
             f"Original lengths before filtering: response={len(responses[i])}, logprobs={len(vllm_logprobs[i])}. "
@@ -203,7 +203,7 @@ def pack_sequences(
         packed_seq_lens=[torch.tensor(t) for t in packed_seq_lens],
         dones=[torch.tensor(t) for t in dones],
         tool_masks=[torch.tensor(t) for t in tool_masks],
-        vllm_logprobs=packed_vllm_logprobs,
+        vllm_logprobs=[torch.tensor(t, dtype=torch.float) for t in packed_vllm_logprobs],
     )
 
 
