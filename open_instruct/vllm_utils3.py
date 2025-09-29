@@ -532,8 +532,8 @@ class LLMRayActor:
             # Periodically check background loop health
             current_time = time.time()
             if current_time - last_bg_check > 5:
-                if hasattr(self.llm_engine, "_background_loop_unshielded_task"):
-                    task = self.llm_engine._background_loop_unshielded_task
+                if hasattr(self.llm_engine, "_background_loop_unshielded"):
+                    task = self.llm_engine._background_loop_unshielded
                     if task:
                         logger.info(
                             f"[prefetch] Background loop task status: done={task.done()}, cancelled={task.cancelled()}, active_tasks={len(self.active_tasks)}"
@@ -804,11 +804,9 @@ class LLMRayActor:
         def _run_collective_rpc():
             try:
                 logger.info("[update_weight] Running collective_rpc on event loop thread")
+                logger.info(f"[update_weight] Background loop task: {self.llm_engine._background_loop_unshielded}")
                 logger.info(
-                    f"[update_weight] Background loop task: {self.llm_engine._background_loop_unshielded_task}"
-                )
-                logger.info(
-                    f"[update_weight] Task done: {self.llm_engine._background_loop_unshielded_task.done() if self.llm_engine._background_loop_unshielded_task else 'N/A'}"
+                    f"[update_weight] Task done: {self.llm_engine._background_loop_unshielded.done() if self.llm_engine._background_loop_unshielded else 'N/A'}"
                 )
 
                 result[0] = self.llm_engine.engine.collective_rpc(
@@ -817,10 +815,10 @@ class LLMRayActor:
 
                 logger.info("[update_weight] collective_rpc completed")
                 logger.info(
-                    f"[update_weight] Background loop task after: {self.llm_engine._background_loop_unshielded_task}"
+                    f"[update_weight] Background loop task after: {self.llm_engine._background_loop_unshielded}"
                 )
                 logger.info(
-                    f"[update_weight] Task done after: {self.llm_engine._background_loop_unshielded_task.done() if self.llm_engine._background_loop_unshielded_task else 'N/A'}"
+                    f"[update_weight] Task done after: {self.llm_engine._background_loop_unshielded.done() if self.llm_engine._background_loop_unshielded else 'N/A'}"
                 )
             except Exception as e:
                 logger.error(f"[update_weight] Exception in collective_rpc: {e}")
