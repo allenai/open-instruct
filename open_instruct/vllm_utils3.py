@@ -738,9 +738,11 @@ class LLMRayActor:
         use_ray=False,
         timeout_minutes=120,
     ):
-        # Run CUDA operation in the thread where engine was created to ensure same CUDA context
+        import functools
+
         async def _init_process_group_async():
-            return self.llm_engine.engine.collective_rpc(
+            func = functools.partial(
+                self.llm_engine.engine.collective_rpc,
                 "init_process_group",
                 args=(
                     master_address,
@@ -753,28 +755,34 @@ class LLMRayActor:
                     timeout_minutes,
                 ),
             )
+            return await self.loop.run_in_executor(None, func)
 
-        # Schedule the async function to run in the event loop thread
         future = asyncio.run_coroutine_threadsafe(_init_process_group_async(), self.loop)
         return future.result()
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        # Run CUDA operation in the thread where engine was created to ensure same CUDA context
-        async def _update_weight_async():
-            return self.llm_engine.engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        import functools
 
-        # Schedule the async function to run in the event loop thread
+        async def _update_weight_async():
+            func = functools.partial(
+                self.llm_engine.engine.collective_rpc, "update_weight", args=(name, dtype, shape, empty_cache)
+            )
+            return await self.loop.run_in_executor(None, func)
+
         future = asyncio.run_coroutine_threadsafe(_update_weight_async(), self.loop)
         return future.result()
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        # Run CUDA operation in the thread where engine was created to ensure same CUDA context
-        async def _update_weight_cuda_ipc_async():
-            return self.llm_engine.engine.collective_rpc(
-                "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
-            )
+        import functools
 
-        # Schedule the async function to run in the event loop thread
+        async def _update_weight_cuda_ipc_async():
+            func = functools.partial(
+                self.llm_engine.engine.collective_rpc,
+                "update_weight_cuda_ipc",
+                args=(name, dtype, shape, ipc_handles, empty_cache),
+            )
+            return await self.loop.run_in_executor(None, func)
+
         future = asyncio.run_coroutine_threadsafe(_update_weight_cuda_ipc_async(), self.loop)
         return future.result()
 
