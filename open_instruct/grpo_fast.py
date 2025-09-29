@@ -1037,10 +1037,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.local_metrics.add("debug/vllm_vs_local_logprob_diff_max", max_diff.item())
                         self.local_metrics.add("debug/vllm_vs_local_logprob_diff_std", std_diff.item())
 
-                    if args.use_vllm_logprobs:
-                        mb_new_logprobs = mb_vllm_logprobs
-                    else:
-                        mb_new_logprobs = mb_local_logprobs
+                    mb_new_logprobs = mb_local_logprobs
 
                     # Cache the old logprobs
                     if num_mini_batches > 1:
@@ -1048,8 +1045,11 @@ class PolicyTrainerRayProcess(RayProcess):
                     else:
                         with torch.no_grad():
                             if epoch_idx == 0:
-                                old_logprobs[i] = mb_new_logprobs
-                            mb_old_logprobs = old_logprobs[i].detach()
+                                if args.use_vllm_logprobs:
+                                    old_logprobs[i] = mb_vllm_logprobs
+                                else:
+                                    old_logprobs[i] = mb_local_logprobs.detach()
+                            mb_old_logprobs = old_logprobs[i]
 
                     # Calculate the policy's loss
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
