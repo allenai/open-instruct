@@ -162,15 +162,16 @@ def log_gpu_memory(location: str, device: Optional[int] = None) -> None:
     num_alloc_retries = memory_stats.get("num_alloc_retries", 0)
     num_ooms = memory_stats.get("num_ooms", 0)
 
-    logger.info(f"{'=' * 60}")
-    logger.info(f"[GPU Memory @ {location}] Device: {device}")
-    logger.info(f"  Total GPU Memory: {total_memory:.2f} GiB")
-    logger.info(f"  Allocated: {allocated:.2f} GiB ({allocated / total_memory * 100:.1f}%)")
-    logger.info(f"  Reserved: {reserved:.2f} GiB ({reserved / total_memory * 100:.1f}%)")
-    logger.info(f"  Free: {free:.2f} GiB ({free / total_memory * 100:.1f}%)")
-    logger.info(f"  Reserved but unallocated: {reserved - allocated:.2f} GiB")
-    logger.info(f"  Allocation retries: {num_alloc_retries}")
-    logger.info(f"  OOM count: {num_ooms}")
+    logger.info(
+        f"[GPU Memory @ {location}] Device: {device}\n"
+        f"  Total GPU Memory: {total_memory:.2f} GiB\n"
+        f"  Allocated: {allocated:.2f} GiB ({allocated / total_memory * 100:.1f}%)\n"
+        f"  Reserved: {reserved:.2f} GiB ({reserved / total_memory * 100:.1f}%)\n"
+        f"  Free: {free:.2f} GiB ({free / total_memory * 100:.1f}%)\n"
+        f"  Reserved but unallocated: {reserved - allocated:.2f} GiB\n"
+        f"  Allocation retries: {num_alloc_retries}\n"
+        f"  OOM count: {num_ooms}"
+    )
 
     # Try to get snapshot if available (for more detailed analysis)
     try:
