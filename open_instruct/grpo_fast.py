@@ -260,7 +260,7 @@ class Args:
     """
     ref_policy_update_freq: Optional[int] = None
     """How many training steps to take before updating the reference policy."""
-    advantage_normalization_type: Literal["standard", "centered"] = "standard"
+    advantage_normalization_type: Literal["standard", "centered", "margin"] = "standard"
     """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
     divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
@@ -471,6 +471,11 @@ class Args:
     partial_rollouts_model_name: Optional[str] = "gpt-5"
     """The model to use for partial rollouts"""
     partial_rollouts_num_rollouts_to_replace: int = 1
+    """The number of rollouts to replace with partial rollouts"""
+    advantage_mean_bias: float = 0.0
+    """Bias factor to shift the baseline upward in margin normalization (multiplied by max_possible_score)"""
+    zerofy_mean_to_bias_advantage: bool = False
+    """Zero out advantages for scores between original mean and calibrated mean in margin normalization"""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
@@ -1319,10 +1324,20 @@ def data_preparation_thread(
             mean_grouped_rewards = np.repeat(mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
             std_grouped_rewards = scores_per_prompt.std(axis=-1)
             std_grouped_rewards = np.repeat(std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
+
             if args.advantage_normalization_type == "standard":
                 advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
             elif args.advantage_normalization_type == "centered":
                 advantages = scores - mean_grouped_rewards
+            elif args.advantage_normalization_type == "margin":
+                max_possible_score = args.verification_reward
+                print(f"[DEBUG] max_possible_score = {max_possible_score}")
+                print(f"[DEBUG] actual maximum score = {max(scores)}")
+                calibrated_mean_values = np.minimum(mean_grouped_rewards + args.advantage_mean_bias * max_possible_score, 0.9 * max_possible_score)
+                advantages = (scores - calibrated_mean_values) / (std_grouped_rewards + 1e-8)
+                if args.zerofy_mean_to_bias_advantage:
+                    # zero out the advantage for scores between the original mean and the calibrated mean
+                    advantages = np.where((scores >= mean_grouped_rewards) & (scores <= calibrated_mean_values), 0, advantages)
             else:
                 raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
