@@ -21,7 +21,8 @@ DEFAULT_ENV_VARS = [
     ("VLLM_ENGINE_ITERATION_TIMEOUT_S", "3600"),  # 1 hour timeout to prevent AsyncEngineDeadError
     ("RAY_CGRAPH_get_timeout", "300"),
     ("VLLM_DISABLE_COMPILE_CACHE", "1"),
-    ("NCCL_DEBUG", "WARN"),  # Suppress verbose NCCL INFO messages
+    ("NCCL_DEBUG", "ERROR"),  # Only show NCCL ERROR messages, suppress INFO and WARN
+    ("VLLM_LOGGING_LEVEL", "WARNING"),  # Suppress vllm DEBUG messages
 ]
 
 # ----------------------------------------------------------------------
@@ -353,10 +354,6 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
                     name="NCCL_IB_HCA",
                     value="^=mlx5_bond_0",
                 ),
-                beaker.EnvVar(
-                    name="NCCL_DEBUG",
-                    value="INFO",
-                ),
             ])
     # if all cluster is in gcp we add the following env
 
@@ -460,10 +457,6 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
                 beaker.EnvVar(
                     name="NCCL_NVLS_ENABLE",
                     value="0",
-                ),
-                beaker.EnvVar(
-                    name="NCCL_DEBUG",
-                    value="WARN",
                 ),
                 beaker.EnvVar(
                     name="NCCL_FASTRAK_CTRL_DEV",
