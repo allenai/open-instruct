@@ -33,6 +33,7 @@ async def maybe_replace_on_policy_rollouts_with_partial_rollouts(
     tokenizer=None,
     masks=None,
     responses=None,
+    verbose=False,
 ):
     """
     Among all on-policy rollouts per prompt, randomly substitue num_rollouts_to_replace_per_prompt rollouts' answers with external versions.
@@ -171,7 +172,53 @@ async def maybe_replace_on_policy_rollouts_with_partial_rollouts(
                 else:
                     # No context found, treat all tokens as new (shouldn't happen with partial rollouts)
                     updated_masks[i] = [1] * len(new_tokens)
-
+                
+                if verbose:
+                    # Debug: Check if masked content is preserved and new answers have correct masks
+                    print(f"\n🔍 [Mask Validation] Response {i}:")
+                    
+                    # Check if context was found and analyze mask preservation
+                    if original_context:
+                        context_tokens = tokenizer.encode(original_context, return_tensors="pt").squeeze(0)
+                        context_token_count = len(context_tokens)
+                        
+                        # Get the original and new context masks
+                        original_context_mask = masks[i][:context_token_count] if context_token_count <= len(masks[i]) else masks[i]
+                        new_context_mask = updated_masks[i][:context_token_count]
+                        
+                        # Check if masked content (tool outputs) is preserved
+                        masked_positions_original = [j for j, val in enumerate(original_context_mask) if val == 0]
+                        masked_positions_new = [j for j, val in enumerate(new_context_mask) if val == 0]
+                        
+                        masks_preserved = masked_positions_original == masked_positions_new
+                        print(f"🛡️  Tool output masks preserved: {'✅ YES' if masks_preserved else '❌ NO'}")
+                        
+                        if not masks_preserved:
+                            print(f"   Original masked positions: {masked_positions_original}")
+                            print(f"   New masked positions: {masked_positions_new}")
+                        
+                        # Check new answer mask (should be all 1s)
+                        new_answer_mask = updated_masks[i][context_token_count:]
+                        all_ones = all(val == 1 for val in new_answer_mask)
+                        print(f"🎯 New answer mask all 1s: {'✅ YES' if all_ones else '❌ NO'}")
+                        
+                        if not all_ones:
+                            non_one_positions = [j for j, val in enumerate(new_answer_mask) if val != 1]
+                            print(f"   Non-1 positions in new answer: {non_one_positions[:10]}")
+                        
+                        # Show summary
+                        total_zeros = sum(1 for val in updated_masks[i] if val == 0)
+                        total_ones = sum(1 for val in updated_masks[i] if val == 1)
+                        print(f"📊 Final mask: {total_zeros} zeros (tool outputs), {total_ones} ones (trainable)")
+                        
+                    else:
+                        # No context found - all should be 1s
+                        all_ones = all(val == 1 for val in updated_masks[i])
+                        print(f"🎯 All mask values are 1s: {'✅ YES' if all_ones else '❌ NO'} (no context found)")
+                    
+                    print("─" * 50)
+                
+    
     # Return appropriate combination based on what was provided
     if updated_responses is not None:
         return modified_responses, updated_masks, updated_responses
