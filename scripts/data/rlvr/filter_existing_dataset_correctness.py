@@ -4,6 +4,10 @@ Filter an existing jsonl dataset by correctness, using multiple processes.
 requires reward functions setup.
 we use multiprocessing to make things actually fast.
 
+to run:
+python scripts/data/rlvr/filter_existing_dataset_correctness.py \
+  --files data/*.jsonl --output_file filtered.jsonl
+
 If you have code data, you might have to launch code server too before running:
 source configs/beaker_configs/code_api_setup.sh
 
