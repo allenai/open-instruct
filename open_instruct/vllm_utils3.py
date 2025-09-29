@@ -51,14 +51,25 @@ from open_instruct.utils import ray_get_with_progress
 logger = logger_utils.setup_logger(__name__)
 
 
+def log_gpu_memory(logger, request_metadata, request_outputs, active_tasks):
+    """Log GPU memory stats and dictionary sizes."""
+    gpu_allocated = torch.cuda.memory_allocated() / 1024**3
+    gpu_reserved = torch.cuda.memory_reserved() / 1024**3
+    logger.info(
+        f"[Memory Stats] GPU: {gpu_allocated:.2f}/{gpu_reserved:.2f}GB (alloc/reserved), "
+        f"Dicts: metadata={len(request_metadata)}, outputs={len(request_outputs)}, "
+        f"tasks={len(active_tasks)}"
+    )
+
+
 def assert_threaded_actor() -> None:
     """Assert that we're running in a threaded Ray actor (no event loop) vs async actor (has event loop).
 
     Raises:
         AssertionError: If running in an async actor with an event loop
     """
-    import threading
     import sys
+    import threading
 
     # In Python 3.10+, asyncio.get_event_loop() creates a loop if none exists
     # So we need to check if there's a running loop instead
@@ -75,7 +86,7 @@ def assert_threaded_actor() -> None:
     except RuntimeError as e:
         # No running event loop - we're in a threaded actor (good!)
         if "no running event loop" in str(e).lower():
-            logger.info(f"✓ No running event loop detected - running in threaded actor mode")
+            logger.info("✓ No running event loop detected - running in threaded actor mode")
             return
         else:
             # Some other RuntimeError - log it but continue
@@ -658,6 +669,9 @@ class LLMRayActor:
         total_processed = 0
 
         while not self._should_exit():
+            # Log memory stats every loop iteration
+            log_gpu_memory(self.logger, self.request_metadata, self.request_outputs, self.active_tasks)
+
             try:
                 sub_request = self.completion_queue.get(timeout=1.0)
 
