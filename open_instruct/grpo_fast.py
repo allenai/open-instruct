@@ -275,6 +275,8 @@ class Args:
 
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
+    use_vllm_logprobs: bool = False
+    """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
 
     # Reward
     # -- r1 style format reward
@@ -959,7 +961,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         attention_mask = collated_attention_masks[i]
                         position_id = collated_position_ids[i]
                         response_mask = collated_response_masks[i]
-                        old_logprob, _ = self.forward(
+                        local_old_logprob, _ = self.forward(
                             self.model,
                             query_response,
                             attention_mask,
@@ -968,12 +970,19 @@ class PolicyTrainerRayProcess(RayProcess):
                             args.temperature,
                             return_entropy=False,
                         )
+                        vllm_old_logprob = collated_vllm_logprobs[i][:, 1:]
                         if args.mask_tool_use and args.tool_use:
                             response_mask = response_mask.bool() & tool_mask.bool()
                         else:
                             response_mask = response_mask.bool()
-                        old_logprob = torch.masked_fill(old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
-                        old_logprobs[i] = old_logprob
+                        local_old_logprob = torch.masked_fill(
+                            local_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB
+                        )
+                        vllm_old_logprob = torch.masked_fill(vllm_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
+                        if args.use_vllm_logprobs:
+                            old_logprobs[i] = vllm_old_logprob
+                        else:
+                            old_logprobs[i] = local_old_logprob
                         torch.cuda.empty_cache()
 
         local_step = 0
@@ -1002,7 +1011,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
-                    mb_new_logprobs, mb_entropy = self.forward(
+                    mb_local_logprobs, mb_entropy = self.forward(
                         self.model,
                         mb_query_responses,
                         mb_attention_mask,
@@ -1011,13 +1020,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         args.temperature,
                         return_entropy=args.record_entropy,
                     )
-                    mb_new_logprobs = torch.masked_fill(mb_new_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
+                    mb_local_logprobs = torch.masked_fill(mb_local_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
+                    mb_vllm_logprobs = collated_vllm_logprobs[i][:, 1:]
+                    mb_vllm_logprobs = torch.masked_fill(mb_vllm_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
 
                     # Compare vLLM logprobs with local logprobs
                     with torch.no_grad():
-                        mb_vllm_logprobs = collated_vllm_logprobs[i][:, 1:]  # Skip the first token (prompt)
                         valid_mask = mb_response_masks_bool & ~torch.isnan(mb_vllm_logprobs)
-                        logprob_diff = (mb_new_logprobs - mb_vllm_logprobs).abs()
+                        logprob_diff = (mb_local_logprobs - mb_vllm_logprobs).abs()
                         masked_diff = torch.masked_fill(logprob_diff, ~valid_mask, 0.0)
                         mean_diff = masked_diff.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
                         max_diff = masked_diff.max()
@@ -1026,6 +1036,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.local_metrics.add("debug/vllm_vs_local_logprob_diff_mean", mean_diff.item())
                         self.local_metrics.add("debug/vllm_vs_local_logprob_diff_max", max_diff.item())
                         self.local_metrics.add("debug/vllm_vs_local_logprob_diff_std", std_diff.item())
+
+                    if args.use_vllm_logprobs:
+                        mb_new_logprobs = mb_vllm_logprobs
+                    else:
+                        mb_new_logprobs = mb_local_logprobs
 
                     # Cache the old logprobs
                     if num_mini_batches > 1:
@@ -1090,7 +1105,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         loss_stats[i] = loss
                         ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
                         if args.record_entropy:
-                            # Calculate entropy statistics
                             entropy_stats[i] = masked_mean(
                                 mb_entropy, mb_response_masks_bool, args.masked_mean_axis
                             ).float()
