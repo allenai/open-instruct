@@ -891,6 +891,7 @@ class PolicyTrainerRayProcess(RayProcess):
         collated_position_ids,
         collated_advantages,
         collated_response_masks,
+        collated_vllm_logprobs,
         pad_token_id: int,
         num_mini_batches: int,
     ):
@@ -901,6 +902,8 @@ class PolicyTrainerRayProcess(RayProcess):
         to_device_inplace(collated_position_ids, self.device)
         to_device_inplace(collated_advantages, self.device)
         to_device_inplace(collated_response_masks, self.device)
+        if collated_vllm_logprobs is not None:
+            to_device_inplace(collated_vllm_logprobs, self.device)
         # accumulation steps should always be at least 1
         accumulation_steps = max(math.ceil(len(collated_query_responses) / num_mini_batches - 0.5), 1)
         leftover = len(collated_query_responses) % accumulation_steps
@@ -911,6 +914,8 @@ class PolicyTrainerRayProcess(RayProcess):
             collated_position_ids = collated_position_ids[0:-leftover]
             collated_advantages = collated_advantages[0:-leftover]
             collated_response_masks = collated_response_masks[0:-leftover]
+            if collated_vllm_logprobs is not None:
+                collated_vllm_logprobs = collated_vllm_logprobs[0:-leftover]
             logger.warning(f"{leftover} samples are dropped due to batch size {num_mini_batches}")
 
         # recalculate the "real" number of mini-batches
@@ -1009,6 +1014,25 @@ class PolicyTrainerRayProcess(RayProcess):
                         return_entropy=args.record_entropy,
                     )
                     mb_new_logprobs = torch.masked_fill(mb_new_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
+
+                    # Compare vLLM logprobs with local logprobs if available
+                    if collated_vllm_logprobs is not None and epoch_idx == 0:
+                        with torch.no_grad():
+                            mb_vllm_logprobs = collated_vllm_logprobs[i][:, 1:]  # Skip the first token (prompt)
+                            valid_mask = mb_response_masks_bool & (
+                                mb_vllm_logprobs != 0
+                            )  # Only compare non-zero vLLM logprobs
+                            if valid_mask.any():
+                                logprob_diff = (mb_new_logprobs - mb_vllm_logprobs).abs()
+                                masked_diff = torch.masked_fill(logprob_diff, ~valid_mask, 0.0)
+                                mean_diff = masked_diff.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
+                                max_diff = masked_diff.max()
+                                std_diff = masked_diff[valid_mask].std() if valid_mask.sum() > 1 else 0.0
+
+                                # Log to local metrics
+                                self.local_metrics.add("debug/vllm_vs_local_logprob_diff_mean", mean_diff.item())
+                                self.local_metrics.add("debug/vllm_vs_local_logprob_diff_max", max_diff.item())
+                                self.local_metrics.add("debug/vllm_vs_local_logprob_diff_std", std_diff.item())
 
                     # Cache the old logprobs
                     if num_mini_batches > 1:
@@ -1508,6 +1532,7 @@ def accumulate_inference_batches(
     combined_tool_outputs = []
     combined_tool_runtimes = []
     combined_tool_calleds = []
+    combined_logprobs = []
 
     earliest_start_time = float("inf")
     prompt_lengths = []
@@ -1527,6 +1552,10 @@ def accumulate_inference_batches(
         combined_tool_outputs.extend(result.request_info.tool_outputs)
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
+
+        # Combine logprobs if available
+        if result.logprobs is not None:
+            combined_logprobs.extend(result.logprobs)
 
         earliest_start_time = min(earliest_start_time, result.start_time)
 
@@ -1568,6 +1597,7 @@ def accumulate_inference_batches(
         request_info=combined_request_info,
         dataset_index=None,  # Not meaningful for combined result
         token_statistics=accumulated_stats,
+        logprobs=combined_logprobs if combined_logprobs else None,
     )
 
     if actor_manager is not None:
@@ -1704,6 +1734,10 @@ def data_preparation_thread(
             masks = [result.masks[i] for i in non_zero_gradient_index]
             batch = batch[non_zero_gradient_index.tolist()]
             finish_reasons = [result.finish_reasons[i] for i in non_zero_gradient_index]
+            # Filter vLLM logprobs if available
+            vllm_logprobs = None
+            if result.logprobs is not None:
+                vllm_logprobs = [result.logprobs[i] for i in non_zero_gradient_index]
             if args.mask_truncated_completions:
                 stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
                 num_truncated = len(finish_reasons) - len(stop_idxes)
@@ -1718,6 +1752,8 @@ def data_preparation_thread(
                 masks = [masks[i] for i in stop_idxes]
                 batch = batch[stop_idxes.tolist()]
                 finish_reasons = [finish_reasons[i] for i in stop_idxes]
+                if vllm_logprobs is not None:
+                    vllm_logprobs = [vllm_logprobs[i] for i in stop_idxes]
 
             if args.fill_completions:
                 with Timer("⏱ [Data Preparation Thread] Refill completions"):
@@ -1781,6 +1817,7 @@ def data_preparation_thread(
                 masks=masks,
                 pack_length=args.pack_length,
                 pad_token_id=tokenizer.pad_token_id,
+                vllm_logprobs=vllm_logprobs,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
             # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
@@ -1830,6 +1867,11 @@ def data_preparation_thread(
                 per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
                 per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
                 per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
+                per_device_packed_vllm_logprobs = (
+                    packed_sequences.vllm_logprobs[B * i : B * (i + 1)]
+                    if packed_sequences.vllm_logprobs is not None
+                    else None
+                )
 
                 # Shuffle the batch and collate the data
                 b_inds = np.random.permutation(len(per_device_packed_query_responses))
@@ -1839,6 +1881,7 @@ def data_preparation_thread(
                 collated_position_ids = []
                 collated_response_masks = []
                 collated_advantages = []
+                collated_vllm_logprobs = [] if per_device_packed_vllm_logprobs is not None else None
                 for j in range(0, len(per_device_packed_query_responses), args.per_device_train_batch_size):
                     micro_range = b_inds[j : j + args.per_device_train_batch_size]
                     collated_query_responses.append(
@@ -1861,6 +1904,10 @@ def data_preparation_thread(
                     collated_advantages.append(
                         collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0)
                     )
+                    if collated_vllm_logprobs is not None:
+                        collated_vllm_logprobs.append(
+                            collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0)
+                        )
                 collated_data.append(
                     {
                         "collated_query_responses": collated_query_responses,
@@ -1869,6 +1916,7 @@ def data_preparation_thread(
                         "collated_position_ids": collated_position_ids,
                         "collated_advantages": collated_advantages,
                         "collated_response_masks": collated_response_masks,
+                        "collated_vllm_logprobs": collated_vllm_logprobs,
                     }
                 )
 
@@ -2173,6 +2221,7 @@ def create_generation_configs(args: Args):
         n=args.num_samples_per_prompt_rollout,
         stop=args.stop_strings,
         seed=args.seed,
+        logprobs=1,  # Enable logprobs to compare with local calculations
         # IMPORTANT: Set output_kind to FINAL_ONLY to ensure vLLM V1 properly handles n>1
         # With the default CUMULATIVE mode, vLLM V1 returns separate outputs for each
         # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode

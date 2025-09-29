@@ -168,6 +168,28 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
     finish_reasons = [out.finish_reason for out in final_output.outputs]
     use_tools = bool(tools)
 
+    # Extract logprobs from each output
+    logprobs = []
+    for out in final_output.outputs:
+        if hasattr(out, "logprobs") and out.logprobs is not None:
+            # Extract the logprob values for each token
+            token_logprobs = []
+            for logprob_dict in out.logprobs:
+                if logprob_dict:  # logprob_dict might be None for some tokens
+                    # Get the logprob for the selected token
+                    # vLLM returns a dict mapping token_id to logprob
+                    # We need to extract the logprob for the actual generated token
+                    # The structure is typically {token_id: Logprob(logprob=value, rank=..., decoded_token=...)}
+                    # We'll extract the maximum logprob (which should be for the selected token)
+                    max_logprob = max(lp.logprob for lp in logprob_dict.values()) if logprob_dict else 0.0
+                    token_logprobs.append(max_logprob)
+                else:
+                    token_logprobs.append(0.0)
+            logprobs.append(token_logprobs)
+        else:
+            # No logprobs available for this output
+            logprobs.append([0.0] * len(out.token_ids))
+
     # Extract attributes based on whether tools are used
     if use_tools:
         # Extract tool-specific attributes from outputs
@@ -208,6 +230,7 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
             generation_time=current_time - metadata["start_time"],
         ),
         start_time=metadata["start_time"],
+        logprobs=logprobs,
     )
     return result, metadata["is_eval"]
 
