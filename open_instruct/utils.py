@@ -81,8 +81,8 @@ def repeat_each(seq, k):
 
 def ray_get_with_progress(
     ray_refs: List[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: Optional[float] = None
-) -> List[Any]:
-    """Execute ray.get() with a progress bar using futures.
+):
+    """Execute ray.get() with a progress bar using futures and collect timings.
 
     Args:
         ray_refs: List of ray object references
@@ -91,23 +91,31 @@ def ray_get_with_progress(
         timeout: Optional timeout in seconds for all operations to complete
 
     Returns:
-        List of results in the same order as ray_refs
+        (results, completion_times)
+        - results: List of results in the same order as ray_refs
+        - completion_times: time from function start until each ref completed (seconds), aligned to ray_refs
 
     Raises:
         TimeoutError: If timeout is specified and operations don't complete in time
     """
+    t0 = time.perf_counter()
+
     ray_futures = [ref.future() for ref in ray_refs]
+    fut_to_idx = {f: i for i, f in enumerate(ray_futures)}
+
     results = [None] * len(ray_refs)
+    completion_times = [None] * len(ray_refs)
 
     futures_iter = futures.as_completed(ray_futures, timeout=timeout)
     if enable:
         futures_iter = tqdm(futures_iter, total=len(ray_futures), desc=desc, bar_format="{l_bar}{bar}{r_bar}\n")
 
     for future in futures_iter:
-        idx = ray_futures.index(future)
+        idx = fut_to_idx[future]
         results[idx] = future.result()
+        completion_times[idx] = time.perf_counter() - t0
 
-    return results
+    return results, completion_times
 
 
 """
@@ -1178,6 +1186,8 @@ python scripts/submit_eval_jobs.py \
 --skip_oi_evals"""
     if wandb_url is not None:
         command += f" --run_id {wandb_url}"
+        wandb_run_path = wandb_url_to_run_path(wandb_url)
+        command += f" --wandb_run_path {wandb_run_path}"
     if oe_eval_max_length is not None:
         command += f" --oe_eval_max_length {oe_eval_max_length}"
     if training_step is not None:
@@ -1196,6 +1206,33 @@ python scripts/submit_eval_jobs.py \
     print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
     print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
     print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+
+
+def wandb_url_to_run_path(url: str) -> str:
+    """
+    Convert a wandb URL to a wandb run path.
+
+    Args:
+        url (str): wandb URL in format https://wandb.ai/entity/project/runs/run_id
+
+    Returns:
+        str: wandb run path in format entity/project/run_id
+
+    >>> wandb_url_to_run_path("https://wandb.ai/org/project/runs/runid")
+    org/project/runid
+
+    >>> wandb_url_to_run_path("https://wandb.ai/ai2-llm/open_instruct_internal/runs/5nigq0mz")
+    ai2-llm/open_instruct_internal/5nigq0mz
+    """
+    # Remove the base URL and split by '/'
+    path_parts = url.replace("https://wandb.ai/", "").split("/")
+
+    # Extract entity, project, and run_id
+    entity = path_parts[0]
+    project = path_parts[1]
+    run_id = path_parts[3]  # Skip 'runs' at index 2
+
+    return f"{entity}/{project}/{run_id}"
 
 
 # ----------------------------------------------------------------------------
