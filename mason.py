@@ -21,6 +21,7 @@ DEFAULT_ENV_VARS = [
     ("VLLM_ENGINE_ITERATION_TIMEOUT_S", "3600"),  # 1 hour timeout to prevent AsyncEngineDeadError
     ("RAY_CGRAPH_get_timeout", "300"),
     ("VLLM_DISABLE_COMPILE_CACHE", "1"),
+    ("NCCL_DEBUG", "WARN"),  # Suppress verbose NCCL INFO messages
 ]
 
 # ----------------------------------------------------------------------
