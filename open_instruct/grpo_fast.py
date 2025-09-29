@@ -1013,24 +1013,20 @@ class PolicyTrainerRayProcess(RayProcess):
                     )
                     mb_new_logprobs = torch.masked_fill(mb_new_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
 
-                    # Compare vLLM logprobs with local logprobs on first epoch
-                    if epoch_idx == 0:
-                        with torch.no_grad():
-                            mb_vllm_logprobs = collated_vllm_logprobs[i][:, 1:]  # Skip the first token (prompt)
-                            valid_mask = mb_response_masks_bool & (
-                                mb_vllm_logprobs != 0
-                            )  # Only compare non-zero vLLM logprobs
-                            if valid_mask.any():
-                                logprob_diff = (mb_new_logprobs - mb_vllm_logprobs).abs()
-                                masked_diff = torch.masked_fill(logprob_diff, ~valid_mask, 0.0)
-                                mean_diff = masked_diff.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
-                                max_diff = masked_diff.max()
-                                std_diff = masked_diff[valid_mask].std() if valid_mask.sum() > 1 else 0.0
+                    # Compare vLLM logprobs with local logprobs
+                    with torch.no_grad():
+                        mb_vllm_logprobs = collated_vllm_logprobs[i][:, 1:]  # Skip the first token (prompt)
+                        valid_mask = mb_response_masks_bool & (mb_vllm_logprobs != 0)
+                        logprob_diff = (mb_new_logprobs - mb_vllm_logprobs).abs()
+                        masked_diff = torch.masked_fill(logprob_diff, ~valid_mask, 0.0)
+                        mean_diff = masked_diff.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
+                        max_diff = masked_diff.max()
+                        std_diff = masked_diff[valid_mask].std() if valid_mask.sum() > 1 else 0.0
 
-                                # Log to local metrics
-                                self.local_metrics.add("debug/vllm_vs_local_logprob_diff_mean", mean_diff.item())
-                                self.local_metrics.add("debug/vllm_vs_local_logprob_diff_max", max_diff.item())
-                                self.local_metrics.add("debug/vllm_vs_local_logprob_diff_std", std_diff.item())
+                        # Log to local metrics
+                        self.local_metrics.add("debug/vllm_vs_local_logprob_diff_mean", mean_diff.item())
+                        self.local_metrics.add("debug/vllm_vs_local_logprob_diff_max", max_diff.item())
+                        self.local_metrics.add("debug/vllm_vs_local_logprob_diff_std", std_diff.item())
 
                     # Cache the old logprobs
                     if num_mini_batches > 1:
@@ -1551,9 +1547,8 @@ def accumulate_inference_batches(
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
 
-        # Combine logprobs if available
-        if result.logprobs is not None:
-            combined_logprobs.extend(result.logprobs)
+        # Combine logprobs
+        combined_logprobs.extend(result.logprobs)
 
         earliest_start_time = min(earliest_start_time, result.start_time)
 
@@ -1595,7 +1590,7 @@ def accumulate_inference_batches(
         request_info=combined_request_info,
         dataset_index=None,  # Not meaningful for combined result
         token_statistics=accumulated_stats,
-        logprobs=combined_logprobs if combined_logprobs else None,
+        logprobs=combined_logprobs,
     )
 
     if actor_manager is not None:

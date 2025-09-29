@@ -120,13 +120,22 @@ def pack_sequences(
         mask = query_tool_mask + response_tool_mask
 
         # Process vLLM logprobs
-        # For query tokens, we set logprobs to 0, for response tokens we use vLLM logprobs
-        query_logprobs = [0.0] * len(query)
-        # Ensure we don't go out of bounds if vllm_logprobs[i] is shorter than response
-        response_logprobs = vllm_logprobs[i][: len(response)] if i < len(vllm_logprobs) else [0.0] * len(response)
-        # Pad if necessary
+        # For query tokens, we set logprobs to None, for response tokens we use vLLM logprobs
+        query_logprobs = [None] * len(query)
+
+        if i >= len(vllm_logprobs):
+            raise ValueError(
+                f"vllm_logprobs does not have logprobs for response {i}. Expected {len(responses)} responses."
+            )
+
+        response_logprobs = vllm_logprobs[i][: len(response)]
+
+        # Check that we have enough logprobs for the response
         if len(response_logprobs) < len(response):
-            response_logprobs += [0.0] * (len(response) - len(response_logprobs))
+            raise ValueError(
+                f"vllm_logprobs for response {i} has {len(response_logprobs)} values but response has {len(response)} tokens."
+            )
+
         combined_logprobs = query_logprobs + response_logprobs
         if len(query_response) + len(cur_data) > pack_length:
             query_responses.append(cur_data)
@@ -179,7 +188,7 @@ def pack_sequences(
         packed_seq_lens=[torch.tensor(t) for t in packed_seq_lens],
         dones=[torch.tensor(t) for t in dones],
         tool_masks=[torch.tensor(t) for t in tool_masks],
-        vllm_logprobs=[torch.tensor(t) for t in packed_vllm_logprobs],
+        vllm_logprobs=packed_vllm_logprobs,
     )
 
 
