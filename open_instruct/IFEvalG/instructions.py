@@ -1543,8 +1543,6 @@ class RepeatPhraseChecker(Instruction):
         first_word = self._phrase.split()[0]
         last_word = self._phrase.split()[-1]
 
-        len(self._phrase.split()) - 2
-
         found_phrases = re.findall(rf"{first_word} .*? {last_word}", value)
         if len(found_phrases) != self._small_n:
             return False
