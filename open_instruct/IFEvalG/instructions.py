@@ -1548,6 +1548,7 @@ class RepeatPhraseChecker(Instruction):
         found_phrases = re.findall(rf"{first_word} .*? {last_word}", value)
         if len(found_phrases) != self._small_n:
             return False
+        num_satisfied_phrases = 0
         for phrase in found_phrases:
             phrase = phrase.split()
             ref_phrase = self._phrase.split()
@@ -1563,8 +1564,9 @@ class RepeatPhraseChecker(Instruction):
                             return False
                 except IndexError:
                     return False
-        if differences == 1:
-            return True
+            num_satisfied_phrases += 1
+
+        return num_satisfied_phrases == self._small_n
 
 
 class CopyChecker(Instruction):
