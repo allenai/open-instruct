@@ -657,6 +657,13 @@ class LLMRayActor:
         """
         total_processed = 0
 
+        if not self.llm_engine.is_running:
+            logger.warning("[process_from_queue] Background loop not running, restarting...")
+            self.llm_engine.start_background_loop()
+            logger.info("[process_from_queue] Background loop restarted")
+
+        assert not self.llm_engine._background_loop_unshielded.done(), "AsyncLLMEngine background loop task is done/cancelled"
+
         while not self._should_exit():
             try:
                 sub_request = self.completion_queue.get(timeout=1.0)
