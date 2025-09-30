@@ -722,6 +722,11 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
         self.model.train()
 
+        # take a dummy step to force good logprobs on step 1.
+        dummy_loss = torch.tensor(0.0, device=self.device, requires_grad=True)
+        self.model.backward(dummy_loss)
+        self.model.step()
+
         # reference model
         ds_config = get_eval_ds_config(
             offload=False,
