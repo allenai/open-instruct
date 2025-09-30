@@ -35,7 +35,7 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --report_to wandb \
     --chat_template_name olmo_thinker \
     --with_tracking \
-    --oe_eval_max_length 32768
-    # --eval_workspace usable-olmo \
-    # --eval_priority high \
-    # --oe_eval_gpu_multiplier 2 \
+    --oe_eval_max_length 32768 \
+    --eval_workspace usable-olmo \
+    --eval_priority high \
+    --oe_eval_gpu_multiplier 2

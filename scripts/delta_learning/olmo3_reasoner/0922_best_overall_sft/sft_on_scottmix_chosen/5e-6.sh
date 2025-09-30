@@ -3,8 +3,8 @@ EXP_NAME=sm0922-rsn-sft_chosen-yolo_scottmix1_150k-5e-6
 python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
 	--cluster ai2/jupiter-cirrascale-2 ai2/ceres-cirrascale \
 	--gs_model_name $EXP_NAME \
-    --workspace ai2/usable-olmo \
-    --priority high \
+    --workspace ai2/olmo-instruct \
+    --priority urgent \
     --image scottg/open_instruct_dev --pure_docker_mode \
     --preemptible \
     --num_nodes 4 \
@@ -35,7 +35,7 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --report_to wandb \
     --chat_template_name olmo_thinker \
     --with_tracking \
-    --oe_eval_max_length 32768
-    # --eval_workspace usable-olmo \
-    # --eval_priority high \
-    # --oe_eval_gpu_multiplier 2 \
+    --oe_eval_max_length 32768 \
+    --eval_workspace usable-olmo \
+    --eval_priority high \
+    --oe_eval_gpu_multiplier 2

@@ -1,5 +1,5 @@
 MODEL_NAME=/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/olmo3-hparam-search/olmo2.5-6T-R5-LC-sigma-olmo2-tulu3-mix-FINAL-t10_full-v5-32k-lr-8e-5-seed42000
-EXP_NAME=smNR-0926-dpo-delta150k_vgraf-gpt150k_y1-7e-7
+EXP_NAME=smNR-0926-dpo-delta125k_scottm-gpt125k_c35-1e-6
 python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
 	--cluster ai2/jupiter-cirrascale-2 ai2/ceres-cirrascale \
 	--gs_model_name $EXP_NAME \
@@ -21,8 +21,8 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --model_name_or_path $MODEL_NAME \
     --tokenizer_name $MODEL_NAME \
     --use_slow_tokenizer False \
-    --dataset_mixer_list scottgeng00/olmo-3-preference-mix-deltas-complement2-yolo_victoria_hates_code-DECON 150000 \
-        allenai/dpo-yolo1-200k-gpt4.1-judge-2weak2strong-maxdelta_rejected-DECON 150000 \
+    --dataset_mixer_list scottgeng00/olmo-3-preference-mix-deltas-complement2-yolo_scottmix-DECON 125000 \
+        allenai/dpo-chat35-150k-gpt4.1-judge-2weak2strong-maxdelta_rejected-DECON 125000 \
         VGraf/general_responses_dev_8maxturns_truncated2048 2247 \
         VGraf/paraphrase_train_dev_8maxturns_truncated2048 1687 \
         VGraf/repeat_response_flip_tulu_5maxturns_big_truncated2048 562 \
@@ -30,7 +30,7 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --max_seq_length 16384 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 8 \
-    --learning_rate 7e-7 \
+    --learning_rate 1e-6 \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
@@ -44,5 +44,4 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --chat_template_name olmo123 \
     --with_tracking \
     --eval_workspace olmo-instruct \
-    --oe_eval_gpu_multiplier 1 \
-    --oe_eval_max_length 32768
+    --oe_eval_gpu_multiplier 1
