@@ -1564,7 +1564,7 @@ class RepeatPhraseChecker(Instruction):
                             return False
                 except IndexError:
                     return False
-            num_satisfied_phrases += 1
+            num_satisfied_phrases += differences == 1
 
         return num_satisfied_phrases == self._small_n
 
