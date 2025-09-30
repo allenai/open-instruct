@@ -407,6 +407,8 @@ class Args:
     """the docker image for evaluation for oe-eval"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
+    beaker_eval_freq: Optional[int] = None
+    """the frequency of auto-launched evaluation jobs. Must be a multiple of save_freq"""
 
     # Evaluation behavior
     eval_on_step_0: bool = False
@@ -485,6 +487,8 @@ class Args:
                 if tool not in ["search", "code"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
+        if self.beaker_eval_freq is not None and self.save_freq is not None:
+            assert self.beaker_eval_freq % self.save_freq == 0, "beaker_eval_freq must be a multiple of save_freq"
 
 
 def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
@@ -2383,7 +2387,7 @@ def one_training_step(
                 ],
                 desc=f"Saving model at step {training_step}",
             )
-            if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
+            if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job() and (args.beaker_eval_freq is None or training_step % args.beaker_eval_freq == 0):
                 leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
                 for i in range(args.world_size):
                     policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
