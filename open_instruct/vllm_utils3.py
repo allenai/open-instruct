@@ -419,6 +419,8 @@ class LLMRayActor:
         self.verbose = verbose
         self.request_metadata = {}
         self.completion_queue = queue.Queue()  # Thread-safe queue for completed GenerationResults
+        self._future_check_interval_s = 5
+        self._last_future_check = time.monotonic()
 
         if self.tools:
             self.executor = futures.ThreadPoolExecutor(max_workers=20)
@@ -524,6 +526,9 @@ class LLMRayActor:
             if self._should_stop():
                 time.sleep(0.1)
                 continue
+
+            # Periodically verify that all spawned async tasks are healthy
+            self._check_active_tasks()
 
             # Check if we need more requests
             current_unfinished = len(self.active_tasks)
@@ -666,6 +671,7 @@ class LLMRayActor:
 
         while not self._should_exit():
             try:
+                self._check_active_tasks()
                 sub_request = self.completion_queue.get(timeout=1.0)
 
                 # Check if it's a sub-request (dict) or already processed result (tuple)
@@ -733,6 +739,21 @@ class LLMRayActor:
                 pass
 
         return total_processed
+
+    def _check_active_tasks(self):
+        """Crash the actor immediately if any async task failed."""
+        now = time.monotonic()
+        if (now - self._last_future_check) < self._future_check_interval_s:
+            return
+
+        for request_id, future in list(self.active_tasks.items()):
+            if future.cancelled():
+                raise RuntimeError(f"Async generation future for {request_id} was unexpectedly cancelled")
+
+            if future.done():
+                future.result()
+
+        self._last_future_check = now
 
     def init_process_group(
         self,
