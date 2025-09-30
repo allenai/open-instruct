@@ -22,7 +22,7 @@ def generate_snippet_id() -> str:
     return f"{short_hash}"
 
 
-def extract_answer_context_citations(response: str) -> tuple[str, str, Dict[str, str]]:
+def extract_answer_context_citations(response: str, use_full_response_as_answer: bool = False) -> tuple[str, str, Dict[str, str]]:
     """
     Extract the answer from the context.
     
@@ -30,6 +30,9 @@ def extract_answer_context_citations(response: str) -> tuple[str, str, Dict[str,
         tuple: (extracted_context, extracted_answer, extracted_citations)
                Returns (None, None, None) if no answer tags found
     """
+    if use_full_response_as_answer:
+        return None, response, None
+    
     extracted_answer = None
     extracted_citations = None
     extracted_context = None
@@ -126,7 +129,10 @@ def extract_search_tool_calls(context: str, mcp_parser_name: Optional[str] = Non
         return []
     
     
-def compute_format_reward(response: str, mcp_parser_name: Optional[str] = None) -> float:
+def compute_format_reward(response: str, mcp_parser_name: Optional[str] = None, use_full_response_as_answer: bool = False) -> float:
+    if use_full_response_as_answer:
+        return 1.0
+    
     # check if response contains final answer between <answer></answer> tags
     answer_pattern = r"<answer>.*?</answer>"
     answer_match = re.search(answer_pattern, response, re.DOTALL)

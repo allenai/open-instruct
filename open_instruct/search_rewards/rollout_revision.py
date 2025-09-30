@@ -34,6 +34,7 @@ async def maybe_replace_on_policy_rollouts_with_partial_rollouts(
     masks=None,
     responses=None,
     verbose=False,
+    use_full_response_as_answer=False,
 ):
     """
     Among all on-policy rollouts per prompt, randomly substitue num_rollouts_to_replace_per_prompt rollouts' answers with external versions.
@@ -84,25 +85,38 @@ async def maybe_replace_on_policy_rollouts_with_partial_rollouts(
             original_query = current_group_queries[local_idx]
             
             # Extract the context before the answer
-            context = original_response.split("<answer>")[0]
-            messages = [
-                {
-                    "role": "system",
-                    "content": system_prompt
-                },
-                {
-                    "role": "user",
-                    "content": original_query + "\n\n"  #+ additional_question_instructions["long_form"]
-                },
-                {
-                    "role": "assistant",
-                    "content": context
-                },
-                {
-                    "role": "user",
-                    "content": "Now continue the generation to produce a final answer and wrap it in <answer></answer> tags."
-                }
-            ]
+            if use_full_response_as_answer:
+                context = ""
+                messages = [
+                    {
+                        "role": "system",
+                        "content": system_prompt if system_prompt is not None else "You are a helpful assistant."
+                    },
+                    {
+                        "role": "user",
+                        "content": original_query + "\n\n"  #+ additional_question_instructions["long_form"]
+                    },
+                ]
+            else:
+                context = original_response.split("<answer>")[0]
+                messages = [
+                    {
+                        "role": "system",
+                        "content": system_prompt
+                    },
+                    {
+                        "role": "user",
+                        "content": original_query + "\n\n"  #+ additional_question_instructions["long_form"]
+                    },
+                    {
+                        "role": "assistant",
+                        "content": context
+                    },
+                    {
+                        "role": "user",
+                        "content": "Now continue the generation to produce a final answer and wrap it in <answer></answer> tags."
+                    }
+                ]
             
             # Generate partial rollout using the original response as context
             partial_rollouts = await generate_partial_rollouts(

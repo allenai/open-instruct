@@ -476,6 +476,8 @@ class Args:
     """Bias factor to shift the baseline upward in margin normalization (multiplied by max_possible_score)"""
     zerofy_mean_to_bias_advantage: bool = False
     """Zero out advantages for scores between original mean and calibrated mean in margin normalization"""
+    use_full_response_as_answer: bool = False
+    """Whether to use the full response as the answer"""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
@@ -2481,7 +2483,8 @@ if __name__ == "__main__":
                     transform_fn_args=transform_fn_args,
                     tokenizer=tokenizer,
                     masks=masks,
-                    responses=responses
+                    responses=responses,
+                    use_full_response_as_answer=args.use_full_response_as_answer
                 )
                 
                 # Handle the return value - could be responses, (responses, masks), or (responses, masks, tokenized_responses)

@@ -172,7 +172,7 @@ Your JSON Evaluation:"""
     return rubric_scores
 
 
-async def _score_weighted_rubric(response: str, ground_truth: Dict[str, Any], use_general_rubric: bool = False) -> Tuple[List[float], List[float]]:
+async def _score_weighted_rubric(response: str, ground_truth: Dict[str, Any], use_general_rubric: bool = False, use_likert_rubric: bool = False) -> Tuple[List[float], List[float]]:
     """
     Score the response against rubrics and return individual scores and weights.
     
@@ -182,11 +182,31 @@ async def _score_weighted_rubric(response: str, ground_truth: Dict[str, Any], us
     rubrics = ground_truth["rubrics"]
     question = ground_truth["query"]
     tasks = []
-    general_rubric = """(1) Overall Comprehensiveness: The report should cover content as comprehensively as possible
+    
+    if use_likert_rubric:
+        system_prompt = """You are an expert evaluator. Given a user prompt and a generated response, please rate the overall quality of the response on a scale of 1 to 10, where 1 is very poor and 10 is excellent.
+Start your response with a valid JSON object that starts with "```json" and ends with "```". The JSON object should contain a single key "score" and the value should be an integer between 1 and 10.
+Example response:
+```json
+{
+"score": 8
+}```"""
+        user_prompt = f"""Given the following prompt, and response, please rate the overall quality of the response on a scale of 1 to 10.
+<prompt>
+{question}
+</prompt>   
+<response>
+{response}
+</response>
+Your JSON Evaluation:"""
+        task = _score_property_async(response, question, None, system_prompt=system_prompt, user_prompt=user_prompt, score_scale=10.0)
+        tasks.append(task)
+        weights = [1.0]
+    elif use_general_rubric:
+        general_rubric = """(1) Overall Comprehensiveness: The report should cover content as comprehensively as possible
 (2) Thoroughness of Discussion: Each section should be discussed thoroughly, not just superficially
 (3) Factuality: There should be minimal factual errors
 (4) Coherence: The discussion should stay focused and relevant to the topic"""
-    if use_general_rubric:
         task = _score_property_async(response, question, general_rubric)
         tasks.append(task)
         weights = [1.0]

@@ -88,8 +88,11 @@ async def compute_longform_averaged_outcome_reward_async(
         question: str, mcp_parser_name: Optional[str] = None, 
         use_general_rubric: bool = False,
         no_citation_reward: bool = False,
+        use_likert_rubric: bool = False,
+        use_full_response_as_answer: bool = False,
     ) -> Dict[str, Any]:
-    extracted_context, extracted_answer, extracted_citations = extract_answer_context_citations(response)
+    extracted_context, extracted_answer, extracted_citations = extract_answer_context_citations(response, use_full_response_as_answer=use_full_response_as_answer)
+    
     result = {
         "num_search_turns_reward": 0.0,
         "rubric_reward": 0.0,
@@ -99,7 +102,7 @@ async def compute_longform_averaged_outcome_reward_async(
     }
     
     # score format
-    format_reward = compute_format_reward(response, mcp_parser_name=mcp_parser_name)
+    format_reward = compute_format_reward(response, mcp_parser_name=mcp_parser_name, use_full_response_as_answer=use_full_response_as_answer)
     result["format_reward"] = format_reward
     
     # score num search turns
@@ -110,7 +113,7 @@ async def compute_longform_averaged_outcome_reward_async(
         return result
     
     # score rubric
-    scores, weights = await _score_weighted_rubric(extracted_answer, ground_truth, use_general_rubric=use_general_rubric)
+    scores, weights = await _score_weighted_rubric(extracted_answer, ground_truth, use_general_rubric=use_general_rubric, use_likert_rubric=use_likert_rubric)
     if len(scores) == 0:
         print("🔥 No rubric scores found. This should not happen.")
         rubric_reward = 0.0
@@ -120,6 +123,10 @@ async def compute_longform_averaged_outcome_reward_async(
         total_weight = sum(weight for weight in weights if weight > 0)
         rubric_reward = total_weighted_score / max(total_weight, 1.0)
     result["rubric_reward"] = rubric_reward
+    
+    if use_full_response_as_answer:
+        result["reward"] = rubric_reward
+        return result
     
     # score citation (include 0.1 weighted citation format reward)
     if not no_citation_reward:

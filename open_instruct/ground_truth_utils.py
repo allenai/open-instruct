@@ -108,7 +108,9 @@ class RubricVerifierConfig(VerifierConfig):
     """Whether to not apply citation reward"""
     use_likert_rubric: bool = False
     """Whether to use the likert rubric"""
-
+    use_full_response_as_answer: bool = False
+    """Whether to use the full response as the answer"""
+    
 @dataclass
 class VerificationResult:
     score: float
@@ -1182,6 +1184,7 @@ class RLRAGLongFormAveragedOutcomeVerifier(VerifierFunction):
                                                           use_general_rubric=self.verifier_config.use_general_rubric, 
                                                           no_citation_reward=self.verifier_config.no_citation_reward,
                                                           use_likert_rubric=self.verifier_config.use_likert_rubric,
+                                                          use_full_response_as_answer=self.verifier_config.use_full_response_as_answer,
                                                           )
         score = result["reward"]
         return VerificationResult(score=score, log_values=result)
@@ -1206,7 +1209,12 @@ class RLRAGLongFormAveragedOutcomeNewVerifier(VerifierFunction):
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> VerificationResult:
         test_case = json.loads(label)
-        result = asyncio.run(compute_longform_averaged_outcome_reward_async(prediction, test_case, query, mcp_parser_name=self.verifier_config.mcp_parser_name, use_general_rubric=self.verifier_config.use_general_rubric, no_citation_reward=self.verifier_config.no_citation_reward))
+        result = asyncio.run(compute_longform_averaged_outcome_reward_async(prediction, test_case, query, 
+                                                                            mcp_parser_name=self.verifier_config.mcp_parser_name, 
+                                                                            use_general_rubric=self.verifier_config.use_general_rubric, 
+                                                                            no_citation_reward=self.verifier_config.no_citation_reward,
+                                                                            use_likert_rubric=self.verifier_config.use_likert_rubric,
+                                                                            use_full_response_as_answer=self.verifier_config.use_full_response_as_answer))
         score = result["reward"]
         return VerificationResult(score=score, log_values=result)
     
