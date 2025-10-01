@@ -433,6 +433,7 @@ class LLMRayActor:
             self.executor = None
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
+        self.sleep_mode_enabled = kwargs.get("enable_sleep_mode", False)
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
             # stop ray from manipulating *_VISIBLE_DEVICES
@@ -509,8 +510,9 @@ class LLMRayActor:
             self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=False)
             logger.info("AsyncLLMEngine created successfully")
 
-            # Don't start the background loop - let process_from_queue manage it
-            logger.info("AsyncLLMEngine background loop NOT started (will be managed by process_from_queue)")
+            # Start the background loop (synchronous call)
+            self.llm_engine.start_background_loop()
+            logger.info("AsyncLLMEngine background loop started")
 
             # Signal init complete
             self.init_complete.set()
@@ -679,13 +681,15 @@ class LLMRayActor:
         """
         total_processed = 0
 
-        # Assert that background loop should NOT be running on entry
-        assert not self.llm_engine.is_running, "[process_from_queue] Background loop should not be running on entry!"
+        if not self.llm_engine.is_running:
+            logger.warning("[process_from_queue] Background loop not running, restarting...")
+            self.llm_engine.start_background_loop()
+            logger.info("[process_from_queue] Background loop restarted")
 
-        # Always start the background loop when entering
-        logger.info("[process_from_queue] Starting background loop on entry")
-        self.llm_engine.start_background_loop()
-        logger.info("[process_from_queue] Background loop started")
+        # Wake up the engine when starting to process (only if sleep mode is enabled)
+        if self.sleep_mode_enabled:
+            logger.info("[process_from_queue] Waking up engine to process requests")
+            self.wake_up()
 
         while not self._should_exit():
             if self._prefetch_future.done():
@@ -759,10 +763,10 @@ class LLMRayActor:
             except queue.Empty:
                 pass
 
-        # Shutdown the background loop before exiting
-        logger.info("[process_from_queue] Shutting down background loop on exit")
-        self.llm_engine.shutdown_background_loop()
-        logger.info("[process_from_queue] Background loop shut down")
+        # Put the engine to sleep when done processing (only if sleep mode is enabled)
+        if self.sleep_mode_enabled:
+            logger.info("[process_from_queue] Putting engine to sleep after processing")
+            self.sleep()
 
         return total_processed
 
