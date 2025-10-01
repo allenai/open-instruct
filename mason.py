@@ -233,7 +233,7 @@ def get_env_vars(
         raise ValueError(f"Cannot override default environment variables: {conflicting_vars}")
 
     for name, value in DEFAULT_ENV_VARS.items():
-        env_vars.append(beaker.BeaverEnvVar(name=name, value=value))
+        env_vars.append(beaker.BeakerEnvVar(name=name, value=value))
 
     for env_var in additional_env_vars:
         env_vars.append(beaker.BeakerEnvVar(name=env_var["name"], value=env_var["value"]))
@@ -325,7 +325,7 @@ def get_env_vars(
                     ),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS", value="600000"),
                     beaker.BeakerEnvVar(name="NCCL_NVLS_ENABLE", value="0"),
-                    beaker.BeaverEnvVar(name="NCCL_FASTRAK_CTRL_DEV", value="enp0s12"),
+                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_CTRL_DEV", value="enp0s12"),
                     beaker.BeakerEnvVar(
                         name="NCCL_FASTRAK_IFNAME",
                         value="enp6s0,enp7s0,enp13s0,enp14s0,enp134s0,enp135s0,enp141s0,enp142s0",
