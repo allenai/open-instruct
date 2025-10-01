@@ -2256,6 +2256,7 @@ def weight_sync_thread(
     weight_sync_trigger_event: threading.Event,
     policy_group: ModelGroup,
     actor_manager: ActorManager,
+    vllm_engines,
     weight_sync_metrics_Q: Queue,
     resume_training_step: int = 1,
 ):
@@ -2788,6 +2789,7 @@ def run_training(
         weight_sync_trigger_event,
         policy_group,
         actor_manager,
+        vllm_engines,
         weight_sync_metrics_Q,
         resume_training_step,
     )
