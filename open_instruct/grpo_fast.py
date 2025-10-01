@@ -2290,7 +2290,9 @@ def weight_sync_thread(
                 )
 
                 # Broadcast weights to vLLM engines
-                weight_broadcast_futures: List[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+                weight_broadcast_futures: List[ray.ObjectRef] = [
+                    m.broadcast_to_vllm.remote() for m in policy_group.models
+                ]
 
                 # Wait for all weight updates to complete and collect individual timings
                 _, actor_sync_times = ray_get_with_progress(

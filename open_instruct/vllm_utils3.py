@@ -632,10 +632,7 @@ class LLMRayActor:
             logger.warning("pause_generation: engine lacks stop_remote_worker_execution_loop_async; skipping pause")
             return True
 
-        future = asyncio.run_coroutine_threadsafe(
-            engine.stop_remote_worker_execution_loop_async(),
-            self.loop,
-        )
+        future = asyncio.run_coroutine_threadsafe(engine.stop_remote_worker_execution_loop_async(), self.loop)
 
         try:
             future.result(timeout=timeout_s)
