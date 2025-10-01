@@ -13,7 +13,6 @@ python scripts/submit_finetune_job.py \
     --config configs/train_configs/olmo2/olmo2_1124_7b_sft.yaml \
     --exp_name "1206_finetune_epoch_${epoch}_lr_${lr}_loss_type_${loss_type}" \
     --seed $seed \
-    --reduce_loss $loss_type \
     --learning_rate $lr \
     --num_train_epochs $epoch \
     --hf_metadata_dataset allenai/olmo-instruct-evals
@@ -52,7 +51,6 @@ python scripts/submit_finetune_job.py \
     --default_beaker_config configs/beaker_configs/default_finetune_multinode_olmo2_1124.yaml \
     --config configs/train_configs/olmo2/olmo2_1124_13b_sft.yaml \
     --exp_name "1209_bsz128_13b_finetune_epoch_${epoch}_lr_${lr}_loss_type_${loss_type}" \
-    --reduce_loss $loss_type \
     --learning_rate $lr \
     --num_train_epochs $epoch \
     --hf_metadata_dataset allenai/olmo-instruct-evals
@@ -72,7 +70,6 @@ python scripts/submit_finetune_job.py \
     --default_beaker_config configs/beaker_configs/default_finetune_multinode_olmo2_1124.yaml \
     --config configs/train_configs/olmo2/olmo2_1124_13b_sft.yaml \
     --exp_name "1208_2_bsz64_13b_finetune_epoch_${epoch}_lr_${lr}_loss_type_${loss_type}" \
-    --reduce_loss $loss_type \
     --learning_rate $lr \
     --num_train_epochs $epoch \
     --hf_metadata_dataset allenai/olmo-instruct-evals
