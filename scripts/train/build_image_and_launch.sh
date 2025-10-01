@@ -27,15 +27,10 @@ beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 
 existing_image_desc=$(beaker image get "$beaker_user/$image_name" --format json 2>/dev/null | jq -r '.[0].description // ""' || echo "")
 
-if [[ "$existing_image_desc" == *"$git_hash"* ]] && [[ -n "$existing_image_desc" ]]; then
+if [[ -n "$existing_image_desc" ]] && [[ "$existing_image_desc" == *"$git_hash"* ]]; then
   echo "Beaker image already exists for commit $git_hash, skipping Docker build and upload."
-  skip_upload=true
 else
   echo "Creating new beaker image for commit $git_hash..."
-  skip_upload=false
-fi
-
-if [[ "$skip_upload" == "false" ]]; then
   docker build --platform=linux/amd64 \
     --build-arg GIT_COMMIT="$git_hash" \
     --build-arg GIT_BRANCH="$git_branch" \
