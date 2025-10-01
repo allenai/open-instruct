@@ -557,10 +557,12 @@ class LLMRayActor:
 
     def get_model_dims_dict(self):
         """Get only the model dimensions as a simple dict without loading weights."""
-        model_config = self.llm_engine.model_config
-        parallel_config = self.llm_engine.vllm_config.parallel_config
+        model_config_future = asyncio.run_coroutine_threadsafe(self.llm_engine.get_model_config(), self.loop)
+        model_config = model_config_future.result()
 
-        # Extract only the necessary dimensions as simple Python types
+        parallel_config_future = asyncio.run_coroutine_threadsafe(self.llm_engine.get_parallel_config(), self.loop)
+        parallel_config = parallel_config_future.result()
+
         hidden_size = model_config.get_hidden_size()
         intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
 
