@@ -21,7 +21,7 @@ uv run python mason.py \
        --num_nodes 1 \
        --max_retries 0 \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-       --env VLLM_LOGGING_LEVEL=WARNING \
+       --env VLLM_LOGGING_LEVEL=DEBUG \
        --budget ai2/oe-adapt \
        --gpus 1 \
        --task_name open_instruct-single_gpu_test \
@@ -42,7 +42,7 @@ uv run python mason.py \
     --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
     --temperature 0.7 \
-    --inflight_updates True \
+    --inflight_updates False \
     --ground_truths_key ground_truth \
     --chat_template_name r1_simple_chat_postpend_think \
     --learning_rate 3e-7 \
