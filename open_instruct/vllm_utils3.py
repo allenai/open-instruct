@@ -433,7 +433,6 @@ class LLMRayActor:
             self.executor = None
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
-        self.sleep_mode_enabled = kwargs.get("enable_sleep_mode", False)
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
             # stop ray from manipulating *_VISIBLE_DEVICES
@@ -686,11 +685,6 @@ class LLMRayActor:
             self.llm_engine.start_background_loop()
             logger.info("[process_from_queue] Background loop restarted")
 
-        # Wake up the engine when starting to process (only if sleep mode is enabled)
-        if self.sleep_mode_enabled:
-            logger.info("[process_from_queue] Waking up engine to process requests")
-            self.wake_up()
-
         while not self._should_exit():
             if self._prefetch_future.done():
                 self._prefetch_future.result()
@@ -762,12 +756,6 @@ class LLMRayActor:
 
             except queue.Empty:
                 pass
-
-        # Put the engine to sleep when done processing (only if sleep mode is enabled)
-        if self.sleep_mode_enabled:
-            logger.info("[process_from_queue] Putting engine to sleep after processing")
-            self.sleep()
-
         return total_processed
 
     def _check_active_tasks(self):
