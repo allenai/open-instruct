@@ -123,13 +123,13 @@ if len(set([item.text for item in output.outputs])) == 1:
 # debug job submission; you should install your python on NFS and
 # make sure `which python` returns the python environment you are using
 python mason.py \
-    --cluster ai2/allennlp-cirrascale \
+    --cluster ai2/allennlp \
     --priority low \
     --budget ai2/allennlp \
     --gpus 1 -- which python
 # sometimes we run into permission issues; need to run the following
 python mason.py \
-    --cluster ai2/allennlp-cirrascale \
+    --cluster ai2/allennlp \
     --priority low \
     --budget ai2/allennlp \
     --gpus 1 -- chmod -R 777 /net/nfs.cirrascale/allennlp/.cache/

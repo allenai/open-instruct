@@ -81,7 +81,7 @@ if [ "$on_jupyter" = true ]; then
 else
     echo "Running on Mason"
     python mason.py \
-    --cluster ai2/allennlp-cirrascale ai2/priore \
+    --cluster ai2/allennlp ai2/priore \
     --image costah/open_instruct_rs \
     --pure_docker_mode \
     --priority low \

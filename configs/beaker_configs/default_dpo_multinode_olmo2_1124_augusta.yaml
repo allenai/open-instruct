@@ -68,6 +68,6 @@ tasks:
     resources:
       gpuCount: 8
     context:
-      cluster: ai2/allennlp-cirrascale
+      cluster: ai2/allennlp
       priority: high
       preemptible: false

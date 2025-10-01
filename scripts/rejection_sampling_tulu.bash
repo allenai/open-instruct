@@ -67,7 +67,7 @@ echo $command
 # Run the combined command
 echo "Submitting all shards in one command"
 python mason.py \
-    --cluster ai2/allennlp-cirrascale ai2/mosaic-cirrascale \
+    --cluster ai2/allennlp \
     --priority low \
     --preemptible \
     --budget ai2/allennlp \

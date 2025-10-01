@@ -20,7 +20,7 @@ def main():
                         help="Path to the default Beaker config file")
     parser.add_argument("--config", default=None,
                         help="Path to an additional config file to override default settings")
-    parser.add_argument("--cluster", type=str, default="ai2/allennlp-cirrascale", help="Beaker cluster to use")
+    parser.add_argument("--cluster", type=str, default="ai2/allennlp", help="Beaker cluster to use")
     parser.add_argument("--priority", type=str, default="high", help="Priority of the job")
     parser.add_argument("--preemptible", type=bool, default=True, help="Whether to use preemptible instances")
     parser.add_argument("--num_gpus", type=int, default=8, help="Number of GPUs to use")

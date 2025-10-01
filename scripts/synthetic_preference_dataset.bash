@@ -96,7 +96,7 @@ if [ "$deploy_mode" = "docker_weka" ]; then
         --gpus $num_gpus -- $command
 elif [ "$deploy_mode" = "docker_nfs" ]; then
     python mason.py \
-        --cluster ai2/allennlp-cirrascale \
+        --cluster ai2/allennlp \
         --image costah/open_instruct_synth_pref --pure_docker_mode \
         --priority low \
         --preemptible \
@@ -104,7 +104,7 @@ elif [ "$deploy_mode" = "docker_nfs" ]; then
         --gpus $num_gpus -- $command
 elif [ "$deploy_mode" = "docker" ]; then
     python mason.py \
-        --cluster ai2/allennlp-cirrascale ai2/neptune \
+        --cluster ai2/allennlp ai2/neptune \
         --image costah/open_instruct_synth_pref --pure_docker_mode \
         --priority low \
         --preemptible \
@@ -112,7 +112,7 @@ elif [ "$deploy_mode" = "docker" ]; then
         --gpus $num_gpus -- $command
 elif [ "$deploy_mode" = "nfs" ]; then
     python mason.py \
-        --cluster ai2/allennlp-cirrascale \
+        --cluster ai2/allennlp \
         --priority low \
         --preemptible \
         --budget ai2/allennlp \
