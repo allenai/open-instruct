@@ -1,5 +1,6 @@
 import logging
 import re
+import os
 from typing import Any, Dict, Optional
 
 from open_instruct.search_rewards.utils.format_utils import extract_answer_context_citations, compute_format_reward
@@ -91,6 +92,8 @@ async def compute_longform_averaged_outcome_reward_async(
         use_likert_rubric: bool = False,
         use_full_response_as_answer: bool = False,
     ) -> Dict[str, Any]:
+    use_full_response_as_answer = bool(os.environ.get("USE_FULL_RESPONSE_AS_ANSWER", use_full_response_as_answer))
+    
     extracted_context, extracted_answer, extracted_citations = extract_answer_context_citations(response, use_full_response_as_answer=use_full_response_as_answer)
     
     result = {

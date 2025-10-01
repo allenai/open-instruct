@@ -3,6 +3,7 @@ import uuid
 from typing import Dict, Any, Optional, List
 import re
 import logging
+import os
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ def extract_answer_context_citations(response: str, use_full_response_as_answer:
         tuple: (extracted_context, extracted_answer, extracted_citations)
                Returns (None, None, None) if no answer tags found
     """
-    if use_full_response_as_answer:
+    if bool(os.environ.get("USE_FULL_RESPONSE_AS_ANSWER", use_full_response_as_answer)):
         return None, response, None
     
     extracted_answer = None
@@ -56,7 +57,7 @@ def extract_answer_context_citations(response: str, use_full_response_as_answer:
 
     if not match:
         # error_message = "Failed to extract answer from response - no <answer></answer> tags found"
-        LOGGER.warning("No <answer></answer> tags found in response")
+        LOGGER.warning(f"No <answer></answer> tags found in response with use_full_response_as_answer set to {use_full_response_as_answer}")
         return None, None, None
 
     extracted_answer = match.group(1).strip()

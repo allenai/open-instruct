@@ -390,6 +390,8 @@ class Args:
     """Number of training rollouts to log each time"""
     log_direction_agreement: bool = False
     """Whether to log direction agreement between fine-grained rewards and global reward"""
+    log_separation_scores: bool = False
+    """Whether to log separation scores measuring reward concentration around the mean"""
 
     # Tool settings
     tools: Optional[List[str]] = None
@@ -478,6 +480,8 @@ class Args:
     """Zero out advantages for scores between original mean and calibrated mean in margin normalization"""
     use_full_response_as_answer: bool = False
     """Whether to use the full response as the answer"""
+    log_separation_scores: bool = False
+    """Whether to log separation scores measuring reward concentration around the mean"""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
@@ -1332,16 +1336,36 @@ def data_preparation_thread(
             elif args.advantage_normalization_type == "centered":
                 advantages = scores - mean_grouped_rewards
             elif args.advantage_normalization_type == "margin":
-                max_possible_score = args.verification_reward
-                print(f"[DEBUG] max_possible_score = {max_possible_score}")
-                print(f"[DEBUG] actual maximum score = {max(scores)}")
-                calibrated_mean_values = np.minimum(mean_grouped_rewards + args.advantage_mean_bias * max_possible_score, 0.9 * max_possible_score)
-                advantages = (scores - calibrated_mean_values) / (std_grouped_rewards + 1e-8)
-                if args.zerofy_mean_to_bias_advantage:
-                    # zero out the advantage for scores between the original mean and the calibrated mean
-                    advantages = np.where((scores >= mean_grouped_rewards) & (scores <= calibrated_mean_values), 0, advantages)
+                max_possible_score = float(args.verification_reward)
+                bias = float(np.clip(args.advantage_mean_bias, 0.0, 1.0))
+                # raise baseline toward a cap; guarantee monotonicity (>= mean)
+                calibrated = mean_grouped_rewards + bias * max_possible_score
+                cap = 0.9 * max_possible_score
+                calibrated = np.minimum(calibrated, cap)
+                calibrated = np.maximum(calibrated, mean_grouped_rewards)
+
+                advantages = (scores - calibrated) / (std_grouped_rewards + 1e-8)
+
+                if getattr(args, "zerofy_mean_to_bias_advantage", False):
+                    lo, hi = mean_grouped_rewards, calibrated  # calibrated >= mean guaranteed
+                    mask = (scores >= lo) & (scores <= hi)
+                    advantages = np.where(mask, 0.0, advantages)
             else:
                 raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
+
+            if args.log_separation_scores:
+                # Normalized Mean Absolute Deviation (NMAD) per prompt
+                # NMAD = mean(|r - mean(r)|) / (std(r) + eps)
+                eps = 1e-8
+                per_means = scores_per_prompt.mean(axis=1)                     # [P]
+                per_stds  = scores_per_prompt.std(axis=1, ddof=0)              # [P]
+                abs_dev   = np.abs(scores_per_prompt - per_means[:, None])     # [P, M]
+                nmad      = abs_dev.mean(axis=1) / (per_stds + eps)            # [P]
+
+                reward_metrics["objective/separation_score_mean"] = float(nmad.mean())
+                reward_metrics["objective/separation_score_std"]  = float(nmad.std())
+                reward_metrics["objective/separation_score_min"]  = float(nmad.min())
+                reward_metrics["objective/separation_score_max"]  = float(nmad.max())
 
         # Log training rollouts if enabled
         training_rollouts_data = None
