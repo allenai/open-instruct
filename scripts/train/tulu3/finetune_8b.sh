@@ -28,6 +28,7 @@ uv run python mason.py \
     --tokenizer_name meta-llama/Llama-3.1-8B \
     --tokenizer_revision main \
     --use_slow_tokenizer \
+    --chat_template tulu \
     --dataset_mixer_list allenai/tulu-3-sft-mixture 512 \
     --max_seq_length 4096 \
     --per_device_train_batch_size 1 \
