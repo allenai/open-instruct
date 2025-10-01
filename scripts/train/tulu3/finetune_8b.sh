@@ -6,7 +6,7 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 
 uv run python mason.py \
     --cluster ai2/jupiter \
-    --workspace ai2/tulu-3-dev \
+    --workspace ai2/open-instruct-dev \
     --priority high \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
