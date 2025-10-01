@@ -650,8 +650,11 @@ class LLMRayActor:
 
         try:
             if self.llm_engine is not None:
-                self.llm_engine.start_background_loop()
-                logger.info("resume_generation: background loop restarted")
+                if hasattr(self.llm_engine, "is_running") and self.llm_engine.is_running:
+                    logger.info("resume_generation: background loop already running; skipping restart")
+                else:
+                    self.llm_engine.start_background_loop()
+                    logger.info("resume_generation: background loop restarted")
         finally:
             self._generation_paused.clear()
 
