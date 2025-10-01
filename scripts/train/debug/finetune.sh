@@ -1,4 +1,21 @@
-uv run accelerate launch \
+#!/bin/bash
+
+BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+
+echo "Using Beaker image: $BEAKER_IMAGE"
+
+uv run python mason.py \
+    --cluster ai2/jupiter \
+    --workspace ai2/open-instruct-dev \
+    --priority normal \
+    --image "$BEAKER_IMAGE" \
+    --pure_docker_mode \
+    --preemptible \
+    --num_nodes 1 \
+    --budget ai2/oe-adapt \
+    --gpus 1 \
+    -- \
+    accelerate launch \
     --mixed_precision bf16 \
     --num_processes 1 \
     open_instruct/finetune.py \
@@ -12,11 +29,10 @@ uv run accelerate launch \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
-    --output_dir output/ \
     --report_to wandb \
     --logging_steps 1 \
     --model_revision main \
     --dataset_mixer_list allenai/tulu-3-sft-personas-algebra 100 \
     --add_bos \
     --seed 123 \
-    # --with_tracking \
+    --with_tracking
