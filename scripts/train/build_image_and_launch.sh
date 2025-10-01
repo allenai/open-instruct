@@ -43,7 +43,7 @@ if [[ "$skip_upload" == "false" ]]; then
 
   beaker image rename "$beaker_user/$image_name" "" || echo "Image not found, skipping rename."
 
-  beaker image create "$image_name" -n "$image_name" -w "ai2/$beaker_user" --desc "Git commit: $git_hash"
+  beaker image create "$image_name" -n "$image_name" -w "ai2/$beaker_user" --description "Git commit: $git_hash"
 fi
 
 # Ensure uv is installed and sync dependencies before running the script
