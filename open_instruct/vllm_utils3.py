@@ -45,7 +45,7 @@ from torch.distributed.distributed_c10d import (
 
 from open_instruct import logger_utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
-from open_instruct.tool_utils.tool_vllm import MaxCallsExceededTool, Tool
+from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
@@ -555,6 +555,24 @@ class LLMRayActor:
             # Add the request by spawning async tasks
             self._add_request_sync(request)
 
+    def get_model_dims_dict(self):
+        """Get only the model dimensions as a simple dict without loading weights."""
+        model_config = self.llm_engine.model_config
+        parallel_config = self.llm_engine.vllm_config.parallel_config
+
+        # Extract only the necessary dimensions as simple Python types
+        hidden_size = model_config.get_hidden_size()
+        intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
+
+        return {
+            "num_layers": model_config.get_num_layers(parallel_config),
+            "hidden_size": hidden_size,
+            "intermediate_size": intermediate_size,
+            "vocab_size": model_config.get_vocab_size(),
+            "num_attn_heads": model_config.get_num_attention_heads(parallel_config),
+            "num_kv_heads": model_config.get_num_kv_heads(parallel_config),
+        }
+
     def _should_stop(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
             should_stop_ref = self.actor_manager.should_stop.remote()
@@ -667,11 +685,11 @@ class LLMRayActor:
             self.llm_engine.start_background_loop()
             logger.info("[process_from_queue] Background loop restarted")
 
-        assert not self.llm_engine._background_loop_unshielded.done(), (
-            "AsyncLLMEngine background loop task is done/cancelled"
-        )
-
         while not self._should_exit():
+            # Health check: ensure prefetch worker is alive. This will raise if it has crashed.
+            if self._prefetch_future.done():
+                self._prefetch_future.result()
+
             try:
                 self._check_active_tasks()
                 sub_request = self.completion_queue.get(timeout=1.0)
