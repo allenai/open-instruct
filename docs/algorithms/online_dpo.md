@@ -150,9 +150,9 @@ python mason.py \
 
 ```bash
 # for running chat based models you should use an 8xH100 node.
-# use ai2/jupiter-cirrascale-2 or ai2/pluto-cirrascale
+# use ai2/jupiter or ai2/pluto-cirrascale
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority high \
@@ -202,9 +202,9 @@ python mason.py \
 
 ```bash
 # for running chat based models you should use an 8xH100 node.
-# use ai2/jupiter-cirrascale-2 or ai2/pluto-cirrascale
+# use ai2/jupiter or ai2/pluto-cirrascale
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority high \
@@ -256,7 +256,7 @@ An example command with beaker datasets models:
 
 ```
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --image nathanl/open_instruct_auto \
     --pure_docker_mode \
     --workspace ai2/tulu-3-dev \

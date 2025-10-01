@@ -1,6 +1,6 @@
 '''
 python mason.py \
-  --cluster ai2/jupiter-cirrascale-2 --image nathanl/open_instruct_auto \
+  --cluster ai2/jupiter --image nathanl/open_instruct_auto \
   --workspace ai2/tulu-thinker \
   --priority high \
   --preemptible \

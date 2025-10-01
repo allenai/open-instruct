@@ -175,7 +175,7 @@ def main():
 
     # add cluster-specific env vars
     if args.num_nodes > 1:
-        if args.cluster == "ai2/jupiter-cirrascale-2":
+        if args.cluster == "ai2/jupiter":
             d['tasks'][0]['envVars'] += [
                 {
                     "name": "NCCL_SOCKET_IFNAME",

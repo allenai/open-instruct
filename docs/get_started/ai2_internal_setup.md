@@ -55,7 +55,7 @@ You can take your command above and run it on the weka cluster with the followin
 
 ```bash
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale ai2/neptune-cirrascale \
+    --cluster ai2/jupiter ai2/saturn ai2/neptune-cirrascale \
     --workspace ai2/tulu-3-dev \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --priority normal \
@@ -140,7 +140,7 @@ We provide a script integrated with beaker for use internally at Ai2. There are 
 for model in allenai/OLMoE-1B-7B-0125-Instruct allenai/OLMoE-1B-7B-0125-DPO allenai/OLMoE-1B-7B-0125-SFT allenai/OLMoE-1B-7B-0924-SFT allenai/OLMoE-1B-7B-0924-Instruct; do
 python scripts/submit_eval_jobs.py \
     --model_name hf-$model \
-    --cluster ai2/jupiter-cirrascale-2 ai2/neptune-cirrascale ai2/saturn-cirrascale ai2/ceres-cirrascale  \
+    --cluster ai2/jupiter ai2/neptune-cirrascale ai2/saturn ai2/ceres-cirrascale  \
     --priority high \
     --location $model \
     --is_tuned \
@@ -164,7 +164,7 @@ url=https://wandb.ai/ai2-llm/open_instruct_internal/runs/7afq8x28
 location=01JNMHSM8DDSFB3GJDBM5MP6J8
 python scripts/submit_eval_jobs.py \
     --model_name $model_name \
-    --cluster ai2/jupiter-cirrascale-2 ai2/neptune-cirrascale ai2/saturn-cirrascale ai2/ceres-cirrascale  \
+    --cluster ai2/jupiter ai2/neptune-cirrascale ai2/saturn ai2/ceres-cirrascale  \
     --priority high \
     --location $location \
     --is_tuned \
@@ -187,7 +187,7 @@ This will later show up in the [internal leaderboard](https://huggingface.co/spa
 python scripts/submit_eval_jobs.py \
     --model_name test_no_hf_upload \
     --location /weka/oe-adapt-default/costah/models/0129_grpo_math_kl_fix_zs_0.0_16_half-m_461_checkpoints/step_640 \
-    --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
+    --cluster ai2/saturn ai2/neptune-cirrascale \
     --is_tuned \
     --workspace "tulu-3-results" \
     --priority high \

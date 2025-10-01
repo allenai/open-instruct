@@ -1146,7 +1146,7 @@ def launch_ai2_evals_on_weka(
     eval_priority: Optional[str] = "normal",
     beaker_image: Optional[str] = None,
 ) -> None:
-    weka_cluster = "ai2/saturn-cirrascale ai2/neptune-cirrascale"
+    weka_cluster = "ai2/saturn ai2/neptune-cirrascale"
     gcp_cluster = "ai2/augusta-google-1"
     cluster = weka_cluster if gs_bucket_path is None else gcp_cluster
     beaker_users = get_beaker_whoami()

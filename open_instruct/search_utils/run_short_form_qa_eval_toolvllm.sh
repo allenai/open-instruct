@@ -13,7 +13,7 @@ read -r -a MASON_CMD <<< \
     --gpus 1 \
     --workspace ai2/rl-rag \
     --budget ai2/oe-adapt \
-    --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale ai2/neptune-cirrascale \
+    --cluster ai2/jupiter ai2/saturn ai2/neptune-cirrascale \
     --"
 
 # ensure output dirs exist

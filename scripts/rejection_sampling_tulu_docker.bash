@@ -71,7 +71,7 @@ echo "Submitting all shards in one command"
 
 if [ "$on_jupyter" = true ]; then
     python mason.py \
-        --cluster ai2/jupiter-cirrascale-2 \
+        --cluster ai2/jupiter \
         --image costah/open_instruct_rs \
         --pure_docker_mode \
         --priority low \

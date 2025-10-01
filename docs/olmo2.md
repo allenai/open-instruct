@@ -182,7 +182,7 @@ Example run with DeepSpeed Stage 3 (slower than stage 2):
 ```
 for lr in 2e-6; do
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/olmo-instruct \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \

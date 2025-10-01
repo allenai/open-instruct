@@ -7,9 +7,9 @@ BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 echo "Using Beaker image: $BEAKER_IMAGE"
 
 uv run python mason.py \
-       --cluster ai2/jupiter-cirrascale-2 \
+       --cluster ai2/jupiter \
        --cluster ai2/augusta-google-1 \
-       --cluster ai2/saturn-cirrascale \
+       --cluster ai2/saturn \
        --image "$BEAKER_IMAGE" \
        --description "Single GPU on Beaker integration test." \
        --pure_docker_mode \
