@@ -83,6 +83,16 @@ INTERCONNECT_CLUSTERS = [
     "ai2/augusta",
 ]
 
+# by default, we turn off vllm compile cache
+# torch compile caching seems consistently broken, but the actual compiling isn't.
+# Not sure why, for now we have disabled the caching (VLLM_DISABLE_COMPILE_CACHE=1).
+DEFAULT_ENV_VARS = {
+    "RAY_CGRAPH_get_timeout": "300",
+    "VLLM_DISABLE_COMPILE_CACHE": "1",
+    "NCCL_DEBUG": "ERROR",
+    "VLLM_LOGGING_LEVEL": "WARNING",
+}
+
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -257,11 +267,13 @@ def parse_commands(command_args: List[str]) -> List[List[str]]:
 def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: List[str],
                 whoami: str, resumable: bool, num_nodes: int, additional_env_vars: List[Dict[str, str]],
                 additional_secrets: List[Dict[str, str]]):
-    additional_env_var_names = [var["name"] for var in additional_env_vars]
+    conflicting_vars = {var["name"] for var in additional_env_vars} & DEFAULT_ENV_VARS.keys()
+    if conflicting_vars:
+        raise ValueError(f"Cannot override default environment variables: {conflicting_vars}")
+    
+    for name, value in DEFAULT_ENV_VARS.items():
+        env_vars.append(beaker.EnvVar(name=name, value=value))
 
-    # Initialize with default environment variables (can be overridden by user-specified vars)
-    env_vars = [beaker.EnvVar(name=name, value=value) for name, value in DEFAULT_ENV_VARS if name not in additional_env_var_names]
-    # Add user-specified environment variables first
     for env_var in additional_env_vars:
         env_vars.append(
             beaker.EnvVar(
