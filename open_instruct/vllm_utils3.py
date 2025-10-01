@@ -667,7 +667,9 @@ class LLMRayActor:
             self.llm_engine.start_background_loop()
             logger.info("[process_from_queue] Background loop restarted")
 
-        assert not self.llm_engine._background_loop_unshielded.done(), "AsyncLLMEngine background loop task is done/cancelled"
+        assert not self.llm_engine._background_loop_unshielded.done(), (
+            "AsyncLLMEngine background loop task is done/cancelled"
+        )
 
         while not self._should_exit():
             try:
@@ -914,7 +916,6 @@ def create_vllm_engines(
         vllm_engines.append(
             ray.remote(LLMRayActor)
             .options(
-                max_concurrency=1,
                 num_cpus=num_gpus,
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
