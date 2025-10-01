@@ -17,9 +17,11 @@
 
 import asyncio
 import dataclasses
+import inspect
 import logging
 import os
 import queue
+import sys
 import threading
 import time
 from collections import defaultdict
@@ -51,49 +53,64 @@ from open_instruct.utils import ray_get_with_progress
 logger = logger_utils.setup_logger(__name__)
 
 
-def assert_threaded_actor(self) -> None:
-    """Assert that we're running in a threaded Ray actor (no event loop) vs async actor (has event loop).
+def assert_threaded_actor(cls: type):
+    """
+    Assert that a class is suitable for use in a threaded (non-async) Ray actor.
+
+    This function performs two checks:
+      1. The class must not define any `async def` methods
+         (including async generators, staticmethods, or classmethods).
+      2. There must not be a running asyncio event loop in the current thread.
+
+    Args:
+        cls (type): The class to inspect.
 
     Raises:
-        AssertionError: If running in an async actor with an event loop
+        AssertionError: If the class defines one or more async methods, or a running asyncio event loop is detected.
+        RuntimeError: If an unexpected error occurs while checking for the event loop.
     """
-    import inspect
-    import sys
-    import threading
 
-    methods = inspect.getmembers(self.__class__, predicate=inspect.isfunction)
-    async_methods = [name for name, method in methods if inspect.iscoroutinefunction(method)]
+    cls_name = cls.__name__
+
+    # --- Check for async methods defined directly on the class ---
+    async_methods = []
+    for name, obj in vars(cls).items():
+        # unwrap @staticmethod / @classmethod to underlying function
+        if isinstance(obj, (staticmethod, classmethod)):
+            func = obj.__func__
+        elif inspect.isfunction(obj):
+            func = obj
+        else:
+            continue  # not a function we care about
+
+        # catch both coroutine functions and async generators
+        if inspect.iscoroutinefunction(func) or inspect.isasyncgenfunction(func):
+            async_methods.append(name)
+
     if async_methods:
-        logger.error(f"Found async methods in LLMRayActor: {async_methods}")
-    else:
-        logger.info("No async methods found in LLMRayActor")
+        async_methods.sort()
+        raise AssertionError(
+            f"{cls_name} must not define async methods for threaded actor mode. "
+            f"Found: {async_methods}. "
+            f"Fix: convert these to sync methods and run async work in a background loop/thread."
+        )
 
-    # In Python 3.10+, asyncio.get_event_loop() creates a loop if none exists
-    # So we need to check if there's a running loop instead
+    # --- Check that no event loop is running in this thread ---
     try:
         loop = asyncio.get_running_loop()
-        # There's a running event loop - we're in an async actor (bad!)
-        raise AssertionError(
-            f"LLMRayActor must run in a threaded Ray actor to avoid event loop conflicts. "
-            f"Current actor has a RUNNING event loop (async actor). "
-            f"Loop: {loop}, Thread: {threading.current_thread().name}. "
-            f"Python version: {sys.version}. "
-            f"Fix: Ensure no async methods in LLMRayActor class."
-        )
     except RuntimeError as e:
-        # No running event loop - we're in a threaded actor (good!)
+        # Expected in threaded (non-async) contexts
         if "no running event loop" in str(e).lower():
-            logger.info("✓ No running event loop detected - running in threaded actor mode")
             return
-        else:
-            # Some other RuntimeError - log it but continue
-            logger.warning(f"Unexpected error checking for event loop: {e}")
-            return
-
-
-# ============================================================================
-# Free async functions for async operations
-# ============================================================================
+        # Other RuntimeError is unexpected—surface it
+        raise
+    else:
+        # If we got a loop, we’re in an async actor (not allowed here)
+        raise AssertionError(
+            f"{cls_name} must run in a threaded Ray actor (no running event loop). "
+            f"Detected RUNNING loop={loop!r} on thread='{threading.current_thread().name}'. "
+            f"Python={sys.version.split()[0]}."
+        )
 
 
 async def generate_one_completion(
