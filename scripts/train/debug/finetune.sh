@@ -14,6 +14,7 @@ uv run python mason.py \
     --num_nodes 1 \
     --budget ai2/oe-adapt \
     --gpus 1 \
+    --non_resumable \
     -- \
     accelerate launch \
     --mixed_precision bf16 \
