@@ -639,11 +639,10 @@ class PolicyTrainerRayProcess(RayProcess):
             device_name,
         )
 
-        ds_init_kwargs = {"timeout": timedelta(minutes=args.backend_timeout)}
-        if cuda_available and current_device is not None:
-            ds_init_kwargs["device_id"] = current_device
-
-        deepspeed.init_distributed(**ds_init_kwargs)
+        # DeepSpeed <0.15 does not accept a device_id kwarg, so rely on torch.cuda.set_device above and
+        # make sure LOCAL_RANK reflects the ray-assigned GPU before initializing.
+        os.environ["LOCAL_RANK"] = str(self.local_rank)
+        deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
         ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
