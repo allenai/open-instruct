@@ -625,20 +625,6 @@ class PolicyTrainerRayProcess(RayProcess):
         np.random.seed(worker_seed)
         random.seed(worker_seed)
 
-        # Log per-rank device assignment to assist NCCL debugging.
-        cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "<unset>")
-        cuda_available = torch.cuda.is_available()
-        current_device = torch.cuda.current_device() if cuda_available else None
-        device_name = torch.cuda.get_device_name(current_device) if cuda_available else "cpu"
-        logger.info(
-            "[distributed_init] rank=%s local_rank=%s cuda_visible_devices=%s current_device=%s (%s)",
-            self.rank,
-            self.local_rank,
-            cuda_visible_devices,
-            current_device,
-            device_name,
-        )
-
         # DeepSpeed <0.15 does not accept a device_id kwarg, so rely on torch.cuda.set_device above and
         # make sure LOCAL_RANK reflects the ray-assigned GPU before initializing.
         os.environ["LOCAL_RANK"] = str(self.local_rank)
@@ -891,14 +877,12 @@ class PolicyTrainerRayProcess(RayProcess):
             all_refs.extend(refss)
         return all_refs
 
-    def distributed_barrier(self, tag: str = ""):
+    def maybe_distributed_barrier(self, tag: str = ""):
         """Synchronize all learners via torch.distributed.barrier with logging."""
         if dist.is_initialized():
             logger.info("[distributed_barrier] rank=%s tag=%s entering", self.rank, tag)
             dist.barrier()
             logger.info("[distributed_barrier] rank=%s tag=%s complete", self.rank, tag)
-        else:
-            logger.info("[distributed_barrier] rank=%s tag=%s skipped (dist not initialized)", self.rank, tag)
 
     def update_ref_policy(self):
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
@@ -938,23 +922,6 @@ class PolicyTrainerRayProcess(RayProcess):
             collated_advantages = collated_advantages[0:-leftover]
             collated_response_masks = collated_response_masks[0:-leftover]
             logger.warning(f"{leftover} samples are dropped due to batch size {num_mini_batches}")
-
-        # Record per-rank batching state to spot desynchronization issues.
-        local_batch_info = (len(collated_query_responses), accumulation_steps, num_mini_batches)
-        logger.info(
-            "[train_setup] rank=%s batches=%s accum_steps=%s requested_mbs=%s",
-            self.rank,
-            local_batch_info[0],
-            local_batch_info[1],
-            local_batch_info[2],
-        )
-        if dist.is_initialized():
-            gathered_batch_info = [None] * dist.get_world_size()
-            dist.all_gather_object(gathered_batch_info, local_batch_info)
-            if self.rank == 0:
-                unique_infos = set(gathered_batch_info)
-                if len(unique_infos) > 1:
-                    logger.error("[train_setup] mismatched batch metadata across ranks: %s", gathered_batch_info)
 
         # recalculate the "real" number of mini-batches
         num_mini_batches = len(collated_query_responses) // accumulation_steps
@@ -2323,9 +2290,11 @@ def weight_sync_thread(
                 enable=args.verbose,
             )
 
-            barrier_tag = f"weight_sync_{time.monotonic():.0f}"
             ray_get_with_progress(
-                [m.distributed_barrier.remote(f"{barrier_tag}_post_update") for m in policy_group.models],
+                [
+                    m.maybe_distributed_barrier.remote(f"weight_sync_{time.monotonic():.0f}_post_update")
+                    for m in policy_group.models
+                ],
                 desc="[Weight Sync Thread] Distributed barrier",
                 enable=args.verbose,
             )
@@ -2362,11 +2331,8 @@ def generate_thread(args, vllm_engines, resume_training_step, stop_event, genera
                 enable=args.verbose,
             )
             num_processed = sum(int(result) for result in processed_results)
-            # Suppress timing output if nothing was processed
             if num_processed == 0:
                 timer.noop = True
-                # Sleep for 10 seconds when no work was processed to avoid tight loop
-                time.sleep(10)
         if num_processed > 0:
             try:
                 generate_metrics_Q.put_nowait({"time/generation": timer.duration})

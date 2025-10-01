@@ -51,14 +51,22 @@ from open_instruct.utils import ray_get_with_progress
 logger = logger_utils.setup_logger(__name__)
 
 
-def assert_threaded_actor() -> None:
+def assert_threaded_actor(self) -> None:
     """Assert that we're running in a threaded Ray actor (no event loop) vs async actor (has event loop).
 
     Raises:
         AssertionError: If running in an async actor with an event loop
     """
+    import inspect
     import sys
     import threading
+
+    methods = inspect.getmembers(self.__class__, predicate=inspect.isfunction)
+    async_methods = [name for name, method in methods if inspect.iscoroutinefunction(method)]
+    if async_methods:
+        logger.error(f"Found async methods in LLMRayActor: {async_methods}")
+    else:
+        logger.info("No async methods found in LLMRayActor")
 
     # In Python 3.10+, asyncio.get_event_loop() creates a loop if none exists
     # So we need to check if there's a running loop instead
@@ -92,21 +100,15 @@ async def generate_one_completion(
     llm_engine: vllm.AsyncLLMEngine, request_id: str, prompt: vllm.TokensPrompt, sampling_params: vllm.SamplingParams
 ) -> vllm.RequestOutput:
     """Generate a single completion from the async engine."""
-    logger.info(f"[generate_one_completion] Adding request {request_id} to engine")
+    logger.debug(f"[generate_one_completion] Adding request {request_id} to engine")
     generator = await llm_engine.add_request(request_id, prompt, sampling_params)
-    logger.info(f"[generate_one_completion] Got generator for {request_id}, starting iteration")
+    logger.debug(f"[generate_one_completion] Got generator for {request_id}, starting iteration")
 
     outputs = []
-    iteration_count = 0
     async for output in generator:
-        iteration_count += 1
-        if iteration_count % 100 == 0:
-            logger.info(
-                f"[generate_one_completion] Iteration {iteration_count} for {request_id}, finished={output.finished}"
-            )
         if output.finished:
             outputs.append(output)
-            logger.info(f"[generate_one_completion] Request {request_id} finished after {iteration_count} iterations")
+            logger.debug(f"[generate_one_completion] Request {request_id} finished")
             break
 
     assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
@@ -125,8 +127,6 @@ async def process_request_async(
     tools: Optional[Dict[str, Tool]] = None,
 ):
     """Process a single async request and push to completion queue when ready."""
-    logger.info(f"[process_request_async] START {sub_request_id}")
-
     # Generate completion
     request_output = await generate_one_completion(llm_engine, sub_request_id, prompt, sampling_params)
 
@@ -163,7 +163,6 @@ async def process_request_async(
 
     # Push sub-request to completion queue
     completion_queue.put(sub_request_result)
-    logger.info(f"[process_request_async] Pushed sub-request {sub_request_id} to completion queue")
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -395,18 +394,7 @@ class LLMRayActor:
         verbose: bool = False,
         **kwargs,
     ):
-        # Debug: Check what methods Ray sees
-        import inspect
-
-        methods = inspect.getmembers(self.__class__, predicate=inspect.isfunction)
-        async_methods = [name for name, method in methods if inspect.iscoroutinefunction(method)]
-        if async_methods:
-            logger.error(f"Found async methods in LLMRayActor: {async_methods}")
-        else:
-            logger.info("No async methods found in LLMRayActor")
-
-        # Ensure we're in a threaded actor
-        assert_threaded_actor()
+        assert_threaded_actor(self)
 
         self.logger = logger_utils.setup_logger(__name__)
         if verbose:
