@@ -471,6 +471,8 @@ class LLMRayActor:
         self._should_stop_timeout_s = 5
         self._inflight_ref = None
 
+        self._executor = futures.ThreadPoolExecutor(max_workers=1)
+
         # Async tracking for request accumulation
         self.active_tasks = {}  # Track active async tasks
         self.request_outputs = {}  # Accumulate outputs until all N samples complete
@@ -488,9 +490,7 @@ class LLMRayActor:
         if not self.init_complete.wait(timeout=120):
             raise RuntimeError("Failed to initialize AsyncLLMEngine within 120 seconds")
 
-        # Start synchronous prefetch thread
-        self.prefetch_thread = threading.Thread(target=self._prefetch_requests, daemon=True)
-        self.prefetch_thread.start()
+        self._prefetch_future = self._executor.submit(self._prefetch_worker)
 
     def _run_async_loop(self):
         """Run the async event loop in a dedicated thread."""
@@ -519,24 +519,20 @@ class LLMRayActor:
             self.init_complete.set()  # Unblock waiting thread
             raise
 
-    def _prefetch_requests(self):
-        """Synchronous prefetch that spawns async tasks."""
+    def _prefetch_worker(self, sleep_length_s: int = 1):
+        """Background worker that prefetches requests until we have enough buffered."""
         while True:
-            # Don't consume requests during weight sync
             if self._should_stop():
-                time.sleep(0.1)
+                time.sleep(sleep_length_s)
                 continue
 
-            # Periodically verify that all spawned async tasks are healthy
             self._check_active_tasks()
 
-            # Check if we need more requests
             current_unfinished = len(self.active_tasks)
             if current_unfinished >= self.inference_batch_size:
-                time.sleep(1)
+                time.sleep(sleep_length_s)
                 continue
 
-            # Try to get a request
             try:
                 request = self.prompt_queue.get(timeout=0.1)
             except queue.Empty:
@@ -545,14 +541,11 @@ class LLMRayActor:
             if request is None:
                 continue
 
-            # Check again AFTER getting request but BEFORE adding to engine
             if self._should_stop():
-                # Put the request back in the queue
                 self.prompt_queue.put(request)
-                time.sleep(0.1)
+                time.sleep(sleep_length_s)
                 continue
 
-            # Add the request by spawning async tasks
             self._add_request_sync(request)
 
     def get_model_dims_dict(self):
@@ -688,7 +681,6 @@ class LLMRayActor:
             logger.info("[process_from_queue] Background loop restarted")
 
         while not self._should_exit():
-            # Health check: ensure prefetch worker is alive. This will raise if it has crashed.
             if self._prefetch_future.done():
                 self._prefetch_future.result()
 
