@@ -5,7 +5,7 @@ for lr in 2e-5 1.75e-5; do
 for loss_type in sum; do
 for seed in 7; do
 python scripts/submit_finetune_job.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --priority urgent \
     --workspace ai2/tulu-3-dev \
     --num_nodes 4 \
@@ -13,7 +13,6 @@ python scripts/submit_finetune_job.py \
     --config configs/train_configs/olmo2/olmo2_1124_7b_sft.yaml \
     --exp_name "0119_node8_finetune_olmoe_1b_epoch_${epoch}_lr_${lr}_loss_type_${loss_type}" \
     --seed $seed \
-    --reduce_loss $loss_type \
     --learning_rate $lr \
     --num_train_epochs $epoch \
     --per_device_train_batch_size 2 \
@@ -30,7 +29,7 @@ done
 # 1B full sweep 5e-7 
 for lr in 6e-7 7e-7; do
 python scripts/submit_dpo_job.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --priority urgent \
     --workspace ai2/tulu-3-dev \
     --num_nodes 4 \
@@ -49,7 +48,7 @@ done
 
 for lr in 6e-7 7e-7; do
 python scripts/submit_dpo_job.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --priority urgent \
     --workspace ai2/tulu-3-dev \
     --num_nodes 4 \
@@ -72,7 +71,7 @@ for grad_accu_steps in 1 2; do
 bsz=$((8 * 8 * 2 * $grad_accu_steps))
 exp_name="0125_node8_sft_olmoe_1b_lr_${lr}_bsz_${bsz}"
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
@@ -107,7 +106,6 @@ python mason.py \
     --with_tracking \
     --report_to wandb \
     --logging_steps 1 \
-    --reduce_loss sum \
     --add_bos
 done
 done
@@ -118,7 +116,7 @@ done
 for lr in 5e-7 6e-7 7e-7 8e-7 9e-7; do
 exp_name="0119_node4_dpo_olmoe_1blr_${lr}"
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
@@ -179,7 +177,7 @@ done
 for lr in 5e-7 6e-7 7e-7 8e-7 9e-7; do
 exp_name="0125_dpo_olmoe_1blr_${lr}"
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
@@ -234,7 +232,7 @@ done
 for lr in 5e-7 6e-7 7e-7 8e-7 9e-7; do
 exp_name="0125_dpo_olmoe_1blr_${lr}"
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
@@ -290,12 +288,12 @@ done
 
 # reward model
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --priority urgent \
     --preemptible \
     --num_nodes 4 \
     --workspace ai2/tulu-3-dev \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- accelerate launch \
     --deepspeed_multinode_launcher standard \
     --num_processes 8 \
@@ -325,7 +323,7 @@ python mason.py \
 for lr in 5e-7 6e-7 7e-7 8e-7 9e-7; do
 exp_name="0125_dpo_olmoe_1blr_${lr}"
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
@@ -384,7 +382,7 @@ done
 for beta in 0.01 0.02 0.03 0.07; do
 exp_name="0119_ppo_olmoe_1node_${beta}_${RANDOM}"
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
@@ -437,7 +435,7 @@ done
 for beta in 0.01 0.02 0.03 0.07; do
 exp_name="0119_ppo_olmoe_rm_init_1node_${beta}_${RANDOM}"
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
@@ -490,7 +488,7 @@ done
 for beta in 0.01; do
 exp_name="0119_ppo_olmoe_rm_init_4node_${beta}_${RANDOM}"
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
@@ -544,7 +542,7 @@ done
 for beta in 0.01 0.02 0.03 0.07; do
 exp_name="0119_2_ppo_olmoe_rm_init_1node_${beta}_${RANDOM}"
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
@@ -594,11 +592,11 @@ python mason.py \
 done
 
 # python mason.py \
-#     --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale ai2/neptune-cirrascale ai2/ceres-cirrascale \
+#     --cluster ai2/jupiter ai2/saturn ai2/neptune ai2/ceres \
 #     --workspace ai2/tulu-3-dev \
 #     --priority urgent \
 #     --preemptible \
-#     --budget ai2/allennlp \
+#     --budget ai2/jupiter \
 #     --gpus 8 -- accelerate launch \
 #     --mixed_precision bf16 \
 #     --num_processes 8 \
@@ -624,7 +622,6 @@ done
 #     --with_tracking \
 #     --report_to wandb \
 #     --logging_steps 1 \
-#     --reduce_loss sum \
 #     --checkpointing_steps epoch \
 #     --dataset_mix_dir /output/ \
 #     --hf_metadata_dataset allenai/2025-1-olmoe-instruct-evals \
@@ -632,12 +629,12 @@ done
 
 # # this is a lot more efficient
 # python mason.py \
-#     --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale ai2/neptune-cirrascale ai2/ceres-cirrascale \
+#     --cluster ai2/jupiter ai2/saturn ai2/neptune ai2/ceres \
 #     --workspace ai2/tulu-3-dev \
 #     --priority urgent \
 #     --preemptible \
 #     --num_nodes 4 \
-#     --budget ai2/allennlp \
+#     --budget ai2/jupiter \
 #     --gpus 8 -- accelerate launch \
 #     --config_file configs/ds_configs/deepspeed_zero2.yaml \
 #     --deepspeed_multinode_launcher standard \
@@ -662,7 +659,6 @@ done
 #     --with_tracking \
 #     --report_to wandb \
 #     --logging_steps 1 \
-#     --reduce_loss sum \
 #     --dataset_mix_dir /output/ \
 #     --hf_metadata_dataset allenai/2025-1-olmoe-instruct-evals \
 #     --add_bos true
@@ -690,7 +686,6 @@ done
 #     --with_tracking \
 #     --report_to wandb \
 #     --logging_steps 1 \
-#     --reduce_loss sum \
 #     --checkpointing_steps epoch \
 #     --dataset_mix_dir /output/ \
 #     --hf_metadata_dataset allenai/2025-1-olmoe-instruct-evals \
@@ -717,7 +712,6 @@ done
 #     --with_tracking \
 #     --report_to wandb \
 #     --logging_steps 1 \
-#     --reduce_loss sum \
 #     --checkpointing_steps epoch \
 #     --dataset_mix_dir /output/ \
 #     --hf_metadata_dataset allenai/2025-1-olmoe-instruct-evals \
@@ -770,7 +764,6 @@ done
 #     --with_tracking \
 #     --report_to wandb \
 #     --logging_steps 1 \
-#     --reduce_loss sum \
 #     --checkpointing_steps epoch \
 #     --dataset_mix_dir /output/ \
 #     --hf_metadata_dataset allenai/2025-1-olmoe-instruct-evals \
@@ -815,7 +808,6 @@ done
 #     --with_tracking \
 #     --report_to wandb \
 #     --logging_steps 1 \
-#     --reduce_loss sum \
 #     --checkpointing_steps epoch \
 #     --dataset_mix_dir /output/ \
 #     --hf_metadata_dataset allenai/2025-1-olmoe-instruct-evals \
@@ -859,7 +851,6 @@ done
 #     --with_tracking \
 #     --report_to wandb \
 #     --logging_steps 1 \
-#     --reduce_loss sum \
 #     --checkpointing_steps epoch \
 #     --dataset_mix_dir /output/ \
 #     --hf_metadata_dataset allenai/2025-1-olmoe-instruct-evals \

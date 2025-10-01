@@ -67,10 +67,10 @@ echo $command
 # Run the combined command
 echo "Submitting all shards in one command"
 python mason.py \
-    --cluster ai2/general-cirrascale-a5000 ai2/allennlp-cirrascale ai2/s2-cirrascale ai2/mosaic-cirrascale \
+    --cluster ai2/jupiter \
     --priority low \
     --preemptible \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus $num_gpus -- $command
 
 echo "All shards submitted"

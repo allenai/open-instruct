@@ -46,7 +46,6 @@ accelerate launch \
     --with_tracking \
     --report_to wandb \
     --logging_steps 1 \
-    --reduce_loss sum \
     --model_revision main \
     --dataset_mixer_list allenai/tulu-3-sft-mixture 1.0 \
     --checkpointing_steps epoch \
@@ -111,7 +110,6 @@ accelerate launch \
     --with_tracking \
     --report_to wandb \
     --logging_steps 1 \
-    --reduce_loss sum \
     --model_revision main \
     --dataset_mixer_list allenai/tulu-3-sft-mixture 1.0 \
     --dataset_mix_dir output/sft_70B \
@@ -416,7 +414,7 @@ Couple of notes:
 
 ```bash
 TORCH_NCCL_ENABLE_MONITORING=0 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 --pure_docker_mode \
+    --cluster ai2/jupiter --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
@@ -491,7 +489,7 @@ echo --- local_mini_batch_size=$local_mini_batch_size
 echo --- full_bsz=$full_bsz
 echo --- num_gradient_updates=$(($local_rollout_batch_size * $nspp / $local_mini_batch_size))
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
@@ -568,7 +566,7 @@ If you are running on a single node (8 GPUs), consider adjusting the commands as
  echo --- full_bsz=$full_bsz
  echo --- num_gradient_updates=$(($local_rollout_batch_size * $nspp / $local_mini_batch_size))
  python mason.py \
-     --cluster ai2/jupiter-cirrascale-2 \
+     --cluster ai2/jupiter \
      --workspace ai2/tulu-3-dev \
      --priority high \
      --preemptible \
