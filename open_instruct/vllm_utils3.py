@@ -53,9 +53,9 @@ from open_instruct.utils import ray_get_with_progress
 logger = logger_utils.setup_logger(__name__)
 
 
-def assert_threaded_actor(cls: type):
+def assert_threaded_actor(instance):
     """
-    Assert that a class is suitable for use in a threaded (non-async) Ray actor.
+    Assert that an instance's class is suitable for use in a threaded (non-async) Ray actor.
 
     This function performs two checks:
       1. The class must not define any `async def` methods
@@ -63,13 +63,13 @@ def assert_threaded_actor(cls: type):
       2. There must not be a running asyncio event loop in the current thread.
 
     Args:
-        cls (type): The class to inspect.
+        instance: The instance whose class to inspect.
 
     Raises:
         AssertionError: If the class defines one or more async methods, or a running asyncio event loop is detected.
         RuntimeError: If an unexpected error occurs while checking for the event loop.
     """
-
+    cls = instance.__class__
     cls_name = cls.__name__
 
     # --- Check for async methods defined directly on the class ---
