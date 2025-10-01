@@ -75,6 +75,16 @@ INTERCONNECT_CLUSTERS = [
     "ai2/augusta",
 ]
 
+# by default, we turn off vllm compile cache
+# torch compile caching seems consistently broken, but the actual compiling isn't.
+# Not sure why, for now we have disabled the caching (VLLM_DISABLE_COMPILE_CACHE=1).
+DEFAULT_ENV_VARS = {
+    "RAY_CGRAPH_get_timeout": "300",
+    "VLLM_DISABLE_COMPILE_CACHE": "1",
+    "NCCL_DEBUG": "ERROR",
+    "VLLM_LOGGING_LEVEL": "WARNING",
+}
+
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -250,11 +260,13 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
                 whoami: str, resumable: bool, num_nodes: int, additional_env_vars: List[Dict[str, str]],
                 additional_secrets: List[Dict[str, str]]):
     env_vars = []
-    additional_env_var_names = [var["name"] for var in additional_env_vars]
-    if "RAY_CGRAPH_get_timeout" not in additional_env_var_names:
-        env_vars.append(beaker.EnvVar(name="RAY_CGRAPH_get_timeout",
-                                      value="300"))
-    # Add user-specified environment variables first
+    conflicting_vars = {var["name"] for var in additional_env_vars} & DEFAULT_ENV_VARS.keys()
+    if conflicting_vars:
+        raise ValueError(f"Cannot override default environment variables: {conflicting_vars}")
+
+    for name, value in DEFAULT_ENV_VARS.items():
+        env_vars.append(beaker.EnvVar(name=name, value=value))
+
     for env_var in additional_env_vars:
         env_vars.append(
             beaker.EnvVar(
@@ -335,10 +347,6 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
                 beaker.EnvVar(
                     name="NCCL_IB_HCA",
                     value="^=mlx5_bond_0",
-                ),
-                beaker.EnvVar(
-                    name="NCCL_DEBUG",
-                    value="INFO",
                 ),
             ])
     # if all cluster is in gcp we add the following env
@@ -445,10 +453,6 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
                     value="0",
                 ),
                 beaker.EnvVar(
-                    name="NCCL_DEBUG",
-                    value="WARN",
-                ),
-                beaker.EnvVar(
                     name="NCCL_FASTRAK_CTRL_DEV",
                     value="enp0s12",
                 ),
@@ -488,16 +492,6 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
                 value="allow",
             ),
         ])
-
-    # by default, we turn off vllm compile cache
-    # torch compile caching seems consistently broken, but the actual compiling isn't.
-    # Not sure why, for now we have disabled the caching (VLLM_DISABLE_COMPILE_CACHE=1).
-    env_vars.extend([
-        beaker.EnvVar(
-            name="VLLM_DISABLE_COMPILE_CACHE",
-            value="1",
-        ),
-    ])
 
     return env_vars
 
