@@ -272,6 +272,7 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
         for env_var in additional_env_vars
     ])
 
+    # add user-specific secrets
     env_vars.extend([
         beaker.EnvVar(name=secret["name"], secret=secret["value"])
         for secret in additional_secrets
