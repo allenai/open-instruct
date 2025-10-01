@@ -225,26 +225,27 @@ def parse_commands(command_args: List[str]) -> List[List[str]]:
     return commands
 
 
-def get_env_vars(
-    pure_docker_mode: bool,
-    cluster: List[str],
-    beaker_secrets: List[str],
-    whoami: str,
-    resumable: bool,
-    num_nodes: int,
-    additional_env_vars: List[Dict[str, str]],
-    additional_secrets: List[Dict[str, str]],
-):
-    conflicting_vars = {var["name"] for var in additional_env_vars} & DEFAULT_ENV_VARS.keys()
-    if conflicting_vars:
-        raise ValueError(f"Cannot override default environment variables: {conflicting_vars}")
-    env_vars = [beaker.EnvVar(name=name, value=value) for name, value in DEFAULT_ENV_VARS.items()]
+def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: List[str],
+                whoami: str, resumable: bool, num_nodes: int, additional_env_vars: List[Dict[str, str]],
+                additional_secrets: List[Dict[str, str]]):
+    additional_env_var_names = {var["name"] for var in additional_env_vars}
 
-    for env_var in additional_env_vars:
-        env_vars.append(beaker.EnvVar(name=env_var["name"], value=env_var["value"]))
+    env_vars = [
+        beaker.EnvVar(name=name, value=value)
+        for name, value in DEFAULT_ENV_VARS.items()
+        if name not in additional_env_var_names
+    ]
+
+    env_vars.extend([
+        beaker.EnvVar(name=env_var["name"], value=env_var["value"])
+        for env_var in additional_env_vars
+    ])
+
     # add user-specific secrets
-    for secret in additional_secrets:
-        env_vars.append(beaker.EnvVar(name=secret["name"], secret=secret["value"]))
+    env_vars.extend([
+        beaker.EnvVar(name=secret["name"], secret=secret["value"])
+        for secret in additional_secrets
+    ])
 
     useful_secrets = [
         "HF_TOKEN",
