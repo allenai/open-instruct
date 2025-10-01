@@ -37,7 +37,6 @@ uv run python mason.py \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
-    --reduce_loss sum \
     --use_flash_attn \
     --gradient_checkpointing \
     --report_to wandb \
