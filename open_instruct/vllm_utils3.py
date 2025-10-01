@@ -478,6 +478,9 @@ class LLMRayActor:
 
         self._executor = futures.ThreadPoolExecutor(max_workers=1)
 
+        # Generation pause control
+        self._generation_paused = threading.Event()
+
         # Async tracking for request accumulation
         self.active_tasks = {}  # Track active async tasks
         self.request_outputs = {}  # Accumulate outputs until all N samples complete
@@ -527,6 +530,10 @@ class LLMRayActor:
     def _prefetch_worker(self, sleep_length_s: int = 1):
         """Background worker that prefetches requests until we have enough buffered."""
         while True:
+            if self._generation_paused.is_set():
+                time.sleep(sleep_length_s)
+                continue
+
             if self._should_stop():
                 time.sleep(sleep_length_s)
                 continue
@@ -609,6 +616,47 @@ class LLMRayActor:
             # Otherwise, we have pending work and should continue
 
         return False
+
+    def pause_generation(self, timeout_s: float = 300.0) -> bool:
+        """Pause vLLM background execution without draining active requests."""
+        if self._generation_paused.is_set():
+            return True
+
+        self._generation_paused.set()
+
+        if self.llm_engine is None or not hasattr(self.llm_engine, "engine"):
+            return True
+
+        engine = self.llm_engine.engine
+        if not hasattr(engine, "stop_remote_worker_execution_loop_async"):
+            logger.warning("pause_generation: engine lacks stop_remote_worker_execution_loop_async; skipping pause")
+            return True
+
+        future = asyncio.run_coroutine_threadsafe(
+            engine.stop_remote_worker_execution_loop_async(),
+            self.loop,
+        )
+
+        try:
+            future.result(timeout=timeout_s)
+            logger.info("pause_generation: background loop paused successfully")
+            return True
+        except Exception as exc:  # pylint: disable=broad-except
+            self._generation_paused.clear()
+            logger.error(f"pause_generation failed: {exc}")
+            raise
+
+    def resume_generation(self):
+        """Resume vLLM background execution after a pause."""
+        if not self._generation_paused.is_set():
+            return
+
+        try:
+            if self.llm_engine is not None:
+                self.llm_engine.start_background_loop()
+                logger.info("resume_generation: background loop restarted")
+        finally:
+            self._generation_paused.clear()
 
     def _add_request_sync(self, request: PromptRequest):
         """Add a request by spawning async tasks."""

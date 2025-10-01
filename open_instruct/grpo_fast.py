@@ -2279,29 +2279,44 @@ def weight_sync_thread(
             ray.get(actor_manager.set_should_stop.remote(True))
             logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
 
-            # Broadcast weights to vLLM engines
-            # First get the futures
-            weight_broadcast_futures: List[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+            actor_sync_times: List[float] = []
+            try:
+                # Pause generation on all engines before broadcasting weights
+                ray_get_with_progress(
+                    [engine.pause_generation.remote() for engine in vllm_engines],
+                    desc="[Weight Sync Thread] Pausing generation",
+                    enable=args.verbose,
+                )
 
-            # Wait for all weight updates to complete and collect individual timings
-            _, actor_sync_times = ray_get_with_progress(
-                weight_broadcast_futures,
-                desc="[Weight Sync Thread] Waiting for weight updates to complete",
-                enable=args.verbose,
-            )
+                # Broadcast weights to vLLM engines
+                weight_broadcast_futures: List[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
 
-            ray_get_with_progress(
-                [
-                    m.maybe_distributed_barrier.remote(f"weight_sync_{time.monotonic():.0f}_post_update")
-                    for m in policy_group.models
-                ],
-                desc="[Weight Sync Thread] Distributed barrier",
-                enable=args.verbose,
-            )
+                # Wait for all weight updates to complete and collect individual timings
+                _, actor_sync_times = ray_get_with_progress(
+                    weight_broadcast_futures,
+                    desc="[Weight Sync Thread] Waiting for weight updates to complete",
+                    enable=args.verbose,
+                )
 
-            # Allow actors to resume
-            ray.get(actor_manager.set_should_stop.remote(False))
-            logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
+                ray_get_with_progress(
+                    [
+                        m.maybe_distributed_barrier.remote(f"weight_sync_{time.monotonic():.0f}_post_update")
+                        for m in policy_group.models
+                    ],
+                    desc="[Weight Sync Thread] Distributed barrier",
+                    enable=args.verbose,
+                )
+            finally:
+                # Resume generation regardless of broadcast outcome
+                ray_get_with_progress(
+                    [engine.resume_generation.remote() for engine in vllm_engines],
+                    desc="[Weight Sync Thread] Resuming generation",
+                    enable=args.verbose,
+                )
+
+                # Allow actors to resume normal operation
+                ray.get(actor_manager.set_should_stop.remote(False))
+                logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
 
         # Calculate distribution statistics
         sync_time_stats = {
