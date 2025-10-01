@@ -680,10 +680,13 @@ class LLMRayActor:
         """
         total_processed = 0
 
-        if not self.llm_engine.is_running:
-            logger.warning("[process_from_queue] Background loop not running, restarting...")
-            self.llm_engine.start_background_loop()
-            logger.info("[process_from_queue] Background loop restarted")
+        # Assert that background loop should NOT be running on entry
+        assert not self.llm_engine.is_running, "[process_from_queue] Background loop should not be running on entry!"
+
+        # Always start the background loop when entering
+        logger.info("[process_from_queue] Starting background loop on entry")
+        self.llm_engine.start_background_loop()
+        logger.info("[process_from_queue] Background loop started")
 
         while not self._should_exit():
             if self._prefetch_future.done():
@@ -756,6 +759,12 @@ class LLMRayActor:
 
             except queue.Empty:
                 pass
+
+        # Shutdown the background loop before exiting
+        logger.info("[process_from_queue] Shutting down background loop on exit")
+        self.llm_engine.shutdown_background_loop()
+        logger.info("[process_from_queue] Background loop shut down")
+
         return total_processed
 
     def _check_active_tasks(self):
