@@ -25,7 +25,7 @@ image_name=open-instruct-integration-test-${sanitized_branch}
 
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 
-existing_image_desc=$(beaker image get "$beaker_user/$image_name" --format json 2>/dev/null | jq -r '.description // ""' || echo "")
+existing_image_desc=$(beaker image get "$beaker_user/$image_name" --format json 2>/dev/null | jq -r '.[0].description // ""' || echo "")
 
 if [[ "$existing_image_desc" == *"$git_hash"* ]] && [[ -n "$existing_image_desc" ]]; then
   echo "Beaker image already exists for commit $git_hash, skipping Docker build and upload."
