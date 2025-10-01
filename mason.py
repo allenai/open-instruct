@@ -260,9 +260,7 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
                 whoami: str, resumable: bool, num_nodes: int, additional_env_vars: List[Dict[str, str]],
                 additional_secrets: List[Dict[str, str]]):
     env_vars = []
-    additional_env_var_names = [var["name"] for var in additional_env_vars]
-
-    conflicting_vars = set(additional_env_var_names) & set(DEFAULT_ENV_VARS.keys())
+    conflicting_vars = {var["name"] for var in additional_env_vars} & DEFAULT_ENV_VARS.keys()
     if conflicting_vars:
         raise ValueError(f"Cannot override default environment variables: {conflicting_vars}")
 
