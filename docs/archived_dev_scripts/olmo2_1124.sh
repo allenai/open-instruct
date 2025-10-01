@@ -5,7 +5,7 @@ for lr in 1e-5; do
 for loss_type in sum; do
 for seed in 3 4; do
 python scripts/submit_finetune_job.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --priority urgent \
     --workspace ai2/tulu-3-dev \
     --num_nodes 4 \
@@ -25,7 +25,7 @@ done
 # 7B DPO sweep 5e-7 6e-7 7e-7 8e-7 
 for lr in 1e-6 2e-6 3e-6; do
 python scripts/submit_dpo_job.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --priority urgent \
     --workspace ai2/tulu-3-dev \
     --num_nodes 4 \
@@ -45,7 +45,7 @@ for epoch in 2; do
 for lr in 7e-6 7.25e-6 7.5e-6 8e-6; do
 for loss_type in sum; do
 python scripts/submit_finetune_job.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --priority urgent \
     --workspace ai2/tulu-3-dev \
     --num_nodes 4 \
@@ -65,7 +65,7 @@ for epoch in 2; do
 for lr in 6e-6 7.5e-6 8e-6; do
 for loss_type in sum; do
 python scripts/submit_finetune_job.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --priority urgent \
     --workspace ai2/tulu-3-dev \
     --num_nodes 4 \
@@ -85,7 +85,7 @@ done
 # 13B DPO sweep
 for lr in 5e-7 6e-7 7e-7 8e-7; do
 python scripts/submit_dpo_job.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --priority urgent \
     --workspace ai2/tulu-3-dev \
     --num_nodes 4 \
@@ -107,7 +107,7 @@ done
 
 python scripts/submit_eval_jobs.py \
     --model_name hf-shanearora/i-am-a-good-open-base-model \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --location shanearora/i-am-a-good-open-base-model  \
     --workspace tulu-3-results \
     --preemptible \
@@ -123,7 +123,7 @@ python scripts/submit_eval_jobs.py \
 python scripts/submit_eval_jobs.py \
     --model_name 1203_13b_gsm_math_if_beta_0.1_lr_4e-7_16858__52__1733711388 \
     --location /weka/oe-adapt-default/costah/models/olmo1124/1203_13b_gsm_math_if_beta_0.1_lr_4e-7_16858 \
-    --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
+    --cluster ai2/saturn ai2/neptune \
     --is_tuned \
     --workspace "tulu-3-results" \
     --priority high \
@@ -138,7 +138,7 @@ python scripts/submit_eval_jobs.py \
 python scripts/submit_eval_jobs.py \
     --model_name  \
     --location {step_dir} \
-    --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
+    --cluster ai2/saturn ai2/neptune \
     --is_tuned \
     --workspace "tulu-3-results" \
     --priority high \
@@ -154,12 +154,12 @@ python scripts/submit_eval_jobs.py \
 
 python mason.py \
     --image costah/open_instruct_ppo_olmo22 --pure_docker_mode \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --priority urgent \
     --preemptible \
     --num_nodes 4 \
     --workspace ai2/tulu-3-dev \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& accelerate launch \
     --deepspeed_multinode_launcher standard \
     --num_machines 4 \
@@ -186,12 +186,12 @@ python mason.py \
 
 python mason.py \
     --image costah/open_instruct_ppo_olmo22 --pure_docker_mode \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --priority urgent \
     --preemptible \
     --num_nodes 4 \
     --workspace ai2/tulu-3-dev \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& accelerate launch \
     --deepspeed_multinode_launcher standard \
     --num_machines 4 \
@@ -225,13 +225,13 @@ for seed in 1; do
 exp_name="1203_7b_lrm_gsm_math_if_beta_${beta}_lr_${lr}_${RANDOM}"
 echo $exp_name
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 --image nathanl/open_instruct_auto --pure_docker_mode \
+    --cluster ai2/jupiter --image nathanl/open_instruct_auto --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo22 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \
@@ -282,13 +282,13 @@ for seed in 52; do
 exp_name="1203_13b_gsm_math_if_beta_${beta}_lr_${lr}_${RANDOM}"
 echo $exp_name
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 --image nathanl/open_instruct_auto --pure_docker_mode \
+    --cluster ai2/jupiter --image nathanl/open_instruct_auto --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo22 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \
@@ -339,7 +339,7 @@ done
 # 7B DPO sweep 
 for lr in 6e-7 7e-7 8e-7 9e-7 1e-6 2e-6; do
 python scripts/submit_dpo_job.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --priority urgent \
     --workspace ai2/tulu-3-dev \
     --num_nodes 4 \
@@ -358,12 +358,12 @@ done
 # 7b RM
 python mason.py \
     --image costah/open_instruct_ppo_olmo23 --pure_docker_mode \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --priority urgent \
     --preemptible \
     --num_nodes 2 \
     --workspace ai2/tulu-3-dev \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& accelerate launch \
     --deepspeed_multinode_launcher standard \
     --num_machines 2 \
@@ -394,7 +394,7 @@ python mason.py \
 # 13B DPO sweep 8e-7 
 for lr in 8.5e-7 9e-7 9.5e-7 1e-6 1.5e-6 2e-6 ; do
 python scripts/submit_dpo_job.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --priority urgent \
     --workspace ai2/tulu-3-dev \
     --num_nodes 4 \
@@ -413,12 +413,12 @@ done
 # 13b RM
 python mason.py \
     --image costah/open_instruct_ppo_olmo23 --pure_docker_mode \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --priority urgent \
     --preemptible \
     --num_nodes 4 \
     --workspace ai2/tulu-3-dev \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& accelerate launch \
     --deepspeed_multinode_launcher standard \
     --num_machines 4 \
@@ -454,13 +454,13 @@ for seed in 1; do
 exp_name="1210_7b_gsm_math_if_beta_${beta}_lr_${lr}_${RANDOM}"
 echo $exp_name
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 --image nathanl/open_instruct_auto --pure_docker_mode \
+    --cluster ai2/jupiter --image nathanl/open_instruct_auto --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo23 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \
@@ -510,13 +510,13 @@ for seed in 1; do
 exp_name="1210_7b_gsm_beta_${beta}_lr_${lr}_${RANDOM}"
 echo $exp_name
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 --image nathanl/open_instruct_auto --pure_docker_mode \
+    --cluster ai2/jupiter --image nathanl/open_instruct_auto --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo23 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \
@@ -566,13 +566,13 @@ for seed in 1; do
 exp_name="1210_7b_lrm_gsm_math_if_beta_${beta}_lr_${lr}_${RANDOM}"
 echo $exp_name
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 --image nathanl/open_instruct_auto --pure_docker_mode \
+    --cluster ai2/jupiter --image nathanl/open_instruct_auto --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo23 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \
@@ -623,13 +623,13 @@ for seed in 52; do
 exp_name="1210_13b_gsm_math_if_beta_${beta}_lr_${lr}_${RANDOM}"
 echo $exp_name
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 --image nathanl/open_instruct_auto --pure_docker_mode \
+    --cluster ai2/jupiter --image nathanl/open_instruct_auto --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo23 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \
@@ -679,13 +679,13 @@ for seed in 52; do
 exp_name="1210_2_13b_gsm_math_if_beta_${beta}_lr_${lr}_${RANDOM}"
 echo $exp_name
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 --image nathanl/open_instruct_auto --pure_docker_mode \
+    --cluster ai2/jupiter --image nathanl/open_instruct_auto --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo23 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \
@@ -738,13 +738,13 @@ for seed in 52; do
 exp_name="1210_13b_gsm_beta_${beta}_lr_${lr}_${RANDOM}"
 echo $exp_name
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 --image nathanl/open_instruct_auto --pure_docker_mode \
+    --cluster ai2/jupiter --image nathanl/open_instruct_auto --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo23 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \
@@ -794,13 +794,13 @@ for seed in 52; do
 exp_name="1210_13b_gsm_beta_${beta}_lr_${lr}_${RANDOM}"
 echo $exp_name
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 --image nathanl/open_instruct_auto --pure_docker_mode \
+    --cluster ai2/jupiter --image nathanl/open_instruct_auto --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo23 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \
@@ -850,13 +850,13 @@ for seed in 52; do
 exp_name="1210_13b_math_beta_${beta}_lr_${lr}_${RANDOM}"
 echo $exp_name
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 --image nathanl/open_instruct_auto --pure_docker_mode \
+    --cluster ai2/jupiter --image nathanl/open_instruct_auto --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo23 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \

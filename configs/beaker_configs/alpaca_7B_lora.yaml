@@ -68,6 +68,5 @@ tasks:
     resources:
       gpuCount: 4
     context:
-      # cluster: ai2/allennlp-cirrascale
-      cluster: ai2/yizhongw-4xa100-80gb
+      cluster: ai2/jupiter
       priority: high

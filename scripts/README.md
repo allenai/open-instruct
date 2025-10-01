@@ -93,7 +93,7 @@ You may want to add the `--exp_name`, the name that appears in the internal lead
 
 To use this for multi-node jobs, here is an example that runs IFT on 4 nodes:
 ```
-python scripts/submit_finetune_job.py --default_beaker_config configs/beaker_configs/default_finetune_multinode.yaml --config configs/train_configs/sft/tulu3_8b_preview_mix_v3.1.yaml --cluster ai2/jupiter-cirrascale-2 --workspace ai2/tulu-3-dev --num_nodes 4 --exp_name preview_mix
+python scripts/submit_finetune_job.py --default_beaker_config configs/beaker_configs/default_finetune_multinode.yaml --config configs/train_configs/sft/tulu3_8b_preview_mix_v3.1.yaml --cluster ai2/jupiter --workspace ai2/tulu-3-dev --num_nodes 4 --exp_name preview_mix
 ```
 
 3. `submit_dpo_job.py`: **Core script** for submitting DPO tuning jobs. It should behave like the finetune script, but additionally can take in beaker datasets to mount via `--datasets`, e.g.:
@@ -110,9 +110,9 @@ It is possible to re-use the existing environment you have and run things withou
 Then you can submit jobs via `mason.py`, which we modified from https://github.com/allenai/mason. You can run the following to do a quick check
 ```bash
 python mason.py \
-    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/general-cirrascale-a100-80g-ib \
+    --cluster ai2/jupiter \
     --priority low \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 1 -- which python
 ```
 
@@ -126,9 +126,9 @@ After setting it up successfully, say you are running `sh scripts/dpo_train_with
 
 ```bash
 python mason.py \
-    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000  \
+    --cluster ai2/jupiter \
     --priority low \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 1 -- sh scripts/finetune_with_accelerate_config.sh 1 configs/train_configs/sft/mini.yaml
 ```
 

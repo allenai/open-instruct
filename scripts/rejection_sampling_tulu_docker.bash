@@ -71,22 +71,22 @@ echo "Submitting all shards in one command"
 
 if [ "$on_jupyter" = true ]; then
     python mason.py \
-        --cluster ai2/jupiter-cirrascale-2 \
+        --cluster ai2/jupiter \
         --image costah/open_instruct_rs \
         --pure_docker_mode \
         --priority low \
         --preemptible \
-        --budget ai2/allennlp \
+        --budget ai2/jupiter \
         --gpus $num_gpus -- $command
 else
     echo "Running on Mason"
     python mason.py \
-    --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
+    --cluster ai2/jupiter \
     --image costah/open_instruct_rs \
     --pure_docker_mode \
     --priority low \
     --preemptible \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus $num_gpus -- $command
 fi
 
