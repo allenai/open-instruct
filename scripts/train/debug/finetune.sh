@@ -9,6 +9,7 @@ uv run python mason.py \
     --workspace ai2/open-instruct-dev \
     --priority normal \
     --image "$BEAKER_IMAGE" \
+    --description "Single GPU finetune job." \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
