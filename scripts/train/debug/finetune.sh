@@ -37,4 +37,5 @@ uv run python mason.py \
     --dataset_mixer_list allenai/tulu-3-sft-personas-algebra 100 \
     --add_bos \
     --seed 123 \
+    --chat_template_name tulu \
     --with_tracking
