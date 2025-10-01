@@ -15,7 +15,7 @@ In the sections below, we will include some examples on how to train models and 
 
 ```bash
 python mason.py \
-    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
+    --cluster ai2/prior \
     --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
     --priority preemptible \
     --budget ai2/allennlp \
@@ -108,7 +108,7 @@ Here we are using --vllm_device cuda:7 to say we want to launch the vllm generat
 # for running TL;DR you can likely use GPUs with less memory
 python mason.py \
     --image nathanl/open_instruct_auto --pure_docker_mode \
-    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/general-cirrascale \
+    --cluster ai2/prior \
     --priority normal \
     --resumable \
     --preemptible \
@@ -313,7 +313,7 @@ Furthermore, we also track the dataset length visualization in wandb (see detail
 ![token length visualization in wandb](reward_modeling_token_wandb.png)
 
 
-Finally, we also include samples 
+Finally, we also include samples
 
 ![reward modeling preference sample texts](reward_modeling_preference_sample_texts.png)
 
@@ -433,5 +433,3 @@ actor_thread.join()
 --[leaner] get π_6 ->  p_5 D_π_5 -> π_7, time: 7.007669448852539
 --[leaner] get π_7 ->  p_6 D_π_6 -> π_8, time: 8.009439706802368
 ```
-
-
