@@ -1,4 +1,4 @@
-python mason.py \
+uv run python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority high \
