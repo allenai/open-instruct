@@ -16,7 +16,7 @@ python mason.py \
     --workspace ai2/tulu-3-dev \
     --priority normal \
     --preemptible \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 0 -- python scripts/cache_hf.py \
     --model_name_or_path "allenai/open_instruct_dev" \
     --model_revision "reward_modeling__1__1737836233" \

@@ -76,17 +76,17 @@ if [ "$on_jupyter" = true ]; then
         --pure_docker_mode \
         --priority low \
         --preemptible \
-        --budget ai2/allennlp \
+        --budget ai2/jupiter \
         --gpus $num_gpus -- $command
 else
     echo "Running on Mason"
     python mason.py \
-    --cluster ai2/allennlp ai2/prior \
+    --cluster ai2/jupiter \
     --image costah/open_instruct_rs \
     --pure_docker_mode \
     --priority low \
     --preemptible \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus $num_gpus -- $command
 fi
 

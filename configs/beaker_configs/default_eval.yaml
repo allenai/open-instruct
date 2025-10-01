@@ -57,7 +57,7 @@ tasks:
     resources:
       gpuCount: 1
     constraints:
-      cluster: ai2/allennlp
+      cluster: ai2/jupiter
     context:
       priority: high
       preemptible: false

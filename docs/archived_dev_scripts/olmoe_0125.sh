@@ -295,7 +295,7 @@ python mason.py \
     --preemptible \
     --num_nodes 4 \
     --workspace ai2/tulu-3-dev \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- accelerate launch \
     --deepspeed_multinode_launcher standard \
     --num_processes 8 \
@@ -598,7 +598,7 @@ done
 #     --workspace ai2/tulu-3-dev \
 #     --priority urgent \
 #     --preemptible \
-#     --budget ai2/allennlp \
+#     --budget ai2/jupiter \
 #     --gpus 8 -- accelerate launch \
 #     --mixed_precision bf16 \
 #     --num_processes 8 \
@@ -637,7 +637,7 @@ done
 #     --priority urgent \
 #     --preemptible \
 #     --num_nodes 4 \
-#     --budget ai2/allennlp \
+#     --budget ai2/jupiter \
 #     --gpus 8 -- accelerate launch \
 #     --config_file configs/ds_configs/deepspeed_zero2.yaml \
 #     --deepspeed_multinode_launcher standard \

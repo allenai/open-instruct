@@ -159,7 +159,7 @@ python mason.py \
     --preemptible \
     --num_nodes 4 \
     --workspace ai2/tulu-3-dev \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& accelerate launch \
     --deepspeed_multinode_launcher standard \
     --num_machines 4 \
@@ -191,7 +191,7 @@ python mason.py \
     --preemptible \
     --num_nodes 4 \
     --workspace ai2/tulu-3-dev \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& accelerate launch \
     --deepspeed_multinode_launcher standard \
     --num_machines 4 \
@@ -231,7 +231,7 @@ python mason.py \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo22 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \
@@ -288,7 +288,7 @@ python mason.py \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo22 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \
@@ -363,7 +363,7 @@ python mason.py \
     --preemptible \
     --num_nodes 2 \
     --workspace ai2/tulu-3-dev \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& accelerate launch \
     --deepspeed_multinode_launcher standard \
     --num_machines 2 \
@@ -418,7 +418,7 @@ python mason.py \
     --preemptible \
     --num_nodes 4 \
     --workspace ai2/tulu-3-dev \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& accelerate launch \
     --deepspeed_multinode_launcher standard \
     --num_machines 4 \
@@ -460,7 +460,7 @@ python mason.py \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo23 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \
@@ -516,7 +516,7 @@ python mason.py \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo23 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \
@@ -572,7 +572,7 @@ python mason.py \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo23 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \
@@ -629,7 +629,7 @@ python mason.py \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo23 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \
@@ -685,7 +685,7 @@ python mason.py \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo23 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \
@@ -744,7 +744,7 @@ python mason.py \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo23 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \
@@ -800,7 +800,7 @@ python mason.py \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo23 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \
@@ -856,7 +856,7 @@ python mason.py \
     --preemptible \
     --num_nodes 4 \
     --image costah/open_instruct_ppo_olmo23 \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl_olmo.py \
     --beta $beta \
     --learning_rate $lr \

@@ -15,10 +15,10 @@ In the sections below, we will include some examples on how to train models and 
 
 ```bash
 python mason.py \
-    --cluster ai2/prior \
+    --cluster ai2/jupiter \
     --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
     --priority preemptible \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus $NUM_GPUS -- $YOUR_COMMAND
 ```
 
@@ -108,11 +108,11 @@ Here we are using --vllm_device cuda:7 to say we want to launch the vllm generat
 # for running TL;DR you can likely use GPUs with less memory
 python mason.py \
     --image nathanl/open_instruct_auto --pure_docker_mode \
-    --cluster ai2/prior \
+    --cluster ai2/jupiter \
     --priority normal \
     --resumable \
     --preemptible \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
      open_instruct/online_dpo_vllm_thread.py \
     --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
@@ -156,7 +156,7 @@ python mason.py \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
     open_instruct/online_dpo_vllm_thread.py \
     --exp_name "online_dpo_vllm_thread_beta_0.03" \
@@ -207,7 +207,7 @@ python mason.py \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
     open_instruct/online_dpo_vllm_thread.py \
     --exp_name "online_dpo_vllm_thread_beta_0.03" \
@@ -260,7 +260,7 @@ python mason.py \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --beaker_datasets /model:01J6DC8YQ291QA3QEYQTM3CBHE /reward_model:01J834TT3SB6PTB3QYPH33YJ6M \
     --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
     open_instruct/online_dpo_vllm_thread.py \

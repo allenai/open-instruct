@@ -75,4 +75,4 @@ tasks:
     context:
       priority: high
     constraints:
-      cluster: [ai2/allennlp]
+      cluster: [ai2/jupiter]
