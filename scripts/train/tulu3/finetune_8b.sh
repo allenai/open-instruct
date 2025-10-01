@@ -1,8 +1,14 @@
+#!/bin/bash
+
+BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+
+echo "Using Beaker image: $BEAKER_IMAGE"
+
 uv run python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority high \
-    --image nathanl/open_instruct_auto \
+    --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 8 \
