@@ -898,11 +898,7 @@ class PolicyTrainerRayProcess(RayProcess):
             dist.barrier()
             logger.info("[distributed_barrier] rank=%s tag=%s complete", self.rank, tag)
         else:
-            logger.info(
-                "[distributed_barrier] rank=%s tag=%s skipped (dist not initialized)",
-                self.rank,
-                tag,
-            )
+            logger.info("[distributed_barrier] rank=%s tag=%s skipped (dist not initialized)", self.rank, tag)
 
     def update_ref_policy(self):
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
@@ -944,11 +940,7 @@ class PolicyTrainerRayProcess(RayProcess):
             logger.warning(f"{leftover} samples are dropped due to batch size {num_mini_batches}")
 
         # Record per-rank batching state to spot desynchronization issues.
-        local_batch_info = (
-            len(collated_query_responses),
-            accumulation_steps,
-            num_mini_batches,
-        )
+        local_batch_info = (len(collated_query_responses), accumulation_steps, num_mini_batches)
         logger.info(
             "[train_setup] rank=%s batches=%s accum_steps=%s requested_mbs=%s",
             self.rank,
@@ -962,10 +954,7 @@ class PolicyTrainerRayProcess(RayProcess):
             if self.rank == 0:
                 unique_infos = set(gathered_batch_info)
                 if len(unique_infos) > 1:
-                    logger.error(
-                        "[train_setup] mismatched batch metadata across ranks: %s",
-                        gathered_batch_info,
-                    )
+                    logger.error("[train_setup] mismatched batch metadata across ranks: %s", gathered_batch_info)
 
         # recalculate the "real" number of mini-batches
         num_mini_batches = len(collated_query_responses) // accumulation_steps
