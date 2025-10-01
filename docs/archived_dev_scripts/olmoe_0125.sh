@@ -13,7 +13,6 @@ python scripts/submit_finetune_job.py \
     --config configs/train_configs/olmo2/olmo2_1124_7b_sft.yaml \
     --exp_name "0119_node8_finetune_olmoe_1b_epoch_${epoch}_lr_${lr}_loss_type_${loss_type}" \
     --seed $seed \
-    --reduce_loss $loss_type \
     --learning_rate $lr \
     --num_train_epochs $epoch \
     --per_device_train_batch_size 2 \
@@ -107,7 +106,6 @@ python mason.py \
     --with_tracking \
     --report_to wandb \
     --logging_steps 1 \
-    --reduce_loss sum \
     --add_bos
 done
 done
@@ -624,7 +622,6 @@ done
 #     --with_tracking \
 #     --report_to wandb \
 #     --logging_steps 1 \
-#     --reduce_loss sum \
 #     --checkpointing_steps epoch \
 #     --dataset_mix_dir /output/ \
 #     --hf_metadata_dataset allenai/2025-1-olmoe-instruct-evals \
@@ -662,7 +659,6 @@ done
 #     --with_tracking \
 #     --report_to wandb \
 #     --logging_steps 1 \
-#     --reduce_loss sum \
 #     --dataset_mix_dir /output/ \
 #     --hf_metadata_dataset allenai/2025-1-olmoe-instruct-evals \
 #     --add_bos true
@@ -690,7 +686,6 @@ done
 #     --with_tracking \
 #     --report_to wandb \
 #     --logging_steps 1 \
-#     --reduce_loss sum \
 #     --checkpointing_steps epoch \
 #     --dataset_mix_dir /output/ \
 #     --hf_metadata_dataset allenai/2025-1-olmoe-instruct-evals \
@@ -717,7 +712,6 @@ done
 #     --with_tracking \
 #     --report_to wandb \
 #     --logging_steps 1 \
-#     --reduce_loss sum \
 #     --checkpointing_steps epoch \
 #     --dataset_mix_dir /output/ \
 #     --hf_metadata_dataset allenai/2025-1-olmoe-instruct-evals \
@@ -770,7 +764,6 @@ done
 #     --with_tracking \
 #     --report_to wandb \
 #     --logging_steps 1 \
-#     --reduce_loss sum \
 #     --checkpointing_steps epoch \
 #     --dataset_mix_dir /output/ \
 #     --hf_metadata_dataset allenai/2025-1-olmoe-instruct-evals \
@@ -815,7 +808,6 @@ done
 #     --with_tracking \
 #     --report_to wandb \
 #     --logging_steps 1 \
-#     --reduce_loss sum \
 #     --checkpointing_steps epoch \
 #     --dataset_mix_dir /output/ \
 #     --hf_metadata_dataset allenai/2025-1-olmoe-instruct-evals \
@@ -859,7 +851,6 @@ done
 #     --with_tracking \
 #     --report_to wandb \
 #     --logging_steps 1 \
-#     --reduce_loss sum \
 #     --checkpointing_steps epoch \
 #     --dataset_mix_dir /output/ \
 #     --hf_metadata_dataset allenai/2025-1-olmoe-instruct-evals \

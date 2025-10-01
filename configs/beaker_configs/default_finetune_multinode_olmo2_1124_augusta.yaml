@@ -43,7 +43,6 @@ tasks:
         --with_tracking
         --report_to tensorboard
         --logging_steps 1
-        --reduce_loss sum
     ']
     envVars:
       - name: CUDA_DEVICE_ORDER
