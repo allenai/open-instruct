@@ -44,7 +44,7 @@ for i in "${!MODEL_NAMES[@]}"; do
         --workspace ai2/flex2 \
         --oe_eval_max_length 4096 \
         --process_output r1_style \
-        --beaker_image jacobm/flex-olmo-oe-eval-vllm \
+        --beaker_image jacobm/oe-eval-flex-olmo-9-29-5 \
         --skip_oi_evals \
         --gpu_multiplier 2 \
         --oe_eval_tasks mmlu:cot::hamish_zs_reasoning,popqa::hamish_zs_reasoning,simpleqa::tulu-thinker,bbh:cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,minerva_math::hamish_zs_reasoning,gsm8k::zs_cot_latex,aime:zs_cot_r1::pass_at_32_2024_temp1,aime:zs_cot_r1::pass_at_32_2025_temp1,codex_humanevalplus:0-shot-chat::tulu-thinker,mbppplus:0-shot-chat::tulu-thinker,alpaca_eval_v3::hamish_zs_reasoning,ifeval::hamish_zs_reasoning \
