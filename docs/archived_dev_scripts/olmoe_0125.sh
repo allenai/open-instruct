@@ -594,7 +594,7 @@ python mason.py \
 done
 
 # python mason.py \
-#     --cluster ai2/jupiter ai2/saturn ai2/neptune-cirrascale ai2/ceres-cirrascale \
+#     --cluster ai2/jupiter ai2/saturn ai2/neptune ai2/ceres \
 #     --workspace ai2/tulu-3-dev \
 #     --priority urgent \
 #     --preemptible \
@@ -632,7 +632,7 @@ done
 
 # # this is a lot more efficient
 # python mason.py \
-#     --cluster ai2/jupiter ai2/saturn ai2/neptune-cirrascale ai2/ceres-cirrascale \
+#     --cluster ai2/jupiter ai2/saturn ai2/neptune ai2/ceres \
 #     --workspace ai2/tulu-3-dev \
 #     --priority urgent \
 #     --preemptible \

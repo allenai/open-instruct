@@ -75,4 +75,4 @@ tasks:
     context:
       priority: high
     constraints:
-      cluster: [ai2/general-cirrascale-a100-80g-ib]
+      cluster: [ai2/allennlp-cirrascale]

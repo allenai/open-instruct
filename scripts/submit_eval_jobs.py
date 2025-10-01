@@ -84,7 +84,6 @@ parser.add_argument("--beaker_image", type=str, default="oe-eval-beaker/oe_eval_
 # image: https://legacy.beaker.org/im/01JRZWRN4FSGK7FWKV1DRPP1R1/details
 parser.add_argument("--beaker_subfolder", type=str, default=None)
 parser.add_argument("--cluster", nargs='+', default=[
-    # "ai2/s2-cirrascale-l40",
     "ai2/ceres",
     "ai2/neptune",
     "ai2/saturn",

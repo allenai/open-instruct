@@ -103,18 +103,7 @@ def main():
                 #     "value": "/weka/oe-adapt-default/allennlp/.cache/hub",
                 # },
             ]
-        elif args.cluster == "ai2/pluto-cirrascale":
-            d1['tasks'][0]['envVars'] += [
-                {
-                    "name": "NCCL_IB_HCA",
-                    "value": "^=mlx5_1,mlx5_2",
-                },
-                {
-                    "name": "NCCL_DEBUG",
-                    "value": "INFO",
-                },
-            ]
-        elif args.cluster == "ai2/augusta-google-1":
+        elif args.cluster == "ai2/augusta":
             d1['tasks'][0]['envVars'] += [
                 {
                     "name":"LD_LIBRARY_PATH",

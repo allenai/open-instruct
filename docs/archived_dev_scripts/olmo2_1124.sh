@@ -123,7 +123,7 @@ python scripts/submit_eval_jobs.py \
 python scripts/submit_eval_jobs.py \
     --model_name 1203_13b_gsm_math_if_beta_0.1_lr_4e-7_16858__52__1733711388 \
     --location /weka/oe-adapt-default/costah/models/olmo1124/1203_13b_gsm_math_if_beta_0.1_lr_4e-7_16858 \
-    --cluster ai2/saturn ai2/neptune-cirrascale \
+    --cluster ai2/saturn ai2/neptune \
     --is_tuned \
     --workspace "tulu-3-results" \
     --priority high \
@@ -138,7 +138,7 @@ python scripts/submit_eval_jobs.py \
 python scripts/submit_eval_jobs.py \
     --model_name  \
     --location {step_dir} \
-    --cluster ai2/saturn ai2/neptune-cirrascale \
+    --cluster ai2/saturn ai2/neptune \
     --is_tuned \
     --workspace "tulu-3-results" \
     --priority high \

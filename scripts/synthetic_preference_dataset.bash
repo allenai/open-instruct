@@ -88,7 +88,7 @@ echo $command
 echo "Submitting all shards in one command"
 if [ "$deploy_mode" = "docker_weka" ]; then
     python mason.py \
-        --cluster ai2/neptune-cirrascale ai2/saturn ai2/jupiter \
+        --cluster ai2/neptune ai2/saturn ai2/jupiter \
         --image costah/open_instruct_synth_pref --pure_docker_mode \
         --priority low \
         --preemptible \
@@ -96,7 +96,7 @@ if [ "$deploy_mode" = "docker_weka" ]; then
         --gpus $num_gpus -- $command
 elif [ "$deploy_mode" = "docker_nfs" ]; then
     python mason.py \
-        --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale ai2/s2-cirrascale \
+        --cluster ai2/allennlp-cirrascale \
         --image costah/open_instruct_synth_pref --pure_docker_mode \
         --priority low \
         --preemptible \
@@ -104,7 +104,7 @@ elif [ "$deploy_mode" = "docker_nfs" ]; then
         --gpus $num_gpus -- $command
 elif [ "$deploy_mode" = "docker" ]; then
     python mason.py \
-        --cluster ai2/allennlp-cirrascale ai2/neptune-cirrascale \
+        --cluster ai2/allennlp-cirrascale ai2/neptune \
         --image costah/open_instruct_synth_pref --pure_docker_mode \
         --priority low \
         --preemptible \
@@ -112,7 +112,7 @@ elif [ "$deploy_mode" = "docker" ]; then
         --gpus $num_gpus -- $command
 elif [ "$deploy_mode" = "nfs" ]; then
     python mason.py \
-        --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale ai2/s2-cirrascale \
+        --cluster ai2/allennlp-cirrascale \
         --priority low \
         --preemptible \
         --budget ai2/allennlp \
