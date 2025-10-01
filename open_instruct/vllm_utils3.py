@@ -739,7 +739,6 @@ class LLMRayActor:
 
             except queue.Empty:
                 pass
-
         return total_processed
 
     def _check_active_tasks(self):
