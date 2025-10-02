@@ -157,11 +157,7 @@ class TestLLMOpenAIComparison(unittest.TestCase):
         logger.info("✓ Tokenizer loaded successfully")
 
         # Setup tokenizer config
-        self.tc = TokenizerConfig(
-            tokenizer_name_or_path=self.config.model_name_or_path,
-            chat_template=None,
-            truncate_prompt=self.config.max_prompt_token_length,
-        )
+        self.tc = TokenizerConfig(tokenizer_name_or_path=self.config.model_name_or_path, trust_remote_code=True)
 
         # Load dataset
         logger.info("\n--- DATASET LOADING ---")
