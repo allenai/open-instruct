@@ -641,7 +641,11 @@ class LLMRayActor:
             return True
 
         try:
-            # Acquire executor pause lock (blocks until current iteration finishes)
+            logger.info("[pause_generation] Requesting executor pause...")
+            request_future = asyncio.run_coroutine_threadsafe(executor.request_pause(), self.loop)
+            request_future.result(timeout=timeout_s)
+            logger.info("[pause_generation] Executor pause acknowledged")
+
             logger.info("[pause_generation] Acquiring executor pause lock...")
             lock_future = asyncio.run_coroutine_threadsafe(executor.acquire_pause_lock(), self.loop)
             lock_future.result(timeout=timeout_s)
