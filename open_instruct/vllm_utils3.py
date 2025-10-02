@@ -557,11 +557,6 @@ class LLMRayActor:
             if request is None:
                 continue
 
-            if self._should_stop():
-                self.prompt_queue.put(request)
-                time.sleep(sleep_length_s)
-                continue
-
             self._add_request_sync(request)
 
     def get_model_dims_dict(self):
