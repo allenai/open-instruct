@@ -668,9 +668,12 @@ class LLMRayActor:
         future.result()
         logger.info("[release_lock] Executor lock released")
 
-        self._refresh_should_stop_cache()
-        logger.info("[release_lock] Refreshed should_stop cache")
+        return True
 
+    def refresh_should_stop_cache(self) -> bool:
+        """Force-refresh the cached should_stop flag from the actor manager."""
+        self._refresh_should_stop_cache()
+        logger.info("[refresh_should_stop_cache] Cache refreshed")
         return True
 
     def _add_request_sync(self, request: PromptRequest):

@@ -2308,6 +2308,11 @@ def weight_sync_thread(
                     enable=args.verbose,
                 )
             finally:
+                # Allow actors to resume normal operation before the locks are released
+                logger.info("[Weight Sync Thread] Setting should_stop to False")
+                ray.get(actor_manager.set_should_stop.remote(False))
+                logger.info("[Weight Sync Thread] Set should_stop to False after weight sync")
+
                 logger.info("[Weight Sync Thread] Releasing executor locks")
                 ray_get_with_progress(
                     [engine.release_lock.remote() for engine in vllm_engines],
@@ -2315,10 +2320,12 @@ def weight_sync_thread(
                     enable=args.verbose,
                 )
 
-                # Allow actors to resume normal operation
-                logger.info("[Weight Sync Thread] Setting should_stop to False")
-                ray.get(actor_manager.set_should_stop.remote(False))
-                logger.info("[Weight Sync Thread] Set should_stop to False after weight sync")
+                logger.info("[Weight Sync Thread] Refreshing actor should_stop caches")
+                ray_get_with_progress(
+                    [engine.refresh_should_stop_cache.remote() for engine in vllm_engines],
+                    desc="[Weight Sync Thread] Refreshing actor caches",
+                    enable=args.verbose,
+                )
 
         # Calculate distribution statistics
         sync_time_stats = {
