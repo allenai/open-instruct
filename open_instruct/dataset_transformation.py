@@ -950,10 +950,10 @@ def preference_tulu_tokenize_and_truncate_rl_rag_v1(
         raise ValueError("rejected messages field is empty.")
 
     chosen_encoded = sft_tulu_tokenize_and_truncate_rl_rag_v1(
-        {DEFAULT_SFT_MESSAGES_KEY: chosen_messages}, tokenizer, max_seq_length
+        {"conversations": chosen_messages}, tokenizer, max_seq_length
     )
     rejected_encoded = sft_tulu_tokenize_and_truncate_rl_rag_v1(
-        {DEFAULT_SFT_MESSAGES_KEY: rejected_messages}, tokenizer, max_seq_length
+        {"conversations": rejected_messages}, tokenizer, max_seq_length
     )
 
     return {
