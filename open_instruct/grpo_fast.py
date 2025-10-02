@@ -2282,21 +2282,26 @@ def weight_sync_thread(
 
             actor_sync_times: List[float] = []
             try:
-                # Pause generation on all engines before broadcasting weights
-                logger.info(f"[Weight Sync Thread] About to pause generation on {len(vllm_engines)} engines")
-                pause_results, pause_times = ray_get_with_progress(
-                    [engine.pause_generation.remote() for engine in vllm_engines],
-                    desc="[Weight Sync Thread] Pausing generation",
+                logger.info(
+                    f"[Weight Sync Thread] Acquiring executor locks on {len(vllm_engines)} engines"
+                )
+                ray_get_with_progress(
+                    [engine.acquire_lock.remote() for engine in vllm_engines],
+                    desc="[Weight Sync Thread] Acquiring executor locks",
                     enable=args.verbose,
                 )
-                logger.info(f"[Weight Sync Thread] Pause complete. Results: {pause_results}, Times: {pause_times}")
 
-                # Broadcast weights to vLLM engines
+                logger.info("[Weight Sync Thread] Stopping worker loops before weight broadcast")
+                ray_get_with_progress(
+                    [engine.stop_remote_worker_execution_loop.remote() for engine in vllm_engines],
+                    desc="[Weight Sync Thread] Stopping worker loops",
+                    enable=args.verbose,
+                )
+
                 weight_broadcast_futures: List[ray.ObjectRef] = [
                     m.broadcast_to_vllm.remote() for m in policy_group.models
                 ]
 
-                # Wait for all weight updates to complete and collect individual timings
                 _, actor_sync_times = ray_get_with_progress(
                     weight_broadcast_futures,
                     desc="[Weight Sync Thread] Waiting for weight updates to complete",
@@ -2312,20 +2317,12 @@ def weight_sync_thread(
                     enable=args.verbose,
                 )
             finally:
-                # Resume generation regardless of broadcast outcome
-                logger.info(f"[Weight Sync Thread] About to resume generation on {len(vllm_engines)} engines")
-                try:
-                    resume_results, resume_times = ray_get_with_progress(
-                        [engine.resume_generation.remote() for engine in vllm_engines],
-                        desc="[Weight Sync Thread] Resuming generation",
-                        enable=args.verbose,
-                    )
-                    logger.info(
-                        f"[Weight Sync Thread] Resume complete. Results: {resume_results}, Times: {resume_times}"
-                    )
-                except Exception as e:
-                    logger.error(f"[Weight Sync Thread] Failed to resume generation: {e}")
-                    raise
+                logger.info("[Weight Sync Thread] Releasing executor locks")
+                ray_get_with_progress(
+                    [engine.release_lock.remote() for engine in vllm_engines],
+                    desc="[Weight Sync Thread] Releasing executor locks",
+                    enable=args.verbose,
+                )
 
                 # Allow actors to resume normal operation
                 logger.info("[Weight Sync Thread] Setting should_stop to False")

@@ -617,88 +617,57 @@ class LLMRayActor:
         return False
 
     def pause_generation(self, timeout_s: float = 300.0) -> bool:
-        """Pause vLLM background execution without draining active requests."""
-        logger.info(
-            f"[pause_generation] Called. Already paused={self._generation_paused.is_set()}, "
-            f"_executor_pause_held={self._executor_pause_held}"
-        )
-
-        if self._generation_paused.is_set():
-            logger.info("[pause_generation] Already paused, returning True")
-            return True
-
-        self._generation_paused.set()
-        logger.info("[pause_generation] Set _generation_paused flag")
-
-        if self.llm_engine is None or not hasattr(self.llm_engine, "engine"):
-            logger.info("[pause_generation] No llm_engine or engine, returning True")
-            return True
-
-        engine = self.llm_engine.engine
-        executor = getattr(engine, "model_executor", None)
-        if executor is None or not hasattr(executor, "acquire_pause_lock"):
-            logger.warning("pause_generation: model_executor missing pause API; skipping pause")
-            return True
-
-        try:
-            logger.info("[pause_generation] Requesting executor pause...")
-            request_future = asyncio.run_coroutine_threadsafe(executor.request_pause(), self.loop)
-            request_future.result(timeout=timeout_s)
-            logger.info("[pause_generation] Executor pause acknowledged")
-
-            logger.info("[pause_generation] Acquiring executor pause lock...")
-            lock_future = asyncio.run_coroutine_threadsafe(executor.acquire_pause_lock(), self.loop)
-            lock_future.result(timeout=timeout_s)
-            logger.info("[pause_generation] Executor pause lock acquired")
-
-            self._executor_pause_held = True
-            logger.info(
-                f"[pause_generation] executor pause lock acquired, _executor_pause_held={self._executor_pause_held}"
-            )
-            return True
-        except Exception as exc:  # pylint: disable=broad-except
-            self._executor_pause_held = False
-            self._generation_paused.clear()
-            logger.error(
-                f"[pause_generation] failed: {exc}, _executor_pause_held reset to {self._executor_pause_held}"
-            )
-            raise
+        logger.info("[pause_generation] noop (lock handled in weight sync thread)")
+        return True
 
     def resume_generation(self):
-        """Resume vLLM background execution after a pause."""
-        logger.info(
-            f"[resume_generation] Called. _generation_paused={self._generation_paused.is_set()}, "
-            f"_executor_pause_held={self._executor_pause_held}, llm_engine={self.llm_engine is not None}"
-        )
+        logger.info("[resume_generation] noop")
 
-        if not self._generation_paused.is_set():
-            logger.warning("[resume_generation] Early return: _generation_paused is not set")
-            return
+    def acquire_lock(self, timeout_s: float = 300.0) -> bool:
+        """Acquire the executor lock to serialize weight updates."""
+        if self.llm_engine is None or not hasattr(self.llm_engine, "engine"):
+            return True
 
-        try:
-            if self.llm_engine is not None and self._executor_pause_held:
-                logger.info("[resume_generation] Attempting to release executor pause lock")
-                executor = getattr(self.llm_engine.engine, "model_executor", None)
-                if executor and hasattr(executor, "release_pause_lock"):
-                    logger.info("[resume_generation] Calling executor.release_pause_lock()")
-                    release_future = asyncio.run_coroutine_threadsafe(executor.release_pause_lock(), self.loop)
-                    release_future.result()
-                    logger.info("[resume_generation] Successfully released executor pause lock")
-                else:
-                    logger.warning(f"[resume_generation] No release_pause_lock method. executor={executor}")
-                self._executor_pause_held = False
-                logger.info("[resume_generation] Set _executor_pause_held to False")
-            else:
-                logger.warning(
-                    f"[resume_generation] Skipping pause release: llm_engine={self.llm_engine is not None}, "
-                    f"_executor_pause_held={self._executor_pause_held}"
-                )
-        except Exception as e:
-            logger.error(f"[resume_generation] Failed to release pause lock: {e}")
-            raise
-        finally:
-            self._generation_paused.clear()
-            logger.info("[resume_generation] Cleared _generation_paused flag")
+        executor = getattr(self.llm_engine.engine, "model_executor", None)
+        if executor is None or not hasattr(executor, "acquire_lock"):
+            logger.warning("acquire_lock: model_executor missing lock API; skipping")
+            return True
+
+        future = asyncio.run_coroutine_threadsafe(executor.acquire_lock(), self.loop)
+        future.result(timeout=timeout_s)
+        logger.info("[acquire_lock] Executor lock acquired")
+        return True
+
+    def stop_remote_worker_execution_loop(self, timeout_s: float = 300.0) -> bool:
+        """Stop the remote worker execution loop while the lock is held."""
+        if self.llm_engine is None or not hasattr(self.llm_engine, "engine"):
+            return True
+
+        executor = getattr(self.llm_engine.engine, "model_executor", None)
+        if executor is None or not hasattr(executor, "stop_remote_worker_execution_loop_async"):
+            logger.warning("stop_remote_worker_execution_loop: executor missing API; skipping")
+            return True
+
+        coro = executor.stop_remote_worker_execution_loop_no_lock()
+        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+        future.result(timeout=timeout_s)
+        logger.info("[stop_remote_worker_execution_loop] Worker loop stopped")
+        return True
+
+    def release_lock(self) -> bool:
+        """Release the executor lock after weight updates."""
+        if self.llm_engine is None or not hasattr(self.llm_engine, "engine"):
+            return True
+
+        executor = getattr(self.llm_engine.engine, "model_executor", None)
+        if executor is None or not hasattr(executor, "release_lock"):
+            logger.warning("release_lock: model_executor missing lock API; skipping")
+            return True
+
+        future = asyncio.run_coroutine_threadsafe(executor.release_lock(), self.loop)
+        future.result()
+        logger.info("[release_lock] Executor lock released")
+        return True
 
     def _add_request_sync(self, request: PromptRequest):
         """Add a request by spawning async tasks."""
