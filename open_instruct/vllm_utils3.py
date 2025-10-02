@@ -602,10 +602,6 @@ class LLMRayActor:
         # Check stop condition first (cheapest check)
         stop_requested = self._should_stop()
 
-        # Case 1: inflight_updates enabled and stop requested - exit immediately
-        if self.inflight_updates and stop_requested:
-            return True
-
         # Now check for pending work (only if needed)
         if stop_requested:
             # Need to check if we have pending work
