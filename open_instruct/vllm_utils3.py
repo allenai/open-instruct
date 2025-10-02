@@ -645,13 +645,6 @@ class LLMRayActor:
             lock_future.result(timeout=timeout_s)
             logger.info("[pause_generation] Executor pause lock acquired")
 
-            logger.info("[pause_generation] Stopping background loop...")
-            stop_future = asyncio.run_coroutine_threadsafe(
-                executor.stop_remote_worker_execution_loop_no_lock(), self.loop
-            )
-            stop_future.result(timeout=timeout_s)
-            logger.info("[pause_generation] Background loop stopped")
-
             self._executor_pause_held = True
             logger.info(f"[pause_generation] executor pause lock acquired, _executor_pause_held={self._executor_pause_held}")
             return True
