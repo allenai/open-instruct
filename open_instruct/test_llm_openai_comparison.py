@@ -242,7 +242,7 @@ class TestLLMOpenAIComparison(unittest.TestCase):
             )
 
         # Add max calls exceeded tool
-        self.tools["</tool>"] = MaxCallsExceededTool(start_str="")
+        self.tools["</tool>"] = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
 
         logger.info(f"Initialized tools: {list(self.tools.keys())}")
 
