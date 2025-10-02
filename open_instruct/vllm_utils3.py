@@ -46,7 +46,7 @@ from torch.distributed.distributed_c10d import (
 )
 
 from open_instruct import logger_utils
-from open_instruct.vllm_executor_patch import PauseAwareMPExecutor, PauseAwareUniExecutor
+import open_instruct.vllm_executors as vllm_executors
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
@@ -962,9 +962,9 @@ def create_vllm_engines(
 
     vllm_engines = []
     if tensor_parallel_size == 1:
-        distributed_executor_backend = PauseAwareUniExecutor
+        distributed_executor_backend = vllm_executors.PauseAwareUniExecutor
     else:
-        distributed_executor_backend = PauseAwareMPExecutor
+        distributed_executor_backend = vllm_executors.PauseAwareMPExecutor
     use_hybrid_engine = pg is not None
     num_gpus = int(tensor_parallel_size == 1)
     if use_hybrid_engine and tensor_parallel_size == 1 and single_gpu_mode:
