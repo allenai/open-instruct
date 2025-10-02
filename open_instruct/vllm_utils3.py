@@ -667,6 +667,13 @@ class LLMRayActor:
         future = asyncio.run_coroutine_threadsafe(executor.release_lock(), self.loop)
         future.result()
         logger.info("[release_lock] Executor lock released")
+
+        try:
+            logger.info("[release_lock] Restarting background loop")
+            self.llm_engine.start_background_loop()
+        except Exception as exc:
+            logger.warning(f"[release_lock] start_background_loop failed: {exc}")
+
         return True
 
     def _add_request_sync(self, request: PromptRequest):
