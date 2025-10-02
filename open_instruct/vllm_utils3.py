@@ -591,7 +591,8 @@ class LLMRayActor:
         return self._should_stop_value
 
     def _refresh_should_stop_cache(self):
-        self._last_should_stop_update = 0
+        self._should_stop_value = ray.get(self.actor_manager.should_stop.remote())
+        self._last_should_stop_update = time.perf_counter()
 
     def _should_exit(self) -> bool:
         """Determine if the processing loop should exit.
