@@ -26,6 +26,8 @@ import queue
 import signal
 import socket
 import subprocess
+import sys
+import threading
 import time
 import unittest
 from dataclasses import dataclass, field
@@ -37,6 +39,7 @@ import ray
 import transformers
 from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
+from tqdm import tqdm
 
 from open_instruct import vllm_utils3
 from open_instruct.dataset_transformation import (
@@ -50,6 +53,13 @@ from open_instruct.search_utils.search_tool import SearchTool
 from open_instruct.tool_utils.tools import MaxCallsExceededTool, PythonCodeTool
 from open_instruct.utils import ray_get_with_progress
 
+# Configure logging with timestamps
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+    stream=sys.stdout,
+)
 logger = logging.getLogger(__name__)
 
 
@@ -110,6 +120,10 @@ class TestLLMOpenAIComparison(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Setup that runs once for the entire test class."""
+        logger.info("\n" + "=" * 80)
+        logger.info("INITIALIZING TEST CLASS")
+        logger.info("=" * 80)
+
         cls.config = TestConfig()
         cls.tokenizer = None
         cls.dataset = None
@@ -119,17 +133,28 @@ class TestLLMOpenAIComparison(unittest.TestCase):
         cls.tools = {}
 
         # Initialize Ray if not already initialized
+        logger.info("Checking Ray initialization...")
         if not ray.is_initialized():
+            logger.info("Initializing Ray with 1 GPU...")
             ray.init(ignore_reinit_error=True, num_gpus=1)
+            logger.info("✓ Ray initialized")
+        else:
+            logger.info("✓ Ray already initialized")
 
     def setUp(self):
         """Setup for each test method."""
+        logger.info("=" * 80)
+        logger.info("STARTING TEST SETUP")
+        logger.info("=" * 80)
+
         # Initialize tokenizer
+        logger.info(f"Loading tokenizer from {self.config.model_name_or_path}...")
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(
             self.config.model_name_or_path, padding_side="left", trust_remote_code=True
         )
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+        logger.info("✓ Tokenizer loaded successfully")
 
         # Setup tokenizer config
         self.tc = TokenizerConfig(
@@ -139,25 +164,40 @@ class TestLLMOpenAIComparison(unittest.TestCase):
         )
 
         # Load dataset
+        logger.info("\n--- DATASET LOADING ---")
         self._load_dataset()
 
         # Setup tools
+        logger.info("\n--- TOOL SETUP ---")
         self._setup_tools()
 
         # Start vLLM OpenAI server
+        logger.info("\n--- STARTING VLLM OPENAI SERVER ---")
         self._start_vllm_server()
 
         # Initialize LLMRayActor
+        logger.info("\n--- INITIALIZING LLM RAY ACTOR ---")
         self._init_llm_ray_actor()
 
         # Initialize OpenAI client
+        logger.info("\n--- INITIALIZING OPENAI CLIENT ---")
         self.openai_client = openai.Client(
             base_url=f"http://localhost:{self.config.vllm_port}/v1",
             api_key="dummy",  # vLLM doesn't require a real API key
         )
+        logger.info("✓ OpenAI client initialized")
+
+        logger.info("\n" + "=" * 80)
+        logger.info("TEST SETUP COMPLETE")
+        logger.info("=" * 80 + "\n")
 
     def _load_dataset(self):
         """Load the dataset using the same logic as grpo_fast.py."""
+        logger.info(f"Loading dataset: {self.config.dataset_mixer_list[0]}")
+        logger.info(f"Dataset splits: {self.config.dataset_mixer_list_splits}")
+        logger.info(f"Transform functions: {self.config.dataset_transform_fn}")
+        logger.info(f"Max token length: {self.config.max_token_length}")
+
         transform_fn_args = [
             {},
             {
@@ -165,6 +205,9 @@ class TestLLMOpenAIComparison(unittest.TestCase):
                 "max_prompt_token_length": self.config.max_prompt_token_length,
             },
         ]
+
+        logger.info("Calling get_cached_dataset_tulu (this may take some time)...")
+        start_time = time.time()
 
         self.dataset = get_cached_dataset_tulu(
             dataset_mixer_list=self.config.dataset_mixer_list,
@@ -180,9 +223,12 @@ class TestLLMOpenAIComparison(unittest.TestCase):
         )
 
         # Shuffle dataset with seed for reproducibility
+        logger.info(f"Shuffling dataset with seed {self.config.seed}...")
         self.dataset = self.dataset.shuffle(seed=self.config.seed)
 
-        logger.info(f"Loaded dataset with {len(self.dataset)} examples")
+        elapsed = time.time() - start_time
+        logger.info(f"✓ Dataset loaded successfully in {elapsed:.1f}s")
+        logger.info(f"✓ Total examples: {len(self.dataset)}")
 
     def _setup_tools(self):
         """Setup tools for both LLMRayActor and comparison."""
@@ -208,6 +254,7 @@ class TestLLMOpenAIComparison(unittest.TestCase):
         """Start the vLLM OpenAI-compatible server."""
         # Find a free port
         self.config.vllm_port = find_free_port()
+        logger.info(f"Using port {self.config.vllm_port} for vLLM server")
 
         # Build vLLM server command
         cmd = [
@@ -234,9 +281,11 @@ class TestLLMOpenAIComparison(unittest.TestCase):
             for stop_str in self.config.stop_strings:
                 cmd.extend(["--stop", stop_str])
 
-        logger.info(f"Starting vLLM server with command: {' '.join(cmd)}")
+        logger.info("Server command:")
+        logger.info(f"  {' '.join(cmd)}")
 
         # Start the server process
+        logger.info("Starting vLLM server process...")
         self.vllm_process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -245,33 +294,63 @@ class TestLLMOpenAIComparison(unittest.TestCase):
             preexec_fn=os.setsid,  # Create new process group for cleanup
         )
 
+        # Start a thread to log server stderr output
+        def log_stderr():
+            for line in self.vllm_process.stderr:
+                if line.strip():
+                    logger.debug(f"[vLLM server stderr] {line.strip()}")
+
+        stderr_thread = threading.Thread(target=log_stderr, daemon=True)
+        stderr_thread.start()
+
         # Wait for server to be ready
         max_wait = 60  # seconds
         start_time = time.time()
+        logger.info(f"Waiting for server to be ready (timeout: {max_wait}s)...")
+
+        attempt = 0
         while time.time() - start_time < max_wait:
+            attempt += 1
+            elapsed = int(time.time() - start_time)
+
             try:
                 # Try to connect to the server
                 _ = openai.Client(
                     base_url=f"http://localhost:{self.config.vllm_port}/v1", api_key="dummy"
                 ).models.list()
-                logger.info("vLLM server is ready")
+                logger.info(f"✓ vLLM server is ready after {elapsed}s ({attempt} attempts)")
                 break
             except Exception:
+                if attempt % 5 == 0:  # Log every 5 attempts
+                    logger.info(f"  Still waiting... ({elapsed}/{max_wait}s, attempt {attempt})")
                 time.sleep(1)
         else:
+            logger.error("vLLM server failed to start!")
+            logger.error("Last 100 lines of stderr:")
+            # Try to get some stderr output for debugging
+            try:
+                self.vllm_process.terminate()
+                stderr_out = self.vllm_process.stderr.read()
+                logger.error(stderr_out)
+            except Exception:
+                pass
             raise RuntimeError("vLLM server failed to start within timeout")
 
     def _init_llm_ray_actor(self):
         """Initialize the LLMRayActor."""
+        logger.info("Creating Ray placement group...")
         # Create placement group
         bundles = [{"GPU": 1, "CPU": 10}]
         pg = placement_group(bundles, strategy="STRICT_SPREAD")
         ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
+        logger.info("✓ Placement group ready")
 
         # Get bundle indices
         bundle_indices = vllm_utils3.get_bundle_indices_list(pg)
+        logger.info(f"Bundle indices: {bundle_indices}")
 
         # Create queues
+        logger.info("Creating Ray queues...")
         self.prompt_queue = ray_queue.Queue()
         self.results_queue = ray_queue.Queue()
         self.eval_results_queue = ray_queue.Queue()
@@ -282,9 +361,15 @@ class TestLLMOpenAIComparison(unittest.TestCase):
             def should_stop(self):
                 return False
 
+        logger.info("Creating mock actor manager...")
         actor_manager = MockActorManager.remote()
 
         # Initialize LLMRayActor
+        logger.info("Creating LLMRayActor (this will load the model)...")
+        logger.info(f"  Model: {self.config.model_name_or_path}")
+        logger.info(f"  Tensor parallel size: {self.config.vllm_tensor_parallel_size}")
+        logger.info(f"  GPU memory utilization: {self.config.vllm_gpu_memory_utilization}")
+
         self.llm_ray_actor = ray.remote(num_cpus=10, num_gpus=1)(vllm_utils3.LLMRayActor).remote(
             self.config.model_name_or_path,
             tools=self.tools,
@@ -309,9 +394,12 @@ class TestLLMOpenAIComparison(unittest.TestCase):
         )
 
         # Initialize the actor
-        ray.get(self.llm_ray_actor.get_model_dims_dict.remote())
-
-        logger.info("LLMRayActor initialized")
+        logger.info("Waiting for model to load...")
+        start_time = time.time()
+        model_dims = ray.get(self.llm_ray_actor.get_model_dims_dict.remote())
+        elapsed = time.time() - start_time
+        logger.info(f"✓ LLMRayActor initialized in {elapsed:.1f}s")
+        logger.info(f"  Model dimensions: {model_dims}")
 
     def _generate_with_llm_ray_actor(self, prompts: List[str]) -> List[str]:
         """Generate completions using LLMRayActor.
@@ -322,6 +410,7 @@ class TestLLMOpenAIComparison(unittest.TestCase):
         results = []
 
         # Submit all prompts to the queue
+        logger.info(f"Submitting {len(prompts)} prompts to LLMRayActor...")
         for i, prompt in enumerate(prompts):
             dataset_idx = i
             prompt_request = PromptRequest(
@@ -336,21 +425,26 @@ class TestLLMOpenAIComparison(unittest.TestCase):
                 n=1,  # Number of completions per prompt
             )
             self.prompt_queue.put(prompt_request)
+            logger.debug(f"  Submitted prompt {i + 1}/{len(prompts)}")
 
         # Start generation
+        logger.info("Starting generation on LLMRayActor...")
         generation_future = self.llm_ray_actor.generate.remote()
 
         # Collect results
-        for _ in range(len(prompts)):
+        logger.info(f"Waiting for {len(prompts)} results from LLMRayActor...")
+        for i in tqdm(range(len(prompts)), desc="LLMRayActor generation"):
             try:
                 result = self.results_queue.get(timeout=30)
                 results.append(result)
+                logger.debug(f"  Received result {i + 1}/{len(prompts)}")
             except queue.Empty:
-                logger.error("Timeout waiting for LLMRayActor result")
+                logger.error(f"Timeout waiting for LLMRayActor result {i + 1}")
                 results.append(None)
 
         # Stop generation
         ray.cancel(generation_future)
+        logger.info(f"✓ Collected {len(results)} results from LLMRayActor")
 
         return results
 
@@ -358,8 +452,10 @@ class TestLLMOpenAIComparison(unittest.TestCase):
         """Generate completions using OpenAI-compatible API."""
         results = []
 
-        for prompt in prompts:
+        logger.info(f"Generating {len(prompts)} completions via OpenAI API...")
+        for i, prompt in enumerate(tqdm(prompts, desc="OpenAI API generation")):
             try:
+                logger.debug(f"  Sending prompt {i + 1}/{len(prompts)} to OpenAI API")
                 response = self.openai_client.completions.create(
                     model="test-model",
                     prompt=prompt,
@@ -370,10 +466,12 @@ class TestLLMOpenAIComparison(unittest.TestCase):
                     n=1,
                 )
                 results.append(response.choices[0].text)
+                logger.debug(f"  Received response {i + 1}/{len(prompts)}")
             except Exception as e:
-                logger.error(f"Error generating with OpenAI API: {e}")
+                logger.error(f"Error generating with OpenAI API for prompt {i + 1}: {e}")
                 results.append(None)
 
+        logger.info(f"✓ Collected {len(results)} results from OpenAI API")
         return results
 
     def _compare_completions(self, prompts: List[str], llm_ray_results: List, openai_results: List[str]):
@@ -420,7 +518,12 @@ class TestLLMOpenAIComparison(unittest.TestCase):
     )
     def test_completion_comparison(self, num_prompts):
         """Test comparing completions from LLMRayActor and OpenAI API."""
+        logger.info("\n" + "=" * 80)
+        logger.info(f"RUNNING TEST: test_completion_comparison with {num_prompts} prompts")
+        logger.info("=" * 80)
+
         # Select prompts from dataset
+        logger.info(f"Selecting {num_prompts} prompts from dataset...")
         prompts = []
         for i in range(min(num_prompts, len(self.dataset))):
             example = self.dataset[i]
@@ -433,19 +536,24 @@ class TestLLMOpenAIComparison(unittest.TestCase):
                 prompt = self.tokenizer.decode(prompt_ids, skip_special_tokens=True)
                 prompts.append(prompt)
 
-        logger.info(f"Testing with {len(prompts)} prompts")
+        logger.info(f"✓ Selected {len(prompts)} prompts")
+        for i, prompt in enumerate(prompts[:3]):  # Log first 3 prompts as examples
+            preview = prompt[:100] + "..." if len(prompt) > 100 else prompt
+            logger.debug(f"  Prompt {i + 1}: {preview}")
 
         # Generate with LLMRayActor
-        logger.info("Generating with LLMRayActor...")
+        logger.info("\n--- GENERATING WITH LLM RAY ACTOR ---")
         start_time = time.time()
         llm_ray_results = self._generate_with_llm_ray_actor(prompts)
         llm_ray_time = time.time() - start_time
+        logger.info(f"LLMRayActor generation took {llm_ray_time:.1f}s")
 
         # Generate with OpenAI API
-        logger.info("Generating with OpenAI API...")
+        logger.info("\n--- GENERATING WITH OPENAI API ---")
         start_time = time.time()
         openai_results = self._generate_with_openai_api(prompts)
         openai_time = time.time() - start_time
+        logger.info(f"OpenAI API generation took {openai_time:.1f}s")
 
         # Compare results
         comparison_results = self._compare_completions(prompts, llm_ray_results, openai_results)
@@ -526,24 +634,34 @@ class TestLLMOpenAIComparison(unittest.TestCase):
 
     def tearDown(self):
         """Cleanup after each test."""
+        logger.info("\n" + "=" * 80)
+        logger.info("CLEANING UP TEST")
+        logger.info("=" * 80)
+
         # Shutdown vLLM server
         if self.vllm_process:
+            logger.info("Shutting down vLLM server...")
             try:
                 # Kill the process group to ensure all child processes are terminated
                 os.killpg(os.getpgid(self.vllm_process.pid), signal.SIGTERM)
                 self.vllm_process.wait(timeout=5)
+                logger.info("✓ vLLM server shut down successfully")
             except Exception as e:
                 logger.error(f"Error shutting down vLLM server: {e}")
                 self.vllm_process.kill()
 
         # Cleanup Ray actors
         if self.llm_ray_actor:
+            logger.info("Cleaning up Ray actors...")
             ray.kill(self.llm_ray_actor)
+            logger.info("✓ Ray actors cleaned up")
 
         # Clear references
         self.vllm_process = None
         self.llm_ray_actor = None
         self.openai_client = None
+
+        logger.info("✓ Test cleanup complete\n")
 
     @classmethod
     def tearDownClass(cls):
