@@ -13,8 +13,8 @@ class PauseExecutorMixin:
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._pause_lock: Optional[asyncio.Lock] = None
-        self._pause_requested: bool = False
         self._pause_lock_owned_by_pause: bool = False
+        self._pause_requested: bool = False
         self._pause_ack_event: Optional[asyncio.Event] = None
         self._pause_resume_event: Optional[asyncio.Event] = None
 
@@ -49,7 +49,23 @@ class PauseExecutorMixin:
                 await lock.acquire()
                 lock_acquired = True
 
-            return await super().execute_model_async(execute_model_req)
+            result = await super().execute_model_async(execute_model_req)
+
+            if self._pause_requested:
+                await self.stop_remote_worker_execution_loop_no_lock()
+                self._pause_requested = False
+                ack_event.set()
+
+                lock.release()
+                lock_acquired = False
+
+                await resume_event.wait()
+                resume_event.clear()
+
+                await lock.acquire()
+                lock_acquired = True
+
+            return result
         finally:
             if lock_acquired and lock.locked():
                 lock.release()
@@ -93,6 +109,8 @@ class PauseExecutorMixin:
         lock = self._pause_lock
         if self._pause_lock_owned_by_pause:
             self._pause_lock_owned_by_pause = False
+            return
+        if self._pause_lock_owned_by_pause:
             return
         await lock.acquire()
 
