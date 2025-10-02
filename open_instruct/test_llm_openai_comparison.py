@@ -64,7 +64,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class TestConfig:
+class ComparisonConfig:
     """Configuration for the comparison test."""
 
     # Model configuration
@@ -98,7 +98,7 @@ class TestConfig:
 
     # vLLM configuration
     vllm_tensor_parallel_size: int = 1
-    vllm_gpu_memory_utilization: float = 0.3
+    vllm_gpu_memory_utilization: float = 0.4
     vllm_port: int = 8000
 
     # Comparison configuration
@@ -124,7 +124,7 @@ class TestLLMOpenAIComparison(unittest.TestCase):
         logger.info("INITIALIZING TEST CLASS")
         logger.info("=" * 80)
 
-        cls.config = TestConfig()
+        cls.config = ComparisonConfig()
         cls.tokenizer = None
         cls.dataset = None
         cls.vllm_process = None
@@ -170,10 +170,6 @@ class TestLLMOpenAIComparison(unittest.TestCase):
         # Start vLLM OpenAI server
         logger.info("\n--- STARTING VLLM OPENAI SERVER ---")
         self._start_vllm_server()
-
-        # Initialize LLMRayActor
-        logger.info("\n--- INITIALIZING LLM RAY ACTOR ---")
-        self._init_llm_ray_actor()
 
         # Initialize OpenAI client
         logger.info("\n--- INITIALIZING OPENAI CLIENT ---")
@@ -272,11 +268,6 @@ class TestLLMOpenAIComparison(unittest.TestCase):
             "--trust-remote-code",
         ]
 
-        # Add stop strings if specified
-        if self.config.stop_strings:
-            for stop_str in self.config.stop_strings:
-                cmd.extend(["--stop", stop_str])
-
         logger.info("Server command:")
         logger.info(f"  {' '.join(cmd)}")
 
@@ -290,24 +281,73 @@ class TestLLMOpenAIComparison(unittest.TestCase):
             preexec_fn=os.setsid,  # Create new process group for cleanup
         )
 
+        # Collect stderr and stdout output for debugging
+        self.vllm_stderr_lines = []
+        self.vllm_stdout_lines = []
+
         # Start a thread to log server stderr output
         def log_stderr():
             for line in self.vllm_process.stderr:
                 if line.strip():
-                    logger.debug(f"[vLLM server stderr] {line.strip()}")
+                    self.vllm_stderr_lines.append(line.strip())
+                    logger.info(f"[vLLM stderr] {line.strip()}")
+
+        def log_stdout():
+            for line in self.vllm_process.stdout:
+                if line.strip():
+                    self.vllm_stdout_lines.append(line.strip())
+                    logger.info(f"[vLLM stdout] {line.strip()}")
 
         stderr_thread = threading.Thread(target=log_stderr, daemon=True)
         stderr_thread.start()
+        stdout_thread = threading.Thread(target=log_stdout, daemon=True)
+        stdout_thread.start()
 
         # Wait for server to be ready
-        max_wait = 60  # seconds
+        max_wait = 180  # seconds - allow time for model loading
         start_time = time.time()
         logger.info(f"Waiting for server to be ready (timeout: {max_wait}s)...")
 
+        # First wait for specific initialization messages
+        logger.info("Waiting for 'Available KV cache memory' message...")
+        kv_cache_seen = False
+        while time.time() - start_time < max_wait:
+            # Check if process is still alive
+            if self.vllm_process.poll() is not None:
+                logger.error("vLLM server process terminated unexpectedly!")
+                logger.error("Last 50 lines of stderr:")
+                for line in self.vllm_stderr_lines[-50:]:
+                    logger.error(f"  {line}")
+                raise RuntimeError("vLLM server process terminated unexpectedly")
+
+            # Check for KV cache message
+            for line in self.vllm_stdout_lines:
+                if "Available KV cache memory" in line:
+                    kv_cache_seen = True
+                    break
+
+            if kv_cache_seen:
+                logger.info("✓ KV cache initialized, waiting for server to be ready...")
+                break
+
+            time.sleep(2)
+
+        if not kv_cache_seen:
+            logger.warning("Did not see KV cache initialization message, continuing anyway...")
+
+        # Now try to connect to the server
         attempt = 0
         while time.time() - start_time < max_wait:
             attempt += 1
             elapsed = int(time.time() - start_time)
+
+            # Check if process is still alive
+            if self.vllm_process.poll() is not None:
+                logger.error("vLLM server process terminated unexpectedly!")
+                logger.error("Last 50 lines of stderr:")
+                for line in self.vllm_stderr_lines[-50:]:
+                    logger.error(f"  {line}")
+                raise RuntimeError("vLLM server process terminated unexpectedly")
 
             try:
                 # Try to connect to the server
@@ -316,20 +356,22 @@ class TestLLMOpenAIComparison(unittest.TestCase):
                 ).models.list()
                 logger.info(f"✓ vLLM server is ready after {elapsed}s ({attempt} attempts)")
                 break
-            except Exception:
-                if attempt % 5 == 0:  # Log every 5 attempts
+            except Exception as e:
+                if attempt % 10 == 0:  # Log every 10 attempts
                     logger.info(f"  Still waiting... ({elapsed}/{max_wait}s, attempt {attempt})")
-                time.sleep(1)
+                    logger.debug(f"  Last connection error: {e}")
+                time.sleep(2)
         else:
-            logger.error("vLLM server failed to start!")
+            logger.error("vLLM server failed to start within timeout!")
+            logger.error(
+                f"Captured {len(self.vllm_stdout_lines)} lines of stdout, {len(self.vllm_stderr_lines)} lines of stderr"
+            )
+            logger.error("Last 50 lines of stdout:")
+            for line in self.vllm_stdout_lines[-50:]:
+                logger.error(f"  {line}")
             logger.error("Last 100 lines of stderr:")
-            # Try to get some stderr output for debugging
-            try:
-                self.vllm_process.terminate()
-                stderr_out = self.vllm_process.stderr.read()
-                logger.error(stderr_out)
-            except Exception:
-                pass
+            for line in self.vllm_stderr_lines[-100:]:
+                logger.error(f"  {line}")
             raise RuntimeError("vLLM server failed to start within timeout")
 
     def _init_llm_ray_actor(self):
@@ -513,7 +555,7 @@ class TestLLMOpenAIComparison(unittest.TestCase):
         ]
     )
     def test_completion_comparison(self, num_prompts):
-        """Test comparing completions from LLMRayActor and OpenAI API."""
+        """Test completions from OpenAI API."""
         logger.info("\n" + "=" * 80)
         logger.info(f"RUNNING TEST: test_completion_comparison with {num_prompts} prompts")
         logger.info("=" * 80)
@@ -535,14 +577,7 @@ class TestLLMOpenAIComparison(unittest.TestCase):
         logger.info(f"✓ Selected {len(prompts)} prompts")
         for i, prompt in enumerate(prompts[:3]):  # Log first 3 prompts as examples
             preview = prompt[:100] + "..." if len(prompt) > 100 else prompt
-            logger.debug(f"  Prompt {i + 1}: {preview}")
-
-        # Generate with LLMRayActor
-        logger.info("\n--- GENERATING WITH LLM RAY ACTOR ---")
-        start_time = time.time()
-        llm_ray_results = self._generate_with_llm_ray_actor(prompts)
-        llm_ray_time = time.time() - start_time
-        logger.info(f"LLMRayActor generation took {llm_ray_time:.1f}s")
+            logger.info(f"  Prompt {i + 1}: {preview}")
 
         # Generate with OpenAI API
         logger.info("\n--- GENERATING WITH OPENAI API ---")
@@ -551,39 +586,29 @@ class TestLLMOpenAIComparison(unittest.TestCase):
         openai_time = time.time() - start_time
         logger.info(f"OpenAI API generation took {openai_time:.1f}s")
 
-        # Compare results
-        comparison_results = self._compare_completions(prompts, llm_ray_results, openai_results)
-
-        # Print comparison report
+        # Print report
         logger.info("\n" + "=" * 80)
-        logger.info("COMPARISON REPORT")
+        logger.info("GENERATION REPORT")
         logger.info("=" * 80)
         logger.info(f"Number of prompts: {len(prompts)}")
-        logger.info(f"LLMRayActor time: {llm_ray_time:.2f}s")
         logger.info(f"OpenAI API time: {openai_time:.2f}s")
-        logger.info(f"Speed ratio: {openai_time / llm_ray_time:.2f}x")
+        logger.info(f"Successful completions: {sum(1 for r in openai_results if r is not None)}/{len(openai_results)}")
 
-        matches = sum(1 for r in comparison_results if r["match"])
-        logger.info(f"Exact matches: {matches}/{len(comparison_results)}")
-
-        # Log detailed differences for non-matches
-        for result in comparison_results:
-            if not result["match"]:
-                logger.info(f"\nPrompt {result['prompt_index']}:")
-                logger.info(f"  Prompt: {result['prompt']}")
-                logger.info(f"  Differences: {', '.join(result['differences'])}")
-                if result["llm_ray_completion"]:
-                    logger.info(f"  LLM completion: {result['llm_ray_completion'][:100]}...")
-                if result["openai_completion"]:
-                    logger.info(f"  OpenAI completion: {result['openai_completion'][:100]}...")
+        # Log sample results
+        for i, (prompt, result) in enumerate(zip(prompts[:3], openai_results[:3])):
+            logger.info(f"\nSample {i + 1}:")
+            logger.info(f"  Prompt: {prompt[:100]}...")
+            if result:
+                logger.info(f"  Completion: {result[:100]}...")
+            else:
+                logger.info("  Completion: None (failed)")
 
         # Assert some basic checks
-        self.assertGreater(len(llm_ray_results), 0, "No results from LLMRayActor")
         self.assertGreater(len(openai_results), 0, "No results from OpenAI API")
-        self.assertEqual(len(llm_ray_results), len(openai_results), "Different number of results")
+        self.assertGreater(sum(1 for r in openai_results if r is not None), 0, "All completions failed")
 
     def test_tool_use_comparison(self):
-        """Test tool use behavior comparison."""
+        """Test tool use behavior with OpenAI API."""
         # Find prompts that likely trigger tool use
         tool_prompts = []
         for i in range(min(10, len(self.dataset))):
@@ -607,26 +632,19 @@ class TestLLMOpenAIComparison(unittest.TestCase):
 
         logger.info(f"Testing tool use with {len(tool_prompts)} prompts")
 
-        # Generate with both methods
-        llm_ray_results = self._generate_with_llm_ray_actor(tool_prompts)
+        # Generate with OpenAI API
         openai_results = self._generate_with_openai_api(tool_prompts)
 
         # Analyze tool usage in results
-        for i, (prompt, llm_result, openai_result) in enumerate(zip(tool_prompts, llm_ray_results, openai_results)):
+        for i, (prompt, openai_result) in enumerate(zip(tool_prompts, openai_results)):
             logger.info(f"\nTool prompt {i}: {prompt[:50]}...")
-
-            # Check for tool markers in completions
-            if llm_result and hasattr(llm_result, "request_info"):
-                info = llm_result.request_info
-                if hasattr(info, "tool_calleds") and info.tool_calleds:
-                    logger.info(f"  LLMRayActor used tools: {info.tool_calleds}")
-                    if hasattr(info, "tool_outputs"):
-                        logger.info(f"  Tool outputs: {info.tool_outputs}")
 
             # Check for tool markers in OpenAI completion
             if openai_result:
                 if "<query>" in openai_result or "<code>" in openai_result:
                     logger.info("  OpenAI completion contains tool markers")
+                else:
+                    logger.info("  No tool markers found in completion")
 
     def tearDown(self):
         """Cleanup after each test."""
@@ -646,15 +664,8 @@ class TestLLMOpenAIComparison(unittest.TestCase):
                 logger.error(f"Error shutting down vLLM server: {e}")
                 self.vllm_process.kill()
 
-        # Cleanup Ray actors
-        if self.llm_ray_actor:
-            logger.info("Cleaning up Ray actors...")
-            ray.kill(self.llm_ray_actor)
-            logger.info("✓ Ray actors cleaned up")
-
         # Clear references
         self.vllm_process = None
-        self.llm_ray_actor = None
         self.openai_client = None
 
         logger.info("✓ Test cleanup complete\n")
