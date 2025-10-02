@@ -2282,9 +2282,7 @@ def weight_sync_thread(
 
             actor_sync_times: List[float] = []
             try:
-                logger.info(
-                    f"[Weight Sync Thread] Acquiring executor locks on {len(vllm_engines)} engines"
-                )
+                logger.info(f"[Weight Sync Thread] Acquiring executor locks on {len(vllm_engines)} engines")
                 ray_get_with_progress(
                     [engine.acquire_lock.remote() for engine in vllm_engines],
                     desc="[Weight Sync Thread] Acquiring executor locks",

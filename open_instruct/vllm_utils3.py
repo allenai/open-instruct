@@ -590,6 +590,9 @@ class LLMRayActor:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
 
+    def _refresh_should_stop_cache(self):
+        self._last_should_stop_update = 0
+
     def _should_exit(self) -> bool:
         """Determine if the processing loop should exit.
 
@@ -673,6 +676,9 @@ class LLMRayActor:
             self.llm_engine.start_background_loop()
         except Exception as exc:
             logger.warning(f"[release_lock] start_background_loop failed: {exc}")
+
+        self._refresh_should_stop_cache()
+        logger.info("[release_lock] Refreshed should_stop cache")
 
         return True
 
