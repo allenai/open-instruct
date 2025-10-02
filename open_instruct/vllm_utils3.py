@@ -45,8 +45,8 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
-from open_instruct import logger_utils
 import open_instruct.vllm_executors as vllm_executors
+from open_instruct import logger_utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
@@ -623,12 +623,18 @@ class LLMRayActor:
 
     def pause_generation(self, timeout_s: float = 300.0) -> bool:
         """Pause vLLM background execution without draining active requests."""
+        logger.info(f"[pause_generation] Called. Already paused={self._generation_paused.is_set()}, "
+                   f"_executor_pause_held={self._executor_pause_held}")
+
         if self._generation_paused.is_set():
+            logger.info("[pause_generation] Already paused, returning True")
             return True
 
         self._generation_paused.set()
+        logger.info("[pause_generation] Set _generation_paused flag")
 
         if self.llm_engine is None or not hasattr(self.llm_engine, "engine"):
+            logger.info("[pause_generation] No llm_engine or engine, returning True")
             return True
 
         engine = self.llm_engine.engine
@@ -639,37 +645,58 @@ class LLMRayActor:
 
         try:
             # Acquire executor pause lock (blocks until current iteration finishes)
+            logger.info("[pause_generation] Acquiring executor pause lock...")
             lock_future = asyncio.run_coroutine_threadsafe(executor.acquire_pause_lock(), self.loop)
             lock_future.result(timeout=timeout_s)
+            logger.info("[pause_generation] Executor pause lock acquired")
 
+            logger.info("[pause_generation] Stopping background loop...")
             stop_future = asyncio.run_coroutine_threadsafe(
                 executor.stop_remote_worker_execution_loop_no_lock(), self.loop
             )
             stop_future.result(timeout=timeout_s)
+            logger.info("[pause_generation] Background loop stopped")
 
             self._executor_pause_held = True
-            logger.info("pause_generation: executor pause lock acquired")
+            logger.info(f"[pause_generation] executor pause lock acquired, _executor_pause_held={self._executor_pause_held}")
             return True
         except Exception as exc:  # pylint: disable=broad-except
             self._executor_pause_held = False
             self._generation_paused.clear()
-            logger.error(f"pause_generation failed: {exc}")
+            logger.error(f"[pause_generation] failed: {exc}, _executor_pause_held reset to {self._executor_pause_held}")
             raise
 
     def resume_generation(self):
         """Resume vLLM background execution after a pause."""
+        logger.info(f"[resume_generation] Called. _generation_paused={self._generation_paused.is_set()}, "
+                   f"_executor_pause_held={self._executor_pause_held}, llm_engine={self.llm_engine is not None}")
+
         if not self._generation_paused.is_set():
+            logger.warning("[resume_generation] Early return: _generation_paused is not set")
             return
 
         try:
             if self.llm_engine is not None and self._executor_pause_held:
+                logger.info("[resume_generation] Attempting to release executor pause lock")
                 executor = getattr(self.llm_engine.engine, "model_executor", None)
                 if executor and hasattr(executor, "release_pause_lock"):
+                    logger.info("[resume_generation] Calling executor.release_pause_lock()")
                     release_future = asyncio.run_coroutine_threadsafe(executor.release_pause_lock(), self.loop)
                     release_future.result()
+                    logger.info("[resume_generation] Successfully released executor pause lock")
+                else:
+                    logger.warning(f"[resume_generation] No release_pause_lock method. executor={executor}")
                 self._executor_pause_held = False
+                logger.info("[resume_generation] Set _executor_pause_held to False")
+            else:
+                logger.warning(f"[resume_generation] Skipping pause release: llm_engine={self.llm_engine is not None}, "
+                             f"_executor_pause_held={self._executor_pause_held}")
+        except Exception as e:
+            logger.error(f"[resume_generation] Failed to release pause lock: {e}")
+            raise
         finally:
             self._generation_paused.clear()
+            logger.info("[resume_generation] Cleared _generation_paused flag")
 
     def _add_request_sync(self, request: PromptRequest):
         """Add a request by spawning async tasks."""

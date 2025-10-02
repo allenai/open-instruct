@@ -1,8 +1,8 @@
 import asyncio
 from typing import Optional
 
-from vllm.executor.uniproc_executor import UniProcExecutor
 from vllm.executor.mp_distributed_executor import MultiprocessingDistributedExecutor
+from vllm.executor.uniproc_executor import UniProcExecutor
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.sequence import ExecuteModelRequest
 
