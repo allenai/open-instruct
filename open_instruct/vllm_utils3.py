@@ -671,12 +671,6 @@ class LLMRayActor:
         future.result()
         logger.info("[release_lock] Executor lock released")
 
-        try:
-            logger.info("[release_lock] Restarting background loop")
-            self.llm_engine.start_background_loop()
-        except Exception as exc:
-            logger.warning(f"[release_lock] start_background_loop failed: {exc}")
-
         self._refresh_should_stop_cache()
         logger.info("[release_lock] Refreshed should_stop cache")
 

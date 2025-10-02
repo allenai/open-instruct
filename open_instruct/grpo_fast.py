@@ -2289,13 +2289,6 @@ def weight_sync_thread(
                     enable=args.verbose,
                 )
 
-                logger.info("[Weight Sync Thread] Stopping worker loops before weight broadcast")
-                ray_get_with_progress(
-                    [engine.stop_remote_worker_execution_loop.remote() for engine in vllm_engines],
-                    desc="[Weight Sync Thread] Stopping worker loops",
-                    enable=args.verbose,
-                )
-
                 weight_broadcast_futures: List[ray.ObjectRef] = [
                     m.broadcast_to_vllm.remote() for m in policy_group.models
                 ]
