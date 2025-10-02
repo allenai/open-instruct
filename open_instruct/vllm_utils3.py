@@ -618,8 +618,10 @@ class LLMRayActor:
 
     def pause_generation(self, timeout_s: float = 300.0) -> bool:
         """Pause vLLM background execution without draining active requests."""
-        logger.info(f"[pause_generation] Called. Already paused={self._generation_paused.is_set()}, "
-                   f"_executor_pause_held={self._executor_pause_held}")
+        logger.info(
+            f"[pause_generation] Called. Already paused={self._generation_paused.is_set()}, "
+            f"_executor_pause_held={self._executor_pause_held}"
+        )
 
         if self._generation_paused.is_set():
             logger.info("[pause_generation] Already paused, returning True")
@@ -646,18 +648,24 @@ class LLMRayActor:
             logger.info("[pause_generation] Executor pause lock acquired")
 
             self._executor_pause_held = True
-            logger.info(f"[pause_generation] executor pause lock acquired, _executor_pause_held={self._executor_pause_held}")
+            logger.info(
+                f"[pause_generation] executor pause lock acquired, _executor_pause_held={self._executor_pause_held}"
+            )
             return True
         except Exception as exc:  # pylint: disable=broad-except
             self._executor_pause_held = False
             self._generation_paused.clear()
-            logger.error(f"[pause_generation] failed: {exc}, _executor_pause_held reset to {self._executor_pause_held}")
+            logger.error(
+                f"[pause_generation] failed: {exc}, _executor_pause_held reset to {self._executor_pause_held}"
+            )
             raise
 
     def resume_generation(self):
         """Resume vLLM background execution after a pause."""
-        logger.info(f"[resume_generation] Called. _generation_paused={self._generation_paused.is_set()}, "
-                   f"_executor_pause_held={self._executor_pause_held}, llm_engine={self.llm_engine is not None}")
+        logger.info(
+            f"[resume_generation] Called. _generation_paused={self._generation_paused.is_set()}, "
+            f"_executor_pause_held={self._executor_pause_held}, llm_engine={self.llm_engine is not None}"
+        )
 
         if not self._generation_paused.is_set():
             logger.warning("[resume_generation] Early return: _generation_paused is not set")
@@ -677,8 +685,10 @@ class LLMRayActor:
                 self._executor_pause_held = False
                 logger.info("[resume_generation] Set _executor_pause_held to False")
             else:
-                logger.warning(f"[resume_generation] Skipping pause release: llm_engine={self.llm_engine is not None}, "
-                             f"_executor_pause_held={self._executor_pause_held}")
+                logger.warning(
+                    f"[resume_generation] Skipping pause release: llm_engine={self.llm_engine is not None}, "
+                    f"_executor_pause_held={self._executor_pause_held}"
+                )
         except Exception as e:
             logger.error(f"[resume_generation] Failed to release pause lock: {e}")
             raise

@@ -2320,7 +2320,9 @@ def weight_sync_thread(
                         desc="[Weight Sync Thread] Resuming generation",
                         enable=args.verbose,
                     )
-                    logger.info(f"[Weight Sync Thread] Resume complete. Results: {resume_results}, Times: {resume_times}")
+                    logger.info(
+                        f"[Weight Sync Thread] Resume complete. Results: {resume_results}, Times: {resume_times}"
+                    )
                 except Exception as e:
                     logger.error(f"[Weight Sync Thread] Failed to resume generation: {e}")
                     raise
