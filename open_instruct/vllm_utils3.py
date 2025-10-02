@@ -46,6 +46,7 @@ from torch.distributed.distributed_c10d import (
 )
 
 from open_instruct import logger_utils
+from open_instruct.vllm_executor_patch import PauseAwareMPExecutor, PauseAwareUniExecutor
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
@@ -478,6 +479,9 @@ class LLMRayActor:
 
         self._executor = futures.ThreadPoolExecutor(max_workers=1)
 
+        # Track executor pause state
+        self._executor_pause_held = False
+
         # Generation pause control
         self._generation_paused = threading.Event()
 
@@ -628,17 +632,26 @@ class LLMRayActor:
             return True
 
         engine = self.llm_engine.engine
-        if not hasattr(engine, "stop_remote_worker_execution_loop_async"):
-            logger.warning("pause_generation: engine lacks stop_remote_worker_execution_loop_async; skipping pause")
+        executor = getattr(engine, "model_executor", None)
+        if executor is None or not hasattr(executor, "acquire_pause_lock"):
+            logger.warning("pause_generation: model_executor missing pause API; skipping pause")
             return True
-
-        future = asyncio.run_coroutine_threadsafe(engine.stop_remote_worker_execution_loop_async(), self.loop)
 
         try:
-            future.result(timeout=timeout_s)
-            logger.info("pause_generation: background loop paused successfully")
+            # Acquire executor pause lock (blocks until current iteration finishes)
+            lock_future = asyncio.run_coroutine_threadsafe(executor.acquire_pause_lock(), self.loop)
+            lock_future.result(timeout=timeout_s)
+
+            stop_future = asyncio.run_coroutine_threadsafe(
+                executor.stop_remote_worker_execution_loop_no_lock(), self.loop
+            )
+            stop_future.result(timeout=timeout_s)
+
+            self._executor_pause_held = True
+            logger.info("pause_generation: executor pause lock acquired")
             return True
         except Exception as exc:  # pylint: disable=broad-except
+            self._executor_pause_held = False
             self._generation_paused.clear()
             logger.error(f"pause_generation failed: {exc}")
             raise
@@ -649,12 +662,12 @@ class LLMRayActor:
             return
 
         try:
-            if self.llm_engine is not None:
-                if hasattr(self.llm_engine, "is_running") and self.llm_engine.is_running:
-                    logger.info("resume_generation: background loop already running; skipping restart")
-                else:
-                    self.llm_engine.start_background_loop()
-                    logger.info("resume_generation: background loop restarted")
+            if self.llm_engine is not None and self._executor_pause_held:
+                executor = getattr(self.llm_engine.engine, "model_executor", None)
+                if executor and hasattr(executor, "release_pause_lock"):
+                    release_future = asyncio.run_coroutine_threadsafe(executor.release_pause_lock(), self.loop)
+                    release_future.result()
+                self._executor_pause_held = False
         finally:
             self._generation_paused.clear()
 
@@ -948,7 +961,10 @@ def create_vllm_engines(
         max_tool_calls_dict = {}
 
     vllm_engines = []
-    distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "ray"
+    if tensor_parallel_size == 1:
+        distributed_executor_backend = PauseAwareUniExecutor
+    else:
+        distributed_executor_backend = PauseAwareMPExecutor
     use_hybrid_engine = pg is not None
     num_gpus = int(tensor_parallel_size == 1)
     if use_hybrid_engine and tensor_parallel_size == 1 and single_gpu_mode:
