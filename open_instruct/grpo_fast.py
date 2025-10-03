@@ -626,6 +626,7 @@ class PolicyTrainerRayProcess(RayProcess):
         random.seed(worker_seed)
 
         torch.cuda.set_device(self.local_rank)
+        self.ensure_default_process_group(timeout_minutes=args.backend_timeout)
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
         ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)

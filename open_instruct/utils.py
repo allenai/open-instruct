@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # isort: off
+import inspect
 import os
 
 # We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
@@ -33,7 +34,6 @@ import functools
 import json
 import logging
 import multiprocessing as mp
-import os
 import random
 import re
 import shutil
@@ -46,6 +46,7 @@ from concurrent import futures
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from dataclasses import dataclass
 from multiprocessing import resource_tracker as _rt
+from datetime import timedelta
 from typing import Any, Iterable, List, NewType, Optional, Tuple, Union
 
 import beaker
@@ -70,6 +71,10 @@ MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
 
 logger = logger_utils.setup_logger(__name__)
+
+_INIT_PROCESS_GROUP_SUPPORTS_DEVICE_ID = "device_id" in inspect.signature(
+    torch.distributed.init_process_group
+).parameters
 
 DataClassType = NewType("DataClassType", Any)
 
@@ -1441,6 +1446,31 @@ class RayProcess:
         random.seed(self.rank)
         np.random.seed(self.rank)
         torch.manual_seed(self.rank)
+
+    def ensure_default_process_group(self, backend: Optional[str] = None, timeout_minutes: int = 120) -> None:
+        """Initialize the default torch.distributed process group if needed."""
+        if not torch.distributed.is_available() or torch.distributed.is_initialized():
+            return
+
+        # Default to NCCL on GPU nodes and Gloo otherwise.
+        resolved_backend = backend or ("nccl" if torch.cuda.is_available() else "gloo")
+        init_kwargs = {
+            "backend": resolved_backend,
+            "init_method": "env://",
+            "world_size": self.world_size,
+            "rank": self.rank,
+            "timeout": timedelta(minutes=timeout_minutes),
+        }
+
+        if _INIT_PROCESS_GROUP_SUPPORTS_DEVICE_ID and torch.cuda.is_available():
+            try:
+                current_device = torch.cuda.current_device()
+            except (AssertionError, RuntimeError):
+                current_device = None
+            else:
+                init_kwargs["device_id"] = torch.device("cuda", current_device)
+
+        torch.distributed.init_process_group(**init_kwargs)
 
     @staticmethod
     def get_current_node_ip():
