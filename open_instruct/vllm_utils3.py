@@ -509,10 +509,7 @@ class LLMRayActor:
             self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=False)
             logger.info("AsyncLLMEngine created successfully")
 
-            # Start the background loop (synchronous call)
-            self.llm_engine.start_background_loop()
-            logger.info("AsyncLLMEngine background loop started")
-
+            # AsyncLLM automatically starts the output handler when needed
             # Signal init complete
             self.init_complete.set()
 
@@ -582,6 +579,14 @@ class LLMRayActor:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
 
+    def _check_async_loop_alive(self):
+        """Check if the async event loop thread is still alive and raise if not."""
+        if not self.loop_thread.is_alive():
+            raise RuntimeError(
+                "Async event loop thread has died. This likely means AsyncLLM initialization failed. "
+                "Check earlier logs for the root cause exception."
+            )
+
     def _should_exit(self) -> bool:
         """Determine if the processing loop should exit.
 
@@ -610,6 +615,8 @@ class LLMRayActor:
 
     def _add_request_sync(self, request: PromptRequest):
         """Add a request by spawning async tasks."""
+        self._check_async_loop_alive()
+
         request_id = make_request_id(request)
         logger.info(
             f"[_add_request_sync] 🎯 Adding request: request_id={request_id}, is_eval={request.is_eval}, n={request.generation_config.n}"
@@ -676,12 +683,8 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
+        self._check_async_loop_alive()
         total_processed = 0
-
-        if not self.llm_engine.is_running:
-            logger.warning("[process_from_queue] Background loop not running, restarting...")
-            self.llm_engine.start_background_loop()
-            logger.info("[process_from_queue] Background loop restarted")
 
         while not self._should_exit():
             if self._prefetch_future.done():
