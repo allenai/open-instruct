@@ -854,12 +854,15 @@ class LLMRayActor:
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
         logger.info(f"[update_weight] ENTRY for param: {name}, dtype: {dtype}, shape: {shape}")
+        logger.info(f"[update_weight] self.loop: {self.loop}")
+        logger.info(f"[update_weight] self.loop.is_running(): {self.loop.is_running()}")
+        logger.info(f"[update_weight] asyncio.get_event_loop(): {asyncio.get_event_loop()}")
         logger.info(f"[update_weight] Scheduling collective_rpc_async for update_weight")
         future = asyncio.run_coroutine_threadsafe(
             self.llm_engine.engine_core.collective_rpc_async("update_weight", args=(name, dtype, shape, empty_cache)),
             self.loop,
         )
-        logger.info(f"[update_weight] Async task scheduled, waiting for result for {name}")
+        logger.info(f"[update_weight] Async task scheduled, future: {future}, waiting for result for {name}")
         result = future.result()
         logger.info(f"[update_weight] EXIT for {name}, result received")
         return result
