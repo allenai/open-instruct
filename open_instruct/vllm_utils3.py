@@ -123,10 +123,9 @@ async def generate_one_completion(
 
     outputs = []
     async for output in generator:
+        outputs.append(output)
         if output.finished:
-            outputs.append(output)
             logger.debug(f"[generate_one_completion] Request {request_id} finished")
-            break
 
     assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
     return outputs[0]
