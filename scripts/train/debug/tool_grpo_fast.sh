@@ -17,6 +17,7 @@ uv run python mason.py \
        --description "Single GPU on Beaker with tool use test script." \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
+	--timeout "1h" \
        --priority urgent \
        --preemptible \
        --num_nodes 1 \
@@ -74,5 +75,5 @@ uv run python mason.py \
     --max_tool_calls 5 \
     --vllm_enable_prefix_caching \
     --tools code search \
-    --search_api_endpoint "http://neptune-cs-aus-258.reviz.ai2.in:43189/search" \
+    --search_api_endpoint "http://saturn-cs-aus-248.reviz.ai2.in:47479" \
     --code_tool_api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute
