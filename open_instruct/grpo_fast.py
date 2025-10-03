@@ -2282,13 +2282,6 @@ def weight_sync_thread(
 
             actor_sync_times: List[float] = []
             try:
-                # Pause generation on all engines before broadcasting weights
-                ray_get_with_progress(
-                    [engine.pause_generation.remote() for engine in vllm_engines],
-                    desc="[Weight Sync Thread] Pausing generation",
-                    enable=args.verbose,
-                )
-
                 # Broadcast weights to vLLM engines
                 weight_broadcast_futures: List[ray.ObjectRef] = [
                     m.broadcast_to_vllm.remote() for m in policy_group.models
@@ -2310,13 +2303,6 @@ def weight_sync_thread(
                     enable=args.verbose,
                 )
             finally:
-                # Resume generation regardless of broadcast outcome
-                ray_get_with_progress(
-                    [engine.resume_generation.remote() for engine in vllm_engines],
-                    desc="[Weight Sync Thread] Resuming generation",
-                    enable=args.verbose,
-                )
-
                 # Allow actors to resume normal operation
                 ray.get(actor_manager.set_should_stop.remote(False))
                 logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
