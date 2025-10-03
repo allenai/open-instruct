@@ -185,6 +185,13 @@ async def process_request_async(
     completion_queue.put(sub_request_result)
 
 
+async def _init_engine_async(actor):
+    """Initialize the AsyncLLMEngine from within the running event loop."""
+    logger.info("Starting AsyncLLMEngine initialization...")
+    actor.llm_engine = vllm.AsyncLLMEngine.from_engine_args(actor.engine_args, start_engine_loop=False)
+    logger.info("AsyncLLMEngine created successfully")
+
+
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
 # Turns out Ray doesnt necessarily place bundles together,
 # so this function is used to get the bundle indices of a placement group
@@ -500,11 +507,6 @@ class LLMRayActor:
 
         self._prefetch_future = self._executor.submit(self._prefetch_worker)
 
-    async def _init_engine_async(self):
-        logger.info("Starting AsyncLLMEngine initialization...")
-        self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(self.engine_args, start_engine_loop=False)
-        logger.info("AsyncLLMEngine created successfully")
-
     def _run_async_loop(self):
         """Run the async event loop in a dedicated thread."""
         # Create and set our event loop
@@ -513,7 +515,7 @@ class LLMRayActor:
 
         # Create engine from within running loop context
         # This ensures AsyncLLM.__init__ sees a running loop and starts output handler
-        self.loop.run_until_complete(self._init_engine_async())
+        self.loop.run_until_complete(_init_engine_async(self))
 
         # Signal init complete
         self.init_complete.set()
