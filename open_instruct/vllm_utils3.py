@@ -482,8 +482,8 @@ class LLMRayActor:
         while True:
             iteration_count += 1
 
+            unfinished = self.llm_engine.get_num_unfinished_requests()
             if iteration_count % 100 == 0:
-                unfinished = self.llm_engine.get_num_unfinished_requests()
                 self.logger.info(f"[process_from_queue] iteration={iteration_count}, unfinished={unfinished}")
 
             # Health check: ensure prefetch worker is alive. This will raise if it has crashed.
@@ -492,9 +492,9 @@ class LLMRayActor:
 
             self._poll_tool_futures(self.tracking, self.llm_engine.tokenizer)
             current_time = time.perf_counter()
-            if self.llm_engine.has_unfinished_requests():
+            if unfinished > 0:
                 self.logger.info(
-                    f"[process_from_queue] Calling step(), unfinished={self.llm_engine.get_num_unfinished_requests()}"
+                    f"[process_from_queue] Calling step(), unfinished={unfinished}"
                 )
                 outputs = list(self.llm_engine.step())
                 finished_outputs = [o for o in outputs if o.finished]
@@ -545,19 +545,29 @@ class LLMRayActor:
                         total_processed += num_processed
                         if num_processed > 0:
                             self.logger.info(f"[process_from_queue] Finalized sub-request {output.request_id}")
+                # Refresh unfinished count after stepping
+                unfinished = self.llm_engine.get_num_unfinished_requests()
+
+            waiting_for_weight_update = (
+                not self.inflight_updates and self._weight_update_in_progress.is_set()
+            )
+
+            if waiting_for_weight_update and unfinished == 0:
+                # Give the weight-update RPC a moment to finish clearing the guard before pulling new work.
+                time.sleep(0.05)
+                continue
 
             if self.verbose and iteration_count % 100 == 0:
-                final_unfinished = self.llm_engine.get_num_unfinished_requests()
                 pending_tools = len(self.tracking["pending_tool_futures"])
                 self.logger.info(
-                    f"process_from_queue iteration {iteration_count}: unfinished={final_unfinished}, pending_tools={pending_tools}"
+                    f"process_from_queue iteration {iteration_count}: unfinished={unfinished}, pending_tools={pending_tools}"
                 )
 
             # If we have only pending tools but no unfinished requests, sleep briefly
             # to let pending tools complete before the next iteration
-            if self.llm_engine.get_num_unfinished_requests() == 0 and len(self.tracking["pending_tool_futures"]) > 0:
+            if unfinished == 0 and len(self.tracking["pending_tool_futures"]) > 0:
                 time.sleep(1)
-            elif self.llm_engine.get_num_unfinished_requests() == 0:
+            elif unfinished == 0:
                 time.sleep(0.1)
 
         return total_processed
