@@ -18,6 +18,7 @@
 import dataclasses
 import os
 import queue
+import threading
 import time
 from collections import defaultdict
 from concurrent import futures
@@ -395,6 +396,8 @@ class LLMRayActor:
         self._should_stop_value = False
         self._should_stop_timeout_s = 5
 
+        self._weight_update_in_progress = threading.Event()
+
         self._executor = futures.ThreadPoolExecutor(max_workers=2)
         self._prefetch_future = self._executor.submit(self._prefetch_worker)
         self._process_future = self._executor.submit(self.process_from_queue)
@@ -433,7 +436,7 @@ class LLMRayActor:
     def _prefetch_worker(self, sleep_length_s: int = 1):
         """Background worker that prefetches requests until we have enough buffered."""
         while True:
-            if self._should_stop():
+            if self._weight_update_in_progress.is_set():
                 time.sleep(sleep_length_s)
                 continue
             current_unfinished = self.llm_engine.get_num_unfinished_requests()
@@ -457,25 +460,6 @@ class LLMRayActor:
         results_queue = self.eval_results_queue if is_eval else self.results_queue
         results_queue.put(result)
 
-    def _should_pause(self) -> bool:
-        """Determine if processing should pause.
-
-        Returns:
-            bool: True if should pause processing (stop requested or no work), False otherwise.
-        """
-        stop_requested = self._should_stop()
-
-        if stop_requested:
-            return True
-
-        pending_tools = len(self.tracking["pending_tool_futures"])
-        unfinished = self.llm_engine.get_num_unfinished_requests()
-
-        if pending_tools == 0 and unfinished == 0:
-            return True
-
-        return False
-
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
@@ -492,10 +476,6 @@ class LLMRayActor:
         iteration_count = 0
 
         while True:
-            if self._should_pause():
-                time.sleep(1)
-                continue
-
             iteration_count += 1
 
             # Health check: ensure prefetch worker is alive. This will raise if it has crashed.
@@ -859,28 +839,38 @@ class LLMRayActor:
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        while not self.inflight_updates:
-            pending_tools = len(self.tracking["pending_tool_futures"])
-            unfinished = self.llm_engine.get_num_unfinished_requests()
+        if not self.inflight_updates:
+            self._weight_update_in_progress.set()
+            while True:
+                pending_tools = len(self.tracking["pending_tool_futures"])
+                unfinished = self.llm_engine.get_num_unfinished_requests()
 
-            if pending_tools == 0 and unfinished == 0:
-                break
+                if pending_tools == 0 and unfinished == 0:
+                    break
 
-            time.sleep(0.1)
-        return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+                time.sleep(0.1)
+        result = self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        if not self.inflight_updates:
+            self._weight_update_in_progress.clear()
+        return result
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        while not self.inflight_updates:
-            pending_tools = len(self.tracking["pending_tool_futures"])
-            unfinished = self.llm_engine.get_num_unfinished_requests()
+        if not self.inflight_updates:
+            self._weight_update_in_progress.set()
+            while True:
+                pending_tools = len(self.tracking["pending_tool_futures"])
+                unfinished = self.llm_engine.get_num_unfinished_requests()
 
-            if pending_tools == 0 and unfinished == 0:
-                break
+                if pending_tools == 0 and unfinished == 0:
+                    break
 
-            time.sleep(0.1)
-        return self.llm_engine.collective_rpc(
+                time.sleep(0.1)
+        result = self.llm_engine.collective_rpc(
             "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
+        if not self.inflight_updates:
+            self._weight_update_in_progress.clear()
+        return result
 
     def reset_prefix_cache(self):
         self.llm_engine.reset_prefix_cache()
