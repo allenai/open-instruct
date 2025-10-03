@@ -205,6 +205,28 @@ async def _event_loop_health_monitor():
             logger.info(f"[EventLoopHealth] Pending task: {task.get_name()}, {task}")
 
 
+async def _process_sync_requests(actor):
+    """Background task that processes sync method requests from other threads."""
+    logger.info("[_process_sync_requests] Starting sync request processor")
+    while True:
+        await asyncio.sleep(0.01)
+        try:
+            coro, result_container, done_event = actor._sync_request_queue.get_nowait()
+            logger.debug("[_process_sync_requests] Got sync request from queue")
+            try:
+                result = await coro
+                result_container["result"] = result
+                result_container["error"] = None
+            except Exception as e:
+                logger.error(f"[_process_sync_requests] Error executing sync request: {e}")
+                result_container["result"] = None
+                result_container["error"] = e
+            finally:
+                done_event.set()
+        except queue.Empty:
+            pass
+
+
 async def _init_engine_async(actor):
     """Initialize the AsyncLLMEngine from within the running event loop."""
     logger.info("Starting AsyncLLMEngine initialization...")
@@ -220,6 +242,7 @@ async def _init_engine_async(actor):
     logger.info(f"Current event loop: {asyncio.get_running_loop()}")
     logger.info(f"Event loop all tasks: {len(asyncio.all_tasks())}")
     asyncio.create_task(_event_loop_health_monitor(), name="EventLoopHealthMonitor")
+    asyncio.create_task(_process_sync_requests(actor), name="SyncRequestProcessor")
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -521,6 +544,9 @@ class LLMRayActor:
         # Async tracking for request accumulation
         self.active_tasks = {}  # Track active async tasks
         self.request_outputs = {}  # Accumulate outputs until all N samples complete
+
+        # Sync-to-async bridge for calling async methods from sync context
+        self._sync_request_queue = queue.Queue()
 
         # Initialize async components with our own event loop
         self.init_complete = threading.Event()
@@ -828,6 +854,21 @@ class LLMRayActor:
 
         self._last_future_check = now
 
+    def _call_async_from_sync(self, coro, timeout=120):
+        """Bridge to call async coroutines from sync methods by delegating to event loop thread."""
+        result_container = {}
+        done_event = threading.Event()
+
+        self._sync_request_queue.put((coro, result_container, done_event))
+
+        if not done_event.wait(timeout=timeout):
+            raise TimeoutError(f"Async call timed out after {timeout}s")
+
+        if result_container.get("error"):
+            raise result_container["error"]
+
+        return result_container.get("result")
+
     def init_process_group(
         self,
         master_address,
@@ -839,8 +880,7 @@ class LLMRayActor:
         use_ray=False,
         timeout_minutes=120,
     ):
-        asyncio.set_event_loop(self.loop)
-        future = asyncio.run_coroutine_threadsafe(
+        return self._call_async_from_sync(
             self.llm_engine.engine_core.collective_rpc_async(
                 "init_process_group",
                 args=(
@@ -854,43 +894,26 @@ class LLMRayActor:
                     timeout_minutes,
                 ),
             ),
-            self.loop,
+            timeout=timeout_minutes * 60,
         )
-        return future.result()
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        logger.info(f"[update_weight] ENTRY for param: {name}, dtype: {dtype}, shape: {shape}")
-        logger.info(f"[update_weight] self.loop: {self.loop}, is_running: {self.loop.is_running()}")
-
-        asyncio.set_event_loop(self.loop)
-        current_loop = asyncio.get_event_loop()
-        logger.info(f"[update_weight] After set_event_loop, get_event_loop(): {current_loop}")
-        assert current_loop == self.loop, f"Loop mismatch after set! current={current_loop}, self.loop={self.loop}"
-
-        logger.info(f"[update_weight] Scheduling collective_rpc_async for update_weight")
-        future = asyncio.run_coroutine_threadsafe(
-            self.llm_engine.engine_core.collective_rpc_async("update_weight", args=(name, dtype, shape, empty_cache)),
-            self.loop,
+        logger.info(f"[update_weight] ENTRY for param: {name}")
+        result = self._call_async_from_sync(
+            self.llm_engine.engine_core.collective_rpc_async("update_weight", args=(name, dtype, shape, empty_cache))
         )
-        logger.info(f"[update_weight] Async task scheduled, future: {future}, waiting for result for {name}")
-        result = future.result()
-        logger.info(f"[update_weight] EXIT for {name}, result received")
+        logger.info(f"[update_weight] EXIT for {name}")
         return result
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        asyncio.set_event_loop(self.loop)
-        future = asyncio.run_coroutine_threadsafe(
+        return self._call_async_from_sync(
             self.llm_engine.engine_core.collective_rpc_async(
                 "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
-            ),
-            self.loop,
+            )
         )
-        return future.result()
 
     def reset_prefix_cache(self):
-        asyncio.set_event_loop(self.loop)
-        future = asyncio.run_coroutine_threadsafe(self.llm_engine.reset_prefix_cache(), self.loop)
-        return future.result()
+        return self._call_async_from_sync(self.llm_engine.reset_prefix_cache())
 
     def ready(self):
         # Engine and prefetch are already initialized in __init__
