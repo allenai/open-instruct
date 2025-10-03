@@ -855,6 +855,13 @@ class PolicyTrainerRayProcess(RayProcess):
                         refss.extend(refs)
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+                    logger.debug(
+                        "[broadcast_to_vllm] rank=%s param=%s/%s broadcast complete (%s)",
+                        self.rank,
+                        count,
+                        num_params,
+                        name,
+                    )
         else:  # broadcast each parameter independently
             for name, param in model.named_parameters():
                 count += 1
@@ -870,12 +877,23 @@ class PolicyTrainerRayProcess(RayProcess):
                 with deepspeed.zero.GatheredParameters([param], enabled=self.args.deepspeed_stage == 3):
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+                logger.debug(
+                    "[broadcast_to_vllm] rank=%s param=%s/%s broadcast complete (%s)",
+                    self.rank,
+                    count,
+                    num_params,
+                    name,
+                )
 
         # Return futures instead of blocking - let caller handle completion
-        all_refs = []
+        update_payload = {
+            "rank": self.rank,
+            "num_params": num_params,
+            "update_weight_refs": [],
+        }
         if torch.distributed.get_rank() == 0:
-            all_refs.extend(refss)
-        return all_refs
+            update_payload["update_weight_refs"] = refss
+        return update_payload
 
     def maybe_distributed_barrier(self, tag: str = ""):
         """Synchronize all learners via torch.distributed.barrier with logging."""
@@ -2288,25 +2306,70 @@ def weight_sync_thread(
                     desc="[Weight Sync Thread] Acquiring executor locks",
                     enable=args.verbose,
                 )
-
                 weight_broadcast_futures: List[ray.ObjectRef] = [
                     m.broadcast_to_vllm.remote() for m in policy_group.models
                 ]
 
-                _, actor_sync_times = ray_get_with_progress(
-                    weight_broadcast_futures,
-                    desc="[Weight Sync Thread] Waiting for weight updates to complete",
-                    enable=args.verbose,
-                )
+                try:
+                    broadcast_payloads, actor_sync_times = ray_get_with_progress(
+                        weight_broadcast_futures,
+                        desc="[Weight Sync Thread] Waiting for weight updates to complete",
+                        enable=args.verbose,
+                        timeout=args.backend_timeout,
+                    )
+                except futures.TimeoutError as exc:
+                    logger.error(
+                        "[Weight Sync Thread] Weight broadcast timed out after %ss: %s",
+                        args.backend_timeout,
+                        exc,
+                    )
+                    raise
 
-                ray_get_with_progress(
-                    [
-                        m.maybe_distributed_barrier.remote(f"weight_sync_{time.monotonic():.0f}_post_update")
-                        for m in policy_group.models
-                    ],
-                    desc="[Weight Sync Thread] Distributed barrier",
-                    enable=args.verbose,
-                )
+                pending_update_logs: list[str] = []
+                for payload in broadcast_payloads or []:
+                    if not payload:
+                        continue
+                    rank = payload.get("rank", "unknown")
+                    update_refs = payload.get("update_weight_refs") or []
+                    if not update_refs:
+                        continue
+                    _, remaining = ray.wait(update_refs, num_returns=len(update_refs), timeout=0)
+                    if remaining:
+                        pending_update_logs.append(
+                            f"rank={rank} pending_update_refs={[ref.hex() for ref in remaining]}"
+                        )
+
+                if pending_update_logs:
+                    logger.warning(
+                        "[Weight Sync Thread] Pending update_weight refs after broadcast: %s",
+                        "; ".join(pending_update_logs),
+                    )
+
+                barrier_refs = [
+                    m.maybe_distributed_barrier.remote(f"weight_sync_{time.monotonic():.0f}_post_update")
+                    for m in policy_group.models
+                ]
+                barrier_timeout_s = args.backend_timeout
+                try:
+                    ray_get_with_progress(
+                        barrier_refs,
+                        desc="[Weight Sync Thread] Distributed barrier",
+                        enable=args.verbose,
+                        timeout=barrier_timeout_s,
+                    )
+                except futures.TimeoutError as exc:
+                    pending_barrier = []
+                    for ref in barrier_refs:
+                        _, remaining = ray.wait([ref], num_returns=1, timeout=0)
+                        if remaining:
+                            pending_barrier.append(remaining[0].hex())
+                    logger.error(
+                        "[Weight Sync Thread] Barrier timed out after %ss; pending refs=%s; pending updates=%s",
+                        barrier_timeout_s,
+                        pending_barrier,
+                        pending_update_logs,
+                    )
+                    raise
             finally:
                 # Allow actors to resume normal operation before the locks are released
                 logger.info("[Weight Sync Thread] Setting should_stop to False")

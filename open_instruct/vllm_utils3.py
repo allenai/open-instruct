@@ -600,20 +600,7 @@ class LLMRayActor:
         Returns:
             bool: True if the loop should exit, False otherwise.
         """
-        # Check stop condition first (cheapest check)
-        stop_requested = self._should_stop()
-
-        # Now check for pending work (only if needed)
-        if stop_requested:
-            # Need to check if we have pending work
-            active_tasks = len(self.active_tasks)
-            has_incomplete = len(self.request_outputs) > 0
-
-            # Case 2: stop requested and no pending work - exit
-            if active_tasks == 0 and not has_incomplete:
-                return True
-            # Otherwise, we have pending work and should continue
-
+        # Always keep the processing loop alive; higher-level shutdown uses sentinels.
         return False
 
     def pause_generation(self, timeout_s: float = 300.0) -> bool:
