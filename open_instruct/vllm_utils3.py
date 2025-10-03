@@ -457,8 +457,8 @@ class LLMRayActor:
         results_queue = self.eval_results_queue if is_eval else self.results_queue
         results_queue.put(result)
 
-    def _should_exit(self) -> bool:
-        """Determine if the processing loop should exit.
+    def _should_pause(self) -> bool:
+        """Determine if processing should pause.
 
         Returns:
             bool: True if should pause processing (stop requested or no work), False otherwise.
@@ -492,7 +492,7 @@ class LLMRayActor:
         iteration_count = 0
 
         while True:
-            if self._should_exit():
+            if self._should_pause():
                 time.sleep(1)
                 continue
 
@@ -859,9 +859,15 @@ class LLMRayActor:
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
+        if self.inflight_updates:
+            while not self._should_pause():
+                time.sleep(0.1)
         return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
+        if self.inflight_updates:
+            while not self._should_pause():
+                time.sleep(0.1)
         return self.llm_engine.collective_rpc(
             "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
