@@ -555,11 +555,9 @@ class LLMRayActor:
 
     def get_model_dims_dict(self):
         """Get only the model dimensions as a simple dict without loading weights."""
-        model_config_future = asyncio.run_coroutine_threadsafe(self.llm_engine.get_model_config(), self.loop)
-        model_config = model_config_future.result()
-
-        parallel_config_future = asyncio.run_coroutine_threadsafe(self.llm_engine.get_parallel_config(), self.loop)
-        parallel_config = parallel_config_future.result()
+        # In vLLM v1, use direct attributes
+        model_config = self.llm_engine.model_config
+        parallel_config = self.llm_engine.vllm_config.parallel_config
 
         hidden_size = model_config.get_hidden_size()
         intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
@@ -784,16 +782,16 @@ class LLMRayActor:
         use_ray=False,
         timeout_minutes=120,
     ):
-        return self.llm_engine.engine.collective_rpc(
+        return self.llm_engine.engine_core.collective_rpc(
             "init_process_group",
             args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        return self.llm_engine.engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        return self.llm_engine.engine_core.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        return self.llm_engine.engine.collective_rpc(
+        return self.llm_engine.engine_core.collective_rpc(
             "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
 
@@ -807,16 +805,17 @@ class LLMRayActor:
 
     def get_kv_cache_info(self):
         """Get KV cache max concurrency from the vLLM engine."""
-        # AsyncLLMEngine wraps the underlying LLMEngine
-        engine = self.llm_engine.engine
+        # In vLLM v1, AsyncLLM has direct attributes model_config and vllm_config
+        cache_config = self.llm_engine.vllm_config.cache_config
+        model_config = self.llm_engine.model_config
 
         # Use the same calculation as vLLM's executor_base.py
         # Reference: https://github.com/vllm-project/vllm/blob/b6553be1bc75f046b00046a4ad7576364d03c835/vllm/executor/executor_base.py#L119-L120
         retries = 5
         for attempt in range(retries):
-            num_gpu_blocks = engine.cache_config.num_gpu_blocks
-            block_size = engine.cache_config.block_size
-            max_model_len = engine.model_config.max_model_len
+            num_gpu_blocks = cache_config.num_gpu_blocks
+            block_size = cache_config.block_size
+            max_model_len = model_config.max_model_len
 
             if num_gpu_blocks is not None and num_gpu_blocks != 0:
                 # Calculate max concurrency using vLLM's formula
