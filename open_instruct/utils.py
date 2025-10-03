@@ -45,7 +45,6 @@ from concurrent import futures
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from dataclasses import dataclass
 from multiprocessing import resource_tracker as _rt
-from datetime import timedelta
 from typing import Any, Iterable, List, NewType, Optional, Tuple, Union
 
 import beaker
@@ -1441,27 +1440,6 @@ class RayProcess:
         random.seed(self.rank)
         np.random.seed(self.rank)
         torch.manual_seed(self.rank)
-        if torch.distributed.is_available() and not torch.distributed.is_initialized():
-            backend = "nccl" if torch.cuda.is_available() else "gloo"
-            init_kwargs = {
-                "backend": backend,
-                "init_method": "env://",
-                "world_size": self.world_size,
-                "rank": self.rank,
-                "timeout": timedelta(minutes=120),
-            }
-
-            if torch.cuda.is_available():
-                try:
-                    init_kwargs["device_id"] = torch.device("cuda", torch.cuda.current_device())
-                except (AssertionError, RuntimeError):
-                    pass
-
-            try:
-                torch.distributed.init_process_group(**init_kwargs)
-            except TypeError:
-                init_kwargs.pop("device_id", None)
-                torch.distributed.init_process_group(**init_kwargs)
 
     @staticmethod
     def get_current_node_ip():

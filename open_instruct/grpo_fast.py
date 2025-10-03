@@ -625,6 +625,25 @@ class PolicyTrainerRayProcess(RayProcess):
         np.random.seed(worker_seed)
         random.seed(worker_seed)
 
+        if torch.distributed.is_available() and not torch.distributed.is_initialized():
+            if not torch.cuda.is_available():
+                raise RuntimeError("Expected CUDA availability before initializing NCCL process group")
+
+            init_kwargs = {
+                "backend": "nccl",
+                "init_method": "env://",
+                "world_size": self.world_size,
+                "rank": self.rank,
+                "timeout": timedelta(minutes=args.backend_timeout),
+                "device_id": torch.device("cuda", self.local_rank),
+            }
+
+            try:
+                torch.distributed.init_process_group(**init_kwargs)
+            except TypeError:
+                init_kwargs.pop("device_id", None)
+                torch.distributed.init_process_group(**init_kwargs)
+
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
         ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
