@@ -118,7 +118,7 @@ async def generate_one_completion(
 ) -> vllm.RequestOutput:
     """Generate a single completion from the async engine."""
     logger.debug(f"[generate_one_completion] Adding request {request_id} to engine")
-    generator = await llm_engine.add_request(request_id, prompt, sampling_params)
+    generator = llm_engine.generate(prompt, sampling_params, request_id)
     logger.debug(f"[generate_one_completion] Got generator for {request_id}, starting iteration")
 
     outputs = []
