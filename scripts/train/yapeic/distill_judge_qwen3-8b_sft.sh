@@ -24,6 +24,7 @@ python mason.py \
     --tokenizer_revision main \
     --use_slow_tokenizer \
     --dataset_mixer_list /weka/oe-training-default/yapeic/proc-data/data/distillation/gpt-5_v5_train_15000.jsonl 1.0 \
+    --resume_from_checkpoint /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/distill_judge_qwen3-8b_sft__8__1759457571 \
     --max_seq_length 8192 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 2 \
