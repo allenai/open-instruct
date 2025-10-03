@@ -36,6 +36,7 @@ class GenerationResult:
     training_step: Optional[int] = None
     token_statistics: Optional[TokenStatistics] = None
     start_time: Optional[float] = None
+    logprobs: Optional[List[List[float]]] = None  # logprobs for each token in each response
 
 
 @dataclass

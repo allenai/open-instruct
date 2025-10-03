@@ -182,6 +182,7 @@ class TestGrpoFastBase(unittest.TestCase):
             token_statistics=TokenStatistics(
                 num_prompt_tokens=10, num_response_tokens=3 * total_responses, generation_time=0.1
             ),
+            logprobs=[[0.0, 0.0, 0.0] for _ in range(total_responses)],
         )
 
     def setup_and_split_batch(
