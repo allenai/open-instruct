@@ -834,18 +834,23 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
+        logger.info(f"[broadcast_to_vllm] ENTRY on rank {torch.distributed.get_rank()}")
         # avoid OOM
         torch.cuda.empty_cache()
         model = self.model.module
         count, num_params = 0, len(list(model.named_parameters()))
+        logger.info(f"[broadcast_to_vllm] Total parameters to broadcast: {num_params}")
         refss = []
         if self.args.gather_whole_model:
+            logger.info("[broadcast_to_vllm] Using gather_whole_model mode")
             with deepspeed.zero.GatheredParameters(model.parameters(), enabled=self.args.deepspeed_stage == 3):
                 for name, param in model.named_parameters():
                     count += 1  # empty_cache at last param
                     # Fire all vllm engines for broadcast
                     if torch.distributed.get_rank() == 0:
+                        logger.info(f"[broadcast_to_vllm] Param {count}/{num_params}: {name}, shape: {param.shape}")
                         shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
+                        logger.info(f"[broadcast_to_vllm] Creating update_weight.remote() futures for {name}")
                         refs = [
                             engine.update_weight.remote(
                                 name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
@@ -853,13 +858,18 @@ class PolicyTrainerRayProcess(RayProcess):
                             for engine in self.vllm_engines
                         ]
                         refss.extend(refs)
+                        logger.info(f"[broadcast_to_vllm] Created {len(refs)} futures, about to call torch.distributed.broadcast for {name}")
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+                        logger.info(f"[broadcast_to_vllm] torch.distributed.broadcast COMPLETED for {name}")
         else:  # broadcast each parameter independently
+            logger.info("[broadcast_to_vllm] Using parameter-by-parameter broadcast mode")
             for name, param in model.named_parameters():
                 count += 1
                 if torch.distributed.get_rank() == 0:
+                    logger.info(f"[broadcast_to_vllm] Param {count}/{num_params}: {name}, shape: {param.shape}")
                     shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
+                    logger.info(f"[broadcast_to_vllm] Creating update_weight.remote() futures for {name}")
                     refs = [
                         engine.update_weight.remote(
                             name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
@@ -867,14 +877,17 @@ class PolicyTrainerRayProcess(RayProcess):
                         for engine in self.vllm_engines
                     ]
                     refss.extend(refs)
+                    logger.info(f"[broadcast_to_vllm] Created {len(refs)} futures, about to call torch.distributed.broadcast for {name}")
                 with deepspeed.zero.GatheredParameters([param], enabled=self.args.deepspeed_stage == 3):
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+                        logger.info(f"[broadcast_to_vllm] torch.distributed.broadcast COMPLETED for {name}")
 
         # Return futures instead of blocking - let caller handle completion
         all_refs = []
         if torch.distributed.get_rank() == 0:
             all_refs.extend(refss)
+        logger.info(f"[broadcast_to_vllm] EXIT, returning {len(all_refs)} futures")
         return all_refs
 
     def maybe_distributed_barrier(self, tag: str = ""):
