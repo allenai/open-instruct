@@ -395,8 +395,9 @@ class LLMRayActor:
         self._should_stop_value = False
         self._should_stop_timeout_s = 5
 
-        self._executor = futures.ThreadPoolExecutor(max_workers=1)
+        self._executor = futures.ThreadPoolExecutor(max_workers=2)
         self._prefetch_future = self._executor.submit(self._prefetch_worker)
+        self._process_future = self._executor.submit(self.process_from_queue)
         self.tracking = _init_tool_tracking()
         self.request_outputs = {}
 
@@ -460,36 +461,19 @@ class LLMRayActor:
         """Determine if the processing loop should exit.
 
         Returns:
-            bool: True if the loop should exit, False otherwise.
+            bool: True if should pause processing (stop requested or no work), False otherwise.
         """
-        # Check stop condition first (cheapest check)
         stop_requested = self._should_stop()
 
-        # Case 1: inflight_updates enabled and stop requested - exit immediately
-        if self.inflight_updates and stop_requested:
+        if stop_requested:
             return True
 
-        # Now check for pending work (only if needed)
-        if stop_requested:
-            # Need to check if we have pending work
-            pending_tools = len(self.tracking["pending_tool_futures"])
-            unfinished = self.llm_engine.get_num_unfinished_requests()
-
-            # Case 2: stop requested and no pending work - exit
-            if pending_tools == 0 and unfinished == 0:
-                return True
-            # Otherwise, we have pending work and should continue
-            return False
-
-        # No stop requested - check if there's any work to do
         pending_tools = len(self.tracking["pending_tool_futures"])
         unfinished = self.llm_engine.get_num_unfinished_requests()
 
-        # Case 3: no work left at all - exit
         if pending_tools == 0 and unfinished == 0:
             return True
 
-        # Otherwise, continue processing
         return False
 
     def process_from_queue(self, timeout: float = 60.0):
@@ -507,7 +491,11 @@ class LLMRayActor:
         total_processed = 0
         iteration_count = 0
 
-        while not self._should_exit():
+        while True:
+            if self._should_exit():
+                time.sleep(1)
+                continue
+
             iteration_count += 1
 
             # Health check: ensure prefetch worker is alive. This will raise if it has crashed.
