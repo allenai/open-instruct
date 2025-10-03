@@ -440,6 +440,12 @@ class LLMRayActor:
             if self._weight_update_in_progress.is_set():
                 time.sleep(sleep_length_s)
                 continue
+            if not self.inflight_updates and self._should_stop():
+                # During weight sync the trainer sets should_stop. Avoid pulling
+                # additional requests so the sync can complete after draining
+                # only the currently running batch.
+                time.sleep(sleep_length_s)
+                continue
             current_unfinished = self.llm_engine.get_num_unfinished_requests()
             if current_unfinished >= self.inference_batch_size:
                 time.sleep(sleep_length_s)
