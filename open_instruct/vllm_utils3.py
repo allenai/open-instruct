@@ -479,8 +479,16 @@ class LLMRayActor:
 
         self.logger.info("[process_from_queue] Background thread started")
 
+        waiting_for_weight_update_completion = False
+
         while True:
             iteration_count += 1
+
+            if waiting_for_weight_update_completion:
+                if self._weight_update_in_progress.is_set():
+                    time.sleep(0.05)
+                    continue
+                waiting_for_weight_update_completion = False
 
             unfinished = self.llm_engine.get_num_unfinished_requests()
             if iteration_count % 100 == 0:
@@ -554,7 +562,7 @@ class LLMRayActor:
 
             if waiting_for_weight_update and unfinished == 0:
                 # Give the weight-update RPC a moment to finish clearing the guard before pulling new work.
-                time.sleep(0.05)
+                waiting_for_weight_update_completion = True
                 continue
 
             if self.verbose and iteration_count % 100 == 0:
@@ -872,15 +880,36 @@ class LLMRayActor:
     def update_weight(self, name, dtype, shape, empty_cache=False):
         if not self.inflight_updates:
             self._weight_update_in_progress.set()
+            wait_start = time.perf_counter()
+            last_log = wait_start
+            self.logger.info(
+                "[update_weight] Waiting for engine to drain before syncing '%s'", name
+            )
             while True:
                 pending_tools = len(self.tracking["pending_tool_futures"])
                 unfinished = self.llm_engine.get_num_unfinished_requests()
 
                 if pending_tools == 0 and unfinished == 0:
+                    elapsed = time.perf_counter() - wait_start
+                    self.logger.info(
+                        "[update_weight] Engine drained for '%s' after %.2fs", name, elapsed
+                    )
                     break
 
+                now = time.perf_counter()
+                if now - last_log >= 1.0:
+                    self.logger.info(
+                        "[update_weight] Still waiting for '%s': pending_tools=%d unfinished=%d (%.2fs)",
+                        name,
+                        pending_tools,
+                        unfinished,
+                        now - wait_start,
+                    )
+                    last_log = now
                 time.sleep(0.1)
+        self.logger.info("[update_weight] Calling collective_rpc for '%s'", name)
         result = self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        self.logger.info("[update_weight] Finished collective_rpc for '%s'", name)
         if not self.inflight_updates:
             self._weight_update_in_progress.clear()
         return result
@@ -888,17 +917,40 @@ class LLMRayActor:
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
         if not self.inflight_updates:
             self._weight_update_in_progress.set()
+            wait_start = time.perf_counter()
+            last_log = wait_start
+            self.logger.info(
+                "[update_weight_cuda_ipc] Waiting for engine to drain before syncing '%s'", name
+            )
             while True:
                 pending_tools = len(self.tracking["pending_tool_futures"])
                 unfinished = self.llm_engine.get_num_unfinished_requests()
 
                 if pending_tools == 0 and unfinished == 0:
+                    elapsed = time.perf_counter() - wait_start
+                    self.logger.info(
+                        "[update_weight_cuda_ipc] Engine drained for '%s' after %.2fs",
+                        name,
+                        elapsed,
+                    )
                     break
 
+                now = time.perf_counter()
+                if now - last_log >= 1.0:
+                    self.logger.info(
+                        "[update_weight_cuda_ipc] Still waiting for '%s': pending_tools=%d unfinished=%d (%.2fs)",
+                        name,
+                        pending_tools,
+                        unfinished,
+                        now - wait_start,
+                    )
+                    last_log = now
                 time.sleep(0.1)
+        self.logger.info("[update_weight_cuda_ipc] Calling collective_rpc for '%s'", name)
         result = self.llm_engine.collective_rpc(
             "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
+        self.logger.info("[update_weight_cuda_ipc] Finished collective_rpc for '%s'", name)
         if not self.inflight_updates:
             self._weight_update_in_progress.clear()
         return result
