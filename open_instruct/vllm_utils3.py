@@ -624,6 +624,9 @@ class LLMRayActor:
         logger.info(
             f"[_add_request_sync] 🎯 Adding request: request_id={request_id}, is_eval={request.is_eval}, n={request.generation_config.n}"
         )
+        logger.info(
+            f"[_add_request_sync] Loop thread alive: {self.loop_thread.is_alive()}, loop: {self.loop}, loop_running: {self.loop.is_running()}"
+        )
 
         sampling_params = request.generation_config.clone()
         sampling_params.n = 1  # Use n=1 for sub-requests
@@ -663,6 +666,9 @@ class LLMRayActor:
             )
             # Track the future
             self.active_tasks[sub_request_id] = future
+            logger.info(
+                f"[_add_request_sync] Scheduled task for {sub_request_id}, future={future}, done={future.done()}"
+            )
 
     def _insert_result_to_queue(self, result, is_eval: bool):
         """Insert result into the appropriate queue with blocking put."""
