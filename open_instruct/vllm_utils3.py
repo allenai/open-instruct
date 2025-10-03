@@ -185,7 +185,10 @@ async def process_request_async(
     }
 
     completion_queue.put(sub_request_result)
-    logger.info(f"[process_request_async] EXIT for {sub_request_id}, pushed to completion_queue")
+    logger.info(
+        f"[process_request_async] EXIT for {sub_request_id}, pushed to completion_queue "
+        f"(approx queue size: completion_queue is a threading queue, size not available)"
+    )
 
 
 async def _event_loop_health_monitor():
@@ -617,24 +620,26 @@ class LLMRayActor:
         Returns:
             bool: True if the loop should exit, False otherwise.
         """
-        # Check stop condition first (cheapest check)
         stop_requested = self._should_stop()
+        active_tasks = len(self.active_tasks)
+        has_incomplete = len(self.request_outputs) > 0
 
-        # Case 1: inflight_updates enabled and stop requested - exit immediately
+        logger.info(
+            f"[_should_exit] stop_requested={stop_requested}, inflight_updates={self.inflight_updates}, "
+            f"active_tasks={active_tasks}, incomplete_requests={has_incomplete}"
+        )
+
         if self.inflight_updates and stop_requested:
+            logger.info("[_should_exit] Exiting immediately due to inflight_updates + stop")
             return True
 
-        # Now check for pending work (only if needed)
         if stop_requested:
-            # Need to check if we have pending work
-            active_tasks = len(self.active_tasks)
-            has_incomplete = len(self.request_outputs) > 0
-
-            # Case 2: stop requested and no pending work - exit
             if active_tasks == 0 and not has_incomplete:
+                logger.info("[_should_exit] Exiting - stop requested and no pending work")
                 return True
-            # Otherwise, we have pending work and should continue
+            logger.info("[_should_exit] Continuing - stop requested but have pending work")
 
+        logger.info("[_should_exit] Continuing - no stop requested")
         return False
 
     def _add_request_sync(self, request: PromptRequest):
@@ -713,16 +718,24 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
+        logger.info(f"[process_from_queue] ENTRY - timeout={timeout}")
         self._check_async_loop_alive()
         total_processed = 0
+        loop_iterations = 0
 
+        logger.info("[process_from_queue] Entering while loop")
         while not self._should_exit():
+            loop_iterations += 1
+            logger.debug(f"[process_from_queue] Loop iteration {loop_iterations}")
+
             if self._prefetch_future.done():
                 self._prefetch_future.result()
 
             try:
                 self._check_active_tasks()
+                logger.debug("[process_from_queue] Attempting to get from completion_queue (timeout=1.0)")
                 sub_request = self.completion_queue.get(timeout=1.0)
+                logger.info(f"[process_from_queue] Got item from completion_queue: {type(sub_request)}")
 
                 # Check if it's a sub-request (dict) or already processed result (tuple)
                 if isinstance(sub_request, dict):
@@ -786,7 +799,13 @@ class LLMRayActor:
                 )
 
             except queue.Empty:
+                logger.debug("[process_from_queue] Queue empty, continuing loop")
                 pass
+
+        logger.info(
+            f"[process_from_queue] EXIT - Exited while loop after {loop_iterations} iterations, "
+            f"total_processed={total_processed}"
+        )
         return total_processed
 
     def _check_active_tasks(self):
