@@ -625,7 +625,6 @@ class PolicyTrainerRayProcess(RayProcess):
         np.random.seed(worker_seed)
         random.seed(worker_seed)
 
-        torch.cuda.set_device(self.local_rank)
         self.ensure_default_process_group(timeout_minutes=args.backend_timeout)
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
@@ -823,7 +822,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
                 for i, engine in enumerate(vllm_engines)
             ]
-            torch.cuda.set_device(self.local_rank)
             self.model_update_group = vllm_utils3.init_process_group(
                 backend=backend,
                 init_method=f"tcp://{master_address}:{master_port}",
