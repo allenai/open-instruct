@@ -117,18 +117,22 @@ async def generate_one_completion(
     llm_engine: vllm.AsyncLLMEngine, request_id: str, prompt: vllm.TokensPrompt, sampling_params: vllm.SamplingParams
 ) -> vllm.RequestOutput:
     """Generate a single completion from the async engine."""
-    logger.debug(f"[generate_one_completion] Adding request {request_id} to engine")
-    generator = llm_engine.generate(prompt, sampling_params, request_id)
-    logger.debug(f"[generate_one_completion] Got generator for {request_id}, starting iteration")
+    try:
+        logger.debug(f"[generate_one_completion] Adding request {request_id} to engine")
+        generator = llm_engine.generate(prompt, sampling_params, request_id)
+        logger.debug(f"[generate_one_completion] Got generator for {request_id}, starting iteration")
 
-    outputs = []
-    async for output in generator:
-        outputs.append(output)
-        if output.finished:
-            logger.debug(f"[generate_one_completion] Request {request_id} finished")
+        outputs = []
+        async for output in generator:
+            outputs.append(output)
+            if output.finished:
+                logger.debug(f"[generate_one_completion] Request {request_id} finished")
 
-    assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
-    return outputs[0]
+        assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
+        return outputs[0]
+    except Exception as e:
+        logger.error(f"[generate_one_completion] FAILED for {request_id}: {type(e).__name__}: {e}", exc_info=True)
+        raise
 
 
 async def process_request_async(
