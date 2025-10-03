@@ -435,6 +435,7 @@ class LLMRayActor:
 
     def _prefetch_worker(self, sleep_length_s: int = 1):
         """Background worker that prefetches requests until we have enough buffered."""
+        self.logger.info("[_prefetch_worker] Background thread started")
         while True:
             if self._weight_update_in_progress.is_set():
                 time.sleep(sleep_length_s)
@@ -452,6 +453,7 @@ class LLMRayActor:
                     request_metadata=self.request_metadata,
                     vllm_active_requests=self.vllm_active_requests,
                 )
+                self.logger.info("[_prefetch_worker] Added request to engine")
             except queue.Empty:
                 continue
 
@@ -474,6 +476,8 @@ class LLMRayActor:
         # This ensures state is maintained across multiple calls
         total_processed = 0
         iteration_count = 0
+
+        self.logger.info("[process_from_queue] Background thread started")
 
         while True:
             iteration_count += 1

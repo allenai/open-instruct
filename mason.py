@@ -65,7 +65,7 @@ DEFAULT_ENV_VARS = {
     "RAY_CGRAPH_get_timeout": "300",
     "VLLM_DISABLE_COMPILE_CACHE": "1",
     "NCCL_DEBUG": "ERROR",
-    "VLLM_LOGGING_LEVEL": "WARNING",
+    "VLLM_LOGGING_LEVEL": "DEBUG",
     "VLLM_USE_V1": "1",
 }
 
