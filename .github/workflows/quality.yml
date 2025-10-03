@@ -22,6 +22,8 @@ jobs:
         run: uv python install 3.10
       - name: Install dependencies
         run: uv sync --frozen --only-group dev
+      - name: Check Python syntax
+        run: uv run python -m compileall -q open_instruct
       - name: Code quality
         run: |
           source .venv/bin/activate
