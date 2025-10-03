@@ -482,6 +482,8 @@ class Args:
     """Whether to use the full response as the answer"""
     log_separation_scores: bool = False
     """Whether to log separation scores measuring reward concentration around the mean"""
+    log_nmad: bool = False
+    """Whether to log NMAD measuring reward concentration around the mean"""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
@@ -1353,7 +1355,7 @@ def data_preparation_thread(
             else:
                 raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
-            if args.log_separation_scores:
+            if args.log_nmad:
                 # Normalized Mean Absolute Deviation (NMAD) per prompt
                 # NMAD = mean(|r - mean(r)|) / (std(r) + eps)
                 eps = 1e-8
@@ -1362,10 +1364,38 @@ def data_preparation_thread(
                 abs_dev   = np.abs(scores_per_prompt - per_means[:, None])     # [P, M]
                 nmad      = abs_dev.mean(axis=1) / (per_stds + eps)            # [P]
 
-                reward_metrics["objective/separation_score_mean"] = float(nmad.mean())
-                reward_metrics["objective/separation_score_std"]  = float(nmad.std())
-                reward_metrics["objective/separation_score_min"]  = float(nmad.min())
-                reward_metrics["objective/separation_score_max"]  = float(nmad.max())
+                reward_metrics["objective/nmad_mean"] = float(nmad.mean())
+                reward_metrics["objective/nmad_std"]  = float(nmad.std())
+                reward_metrics["objective/nmad_min"]  = float(nmad.min())
+                reward_metrics["objective/nmad_max"]  = float(nmad.max())
+                
+            if args.log_separation_scores:
+                # Compute your original separation score after linearly scaling rewards
+                # from [0, max_possible_score] -> [-1, 1] to remove scale/positivity effects.
+                max_possible = float(getattr(args, "verification_reward", 1.0))
+                if max_possible <= 0:
+                    # Fallback to a sane positive scale if misconfigured
+                    max_possible = float(max(1.0, np.max(scores)))
+
+                R = np.asarray(scores_per_prompt, dtype=np.float64)          # [P, M] raw rewards
+                R = np.clip(R, 0.0, max_possible)
+                S = (R / max_possible) * 2.0 - 1.0                           # scaled to [-1, 1]
+
+                centers = S.mean(axis=1, keepdims=True)                      # [P, 1]
+                dev = S - centers                                            # [P, M]
+                num = np.abs(dev).sum(axis=1)                                # [P]
+                signs = np.sign(dev)                                         # [-1, 0, 1], [P, M]
+                den = np.abs(signs - centers).sum(axis=1)                    # [P]
+
+                sep = np.where(den > 0.0, num / den, np.where(num == 0.0, 0.0, 1.0))  # [P]
+
+                reward_metrics["objective/separation_scaled_mean"] = float(sep.mean())
+                reward_metrics["objective/separation_scaled_std"]  = float(sep.std(ddof=0))
+                reward_metrics["objective/separation_scaled_min"]  = float(sep.min())
+                reward_metrics["objective/separation_scaled_max"]  = float(sep.max())
+                # Optional: track how close centers are to edges after scaling
+                reward_metrics["objective/separation_scaled_center_abs_mean"] = float(np.mean(np.abs(centers.squeeze(1))))
+
 
         # Log training rollouts if enabled
         training_rollouts_data = None
