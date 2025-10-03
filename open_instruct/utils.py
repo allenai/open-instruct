@@ -741,12 +741,15 @@ def get_last_checkpoint_path(args, incomplete: bool = False) -> str:
     # else, start from scratch.
     # if incomplete is true, include folders without "COMPLETE" in the folder.
     last_checkpoint_path = None
-    if args.output_dir and os.path.isdir(args.output_dir):
+    if args.resume_from_checkpoint:
+        if os.path.isdir(args.resume_from_checkpoint):
+            last_checkpoint_path = get_last_checkpoint(args.resume_from_checkpoint, incomplete=incomplete)
+        else:
+            last_checkpoint_path = args.resume_from_checkpoint
+    elif args.output_dir and os.path.isdir(args.output_dir):
         last_checkpoint_path = get_last_checkpoint(args.output_dir, incomplete=incomplete)
         if last_checkpoint_path is None:
             logger.warning("Output directory exists but no checkpoint found. Starting from scratch.")
-    elif args.resume_from_checkpoint:
-        last_checkpoint_path = args.resume_from_checkpoint
     return last_checkpoint_path
 
 
