@@ -13,13 +13,18 @@ Now continue the generation to porduce a final answer and wrap it in <answer></a
 
 async def generate_partial_rollouts(model_name, messages=None, context=None, system_prompt=None, num_rollouts=1, rollout_length=8192, temperature=1):
     assert messages is not None or context is not None, "Either messages or context must be provided"
-    rollouts = []
+    
+    # Create all tasks first for parallel execution
+    tasks = []
     for _ in range(num_rollouts):
         if messages is not None:
-            rollout = await run_litellm_async(model_name, messages=messages, max_tokens=rollout_length, temperature=temperature)
+            task = run_litellm_async(model_name, messages=messages, max_tokens=rollout_length, temperature=temperature)
         else:         
-            rollout = await run_litellm_async(model_name, system_prompt=system_prompt, user_prompt=USER_PROMPT.format(context=context), max_tokens=rollout_length, temperature=temperature)
-        rollouts.append(rollout)
+            task = run_litellm_async(model_name, system_prompt=system_prompt, user_prompt=USER_PROMPT.format(context=context), max_tokens=rollout_length, temperature=temperature)
+        tasks.append(task)
+    
+    # Execute all tasks in parallel
+    rollouts = await asyncio.gather(*tasks)
     return rollouts
 
 
@@ -28,13 +33,14 @@ async def maybe_replace_on_policy_rollouts_with_partial_rollouts(
     decoded_responses, 
     num_samples_per_prompt_rollout, 
     num_rollouts_to_replace_per_prompt, 
-    model_name="gpt-5",
+    model_names="gpt-5",
     transform_fn_args=None,
     tokenizer=None,
     masks=None,
     responses=None,
     verbose=False,
     use_full_response_as_answer=False,
+    max_concurrent_requests=50,  # Limit concurrent API requests
 ):
     """
     Among all on-policy rollouts per prompt, randomly substitue num_rollouts_to_replace_per_prompt rollouts' answers with external versions.
@@ -44,7 +50,7 @@ async def maybe_replace_on_policy_rollouts_with_partial_rollouts(
         decoded_responses: List of decoded response strings
         num_samples_per_prompt_rollout: Number of samples per prompt
         num_rollouts_to_replace_per_prompt: Number of rollouts to replace per prompt
-        model_name: Name of the external model to use for partial rollouts
+        model_names: Names of the external models to use for partial rollouts
         transform_fn_args: Transform function arguments
         tokenizer: Tokenizer for re-tokenizing responses (optional)
         masks: List of masks corresponding to responses (optional)
@@ -65,7 +71,11 @@ async def maybe_replace_on_policy_rollouts_with_partial_rollouts(
     modified_responses = decoded_responses.copy()
     new_responses = []
     
-    # Process each prompt group
+    # Collect all generation tasks for parallel execution
+    generation_tasks = []
+    task_metadata = []  # Store metadata for each task
+    
+    # Process each prompt group to collect tasks
     for i in range(num_prompts):
         start_idx = i * num_samples_per_prompt_rollout
         end_idx = start_idx + num_samples_per_prompt_rollout
@@ -78,8 +88,8 @@ async def maybe_replace_on_policy_rollouts_with_partial_rollouts(
         indices_to_replace = random.sample(range(num_samples_per_prompt_rollout), 
                                          min(num_rollouts_to_replace_per_prompt, num_samples_per_prompt_rollout))
         
-        # For each selected index, generate a partial rollout replacement
-        for local_idx in indices_to_replace:
+        # For each selected index, prepare generation task
+        for model_id, local_idx in enumerate(indices_to_replace):
             global_idx = start_idx + local_idx
             original_response = current_group[local_idx]
             original_query = current_group_queries[local_idx]
@@ -118,23 +128,57 @@ async def maybe_replace_on_policy_rollouts_with_partial_rollouts(
                     }
                 ]
             
-            # Generate partial rollout using the original response as context
-            partial_rollouts = await generate_partial_rollouts(
+            if isinstance(model_names, list):
+                model_name = model_names[model_id % len(model_names)]
+            elif isinstance(model_names, str):
+                model_name = model_names
+            else:
+                raise ValueError(f"Invalid model_names type: {type(model_names)}")
+            
+            # Create generation task (don't await yet)
+            task = run_litellm_async(
                 model_name=model_name,
                 messages=messages,
-                num_rollouts=1,
-                rollout_length=8192,
+                max_tokens=8192,
                 temperature=1
             )
-            # print("🚼 [Debug] Original query:")
-            # print(original_query)
-            # print(original_response)
-            # print("🚼 [Debug] Partial rollout:")
-            # print(partial_rollouts[0])
+            generation_tasks.append(task)
+            task_metadata.append({
+                'global_idx': global_idx,
+                'context': context,
+                'model_name': model_name
+            })
+    
+    # Execute all generation tasks in parallel with concurrency limiting
+    if generation_tasks:
+        if verbose:
+            print(f"🚀 Executing {len(generation_tasks)} partial rollout generations in parallel (max {max_concurrent_requests} concurrent)...")
+        
+        # Create semaphore to limit concurrent requests
+        semaphore = asyncio.Semaphore(max_concurrent_requests)
+        
+        async def limited_request(task, metadata):
+            async with semaphore:
+                result = await task
+                return result, metadata
+        
+        # Wrap tasks with semaphore limiting
+        limited_tasks = [limited_request(task, metadata) for task, metadata in zip(generation_tasks, task_metadata)]
+        
+        # Execute with concurrency control
+        results = await asyncio.gather(*limited_tasks)
+        
+        # Apply results back to responses
+        for result, metadata in results:
+            global_idx = metadata['global_idx']
+            context = metadata['context']
             
             # Replace the original response with the concatenation of context and partial rollout
-            modified_responses[global_idx] = context + partial_rollouts[0]
-            new_responses.append(context + partial_rollouts[0])
+            modified_responses[global_idx] = context + result
+            new_responses.append(context + result)
+            
+        if verbose:
+            print(f"✅ Completed {len(generation_tasks)} parallel generations")
 
     # Update masks and responses if tokenizer is provided
     updated_masks = None
@@ -500,5 +544,5 @@ Text: BackgroundChicken feather, a byproduct of poultry-processing industries, a
 I need to determine whether "microwave-assisted fermentation of feather hydrolysate with brewer's spent grain (BSG) for co-production of peptides and bioenergy" has prior art and to articulate the research gap. I will build evidence across four pillars: (1) feather keratin hydrolysis/fermentation yielding peptide-rich hydrolysates; (2) BSG use in fermentation/anaerobic digestion for bioenergy and its pretreatments; (3) microwave-assisted processing applied to feathers and/or BSG (particularly pretreatments that enhance hydrolysis or digestion); and (4) any direct combinations of feather hydrolysate with BSG, especially with microwave assistance, and any cascades that co-produce peptides and energy. I have already gathered evidence for (1) keratinolytic fermentations yielding bioactive peptides; (2) BSG valorization for bioenergy and that microwave pretreatment is used; and (3) microwave-assisted hydrolysis of keratin/feathers. What remains is to see if anyone has co-digested/fermented feather waste or feather hydrolysate with BSG or similar lignocellulosic residues, and whether any study explicitly frames a cascade for co-production of peptides and bioenergy using microwave assistance. I will synthesize the findings and identify the specific gap if no direct precedent exists. For the answer, I will structure it into: background on feather-to-peptides, BSG-to-bioenergy and microwave pretreatments, microwave-assisted keratin hydrolysis, evidence on feathers in AD/bioenergy, and an integration/gap section that assesses whether the precise combination has been reported and what remains to be done.
 </think>"""
     sample_context =  question + "\n\n" + search_context
-    rollouts = asyncio.run(generate_partial_rollouts(model_name="gpt-5", context=sample_context, system_prompt=system_prompt, num_rollouts=1, rollout_length=8192, temperature=1))
+    rollouts = asyncio.run(generate_partial_rollouts(model_name="o4-mini", context=sample_context, system_prompt=system_prompt, num_rollouts=1, rollout_length=8192, temperature=1))
     print(rollouts[0])

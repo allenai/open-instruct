@@ -7,6 +7,9 @@ import jsonlines
 import litellm
 from openai import AzureOpenAI
 
+# Configure LiteLLM to drop unsupported parameters instead of raising errors
+litellm.drop_params = True
+
 LOGGER = logging.getLogger(__name__)
 
 

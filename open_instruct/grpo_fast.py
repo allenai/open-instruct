@@ -470,7 +470,7 @@ class Args:
     """Timeout in seconds for evaluation (especially step 0 evaluation)"""
     mix_partial_rollouts: bool = False
     """Whether to mix partial rollouts with additional supervision from other models"""
-    partial_rollouts_model_name: Optional[str] = "gpt-5"
+    partial_rollouts_model_names: Optional[str] = "gpt-5"
     """The model to use for partial rollouts"""
     partial_rollouts_num_rollouts_to_replace: int = 1
     """The number of rollouts to replace with partial rollouts"""
@@ -521,6 +521,8 @@ class Args:
             for mcp_tool_name in self.mcp_tool_names:
                 if mcp_tool_name not in MCP_TOOL_REGISTRY:
                     raise ValueError(f"MCP tool {mcp_tool_name} is not supported. Supported tools are: {', '.join(MCP_TOOL_REGISTRY.keys())}")
+        if self.mix_partial_rollouts:
+            self.partial_rollouts_model_names = [n.strip() for n in self.partial_rollouts_model_names.split(",") if n.strip()]
 
 def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
     """Compute mean of tensor with a masked values."""
@@ -2533,7 +2535,7 @@ if __name__ == "__main__":
                     decoded_responses, 
                     args.num_samples_per_prompt_rollout, 
                     args.partial_rollouts_num_rollouts_to_replace, 
-                    args.partial_rollouts_model_name, 
+                    args.partial_rollouts_model_names, 
                     transform_fn_args=transform_fn_args,
                     tokenizer=tokenizer,
                     masks=masks,
