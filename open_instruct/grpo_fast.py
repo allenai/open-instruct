@@ -2274,14 +2274,16 @@ def weight_sync_thread(
         weight_sync_trigger_event.clear()
 
         with Timer("[Weight Sync]") as timer:
-            logger.debug("[Weight Sync Thread] Starting weight sync")
+            logger.info("[Weight Sync Thread] Starting weight sync")
 
             # Set actors to stop
+            logger.info("[Weight Sync Thread] About to set should_stop to True")
             ray.get(actor_manager.set_should_stop.remote(True))
-            logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
+            logger.info("[Weight Sync Thread] Set should_stop to True for weight sync")
 
             actor_sync_times: List[float] = []
             try:
+                logger.info("[Weight Sync Thread] Entering try block - about to broadcast weights")
                 # Broadcast weights to vLLM engines
                 weight_broadcast_futures: List[ray.ObjectRef] = [
                     m.broadcast_to_vllm.remote() for m in policy_group.models
@@ -2293,6 +2295,7 @@ def weight_sync_thread(
                     desc="[Weight Sync Thread] Waiting for weight updates to complete",
                     enable=args.verbose,
                 )
+                logger.info("[Weight Sync Thread] Weight broadcast complete")
 
                 ray_get_with_progress(
                     [
@@ -2302,10 +2305,12 @@ def weight_sync_thread(
                     desc="[Weight Sync Thread] Distributed barrier",
                     enable=args.verbose,
                 )
+                logger.info("[Weight Sync Thread] Distributed barrier complete")
             finally:
                 # Allow actors to resume normal operation
+                logger.info("[Weight Sync Thread] In finally block - about to set should_stop to False")
                 ray.get(actor_manager.set_should_stop.remote(False))
-                logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
+                logger.info("[Weight Sync Thread] Set should_stop to False after weight sync")
 
         # Calculate distribution statistics
         sync_time_stats = {
