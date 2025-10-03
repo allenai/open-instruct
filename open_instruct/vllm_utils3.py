@@ -785,18 +785,39 @@ class LLMRayActor:
         use_ray=False,
         timeout_minutes=120,
     ):
-        return self.llm_engine.engine_core.collective_rpc(
-            "init_process_group",
-            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
+        future = asyncio.run_coroutine_threadsafe(
+            self.llm_engine.engine_core.collective_rpc_async(
+                "init_process_group",
+                args=(
+                    master_address,
+                    master_port,
+                    rank_offset,
+                    world_size,
+                    group_name,
+                    backend,
+                    use_ray,
+                    timeout_minutes,
+                ),
+            ),
+            self.loop,
         )
+        return future.result()
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        return self.llm_engine.engine_core.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        future = asyncio.run_coroutine_threadsafe(
+            self.llm_engine.engine_core.collective_rpc_async("update_weight", args=(name, dtype, shape, empty_cache)),
+            self.loop,
+        )
+        return future.result()
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        return self.llm_engine.engine_core.collective_rpc(
-            "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
+        future = asyncio.run_coroutine_threadsafe(
+            self.llm_engine.engine_core.collective_rpc_async(
+                "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
+            ),
+            self.loop,
         )
+        return future.result()
 
     def reset_prefix_cache(self):
         future = asyncio.run_coroutine_threadsafe(self.llm_engine.reset_prefix_cache(), self.loop)
