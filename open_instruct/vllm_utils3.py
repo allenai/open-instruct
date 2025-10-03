@@ -894,22 +894,29 @@ class LLMRayActor:
             while True:
                 pending_tools = len(self.tracking["pending_tool_futures"])
                 unfinished = self.llm_engine.get_num_unfinished_requests()
+                active = len(self.vllm_active_requests)
 
                 if pending_tools == 0 and unfinished == 0:
                     elapsed = time.perf_counter() - wait_start
                     self.logger.info(
-                        "[update_weight] Engine drained for '%s' after %.2fs", name, elapsed
+                        "[update_weight] Engine drained for '%s' after %.2fs (active=%d)",
+                        name,
+                        elapsed,
+                        active,
                     )
                     break
 
                 now = time.perf_counter()
                 if now - last_log >= 1.0:
+                    sample_ids = list(self.vllm_active_requests)[:3]
                     self.logger.info(
-                        "[update_weight] Still waiting for '%s': pending_tools=%d unfinished=%d (%.2fs)",
+                        "[update_weight] Still waiting for '%s': pending_tools=%d unfinished=%d active=%d (%.2fs) sample=%s",
                         name,
                         pending_tools,
                         unfinished,
+                        active,
                         now - wait_start,
+                        sample_ids,
                     )
                     last_log = now
                 time.sleep(0.1)
@@ -931,24 +938,29 @@ class LLMRayActor:
             while True:
                 pending_tools = len(self.tracking["pending_tool_futures"])
                 unfinished = self.llm_engine.get_num_unfinished_requests()
+                active = len(self.vllm_active_requests)
 
                 if pending_tools == 0 and unfinished == 0:
                     elapsed = time.perf_counter() - wait_start
                     self.logger.info(
-                        "[update_weight_cuda_ipc] Engine drained for '%s' after %.2fs",
+                        "[update_weight_cuda_ipc] Engine drained for '%s' after %.2fs (active=%d)",
                         name,
                         elapsed,
+                        active,
                     )
                     break
 
                 now = time.perf_counter()
                 if now - last_log >= 1.0:
+                    sample_ids = list(self.vllm_active_requests)[:3]
                     self.logger.info(
-                        "[update_weight_cuda_ipc] Still waiting for '%s': pending_tools=%d unfinished=%d (%.2fs)",
+                        "[update_weight_cuda_ipc] Still waiting for '%s': pending_tools=%d unfinished=%d active=%d (%.2fs) sample=%s",
                         name,
                         pending_tools,
                         unfinished,
+                        active,
                         now - wait_start,
+                        sample_ids,
                     )
                     last_log = now
                 time.sleep(0.1)
