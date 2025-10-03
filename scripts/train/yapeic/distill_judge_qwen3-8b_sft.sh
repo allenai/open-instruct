@@ -4,7 +4,7 @@ python mason.py \
     --description "distill judge into Qwen3-8B via SFT" \
     --workspace ai2/oe-data \
     --priority high \
-    --image nathanl/open_instruct_auto --pure_docker_mode \
+    --image nathanl/open_instruct_auto \
     --preemptible \
     --num_nodes 1 \
     --budget ai2/oe-base \
