@@ -834,6 +834,7 @@ class LLMRayActor:
         use_ray=False,
         timeout_minutes=120,
     ):
+        asyncio.set_event_loop(self.loop)
         future = asyncio.run_coroutine_threadsafe(
             self.llm_engine.engine_core.collective_rpc_async(
                 "init_process_group",
@@ -854,8 +855,8 @@ class LLMRayActor:
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
         logger.info(f"[update_weight] ENTRY for param: {name}, dtype: {dtype}, shape: {shape}")
-        logger.info(f"[update_weight] self.loop: {self.loop}")
-        logger.info(f"[update_weight] self.loop.is_running(): {self.loop.is_running()}")
+        asyncio.set_event_loop(self.loop)
+        logger.info(f"[update_weight] Set event loop to self.loop")
         logger.info(f"[update_weight] asyncio.get_event_loop(): {asyncio.get_event_loop()}")
         logger.info(f"[update_weight] Scheduling collective_rpc_async for update_weight")
         future = asyncio.run_coroutine_threadsafe(
@@ -868,6 +869,7 @@ class LLMRayActor:
         return result
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
+        asyncio.set_event_loop(self.loop)
         future = asyncio.run_coroutine_threadsafe(
             self.llm_engine.engine_core.collective_rpc_async(
                 "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
@@ -877,6 +879,7 @@ class LLMRayActor:
         return future.result()
 
     def reset_prefix_cache(self):
+        asyncio.set_event_loop(self.loop)
         future = asyncio.run_coroutine_threadsafe(self.llm_engine.reset_prefix_cache(), self.loop)
         return future.result()
 
