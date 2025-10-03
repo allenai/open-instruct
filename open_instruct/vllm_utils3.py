@@ -208,6 +208,11 @@ async def _event_loop_health_monitor():
 async def _init_engine_async(actor):
     """Initialize the AsyncLLMEngine from within the running event loop."""
     logger.info("Starting AsyncLLMEngine initialization...")
+    running_loop = asyncio.get_running_loop()
+    logger.info(f"Running loop at engine init: {running_loop}")
+    logger.info(f"actor.loop: {actor.loop}")
+    assert running_loop == actor.loop, f"Loop mismatch! running={running_loop}, actor.loop={actor.loop}"
+
     actor.llm_engine = vllm.AsyncLLMEngine.from_engine_args(actor.engine_args, start_engine_loop=False)
     logger.info("AsyncLLMEngine created successfully")
     logger.info(f"AsyncLLMEngine instance: {actor.llm_engine}")
@@ -855,9 +860,13 @@ class LLMRayActor:
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
         logger.info(f"[update_weight] ENTRY for param: {name}, dtype: {dtype}, shape: {shape}")
+        logger.info(f"[update_weight] self.loop: {self.loop}, is_running: {self.loop.is_running()}")
+
         asyncio.set_event_loop(self.loop)
-        logger.info(f"[update_weight] Set event loop to self.loop")
-        logger.info(f"[update_weight] asyncio.get_event_loop(): {asyncio.get_event_loop()}")
+        current_loop = asyncio.get_event_loop()
+        logger.info(f"[update_weight] After set_event_loop, get_event_loop(): {current_loop}")
+        assert current_loop == self.loop, f"Loop mismatch after set! current={current_loop}, self.loop={self.loop}"
+
         logger.info(f"[update_weight] Scheduling collective_rpc_async for update_weight")
         future = asyncio.run_coroutine_threadsafe(
             self.llm_engine.engine_core.collective_rpc_async("update_weight", args=(name, dtype, shape, empty_cache)),
