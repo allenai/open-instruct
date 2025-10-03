@@ -117,22 +117,25 @@ async def generate_one_completion(
     llm_engine: vllm.AsyncLLMEngine, request_id: str, prompt: vllm.TokensPrompt, sampling_params: vllm.SamplingParams
 ) -> vllm.RequestOutput:
     """Generate a single completion from the async engine."""
-    try:
-        logger.debug(f"[generate_one_completion] Adding request {request_id} to engine")
-        generator = llm_engine.generate(prompt, sampling_params, request_id)
-        logger.debug(f"[generate_one_completion] Got generator for {request_id}, starting iteration")
+    logger.info(f"[generate_one_completion] ENTRY for {request_id}")
+    logger.debug(f"[generate_one_completion] Adding request {request_id} to engine")
+    generator = llm_engine.generate(prompt, sampling_params, request_id)
+    logger.info(f"[generate_one_completion] Got generator for {request_id}, starting async iteration")
 
-        outputs = []
-        async for output in generator:
-            outputs.append(output)
-            if output.finished:
-                logger.debug(f"[generate_one_completion] Request {request_id} finished")
+    outputs = []
+    iteration_count = 0
+    async for output in generator:
+        iteration_count += 1
+        logger.info(
+            f"[generate_one_completion] Iteration {iteration_count} for {request_id}, finished={output.finished}"
+        )
+        outputs.append(output)
+        if output.finished:
+            logger.info(f"[generate_one_completion] Request {request_id} FINISHED after {iteration_count} iterations")
 
-        assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
-        return outputs[0]
-    except Exception as e:
-        logger.error(f"[generate_one_completion] FAILED for {request_id}: {type(e).__name__}: {e}", exc_info=True)
-        raise
+    logger.info(f"[generate_one_completion] EXIT for {request_id} with {len(outputs)} outputs")
+    assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
+    return outputs[0]
 
 
 async def process_request_async(
@@ -147,10 +150,10 @@ async def process_request_async(
     tools: Optional[Dict[str, Tool]] = None,
 ):
     """Process a single async request and push to completion queue when ready."""
-    # Generate completion
+    logger.info(f"[process_request_async] ENTRY for {sub_request_id}")
     request_output = await generate_one_completion(llm_engine, sub_request_id, prompt, sampling_params)
+    logger.info(f"[process_request_async] Generated completion for {sub_request_id}")
 
-    # Process the output
     complete_output = request_output.outputs[0]
 
     # Extract the j index from sub_request_id (format: base_id_j)
@@ -181,8 +184,22 @@ async def process_request_async(
         "tools": tools,
     }
 
-    # Push sub-request to completion queue
     completion_queue.put(sub_request_result)
+    logger.info(f"[process_request_async] EXIT for {sub_request_id}, pushed to completion_queue")
+
+
+async def _event_loop_health_monitor():
+    """Periodically log event loop health status."""
+    while True:
+        await asyncio.sleep(30)
+        loop = asyncio.get_running_loop()
+        all_tasks = asyncio.all_tasks(loop)
+        pending_tasks = [t for t in all_tasks if not t.done()]
+        logger.info(
+            f"[EventLoopHealth] Loop running: {loop.is_running()}, Total tasks: {len(all_tasks)}, Pending: {len(pending_tasks)}"
+        )
+        for task in list(pending_tasks)[:5]:
+            logger.info(f"[EventLoopHealth] Pending task: {task.get_name()}, {task}")
 
 
 async def _init_engine_async(actor):
@@ -190,6 +207,11 @@ async def _init_engine_async(actor):
     logger.info("Starting AsyncLLMEngine initialization...")
     actor.llm_engine = vllm.AsyncLLMEngine.from_engine_args(actor.engine_args, start_engine_loop=False)
     logger.info("AsyncLLMEngine created successfully")
+    logger.info(f"AsyncLLMEngine instance: {actor.llm_engine}")
+    logger.info(f"AsyncLLMEngine has output_handler: {hasattr(actor.llm_engine, '_output_handler')}")
+    logger.info(f"Current event loop: {asyncio.get_running_loop()}")
+    logger.info(f"Event loop all tasks: {len(asyncio.all_tasks())}")
+    asyncio.create_task(_event_loop_health_monitor(), name="EventLoopHealthMonitor")
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
