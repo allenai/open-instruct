@@ -557,6 +557,8 @@ class LLMRayActor:
             # to let pending tools complete before the next iteration
             if self.llm_engine.get_num_unfinished_requests() == 0 and len(self.tracking["pending_tool_futures"]) > 0:
                 time.sleep(1)
+            elif self.llm_engine.get_num_unfinished_requests() == 0:
+                time.sleep(0.1)
 
         return total_processed
 
