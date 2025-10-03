@@ -625,15 +625,14 @@ class PolicyTrainerRayProcess(RayProcess):
         np.random.seed(worker_seed)
         random.seed(worker_seed)
 
-        init_kwargs = {
-            "backend": "nccl",
-            "init_method": "env://",
-            "world_size": self.world_size,
-            "rank": self.rank,
-            "timeout": timedelta(minutes=args.backend_timeout),
-            "device_id": torch.device("cuda", self.local_rank),
-        }
-        torch.distributed.init_process_group(**init_kwargs)
+        torch.distributed.init_process_group(
+            backend="nccl",
+            init_method="env://",
+            world_size=self.world_size,
+            rank=self.rank,
+            timeout=timedelta(minutes=args.backend_timeout),
+            device_id=torch.device("cuda", self.local_rank),
+        )
 
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
