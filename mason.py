@@ -22,7 +22,7 @@ DEFAULT_ENV_VARS = [
     ("RAY_CGRAPH_get_timeout", "300"),
     ("VLLM_DISABLE_COMPILE_CACHE", "1"),
     ("NCCL_DEBUG", "ERROR"),  # Only show NCCL ERROR messages, suppress INFO and WARN
-    ("VLLM_LOGGING_LEVEL", "WARNING"),  # Suppress vllm DEBUG messages
+    ("VLLM_LOGGING_LEVEL", "DEBUG"),  # Suppress vllm DEBUG messages
 ]
 
 # ----------------------------------------------------------------------
@@ -226,9 +226,16 @@ def parse_commands(command_args: List[str]) -> List[List[str]]:
     return commands
 
 
-def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: List[str],
-                whoami: str, resumable: bool, num_nodes: int, additional_env_vars: List[Dict[str, str]],
-                additional_secrets: List[Dict[str, str]]):
+def get_env_vars(
+    pure_docker_mode: bool,
+    cluster: List[str],
+    beaker_secrets: List[str],
+    whoami: str,
+    resumable: bool,
+    num_nodes: int,
+    additional_env_vars: List[Dict[str, str]],
+    additional_secrets: List[Dict[str, str]],
+):
     additional_env_var_names = {var["name"] for var in additional_env_vars}
 
     env_vars = [
@@ -237,16 +244,10 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
         if name not in additional_env_var_names
     ]
 
-    env_vars.extend([
-        beaker.EnvVar(name=env_var["name"], value=env_var["value"])
-        for env_var in additional_env_vars
-    ])
+    env_vars.extend([beaker.EnvVar(name=env_var["name"], value=env_var["value"]) for env_var in additional_env_vars])
 
     # add user-specific secrets
-    env_vars.extend([
-        beaker.EnvVar(name=secret["name"], secret=secret["value"])
-        for secret in additional_secrets
-    ])
+    env_vars.extend([beaker.EnvVar(name=secret["name"], secret=secret["value"]) for secret in additional_secrets])
 
     useful_secrets = [
         "HF_TOKEN",
