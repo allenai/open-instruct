@@ -646,6 +646,7 @@ class PolicyTrainerRayProcess(RayProcess):
             torch_dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
             use_cache=False,
+            device_map={"": self.local_rank},
         )
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
@@ -744,6 +745,7 @@ class PolicyTrainerRayProcess(RayProcess):
             torch_dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
             use_cache=False,
+            device_map={"": self.local_rank},
         )
         disable_dropout_in_model(self.ref_policy)
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
