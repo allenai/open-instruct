@@ -829,6 +829,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
                 for i, engine in enumerate(vllm_engines)
             ]
+            torch.cuda.set_device(self.local_rank)
             self.model_update_group = vllm_utils3.init_process_group(
                 backend=backend,
                 init_method=f"tcp://{master_address}:{master_port}",
