@@ -22,9 +22,9 @@ dependencies = [
     "ray[default]>=2.44.1",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
-    "torch>=2.7.0,<2.8",
-    "transformers>=4.52.4,<4.54.0", # see https://github.com/vllm-project/vllm-ascend/issues/2046
-    "vllm==0.9.1",
+    "torch>=2.8.0,<2.9",
+    "transformers>=4.55.2", # required by vLLM 0.10.2
+    "vllm==0.10.2",
     "wandb==0.18.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
