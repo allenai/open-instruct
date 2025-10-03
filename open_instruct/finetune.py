@@ -700,16 +700,26 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     last_checkpoint_path = get_last_checkpoint_path(args)
     if last_checkpoint_path:
         accelerator.print(f"Resumed from checkpoint: {last_checkpoint_path}")
-        # Allowlist DeepSpeed objects for PyTorch 2.6+ safe unpickling when loading optimizer states
-        # This avoids failures when resuming ZeRO checkpoints due to weights_only=True default
+        # Allowlist required DeepSpeed classes for PyTorch 2.6+ safe unpickling when loading optimizer states
+        # Scope the allowlist strictly to this load via the context manager
         try:
+            from torch.serialization import safe_globals as _safe_globals  # type: ignore
             from deepspeed.runtime.zero.config import ZeroStageEnum  # type: ignore
-            import torch.serialization as _tser  # type: ignore
-            _tser.add_safe_globals([ZeroStageEnum])
+            # LossScaler is referenced by older FP16 optimizer state pickles
+            try:
+                from deepspeed.runtime.fp16.loss_scaler import LossScaler  # type: ignore
+            except Exception:
+                LossScaler = None  # type: ignore
+
+            allowlist = [ZeroStageEnum]
+            if LossScaler is not None:
+                allowlist.append(LossScaler)
+
+            with _safe_globals(allowlist):
+                accelerator.load_state(last_checkpoint_path)
         except Exception:
-            # If anything goes wrong, proceed and let downstream throw a clearer error
-            pass
-        accelerator.load_state(last_checkpoint_path)
+            # Fallback: attempt load without scoped allowlist; may raise with clear message
+            accelerator.load_state(last_checkpoint_path)
         # Extract `epoch_{i}` or `step_{i}`
         last_checkpoint_path = os.path.basename(last_checkpoint_path)
         training_difference = os.path.splitext(last_checkpoint_path)[0]
