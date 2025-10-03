@@ -859,15 +859,25 @@ class LLMRayActor:
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        if not self.inflight_updates:
-            while not self._should_pause():
-                time.sleep(0.1)
+        while not self.inflight_updates:
+            pending_tools = len(self.tracking["pending_tool_futures"])
+            unfinished = self.llm_engine.get_num_unfinished_requests()
+
+            if pending_tools == 0 and unfinished == 0:
+                break
+
+            time.sleep(0.1)
         return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        if not self.inflight_updates:
-            while not self._should_pause():
-                time.sleep(0.1)
+        while not self.inflight_updates:
+            pending_tools = len(self.tracking["pending_tool_futures"])
+            unfinished = self.llm_engine.get_num_unfinished_requests()
+
+            if pending_tools == 0 and unfinished == 0:
+                break
+
+            time.sleep(0.1)
         return self.llm_engine.collective_rpc(
             "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
