@@ -482,6 +482,10 @@ class LLMRayActor:
         while True:
             iteration_count += 1
 
+            if iteration_count % 100 == 0:
+                unfinished = self.llm_engine.get_num_unfinished_requests()
+                self.logger.info(f"[process_from_queue] iteration={iteration_count}, unfinished={unfinished}")
+
             # Health check: ensure prefetch worker is alive. This will raise if it has crashed.
             if self._prefetch_future.done():
                 self._prefetch_future.result()
@@ -489,7 +493,15 @@ class LLMRayActor:
             self._poll_tool_futures(self.tracking, self.llm_engine.tokenizer)
             current_time = time.perf_counter()
             if self.llm_engine.has_unfinished_requests():
-                for output in [o for o in self.llm_engine.step() if o.finished]:
+                self.logger.info(
+                    f"[process_from_queue] Calling step(), unfinished={self.llm_engine.get_num_unfinished_requests()}"
+                )
+                outputs = list(self.llm_engine.step())
+                finished_outputs = [o for o in outputs if o.finished]
+                self.logger.info(
+                    f"[process_from_queue] step() returned {len(outputs)} outputs, {len(finished_outputs)} finished"
+                )
+                for output in finished_outputs:
                     # Fix the index field for all sub-requests
                     # When we have n>1, we create sub-requests with IDs like
                     # train_3_12_0, train_3_12_1, etc. But vLLM creates CompletionOutputs with index=0
@@ -527,9 +539,12 @@ class LLMRayActor:
                         # Remove from vllm_active_requests BEFORE calling _finalize_sub_request
                         # to avoid deadlock in _maybe_process_and_insert
                         self.vllm_active_requests.discard(output.request_id)
-                        total_processed += self._finalize_sub_request(
+                        num_processed = self._finalize_sub_request(
                             output.request_id, output, complete_output, current_time
                         )
+                        total_processed += num_processed
+                        if num_processed > 0:
+                            self.logger.info(f"[process_from_queue] Finalized sub-request {output.request_id}")
 
             if self.verbose and iteration_count % 100 == 0:
                 final_unfinished = self.llm_engine.get_num_unfinished_requests()
