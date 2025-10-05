@@ -476,14 +476,10 @@ class LLMRayActor:
         total_processed = 0
         iteration_count = 0
 
-        self.logger.info("[process_from_queue] Background thread started")
-
         while True:
             iteration_count += 1
 
             unfinished = self.llm_engine.get_num_unfinished_requests()
-            if iteration_count % 100 == 0:
-                self.logger.info(f"[process_from_queue] iteration={iteration_count}, unfinished={unfinished}")
 
             if self._prefetch_future.done():
                 self._prefetch_future.result()
@@ -491,12 +487,8 @@ class LLMRayActor:
             self._poll_tool_futures(self.tracking, self.llm_engine.tokenizer)
             current_time = time.perf_counter()
             if unfinished > 0:
-                self.logger.info(f"[process_from_queue] Calling step(), unfinished={unfinished}")
                 outputs = list(self.llm_engine.step())
                 finished_outputs = [o for o in outputs if o.finished]
-                self.logger.info(
-                    f"[process_from_queue] step() returned {len(outputs)} outputs, {len(finished_outputs)} finished"
-                )
                 for output in finished_outputs:
                     parts = output.request_id.rsplit("_", 1)
                     assert len(parts) == 2 and parts[1].isdigit(), (
@@ -528,15 +520,7 @@ class LLMRayActor:
                             output.request_id, output, complete_output, current_time
                         )
                         total_processed += num_processed
-                        if num_processed > 0:
-                            self.logger.info(f"[process_from_queue] Finalized sub-request {output.request_id}")
                 unfinished = self.llm_engine.get_num_unfinished_requests()
-
-            if self.verbose and iteration_count % 100 == 0:
-                pending_tools = len(self.tracking["pending_tool_futures"])
-                self.logger.info(
-                    f"process_from_queue iteration {iteration_count}: unfinished={unfinished}, pending_tools={pending_tools}"
-                )
 
             if unfinished == 0 and len(self.tracking["pending_tool_futures"]) > 0:
                 time.sleep(1)
