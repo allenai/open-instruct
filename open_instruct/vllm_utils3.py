@@ -18,7 +18,6 @@
 import dataclasses
 import os
 import queue
-import threading
 import time
 from collections import defaultdict
 from concurrent import futures
@@ -396,8 +395,6 @@ class LLMRayActor:
         self._should_stop_value = False
         self._should_stop_timeout_s = 5
 
-        self._weight_update_in_progress = threading.Event()
-
         self._executor = futures.ThreadPoolExecutor(max_workers=2)
         self._prefetch_future = self._executor.submit(self._prefetch_worker)
         self._process_future = self._executor.submit(self.process_from_queue)
@@ -437,13 +434,7 @@ class LLMRayActor:
         """Background worker that prefetches requests until we have enough buffered."""
         self.logger.info("[_prefetch_worker] Background thread started")
         while True:
-            if self._weight_update_in_progress.is_set():
-                time.sleep(sleep_length_s)
-                continue
             if not self.inflight_updates and self._should_stop():
-                # During weight sync the trainer sets should_stop. Avoid pulling
-                # additional requests so the sync can complete after draining
-                # only the currently running batch.
                 time.sleep(sleep_length_s)
                 continue
             current_unfinished = self.llm_engine.get_num_unfinished_requests()
@@ -471,62 +462,41 @@ class LLMRayActor:
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
-        Runs continuously until should_stop is set, periodically adding new requests
-        and yielding control to allow weight synchronization.
+        Runs continuously in a background thread, processing requests from the engine.
 
         Returns:
             int: Number of requests processed
         """
-
-        # Use persistent instance variables for tracking and outputs
-        # This ensures state is maintained across multiple calls
         total_processed = 0
         iteration_count = 0
 
         self.logger.info("[process_from_queue] Background thread started")
 
-        waiting_for_weight_update_completion = False
-
         while True:
             iteration_count += 1
-
-            if waiting_for_weight_update_completion:
-                if self._weight_update_in_progress.is_set():
-                    time.sleep(0.05)
-                    continue
-                waiting_for_weight_update_completion = False
 
             unfinished = self.llm_engine.get_num_unfinished_requests()
             if iteration_count % 100 == 0:
                 self.logger.info(f"[process_from_queue] iteration={iteration_count}, unfinished={unfinished}")
 
-            # Health check: ensure prefetch worker is alive. This will raise if it has crashed.
             if self._prefetch_future.done():
                 self._prefetch_future.result()
 
             self._poll_tool_futures(self.tracking, self.llm_engine.tokenizer)
             current_time = time.perf_counter()
             if unfinished > 0:
-                self.logger.info(
-                    f"[process_from_queue] Calling step(), unfinished={unfinished}"
-                )
+                self.logger.info(f"[process_from_queue] Calling step(), unfinished={unfinished}")
                 outputs = list(self.llm_engine.step())
                 finished_outputs = [o for o in outputs if o.finished]
                 self.logger.info(
                     f"[process_from_queue] step() returned {len(outputs)} outputs, {len(finished_outputs)} finished"
                 )
                 for output in finished_outputs:
-                    # Fix the index field for all sub-requests
-                    # When we have n>1, we create sub-requests with IDs like
-                    # train_3_12_0, train_3_12_1, etc. But vLLM creates CompletionOutputs with index=0
-                    # for all of them (since each sub-request has n=1). We need to fix this.
-                    # Extract the actual index from the sub-request ID
                     parts = output.request_id.rsplit("_", 1)
                     assert len(parts) == 2 and parts[1].isdigit(), (
                         f"Wrong request id format ({output.request_id}), should be request_id _ sub_request_index"
                     )
 
-                    # Fix the index on the CompletionOutput
                     correct_index = int(parts[1])
                     output.outputs = [dataclasses.replace(o, index=correct_index) for o in output.outputs]
                     base_req_id = _extract_base_request_id(output.request_id)
@@ -539,19 +509,14 @@ class LLMRayActor:
                         self.executor,
                     )
 
-                    # Result is None when we do more tool processing.
                     if result is None:
-                        # Request went to tools - remove from vllm_active_requests since it's no longer in vLLM
                         self.vllm_active_requests.discard(output.request_id)
                     else:
-                        # Sub-request is done (no more tool calls)
                         if output.request_id in self.tracking["concat_outputs"]:
                             complete_output = self.tracking["concat_outputs"][output.request_id].outputs[0]
                         else:
                             complete_output = result.outputs[0]
 
-                        # Remove from vllm_active_requests BEFORE calling _finalize_sub_request
-                        # to avoid deadlock in _maybe_process_and_insert
                         self.vllm_active_requests.discard(output.request_id)
                         num_processed = self._finalize_sub_request(
                             output.request_id, output, complete_output, current_time
@@ -559,17 +524,7 @@ class LLMRayActor:
                         total_processed += num_processed
                         if num_processed > 0:
                             self.logger.info(f"[process_from_queue] Finalized sub-request {output.request_id}")
-                # Refresh unfinished count after stepping
                 unfinished = self.llm_engine.get_num_unfinished_requests()
-
-            waiting_for_weight_update = (
-                not self.inflight_updates and self._weight_update_in_progress.is_set()
-            )
-
-            if waiting_for_weight_update and unfinished == 0:
-                # Give the weight-update RPC a moment to finish clearing the guard before pulling new work.
-                waiting_for_weight_update_completion = True
-                continue
 
             if self.verbose and iteration_count % 100 == 0:
                 pending_tools = len(self.tracking["pending_tool_futures"])
@@ -577,8 +532,6 @@ class LLMRayActor:
                     f"process_from_queue iteration {iteration_count}: unfinished={unfinished}, pending_tools={pending_tools}"
                 )
 
-            # If we have only pending tools but no unfinished requests, sleep briefly
-            # to let pending tools complete before the next iteration
             if unfinished == 0 and len(self.tracking["pending_tool_futures"]) > 0:
                 time.sleep(1)
             elif unfinished == 0:
@@ -884,93 +837,75 @@ class LLMRayActor:
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        if not self.inflight_updates:
-            self._weight_update_in_progress.set()
-            wait_start = time.perf_counter()
-            last_log = wait_start
-            self.logger.info(
-                "[update_weight] Waiting for engine to drain before syncing '%s'", name
-            )
-            while True:
-                pending_tools = len(self.tracking["pending_tool_futures"])
-                unfinished = self.llm_engine.get_num_unfinished_requests()
-                active = len(self.vllm_active_requests)
+        wait_start = time.perf_counter()
+        last_log = wait_start
+        self.logger.info("[update_weight] Waiting for engine to drain before syncing '%s'", name)
+        while not self.inflight_updates:
+            pending_tools = len(self.tracking["pending_tool_futures"])
+            unfinished = self.llm_engine.get_num_unfinished_requests()
+            active = len(self.vllm_active_requests)
 
-                if pending_tools == 0 and unfinished == 0:
-                    elapsed = time.perf_counter() - wait_start
-                    self.logger.info(
-                        "[update_weight] Engine drained for '%s' after %.2fs (active=%d)",
-                        name,
-                        elapsed,
-                        active,
-                    )
-                    break
+            if pending_tools == 0 and unfinished == 0:
+                elapsed = time.perf_counter() - wait_start
+                self.logger.info(
+                    "[update_weight] Engine drained for '%s' after %.2fs (active=%d)", name, elapsed, active
+                )
+                break
 
-                now = time.perf_counter()
-                if now - last_log >= 1.0:
-                    sample_ids = list(self.vllm_active_requests)[:3]
-                    self.logger.info(
-                        "[update_weight] Still waiting for '%s': pending_tools=%d unfinished=%d active=%d (%.2fs) sample=%s",
-                        name,
-                        pending_tools,
-                        unfinished,
-                        active,
-                        now - wait_start,
-                        sample_ids,
-                    )
-                    last_log = now
-                time.sleep(0.1)
+            now = time.perf_counter()
+            if now - last_log >= 1.0:
+                sample_ids = list(self.vllm_active_requests)[:3]
+                self.logger.info(
+                    "[update_weight] Still waiting for '%s': pending_tools=%d unfinished=%d active=%d (%.2fs) sample=%s",
+                    name,
+                    pending_tools,
+                    unfinished,
+                    active,
+                    now - wait_start,
+                    sample_ids,
+                )
+                last_log = now
+            time.sleep(0.1)
         self.logger.info("[update_weight] Calling collective_rpc for '%s'", name)
         result = self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
         self.logger.info("[update_weight] Finished collective_rpc for '%s'", name)
-        if not self.inflight_updates:
-            self._weight_update_in_progress.clear()
         return result
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        if not self.inflight_updates:
-            self._weight_update_in_progress.set()
-            wait_start = time.perf_counter()
-            last_log = wait_start
-            self.logger.info(
-                "[update_weight_cuda_ipc] Waiting for engine to drain before syncing '%s'", name
-            )
-            while True:
-                pending_tools = len(self.tracking["pending_tool_futures"])
-                unfinished = self.llm_engine.get_num_unfinished_requests()
-                active = len(self.vllm_active_requests)
+        wait_start = time.perf_counter()
+        last_log = wait_start
+        self.logger.info("[update_weight_cuda_ipc] Waiting for engine to drain before syncing '%s'", name)
+        while not self.inflight_updates:
+            pending_tools = len(self.tracking["pending_tool_futures"])
+            unfinished = self.llm_engine.get_num_unfinished_requests()
+            active = len(self.vllm_active_requests)
 
-                if pending_tools == 0 and unfinished == 0:
-                    elapsed = time.perf_counter() - wait_start
-                    self.logger.info(
-                        "[update_weight_cuda_ipc] Engine drained for '%s' after %.2fs (active=%d)",
-                        name,
-                        elapsed,
-                        active,
-                    )
-                    break
+            if pending_tools == 0 and unfinished == 0:
+                elapsed = time.perf_counter() - wait_start
+                self.logger.info(
+                    "[update_weight_cuda_ipc] Engine drained for '%s' after %.2fs (active=%d)", name, elapsed, active
+                )
+                break
 
-                now = time.perf_counter()
-                if now - last_log >= 1.0:
-                    sample_ids = list(self.vllm_active_requests)[:3]
-                    self.logger.info(
-                        "[update_weight_cuda_ipc] Still waiting for '%s': pending_tools=%d unfinished=%d active=%d (%.2fs) sample=%s",
-                        name,
-                        pending_tools,
-                        unfinished,
-                        active,
-                        now - wait_start,
-                        sample_ids,
-                    )
-                    last_log = now
-                time.sleep(0.1)
+            now = time.perf_counter()
+            if now - last_log >= 1.0:
+                sample_ids = list(self.vllm_active_requests)[:3]
+                self.logger.info(
+                    "[update_weight_cuda_ipc] Still waiting for '%s': pending_tools=%d unfinished=%d active=%d (%.2fs) sample=%s",
+                    name,
+                    pending_tools,
+                    unfinished,
+                    active,
+                    now - wait_start,
+                    sample_ids,
+                )
+                last_log = now
+            time.sleep(0.1)
         self.logger.info("[update_weight_cuda_ipc] Calling collective_rpc for '%s'", name)
         result = self.llm_engine.collective_rpc(
             "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
         self.logger.info("[update_weight_cuda_ipc] Finished collective_rpc for '%s'", name)
-        if not self.inflight_updates:
-            self._weight_update_in_progress.clear()
         return result
 
     def reset_prefix_cache(self):
