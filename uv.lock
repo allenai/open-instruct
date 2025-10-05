@@ -2350,7 +2350,7 @@ requires-dist = [
     { name = "tensorboard", specifier = ">=2.18.0" },
     { name = "torch", marker = "sys_platform != 'darwin'", specifier = ">=2.8.0,<2.9", index = "https://download.pytorch.org/whl/cu128" },
     { name = "torch", marker = "sys_platform == 'darwin'", specifier = ">=2.8.0,<2.9" },
-    { name = "transformers", specifier = ">=4.55.2" },
+    { name = "transformers", specifier = ">=4.57.0" },
     { name = "uvicorn", marker = "extra == 'code'", specifier = ">=0.20.0" },
     { name = "vllm", specifier = "==0.11.0" },
     { name = "wandb", specifier = "==0.18.1" },
