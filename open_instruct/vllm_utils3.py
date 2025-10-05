@@ -396,12 +396,15 @@ class LLMRayActor:
         self._should_stop_value = False
         self._should_stop_timeout_s = 5
 
-        self._executor = futures.ThreadPoolExecutor(max_workers=2)
-        self._prefetch_future = self._executor.submit(self._prefetch_worker)
-        self._process_future = self._executor.submit(self.process_from_queue)
+        # Initialize instance variables before starting threads
         self.tracking = _init_tool_tracking()
         self.request_outputs = {}
         self._threads_started = threading.Event()
+
+        # Start background threads
+        self._executor = futures.ThreadPoolExecutor(max_workers=2)
+        self._prefetch_future = self._executor.submit(self._prefetch_worker)
+        self._process_future = self._executor.submit(self.process_from_queue)
 
     def get_model_dims_dict(self):
         """Get only the model dimensions as a simple dict without loading weights."""
