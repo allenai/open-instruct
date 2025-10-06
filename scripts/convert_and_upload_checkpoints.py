@@ -91,13 +91,11 @@ def _maybe_strip_module_prefix(state_dict: dict) -> dict:
 
 def _find_or_consolidate_weights(checkpoint_path: str) -> str | None:
     """
-    Return a path to a consolidated weights file inside `checkpoint_path`.
+    Return a path to an existing consolidated weights file inside `checkpoint_path`.
 
     - Prefer pytorch_model.bin
     - Else pytorch_model.safetensors
-    - Else, if DeepSpeed shards are present (pytorch_model/ + zero_to_fp32.py),
-      run consolidation to produce pytorch_model.bin and return it.
-    - Else return None.
+    - Else return None (do not attempt consolidation here)
     """
     bin_path = os.path.join(checkpoint_path, "pytorch_model.bin")
     if os.path.exists(bin_path):
@@ -107,29 +105,41 @@ def _find_or_consolidate_weights(checkpoint_path: str) -> str | None:
     if os.path.exists(sft_path):
         return sft_path
 
-    # DeepSpeed shards?
+    return None
+
+
+def _consolidate_with_zero_to_fp32(checkpoint_path: str) -> str | None:
+    """
+    Attempt to run zero_to_fp32.py to produce a pytorch_model.bin file in place.
+    Handles variants that expect file vs directory outputs.
+    Returns the path to the produced pytorch_model.bin if successful, else None.
+    """
+    bin_path = os.path.join(checkpoint_path, "pytorch_model.bin")
     pytorch_model_dir = os.path.join(checkpoint_path, "pytorch_model")
     consolidate_script = os.path.join(checkpoint_path, "zero_to_fp32.py")
-    if os.path.isdir(pytorch_model_dir) and os.path.exists(consolidate_script):
-        print(f" -> Found DeepSpeed checkpoint in {checkpoint_path}. Consolidating weights...")
+    if not (os.path.isdir(pytorch_model_dir) and os.path.exists(consolidate_script)):
+        return None
+
+    print(f" -> Found DeepSpeed checkpoint in {checkpoint_path}. Consolidating weights...")
+    try:
+        # Patch zero_to_fp32.py for torch 2.6+ compatibility
+        print(" -> Patching zero_to_fp32.py for torch.load compatibility...")
+        with open(consolidate_script, "r") as f:
+            script_content = f.read()
+
+        original_line = "state_dict = torch.load(f, map_location=device)"
+        patched_line = "state_dict = torch.load(f, map_location=device, weights_only=False)"
+
+        if original_line in script_content:
+            script_content = script_content.replace(original_line, patched_line)
+            with open(consolidate_script, "w") as f:
+                f.write(script_content)
+            print(" -> Patch applied successfully.")
+        else:
+            print(" -> WARNING: Could not find the line to patch in zero_to_fp32.py. The script might still fail.")
+
+        # First attempt: pass output as file
         try:
-            # Patch zero_to_fp32.py to be compatible with torch.load in PyTorch 2.6+
-            print(" -> Patching zero_to_fp32.py for torch.load compatibility...")
-            with open(consolidate_script, "r") as f:
-                script_content = f.read()
-
-            original_line = "state_dict = torch.load(f, map_location=device)"
-            patched_line = "state_dict = torch.load(f, map_location=device, weights_only=False)"
-
-            if original_line in script_content:
-                script_content = script_content.replace(original_line, patched_line)
-                with open(consolidate_script, "w") as f:
-                    f.write(script_content)
-                print(" -> Patch applied successfully.")
-            else:
-                print(" -> WARNING: Could not find the line to patch in zero_to_fp32.py. The script might fail.")
-
-            # Run consolidation in-place to produce pytorch_model.bin
             result = subprocess.run(
                 ["python", "zero_to_fp32.py", ".", "pytorch_model.bin"],
                 cwd=checkpoint_path,
@@ -137,19 +147,44 @@ def _find_or_consolidate_weights(checkpoint_path: str) -> str | None:
                 capture_output=True,
                 text=True,
             )
-            print(" -> Consolidation successful.")
+            print(" -> Consolidation successful (file mode).")
             if result.stdout:
                 print(" -> Consolidation script stdout:")
                 print(result.stdout)
             if os.path.exists(bin_path):
                 return bin_path
         except subprocess.CalledProcessError as e:
-            print(f" -> ERROR: Failed to consolidate checkpoint {checkpoint_path}.")
-            print(" -> stdout:")
-            print(e.stdout)
-            print(" -> stderr:")
-            print(e.stderr)
-            return None
+            # Retry: some variants expect an output directory; create and pass a dir
+            out_dir = os.path.join(checkpoint_path, "pytorch_model_fp32")
+            os.makedirs(out_dir, exist_ok=True)
+            print(" -> File-mode consolidation failed. Retrying with directory output...")
+            try:
+                result = subprocess.run(
+                    ["python", "zero_to_fp32.py", ".", "pytorch_model_fp32"],
+                    cwd=checkpoint_path,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                print(" -> Consolidation successful (directory mode).")
+                if result.stdout:
+                    print(" -> Consolidation script stdout:")
+                    print(result.stdout)
+                # If the script created a single bin file inside the directory, use it
+                candidate = os.path.join(out_dir, "pytorch_model.bin")
+                if os.path.exists(candidate):
+                    return candidate
+                # Otherwise, leave None and fall back to accelerator.load_state
+            except subprocess.CalledProcessError as e2:
+                print(f" -> ERROR: Failed to consolidate checkpoint {checkpoint_path} in directory mode.")
+                print(" -> stdout:")
+                print(e2.stdout)
+                print(" -> stderr:")
+                print(e2.stderr)
+                return None
+    except Exception as e:
+        print(f" -> ERROR: Unexpected error during consolidation: {e}")
+        return None
 
     return None
 
@@ -251,11 +286,22 @@ def main():
                 print(f" -> Found consolidated weights: {weights_path}")
                 state_dict = _load_state_dict_from_file(weights_path)
             else:
-                print(f" -> No consolidated weights found. Loading accelerator state from {checkpoint_path}...")
-                accelerator.load_state(checkpoint_path)
-                print(" -> State loaded successfully.")
-                # Gather full parameters for saving
-                state_dict = accelerator.get_state_dict(model)
+                # Try loading with accelerate first (works for many DS layouts)
+                try:
+                    print(f" -> No consolidated weights found. Trying accelerator.load_state from {checkpoint_path}...")
+                    accelerator.load_state(checkpoint_path)
+                    print(" -> Accelerator state loaded successfully.")
+                    state_dict = accelerator.get_state_dict(model)
+                except Exception as e:
+                    print(f" -> accelerator.load_state failed: {e}")
+                    print(" -> Attempting consolidation with zero_to_fp32.py...")
+                    consolidated = _consolidate_with_zero_to_fp32(checkpoint_path)
+                    if consolidated is not None:
+                        print(f" -> Consolidated weights created: {consolidated}")
+                        state_dict = _load_state_dict_from_file(consolidated)
+                    else:
+                        print(" -> ERROR: Could not load or consolidate weights for this checkpoint. Skipping.")
+                        continue
 
             # Unwrap the model and save it in the final format using the resolved state_dict
             print(f" -> Converting and saving to temporary directory: {temp_save_dir}...")
