@@ -17,12 +17,10 @@ uv run python mason.py \
        --description "Single GPU on Beaker with tool use test script." \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
-	--timeout "1h" \
        --priority urgent \
        --preemptible \
        --num_nodes 1 \
        --max_retries 0 \
-       --timeout "45m" \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --budget ai2/oe-adapt \
@@ -37,7 +35,7 @@ uv run python mason.py \
     --max_prompt_token_length 512 \
     --response_length 512 \
     --pack_length 1024 \
-    --inflight_updates False \
+    --inflight_updates True \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \

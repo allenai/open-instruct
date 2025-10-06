@@ -11,14 +11,11 @@ uv run python mason.py \
         --workspace ai2/open-instruct-dev \
         --priority urgent \
 	--preemptible \
-	--timeout "30m" \
         --num_nodes 2 \
 	--description "Large (multi-node) test script." \
-        --timeout "1h" \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-	--env TORCH_NCCL_TRACE_BUFFER_SIZE=67108864 \
-	--budget ai2/oe-adapt \
+        --budget ai2/oe-adapt \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
@@ -39,7 +36,7 @@ uv run python mason.py \
         --pack_length 20480 \
         --model_name_or_path Qwen/Qwen2.5-7B \
         --chat_template_name tulu_thinker \
-	--inflight_updates False \
+	--inflight_updates True \
         --stop_strings "</answer>" \
         --non_stop_penalty False \
         --temperature 1.0 \
@@ -48,7 +45,6 @@ uv run python mason.py \
         --sft_messages_key messages \
         --total_episodes 10_000 \
         --deepspeed_stage 2 \
-        --backend_timeout 360 \
         --num_learners_per_node 8 \
         --vllm_num_engines 8 \
         --vllm_tensor_parallel_size 1 \
@@ -62,7 +58,6 @@ uv run python mason.py \
         --with_tracking \
 	--update_progress_every 1 \
         --vllm_enable_prefix_caching \
-        --vllm_enforce_eager \
         --oe_eval_max_length 32768 \
         --oe_eval_tasks "codex_humanevalplus:0-shot-chat-v1::tulu-thinker,mbppplus:0-shot-chat::tulu-thinker,livecodebench_codegeneration::tulu-thinker" \
         --dataset_skip_cache True \
