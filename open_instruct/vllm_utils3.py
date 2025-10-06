@@ -437,7 +437,6 @@ class LLMRayActor:
 
     def _prefetch_worker(self, sleep_length_s: int = 1):
         """Background worker that prefetches requests until we have enough buffered."""
-        self.logger.info("[_prefetch_worker] Background thread started")
         self._threads_started.set()
         while True:
             if not self.inflight_updates and self._should_stop():
@@ -456,7 +455,6 @@ class LLMRayActor:
                     request_metadata=self.request_metadata,
                     vllm_active_requests=self.vllm_active_requests,
                 )
-                self.logger.info("[_prefetch_worker] Added request to engine")
             except queue.Empty:
                 continue
 
@@ -479,17 +477,18 @@ class LLMRayActor:
         while True:
             iteration_count += 1
 
-            unfinished = self.llm_engine.get_num_unfinished_requests()
-
             if self._prefetch_future.done():
                 self._prefetch_future.result()
 
             self._poll_tool_futures(self.tracking, self.llm_engine.tokenizer)
             current_time = time.perf_counter()
-            if unfinished > 0:
-                outputs = list(self.llm_engine.step())
-                finished_outputs = [o for o in outputs if o.finished]
-                for output in finished_outputs:
+            if self.llm_engine.has_unfinished_requests():
+                for output in [o for o in self.llm_engine.step() if o.finished]:
+                    # Fix the index field for all sub-requests
+                    # When we have n>1, we create sub-requests with IDs like
+                    # train_3_12_0, train_3_12_1, etc. But vLLM creates CompletionOutputs with index=0
+                    # for all of them (since each sub-request has n=1). We need to fix this.
+                    # Extract the actual index from the sub-request ID
                     parts = output.request_id.rsplit("_", 1)
                     assert len(parts) == 2 and parts[1].isdigit(), (
                         f"Wrong request id format ({output.request_id}), should be request_id _ sub_request_index"
@@ -507,26 +506,24 @@ class LLMRayActor:
                         self.executor,
                     )
 
+                    # Result is None when we do more tool processing.
                     if result is None:
+                        # Request went to tools - remove from vllm_active_requests since it's no longer in vLLM
                         self.vllm_active_requests.discard(output.request_id)
                     else:
+                        # Sub-request is done (no more tool calls).
                         if output.request_id in self.tracking["concat_outputs"]:
                             complete_output = self.tracking["concat_outputs"][output.request_id].outputs[0]
                         else:
                             complete_output = result.outputs[0]
-
+                        # Remove from vllm_active_requests BEFORE calling _finalize_sub_request
+                        # to avoid deadlock in _maybe_process_and_insert
                         self.vllm_active_requests.discard(output.request_id)
-                        num_processed = self._finalize_sub_request(
+                        total_processed += self._finalize_sub_request(
                             output.request_id, output, complete_output, current_time
                         )
-                        total_processed += num_processed
-                unfinished = self.llm_engine.get_num_unfinished_requests()
-
-            if unfinished == 0 and len(self.tracking["pending_tool_futures"]) > 0:
+            if self.llm_engine.get_num_unfinished_requests() == 0:
                 time.sleep(1)
-            elif unfinished == 0:
-                time.sleep(0.1)
-
         return total_processed
 
     def _maybe_process_and_insert(
@@ -826,29 +823,23 @@ class LLMRayActor:
             args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
         )
 
+    def _maybe_drain_requests(self, sleep_s: float = 0.1):
+        while not self.inflight_updates:
+            pending_tools = len(self.tracking["pending_tool_futures"])
+            unfinished = self.llm_engine.get_num_unfinished_requests()
+
+            if pending_tools == 0 and unfinished == 0:
+                break
+
+            time.sleep(sleep_s)
+
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        if not self.inflight_updates:
-            while True:
-                pending_tools = len(self.tracking["pending_tool_futures"])
-                unfinished = self.llm_engine.get_num_unfinished_requests()
-
-                if pending_tools == 0 and unfinished == 0:
-                    break
-
-                time.sleep(0.1)
+        self._maybe_drain_requests()
         result = self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
         return result
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        if not self.inflight_updates:
-            while True:
-                pending_tools = len(self.tracking["pending_tool_futures"])
-                unfinished = self.llm_engine.get_num_unfinished_requests()
-
-                if pending_tools == 0 and unfinished == 0:
-                    break
-
-                time.sleep(0.1)
+        self._maybe_drain_requests()
         result = self.llm_engine.collective_rpc(
             "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
