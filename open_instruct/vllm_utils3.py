@@ -39,6 +39,7 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+from vllm.v1 import kv_cache_interface
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
@@ -453,9 +454,7 @@ class LLMRayActor:
     def _insert_result_to_queue(self, result, is_eval: bool):
         """Insert result into the appropriate queue with blocking put."""
         results_queue = self.eval_results_queue if is_eval else self.results_queue
-        self.logger.info("About to try and put result into results_queue. This could block!")
         results_queue.put(result)
-        self.logger.info("Successfuly put result into results_queue.")
 
     def _should_exit(self) -> bool:
         """Determine if the processing loop should exit.
