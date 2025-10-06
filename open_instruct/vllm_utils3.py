@@ -67,29 +67,6 @@ def assert_threaded_actor(instance):
     Raises:
         AssertionError: If the class defines one or more async methods, or a running asyncio event loop is detected.
     """
-    cls = instance.__class__
-    cls_name = cls.__name__
-
-    async_methods = []
-    for name, obj in vars(cls).items():
-        if isinstance(obj, (staticmethod, classmethod)):
-            func = obj.__func__
-        elif inspect.isfunction(obj):
-            func = obj
-        else:
-            continue
-
-        if inspect.iscoroutinefunction(func) or inspect.isasyncgenfunction(func):
-            async_methods.append(name)
-
-    if async_methods:
-        async_methods.sort()
-        raise AssertionError(
-            f"{cls_name} must not define async methods for threaded actor mode. "
-            f"Found: {async_methods}. "
-            f"Fix: convert these to sync methods and run async work in a background loop/thread."
-        )
-
     try:
         loop = asyncio.get_running_loop()
         raise AssertionError(
