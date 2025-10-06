@@ -67,23 +67,19 @@ def assert_threaded_actor(instance):
 
     Raises:
         AssertionError: If the class defines one or more async methods, or a running asyncio event loop is detected.
-        RuntimeError: If an unexpected error occurs while checking for the event loop.
     """
     cls = instance.__class__
     cls_name = cls.__name__
 
-    # --- Check for async methods defined directly on the class ---
     async_methods = []
     for name, obj in vars(cls).items():
-        # unwrap @staticmethod / @classmethod to underlying function
         if isinstance(obj, (staticmethod, classmethod)):
             func = obj.__func__
         elif inspect.isfunction(obj):
             func = obj
         else:
-            continue  # not a function we care about
+            continue
 
-        # catch both coroutine functions and async generators
         if inspect.iscoroutinefunction(func) or inspect.isasyncgenfunction(func):
             async_methods.append(name)
 
@@ -95,45 +91,22 @@ def assert_threaded_actor(instance):
             f"Fix: convert these to sync methods and run async work in a background loop/thread."
         )
 
-    # --- Check that no event loop is running in this thread ---
     try:
         loop = asyncio.get_running_loop()
-    except RuntimeError as e:
-        # Expected in threaded (non-async) contexts
-        if "no running event loop" in str(e).lower():
-            return
-        # Other RuntimeError is unexpected—surface it
-        raise
-    else:
-        # If we got a loop, we’re in an async actor (not allowed here)
         raise AssertionError(
             f"{cls_name} must run in a threaded Ray actor (no running event loop). "
             f"Detected RUNNING loop={loop!r} on thread='{threading.current_thread().name}'. "
             f"Python={sys.version.split()[0]}."
         )
+    except RuntimeError:
+        return
 
 
 async def generate_one_completion(
     llm_engine: vllm.AsyncLLMEngine, request_id: str, prompt: vllm.TokensPrompt, sampling_params: vllm.SamplingParams
 ) -> vllm.RequestOutput:
     """Generate a single completion from the async engine."""
-    logger.info(f"[generate_one_completion] ENTRY for {request_id}")
-    logger.debug(f"[generate_one_completion] Adding request {request_id} to engine")
-    generator = llm_engine.generate(prompt, sampling_params, request_id)
-    logger.info(f"[generate_one_completion] Got generator for {request_id}, starting async iteration")
-
-    outputs = []
-    iteration_count = 0
-    async for output in generator:
-        iteration_count += 1
-        logger.info(
-            f"[generate_one_completion] Iteration {iteration_count} for {request_id}, finished={output.finished}"
-        )
-        outputs.append(output)
-        if output.finished:
-            logger.info(f"[generate_one_completion] Request {request_id} FINISHED after {iteration_count} iterations")
-
-    logger.info(f"[generate_one_completion] EXIT for {request_id} with {len(outputs)} outputs")
+    outputs = [o for o in llm_engine.generate(prompt, sampling_params, request_id) if o.finished]
     assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
     return outputs[0]
 
@@ -150,29 +123,16 @@ async def process_request_async(
     tools: Optional[Dict[str, Tool]] = None,
 ):
     """Process a single async request and push to completion queue when ready."""
-    logger.info(f"[process_request_async] ENTRY for {sub_request_id}")
     request_output = await generate_one_completion(llm_engine, sub_request_id, prompt, sampling_params)
-    logger.info(f"[process_request_async] Generated completion for {sub_request_id}")
-
     complete_output = request_output.outputs[0]
 
-    # Extract the j index from sub_request_id (format: base_id_j)
-    j = int(sub_request_id.split("_")[-1])
-    # Use dataclasses.replace to create a new CompletionOutput with the correct index
-    complete_output = dataclasses.replace(complete_output, index=j)
+    complete_output = dataclasses.replace(complete_output, index=int(sub_request_id.split("_")[-1]))
 
-    # Get expected_n from metadata
-    expected_n = request_metadata[base_request_id]["original_sampling_params"].n
-
-    # Clean up this sub-request from active_tasks
     active_tasks.pop(sub_request_id, None)
 
-    # Create sub-request result with all needed metadata
     sub_request_result = {
         "base_request_id": base_request_id,
-        "sub_request_id": sub_request_id,
-        "j": j,
-        "expected_n": expected_n,
+        "expected_n": request_metadata[base_request_id]["original_sampling_params"].n,
         "request_output": vllm.RequestOutput(
             request_id=sub_request_id,
             prompt=request_output.prompt,
