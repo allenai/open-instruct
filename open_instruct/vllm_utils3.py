@@ -188,20 +188,6 @@ async def process_request_async(
     logger.info(f"[process_request_async] Request {sub_request_id} is DONE")
 
 
-async def _event_loop_health_monitor():
-    """Periodically log event loop health status."""
-    while True:
-        await asyncio.sleep(30)
-        loop = asyncio.get_running_loop()
-        all_tasks = asyncio.all_tasks(loop)
-        pending_tasks = [t for t in all_tasks if not t.done()]
-        logger.info(
-            f"[EventLoopHealth] Loop running: {loop.is_running()}, Total tasks: {len(all_tasks)}, Pending: {len(pending_tasks)}"
-        )
-        for task in list(pending_tasks)[:5]:
-            logger.info(f"[EventLoopHealth] Pending task: {task.get_name()}, {task}")
-
-
 async def _process_sync_requests(actor):
     """Background task that processes sync method requests from other threads."""
     logger.info("[_process_sync_requests] Starting sync request processor")
@@ -233,12 +219,6 @@ async def _init_engine_async(actor):
     assert running_loop == actor.loop, f"Loop mismatch! running={running_loop}, actor.loop={actor.loop}"
 
     actor.llm_engine = vllm.AsyncLLMEngine.from_engine_args(actor.engine_args, start_engine_loop=False)
-    logger.info("AsyncLLMEngine created successfully")
-    logger.info(f"AsyncLLMEngine instance: {actor.llm_engine}")
-    logger.info(f"AsyncLLMEngine has output_handler: {hasattr(actor.llm_engine, '_output_handler')}")
-    logger.info(f"Current event loop: {asyncio.get_running_loop()}")
-    logger.info(f"Event loop all tasks: {len(asyncio.all_tasks())}")
-    asyncio.create_task(_event_loop_health_monitor(), name="EventLoopHealthMonitor")
     asyncio.create_task(_process_sync_requests(actor), name="SyncRequestProcessor")
 
 
@@ -870,9 +850,9 @@ class LLMRayActor:
     def update_weight(self, name, dtype, shape, empty_cache=False):
         logger.info(f"[update_weight] ENTRY for param: {name}")
         expected_dtype = self.llm_engine.model_config.dtype
-        assert dtype == str(
-            expected_dtype
-        ), f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
+        assert dtype == str(expected_dtype), (
+            f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
+        )
         resolved_dtype = expected_dtype
         result = self._call_async_from_sync(
             self.llm_engine.engine_core.collective_rpc_async(
@@ -884,9 +864,9 @@ class LLMRayActor:
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
         expected_dtype = self.llm_engine.model_config.dtype
-        assert dtype == str(
-            expected_dtype
-        ), f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
+        assert dtype == str(expected_dtype), (
+            f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
+        )
         resolved_dtype = expected_dtype
         return self._call_async_from_sync(
             self.llm_engine.engine_core.collective_rpc_async(
