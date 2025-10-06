@@ -16,7 +16,6 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 import asyncio
-import dataclasses
 import inspect
 import logging
 import os
@@ -121,12 +120,103 @@ async def process_request_async(
     request_metadata: dict,
     active_tasks: dict,
     tools: Optional[Dict[str, Tool]] = None,
+    max_tool_calls: Optional[Dict[str, int]] = None,
+    executor: Optional[futures.ThreadPoolExecutor] = None,
+    tokenizer=None,
 ):
-    """Process a single async request and push to completion queue when ready."""
-    request_output = await generate_one_completion(llm_engine, sub_request_id, prompt, sampling_params)
-    complete_output = request_output.outputs[0]
+    """Process a single async request with tool support, awaiting tools inline."""
+    accumulated_tokens = []
+    masks = []
+    num_calls = 0
+    timeout = False
+    tool_error = ""
+    tool_output = ""
+    tool_runtime = 0.0
+    tool_called = False
 
-    complete_output = dataclasses.replace(complete_output, index=int(sub_request_id.split("_")[-1]))
+    current_prompt = prompt
+    current_sampling_params = sampling_params.clone()
+
+    while True:
+        request_output = await generate_one_completion(
+            llm_engine, sub_request_id, current_prompt, current_sampling_params
+        )
+        output = request_output.outputs[0]
+
+        accumulated_tokens.extend(output.token_ids)
+        masks.extend([1] * len(output.token_ids))
+
+        if not tools or not max_tool_calls:
+            break
+
+        triggered_tool = None
+        stop_str = None
+        for candidate_stop_str in sampling_params.stop:
+            if candidate_stop_str in tools and output.text.endswith(candidate_stop_str):
+                stop_str = candidate_stop_str
+                if num_calls < max_tool_calls.get(stop_str, 0):
+                    triggered_tool = tools[stop_str]
+                else:
+                    triggered_tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
+                break
+
+        if triggered_tool is None:
+            break
+
+        loop = asyncio.get_event_loop()
+        tool_result = await loop.run_in_executor(executor, triggered_tool, output.text)
+
+        tool_called = True
+        num_calls += 1
+        timeout = timeout or tool_result.timeout
+        tool_error += "" if tool_result.error is None else tool_result.error
+        tool_output += tool_result.output
+        tool_runtime += tool_result.runtime
+
+        tool_output_token_ids = tokenizer.encode(
+            "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+        )
+
+        prompt_and_tool_output = current_prompt.prompt_token_ids + accumulated_tokens + tool_output_token_ids
+        excess = len(prompt_and_tool_output) - llm_engine.model_config.max_model_len
+        if excess > 0:
+            tool_output_token_ids = tool_output_token_ids[:-excess]
+
+        remaining = sampling_params.max_tokens - len(masks)
+        if remaining <= 0:
+            tool_output_token_ids = []
+        elif len(tool_output_token_ids) > remaining:
+            tool_output_token_ids = tool_output_token_ids[:remaining]
+
+        accumulated_tokens.extend(tool_output_token_ids)
+        masks.extend([0] * len(tool_output_token_ids))
+
+        new_sample_tokens = sampling_params.max_tokens - len(masks)
+        if excess > 0 or new_sample_tokens <= 0:
+            break
+
+        current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output, cache_salt=base_request_id)
+        current_sampling_params = sampling_params.clone()
+        current_sampling_params.max_tokens = new_sample_tokens
+
+    complete_output = vllm.CompletionOutput(
+        index=int(sub_request_id.split("_")[-1]),
+        text="",
+        token_ids=accumulated_tokens,
+        cumulative_logprob=output.cumulative_logprob,
+        logprobs=None,
+        finish_reason=output.finish_reason,
+        stop_reason=output.stop_reason,
+    )
+
+    if tools:
+        setattr(complete_output, "mask", masks)
+        setattr(complete_output, "num_calls", num_calls)
+        setattr(complete_output, "timeout", timeout)
+        setattr(complete_output, "tool_error", tool_error)
+        setattr(complete_output, "tool_output", tool_output)
+        setattr(complete_output, "tool_runtime", tool_runtime)
+        setattr(complete_output, "tool_called", tool_called)
 
     active_tasks.pop(sub_request_id, None)
 
@@ -136,7 +226,7 @@ async def process_request_async(
         "request_output": vllm.RequestOutput(
             request_id=sub_request_id,
             prompt=request_output.prompt,
-            prompt_token_ids=request_output.prompt_token_ids,
+            prompt_token_ids=current_prompt.prompt_token_ids,
             prompt_logprobs=request_output.prompt_logprobs,
             outputs=[complete_output],
             finished=True,
@@ -628,6 +718,9 @@ class LLMRayActor:
                     self.request_metadata,
                     self.active_tasks,
                     self.tools,
+                    self.max_tool_calls,
+                    self.executor,
+                    self.llm_engine.tokenizer,
                 ),
                 self.loop,
             )
