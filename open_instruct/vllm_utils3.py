@@ -187,32 +187,43 @@ async def process_request_async(
         tool_output += tool_result.output
         tool_runtime += tool_result.runtime
 
+        logger.info(f"[process_request_async] After tool for {sub_request_id}: encoding tool output")
         tool_output_token_ids = tokenizer.encode(
             "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
         )
+        logger.info(f"[process_request_async] Tool output tokens for {sub_request_id}: {len(tool_output_token_ids)} tokens")
 
         prompt_and_tool_output = current_prompt.prompt_token_ids + accumulated_tokens + tool_output_token_ids
         excess = len(prompt_and_tool_output) - llm_engine.model_config.max_model_len
+        logger.info(f"[process_request_async] Prompt length check for {sub_request_id}: total={len(prompt_and_tool_output)}, excess={excess}")
         if excess > 0:
             tool_output_token_ids = tool_output_token_ids[:-excess]
+            logger.info(f"[process_request_async] Truncated tool output for {sub_request_id} due to model max length")
 
         remaining = sampling_params.max_tokens - len(masks)
+        logger.info(f"[process_request_async] Token budget for {sub_request_id}: remaining={remaining}, masks_len={len(masks)}, max_tokens={sampling_params.max_tokens}")
         if remaining <= 0:
             tool_output_token_ids = []
+            logger.info(f"[process_request_async] No token budget left for {sub_request_id}, clearing tool output tokens")
         elif len(tool_output_token_ids) > remaining:
             tool_output_token_ids = tool_output_token_ids[:remaining]
+            logger.info(f"[process_request_async] Truncated tool output for {sub_request_id} to fit remaining budget")
 
         accumulated_tokens.extend(tool_output_token_ids)
         masks.extend([0] * len(tool_output_token_ids))
 
         new_sample_tokens = sampling_params.max_tokens - len(masks)
+        logger.info(f"[process_request_async] Next iteration setup for {sub_request_id}: new_sample_tokens={new_sample_tokens}, will_continue={excess <= 0 and new_sample_tokens > 0}")
         if excess > 0 or new_sample_tokens <= 0:
+            logger.info(f"[process_request_async] Breaking loop for {sub_request_id}: excess={excess}, new_sample_tokens={new_sample_tokens}")
             break
 
         current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output, cache_salt=base_request_id)
         final_prompt_token_ids = prompt_and_tool_output
         current_sampling_params = sampling_params.clone()
         current_sampling_params.max_tokens = new_sample_tokens
+        logger.info(f"[process_request_async] Prepared for next iteration of {sub_request_id}: prompt_len={len(prompt_and_tool_output)}, max_tokens={new_sample_tokens}")
+        logger.info(f"[process_request_async] Looping back to iteration {iteration+1} for {sub_request_id}")
 
     complete_output = vllm.CompletionOutput(
         index=int(sub_request_id.split("_")[-1]),
