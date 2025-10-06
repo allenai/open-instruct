@@ -1708,6 +1708,8 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     # save a copy of the dataset pre-transformation
     untokenized_dataset = copy.deepcopy(dataset)
+    print("not transforming, returning untokenized dataset as is...")
+    return dataset, untokenized_dataset
     for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
         fn, fn_type = TRANSFORM_FNS[fn_name]
         # always pass in tokenizer and other args if needed
@@ -1890,24 +1892,32 @@ class LocalDatasetTransformationCache:
 
             # add id
             name = dc.dataset_name.split("/")[-1]
+            print(f"Adding id column with prefix {name}_ to untokenized dataset...")
             if "id" in untokenized_dataset.column_names:
-                base_vals = untokenized_dataset["id"]                  # list
+                base_vals = untokenized_dataset["id"]                # list
             elif "source_id" in untokenized_dataset.column_names:
                 base_vals = untokenized_dataset["source_id"]           # list
             else:
                 base_vals = list(range(len(untokenized_dataset)))      # fallback: indices
             # build the new id column
-            id_col = [f"{name}_{v}" for v in base_vals]
+            id_col = [f"{name}_{str(v)}" for v in base_vals]
             # replace or add the 'id' column
-            if "id" in untokenized_dataset.column_names:
-                untokenized_dataset = untokenized_dataset.remove_columns("id")
-            untokenized_dataset = untokenized_dataset.add_column("id", id_col)
-            print(f"Length of id_col: {len(id_col)}, Length of dataset: {len(untokenized_dataset)}")
-            # drop columns 
-            columns_to_keep = dc.target_columns + ["messages", DATASET_ORIGIN_KEY, "id"] if dc.target_columns is not None else ["messages", DATASET_ORIGIN_KEY, "id"]
+            columns_to_keep = dc.target_columns + ["messages", DATASET_ORIGIN_KEY] if dc.target_columns is not None else ["messages", DATASET_ORIGIN_KEY]
             untokenized_dataset = untokenized_dataset.remove_columns(
                 [col for col in untokenized_dataset.column_names if col not in (columns_to_keep)]
             )   
+            from datasets import Value
+            untokenized_dataset = untokenized_dataset.add_column("id", id_col)
+            print(untokenized_dataset["id"])
+            untokenized_dataset = untokenized_dataset.cast_column("id", Value("string"))
+
+            print(f"Length of id_col: {len(id_col)}, Length of dataset: {len(untokenized_dataset)}")
+            # drop columns 
+
+            for message in untokenized_dataset[0]["messages"]:
+                if "tool_calls" in message.keys():
+                    print("WARNING: tool_calls found in messages for dataset ", dc.dataset_name)
+            print("NO issue with tool_calls")
             untransformed_datasets.append(untokenized_dataset)
 
 
@@ -1947,13 +1957,12 @@ class LocalDatasetTransformationCache:
             dataset_order.append(dc.dataset_name)
 
         # Combine datasets
-        combined_dataset = concatenate_datasets(transformed_datasets)
-
+        # combined_dataset = concatenate_datasets(transformed_datasets)
         # Combine untransformed datasets
         combined_untransformed_datasets = concatenate_datasets(untransformed_datasets)
         print("Uploading untransformed dataset to hub for inspection...")
-        combined_untransformed_datasets.push_to_hub("allenai/olmo3-sft-nonreasoner-no-tool-use", private=True)
-
+        combined_untransformed_datasets.push_to_hub("allenai/olmo-3-thinking-sft", private=True)
+        return dataset, {}
         # Prepare return statistics
         all_statistics = {"per_dataset_stats": dataset_statistics, "dataset_order": dataset_order}
 
