@@ -869,16 +869,28 @@ class LLMRayActor:
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
         logger.info(f"[update_weight] ENTRY for param: {name}")
+        expected_dtype = self.llm_engine.model_config.dtype
+        assert dtype == str(
+            expected_dtype
+        ), f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
+        resolved_dtype = expected_dtype
         result = self._call_async_from_sync(
-            self.llm_engine.engine_core.collective_rpc_async("update_weight", args=(name, dtype, shape, empty_cache))
+            self.llm_engine.engine_core.collective_rpc_async(
+                "update_weight", args=(name, resolved_dtype, shape, empty_cache)
+            )
         )
         logger.info(f"[update_weight] EXIT for {name}")
         return result
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
+        expected_dtype = self.llm_engine.model_config.dtype
+        assert dtype == str(
+            expected_dtype
+        ), f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
+        resolved_dtype = expected_dtype
         return self._call_async_from_sync(
             self.llm_engine.engine_core.collective_rpc_async(
-                "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
+                "update_weight_cuda_ipc", args=(name, resolved_dtype, shape, ipc_handles, empty_cache)
             )
         )
 
@@ -1006,10 +1018,7 @@ def create_vllm_engines(
             placement_group_bundle_index=bundle_indices[0],
         )
 
-        env_vars = {
-            "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
-            "VLLM_ALLOW_INSECURE_SERIALIZATION": "1",
-        }
+        env_vars = {"TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
         if distributed_executor_backend == "mp":
             # Allow vLLM v1 to spawn helper processes even for single-GPU runs.
             env_vars["VLLM_ENABLE_V1_MULTIPROCESSING"] = "1"

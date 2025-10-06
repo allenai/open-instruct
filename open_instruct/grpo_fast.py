@@ -855,7 +855,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         logger.info(f"[broadcast_to_vllm] Creating update_weight.remote() futures for {name}")
                         refs = [
                             engine.update_weight.remote(
-                                name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
+                                name, dtype=str(param.dtype), shape=shape, empty_cache=count == num_params
                             )
                             for engine in self.vllm_engines
                         ]
@@ -876,7 +876,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     logger.info(f"[broadcast_to_vllm] Creating update_weight.remote() futures for {name}")
                     refs = [
                         engine.update_weight.remote(
-                            name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
+                            name, dtype=str(param.dtype), shape=shape, empty_cache=count == num_params
                         )
                         for engine in self.vllm_engines
                     ]
