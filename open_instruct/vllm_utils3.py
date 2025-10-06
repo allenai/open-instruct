@@ -478,6 +478,7 @@ class LLMRayActor:
         while True:
             iteration_count += 1
 
+            # Health check: ensure prefetch worker is alive. This will raise if it has crashed.
             if self._prefetch_future.done():
                 self._prefetch_future.result()
 
@@ -495,6 +496,7 @@ class LLMRayActor:
                         f"Wrong request id format ({output.request_id}), should be request_id _ sub_request_index"
                     )
 
+                    # Fix the index on the CompletionOutput
                     correct_index = int(parts[1])
                     output.outputs = [dataclasses.replace(o, index=correct_index) for o in output.outputs]
                     base_req_id = _extract_base_request_id(output.request_id)
@@ -512,11 +514,12 @@ class LLMRayActor:
                         # Request went to tools - remove from vllm_active_requests since it's no longer in vLLM
                         self.vllm_active_requests.discard(output.request_id)
                     else:
-                        # Sub-request is done (no more tool calls).
+                        # Sub-request is done (no more tool calls)
                         if output.request_id in self.tracking["concat_outputs"]:
                             complete_output = self.tracking["concat_outputs"][output.request_id].outputs[0]
                         else:
                             complete_output = result.outputs[0]
+
                         # Remove from vllm_active_requests BEFORE calling _finalize_sub_request
                         # to avoid deadlock in _maybe_process_and_insert
                         self.vllm_active_requests.discard(output.request_id)
@@ -525,6 +528,7 @@ class LLMRayActor:
                         )
             if self.llm_engine.get_num_unfinished_requests() == 0:
                 time.sleep(1)
+
         return total_processed
 
     def _maybe_process_and_insert(
@@ -836,15 +840,14 @@ class LLMRayActor:
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
         self._maybe_drain_requests()
-        result = self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
         return result
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
         self._maybe_drain_requests()
-        result = self.llm_engine.collective_rpc(
+        return self.llm_engine.collective_rpc(
             "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
-        return result
 
     def reset_prefix_cache(self):
         self.llm_engine.reset_prefix_cache()
