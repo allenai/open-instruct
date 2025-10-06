@@ -202,7 +202,7 @@ async def process_request_async(
         "request_output": vllm.RequestOutput(
             request_id=sub_request_id,
             prompt=request_output.prompt,
-            prompt_token_ids=current_prompt.prompt_token_ids,
+            prompt_token_ids=request_output.prompt_token_ids,
             prompt_logprobs=request_output.prompt_logprobs,
             outputs=[complete_output],
             finished=True,
