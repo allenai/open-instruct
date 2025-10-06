@@ -643,34 +643,6 @@ class LLMRayActor:
                 "Check earlier logs for the root cause exception."
             )
 
-    def _should_exit(self) -> bool:
-        """Determine if the processing loop should exit.
-
-        Returns:
-            bool: True if the loop should exit, False otherwise.
-        """
-        stop_requested = self._should_stop()
-        active_tasks = len(self.active_tasks)
-        has_incomplete = len(self.request_outputs) > 0
-
-        logger.info(
-            f"[_should_exit] stop_requested={stop_requested}, inflight_updates={self.inflight_updates}, "
-            f"active_tasks={active_tasks}, incomplete_requests={has_incomplete}"
-        )
-
-        if self.inflight_updates and stop_requested:
-            logger.info("[_should_exit] Exiting immediately due to inflight_updates + stop")
-            return True
-
-        if stop_requested:
-            if active_tasks == 0 and not has_incomplete:
-                logger.info("[_should_exit] Exiting - stop requested and no pending work")
-                return True
-            logger.info("[_should_exit] Continuing - stop requested but have pending work")
-
-        logger.info("[_should_exit] Continuing - no stop requested")
-        return False
-
     def _add_request_sync(self, request: PromptRequest):
         """Add a request by spawning async tasks."""
         self._check_async_loop_alive()
@@ -753,7 +725,7 @@ class LLMRayActor:
         loop_iterations = 0
 
         logger.info("[process_from_queue] Entering while loop")
-        while not self._should_exit():
+        while True:
             loop_iterations += 1
             logger.debug(f"[process_from_queue] Loop iteration {loop_iterations}")
 
@@ -828,8 +800,8 @@ class LLMRayActor:
                 )
 
             except queue.Empty:
-                logger.debug("[process_from_queue] Queue empty, continuing loop")
-                pass
+                logger.debug("[process_from_queue] Queue empty, sleeping briefly")
+                time.sleep(0.1)
 
         logger.info(
             f"[process_from_queue] EXIT - Exited while loop after {loop_iterations} iterations, "
