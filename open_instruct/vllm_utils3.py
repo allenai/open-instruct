@@ -961,7 +961,6 @@ def create_vllm_engines(
     vllm_gpu_memory_utilization: float = 0.9,
     single_gpu_mode: bool = False,
     pg: Optional[ray.util.placement_group] = None,
-    vllm_enable_sleep=False,
     tools: Optional[Dict[str, Tool]] = None,
     max_tool_calls: List[int] = [5],
     prompt_queue=None,
@@ -1044,7 +1043,6 @@ def create_vllm_engines(
                 gpu_memory_utilization=vllm_gpu_memory_utilization,
                 bundle_indices=bundle_indices,
                 num_gpus=0.2 if use_hybrid_engine else 1,
-                enable_sleep_mode=vllm_enable_sleep,
                 noset_visible_devices=ray_noset_visible_devices(),
                 prompt_queue=prompt_queue,
                 results_queue=results_queue,
@@ -1060,83 +1058,6 @@ def create_vllm_engines(
             )
         )
 
-    # Verify engines initialized successfully
-    try:
-        ray_get_with_progress(
-            [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300
-        )
-    except TimeoutError as e:
-        logger.error(f"vLLM engines failed to initialize: {e}")
-        # Kill partially initialized actors before raising
-        for engine in vllm_engines:
-            ray.kill(engine)
-        raise RuntimeError(f"vLLM engine initialization timed out: {e}")
-
-    if vllm_enable_sleep:
-        batch_vllm_engine_call(vllm_engines, "sleep", rank_0_only=False)
+    ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300)
 
     return vllm_engines
-
-
-def batch_vllm_engine_call(engines: List[Any], method_name: str, *args, rank_0_only: bool = True, **kwargs):
-    """
-    Batch call a method on multiple vLLM engines.
-    Args:
-        engines: List of vLLM engine instances
-        method_name: Name of the method to call
-        rank_0_only: Only execute on rank 0 if True
-        *args: Positional arguments to pass to the method
-        **kwargs: Keyword arguments to pass to the method
-    Returns:
-        List of results from ray.get() if on rank 0, None otherwise
-    """
-    import torch
-
-    if rank_0_only and torch.distributed.get_rank() != 0:
-        return None
-
-    refs = []
-    for engine in engines:
-        method = getattr(engine, method_name)
-        refs.append(method.remote(*args, **kwargs))
-
-    return ray.get(refs)
-
-
-if __name__ == "__main__":
-    num_engines = 1
-    tensor_parallel_size = 1
-    world_size = num_engines * tensor_parallel_size + 1
-    vllm_engines = create_vllm_engines(
-        num_engines=num_engines,
-        tensor_parallel_size=tensor_parallel_size,
-        enforce_eager=True,
-        pretrain="facebook/opt-125m",
-        revision="main",
-        seed=42,
-        enable_prefix_caching=False,
-        max_model_len=1024,
-    )
-    llm = vllm_engines[0]
-    from vllm.utils import get_ip, get_open_port
-
-    master_address = get_ip()
-    master_port = get_open_port()
-    backend = "gloo"
-
-    refs = [
-        engine.init_process_group.remote(
-            master_address, master_port, i * tensor_parallel_size + 1, world_size, "openrlhf", backend=backend
-        )
-        for i, engine in enumerate(vllm_engines)
-    ]
-    model_update_group = init_process_group(
-        backend=backend,
-        init_method=f"tcp://{master_address}:{master_port}",
-        world_size=world_size,
-        rank=0,
-        group_name="openrlhf",
-    )
-    ray.get(refs)
-    output = ray.get(llm.generate.remote("San Franciso is a"))
-    logger.info(f"output: {output}")
