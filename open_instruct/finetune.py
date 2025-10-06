@@ -283,9 +283,6 @@ class FlatArguments:
     """The entity (team) of wandb's project"""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
-    push_checkpoints_to_hub: bool = field(
-        default=False, metadata={"help": "Whether to upload all checkpoints to huggingface"}
-    )
     hf_entity: Optional[str] = None
     """The user or org name of the model repository from the Hugging Face Hub"""
     hf_repo_id: str | None = None
@@ -917,31 +914,16 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
                 if isinstance(checkpointing_steps, int):
                     if completed_steps % checkpointing_steps == 0:
-                        checkpoint_dir = f"step_{completed_steps}"
+                        output_dir = f"step_{completed_steps}"
                         if args.output_dir is not None:
-                            checkpoint_dir = os.path.join(args.output_dir, checkpoint_dir)
-                        accelerator.save_state(checkpoint_dir)
+                            output_dir = os.path.join(args.output_dir, output_dir)
+                        accelerator.save_state(output_dir)
                         # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
-                        with open(os.path.join(checkpoint_dir, "COMPLETED"), "w") as f:
+                        with open(
+                            os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w"
+                        ) as f:
                             f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-
-                        if args.push_checkpoints_to_hub:
-                            save_with_accelerate(
-                                accelerator,
-                                model,
-                                tokenizer,
-                                checkpoint_dir,
-                                args.use_lora,
-                                chat_template_name=tc.chat_template_name,
-                            )
-                            push_folder_to_hub(
-                                accelerator,
-                                checkpoint_dir,
-                                args.hf_repo_id,
-                                f"step_{completed_steps}",
-                            )
-
-                        if accelerator.is_local_main_process:
+                        if accelerator.is_local_main_process:  # TODO: in mason local model this is gonna error out if using something like output/test; because mason used the same shared file ssytem.
                             clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
                         accelerator.wait_for_everyone()
 
@@ -949,30 +931,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     break
 
         if checkpointing_steps == "epoch":
-            checkpoint_dir = f"epoch_{epoch}"
+            output_dir = f"epoch_{epoch}"
             if args.output_dir is not None:
-                checkpoint_dir = os.path.join(args.output_dir, checkpoint_dir)
-            accelerator.save_state(checkpoint_dir)
+                output_dir = os.path.join(args.output_dir, output_dir)
+            accelerator.save_state(output_dir)
             # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
-            with open(os.path.join(checkpoint_dir, "COMPLETED"), "w") as f:
+            with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
                 f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-
-            if args.push_checkpoints_to_hub:
-                save_with_accelerate(
-                    accelerator,
-                    model,
-                    tokenizer,
-                    checkpoint_dir,
-                    args.use_lora,
-                    chat_template_name=tc.chat_template_name,
-                )
-                push_folder_to_hub(
-                    accelerator,
-                    checkpoint_dir,
-                    args.hf_repo_id,
-                    f"epoch_{epoch}",
-                )
-
             if accelerator.is_local_main_process:
                 clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
             accelerator.wait_for_everyone()
@@ -1004,7 +969,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             oe_eval_tasks=args.oe_eval_tasks,
             gs_bucket_path=args.gs_bucket_path,
         )
-    if args.push_to_hub and not args.push_checkpoints_to_hub:
+    if args.push_to_hub:
         push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
     accelerator.wait_for_everyone()
     if args.with_tracking:
