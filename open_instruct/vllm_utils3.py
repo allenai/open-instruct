@@ -850,22 +850,16 @@ class LLMRayActor:
     def update_weight(self, name, dtype, shape, empty_cache=False):
         logger.info(f"[update_weight] ENTRY for param: {name}")
         expected_dtype = str(self.llm_engine.model_config.dtype)
-        assert dtype == expected_dtype, (
-            f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
-        )
+        assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
         result = self._call_async_from_sync(
-            self.llm_engine.engine_core.collective_rpc_async(
-                "update_weight", args=(name, dtype, shape, empty_cache)
-            )
+            self.llm_engine.engine_core.collective_rpc_async("update_weight", args=(name, dtype, shape, empty_cache))
         )
         logger.info(f"[update_weight] EXIT for {name}")
         return result
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
         expected_dtype = str(self.llm_engine.model_config.dtype)
-        assert dtype == expected_dtype, (
-            f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
-        )
+        assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
         return self._call_async_from_sync(
             self.llm_engine.engine_core.collective_rpc_async(
                 "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)

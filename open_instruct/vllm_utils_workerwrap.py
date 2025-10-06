@@ -47,16 +47,12 @@ class WorkerWrap:
         import torch
 
         if isinstance(dtype, torch.dtype):
-            assert dtype == self.model_config.dtype, (
-                f"mismatch dtype: src {dtype}, dst {self.model_config.dtype}"
-            )
+            assert dtype == self.model_config.dtype, f"mismatch dtype: src {dtype}, dst {self.model_config.dtype}"
             return dtype
 
         if isinstance(dtype, str):
             expected = str(self.model_config.dtype)
-            assert dtype == expected, (
-                f"mismatch dtype: src {dtype}, dst {expected}"
-            )
+            assert dtype == expected, f"mismatch dtype: src {dtype}, dst {expected}"
             return self.model_config.dtype
 
         raise TypeError(f"Unsupported dtype payload: {dtype!r}")
@@ -84,8 +80,6 @@ class WorkerWrap:
         import torch
 
         from open_instruct.vllm_utils3 import get_physical_gpu_id
-
-        resolved_dtype = self._coerce_dtype(dtype)
 
         handle = ipc_handles[get_physical_gpu_id()]
         device_id = self.device.index
