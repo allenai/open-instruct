@@ -625,6 +625,15 @@ class PolicyTrainerRayProcess(RayProcess):
         np.random.seed(worker_seed)
         random.seed(worker_seed)
 
+        torch.distributed.init_process_group(
+            backend="nccl",
+            init_method="env://",
+            world_size=self.world_size,
+            rank=self.rank,
+            timeout=timedelta(minutes=args.backend_timeout),
+            device_id=torch.device("cuda", self.local_rank),
+        )
+
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
         ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
@@ -646,6 +655,7 @@ class PolicyTrainerRayProcess(RayProcess):
             torch_dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
             use_cache=False,
+            **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
@@ -744,6 +754,7 @@ class PolicyTrainerRayProcess(RayProcess):
             torch_dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
             use_cache=False,
+            **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
         disable_dropout_in_model(self.ref_policy)
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
