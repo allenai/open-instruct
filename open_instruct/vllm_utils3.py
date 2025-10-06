@@ -114,11 +114,16 @@ async def process_request_async(
     current_prompt = prompt
     current_sampling_params = sampling_params.clone()
     final_prompt_token_ids = None
+    iteration = 0
 
     while True:
+        # Use a unique request ID for each iteration to avoid conflicts in vLLM
+        iteration_request_id = f"{sub_request_id}_iter{iteration}"
+        logger.info(f"[process_request_async] Starting generation iteration {iteration} for {sub_request_id} with ID {iteration_request_id}")
         request_output = await generate_one_completion(
-            llm_engine, sub_request_id, current_prompt, current_sampling_params
+            llm_engine, iteration_request_id, current_prompt, current_sampling_params
         )
+        iteration += 1
         output = request_output.outputs[0]
 
         if final_prompt_token_ids is None:
