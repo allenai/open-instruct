@@ -174,6 +174,10 @@ def _consolidate_with_zero_to_fp32(checkpoint_path: str) -> str | None:
                 candidate = os.path.join(out_dir, "pytorch_model.bin")
                 if os.path.exists(candidate):
                     return candidate
+                # If shards + index exist, return the directory path so caller can package shards
+                index_json = os.path.join(out_dir, "pytorch_model.bin.index.json")
+                if os.path.exists(index_json):
+                    return out_dir
                 # Otherwise, leave None and fall back to accelerator.load_state
             except subprocess.CalledProcessError as e2:
                 print(f" -> ERROR: Failed to consolidate checkpoint {checkpoint_path} in directory mode.")
@@ -187,6 +191,20 @@ def _consolidate_with_zero_to_fp32(checkpoint_path: str) -> str | None:
         return None
 
     return None
+
+
+def _copy_weights_to_dir(weights_src_path: str, dst_dir: str) -> None:
+    """
+    Copy single-file weights or sharded weights (with index) into dst_dir.
+    """
+    os.makedirs(dst_dir, exist_ok=True)
+    if os.path.isdir(weights_src_path):
+        for fname in os.listdir(weights_src_path):
+            src = os.path.join(weights_src_path, fname)
+            if os.path.isfile(src):
+                shutil.copy2(src, os.path.join(dst_dir, fname))
+    else:
+        shutil.copy2(weights_src_path, os.path.join(dst_dir, os.path.basename(weights_src_path)))
 
 
 def _load_state_dict_from_file(weights_path: str) -> dict:
@@ -298,7 +316,13 @@ def main():
                     consolidated = _consolidate_with_zero_to_fp32(checkpoint_path)
                     if consolidated is not None:
                         print(f" -> Consolidated weights created: {consolidated}")
-                        state_dict = _load_state_dict_from_file(consolidated)
+                        if os.path.isdir(consolidated):
+                            # Directory mode: copy shards and index into temp_save_dir and skip state_dict assembly
+                            print(" -> Detected sharded fp32 weights. Packaging shards and index for upload...")
+                            _copy_weights_to_dir(consolidated, str(temp_save_dir))
+                            state_dict = None
+                        else:
+                            state_dict = _load_state_dict_from_file(consolidated)
                     else:
                         print(" -> ERROR: Could not load or consolidate weights for this checkpoint. Skipping.")
                         continue
@@ -307,13 +331,18 @@ def main():
             print(f" -> Converting and saving to temporary directory: {temp_save_dir}...")
             unwrapped_model = accelerator.unwrap_model(model)
 
-            unwrapped_model.save_pretrained(
-                str(temp_save_dir),
-                is_main_process=accelerator.is_main_process,
-                save_function=accelerator.save,
-                state_dict=state_dict,
-                safe_serialization=False,  # Set to False to get .bin files
-            )
+            # If we already copied shards (directory mode), only ensure config is saved.
+            if state_dict is None:
+                # Save config to the same directory to make a valid HF folder
+                config.save_pretrained(str(temp_save_dir))
+            else:
+                unwrapped_model.save_pretrained(
+                    str(temp_save_dir),
+                    is_main_process=accelerator.is_main_process,
+                    save_function=accelerator.save,
+                    state_dict=state_dict,
+                    safe_serialization=False,  # Set to False to get .bin files
+                )
 
             if accelerator.is_main_process:
                 # Save tokenizer and fix chat template
