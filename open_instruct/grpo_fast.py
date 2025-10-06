@@ -649,6 +649,7 @@ class PolicyTrainerRayProcess(RayProcess):
             torch_dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
             use_cache=False,
+            **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
@@ -747,6 +748,7 @@ class PolicyTrainerRayProcess(RayProcess):
             torch_dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
             use_cache=False,
+            **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
         disable_dropout_in_model(self.ref_policy)
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
@@ -858,7 +860,9 @@ class PolicyTrainerRayProcess(RayProcess):
                             for engine in self.vllm_engines
                         ]
                         refss.extend(refs)
-                        logger.info(f"[broadcast_to_vllm] Created {len(refs)} futures, about to call torch.distributed.broadcast for {name}")
+                        logger.info(
+                            f"[broadcast_to_vllm] Created {len(refs)} futures, about to call torch.distributed.broadcast for {name}"
+                        )
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
                         logger.info(f"[broadcast_to_vllm] torch.distributed.broadcast COMPLETED for {name}")
@@ -877,7 +881,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         for engine in self.vllm_engines
                     ]
                     refss.extend(refs)
-                    logger.info(f"[broadcast_to_vllm] Created {len(refs)} futures, about to call torch.distributed.broadcast for {name}")
+                    logger.info(
+                        f"[broadcast_to_vllm] Created {len(refs)} futures, about to call torch.distributed.broadcast for {name}"
+                    )
                 with deepspeed.zero.GatheredParameters([param], enabled=self.args.deepspeed_stage == 3):
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
@@ -2342,27 +2348,6 @@ def weight_sync_thread(
     logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
 
 
-def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q):
-    """Thread function that repeatedly calls process_from_queue on vllm engines."""
-    logger.info("[Generate Thread] 🚀 Starting generation thread")
-    while not stop_event.is_set():
-        with Timer("🔥 Generation time") as timer:
-            processed_results, _ = ray_get_with_progress(
-                [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
-                desc="[Generate Thread] Waiting for vLLM engines to process",
-                enable=args.verbose,
-            )
-            num_processed = sum(int(result) for result in processed_results)
-            if num_processed == 0:
-                timer.noop = True
-        if num_processed > 0:
-            try:
-                generate_metrics_Q.put_nowait({"time/generation": timer.duration})
-            except Full:
-                logger.warning("[Generate Thread] generate metrics queue full, skipping metric")
-    logger.info("[Generate Thread] 🛑 Stopping generation thread")
-
-
 def one_training_step(
     args: Args,
     policy_group: ModelGroup,
@@ -2711,7 +2696,6 @@ def cleanup_training_resources(
     actor_manager: ActorManager,
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
-    # Signal generate_thread to stop
     stop_event.set()
 
     logger.info("Signaling all actors to stop...")
@@ -2821,14 +2805,8 @@ def run_training(
         model_dims,
     )
 
-    logger.info("======== ✅ generation thread starts =========")
-    generation_future = executor.submit(
-        generate_thread, args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q
-    )
-
-    # setup health check function to check that everything is still alive
     def health_check_fn():
-        [f.result() for f in [packing_future, generation_future, weight_sync_thread_future] if f.done()]
+        [f.result() for f in [packing_future, weight_sync_thread_future] if f.done()]
 
     # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps):
@@ -2889,7 +2867,6 @@ def run_training(
                 is_eval=True,
             )
 
-        # The generate_thread is now handling vLLM processing asynchronously
         collated_data, data_thread_metrics, num_total_tokens, num_step_tokens, prompt_lengths, response_lengths = (
             load_data_from_packing_thread(packed_sequences_Q, num_total_tokens, stop_event, health_check_fn)
         )
