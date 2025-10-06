@@ -841,7 +841,6 @@ class LLMRayActor:
     def update_weight(self, name, dtype, shape, empty_cache=False):
         self._maybe_drain_requests()
         return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
-        return result
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
         self._maybe_drain_requests()
