@@ -77,6 +77,100 @@ def push_folder_to_hub(
     print(f"🔥 Pushed {output_dir} to {hf_repo_url}")
 
 
+def _maybe_strip_module_prefix(state_dict: dict) -> dict:
+    """
+    Strip a leading 'module.' prefix introduced by DistributedDataParallel saves.
+    """
+    if not state_dict:
+        return state_dict
+    sample_key = next(iter(state_dict))
+    if sample_key.startswith("module."):
+        return {k[len("module."):]: v for k, v in state_dict.items()}
+    return state_dict
+
+
+def _find_or_consolidate_weights(checkpoint_path: str) -> str | None:
+    """
+    Return a path to a consolidated weights file inside `checkpoint_path`.
+
+    - Prefer pytorch_model.bin
+    - Else pytorch_model.safetensors
+    - Else, if DeepSpeed shards are present (pytorch_model/ + zero_to_fp32.py),
+      run consolidation to produce pytorch_model.bin and return it.
+    - Else return None.
+    """
+    bin_path = os.path.join(checkpoint_path, "pytorch_model.bin")
+    if os.path.exists(bin_path):
+        return bin_path
+
+    sft_path = os.path.join(checkpoint_path, "pytorch_model.safetensors")
+    if os.path.exists(sft_path):
+        return sft_path
+
+    # DeepSpeed shards?
+    pytorch_model_dir = os.path.join(checkpoint_path, "pytorch_model")
+    consolidate_script = os.path.join(checkpoint_path, "zero_to_fp32.py")
+    if os.path.isdir(pytorch_model_dir) and os.path.exists(consolidate_script):
+        print(f" -> Found DeepSpeed checkpoint in {checkpoint_path}. Consolidating weights...")
+        try:
+            # Patch zero_to_fp32.py to be compatible with torch.load in PyTorch 2.6+
+            print(" -> Patching zero_to_fp32.py for torch.load compatibility...")
+            with open(consolidate_script, "r") as f:
+                script_content = f.read()
+
+            original_line = "state_dict = torch.load(f, map_location=device)"
+            patched_line = "state_dict = torch.load(f, map_location=device, weights_only=False)"
+
+            if original_line in script_content:
+                script_content = script_content.replace(original_line, patched_line)
+                with open(consolidate_script, "w") as f:
+                    f.write(script_content)
+                print(" -> Patch applied successfully.")
+            else:
+                print(" -> WARNING: Could not find the line to patch in zero_to_fp32.py. The script might fail.")
+
+            # Run consolidation in-place to produce pytorch_model.bin
+            result = subprocess.run(
+                ["python", "zero_to_fp32.py", ".", "pytorch_model.bin"],
+                cwd=checkpoint_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            print(" -> Consolidation successful.")
+            if result.stdout:
+                print(" -> Consolidation script stdout:")
+                print(result.stdout)
+            if os.path.exists(bin_path):
+                return bin_path
+        except subprocess.CalledProcessError as e:
+            print(f" -> ERROR: Failed to consolidate checkpoint {checkpoint_path}.")
+            print(" -> stdout:")
+            print(e.stdout)
+            print(" -> stderr:")
+            print(e.stderr)
+            return None
+
+    return None
+
+
+def _load_state_dict_from_file(weights_path: str) -> dict:
+    """
+    Load a state_dict from a .bin or .safetensors file, handling common formats.
+    """
+    if weights_path.endswith(".safetensors"):
+        try:
+            from safetensors.torch import load_file as safetensors_load_file
+        except Exception as e:
+            raise RuntimeError(
+                "safetensors is required to load '.safetensors' checkpoints; please install it"
+            ) from e
+        state_dict = safetensors_load_file(weights_path)
+    else:
+        state_dict = torch.load(weights_path, map_location="cpu", weights_only=False)
+    return _maybe_strip_module_prefix(state_dict)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Convert and upload raw training checkpoints to the Hugging Face Hub."
@@ -149,69 +243,23 @@ def main():
         print(f"\nProcessing checkpoint: {checkpoint_path}")
 
         try:
-            # Check if this is a DeepSpeed checkpoint that needs consolidation.
-            # This is indicated by the presence of a `pytorch_model` directory
-            # (for sharded weights) and the consolidation script, but no `pytorch_model.bin`.
-            pytorch_model_bin = os.path.join(checkpoint_path, "pytorch_model.bin")
-            pytorch_model_dir = os.path.join(checkpoint_path, "pytorch_model")
-            consolidate_script = os.path.join(checkpoint_path, "zero_to_fp32.py")
+            # Prefer direct weight files (pytorch_model.bin / .safetensors) if present.
+            # If DeepSpeed shards are detected, consolidate them. Otherwise, fall back to accelerator.load_state.
+            weights_path = _find_or_consolidate_weights(checkpoint_path)
 
-            if (
-                not os.path.exists(pytorch_model_bin)
-                and os.path.isdir(pytorch_model_dir)
-                and os.path.exists(consolidate_script)
-            ):
-                print(f" -> Found DeepSpeed checkpoint in {checkpoint_path}. Consolidating weights...")
-                try:
-                    # Patch `zero_to_fp32.py` to be compatible with PyTorch 2.6+ `torch.load`
-                    # by setting `weights_only=False`. This is safe as we're using our own checkpoints.
-                    print(" -> Patching zero_to_fp32.py for torch.load compatibility...")
-                    with open(consolidate_script, "r") as f:
-                        script_content = f.read()
-                    
-                    original_line = "state_dict = torch.load(f, map_location=device)"
-                    patched_line = "state_dict = torch.load(f, map_location=device, weights_only=False)"
+            if weights_path is not None:
+                print(f" -> Found consolidated weights: {weights_path}")
+                state_dict = _load_state_dict_from_file(weights_path)
+            else:
+                print(f" -> No consolidated weights found. Loading accelerator state from {checkpoint_path}...")
+                accelerator.load_state(checkpoint_path)
+                print(" -> State loaded successfully.")
+                # Gather full parameters for saving
+                state_dict = accelerator.get_state_dict(model)
 
-                    if original_line in script_content:
-                        script_content = script_content.replace(original_line, patched_line)
-                        with open(consolidate_script, "w") as f:
-                            f.write(script_content)
-                        print(" -> Patch applied successfully.")
-                    else:
-                        print(" -> WARNING: Could not find the line to patch in zero_to_fp32.py. The script might fail.")
-                    
-                    # The script `zero_to_fp32.py` is usually run from within the checkpoint directory.
-                    # It takes the current directory '.' and the output file name 'pytorch_model.bin' as arguments.
-                    result = subprocess.run(
-                        ["python", "zero_to_fp32.py", ".", "pytorch_model.bin"],
-                        cwd=checkpoint_path,
-                        check=True,
-                        capture_output=True,
-                        text=True,
-                    )
-                    print(" -> Consolidation successful.")
-                    if result.stdout:
-                        print(" -> Consolidation script stdout:")
-                        print(result.stdout)
-                except subprocess.CalledProcessError as e:
-                    print(f" -> ERROR: Failed to consolidate checkpoint {checkpoint_path}.")
-                    print(" -> stdout:")
-                    print(e.stdout)
-                    print(" -> stderr:")
-                    print(e.stderr)
-                    continue  # Skip to the next checkpoint
-
-            # Load the raw checkpoint state into the model
-            print(f" -> Loading raw checkpoint state from {checkpoint_path}...")
-            accelerator.load_state(checkpoint_path)
-            print(" -> State loaded successfully.")
-
-            # Unwrap the model and save it in the final format
+            # Unwrap the model and save it in the final format using the resolved state_dict
             print(f" -> Converting and saving to temporary directory: {temp_save_dir}...")
             unwrapped_model = accelerator.unwrap_model(model)
-
-            # Use get_state_dict to ensure all weights are gathered
-            state_dict = accelerator.get_state_dict(model)
 
             unwrapped_model.save_pretrained(
                 str(temp_save_dir),
