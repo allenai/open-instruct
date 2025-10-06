@@ -28,8 +28,6 @@ from fastapi.staticfiles import StaticFiles
 
 from open_instruct import logger_utils
 
-logger = logger_utils.setup_logger(__name__)
-
 
 def find_free_port():
     """Find and return a free port number."""
@@ -130,10 +128,8 @@ class ActorManager:
 
     def set_should_stop(self, should_stop: bool):
         """Set whether actors should stop processing."""
-        logger.info(f"[ActorManager.set_should_stop] Setting should_stop from {self._should_stop} to {should_stop}")
         self._should_stop = should_stop
         self._last_updated = datetime.now()
-        logger.info(f"[ActorManager.set_should_stop] Confirmed: should_stop is now {self._should_stop}")
 
     def should_stop(self) -> bool:
         """Check if actors should stop processing."""

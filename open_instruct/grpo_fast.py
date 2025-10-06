@@ -836,23 +836,18 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
-        logger.info(f"[broadcast_to_vllm] ENTRY on rank {torch.distributed.get_rank()}")
         # avoid OOM
         torch.cuda.empty_cache()
         model = self.model.module
         count, num_params = 0, len(list(model.named_parameters()))
-        logger.info(f"[broadcast_to_vllm] Total parameters to broadcast: {num_params}")
         refss = []
         if self.args.gather_whole_model:
-            logger.info("[broadcast_to_vllm] Using gather_whole_model mode")
             with deepspeed.zero.GatheredParameters(model.parameters(), enabled=self.args.deepspeed_stage == 3):
                 for name, param in model.named_parameters():
                     count += 1  # empty_cache at last param
                     # Fire all vllm engines for broadcast
                     if torch.distributed.get_rank() == 0:
-                        logger.info(f"[broadcast_to_vllm] Param {count}/{num_params}: {name}, shape: {param.shape}")
                         shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
-                        logger.info(f"[broadcast_to_vllm] Creating update_weight.remote() futures for {name}")
                         refs = [
                             engine.update_weight.remote(
                                 name, dtype=str(param.dtype), shape=shape, empty_cache=count == num_params
@@ -860,20 +855,13 @@ class PolicyTrainerRayProcess(RayProcess):
                             for engine in self.vllm_engines
                         ]
                         refss.extend(refs)
-                        logger.info(
-                            f"[broadcast_to_vllm] Created {len(refs)} futures, about to call torch.distributed.broadcast for {name}"
-                        )
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
-                        logger.info(f"[broadcast_to_vllm] torch.distributed.broadcast COMPLETED for {name}")
         else:  # broadcast each parameter independently
-            logger.info("[broadcast_to_vllm] Using parameter-by-parameter broadcast mode")
             for name, param in model.named_parameters():
                 count += 1
                 if torch.distributed.get_rank() == 0:
-                    logger.info(f"[broadcast_to_vllm] Param {count}/{num_params}: {name}, shape: {param.shape}")
                     shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
-                    logger.info(f"[broadcast_to_vllm] Creating update_weight.remote() futures for {name}")
                     refs = [
                         engine.update_weight.remote(
                             name, dtype=str(param.dtype), shape=shape, empty_cache=count == num_params
@@ -881,27 +869,15 @@ class PolicyTrainerRayProcess(RayProcess):
                         for engine in self.vllm_engines
                     ]
                     refss.extend(refs)
-                    logger.info(
-                        f"[broadcast_to_vllm] Created {len(refs)} futures, about to call torch.distributed.broadcast for {name}"
-                    )
                 with deepspeed.zero.GatheredParameters([param], enabled=self.args.deepspeed_stage == 3):
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
-                        logger.info(f"[broadcast_to_vllm] torch.distributed.broadcast COMPLETED for {name}")
 
         # Return futures instead of blocking - let caller handle completion
         all_refs = []
         if torch.distributed.get_rank() == 0:
             all_refs.extend(refss)
-        logger.info(f"[broadcast_to_vllm] EXIT, returning {len(all_refs)} futures")
         return all_refs
-
-    def maybe_distributed_barrier(self, tag: str = ""):
-        """Synchronize all learners via torch.distributed.barrier with logging."""
-        if dist.is_initialized():
-            logger.info("[distributed_barrier] rank=%s tag=%s entering", self.rank, tag)
-            dist.barrier()
-            logger.info("[distributed_barrier] rank=%s tag=%s complete", self.rank, tag)
 
     def update_ref_policy(self):
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
@@ -2275,7 +2251,6 @@ def weight_sync_thread(
     weight_sync_trigger_event: threading.Event,
     policy_group: ModelGroup,
     actor_manager: ActorManager,
-    vllm_engines,
     weight_sync_metrics_Q: Queue,
     resume_training_step: int = 1,
 ):
@@ -2293,43 +2268,26 @@ def weight_sync_thread(
         weight_sync_trigger_event.clear()
 
         with Timer("[Weight Sync]") as timer:
-            logger.info("[Weight Sync Thread] Starting weight sync")
+            logger.debug("[Weight Sync Thread] Starting weight sync")
 
             # Set actors to stop
-            logger.info("[Weight Sync Thread] About to set should_stop to True")
             ray.get(actor_manager.set_should_stop.remote(True))
-            logger.info("[Weight Sync Thread] Set should_stop to True for weight sync")
+            logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
 
-            actor_sync_times: List[float] = []
-            try:
-                logger.info("[Weight Sync Thread] Entering try block - about to broadcast weights")
-                # Broadcast weights to vLLM engines
-                weight_broadcast_futures: List[ray.ObjectRef] = [
-                    m.broadcast_to_vllm.remote() for m in policy_group.models
-                ]
+            # Broadcast weights to vLLM engines
+            # First get the futures
+            weight_broadcast_futures: List[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
 
-                # Wait for all weight updates to complete and collect individual timings
-                _, actor_sync_times = ray_get_with_progress(
-                    weight_broadcast_futures,
-                    desc="[Weight Sync Thread] Waiting for weight updates to complete",
-                    enable=args.verbose,
-                )
-                logger.info("[Weight Sync Thread] Weight broadcast complete")
+            # Wait for all weight updates to complete and collect individual timings
+            _, actor_sync_times = ray_get_with_progress(
+                weight_broadcast_futures,
+                desc="[Weight Sync Thread] Waiting for weight updates to complete",
+                enable=args.verbose,
+            )
 
-                ray_get_with_progress(
-                    [
-                        m.maybe_distributed_barrier.remote(f"weight_sync_{time.monotonic():.0f}_post_update")
-                        for m in policy_group.models
-                    ],
-                    desc="[Weight Sync Thread] Distributed barrier",
-                    enable=args.verbose,
-                )
-                logger.info("[Weight Sync Thread] Distributed barrier complete")
-            finally:
-                # Allow actors to resume normal operation
-                logger.info("[Weight Sync Thread] In finally block - about to set should_stop to False")
-                ray.get(actor_manager.set_should_stop.remote(False))
-                logger.info("[Weight Sync Thread] Set should_stop to False after weight sync")
+            # Allow actors to resume
+            ray.get(actor_manager.set_should_stop.remote(False))
+            logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
 
         # Calculate distribution statistics
         sync_time_stats = {
@@ -2779,7 +2737,6 @@ def run_training(
         weight_sync_trigger_event,
         policy_group,
         actor_manager,
-        vllm_engines,
         weight_sync_metrics_Q,
         resume_training_step,
     )
