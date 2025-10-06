@@ -106,7 +106,7 @@ async def generate_one_completion(
     llm_engine: vllm.AsyncLLMEngine, request_id: str, prompt: vllm.TokensPrompt, sampling_params: vllm.SamplingParams
 ) -> vllm.RequestOutput:
     """Generate a single completion from the async engine."""
-    outputs = [o for o in llm_engine.generate(prompt, sampling_params, request_id) if o.finished]
+    outputs = [o async for o in llm_engine.generate(prompt, sampling_params, request_id) if o.finished]
     assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
     return outputs[0]
 
