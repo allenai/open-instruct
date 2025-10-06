@@ -46,8 +46,9 @@ class WorkerWrap:
     def update_weight(self, name, dtype, shape, empty_cache=False):
         import torch
 
-        expected = str(self.model_config.dtype)
-        assert dtype == expected, f"mismatch dtype: src {dtype}, dst {expected}"
+        assert dtype == str(self.model_config.dtype), (
+            f"mismatch dtype: src {dtype}, dst {str(self.model_config.dtype)}"
+        )
         weight = torch.empty(shape, dtype=self.model_config.dtype, device="cuda")
         if self._model_update_with_ray:
             import ray.util.collective as collective
@@ -68,8 +69,9 @@ class WorkerWrap:
 
         from open_instruct.vllm_utils3 import get_physical_gpu_id
 
-        expected = str(self.model_config.dtype)
-        assert dtype == expected, f"mismatch dtype: src {dtype}, dst {expected}"
+        assert dtype == str(self.model_config.dtype), (
+            f"mismatch dtype: src {dtype}, dst {str(self.model_config.dtype)}"
+        )
         handle = ipc_handles[get_physical_gpu_id()]
         device_id = self.device.index
         func, args = handle
