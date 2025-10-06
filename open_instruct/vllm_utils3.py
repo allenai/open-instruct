@@ -146,6 +146,8 @@ async def process_request_async(
 
         # Use the passed executor instead of asyncio's default thread pool to avoid exhausting threads
         # Must use get_running_loop() since we're already in an async context
+        if executor is None:
+            logger.error(f"[process_request_async] CRITICAL: executor is None for request {sub_request_id}, will use default thread pool which may deadlock!")
         loop = asyncio.get_running_loop()
         tool_result = await loop.run_in_executor(executor, triggered_tool, output.text)
 
