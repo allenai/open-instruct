@@ -34,7 +34,7 @@ uv run python mason.py \
         --max_prompt_token_length 2048 \
         --response_length 4096 \
         --pack_length 20480 \
-        --model_name_or_path Qwen/Qwen2.5-7B \
+        --model_name_or_path /weka/oe-adapt-default/finbarrt/stego32/step17000-hf \
         --chat_template_name tulu_thinker \
 	--inflight_updates True \
         --stop_strings "</answer>" \
@@ -61,4 +61,9 @@ uv run python mason.py \
         --oe_eval_max_length 32768 \
         --oe_eval_tasks "codex_humanevalplus:0-shot-chat-v1::tulu-thinker,mbppplus:0-shot-chat::tulu-thinker,livecodebench_codegeneration::tulu-thinker" \
         --dataset_skip_cache True \
-	--push_to_hub False
+	--push_to_hub False \
+	# Requirements for OLMo3 32B
+	--tokenizer_name_or_path "allenai/OLMo-2-1124-7B" \
+	--add_bos \
+	--deepspeed_stage 3 \
+	--gather_whole_model False \
