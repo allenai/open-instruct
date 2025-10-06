@@ -144,7 +144,9 @@ async def process_request_async(
         if triggered_tool is None:
             break
 
-        tool_result = await asyncio.to_thread(triggered_tool, output.text)
+        # Use the passed executor instead of asyncio's default thread pool to avoid exhausting threads
+        loop = asyncio.get_event_loop()
+        tool_result = await loop.run_in_executor(executor, triggered_tool, output.text)
 
         tool_called = True
         num_calls += 1
