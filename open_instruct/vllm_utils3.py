@@ -1006,7 +1006,10 @@ def create_vllm_engines(
             placement_group_bundle_index=bundle_indices[0],
         )
 
-        env_vars = {"TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
+        env_vars = {
+            "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
+            "VLLM_ALLOW_INSECURE_SERIALIZATION": "1",
+        }
         if distributed_executor_backend == "mp":
             # Allow vLLM v1 to spawn helper processes even for single-GPU runs.
             env_vars["VLLM_ENABLE_V1_MULTIPROCESSING"] = "1"
