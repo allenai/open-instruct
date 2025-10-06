@@ -3,6 +3,7 @@ import functools
 import json
 import os
 import shutil
+import subprocess
 import time
 from pathlib import Path
 
@@ -148,6 +149,41 @@ def main():
         print(f"\nProcessing checkpoint: {checkpoint_path}")
 
         try:
+            # Check if this is a DeepSpeed checkpoint that needs consolidation.
+            # This is indicated by the presence of a `pytorch_model` directory
+            # (for sharded weights) and the consolidation script, but no `pytorch_model.bin`.
+            pytorch_model_bin = os.path.join(checkpoint_path, "pytorch_model.bin")
+            pytorch_model_dir = os.path.join(checkpoint_path, "pytorch_model")
+            consolidate_script = os.path.join(checkpoint_path, "zero_to_fp32.py")
+
+            if (
+                not os.path.exists(pytorch_model_bin)
+                and os.path.isdir(pytorch_model_dir)
+                and os.path.exists(consolidate_script)
+            ):
+                print(f" -> Found DeepSpeed checkpoint in {checkpoint_path}. Consolidating weights...")
+                try:
+                    # The script `zero_to_fp32.py` is usually run from within the checkpoint directory.
+                    # It takes the current directory '.' and the output file name 'pytorch_model.bin' as arguments.
+                    result = subprocess.run(
+                        ["python", "zero_to_fp32.py", ".", "pytorch_model.bin"],
+                        cwd=checkpoint_path,
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    print(" -> Consolidation successful.")
+                    if result.stdout:
+                        print(" -> Consolidation script stdout:")
+                        print(result.stdout)
+                except subprocess.CalledProcessError as e:
+                    print(f" -> ERROR: Failed to consolidate checkpoint {checkpoint_path}.")
+                    print(" -> stdout:")
+                    print(e.stdout)
+                    print(" -> stderr:")
+                    print(e.stderr)
+                    continue  # Skip to the next checkpoint
+
             # Load the raw checkpoint state into the model
             print(f" -> Loading raw checkpoint state from {checkpoint_path}...")
             accelerator.load_state(checkpoint_path)
