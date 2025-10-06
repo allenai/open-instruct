@@ -8,4 +8,3 @@
 - To run the `./scripts/train/build_image_and_launch.sh` script, you must commit the current changes.
 - Launch tool use experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/tool_grpo_fast.sh`.
 - Launch multi-node non-tool experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/large_test_script.sh`.
-- You can launch the benchmark script with ./scripts/train/build_image_and_launch.sh scripts/launch_benchmark.sh 64 Qwen/Qwen2.5-7B
