@@ -1,5 +1,5 @@
 python mason.py \
-    --cluster ai2/jupiter \
+    --cluster ai2/saturn \
     --task_name upload_distill_judge_qwen3-8b_sft \
     --description "Convert and upload checkpoints for distill_judge_qwen3-8b_sft" \
     --workspace ai2/oe-data \
