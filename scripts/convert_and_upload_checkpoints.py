@@ -163,6 +163,23 @@ def main():
             ):
                 print(f" -> Found DeepSpeed checkpoint in {checkpoint_path}. Consolidating weights...")
                 try:
+                    # Patch `zero_to_fp32.py` to be compatible with PyTorch 2.6+ `torch.load`
+                    # by setting `weights_only=False`. This is safe as we're using our own checkpoints.
+                    print(" -> Patching zero_to_fp32.py for torch.load compatibility...")
+                    with open(consolidate_script, "r") as f:
+                        script_content = f.read()
+                    
+                    original_line = "state_dict = torch.load(f, map_location=device)"
+                    patched_line = "state_dict = torch.load(f, map_location=device, weights_only=False)"
+
+                    if original_line in script_content:
+                        script_content = script_content.replace(original_line, patched_line)
+                        with open(consolidate_script, "w") as f:
+                            f.write(script_content)
+                        print(" -> Patch applied successfully.")
+                    else:
+                        print(" -> WARNING: Could not find the line to patch in zero_to_fp32.py. The script might fail.")
+                    
                     # The script `zero_to_fp32.py` is usually run from within the checkpoint directory.
                     # It takes the current directory '.' and the output file name 'pytorch_model.bin' as arguments.
                     result = subprocess.run(
