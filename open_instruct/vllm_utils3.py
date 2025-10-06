@@ -193,8 +193,12 @@ async def process_request_async(
         )
         logger.info(f"[process_request_async] Tool output tokens for {sub_request_id}: {len(tool_output_token_ids)} tokens")
 
+        logger.info(f"[process_request_async] Concatenating prompts for {sub_request_id}")
         prompt_and_tool_output = current_prompt.prompt_token_ids + accumulated_tokens + tool_output_token_ids
-        excess = len(prompt_and_tool_output) - llm_engine.model_config.max_model_len
+        logger.info(f"[process_request_async] Accessing model config for {sub_request_id}")
+        max_model_len = llm_engine.model_config.max_model_len
+        logger.info(f"[process_request_async] Got max_model_len={max_model_len} for {sub_request_id}")
+        excess = len(prompt_and_tool_output) - max_model_len
         logger.info(f"[process_request_async] Prompt length check for {sub_request_id}: total={len(prompt_and_tool_output)}, excess={excess}")
         if excess > 0:
             tool_output_token_ids = tool_output_token_ids[:-excess]
