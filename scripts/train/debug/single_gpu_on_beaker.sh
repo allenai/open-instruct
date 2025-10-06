@@ -20,6 +20,7 @@ uv run python mason.py \
        --priority urgent \
        --num_nodes 1 \
        --max_retries 0 \
+       --timeout "15m" \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --env VLLM_LOGGING_LEVEL=DEBUG \
        --budget ai2/oe-adapt \

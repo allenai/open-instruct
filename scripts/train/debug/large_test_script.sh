@@ -14,6 +14,7 @@ uv run python mason.py \
 	--timeout "30m" \
         --num_nodes 2 \
 	--description "Large (multi-node) test script." \
+        --timeout "1h" \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
 	--env TORCH_NCCL_TRACE_BUFFER_SIZE=67108864 \
