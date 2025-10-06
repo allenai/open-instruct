@@ -185,10 +185,7 @@ async def process_request_async(
     }
 
     completion_queue.put(sub_request_result)
-    logger.info(
-        f"[process_request_async] EXIT for {sub_request_id}, pushed to completion_queue "
-        f"(approx queue size: completion_queue is a threading queue, size not available)"
-    )
+    logger.info(f"[process_request_async] Request {sub_request_id} is DONE")
 
 
 async def _event_loop_health_monitor():
@@ -539,7 +536,7 @@ class LLMRayActor:
         self._should_stop_timeout_s = 5
         self._inflight_ref = None
 
-        self._executor = futures.ThreadPoolExecutor(max_workers=1)
+        self._executor = futures.ThreadPoolExecutor(max_workers=2)
 
         # Async tracking for request accumulation
         self.active_tasks = {}  # Track active async tasks
@@ -562,6 +559,7 @@ class LLMRayActor:
             raise RuntimeError("Failed to initialize AsyncLLMEngine within 120 seconds")
 
         self._prefetch_future = self._executor.submit(self._prefetch_worker)
+        self._process_future = self._executor.submit(self.process_from_queue)
 
     def _run_async_loop(self):
         """Run the async event loop in a dedicated thread."""
