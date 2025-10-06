@@ -113,12 +113,16 @@ async def process_request_async(
 
     current_prompt = prompt
     current_sampling_params = sampling_params.clone()
+    final_prompt_token_ids = None
 
     while True:
         request_output = await generate_one_completion(
             llm_engine, sub_request_id, current_prompt, current_sampling_params
         )
         output = request_output.outputs[0]
+
+        if final_prompt_token_ids is None:
+            final_prompt_token_ids = request_output.prompt_token_ids
 
         accumulated_tokens.extend(output.token_ids)
         masks.extend([1] * len(output.token_ids))
@@ -172,6 +176,7 @@ async def process_request_async(
             break
 
         current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output, cache_salt=base_request_id)
+        final_prompt_token_ids = prompt_and_tool_output
         current_sampling_params = sampling_params.clone()
         current_sampling_params.max_tokens = new_sample_tokens
 
@@ -202,7 +207,7 @@ async def process_request_async(
         "request_output": vllm.RequestOutput(
             request_id=sub_request_id,
             prompt=request_output.prompt,
-            prompt_token_ids=request_output.prompt_token_ids,
+            prompt_token_ids=final_prompt_token_ids,
             prompt_logprobs=request_output.prompt_logprobs,
             outputs=[complete_output],
             finished=True,
