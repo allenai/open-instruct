@@ -52,44 +52,8 @@ from open_instruct.utils import ray_get_with_progress
 logger = logger_utils.setup_logger(__name__)
 
 
-def assert_threaded_actor(instance):
-    """
-    Assert that an instance's class is suitable for use in a threaded (non-async) Ray actor.
-
-    This function performs two checks:
-      1. The class must not define any `async def` methods
-         (including async generators, staticmethods, or classmethods).
-      2. There must not be a running asyncio event loop in the current thread.
-
-    Args:
-        instance: The instance whose class to inspect.
-
-    Raises:
-        AssertionError: If the class defines one or more async methods, or a running asyncio event loop is detected.
-    """
-    cls = instance.__class__
-    cls_name = cls.__name__
-
-    async_methods = []
-    for name, obj in vars(cls).items():
-        if isinstance(obj, (staticmethod, classmethod)):
-            func = obj.__func__
-        elif inspect.isfunction(obj):
-            func = obj
-        else:
-            continue
-
-        if inspect.iscoroutinefunction(func) or inspect.isasyncgenfunction(func):
-            async_methods.append(name)
-
-    if async_methods:
-        async_methods.sort()
-        raise AssertionError(
-            f"{cls_name} must not define async methods for threaded actor mode. "
-            f"Found: {async_methods}. "
-            f"Fix: convert these to sync methods and run async work in a background loop/thread."
-        )
-
+def assert_threaded_actor():
+    """Asserts if called inside an async Ray actor."""
     try:
         loop = asyncio.get_running_loop()
         raise AssertionError(
