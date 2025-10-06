@@ -26,6 +26,8 @@ try:
 except ImportError:
     pass
 import asyncio
+import json
+import os
 
 import pandas as pd
 import torch
@@ -514,7 +516,17 @@ def save_with_accelerate(
         )
 
     if accelerator.is_main_process:
+        chat_template = tokenizer.chat_template
+        tokenizer.chat_template = None
         tokenizer.save_pretrained(output_dir)
+        tokenizer.chat_template = chat_template
+        if chat_template is not None:
+            with open(os.path.join(output_dir, "tokenizer_config.json"), "r", encoding="utf-8") as f:
+                tokenizer_config = json.load(f)
+            tokenizer_config["chat_template"] = chat_template
+            with open(os.path.join(output_dir, "tokenizer_config.json"), "w", encoding="utf-8") as f:
+                json.dump(tokenizer_config, f, indent=2, sort_keys=True)
+                f.write("\n")
     # customize model card (TODO (Costa): this can be prettier)
 
 
