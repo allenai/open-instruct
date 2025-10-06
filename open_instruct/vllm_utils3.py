@@ -132,9 +132,11 @@ async def process_request_async(
 
         triggered_tool = None
         stop_str = None
+        logger.info(f"[process_request_async] Checking for tool trigger in {sub_request_id}, output ends with: {output.text[-50:] if len(output.text) > 50 else output.text}")
         for candidate_stop_str in sampling_params.stop:
             if candidate_stop_str in tools and output.text.endswith(candidate_stop_str):
                 stop_str = candidate_stop_str
+                logger.info(f"[process_request_async] Tool trigger detected for {sub_request_id}: {stop_str}")
                 if num_calls < max_tool_calls.get(stop_str, 0):
                     triggered_tool = tools[stop_str]
                 else:
@@ -142,14 +144,27 @@ async def process_request_async(
                 break
 
         if triggered_tool is None:
+            logger.info(f"[process_request_async] No tool triggered for {sub_request_id}, finishing request")
             break
 
         # Use the passed executor instead of asyncio's default thread pool to avoid exhausting threads
         # Must use get_running_loop() since we're already in an async context
         if executor is None:
             logger.error(f"[process_request_async] CRITICAL: executor is None for request {sub_request_id}, will use default thread pool which may deadlock!")
+
+        # Wrapper function to log tool execution
+        def tool_wrapper(tool, text):
+            logger.info(f"[process_request_async] TOOL CALL START: {sub_request_id} calling {tool.__class__.__name__}")
+            try:
+                result = tool(text)
+                logger.info(f"[process_request_async] TOOL CALL END: {sub_request_id} completed successfully")
+                return result
+            except Exception as e:
+                logger.error(f"[process_request_async] TOOL CALL ERROR: {sub_request_id} failed with {e}")
+                raise
+
         loop = asyncio.get_running_loop()
-        tool_result = await loop.run_in_executor(executor, triggered_tool, output.text)
+        tool_result = await loop.run_in_executor(executor, tool_wrapper, triggered_tool, output.text)
 
         tool_called = True
         num_calls += 1
