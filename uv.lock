@@ -2344,7 +2344,7 @@ requires-dist = [
     { name = "packaging", specifier = ">=24.2" },
     { name = "peft", specifier = ">=0.13.2" },
     { name = "pydantic", marker = "extra == 'code'", specifier = ">=2.0.0" },
-    { name = "ray", extras = ["default"], specifier = ">=2.44.1" },
+    { name = "ray", extras = ["default"], specifier = ">=2.49.2" },
     { name = "requests", marker = "extra == 'code'", specifier = ">=2.28.0" },
     { name = "setuptools", specifier = ">=75.6.0,<80.0.0" },
     { name = "tensorboard", specifier = ">=2.18.0" },
