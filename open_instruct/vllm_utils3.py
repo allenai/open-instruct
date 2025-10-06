@@ -82,7 +82,14 @@ async def generate_one_completion(
     llm_engine: vllm.AsyncLLMEngine, request_id: str, prompt: vllm.TokensPrompt, sampling_params: vllm.SamplingParams
 ) -> vllm.RequestOutput:
     """Generate a single completion from the async engine."""
-    outputs = [o async for o in llm_engine.generate(prompt, sampling_params, request_id) if o.finished]
+    logger.info(f"[generate_one_completion] Starting generation for {request_id}")
+    outputs = []
+    async for o in llm_engine.generate(prompt, sampling_params, request_id):
+        logger.info(f"[generate_one_completion] Got output for {request_id}, finished={o.finished}")
+        if o.finished:
+            outputs.append(o)
+            break
+    logger.info(f"[generate_one_completion] Finished collecting outputs for {request_id}, got {len(outputs)} outputs")
     assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
     return outputs[0]
 
@@ -123,8 +130,10 @@ async def process_request_async(
         request_output = await generate_one_completion(
             llm_engine, iteration_request_id, current_prompt, current_sampling_params
         )
+        logger.info(f"[process_request_async] ✅ Completed generation for iteration {iteration} on {sub_request_id}, got {len(request_output.outputs)} outputs")
         iteration += 1
         output = request_output.outputs[0]
+        logger.info(f"[process_request_async] Output {iteration-1} for {sub_request_id}: text_len={len(output.text)}, tokens={len(output.token_ids)}, finish_reason={output.finish_reason}")
 
         if final_prompt_token_ids is None:
             final_prompt_token_ids = request_output.prompt_token_ids
