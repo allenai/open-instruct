@@ -399,12 +399,13 @@ class LLMRayActor:
         # Initialize instance variables before starting threads
         self.tracking = _init_tool_tracking()
         self.request_outputs = {}
-        self._threads_started = threading.Event()
 
         # Start background threads
+        threads_started = threading.Event()
         self._executor = futures.ThreadPoolExecutor(max_workers=2)
-        self._prefetch_future = self._executor.submit(self._prefetch_worker)
-        self._process_future = self._executor.submit(self.process_from_queue)
+        self._prefetch_future = self._executor.submit(self._prefetch_worker, threads_started)
+        self._process_future = self._executor.submit(self._process_from_queue)
+        threads_started.wait(timeout=30)
 
     def get_model_dims_dict(self):
         """Get only the model dimensions as a simple dict without loading weights."""
@@ -435,9 +436,9 @@ class LLMRayActor:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
 
-    def _prefetch_worker(self, sleep_length_s: int = 1):
+    def _prefetch_worker(self, threads_started: threading.Event, sleep_length_s: int = 1):
         """Background worker that prefetches requests until we have enough buffered."""
-        self._threads_started.set()
+        threads_started.set()
         while True:
             if not self.inflight_updates and self._should_stop():
                 time.sleep(sleep_length_s)
@@ -463,7 +464,7 @@ class LLMRayActor:
         results_queue = self.eval_results_queue if is_eval else self.results_queue
         results_queue.put(result)
 
-    def process_from_queue(self, timeout: float = 60.0):
+    def _process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
         Runs continuously in a background thread, processing requests from the engine.
@@ -855,7 +856,6 @@ class LLMRayActor:
         self.llm_engine.wake_up(tags)
 
     def ready(self):
-        self._threads_started.wait(timeout=30)
         return True
 
     def get_kv_cache_info(self):
