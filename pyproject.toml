@@ -3,7 +3,7 @@ name = "open-instruct"
 version = "0.1.0"
 description = "Train open, instruction-following language models"
 readme = "README.md"
-requires-python = "==3.12"
+requires-python = "==3.12.*"
 dependencies = [
     "accelerate>=1.1.1",
     "antlr4-python3-runtime==4.11",
