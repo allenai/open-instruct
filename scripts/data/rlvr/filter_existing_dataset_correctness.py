@@ -23,12 +23,22 @@ from datasets import Dataset
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-from open_instruct.ground_truth_utils import build_all_verifiers
+from open_instruct.ground_truth_utils import build_all_verifiers, VerifierFunction
+from open_instruct import logger_utils
+
+logger = logger_utils.setup_logger(__name__)
 
 
-def _avg_correctness(sample, reward_fn_mapping, judge_override=None):
+def _avg_correctness(sample: dict, reward_fn_mapping: dict[str, VerifierFunction], judge_override: str | None = None):
     """
     Compute the mean correctness for one sample (called in worker).
+    Args:
+        sample: The sample to compute the correctness for. Should have "dataset", "ground_truth", and "output" keys. Output should be a list of strings (list of completions for the sample).
+        reward_fn_mapping: The reward function mapping. Should be a dictionary of verifier names to verifier functions objects.
+        judge_override: If specified, use this judge/verifier for all samples instead of the dataset-provided one.
+    Returns:
+        The average score of outputs as judged by the verifier function. If there are no outputs, return 0.0.
+        The number of outputs.
     """
     dataset = sample["dataset"][0] if isinstance(sample["dataset"], list) else sample["dataset"]
     gt = sample["ground_truth"][0] if isinstance(sample["ground_truth"], list) else sample["ground_truth"]
@@ -187,7 +197,7 @@ def main():
     )
     args = parser.parse_args()
     if args.lower_bound == 0 and args.upper_bound == 1:
-        print("Upper bound is 1 and lower bound is 0. No filtering will be done, is this intended?")
+        logger.warning("Upper bound is 1 and lower bound is 0. No filtering will be done, is this intended?")
 
     reward_fn_mapping = build_all_verifiers(args)
 
@@ -203,7 +213,7 @@ def main():
                 f"Try one of: {', '.join(sorted(reward_fn_mapping.keys()))}"
             )
         override_key = candidate
-        print(f"Using judge override: {override_key}")
+        logger.info(f"Using judge override: {override_key}")
 
     # currying the avg_correctness function
     avg_correctness = partial(
@@ -225,12 +235,10 @@ def main():
     chunk_size = 1  # Tune for workload size
 
     with Pool(processes=workers) as pool:
-        results = list(
-            tqdm(
-                pool.imap(avg_correctness, samples, chunksize=chunk_size),
-                total=len(samples),
-                desc="Scoring"
-            )
+        results = tqdm(
+            pool.imap(avg_correctness, samples, chunksize=chunk_size),
+            total=len(samples),
+            desc="Scoring"
         )
     # results is a list of tuples: (avg_score, num_rollouts)
     avg_scores = [score for score, _ in results]
@@ -250,7 +258,7 @@ def main():
         sample for sample, score in zip(samples, avg_scores)
         if lower_bound <= score <= upper_bound
     ]
-    print(
+    logger.info(
         f"Filtered {len(samples) - len(filtered_samples)} samples out of {len(samples)}"
     )
 
