@@ -1118,6 +1118,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         loss_stats[i] = loss
                         ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
                         if args.record_entropy:
+                            # Calculate entropy statistics
                             entropy_stats[i] = masked_mean(
                                 mb_entropy, mb_response_masks_bool, args.masked_mean_axis
                             ).float()
