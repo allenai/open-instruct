@@ -29,7 +29,7 @@ from open_instruct import logger_utils
 logger = logger_utils.setup_logger(__name__)
 
 
-def _avg_correctness(sample: dict, reward_fn_mapping: dict[str, VerifierFunction], judge_override: str | None = None):
+def _avg_correctness(sample: dict, reward_fn_mapping: dict[str, VerifierFunction], judge_override: str | None = None) -> tuple[float, int]:
     """
     Compute the mean correctness for one sample (called in worker).
     Args:
