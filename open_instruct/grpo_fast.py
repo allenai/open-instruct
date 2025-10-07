@@ -983,6 +983,8 @@ class PolicyTrainerRayProcess(RayProcess):
                             local_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB
                         )
                         vllm_old_logprob = torch.masked_fill(vllm_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
+                        # Replace any remaining NaN values (query tokens in packed sequences are set to NaN by pack_sequences in rl_utils2.py)
+                        vllm_old_logprob = torch.nan_to_num(vllm_old_logprob, nan=INVALID_LOGPROB)
                         if args.use_vllm_logprobs:
                             old_logprobs[i] = vllm_old_logprob
                         else:
@@ -1027,6 +1029,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     mb_local_logprobs = torch.masked_fill(mb_local_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
                     mb_vllm_logprobs = collated_vllm_logprobs[i][:, 1:]
                     mb_vllm_logprobs = torch.masked_fill(mb_vllm_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
+                    # Replace any remaining NaN values (query tokens in packed sequences are set to NaN by pack_sequences in rl_utils2.py)
+                    mb_vllm_logprobs = torch.nan_to_num(mb_vllm_logprobs, nan=INVALID_LOGPROB)
 
                     # Compare vLLM logprobs with local logprobs
                     with torch.no_grad():
@@ -1065,43 +1069,33 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Apply truncated importance sampling if enabled
                     if args.truncated_importance_sampling_ratio_cap > 0 and mb_vllm_logprobs is not None:
-                        # Debug assertions before importance sampling
-                        assert not torch.isnan(mb_old_logprobs).any(), f"NaN in mb_old_logprobs before IS"
-                        assert not torch.isnan(mb_vllm_logprobs).any(), f"NaN in mb_vllm_logprobs before IS"
-                        assert not torch.isnan(pg_losses).any(), f"NaN in pg_losses before IS"
-                        assert not torch.isnan(pg_losses2).any(), f"NaN in pg_losses2 before IS"
+                        # Only apply importance sampling where both logprobs are valid (not INVALID_LOGPROB)
+                        # This excludes query tokens and padding which have INVALID_LOGPROB=1.0
+                        valid_mask = (mb_old_logprobs != INVALID_LOGPROB) & (mb_vllm_logprobs != INVALID_LOGPROB)
+                        valid_mask = valid_mask & mb_response_masks_bool
 
-                        # Check for INVALID_LOGPROB values
-                        num_invalid_old = (mb_old_logprobs == INVALID_LOGPROB).sum().item()
-                        num_invalid_vllm = (mb_vllm_logprobs == INVALID_LOGPROB).sum().item()
-                        if num_invalid_old > 0 or num_invalid_vllm > 0:
-                            print(f"Warning: {num_invalid_old} INVALID_LOGPROB in old, {num_invalid_vllm} in vllm")
+                        # Initialize importance ratio to 1.0 (no effect) for all positions
+                        tis_imp_ratio = torch.ones_like(mb_old_logprobs)
 
-                        # Calculate importance sampling ratio: exp(old_logprob - rollout_logprobs)
-                        logprob_diff_is = mb_old_logprobs - mb_vllm_logprobs
-                        assert not torch.isnan(logprob_diff_is).any(), f"NaN in logprob_diff_is"
+                        if valid_mask.any():
+                            # Calculate logprob difference only for valid positions
+                            logprob_diff_is = mb_old_logprobs - mb_vllm_logprobs
+                            # Clamp to prevent numerical overflow in exp
+                            logprob_diff_is = torch.where(
+                                valid_mask, logprob_diff_is.clamp(-10.0, 10.0), torch.zeros_like(logprob_diff_is)
+                            )
+                            # Compute importance ratio only for valid positions
+                            tis_imp_ratio = torch.where(valid_mask, torch.exp(logprob_diff_is), tis_imp_ratio)
+                            # Apply cap
+                            tis_imp_ratio = torch.clamp(
+                                tis_imp_ratio, max=args.truncated_importance_sampling_ratio_cap
+                            )
 
-                        # Check for extreme values that could cause overflow
-                        max_diff = logprob_diff_is.max().item()
-                        min_diff = logprob_diff_is.min().item()
-                        if max_diff > 20 or min_diff < -20:
-                            print(f"Warning: Extreme logprob differences: max={max_diff}, min={min_diff}")
-
-                        tis_imp_ratio = torch.exp(logprob_diff_is)
-                        assert not torch.isnan(tis_imp_ratio).any(), f"NaN in tis_imp_ratio after exp"
-                        assert not torch.isinf(tis_imp_ratio).any(), f"Inf in tis_imp_ratio after exp"
-
-                        tis_imp_ratio = torch.clamp(tis_imp_ratio, max=args.truncated_importance_sampling_ratio_cap)
-                        assert not torch.isnan(tis_imp_ratio).any(), f"NaN in tis_imp_ratio after clamp"
-
+                        # Apply importance sampling to losses
                         pg_losses = pg_losses * tis_imp_ratio
-                        assert not torch.isnan(pg_losses).any(), f"NaN in pg_losses after IS"
-
                         pg_losses2 = pg_losses2 * tis_imp_ratio
-                        assert not torch.isnan(pg_losses2).any(), f"NaN in pg_losses2 after IS"
 
                     pg_loss_max = torch.max(pg_losses, pg_losses2)
-                    assert not torch.isnan(pg_loss_max).any(), f"NaN in pg_loss_max"
 
                     # Here we recalculate kl: we want the KL loss to backpropagate through the model
                     # We also clamp the KL loss to avoid numerical instability
@@ -1122,9 +1116,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # grpo change: directly subtract KL in loss (add)
                     loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
-                    assert not torch.isnan(loss).any(), f"NaN in loss after masked_mean"
                     loss = loss / accumulation_steps
-                    assert not torch.isnan(loss).any(), f"NaN in loss after division by accumulation_steps"
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
                         self.model.step()
