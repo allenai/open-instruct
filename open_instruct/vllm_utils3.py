@@ -118,7 +118,7 @@ async def process_request_async(
     tool_called = False
 
     current_prompt = prompt
-    current_prompt_token_ids = prompt.prompt_token_ids  # Cache the initial prompt token IDs
+    current_prompt_token_ids = request_metadata[base_request_id]["prompt_token_ids"]  # Already stored as list on submit path
     current_sampling_params = sampling_params.clone()
     final_prompt_token_ids = None
     iteration = 0
@@ -253,7 +253,7 @@ async def process_request_async(
             break
 
         current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output, cache_salt=base_request_id)
-        current_prompt_token_ids = prompt_and_tool_output  # Update the cached token IDs
+        current_prompt_token_ids = prompt_and_tool_output
         final_prompt_token_ids = prompt_and_tool_output
         current_sampling_params = sampling_params.clone()
         current_sampling_params.max_tokens = new_sample_tokens
@@ -758,6 +758,7 @@ class LLMRayActor:
             "sampling_params": sampling_params,
             "original_sampling_params": request.generation_config,
             "prompt_tokens": len(request.prompt),
+            "prompt_token_ids": list(request.prompt),
             "start_time": time.perf_counter(),
         }
 
