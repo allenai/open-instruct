@@ -36,6 +36,8 @@ from open_instruct.math_utils import (
 )
 from open_instruct.utils import extract_final_answer
 
+from pydantic import BaseModel
+
 logger = logger_utils.setup_logger(__name__)
 
 # remove excessive logging from liteLLM
@@ -939,6 +941,63 @@ class CodeVerifier(VerifierFunction):
             type: The VerifierConfig class or its subclass
         """
         return CodeVerifierConfig
+
+
+class ProcedureFormatVerifier(VerifierFunction):
+    """
+    Verifier for procedures, check whether the format matches the schema.
+    """
+
+    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+        super().__init__("procedure_format", verifier_config=verifier_config, weight=1.0)
+
+    class FailureAllNoLabelStep(BaseModel):
+        failure: str
+        L1_steps: list[int]
+        L2_steps: list[int]
+
+    class FailureAllNoLabel(BaseModel):
+        critical_failures: list[FailureAllNoLabelStep]
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
+        answer_string = prediction.split("</think>")[-1].split("<|im_end|>")[0].strip()
+        try:
+            failure_all_no_label = self.FailureAllNoLabel.model_validate_json(answer_string)
+        except Exception as e:
+            return VerificationResult(score=0.0)
+        return VerificationResult(score=1.0)
+
+
+class ProcedureBinaryVerifier(VerifierFunction):
+    """
+    Verifier for procedures, check whether the binary fail / no fail judgment matches.
+    """
+    
+    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+        super().__init__("procedure_binary", verifier_config=verifier_config, weight=1.0)
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
+        answer_string = prediction.split("</think>")[-1].split("<|im_end|>")[0].strip()
+        try:
+            label_obj = json.loads(label) if isinstance(label, str) else label
+        except Exception:
+            return VerificationResult(score=0.0)
+        try:
+            answer_obj = json.loads(answer_string)
+        except Exception:
+            return VerificationResult(score=0.0)
+
+        label_cf = label_obj.get("critical_failures", []) if isinstance(label_obj, dict) else []
+        answer_cf = answer_obj.get("critical_failures", []) if isinstance(answer_obj, dict) else []
+
+        label_has_failures = bool(label_cf)
+        answer_has_failures = bool(answer_cf)
+
+        return VerificationResult(score=1.0 if label_has_failures == answer_has_failures else 0.0)
 
 
 def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
