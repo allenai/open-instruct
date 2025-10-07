@@ -88,34 +88,34 @@ echo $command
 echo "Submitting all shards in one command"
 if [ "$deploy_mode" = "docker_weka" ]; then
     python mason.py \
-        --cluster ai2/neptune-cirrascale ai2/saturn-cirrascale ai2/jupiter-cirrascale-2 \
+        --cluster ai2/neptune ai2/saturn ai2/jupiter \
         --image costah/open_instruct_synth_pref --pure_docker_mode \
         --priority low \
         --preemptible \
-        --budget ai2/allennlp \
+        --budget ai2/jupiter \
         --gpus $num_gpus -- $command
 elif [ "$deploy_mode" = "docker_nfs" ]; then
     python mason.py \
-        --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale ai2/s2-cirrascale \
+        --cluster ai2/jupiter \
         --image costah/open_instruct_synth_pref --pure_docker_mode \
         --priority low \
         --preemptible \
-        --budget ai2/allennlp \
+        --budget ai2/jupiter \
         --gpus $num_gpus -- $command
 elif [ "$deploy_mode" = "docker" ]; then
     python mason.py \
-        --cluster ai2/allennlp-cirrascale ai2/neptune-cirrascale \
+        --cluster ai2/jupiter ai2/neptune \
         --image costah/open_instruct_synth_pref --pure_docker_mode \
         --priority low \
         --preemptible \
-        --budget ai2/allennlp \
+        --budget ai2/jupiter \
         --gpus $num_gpus -- $command
 elif [ "$deploy_mode" = "nfs" ]; then
     python mason.py \
-        --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale ai2/s2-cirrascale \
+        --cluster ai2/jupiter \
         --priority low \
         --preemptible \
-        --budget ai2/allennlp \
+        --budget ai2/jupiter \
         --gpus $num_gpus -- $command
 else
     echo "Invalid deploy_mode"

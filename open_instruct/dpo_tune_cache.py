@@ -271,13 +271,6 @@ class FlatArguments:
             "Useful if tokenization process is long. Default is 1800 seconds (30 minutes)."
         },
     )
-    reduce_loss: str = field(
-        default="mean",
-        metadata={
-            "help": "How to reduce loss over tokens. Options are 'mean' or 'sum'."
-            "Using 'sum' can improve chat model performance."
-        },
-    )
     resume_from_checkpoint: Optional[str] = field(
         default=None, metadata={"help": "If the training should continue from a checkpoint folder."}
     )
@@ -361,8 +354,6 @@ class FlatArguments:
     """the max generation length for evaluation for oe-eval"""
 
     def __post_init__(self):
-        if self.reduce_loss not in ["mean", "sum"]:
-            raise ValueError("reduce_loss must be either 'mean' or 'sum'")
         if self.dataset_name is None and self.dataset_mixer is None and self.dataset_mixer_list is None:
             raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
         if (

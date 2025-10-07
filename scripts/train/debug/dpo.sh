@@ -1,5 +1,5 @@
 python mason.py \
-    --cluster ai2/neptune-cirrascale \
+    --cluster ai2/neptune \
     --workspace ai2/tulu-thinker \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \

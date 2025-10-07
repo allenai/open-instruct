@@ -16,7 +16,7 @@ We ran training for the 1B model in SFT on 1 node of 8 NVIDIA H100 GPUs.
 The command used internally is:
 ```
 python mason.py \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/augusta \
     --workspace ai2/olmo-instruct \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \
@@ -47,7 +47,6 @@ python mason.py \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
-    --reduce_loss sum \
     --report_to wandb \
     --with_tracking \
     --logging_steps 1 \
@@ -79,7 +78,6 @@ accelerate launch \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
-    --reduce_loss sum \
     --report_to wandb \
     --with_tracking \
     --logging_steps 1 \
@@ -135,7 +133,7 @@ For those internal to Ai2, see the [wandb logs](https://wandb.ai/ai2-llm/open_in
 Example with DeepSpeed Stage 2: 
 ```
 python mason.py \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/augusta \
     --workspace ai2/olmo-instruct \
     --priority urgent \
     --image nathanl/open_instruct_auto --pure_docker_mode \
@@ -182,7 +180,7 @@ Example run with DeepSpeed Stage 3 (slower than stage 2):
 ```
 for lr in 2e-6; do
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/olmo-instruct \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \

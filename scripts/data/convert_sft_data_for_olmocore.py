@@ -34,7 +34,7 @@ OLMoCore accepts data in numpy mmap format. One file is for the input tokens and
         --workspace ai2/jacobm \
         --budget ai2/oe-base \
         --priority normal \
-        --cluster ai2/neptune-cirrascale --gpus 1 \
+        --cluster ai2/neptune --gpus 1 \
         --weka=oe-training-default:/weka/oe-training-default \
         --task-name convert-sft-data-for-olmocore --yes \
         --env-secret HF_TOKEN=HF_TOKEN \

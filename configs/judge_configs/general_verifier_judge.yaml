@@ -24,7 +24,7 @@ tasks:
           weka: oe-adapt-default
     constraints:
       cluster:
-        - ai2/saturn-cirrascale
+        - ai2/saturn
     resources:
       gpuCount: 2
     context:

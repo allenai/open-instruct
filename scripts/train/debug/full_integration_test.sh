@@ -12,7 +12,7 @@ for split_var in split_int_mix_3; do
     exp_name="${exp_name}_${RANDOM}"
 
     uv run python mason.py \
-        --cluster ai2/augusta-google-1 \
+        --cluster ai2/augusta \
         --image "$BEAKER_IMAGE" \
         --pure_docker_mode \
         --workspace ai2/olmo-instruct \

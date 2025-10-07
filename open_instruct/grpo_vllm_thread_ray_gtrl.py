@@ -1815,10 +1815,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         if args.try_launch_beaker_eval_jobs and len(beaker_config.beaker_dataset_id_urls) > 0:
             command = f"""\
             python mason.py  \
-                --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/s2-cirrascale ai2/general-cirrascale \
+                --cluster ai2/jupiter \
                 --priority low \
                 --preemptible \
-                --budget ai2/allennlp \
+                --budget ai2/jupiter \
                 --workspace ai2/tulu-2-improvements \
                 --image nathanl/open_instruct_auto \
                 --pure_docker_mode \
