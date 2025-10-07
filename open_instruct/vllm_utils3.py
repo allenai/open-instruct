@@ -119,6 +119,7 @@ async def process_request_async(
     tool_called = False
 
     current_prompt = prompt
+    current_prompt_token_ids = prompt.prompt_token_ids  # Cache the initial prompt token IDs
     current_sampling_params = sampling_params.clone()
     final_prompt_token_ids = None
     iteration = 0
@@ -194,11 +195,10 @@ async def process_request_async(
         logger.info(f"[process_request_async] Tool output tokens for {sub_request_id}: {len(tool_output_token_ids)} tokens")
 
         logger.info(f"[process_request_async] Concatenating prompts for {sub_request_id}")
-        logger.info(f"[process_request_async] Getting current_prompt.prompt_token_ids for {sub_request_id}")
-        prompt_tokens = current_prompt.prompt_token_ids
-        logger.info(f"[process_request_async] Got prompt_tokens: {len(prompt_tokens)} tokens for {sub_request_id}")
+        logger.info(f"[process_request_async] Using cached prompt_token_ids for {sub_request_id}")
+        logger.info(f"[process_request_async] current_prompt_token_ids: {len(current_prompt_token_ids)} tokens for {sub_request_id}")
         logger.info(f"[process_request_async] accumulated_tokens: {len(accumulated_tokens)} for {sub_request_id}")
-        prompt_and_tool_output = prompt_tokens + accumulated_tokens + tool_output_token_ids
+        prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens + tool_output_token_ids
         logger.info(f"[process_request_async] Concatenation complete for {sub_request_id}: total={len(prompt_and_tool_output)}")
         logger.info(f"[process_request_async] Accessing model config for {sub_request_id}")
         max_model_len = llm_engine.model_config.max_model_len
@@ -228,6 +228,7 @@ async def process_request_async(
             break
 
         current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output, cache_salt=base_request_id)
+        current_prompt_token_ids = prompt_and_tool_output  # Update the cached token IDs
         final_prompt_token_ids = prompt_and_tool_output
         current_sampling_params = sampling_params.clone()
         current_sampling_params.max_tokens = new_sample_tokens
