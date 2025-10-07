@@ -57,6 +57,7 @@ uv run python mason.py \
     --beta 0.01 \
     --seed 1 \
     --local_eval_every 10 \
+    --inflight_updates False \
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.3 \
     --gradient_checkpointing \
