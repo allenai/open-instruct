@@ -255,7 +255,7 @@ def main():
         "--upload_dtype",
         type=str,
         choices=["fp32", "bf16"],
-        default="fp32",
+        default="bf16",
         help="Convert and upload weights in this dtype. 'bf16' reduces size.",
     )
 
