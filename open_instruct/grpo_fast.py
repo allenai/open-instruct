@@ -248,6 +248,8 @@ class Args:
     """the lower clip range"""
     clip_higher: float = 0.2
     """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
+    truncated_importance_sampling_ratio_cap: float = 0.0
+    """The maximum cap for truncated importance sampling ratio (0 means disabled)"""
     inflight_updates: bool = False
     """Enable immediate stopping of request processing when should_stop is set, allowing for quick pausing and resumption"""
     kl_estimator: Literal["kl1", "kl2", "kl3", "kl4"] = "kl3"
@@ -1060,6 +1062,15 @@ class PolicyTrainerRayProcess(RayProcess):
                     pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(
                         ratio, 1.0 - args.clip_lower, 1.0 + args.clip_higher
                     )
+
+                    # Apply truncated importance sampling if enabled
+                    if args.truncated_importance_sampling_ratio_cap > 0 and mb_vllm_logprobs is not None:
+                        # Calculate importance sampling ratio: exp(old_logprob - rollout_logprobs)
+                        tis_imp_ratio = torch.exp(mb_old_logprobs - mb_vllm_logprobs)
+                        tis_imp_ratio = torch.clamp(tis_imp_ratio, max=args.truncated_importance_sampling_ratio_cap)
+                        pg_losses = pg_losses * tis_imp_ratio
+                        pg_losses2 = pg_losses2 * tis_imp_ratio
+
                     pg_loss_max = torch.max(pg_losses, pg_losses2)
 
                     # Here we recalculate kl: we want the KL loss to backpropagate through the model
