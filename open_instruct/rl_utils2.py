@@ -118,8 +118,9 @@ def pack_sequences(
         # Filter out padding tokens from response, mask, and logprobs together
         response_logprobs_unfiltered = vllm_logprobs[i]
 
-        # vLLM returns N tokens but N-1 logprobs (no logprob for first token)
-        # Add a NaN placeholder for the first token to maintain alignment
+        # vLLM returns N-1 logprobs for N generated tokens (missing logprob for first token).
+        # This is consistent behavior - vLLM doesn't compute logprob for the first generated token.
+        # Add a NaN placeholder for the first token to maintain alignment with token_ids.
         if len(response_logprobs_unfiltered) == len(response) - 1:
             import logging
 

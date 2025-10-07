@@ -1074,50 +1074,18 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Apply truncated importance sampling if enabled
                     if args.truncated_importance_sampling_ratio_cap > 0 and mb_vllm_logprobs is not None:
-                        old_mask = mb_old_logprobs != INVALID_LOGPROB
-                        vllm_mask = mb_vllm_logprobs != INVALID_LOGPROB
-
-                        if not torch.all(old_mask == mb_response_masks_bool):
-                            diff_positions = (old_mask != mb_response_masks_bool).sum()
-                            diff_mask = old_mask != mb_response_masks_bool
-                            diff_indices = torch.where(diff_mask)
-                            diff_old_logprobs = mb_old_logprobs[diff_mask]
-                            diff_response_mask = mb_response_masks_bool[diff_mask]
-                            logger.error(
-                                f"Old logprobs mask mismatch: "
-                                f"old_mask sum={old_mask.sum()}, "
-                                f"response_mask sum={mb_response_masks_bool.sum()}, "
-                                f"diff_positions={diff_positions}, "
-                                f"diff_indices={diff_indices}, "
-                                f"diff_old_logprobs={diff_old_logprobs}, "
-                                f"diff_response_mask_values={diff_response_mask}, "
-                                f"INVALID_LOGPROB={INVALID_LOGPROB}"
-                            )
-
-                        if not torch.all(vllm_mask == mb_response_masks_bool):
-                            diff_positions = (vllm_mask != mb_response_masks_bool).sum()
-                            diff_mask = vllm_mask != mb_response_masks_bool
-                            diff_indices = torch.where(diff_mask)
-                            diff_vllm_logprobs = mb_vllm_logprobs[diff_mask]
-                            diff_response_mask = mb_response_masks_bool[diff_mask]
-                            logger.error(
-                                f"vLLM logprobs mask mismatch: "
-                                f"vllm_mask sum={vllm_mask.sum()}, "
-                                f"response_mask sum={mb_response_masks_bool.sum()}, "
-                                f"diff_positions={diff_positions}, "
-                                f"diff_indices={diff_indices}, "
-                                f"diff_vllm_logprobs={diff_vllm_logprobs}, "
-                                f"diff_response_mask_values={diff_response_mask}, "
-                                f"INVALID_LOGPROB={INVALID_LOGPROB}"
-                            )
-
-                        assert torch.all((mb_old_logprobs != INVALID_LOGPROB) == mb_response_masks_bool), (
-                            "Old logprobs mask should match response mask"
-                        )
-                        assert torch.all((mb_vllm_logprobs != INVALID_LOGPROB) == mb_response_masks_bool), (
-                            "vLLM logprobs mask should match response mask"
-                        )
-                        valid_mask = mb_response_masks_bool
+                        # vLLM returns N-1 logprobs for N generated tokens (missing first token).
+                        # Those positions get NaN -> INVALID_LOGPROB, so we exclude them from valid_mask.
+                        # We can't just use mb_response_masks_bool because some response tokens
+                        # legitimately have INVALID_LOGPROB (first tokens of each response).
+                        #
+                        # Why check both mb_old_logprobs and mb_vllm_logprobs separately?
+                        # - When use_vllm_logprobs=True: mb_old_logprobs = mb_vllm_logprobs, so both masks are identical
+                        # - When use_vllm_logprobs=False: mb_old_logprobs uses local forward pass (has valid logprobs
+                        #   for first tokens), while mb_vllm_logprobs has INVALID_LOGPROB at first tokens
+                        # The intersection handles both cases correctly.
+                        valid_mask = (mb_old_logprobs != INVALID_LOGPROB) & (mb_vllm_logprobs != INVALID_LOGPROB)
+                        valid_mask = valid_mask & mb_response_masks_bool
 
                         # Initialize importance ratio to 1.0 (no effect) for all positions
                         tis_imp_ratio = torch.ones_like(mb_old_logprobs)
