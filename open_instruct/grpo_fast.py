@@ -1074,6 +1074,32 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Apply truncated importance sampling if enabled
                     if args.truncated_importance_sampling_ratio_cap > 0 and mb_vllm_logprobs is not None:
+                        old_mask = mb_old_logprobs != INVALID_LOGPROB
+                        vllm_mask = mb_vllm_logprobs != INVALID_LOGPROB
+
+                        if not torch.all(old_mask == mb_response_masks_bool):
+                            diff_positions = (old_mask != mb_response_masks_bool).sum()
+                            old_unique = torch.unique(mb_old_logprobs)
+                            logger.error(
+                                f"Old logprobs mask mismatch: "
+                                f"old_mask sum={old_mask.sum()}, "
+                                f"response_mask sum={mb_response_masks_bool.sum()}, "
+                                f"diff_positions={diff_positions}, "
+                                f"old_logprobs unique values={old_unique}, "
+                                f"INVALID_LOGPROB={INVALID_LOGPROB}"
+                            )
+
+                        if not torch.all(vllm_mask == mb_response_masks_bool):
+                            diff_positions = (vllm_mask != mb_response_masks_bool).sum()
+                            vllm_unique = torch.unique(mb_vllm_logprobs)
+                            logger.error(
+                                f"vLLM logprobs mask mismatch: "
+                                f"vllm_mask sum={vllm_mask.sum()}, "
+                                f"response_mask sum={mb_response_masks_bool.sum()}, "
+                                f"diff_positions={diff_positions}, "
+                                f"vllm_logprobs unique values={vllm_unique}"
+                            )
+
                         assert torch.all((mb_old_logprobs != INVALID_LOGPROB) == mb_response_masks_bool), (
                             "Old logprobs mask should match response mask"
                         )
