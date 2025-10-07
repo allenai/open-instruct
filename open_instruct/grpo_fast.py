@@ -1074,10 +1074,13 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Apply truncated importance sampling if enabled
                     if args.truncated_importance_sampling_ratio_cap > 0 and mb_vllm_logprobs is not None:
-                        # Only apply importance sampling where both logprobs are valid (not INVALID_LOGPROB)
-                        # This excludes query tokens and padding which have INVALID_LOGPROB=1.0
-                        valid_mask = (mb_old_logprobs != INVALID_LOGPROB) & (mb_vllm_logprobs != INVALID_LOGPROB)
-                        valid_mask = valid_mask & mb_response_masks_bool
+                        assert torch.all((mb_old_logprobs != INVALID_LOGPROB) == mb_response_masks_bool), (
+                            "Old logprobs mask should match response mask"
+                        )
+                        assert torch.all((mb_vllm_logprobs != INVALID_LOGPROB) == mb_response_masks_bool), (
+                            "vLLM logprobs mask should match response mask"
+                        )
+                        valid_mask = mb_response_masks_bool
 
                         # Initialize importance ratio to 1.0 (no effect) for all positions
                         tis_imp_ratio = torch.ones_like(mb_old_logprobs)
