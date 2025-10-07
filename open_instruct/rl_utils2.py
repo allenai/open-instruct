@@ -121,7 +121,33 @@ def pack_sequences(
         # vLLM returns N tokens but N-1 logprobs (no logprob for first token)
         # Add a NaN placeholder for the first token to maintain alignment
         if len(response_logprobs_unfiltered) == len(response) - 1:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"Response {i}: vLLM returned N-1 logprobs! "
+                f"response_length={len(response)}, "
+                f"logprobs_length={len(response_logprobs_unfiltered)}. "
+                f"Adding NaN placeholder for first token."
+            )
             response_logprobs_unfiltered = [float("nan")] + response_logprobs_unfiltered
+        elif len(response_logprobs_unfiltered) == len(response):
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.debug(
+                f"Response {i}: vLLM returned N logprobs for N tokens (expected). "
+                f"response_length={len(response)}, logprobs_length={len(response_logprobs_unfiltered)}"
+            )
+        else:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.error(
+                f"Response {i}: Unexpected logprobs length! "
+                f"response_length={len(response)}, "
+                f"logprobs_length={len(response_logprobs_unfiltered)}"
+            )
 
         filtered_response = []
         filtered_mask = []
