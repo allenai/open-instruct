@@ -1045,6 +1045,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.local_metrics.add("debug/vllm_vs_local_logprob_diff_max", max_diff.item())
                         self.local_metrics.add("debug/vllm_vs_local_logprob_diff_std", std_diff.item())
 
+                        reverse_kl = torch.exp(mb_vllm_logprobs) * (mb_vllm_logprobs - mb_local_logprobs)
+                        masked_reverse_kl = torch.masked_fill(reverse_kl, ~valid_mask, 0.0)
+                        mean_reverse_kl = masked_reverse_kl.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
+                        self.local_metrics.add("debug/vllm_local_reverse_kl", mean_reverse_kl.item())
+
                     mb_new_logprobs = mb_local_logprobs
 
                     # Cache the old logprobs
