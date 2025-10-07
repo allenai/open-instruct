@@ -158,8 +158,8 @@ def get_args():
     )
     parser.add_argument(
         "--timeout",
-        type=str,
-        help="Timeout for the Beaker task (e.g., '2h', '30m', '1d'). If not specified, no timeout is set.",
+        type=int,
+        help="Timeout for the Beaker task in seconds (e.g., 7200 for 2 hours). If not specified, no timeout is set.",
         default=None,
     )
     # Split up the mason args from the Python args.
