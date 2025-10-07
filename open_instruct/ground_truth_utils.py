@@ -949,7 +949,7 @@ class ProcedureFormatVerifier(VerifierFunction):
         L2_steps: list[int]
 
     class FailureAllNoLabel(BaseModel):
-        critical_failures: list[FailureAllNoLabelStep]
+        critical_failures: list["ProcedureFormatVerifier.FailureAllNoLabelStep"]
 
     def __call__(
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
