@@ -170,7 +170,21 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
     use_tools = bool(tools)
 
     logprobs = []
-    for out in final_output.outputs:
+    for idx, out in enumerate(final_output.outputs):
+        token_ids_len = len(out.token_ids)
+        logprobs_len = len(out.logprobs) if out.logprobs else 0
+        if token_ids_len != logprobs_len:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            first_logprob = out.logprobs[0] if logprobs_len > 0 else None
+            logger.error(
+                f"🚨 vLLM CompletionOutput {idx}: LENGTH MISMATCH! "
+                f"token_ids_len={token_ids_len}, logprobs_len={logprobs_len}. "
+                f"first_token_id={out.token_ids[0] if token_ids_len > 0 else None}, "
+                f"first_logprob_entry={first_logprob}, "
+                f"This should NOT happen according to vLLM source code analysis!"
+            )
         logprobs.append(
             [logprob_dict[token_id].logprob for token_id, logprob_dict in zip(out.token_ids, out.logprobs)]
         )
