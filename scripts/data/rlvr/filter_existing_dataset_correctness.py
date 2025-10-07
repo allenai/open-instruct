@@ -235,10 +235,12 @@ def main():
     chunk_size = 1  # Tune for workload size
 
     with Pool(processes=workers) as pool:
-        results = tqdm(
-            pool.imap(avg_correctness, samples, chunksize=chunk_size),
-            total=len(samples),
-            desc="Scoring"
+        results = list(
+            tqdm(
+                pool.imap(avg_correctness, samples, chunksize=chunk_size),
+                total=len(samples),
+                desc="Scoring"
+            )
         )
     # results is a list of tuples: (avg_score, num_rollouts)
     avg_scores = [score for score, _ in results]
