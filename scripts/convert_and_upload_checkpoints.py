@@ -251,6 +251,13 @@ def main():
         action="store_true",
         help="Set this flag if the model requires trusting remote code.",
     )
+    parser.add_argument(
+        "--upload_dtype",
+        type=str,
+        choices=["fp32", "bf16"],
+        default="fp32",
+        help="Convert and upload weights in this dtype. 'bf16' reduces size.",
+    )
 
     args = parser.parse_args()
 
@@ -318,9 +325,35 @@ def main():
                         print(f" -> Consolidated weights created: {consolidated}")
                         if os.path.isdir(consolidated):
                             # Directory mode: copy shards and index into temp_save_dir and skip state_dict assembly
-                            print(" -> Detected sharded fp32 weights. Packaging shards and index for upload...")
-                            _copy_weights_to_dir(consolidated, str(temp_save_dir))
-                            state_dict = None
+                            if args.upload_dtype == "bf16":
+                                print(" -> Detected sharded fp32 weights. Converting to bf16 by reloading model...")
+                                try:
+                                    tmp_model = AutoModelForCausalLM.from_pretrained(
+                                        consolidated,
+                                        config=config,
+                                        trust_remote_code=args.trust_remote_code,
+                                        torch_dtype=torch.bfloat16,
+                                        low_cpu_mem_usage=True,
+                                    )
+                                    tmp_model.save_pretrained(
+                                        str(temp_save_dir),
+                                        safe_serialization=False,
+                                    )
+                                    state_dict = None
+                                except Exception as e2:
+                                    print(f" -> ERROR: Failed to reload and save bf16 model from shards: {e2}")
+                                    print(" -> Falling back to packaging fp32 shards for upload.")
+                                    _copy_weights_to_dir(consolidated, str(temp_save_dir))
+                                    state_dict = None
+                                finally:
+                                    try:
+                                        del tmp_model
+                                    except Exception:
+                                        pass
+                            else:
+                                print(" -> Detected sharded fp32 weights. Packaging shards and index for upload...")
+                                _copy_weights_to_dir(consolidated, str(temp_save_dir))
+                                state_dict = None
                         else:
                             state_dict = _load_state_dict_from_file(consolidated)
                     else:
@@ -331,17 +364,23 @@ def main():
             print(f" -> Converting and saving to temporary directory: {temp_save_dir}...")
             unwrapped_model = accelerator.unwrap_model(model)
 
-            # If we already copied shards (directory mode), only ensure config is saved.
+            # If we already copied or saved weights (directory mode), only ensure config is saved.
             if state_dict is None:
                 # Save config to the same directory to make a valid HF folder
                 config.save_pretrained(str(temp_save_dir))
             else:
+                # Optionally cast tensors to bf16 before saving
+                if args.upload_dtype == "bf16":
+                    print(" -> Casting state_dict to bfloat16 before saving...")
+                    for k, v in list(state_dict.items()):
+                        if torch.is_floating_point(v):
+                            state_dict[k] = v.to(torch.bfloat16)
                 unwrapped_model.save_pretrained(
                     str(temp_save_dir),
                     is_main_process=accelerator.is_main_process,
                     save_function=accelerator.save,
                     state_dict=state_dict,
-                    safe_serialization=False,  # Set to False to get .bin files
+                    safe_serialization=False,
                 )
 
             if accelerator.is_main_process:
