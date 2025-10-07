@@ -1074,18 +1074,21 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Apply truncated importance sampling if enabled
                     if args.truncated_importance_sampling_ratio_cap > 0 and mb_vllm_logprobs is not None:
-                        # vLLM returns N-1 logprobs for N generated tokens (missing first token).
-                        # Those positions get NaN -> INVALID_LOGPROB, so we exclude them from valid_mask.
-                        # We can't just use mb_response_masks_bool because some response tokens
-                        # legitimately have INVALID_LOGPROB (first tokens of each response).
-                        #
-                        # Why check both mb_old_logprobs and mb_vllm_logprobs separately?
-                        # - When use_vllm_logprobs=True: mb_old_logprobs = mb_vllm_logprobs, so both masks are identical
-                        # - When use_vllm_logprobs=False: mb_old_logprobs uses local forward pass (has valid logprobs
-                        #   for first tokens), while mb_vllm_logprobs has INVALID_LOGPROB at first tokens
-                        # The intersection handles both cases correctly.
-                        valid_mask = (mb_old_logprobs != INVALID_LOGPROB) & (mb_vllm_logprobs != INVALID_LOGPROB)
-                        valid_mask = valid_mask & mb_response_masks_bool
+                        old_logprobs_mask = mb_old_logprobs != INVALID_LOGPROB
+                        vllm_logprobs_mask = mb_vllm_logprobs != INVALID_LOGPROB
+
+                        assert torch.all(old_logprobs_mask == mb_response_masks_bool), (
+                            f"Old logprobs mask should match response mask. "
+                            f"old_mask sum={old_logprobs_mask.sum()}, "
+                            f"response_mask sum={mb_response_masks_bool.sum()}"
+                        )
+                        assert torch.all(vllm_logprobs_mask == mb_response_masks_bool), (
+                            f"vLLM logprobs mask should match response mask. "
+                            f"vllm_mask sum={vllm_logprobs_mask.sum()}, "
+                            f"response_mask sum={mb_response_masks_bool.sum()}"
+                        )
+
+                        valid_mask = mb_response_masks_bool
 
                         # Initialize importance ratio to 1.0 (no effect) for all positions
                         tis_imp_ratio = torch.ones_like(mb_old_logprobs)
@@ -1720,14 +1723,10 @@ def data_preparation_thread(
                 for i in range(len(result.request_info.tool_outputs))
             ]
         for i in range(len(result.finish_reasons)):
-            # edge case: sometimes it outputs eos immediately, and we get an empty response
-            # in that case, we need to add the eos token to the response
-            # note that this also adds eos to the end of reponses that stopped for other reasons.
-            if result.finish_reasons[i] == "stop" and (
-                len(result.responses[i]) == 0 or result.responses[i][-1] != tokenizer.eos_token_id
-            ):
+            if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
                 result.responses[i].append(tokenizer.eos_token_id)
-                result.masks[i].append(1)  # never mask the eos token for
+                result.masks[i].append(1)
+                result.logprobs[i].append(float("nan"))
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
             decoded_queries = batch.raw_queries
