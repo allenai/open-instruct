@@ -1079,25 +1079,36 @@ class PolicyTrainerRayProcess(RayProcess):
 
                         if not torch.all(old_mask == mb_response_masks_bool):
                             diff_positions = (old_mask != mb_response_masks_bool).sum()
-                            old_unique = torch.unique(mb_old_logprobs)
+                            diff_mask = old_mask != mb_response_masks_bool
+                            diff_indices = torch.where(diff_mask)
+                            diff_old_logprobs = mb_old_logprobs[diff_mask]
+                            diff_response_mask = mb_response_masks_bool[diff_mask]
                             logger.error(
                                 f"Old logprobs mask mismatch: "
                                 f"old_mask sum={old_mask.sum()}, "
                                 f"response_mask sum={mb_response_masks_bool.sum()}, "
                                 f"diff_positions={diff_positions}, "
-                                f"old_logprobs unique values={old_unique}, "
+                                f"diff_indices={diff_indices}, "
+                                f"diff_old_logprobs={diff_old_logprobs}, "
+                                f"diff_response_mask_values={diff_response_mask}, "
                                 f"INVALID_LOGPROB={INVALID_LOGPROB}"
                             )
 
                         if not torch.all(vllm_mask == mb_response_masks_bool):
                             diff_positions = (vllm_mask != mb_response_masks_bool).sum()
-                            vllm_unique = torch.unique(mb_vllm_logprobs)
+                            diff_mask = vllm_mask != mb_response_masks_bool
+                            diff_indices = torch.where(diff_mask)
+                            diff_vllm_logprobs = mb_vllm_logprobs[diff_mask]
+                            diff_response_mask = mb_response_masks_bool[diff_mask]
                             logger.error(
                                 f"vLLM logprobs mask mismatch: "
                                 f"vllm_mask sum={vllm_mask.sum()}, "
                                 f"response_mask sum={mb_response_masks_bool.sum()}, "
                                 f"diff_positions={diff_positions}, "
-                                f"vllm_logprobs unique values={vllm_unique}"
+                                f"diff_indices={diff_indices}, "
+                                f"diff_vllm_logprobs={diff_vllm_logprobs}, "
+                                f"diff_response_mask_values={diff_response_mask}, "
+                                f"INVALID_LOGPROB={INVALID_LOGPROB}"
                             )
 
                         assert torch.all((mb_old_logprobs != INVALID_LOGPROB) == mb_response_masks_bool), (
