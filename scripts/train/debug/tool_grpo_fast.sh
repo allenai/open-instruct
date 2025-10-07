@@ -36,7 +36,7 @@ uv run python mason.py \
     --max_prompt_token_length 512 \
     --response_length 512 \
     --pack_length 1024 \
-    --inflight_updates True \
+    --inflight_updates False \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
@@ -57,7 +57,6 @@ uv run python mason.py \
     --beta 0.01 \
     --seed 1 \
     --local_eval_every 10 \
-    --inflight_updates False \
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.3 \
     --gradient_checkpointing \
