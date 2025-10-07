@@ -16,7 +16,6 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 import asyncio
-import inspect
 import logging
 import os
 import queue
@@ -70,7 +69,7 @@ def assert_threaded_actor(instance):
     try:
         loop = asyncio.get_running_loop()
         raise AssertionError(
-            f"{cls_name} must run in a threaded Ray actor (no running event loop). "
+            f"{instance.__class__.__name__} must run in a threaded Ray actor (no running event loop). "
             f"Detected RUNNING loop={loop!r} on thread='{threading.current_thread().name}'. "
             f"Python={sys.version.split()[0]}."
         )
@@ -127,14 +126,20 @@ async def process_request_async(
     while True:
         # Use a unique request ID for each iteration to avoid conflicts in vLLM
         iteration_request_id = f"{sub_request_id}_iter{iteration}"
-        logger.info(f"[process_request_async] Starting generation iteration {iteration} for {sub_request_id} with ID {iteration_request_id}")
+        logger.info(
+            f"[process_request_async] Starting generation iteration {iteration} for {sub_request_id} with ID {iteration_request_id}"
+        )
         request_output = await generate_one_completion(
             llm_engine, iteration_request_id, current_prompt, current_sampling_params
         )
-        logger.info(f"[process_request_async] ✅ Completed generation for iteration {iteration} on {sub_request_id}, got {len(request_output.outputs)} outputs")
+        logger.info(
+            f"[process_request_async] ✅ Completed generation for iteration {iteration} on {sub_request_id}, got {len(request_output.outputs)} outputs"
+        )
         iteration += 1
         output = request_output.outputs[0]
-        logger.info(f"[process_request_async] Output {iteration-1} for {sub_request_id}: text_len={len(output.text)}, tokens={len(output.token_ids)}, finish_reason={output.finish_reason}")
+        logger.info(
+            f"[process_request_async] Output {iteration - 1} for {sub_request_id}: text_len={len(output.text)}, tokens={len(output.token_ids)}, finish_reason={output.finish_reason}"
+        )
 
         if final_prompt_token_ids is None:
             final_prompt_token_ids = request_output.prompt_token_ids
@@ -147,7 +152,9 @@ async def process_request_async(
 
         triggered_tool = None
         stop_str = None
-        logger.info(f"[process_request_async] Checking for tool trigger in {sub_request_id}, output ends with: {output.text[-50:] if len(output.text) > 50 else output.text}")
+        logger.info(
+            f"[process_request_async] Checking for tool trigger in {sub_request_id}, output ends with: {output.text[-50:] if len(output.text) > 50 else output.text}"
+        )
         for candidate_stop_str in sampling_params.stop:
             if candidate_stop_str in tools and output.text.endswith(candidate_stop_str):
                 stop_str = candidate_stop_str
@@ -165,7 +172,9 @@ async def process_request_async(
         # Use the passed executor instead of asyncio's default thread pool to avoid exhausting threads
         # Must use get_running_loop() since we're already in an async context
         if executor is None:
-            logger.error(f"[process_request_async] CRITICAL: executor is None for request {sub_request_id}, will use default thread pool which may deadlock!")
+            logger.error(
+                f"[process_request_async] CRITICAL: executor is None for request {sub_request_id}, will use default thread pool which may deadlock!"
+            )
 
         # Wrapper function to log tool execution
         def tool_wrapper(tool, text):
@@ -192,28 +201,40 @@ async def process_request_async(
         tool_output_token_ids = tokenizer.encode(
             "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
         )
-        logger.info(f"[process_request_async] Tool output tokens for {sub_request_id}: {len(tool_output_token_ids)} tokens")
+        logger.info(
+            f"[process_request_async] Tool output tokens for {sub_request_id}: {len(tool_output_token_ids)} tokens"
+        )
 
         logger.info(f"[process_request_async] Concatenating prompts for {sub_request_id}")
         logger.info(f"[process_request_async] Using cached prompt_token_ids for {sub_request_id}")
-        logger.info(f"[process_request_async] current_prompt_token_ids: {len(current_prompt_token_ids)} tokens for {sub_request_id}")
+        logger.info(
+            f"[process_request_async] current_prompt_token_ids: {len(current_prompt_token_ids)} tokens for {sub_request_id}"
+        )
         logger.info(f"[process_request_async] accumulated_tokens: {len(accumulated_tokens)} for {sub_request_id}")
         prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens + tool_output_token_ids
-        logger.info(f"[process_request_async] Concatenation complete for {sub_request_id}: total={len(prompt_and_tool_output)}")
+        logger.info(
+            f"[process_request_async] Concatenation complete for {sub_request_id}: total={len(prompt_and_tool_output)}"
+        )
         logger.info(f"[process_request_async] Accessing model config for {sub_request_id}")
         max_model_len = llm_engine.model_config.max_model_len
         logger.info(f"[process_request_async] Got max_model_len={max_model_len} for {sub_request_id}")
         excess = len(prompt_and_tool_output) - max_model_len
-        logger.info(f"[process_request_async] Prompt length check for {sub_request_id}: total={len(prompt_and_tool_output)}, excess={excess}")
+        logger.info(
+            f"[process_request_async] Prompt length check for {sub_request_id}: total={len(prompt_and_tool_output)}, excess={excess}"
+        )
         if excess > 0:
             tool_output_token_ids = tool_output_token_ids[:-excess]
             logger.info(f"[process_request_async] Truncated tool output for {sub_request_id} due to model max length")
 
         remaining = sampling_params.max_tokens - len(masks)
-        logger.info(f"[process_request_async] Token budget for {sub_request_id}: remaining={remaining}, masks_len={len(masks)}, max_tokens={sampling_params.max_tokens}")
+        logger.info(
+            f"[process_request_async] Token budget for {sub_request_id}: remaining={remaining}, masks_len={len(masks)}, max_tokens={sampling_params.max_tokens}"
+        )
         if remaining <= 0:
             tool_output_token_ids = []
-            logger.info(f"[process_request_async] No token budget left for {sub_request_id}, clearing tool output tokens")
+            logger.info(
+                f"[process_request_async] No token budget left for {sub_request_id}, clearing tool output tokens"
+            )
         elif len(tool_output_token_ids) > remaining:
             tool_output_token_ids = tool_output_token_ids[:remaining]
             logger.info(f"[process_request_async] Truncated tool output for {sub_request_id} to fit remaining budget")
@@ -222,9 +243,13 @@ async def process_request_async(
         masks.extend([0] * len(tool_output_token_ids))
 
         new_sample_tokens = sampling_params.max_tokens - len(masks)
-        logger.info(f"[process_request_async] Next iteration setup for {sub_request_id}: new_sample_tokens={new_sample_tokens}, will_continue={excess <= 0 and new_sample_tokens > 0}")
+        logger.info(
+            f"[process_request_async] Next iteration setup for {sub_request_id}: new_sample_tokens={new_sample_tokens}, will_continue={excess <= 0 and new_sample_tokens > 0}"
+        )
         if excess > 0 or new_sample_tokens <= 0:
-            logger.info(f"[process_request_async] Breaking loop for {sub_request_id}: excess={excess}, new_sample_tokens={new_sample_tokens}")
+            logger.info(
+                f"[process_request_async] Breaking loop for {sub_request_id}: excess={excess}, new_sample_tokens={new_sample_tokens}"
+            )
             break
 
         current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output, cache_salt=base_request_id)
@@ -232,8 +257,10 @@ async def process_request_async(
         final_prompt_token_ids = prompt_and_tool_output
         current_sampling_params = sampling_params.clone()
         current_sampling_params.max_tokens = new_sample_tokens
-        logger.info(f"[process_request_async] Prepared for next iteration of {sub_request_id}: prompt_len={len(prompt_and_tool_output)}, max_tokens={new_sample_tokens}")
-        logger.info(f"[process_request_async] Looping back to iteration {iteration+1} for {sub_request_id}")
+        logger.info(
+            f"[process_request_async] Prepared for next iteration of {sub_request_id}: prompt_len={len(prompt_and_tool_output)}, max_tokens={new_sample_tokens}"
+        )
+        logger.info(f"[process_request_async] Looping back to iteration {iteration + 1} for {sub_request_id}")
 
     complete_output = vllm.CompletionOutput(
         index=int(sub_request_id.split("_")[-1]),
