@@ -66,6 +66,7 @@ DEFAULT_ENV_VARS = {
     "VLLM_DISABLE_COMPILE_CACHE": "1",
     "NCCL_DEBUG": "ERROR",
     "VLLM_LOGGING_LEVEL": "WARNING",
+    "VLLM_USE_V1": "1",
 }
 
 
@@ -227,19 +228,18 @@ def get_env_vars(
     additional_env_vars: List[Dict[str, str]],
     additional_secrets: List[Dict[str, str]],
 ):
-    env_vars = []
-    conflicting_vars = {var["name"] for var in additional_env_vars} & DEFAULT_ENV_VARS.keys()
-    if conflicting_vars:
-        raise ValueError(f"Cannot override default environment variables: {conflicting_vars}")
+    additional_env_var_names = {var["name"] for var in additional_env_vars}
 
-    for name, value in DEFAULT_ENV_VARS.items():
-        env_vars.append(beaker.BeakerEnvVar(name=name, value=value))
+    env_vars = [
+        beaker.BeakerEnvVar(name=name, value=value)
+        for name, value in DEFAULT_ENV_VARS.items()
+        if name not in additional_env_var_names
+    ]
 
-    for env_var in additional_env_vars:
-        env_vars.append(beaker.BeakerEnvVar(name=env_var["name"], value=env_var["value"]))
+    env_vars.extend([beaker.BeakerEnvVar(name=env_var["name"], value=env_var["value"]) for env_var in additional_env_vars])
+
     # add user-specific secrets
-    for secret in additional_secrets:
-        env_vars.append(beaker.BeakerEnvVar(name=secret["name"], secret=secret["value"]))
+    env_vars.extend([beaker.BeakerEnvVar(name=secret["name"], secret=secret["value"]) for secret in additional_secrets])
 
     useful_secrets = [
         "HF_TOKEN",
