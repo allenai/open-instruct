@@ -771,6 +771,12 @@ class LLMRayActor:
     def ready(self) -> bool:
         return True
 
+    def check_background_threads(self) -> None:
+        if self._prefetch_future.done():
+            self._prefetch_future.result()
+        if self._process_future.done():
+            self._process_future.result()
+
     def get_kv_cache_info(self) -> int:
         """Get KV cache max concurrency from the vLLM engine."""
         cache_config = self.llm_engine.vllm_config.cache_config
