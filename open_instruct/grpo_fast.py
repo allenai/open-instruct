@@ -2303,28 +2303,6 @@ def weight_sync_thread(
     logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
 
 
-def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q):
-    """Thread function that repeatedly calls process_from_queue on vllm engines."""
-    logger.info("[Generate Thread] 🚀 Starting generation thread")
-    while not stop_event.is_set():
-        with Timer("🔥 Generation time") as timer:
-            processed_results, _ = ray_get_with_progress(
-                [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
-                desc="[Generate Thread] Waiting for vLLM engines to process",
-                enable=args.verbose,
-            )
-            num_processed = sum(int(result) for result in processed_results)
-            # Suppress timing output if nothing was processed
-            if num_processed == 0:
-                timer.noop = True
-        if num_processed > 0:
-            try:
-                generate_metrics_Q.put_nowait({"time/generation": timer.duration})
-            except Full:
-                logger.warning("[Generate Thread] generate metrics queue full, skipping metric")
-    logger.info("[Generate Thread] 🛑 Stopping generation thread")
-
-
 def one_training_step(
     args: Args,
     policy_group: ModelGroup,
@@ -2673,7 +2651,6 @@ def cleanup_training_resources(
     actor_manager: ActorManager,
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
-    # Signal generate_thread to stop
     stop_event.set()
 
     logger.info("Signaling all actors to stop...")
@@ -2782,14 +2759,13 @@ def run_training(
         model_dims,
     )
 
-    logger.info("======== ✅ generation thread starts =========")
-    generation_future = executor.submit(
-        generate_thread, args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q
-    )
-
-    # setup health check function to check that everything is still alive
     def health_check_fn():
-        [f.result() for f in [packing_future, generation_future, weight_sync_thread_future] if f.done()]
+        [f.result() for f in [packing_future, weight_sync_thread_future] if f.done()]
+        ray_get_with_progress(
+            [engine.check_background_threads.remote() for engine in vllm_engines],
+            desc="Checking vLLM engine health",
+            enable=False,
+        )
 
     # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps):
@@ -2826,7 +2802,9 @@ def run_training(
             )
 
         # Check if any of the threads have raised an exception.
+        health_check_start = time.perf_counter()
         health_check_fn()
+        health_check_time = time.perf_counter() - health_check_start
 
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
         weight_sync_trigger_event.set()
@@ -2850,7 +2828,6 @@ def run_training(
                 is_eval=True,
             )
 
-        # The generate_thread is now handling vLLM processing asynchronously
         collated_data, data_thread_metrics, num_total_tokens, num_step_tokens, prompt_lengths, response_lengths = (
             load_data_from_packing_thread(packed_sequences_Q, num_total_tokens, stop_event, health_check_fn)
         )
@@ -2862,6 +2839,8 @@ def run_training(
                 data_thread_metrics |= metrics_Q.get_nowait()
             except Empty:
                 logger.info("[Main Thread] didn't get train generation metrics")
+
+        data_thread_metrics["time/health_check"] = health_check_time
 
         one_training_step(
             args,
