@@ -77,19 +77,6 @@ def assert_threaded_actor(instance):
         return
 
 
-async def generate_one_completion(
-    llm_engine: vllm.AsyncLLMEngine, request_id: str, prompt: vllm.TokensPrompt, sampling_params: vllm.SamplingParams
-) -> vllm.RequestOutput:
-    """Generate a single completion from the async engine."""
-    outputs = []
-    async for o in llm_engine.generate(prompt, sampling_params, request_id):
-        if o.finished:
-            outputs.append(o)
-            break
-    assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
-    return outputs[0]
-
-
 async def process_request_async(
     llm_engine: vllm.AsyncLLMEngine,
     sub_request_id: str,
@@ -124,9 +111,9 @@ async def process_request_async(
 
     while True:
         iteration_request_id = f"{sub_request_id}_iter{iteration}"
-        request_output = await generate_one_completion(
-            llm_engine, iteration_request_id, current_prompt, current_sampling_params
-        )
+        outputs = [o async for o in llm_engine.generate(current_prompt, current_sampling_params, iteration_request_id) if o.finished]
+        assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {iteration_request_id}"
+        request_output = outputs[0]
         iteration += 1
         output = request_output.outputs[0]
 
