@@ -42,7 +42,6 @@ uv run python mason.py \
         --non_stop_penalty False \
         --temperature 1.0 \
         --verbose False \
-        --use_vllm_logprobs \
         --ground_truths_key ground_truth \
         --sft_messages_key messages \
         --total_episodes 10_000 \

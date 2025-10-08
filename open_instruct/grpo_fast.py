@@ -1070,6 +1070,13 @@ class PolicyTrainerRayProcess(RayProcess):
                                     old_logprobs[i] = mb_local_logprobs.detach()
                             mb_old_logprobs = old_logprobs[i]
 
+                    old_logprobs_mask = mb_old_logprobs != INVALID_LOGPROB
+                    assert torch.all(old_logprobs_mask == mb_response_masks_bool), (
+                        f"Old logprobs mask should match response mask. "
+                        f"old_mask sum={old_logprobs_mask.sum()}, "
+                        f"response_mask sum={mb_response_masks_bool.sum()}"
+                    )
+
                     # Calculate the policy's loss
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
                     ratio = torch.exp(logprobs_diff)
