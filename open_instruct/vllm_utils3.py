@@ -648,12 +648,6 @@ class LLMRayActor:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
 
-    def maybe_wait_for_requests_to_drain(self) -> None:
-        """Wait for all active requests and tool executions to complete if conditions are met."""
-        if not self.inflight_updates and self._check_should_stop_with_cache():
-            while len(self.active_tasks) > 0:
-                time.sleep(PROCESS_SLEEP_S)
-
     def _accumulate_sub_request(self, sub_request: dict) -> int:
         base_request_id = sub_request["base_request_id"]
         expected_n = sub_request["expected_n"]
@@ -743,7 +737,10 @@ class LLMRayActor:
         return future.result(timeout=timeout)
 
     def _prepare_weight_update(self, name: str, dtype: str) -> None:
-        self.maybe_wait_for_requests_to_drain()
+        # Wait for all active requests to complete.
+        while not self.inflight_updates and len(self.active_tasks) > 0:
+            time.sleep(PROCESS_SLEEP_S)
+
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
 
