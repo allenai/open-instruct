@@ -54,7 +54,6 @@ uv run python mason.py \
     --local_eval_every 1 \
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.3 \
-    --use_vllm_logprobs \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --save_traces \
     --vllm_enforce_eager \

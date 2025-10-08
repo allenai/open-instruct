@@ -42,6 +42,7 @@ uv run python mason.py \
         --non_stop_penalty False \
         --temperature 1.0 \
         --verbose False \
+        --truncated_importance_sampling_ratio_cap 2.0 \
         --ground_truths_key ground_truth \
         --sft_messages_key messages \
         --total_episodes 10_000 \
