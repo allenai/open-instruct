@@ -169,6 +169,16 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
     finish_reasons = [out.finish_reason for out in final_output.outputs]
     use_tools = bool(tools)
 
+    logprobs = []
+    for idx, out in enumerate(final_output.outputs):
+        assert len(out.token_ids) == len(out.logprobs), (
+            f"vLLM CompletionOutput {idx}: token_ids length ({len(out.token_ids)}) "
+            f"!= logprobs length ({len(out.logprobs)})"
+        )
+        logprobs.append(
+            [logprob_dict[token_id].logprob for token_id, logprob_dict in zip(out.token_ids, out.logprobs)]
+        )
+
     # Extract attributes based on whether tools are used
     if use_tools:
         # Extract tool-specific attributes from outputs
@@ -209,6 +219,7 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
             generation_time=current_time - metadata["start_time"],
         ),
         start_time=metadata["start_time"],
+        logprobs=logprobs,
     )
     return result, metadata["is_eval"]
 
