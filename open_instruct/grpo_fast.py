@@ -440,6 +440,11 @@ class Args:
             logger.warning("When using the v0 version of vLLM, caching is broken and will never be invalidated.")
             if self.vllm_enable_prefix_caching:
                 raise ValueError("Prefix caching is currently not supported for v0.")
+        if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
+            raise ValueError(
+                "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
+                "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
+            )
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
@@ -965,25 +970,26 @@ class PolicyTrainerRayProcess(RayProcess):
                         attention_mask = collated_attention_masks[i]
                         position_id = collated_position_ids[i]
                         response_mask = collated_response_masks[i]
-                        local_old_logprob, _ = self.forward(
-                            self.model,
-                            query_response,
-                            attention_mask,
-                            position_id,
-                            pad_token_id,
-                            args.temperature,
-                            return_entropy=False,
-                        )
+                        if not args.use_vllm_logprobs:
+                            local_old_logprob, _ = self.forward(
+                                self.model,
+                                query_response,
+                                attention_mask,
+                                position_id,
+                                pad_token_id,
+                                args.temperature,
+                                return_entropy=False,
+                            )
                         vllm_old_logprob = collated_vllm_logprobs[i][:, 1:]
                         if args.mask_tool_use and args.tool_use:
                             response_mask = response_mask.bool() & tool_mask.bool()
                         else:
                             response_mask = response_mask.bool()
-                        local_old_logprob = torch.masked_fill(
-                            local_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB
-                        )
+                        if not args.use_vllm_logprobs:
+                            local_old_logprob = torch.masked_fill(
+                                local_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB
+                            )
                         vllm_old_logprob = torch.masked_fill(vllm_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
-                        # Replace any remaining NaN values (query tokens in packed sequences are set to NaN by pack_sequences in rl_utils2.py)
                         vllm_old_logprob = torch.nan_to_num(vllm_old_logprob, nan=INVALID_LOGPROB)
                         if args.use_vllm_logprobs:
                             old_logprobs[i] = vllm_old_logprob
