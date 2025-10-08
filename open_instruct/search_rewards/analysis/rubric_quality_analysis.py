@@ -72,16 +72,24 @@ def ask_with_search(prompt: str):
         raise
 
 
-def load_rubric(rubric_id: str, num_samples: int, verbose: bool = True) -> List[str]:
+def load_rubric(rubric_id: str, num_samples: int, format: str = "v1", verbose: bool = True) -> List[str]:
     rubric_data = load_dataset("rl-rag/"+rubric_id, split="train")
     all_criteria = []
     for example in rubric_data:
-        question = json.loads(example["ground_truth"])["Question"]
-        criteria = []
-        for key in ["Answer Critical"]: #, "Valuable", "Context"]:
-            per_sample_criteria = json.loads(example["ground_truth"])[key]
-            for criterion in per_sample_criteria:
-                criteria.append(criterion["Ingredient"])
+        if format == "v1":
+            question = json.loads(example["ground_truth"])["Question"]
+            criteria = []
+            for key in ["Answer Critical"]: #, "Valuable", "Context"]:
+                per_sample_criteria = json.loads(example["ground_truth"])[key]
+                for criterion in per_sample_criteria:
+                    criteria.append(criterion["Ingredient"])
+        elif format == "v2":
+            question = json.loads(example["ground_truth"])["query"]
+            criteria = []
+            for key in ["rubrics"]:
+                per_sample_criteria = json.loads(example["ground_truth"])[key]
+                for criterion in per_sample_criteria:
+                    criteria.append(criterion["description"])
         all_criteria.append((question, criteria))
 
     if verbose:
@@ -242,21 +250,17 @@ def compute_scores(output_file: str) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     num_samples = 300
+    rubric_format = "v2"
     all_rubric_ids = [
-        "rl_rag_train_sqa_1k_clean_search_rubric_longform_rubrics",
-        "rl_rag_train_sqa_1k_clean_dr_rubric_longform_rubrics",
-        "rl_rag_train_sqa_1k_clean_cb_rubric_longform_rubrics"
+        # "rl_rag_train_sqa_1k_clean_search_rubric_longform_rubrics",
+        # "rl_rag_train_sqa_1k_clean_dr_rubric_longform_rubrics",
+        # "rl_rag_train_sqa_1k_clean_cb_rubric_longform_rubrics"
+        "RaR-Medicine-20k-o3-mini-converted"
     ]
     for rubric_id in all_rubric_ids:
-        output_file = os.path.join(
-            "open_instruct",
-            "search_rewards",
-            "analysis",
-            "outputs",
-            f"rubric_quality_analysis_{rubric_id}_{num_samples}.jsonl",
-        )
+        output_file = f"open_instruct/search_rewards/analysis/outputs/rubric_quality_analysis_{rubric_id}_{num_samples}.jsonl"
 
-        all_criteria = load_rubric(rubric_id, num_samples, verbose=False)
+        all_criteria = load_rubric(rubric_id, num_samples, format=rubric_format, verbose=False)
         if not check_existence(output_file, num_samples):
             score_factuality(all_criteria, output_file)
             print(f"Saved results to {output_file}")
