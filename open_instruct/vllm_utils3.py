@@ -50,6 +50,20 @@ from open_instruct.utils import ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
 
+DEFAULT_WORKERS = 2
+TOOL_WORKERS = 20
+INIT_TIMEOUT_S = 120
+WEIGHT_UPDATE_TIMEOUT_S = 120
+DRAIN_TIMEOUT_S = 300.0
+SHOULD_STOP_CACHE_TIMEOUT_S = 5
+PREFETCH_SLEEP_S = 1
+QUEUE_GET_TIMEOUT_S = 0.1
+COMPLETION_QUEUE_TIMEOUT_S = 1.0
+PROCESS_SLEEP_S = 0.1
+RAY_WAIT_TIMEOUT_S = 0.1
+KV_CACHE_RETRIES = 5
+KV_CACHE_RETRY_SLEEP_S = 0.2
+
 
 def assert_threaded_actor(instance):
     """
@@ -483,24 +497,45 @@ class LLMRayActor:
         self.inflight_updates = inflight_updates
         self.verbose = verbose
         self.request_metadata = {}
-        self.completion_queue = queue.Queue()  # Thread-safe queue for completed GenerationResults
+        self.completion_queue = queue.Queue()
 
-        max_workers = 22 if self.tools else 2
+        max_workers = DEFAULT_WORKERS + (TOOL_WORKERS if self.tools else 0)
         self.executor = futures.ThreadPoolExecutor(max_workers=max_workers)
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
-        if kwargs.get("distributed_executor_backend") == "ray":
-            # a hack to make the script work.
-            # stop ray from manipulating *_VISIBLE_DEVICES
-            # at the top-level when the distributed_executor_backend is ray.
+        distributed_executor_backend = kwargs.get("distributed_executor_backend")
+        self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
+
+        self._setup_engine_args(args, bundle_indices, kwargs)
+
+        self.prompt_queue = prompt_queue
+        self.results_queue = results_queue
+        self.eval_results_queue = eval_results_queue
+        self.actor_manager = actor_manager
+
+        self._last_should_stop_update = float("-inf")
+        self._should_stop_value = False
+        self._should_stop_timeout_s = SHOULD_STOP_CACHE_TIMEOUT_S
+        self._inflight_ref = None
+
+        self.active_tasks = {}
+        self.request_outputs = {}
+
+        self._initialize_async_loop()
+
+        self._prefetch_future = self.executor.submit(self._prefetch_worker)
+        self._process_future = self.executor.submit(self.process_from_queue)
+
+    def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str):
+        """Configure GPU visibility for Ray and vLLM."""
+        if distributed_executor_backend == "ray":
             os.environ.pop("CUDA_VISIBLE_DEVICES", None)
             os.environ.pop("ROCR_VISIBLE_DEVICES", None)
         elif noset_visible_devices:
-            # We need to set CUDA_VISIBLE_DEVICES to the ray assigned GPU
-            # when the distributed_executor_backend is not ray and
-            # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
             os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
 
+    def _setup_engine_args(self, args, bundle_indices, kwargs):
+        """Create and configure vLLM engine arguments."""
         num_gpus = kwargs.pop("num_gpus")
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
@@ -509,44 +544,20 @@ class LLMRayActor:
                 self.logger.info(f"creating LLM with bundle_indices={bundle_indices}")
 
         self.engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
-        # Log stats causes a crash in the engine at assert outputs.scheduler_stats is not None when we call step() and there is nothing to step.
         self.engine_args.disable_log_stats = True
-
-        # Cascade attention has known performance issues: https://github.com/vllm-project/vllm/issues/17652
         self.engine_args.disable_cascade_attn = True
 
+    def _initialize_async_loop(self):
+        """Start async event loop and initialize the engine."""
+        self.init_complete = threading.Event()
+        self.loop = None
         self.llm_engine = None
 
-        self.prompt_queue = prompt_queue
-        self.results_queue = results_queue
-        self.eval_results_queue = eval_results_queue
-        self.actor_manager = actor_manager
-
-        # For caching should_stop status.
-        self._last_should_stop_update = float("-inf")
-        self._should_stop_value = False
-        self._should_stop_timeout_s = 5
-        self._inflight_ref = None
-
-        # Async tracking for request accumulation
-        self.active_tasks = {}  # Track active async tasks
-        self.request_outputs = {}  # Accumulate outputs until all N samples complete
-
-        # Initialize async components with our own event loop
-        self.init_complete = threading.Event()
-        self.loop = None  # Will be set in thread
-        self.llm_engine = None  # Will be set in thread
-
-        # Start the async loop thread
         self.loop_thread = threading.Thread(target=self._run_async_loop, daemon=True)
         self.loop_thread.start()
 
-        # Wait for engine initialization
-        if not self.init_complete.wait(timeout=120):
-            raise RuntimeError("Failed to initialize AsyncLLMEngine within 120 seconds")
-
-        self._prefetch_future = self.executor.submit(self._prefetch_worker)
-        self._process_future = self.executor.submit(self.process_from_queue)
+        if not self.init_complete.wait(timeout=INIT_TIMEOUT_S):
+            raise RuntimeError(f"Failed to initialize AsyncLLMEngine within {INIT_TIMEOUT_S} seconds")
 
     def _run_async_loop(self):
         """Run the async event loop in a dedicated thread."""
@@ -564,20 +575,20 @@ class LLMRayActor:
         # Keep loop running for async operations
         self.loop.run_forever()
 
-    def _prefetch_worker(self, sleep_length_s: int = 1):
+    def _prefetch_worker(self):
         """Background worker that prefetches requests until we have enough buffered."""
         while True:
             if self._should_stop():
-                time.sleep(sleep_length_s)
+                time.sleep(PREFETCH_SLEEP_S)
                 continue
 
             current_unfinished = len(self.active_tasks)
             if current_unfinished >= self.inference_batch_size:
-                time.sleep(sleep_length_s)
+                time.sleep(PREFETCH_SLEEP_S)
                 continue
 
             try:
-                request = self.prompt_queue.get(timeout=0.1)
+                request = self.prompt_queue.get(timeout=QUEUE_GET_TIMEOUT_S)
             except queue.Empty:
                 continue
 
@@ -586,7 +597,7 @@ class LLMRayActor:
 
             if self._should_stop():
                 self.prompt_queue.put(request)
-                time.sleep(sleep_length_s)
+                time.sleep(PREFETCH_SLEEP_S)
                 continue
 
             self._add_request_sync(request)
@@ -612,7 +623,7 @@ class LLMRayActor:
     def _should_stop(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
             should_stop_ref = self.actor_manager.should_stop.remote()
-            ready_refs, _ = ray.wait([should_stop_ref], timeout=0.1)
+            ready_refs, _ = ray.wait([should_stop_ref], timeout=RAY_WAIT_TIMEOUT_S)
             if ready_refs:
                 self._should_stop_value = ray.get(ready_refs[0])
                 self._last_should_stop_update = time.perf_counter()
@@ -620,7 +631,7 @@ class LLMRayActor:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
 
-    def _wait_for_requests_to_drain(self, timeout: float = 300.0):
+    def _wait_for_requests_to_drain(self, timeout: float = DRAIN_TIMEOUT_S):
         """Wait for all active requests and tool executions to complete."""
         start_time = time.perf_counter()
         while len(self.active_tasks) > 0:
@@ -629,7 +640,7 @@ class LLMRayActor:
                     f"Timeout waiting for requests to drain. {len(self.active_tasks)} tasks remaining."
                 )
                 break
-            time.sleep(0.1)
+            time.sleep(PROCESS_SLEEP_S)
 
     def _add_request_sync(self, request: PromptRequest):
         """Add a request by spawning async tasks."""
@@ -677,7 +688,7 @@ class LLMRayActor:
             )
             self.active_tasks[sub_request_id] = future
 
-    def process_from_queue(self, timeout: float = 60.0):
+    def process_from_queue(self):
         """Run generation loop pulling from completion queue.
 
         Returns:
@@ -690,7 +701,7 @@ class LLMRayActor:
                 self._prefetch_future.result()
 
             try:
-                sub_request = self.completion_queue.get(timeout=1.0)
+                sub_request = self.completion_queue.get(timeout=COMPLETION_QUEUE_TIMEOUT_S)
 
                 base_request_id = sub_request["base_request_id"]
                 expected_n = sub_request["expected_n"]
@@ -733,7 +744,7 @@ class LLMRayActor:
                     total_processed += 1
 
             except queue.Empty:
-                time.sleep(0.1)
+                time.sleep(PROCESS_SLEEP_S)
 
         return total_processed
 
@@ -766,33 +777,33 @@ class LLMRayActor:
         )
         return future.result(timeout=timeout_minutes * 60)
 
-    def update_weight(self, name, dtype, shape, empty_cache=False):
+    def _prepare_weight_update(self, name: str, dtype: str):
         if not self.inflight_updates and self._should_stop():
             self._wait_for_requests_to_drain()
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
+
+    def update_weight(self, name, dtype, shape, empty_cache=False):
+        self._prepare_weight_update(name, dtype)
         future = asyncio.run_coroutine_threadsafe(
             self.llm_engine.engine_core.collective_rpc_async("update_weight", args=(name, dtype, shape, empty_cache)),
             self.loop,
         )
-        return future.result(timeout=120)
+        return future.result(timeout=WEIGHT_UPDATE_TIMEOUT_S)
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        if not self.inflight_updates and self._should_stop():
-            self._wait_for_requests_to_drain()
-        expected_dtype = str(self.llm_engine.model_config.dtype)
-        assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
+        self._prepare_weight_update(name, dtype)
         future = asyncio.run_coroutine_threadsafe(
             self.llm_engine.engine_core.collective_rpc_async(
                 "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
             ),
             self.loop,
         )
-        return future.result(timeout=120)
+        return future.result(timeout=WEIGHT_UPDATE_TIMEOUT_S)
 
     def reset_prefix_cache(self):
         future = asyncio.run_coroutine_threadsafe(self.llm_engine.reset_prefix_cache(), self.loop)
-        return future.result(timeout=120)
+        return future.result(timeout=WEIGHT_UPDATE_TIMEOUT_S)
 
     def ready(self):
         # Engine and prefetch are already initialized in __init__
@@ -800,14 +811,10 @@ class LLMRayActor:
 
     def get_kv_cache_info(self):
         """Get KV cache max concurrency from the vLLM engine."""
-        # In vLLM v1, AsyncLLM has direct attributes model_config and vllm_config
         cache_config = self.llm_engine.vllm_config.cache_config
         model_config = self.llm_engine.model_config
 
-        # Use the same calculation as vLLM's executor_base.py
-        # Reference: https://github.com/vllm-project/vllm/blob/b6553be1bc75f046b00046a4ad7576364d03c835/vllm/executor/executor_base.py#L119-L120
-        retries = 5
-        for attempt in range(retries):
+        for attempt in range(KV_CACHE_RETRIES):
             num_gpu_blocks = cache_config.num_gpu_blocks
             block_size = cache_config.block_size
             max_model_len = model_config.max_model_len
@@ -816,8 +823,7 @@ class LLMRayActor:
                 max_concurrency = (num_gpu_blocks * block_size) / max_model_len
                 return int(max_concurrency)
 
-            # Not initialized yet; wait a bit
-            time.sleep(0.2)
+            time.sleep(KV_CACHE_RETRY_SLEEP_S)
 
         logger.warning("num_gpu_blocks not initialized after retries, returning default value 1")
         return 1
