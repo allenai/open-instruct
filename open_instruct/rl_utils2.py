@@ -6,7 +6,6 @@ from typing import Generic, List, Optional, TypeVar
 import numpy as np
 import torch
 from rich.pretty import pprint
-import logging
 
 from open_instruct import logger_utils
 
@@ -118,26 +117,13 @@ def pack_sequences(
         # Filter out padding tokens from response, mask, and logprobs together
         response_logprobs_unfiltered = vllm_logprobs[i]
 
-        # vLLM should return N logprobs for N generated tokens.
-        # If not, this indicates a bug - either in vLLM or in our EOS appending logic.
-        if len(response_logprobs_unfiltered) != len(response):
-            import logging
-
-            logger = logging.getLogger(__name__)
-            logger.error(
-                f"Response {i}: UNEXPECTED logprobs length mismatch! "
-                f"response_length={len(response)}, "
-                f"logprobs_length={len(response_logprobs_unfiltered)}. "
-                f"This should not happen after fixing EOS appending logic."
-            )
+        assert len(response_logprobs_unfiltered) == len(response), (
+            f"Response {i}: logprobs length ({len(response_logprobs_unfiltered)}) != response length ({len(response)})"
+        )
 
         filtered_response = []
         filtered_mask = []
         filtered_logprobs = []
-        assert len(response_logprobs_unfiltered) >= len(response), (
-            f"Response {i}: Not enough logprobs after alignment. "
-            f"response_logprobs_unfiltered has {len(response_logprobs_unfiltered)} but response has {len(response)}"
-        )
         for j, (token, mask_val) in enumerate(zip(response, mask)):
             if token != pad_token_id:
                 filtered_response.append(token)
