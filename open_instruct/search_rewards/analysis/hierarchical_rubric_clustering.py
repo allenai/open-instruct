@@ -983,7 +983,8 @@ def run_example():
     newline = "\n"
     print(f"Few examples of criteria: {newline.join(criteria[:5])}")
 
-    criteria = list(set(criteria))[:3000]  # Remove duplicates
+    num_criteria = 100
+    criteria = list(set(criteria))[:num_criteria]  # Remove duplicates
     
     # Initialize the clustering algorithm
     # For a real-world scenario with 3,307 values as mentioned in the paper, 
@@ -999,16 +1000,23 @@ def run_example():
     # Build the hierarchy
     hierarchy = hierarchical_clustering.build_hierarchy()
     
+    # Ensure output directory exists before writing files
+    output_dir = os.path.join("outputs", "rubric_analysis")
+    os.makedirs(output_dir, exist_ok=True)
+
     # Visualize the hierarchy
-    viz_file = hierarchical_clustering.visualize_hierarchy(f"outputs/rubric_analysis/{rubric_id}_hierarchy.html")
+    viz_path = os.path.join(output_dir, f"{rubric_id}_hierarchy_{num_criteria}.html")
+    viz_file = hierarchical_clustering.visualize_hierarchy(viz_path)
     logger.info(f"Hierarchy visualization saved to {viz_file}")
 
     # Create the tree visualization
-    tree_file = hierarchical_clustering.visualize_tree(f"outputs/rubric_analysis/{rubric_id}_hierarchy_tree.html")
+    tree_path = os.path.join(output_dir, f"{rubric_id}_hierarchy_tree_{num_criteria}.html")
+    tree_file = hierarchical_clustering.visualize_tree(tree_path)
     logger.info(f"Tree visualization saved to {tree_file}")
     
     # Export to CSV
-    csv_file = hierarchical_clustering.export_to_csv(f"outputs/rubric_analysis/{rubric_id}_hierarchy.csv")
+    csv_path = os.path.join(output_dir, f"{rubric_id}_hierarchy_{num_criteria}.csv")
+    csv_file = hierarchical_clustering.export_to_csv(csv_path)
     logger.info(f"Hierarchy exported to {csv_file}")
 
     
