@@ -114,18 +114,11 @@ def _truncate_tool_output_tokens(
 
 
 async def process_request_async(
-    llm_engine: vllm.AsyncLLMEngine,
+    actor: "LLMRayActor",
     sub_request_id: str,
     base_request_id: str,
     prompt: vllm.TokensPrompt,
     sampling_params: vllm.SamplingParams,
-    completion_queue: queue.Queue,
-    request_metadata: dict,
-    active_tasks: dict,
-    tools: Optional[Dict[str, Tool]] = None,
-    max_tool_calls: Optional[Dict[str, int]] = None,
-    executor: Optional[futures.ThreadPoolExecutor] = None,
-    tokenizer=None,
 ):
     """Process a single async request with tool support, awaiting tools inline."""
     accumulated_tokens = []
@@ -138,9 +131,7 @@ async def process_request_async(
     tool_called = False
 
     current_prompt = prompt
-    current_prompt_token_ids = request_metadata[base_request_id][
-        "prompt_token_ids"
-    ]  # Already stored as list on submit path
+    current_prompt_token_ids = actor.request_metadata[base_request_id]["prompt_token_ids"]
     current_sampling_params = sampling_params.clone()
     final_prompt_token_ids = None
     iteration = 0
@@ -149,7 +140,7 @@ async def process_request_async(
         iteration_request_id = f"{sub_request_id}_iter{iteration}"
         outputs = [
             o
-            async for o in llm_engine.generate(current_prompt, current_sampling_params, iteration_request_id)
+            async for o in actor.llm_engine.generate(current_prompt, current_sampling_params, iteration_request_id)
             if o.finished
         ]
         assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {iteration_request_id}"
@@ -163,19 +154,21 @@ async def process_request_async(
         accumulated_tokens.extend(output.token_ids)
         masks.extend([1] * len(output.token_ids))
 
-        if not tools or not max_tool_calls:
+        if not actor.tools or not actor.max_tool_calls:
             break
 
-        tool_result_tuple = get_triggered_tool(output.text, tools, max_tool_calls, num_calls, sampling_params)
+        tool_result_tuple = get_triggered_tool(
+            output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
+        )
         if tool_result_tuple is None:
             break
 
         triggered_tool, stop_str = tool_result_tuple
 
-        assert executor is not None, f"executor is None for request {sub_request_id}"
+        assert actor.executor is not None, f"executor is None for request {sub_request_id}"
 
         loop = asyncio.get_running_loop()
-        tool_result = await loop.run_in_executor(executor, triggered_tool, output.text)
+        tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
 
         tool_called = True
         num_calls += 1
@@ -184,7 +177,7 @@ async def process_request_async(
         tool_output += tool_result.output
         tool_runtime += tool_result.runtime
 
-        tool_output_token_ids = tokenizer.encode(
+        tool_output_token_ids = actor.llm_engine.tokenizer.encode(
             "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
         )
 
@@ -192,7 +185,7 @@ async def process_request_async(
             tool_output_token_ids,
             current_prompt_token_ids,
             accumulated_tokens,
-            llm_engine.model_config.max_model_len,
+            actor.llm_engine.model_config.max_model_len,
             sampling_params.max_tokens,
             len(masks),
         )
@@ -220,7 +213,7 @@ async def process_request_async(
         stop_reason=output.stop_reason,
     )
 
-    if tools:
+    if actor.tools:
         setattr(complete_output, "mask", masks)
         setattr(complete_output, "num_calls", num_calls)
         setattr(complete_output, "timeout", timeout)
@@ -229,23 +222,23 @@ async def process_request_async(
         setattr(complete_output, "tool_runtime", tool_runtime)
         setattr(complete_output, "tool_called", tool_called)
 
-    active_tasks.pop(sub_request_id, None)
+    actor.active_tasks.pop(sub_request_id, None)
 
-    sub_request_result = {
-        "base_request_id": base_request_id,
-        "expected_n": request_metadata[base_request_id]["original_sampling_params"].n,
-        "request_output": vllm.RequestOutput(
-            request_id=sub_request_id,
-            prompt=request_output.prompt,
-            prompt_token_ids=final_prompt_token_ids,
-            prompt_logprobs=request_output.prompt_logprobs,
-            outputs=[complete_output],
-            finished=True,
-        ),
-        "tools": tools,
-    }
-
-    completion_queue.put(sub_request_result)
+    actor.completion_queue.put(
+        {
+            "base_request_id": base_request_id,
+            "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
+            "request_output": vllm.RequestOutput(
+                request_id=sub_request_id,
+                prompt=request_output.prompt,
+                prompt_token_ids=final_prompt_token_ids,
+                prompt_logprobs=request_output.prompt_logprobs,
+                outputs=[complete_output],
+                finished=True,
+            ),
+            "tools": actor.tools,
+        }
+    )
 
 
 async def _init_engine_async(actor):
@@ -379,7 +372,7 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
         dataset_index=metadata["dataset_index"],
         training_step=metadata["training_step"],
         token_statistics=TokenStatistics(
-            num_prompt_tokens=metadata["prompt_tokens"],
+            num_prompt_tokens=len(metadata["prompt_token_ids"]),
             num_response_tokens=total_generation_tokens,
             generation_time=current_time - metadata["start_time"],
         ),
@@ -478,9 +471,6 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
         except queue.Empty:
             continue
 
-        if request is None:
-            continue
-
         _add_request(actor, request)
 
 
@@ -496,7 +486,6 @@ def _add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "training_step": request.training_step,
         "sampling_params": sampling_params,
         "original_sampling_params": request.generation_config,
-        "prompt_tokens": len(request.prompt),
         "prompt_token_ids": list(request.prompt),
         "start_time": time.perf_counter(),
     }
@@ -508,25 +497,9 @@ def _add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         if request.generation_config.seed is not None:
             sub_sampling_params.seed = request.generation_config.seed + j
         sub_request_id = f"{request_id}_{j}"
-
-        future = asyncio.run_coroutine_threadsafe(
-            process_request_async(
-                actor.llm_engine,
-                sub_request_id,
-                request_id,
-                tokens_prompt,
-                sub_sampling_params,
-                actor.completion_queue,
-                actor.request_metadata,
-                actor.active_tasks,
-                actor.tools,
-                actor.max_tool_calls,
-                actor.executor,
-                actor.llm_engine.tokenizer,
-            ),
-            actor.loop,
+        actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
+            process_request_async(actor, sub_request_id, request_id, tokens_prompt, sub_sampling_params), actor.loop
         )
-        actor.active_tasks[sub_request_id] = future
 
 
 class LLMRayActor:

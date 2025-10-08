@@ -57,7 +57,7 @@ class TestVllmUtils3(unittest.TestCase):
                 "is_eval": False,
                 "dataset_index": 43039,
                 "training_step": 1,
-                "prompt_tokens": 10,
+                "prompt_token_ids": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
                 "start_time": 1000.0,
             }
         }
@@ -122,7 +122,7 @@ class TestVllmUtils3(unittest.TestCase):
                 "is_eval": True,
                 "dataset_index": 200,
                 "training_step": 2,
-                "prompt_tokens": 5,
+                "prompt_token_ids": [1, 2, 3, 4, 5],
                 "start_time": 2000.0,
             }
         }
