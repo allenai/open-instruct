@@ -233,33 +233,12 @@ async def process_request_async(
     completion_queue.put(sub_request_result)
 
 
-async def _process_sync_requests(actor):
-    """Background task that processes sync method requests from other threads."""
-    while True:
-        await asyncio.sleep(0.01)
-        try:
-            coro, result_container, done_event = actor._sync_request_queue.get_nowait()
-            try:
-                result = await coro
-                result_container["result"] = result
-                result_container["error"] = None
-            except Exception as e:
-                logger.error(f"Error executing sync request: {e}")
-                result_container["result"] = None
-                result_container["error"] = e
-            finally:
-                done_event.set()
-        except queue.Empty:
-            pass
-
-
 async def _init_engine_async(actor):
     """Initialize the AsyncLLMEngine from within the running event loop."""
     running_loop = asyncio.get_running_loop()
     assert running_loop == actor.loop, f"Loop mismatch! running={running_loop}, actor.loop={actor.loop}"
 
     actor.llm_engine = vllm.AsyncLLMEngine.from_engine_args(actor.engine_args, start_engine_loop=False)
-    asyncio.create_task(_process_sync_requests(actor), name="SyncRequestProcessor")
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -551,9 +530,6 @@ class LLMRayActor:
         self.active_tasks = {}  # Track active async tasks
         self.request_outputs = {}  # Accumulate outputs until all N samples complete
 
-        # Sync-to-async bridge for calling async methods from sync context
-        self._sync_request_queue = queue.Queue()
-
         # Initialize async components with our own event loop
         self.init_complete = threading.Event()
         self.loop = None  # Will be set in thread
@@ -748,21 +724,6 @@ class LLMRayActor:
 
         return total_processed
 
-    def _call_async_from_sync(self, coro, timeout=120):
-        """Bridge to call async coroutines from sync methods by delegating to event loop thread."""
-        result_container = {}
-        done_event = threading.Event()
-
-        self._sync_request_queue.put((coro, result_container, done_event))
-
-        if not done_event.wait(timeout=timeout):
-            raise TimeoutError(f"Async call timed out after {timeout}s")
-
-        if result_container.get("error"):
-            raise result_container["error"]
-
-        return result_container.get("result")
-
     def init_process_group(
         self,
         master_address,
@@ -774,7 +735,7 @@ class LLMRayActor:
         use_ray=False,
         timeout_minutes=120,
     ):
-        return self._call_async_from_sync(
+        future = asyncio.run_coroutine_threadsafe(
             self.llm_engine.engine_core.collective_rpc_async(
                 "init_process_group",
                 args=(
@@ -788,27 +749,33 @@ class LLMRayActor:
                     timeout_minutes,
                 ),
             ),
-            timeout=timeout_minutes * 60,
+            self.loop,
         )
+        return future.result(timeout=timeout_minutes * 60)
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
-        return self._call_async_from_sync(
-            self.llm_engine.engine_core.collective_rpc_async("update_weight", args=(name, dtype, shape, empty_cache))
+        future = asyncio.run_coroutine_threadsafe(
+            self.llm_engine.engine_core.collective_rpc_async("update_weight", args=(name, dtype, shape, empty_cache)),
+            self.loop,
         )
+        return future.result(timeout=120)
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
-        return self._call_async_from_sync(
+        future = asyncio.run_coroutine_threadsafe(
             self.llm_engine.engine_core.collective_rpc_async(
                 "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
-            )
+            ),
+            self.loop,
         )
+        return future.result(timeout=120)
 
     def reset_prefix_cache(self):
-        return self._call_async_from_sync(self.llm_engine.reset_prefix_cache())
+        future = asyncio.run_coroutine_threadsafe(self.llm_engine.reset_prefix_cache(), self.loop)
+        return future.result(timeout=120)
 
     def ready(self):
         # Engine and prefetch are already initialized in __init__
