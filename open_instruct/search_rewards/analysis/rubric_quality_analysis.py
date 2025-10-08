@@ -1,7 +1,7 @@
 import re
 import json
 import random
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from datasets import load_dataset
 
 import os
@@ -10,7 +10,7 @@ from openai import OpenAI, OpenAIError
 
 FACTUALITY_EVAL_PROMPT_LIST_CRITERIA = (
     "You are a careful evaluator that determines whether each criterion contains a factual claim, "
-    "and if so, whether that claim is factually correct."
+    "and if so, whether that claim is factually correct and verifiable."
     "\n\nInstructions:"
     "\n1. Read the question and the list of criteria carefully."
     "\n2. For each criterion, decide first whether it *makes a factual claim* — that is, whether it asserts "
@@ -18,30 +18,34 @@ FACTUALITY_EVAL_PROMPT_LIST_CRITERIA = (
     "\n\n   **Distinguishing referential vs. assertive phrasing:**"
     "\n   - Referential (→ NA): Criteria that only ask to *mention*, *explain*, *describe*, *discuss*, or *include information about* something, "
     "without specifying what that information should be. These refer to factual topics but do not assert any particular fact."
-    "\n     - Example: 'Explain the principle of masked diffusion models.' → NA (it requests an explanation but does not assert what the principle is)."
-    "\n     - Example: 'Mention information about A.' → NA (no verifiable claim)."
+    "\n     - Example: 'Explain the principle of masked diffusion models.' → NA (requests explanation, not asserting the content)."
+    "\n     - Example: 'Mention information about A.' → NA."
     "\n   - Assertive (→ factual claim): Criteria that *state or imply a specific fact*, relationship, or property that could be true or false. "
     "They assert content, not just reference it."
     "\n     - Example: 'Masked diffusion models use random masking during the denoising process.' → factual claim."
     "\n     - Example: 'A is located in B.' → factual claim."
     "\n3. If the criterion is about writing style, tone, clarity, structure, or formatting, or if it only requires mentioning or explaining topics "
     "without specifying factual assertions, return 'NA'."
-    "\n4. If the criterion contains a factual claim, evaluate its correctness based on reliable knowledge or reasoning."
-    "\n5. Assign a factuality score as follows:"
-    "\n   - 1 → All factual criteria are correct."
-    "\n   - Between 0 and 1 → Some factual criteria are correct, others are incorrect (average their factual correctness)."
-    "\n   - 0 → All factual criteria are incorrect."
-    "\n   - 'NA' → None of the criteria contain any factual claims (e.g., all are about writing quality, general coverage, or referential requests)."
-    "\n6. When uncertain:"
-    "\n   - If the criterion only requires including or explaining information about a topic, treat it as NA."
-    "\n   - If it specifies what the information *should be* (e.g., 'A causes B', 'A is defined as C'), treat it as a factual claim."
-    "\n7. When the criterion involves a specific entity, number, or event, perform a search to confirm. "
-    "If the information cannot be verified, assign a neutral score of 0.5."
-    "\n8. Also output the number of factual (non-NA) and non-factual (NA) criteria."
+    "\n4. For each factual claim, check whether it can be verified using reliable evidence or reasoning."
+    "\n   - If evidence confirms it → factual and correct."
+    "\n   - If reliable evidence contradicts it → factual but incorrect."
+    "\n   - If no verifiable evidence is found (e.g., no data, no known sources) → factual but *unverified*."
+    "\n5. Compute the factuality score as:"
+    "\n   - 1 → All verifiable factual claims are correct."
+    "\n   - Between 0 and 1 → Some verifiable factual claims are correct, others are incorrect (average them)."
+    "\n   - 0 → All verifiable factual claims are incorrect."
+    "\n   - 'NA' → None of the criteria make any factual claims."
+    "\n6. Do *not* lower the score for claims that are unverified (i.e., lacking evidence) unless there is evidence showing they are *false*."
+    "\n7. Also count how many criteria are assertive but unverified."
     "\n\nOutput Format:"
     "\nReturn your result strictly in JSON format as follows:"
-    "\n{{\"factual_score\": <float_or_\"NA\">, \"explanation\": \"<short explanation>\", "
-    "\"num_non_na_criteria\": <number>, \"num_na_criteria\": <number>}}"
+    "\n{{"
+    "\"factual_score\": <float_or_\"NA\">, "
+    "\"explanation\": \"<short explanation>\", "
+    "\"num_non_na_criteria\": <number>, "
+    "\"num_na_criteria\": <number>, "
+    "\"num_unverified_assertive_criteria\": <number>"
+    "}}"
     "\n\nNow evaluate the following:"
     "\nQuestion: {question}"
     "\nCriteria: {criteria}"
@@ -165,10 +169,13 @@ def parse_response(response: str) -> Dict[str, Any]:
                     explanation = explanation_match.group(1) if explanation_match else "Partial response - explanation truncated"
                     num_non_na_match = re.search(r'"num_non_na_criteria":\s*(\d+)', response)
                     num_na_match = re.search(r'"num_na_criteria":\s*(\d+)', response)
+                    num_unverified_match = re.search(r'"num_unverified_assertive_criteria":\s*(\d+)', response)
                     parsed_response: Dict[str, Any] = {"factual_score": score_value, "explanation": explanation}
                     if num_non_na_match and num_na_match:
                         parsed_response["num_non_na_criteria"] = int(num_non_na_match.group(1))
                         parsed_response["num_na_criteria"] = int(num_na_match.group(1))
+                    if num_unverified_match:
+                        parsed_response["num_unverified_assertive_criteria"] = int(num_unverified_match.group(1))
                     return parsed_response
                 else:
                     print(f"Failed to parse response: {response}")
@@ -183,10 +190,13 @@ def parse_response(response: str) -> Dict[str, Any]:
                 explanation = explanation_match.group(1) if explanation_match else "Partial response - explanation truncated"
                 num_non_na_match = re.search(r'"num_non_na_criteria":\s*(\d+)', response)
                 num_na_match = re.search(r'"num_na_criteria":\s*(\d+)', response)
+                num_unverified_match = re.search(r'"num_unverified_assertive_criteria":\s*(\d+)', response)
                 parsed_response = {"factual_score": score_value, "explanation": explanation}
                 if num_non_na_match and num_na_match:
                     parsed_response["num_non_na_criteria"] = int(num_non_na_match.group(1))
                     parsed_response["num_na_criteria"] = int(num_na_match.group(1))
+                if num_unverified_match:
+                    parsed_response["num_unverified_assertive_criteria"] = int(num_unverified_match.group(1))
                 return parsed_response
             else:
                 print(f"Failed to parse response even after extracting from markdown: {response}")
@@ -199,31 +209,36 @@ def compute_scores(output_file: str) -> Dict[str, Any]:
     
     num_na = 0
     num_failed_to_parse = 0
-    non_na_factual_scores = []
+    non_na_factual_scores: List[float] = []
     total_num_non_na_criteria = 0
     total_num_na_criteria = 0
+    total_num_unverified_assertive_criteria = 0
     num_missing_criteria_counts = 0
+    num_missing_unverified_counts = 0
     for result in results:
         try:
             response = parse_response(result["response"])
         except Exception:
             num_failed_to_parse += 1
-            non_na_factual_scores.append(0.0)
             continue
-        if response["factual_score"] == "NA":
+
+        factual_score_raw = response.get("factual_score")
+        numeric_score: Optional[float] = None
+
+        if factual_score_raw == "NA":
             num_na += 1
-            response["factual_score"] = 0.0
-            non_na_factual_scores.append(0.0)
-        elif response["factual_score"] == "failed_to_parse":
-            num_failed_to_parse += 1
-            response["factual_score"] = 0.0
-            non_na_factual_scores.append(0.0)
         else:
-            response["factual_score"] = float(response["factual_score"])
-            non_na_factual_scores.append(response["factual_score"])
+            try:
+                numeric_score = float(factual_score_raw)
+            except (TypeError, ValueError):
+                num_failed_to_parse += 1
+
+        if numeric_score is not None:
+            non_na_factual_scores.append(numeric_score)
 
         non_na_count = response.get("num_non_na_criteria")
         na_count = response.get("num_na_criteria")
+        unverified_count = response.get("num_unverified_assertive_criteria")
         if non_na_count is not None and na_count is not None:
             try:
                 total_num_non_na_criteria += int(non_na_count)
@@ -232,18 +247,38 @@ def compute_scores(output_file: str) -> Dict[str, Any]:
                 num_missing_criteria_counts += 1
         else:
             num_missing_criteria_counts += 1
+
+        if unverified_count is not None:
+            try:
+                total_num_unverified_assertive_criteria += int(unverified_count)
+            except (TypeError, ValueError):
+                num_missing_unverified_counts += 1
+        else:
+            num_missing_unverified_counts += 1
     
     print(f"Num NA: {num_na}, fraction: {num_na / len(results)}")
     print(f"Num failed to parse: {num_failed_to_parse}, fraction: {num_failed_to_parse / len(results)}")
-    print(f"Mean non-NA factual score: {sum(non_na_factual_scores) / len(non_na_factual_scores)}")
+    if non_na_factual_scores:
+        mean_non_na = sum(non_na_factual_scores) / len(non_na_factual_scores)
+        print(f"Mean non-NA factual score: {mean_non_na}")
+    else:
+        print("Mean non-NA factual score: NA (no non-NA responses)")
     total_criteria = total_num_non_na_criteria + total_num_na_criteria
     if total_criteria > 0:
         print(
             f"Fraction assertive claims: {total_num_non_na_criteria / total_criteria} "
             f"({total_num_non_na_criteria}/{total_criteria})"
         )
+    if total_num_non_na_criteria > 0:
+        print(
+            f"Fraction unverified assertive claims: "
+            f"{total_num_unverified_assertive_criteria / total_num_non_na_criteria} "
+            f"({total_num_unverified_assertive_criteria}/{total_num_non_na_criteria})"
+        )
     if num_missing_criteria_counts:
         print(f"Missing criteria counts in {num_missing_criteria_counts} responses")
+    if num_missing_unverified_counts:
+        print(f"Missing unverified assertive counts in {num_missing_unverified_counts} responses")
     print("#"*30)
     return results
     
@@ -258,7 +293,7 @@ if __name__ == "__main__":
         "RaR-Medicine-20k-o3-mini-converted"
     ]
     for rubric_id in all_rubric_ids:
-        output_file = f"open_instruct/search_rewards/analysis/outputs/rubric_quality_analysis_{rubric_id}_{num_samples}.jsonl"
+        output_file = f"open_instruct/search_rewards/analysis/outputs_old4/rubric_quality_analysis_{rubric_id}_{num_samples}.jsonl"
 
         all_criteria = load_rubric(rubric_id, num_samples, format=rubric_format, verbose=False)
         if not check_existence(output_file, num_samples):
