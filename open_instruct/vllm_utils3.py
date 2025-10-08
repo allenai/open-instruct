@@ -118,7 +118,9 @@ async def process_request_async(
     tool_called = False
 
     current_prompt = prompt
-    current_prompt_token_ids = request_metadata[base_request_id]["prompt_token_ids"]  # Already stored as list on submit path
+    current_prompt_token_ids = request_metadata[base_request_id][
+        "prompt_token_ids"
+    ]  # Already stored as list on submit path
     current_sampling_params = sampling_params.clone()
     final_prompt_token_ids = None
     iteration = 0
@@ -577,13 +579,9 @@ class LLMRayActor:
         self.verbose = verbose
         self.request_metadata = {}
         self.completion_queue = queue.Queue()  # Thread-safe queue for completed GenerationResults
-        self._future_check_interval_s = 5
-        self._last_future_check = time.monotonic()
 
-        if self.tools:
-            self.executor = futures.ThreadPoolExecutor(max_workers=20)
-        else:
-            self.executor = None
+        max_workers = 22 if self.tools else 2
+        self.executor = futures.ThreadPoolExecutor(max_workers=max_workers)
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
@@ -629,8 +627,6 @@ class LLMRayActor:
         self._should_stop_timeout_s = 5
         self._inflight_ref = None
 
-        self._executor = futures.ThreadPoolExecutor(max_workers=2)
-
         # Async tracking for request accumulation
         self.active_tasks = {}  # Track active async tasks
         self.request_outputs = {}  # Accumulate outputs until all N samples complete
@@ -651,8 +647,8 @@ class LLMRayActor:
         if not self.init_complete.wait(timeout=120):
             raise RuntimeError("Failed to initialize AsyncLLMEngine within 120 seconds")
 
-        self._prefetch_future = self._executor.submit(self._prefetch_worker)
-        self._process_future = self._executor.submit(self.process_from_queue)
+        self._prefetch_future = self.executor.submit(self._prefetch_worker)
+        self._process_future = self.executor.submit(self.process_from_queue)
 
     def _run_async_loop(self):
         """Run the async event loop in a dedicated thread."""
@@ -676,8 +672,6 @@ class LLMRayActor:
             if self._should_stop():
                 time.sleep(sleep_length_s)
                 continue
-
-            self._check_active_tasks()
 
             current_unfinished = len(self.active_tasks)
             if current_unfinished >= self.inference_batch_size:
@@ -728,18 +722,8 @@ class LLMRayActor:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
 
-    def _check_async_loop_alive(self):
-        """Check if the async event loop thread is still alive and raise if not."""
-        if not self.loop_thread.is_alive():
-            raise RuntimeError(
-                "Async event loop thread has died. This likely means AsyncLLM initialization failed. "
-                "Check earlier logs for the root cause exception."
-            )
-
     def _add_request_sync(self, request: PromptRequest):
         """Add a request by spawning async tasks."""
-        self._check_async_loop_alive()
-
         request_id = make_request_id(request)
         logger.info(
             f"[_add_request_sync] 🎯 Adding request: request_id={request_id}, is_eval={request.is_eval}, n={request.generation_config.n}"
@@ -794,22 +778,6 @@ class LLMRayActor:
                 f"[_add_request_sync] Scheduled task for {sub_request_id}, future={future}, done={future.done()}"
             )
 
-    def _insert_result_to_queue(self, result, is_eval: bool):
-        """Insert result into the appropriate queue with blocking put."""
-        queue_type = "eval" if is_eval else "train"
-        results_queue = self.eval_results_queue if is_eval else self.results_queue
-        logger.info(
-            f"[_insert_result_to_queue] 📤 Attempting to put result into {queue_type} queue: {result.dataset_index if hasattr(result, 'dataset_index') else 'unknown'}"
-        )
-        logger.info(f"[_insert_result_to_queue] Queue object: {results_queue}")
-        logger.info(f"[_insert_result_to_queue] Result type: {type(result)}")
-        try:
-            results_queue.put(result)
-            logger.info(f"[_insert_result_to_queue] ✅ Successfully put result into {queue_type} queue")
-        except Exception as e:
-            logger.error(f"[_insert_result_to_queue] ❌ Failed to put result into {queue_type} queue: {e}")
-            raise
-
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop pulling from completion queue.
 
@@ -817,7 +785,6 @@ class LLMRayActor:
             int: Number of requests processed
         """
         logger.info(f"[process_from_queue] ENTRY - timeout={timeout}")
-        self._check_async_loop_alive()
         total_processed = 0
         loop_iterations = 0
 
@@ -830,64 +797,54 @@ class LLMRayActor:
                 self._prefetch_future.result()
 
             try:
-                self._check_active_tasks()
                 logger.debug("[process_from_queue] Attempting to get from completion_queue (timeout=1.0)")
                 sub_request = self.completion_queue.get(timeout=1.0)
                 logger.info(f"[process_from_queue] Got item from completion_queue: {type(sub_request)}")
 
-                # Check if it's a sub-request (dict) or already processed result (tuple)
-                if isinstance(sub_request, dict):
-                    # This is a sub-request that needs aggregation
-                    base_request_id = sub_request["base_request_id"]
-                    expected_n = sub_request["expected_n"]
+                base_request_id = sub_request["base_request_id"]
+                expected_n = sub_request["expected_n"]
 
-                    # Initialize accumulator if needed
-                    if base_request_id not in self.request_outputs:
-                        self.request_outputs[base_request_id] = {
-                            "outputs": [],
-                            "expected_n": expected_n,
-                            "tools": sub_request["tools"],
-                        }
+                # Initialize accumulator if needed
+                if base_request_id not in self.request_outputs:
+                    self.request_outputs[base_request_id] = {
+                        "outputs": [],
+                        "expected_n": expected_n,
+                        "tools": sub_request["tools"],
+                    }
 
-                    # Add this sub-request output
-                    self.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
+                # Add this sub-request output
+                self.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
 
-                    logger.info(
-                        f"[process_from_queue] Accumulated {len(self.request_outputs[base_request_id]['outputs'])}/{expected_n} for {base_request_id}"
+                logger.info(
+                    f"[process_from_queue] Accumulated {len(self.request_outputs[base_request_id]['outputs'])}/{expected_n} for {base_request_id}"
+                )
+
+                # Check if all sub-requests are complete
+                if len(self.request_outputs[base_request_id]["outputs"]) == expected_n:
+                    logger.info(f"[process_from_queue] All sub-requests complete for {base_request_id}, aggregating")
+
+                    # Sort outputs by j index (extracted from request_id)
+                    outputs = self.request_outputs[base_request_id]["outputs"]
+                    ordered_outs = sorted(outputs, key=lambda x: int(x.request_id.split("_")[-1]))
+
+                    # Process the completed request
+                    current_time = time.perf_counter()
+                    result, is_eval = process_completed_request(
+                        base_request_id,
+                        ordered_outs,
+                        {},  # tracking dict (empty for now)
+                        current_time,
+                        self.request_outputs[base_request_id]["tools"],
+                        self.request_metadata,
                     )
 
-                    # Check if all sub-requests are complete
-                    if len(self.request_outputs[base_request_id]["outputs"]) == expected_n:
-                        logger.info(
-                            f"[process_from_queue] All sub-requests complete for {base_request_id}, aggregating"
-                        )
+                    # Clean up
+                    self.request_outputs.pop(base_request_id)
+                    self.request_metadata.pop(base_request_id, None)
 
-                        # Sort outputs by j index (extracted from request_id)
-                        outputs = self.request_outputs[base_request_id]["outputs"]
-                        ordered_outs = sorted(outputs, key=lambda x: int(x.request_id.split("_")[-1]))
-
-                        # Process the completed request
-                        current_time = time.perf_counter()
-                        result, is_eval = process_completed_request(
-                            base_request_id,
-                            ordered_outs,
-                            {},  # tracking dict (empty for now)
-                            current_time,
-                            self.request_outputs[base_request_id]["tools"],
-                            self.request_metadata,
-                        )
-
-                        # Clean up
-                        self.request_outputs.pop(base_request_id)
-                        self.request_metadata.pop(base_request_id, None)
-
-                        # Insert result to appropriate queue
-                        self._insert_result_to_queue(result, is_eval=is_eval)
-                        total_processed += 1
-                else:
-                    # Legacy path if something directly puts a tuple result
-                    result, is_eval = sub_request
-                    self._insert_result_to_queue(result, is_eval=is_eval)
+                    # Insert result to appropriate queue
+                    results_queue = self.eval_results_queue if is_eval else self.results_queue
+                    results_queue.put(result)
                     total_processed += 1
 
                 # Log memory stats after processing
@@ -905,21 +862,6 @@ class LLMRayActor:
             f"total_processed={total_processed}"
         )
         return total_processed
-
-    def _check_active_tasks(self):
-        """Crash the actor immediately if any async task failed."""
-        now = time.monotonic()
-        if (now - self._last_future_check) < self._future_check_interval_s:
-            return
-
-        for request_id, future in list(self.active_tasks.items()):
-            if future.cancelled():
-                raise RuntimeError(f"Async generation future for {request_id} was unexpectedly cancelled")
-
-            if future.done():
-                future.result()
-
-        self._last_future_check = now
 
     def _call_async_from_sync(self, coro, timeout=120):
         """Bridge to call async coroutines from sync methods by delegating to event loop thread."""
