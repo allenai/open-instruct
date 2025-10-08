@@ -2761,6 +2761,11 @@ def run_training(
 
     def health_check_fn():
         [f.result() for f in [packing_future, weight_sync_thread_future] if f.done()]
+        ray_get_with_progress(
+            [engine.check_background_threads.remote() for engine in vllm_engines],
+            desc="Checking vLLM engine health",
+            enable=False,
+        )
 
     # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps):
@@ -2797,7 +2802,9 @@ def run_training(
             )
 
         # Check if any of the threads have raised an exception.
+        health_check_start = time.perf_counter()
         health_check_fn()
+        health_check_time = time.perf_counter() - health_check_start
 
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
         weight_sync_trigger_event.set()
@@ -2832,6 +2839,8 @@ def run_training(
                 data_thread_metrics |= metrics_Q.get_nowait()
             except Empty:
                 logger.info("[Main Thread] didn't get train generation metrics")
+
+        data_thread_metrics["time/health_check"] = health_check_time
 
         one_training_step(
             args,
