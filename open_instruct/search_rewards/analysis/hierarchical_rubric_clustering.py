@@ -651,6 +651,95 @@ Focus on capturing the overarching theme that unites these criteria rather than 
         df.to_csv(output_file, index=False)
         
         return output_file
+
+    def compute_diversity(
+        self,
+        level: Optional[int] = None,
+        sample_size: Optional[int] = 5000,
+        random_state: int = 42,
+    ) -> Dict[str, float]:
+        """Compute a diversity metric for the clustered criteria.
+
+        The metric combines two components:
+            1. Semantic spread across individual criteria, measured via cosine similarity
+               of the criterion embeddings.
+            2. Cluster evenness, measured by the normalized entropy of item counts across
+               clusters at a given hierarchy level.
+
+        Args:
+            level: Hierarchy level to evaluate. Defaults to the highest level built.
+            sample_size: Number of criterion pairs to sample when estimating mean cosine
+                similarity. If ``None`` or larger than the total number of unique pairs,
+                all unique pairs are used.
+            random_state: Random seed for sampling criterion pairs.
+
+        Returns:
+            Dictionary containing ``semantic_spread``, ``cluster_evenness``, and the
+            combined ``diversity_score`` (product of the two components).
+        """
+
+        if not self.criteria:
+            raise ValueError("No criteria available to compute diversity.")
+        if not self.hierarchy:
+            raise ValueError("Hierarchy has not been built. Call build_hierarchy() first.")
+
+        embeddings = self.embed_texts(self.criteria)
+        if embeddings.ndim != 2 or embeddings.shape[0] <= 1:
+            return {
+                "semantic_spread": 0.0,
+                "cluster_evenness": 0.0,
+                "diversity_score": 0.0,
+            }
+
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        normalized_embeddings = embeddings / np.clip(norms, 1e-12, None)
+        n = normalized_embeddings.shape[0]
+
+        total_pairs = n * (n - 1) // 2
+        rng = np.random.default_rng(random_state)
+
+        if sample_size is None or sample_size >= total_pairs:
+            similarity_matrix = normalized_embeddings @ normalized_embeddings.T
+            tri_upper = np.triu_indices(n, k=1)
+            mean_similarity = float(similarity_matrix[tri_upper].mean()) if tri_upper[0].size else 1.0
+        else:
+            idx_i = rng.integers(0, n, size=sample_size)
+            idx_j = rng.integers(0, n, size=sample_size)
+
+            duplicate_mask = idx_i == idx_j
+            if duplicate_mask.any():
+                idx_j[duplicate_mask] = (idx_j[duplicate_mask] + 1) % n
+
+            pair_sims = np.einsum(
+                "ij,ij->i",
+                normalized_embeddings[idx_i],
+                normalized_embeddings[idx_j],
+            )
+            mean_similarity = float(pair_sims.mean()) if pair_sims.size else 1.0
+
+        semantic_spread = max(0.0, 1.0 - mean_similarity)
+
+        target_level = level if level is not None else max(self.hierarchy.keys())
+        clusters = self.hierarchy.get(target_level)
+        if clusters is None:
+            raise ValueError(f"Hierarchy level {target_level} is not available.")
+
+        cluster_counts = np.array([len(cluster.get("items", [])) for cluster in clusters.values()], dtype=float)
+        total_items = cluster_counts.sum()
+        if total_items == 0 or len(cluster_counts) <= 1:
+            cluster_evenness = 0.0
+        else:
+            probs = cluster_counts / total_items
+            entropy = -np.sum(probs * np.log(probs + 1e-12))
+            cluster_evenness = float(entropy / np.log(len(cluster_counts)))
+
+        diversity_score = float(semantic_spread * cluster_evenness)
+
+        return {
+            "semantic_spread": semantic_spread,
+            "cluster_evenness": cluster_evenness,
+            "diversity_score": diversity_score,
+        }
     
     def visualize_tree(self, output_file: str = "hierarchy_tree.html") -> str:
         """
@@ -878,57 +967,8 @@ Focus on capturing the overarching theme that unites these criteria rather than 
         
         return output_file
     
-    def export_to_csv(self, output_file: str = "hierarchy.csv") -> str:
-        """
-        Export the hierarchy to a CSV file.
-        
-        Args:
-            output_file: File to save the CSV to
-            
-        Returns:
-            Path to the CSV file
-        """
-        rows = []
-        
-        # Generate rows for each level and cluster
-        for level in range(self.L):
-            clusters = self.hierarchy.get(level, {})
-            
-            for cluster_id, cluster in clusters.items():
-                description = cluster['description']
-                
-                # For base level, add each item
-                if level == 0:
-                    for item in cluster['items']:
-                        row = {"Level": level, "Cluster_ID": cluster_id, "Description": description, "Item": item}
-                        rows.append(row)
-                else:
-                    # For higher levels, add one row per cluster with comma-separated children
-                    children_ids = cluster['children']
-                    children_descs = []
-                    
-                    for child_id in children_ids:
-                        child = self.hierarchy[level-1].get(child_id, {})
-                        child_desc = child.get('description', f"Child {child_id}")
-                        children_descs.append(child_desc)
-                    
-                    row = {
-                        "Level": level, 
-                        "Cluster_ID": cluster_id, 
-                        "Description": description, 
-                        "Children": ", ".join(map(str, children_ids)),
-                        "Children_Descriptions": "; ".join(children_descs)
-                    }
-                    rows.append(row)
-        
-        # Create DataFrame and save to CSV
-        df = pd.DataFrame(rows)
-        df.to_csv(output_file, index=False)
-        
-        return output_file
-
 # Example usage
-def run_example():
+def run_example(rubric_id: str, num_criteria: int):
     # Set your Anthropic API key here or in environment variables
     # api_key = os.environ["ANTHROPIC_API_KEY"]
     openai_api_key = os.environ["OPENAI_API_KEY"]
@@ -970,7 +1010,7 @@ def run_example():
     # or read the criteria from a jsonl file
     # with open("outputs/rubric_analysis/wildchat_4k_positive_significant_rubric.jsonl", "r") as f:
     #     criteria = [json.loads(line)["criteria"] for line in f.readlines()]
-    rubric_id = "rl_rag_train_sqa_1k_clean_search_rubric_longform_rubrics"
+    # rubric_id = "rl_rag_train_sqa_1k_clean_search_rubric_longform_rubrics"
     rubric_data = load_dataset("rl-rag/"+rubric_id, split="train")
     criteria = []
     for example in rubric_data:
@@ -983,8 +1023,10 @@ def run_example():
     newline = "\n"
     print(f"Few examples of criteria: {newline.join(criteria[:5])}")
 
-    num_criteria = 100
-    criteria = list(set(criteria))[:num_criteria]  # Remove duplicates
+    rng = random.Random(42)
+    rng.shuffle(criteria)
+
+    criteria = criteria[:num_criteria]
     
     # Initialize the clustering algorithm
     # For a real-world scenario with 3,307 values as mentioned in the paper, 
@@ -1000,9 +1042,25 @@ def run_example():
     # Build the hierarchy
     hierarchy = hierarchical_clustering.build_hierarchy()
     
+    diversity_metrics = hierarchical_clustering.compute_diversity()
+    logger.info(
+        "Hierarchy diversity metrics: "
+        f"semantic_spread={diversity_metrics['semantic_spread']:.4f}, "
+        f"cluster_evenness={diversity_metrics['cluster_evenness']:.4f}, "
+        f"diversity_score={diversity_metrics['diversity_score']:.4f}"
+    )
+
     # Ensure output directory exists before writing files
     output_dir = os.path.join("outputs", "rubric_analysis")
     os.makedirs(output_dir, exist_ok=True)
+
+    diversity_path = os.path.join(
+        output_dir,
+        f"{rubric_id}_hierarchy_diversity_{num_criteria}.json",
+    )
+    with open(diversity_path, "w", encoding="utf-8") as f:
+        json.dump(diversity_metrics, f, ensure_ascii=False, indent=2)
+    logger.info(f"Diversity metrics saved to {diversity_path}")
 
     # Visualize the hierarchy
     viz_path = os.path.join(output_dir, f"{rubric_id}_hierarchy_{num_criteria}.html")
@@ -1023,7 +1081,14 @@ def run_example():
     return hierarchy
 
 if __name__ == "__main__":
-    hierarchy = run_example()
+    rubric_ids = [
+        "rl_rag_train_sqa_1k_clean_search_rubric_longform_rubrics",
+        "rl_rag_train_sqa_1k_clean_dr_rubric_longform_rubrics",
+        "rl_rag_train_sqa_1k_clean_cb_rubric_longform_rubrics"
+    ]
+    num_criteria = 300
+    for rubric_id in rubric_ids:
+        hierarchy = run_example(rubric_id, num_criteria)
 
     # # Create the tree visualization as well
     # hierarchical_clustering = HierarchicalClustering(
