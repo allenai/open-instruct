@@ -618,6 +618,17 @@ class LLMRayActor:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
 
+    def _wait_for_requests_to_drain(self, timeout: float = 300.0):
+        """Wait for all active requests and tool executions to complete."""
+        start_time = time.perf_counter()
+        while len(self.active_tasks) > 0:
+            if time.perf_counter() - start_time > timeout:
+                self.logger.warning(
+                    f"Timeout waiting for requests to drain. {len(self.active_tasks)} tasks remaining."
+                )
+                break
+            time.sleep(0.1)
+
     def _add_request_sync(self, request: PromptRequest):
         """Add a request by spawning async tasks."""
         request_id = make_request_id(request)
@@ -754,6 +765,8 @@ class LLMRayActor:
         return future.result(timeout=timeout_minutes * 60)
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
+        if not self.inflight_updates and self._should_stop():
+            self._wait_for_requests_to_drain()
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
         future = asyncio.run_coroutine_threadsafe(
@@ -763,6 +776,8 @@ class LLMRayActor:
         return future.result(timeout=120)
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
+        if not self.inflight_updates and self._should_stop():
+            self._wait_for_requests_to_drain()
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
         future = asyncio.run_coroutine_threadsafe(
