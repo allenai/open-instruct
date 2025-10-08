@@ -25,7 +25,7 @@ import time
 from collections import defaultdict
 from concurrent import futures
 from datetime import timedelta
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Awaitable, Dict, List, Optional, Tuple, Union
 
 import ray
 import torch
@@ -576,30 +576,22 @@ class LLMRayActor:
             raise RuntimeError(f"Failed to initialize AsyncLLMEngine within {INIT_TIMEOUT_S} seconds")
 
     def _run_async_loop(self) -> None:
-        """Run the async event loop in a dedicated thread."""
-        # Create and set our event loop
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
 
-        # Create engine from within running loop context
-        # This ensures AsyncLLM.__init__ sees a running loop and starts output handler
         self.loop.run_until_complete(_init_engine_async(self))
 
-        # Signal init complete
         self.init_complete.set()
 
-        # Keep loop running for async operations
         self.loop.run_forever()
 
     def _prefetch_worker(self) -> None:
-        """Background worker that prefetches requests until we have enough buffered."""
         while True:
-            if self._should_stop():
+            if self._check_should_stop_with_cache():
                 time.sleep(PREFETCH_SLEEP_S)
                 continue
 
-            current_unfinished = len(self.active_tasks)
-            if current_unfinished >= self.inference_batch_size:
+            if len(self.active_tasks) >= self.inference_batch_size:
                 time.sleep(PREFETCH_SLEEP_S)
                 continue
 
@@ -609,11 +601,6 @@ class LLMRayActor:
                 continue
 
             if request is None:
-                continue
-
-            if self._should_stop():
-                self.prompt_queue.put(request)
-                time.sleep(PREFETCH_SLEEP_S)
                 continue
 
             self._add_request(request)
@@ -636,7 +623,7 @@ class LLMRayActor:
             "num_kv_heads": model_config.get_num_kv_heads(parallel_config),
         }
 
-    def _should_stop(self) -> bool:
+    def _check_should_stop_with_cache(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=RAY_WAIT_TIMEOUT_S)
@@ -704,12 +691,42 @@ class LLMRayActor:
             )
             self.active_tasks[sub_request_id] = future
 
-    def process_from_queue(self):
-        """Run generation loop pulling from completion queue.
+    def _accumulate_sub_request(self, sub_request: dict) -> bool:
+        base_request_id = sub_request["base_request_id"]
+        expected_n = sub_request["expected_n"]
 
-        Returns:
-            int: Number of requests processed
-        """
+        if base_request_id not in self.request_outputs:
+            self.request_outputs[base_request_id] = {
+                "outputs": [],
+                "expected_n": expected_n,
+                "tools": sub_request["tools"],
+            }
+
+        self.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
+
+        return len(self.request_outputs[base_request_id]["outputs"]) == expected_n
+
+    def _finalize_completed_request(self, base_request_id: str) -> None:
+        outputs = self.request_outputs[base_request_id]["outputs"]
+        ordered_outs = sorted(outputs, key=lambda x: int(x.request_id.split("_")[-1]))
+
+        current_time = time.perf_counter()
+        result, is_eval = process_completed_request(
+            base_request_id,
+            ordered_outs,
+            {},
+            current_time,
+            self.request_outputs[base_request_id]["tools"],
+            self.request_metadata,
+        )
+
+        self.request_outputs.pop(base_request_id)
+        self.request_metadata.pop(base_request_id, None)
+
+        results_queue = self.eval_results_queue if is_eval else self.results_queue
+        results_queue.put(result)
+
+    def process_from_queue(self) -> int:
         total_processed = 0
 
         while True:
@@ -719,44 +736,10 @@ class LLMRayActor:
             try:
                 sub_request = self.completion_queue.get(timeout=COMPLETION_QUEUE_TIMEOUT_S)
 
-                base_request_id = sub_request["base_request_id"]
-                expected_n = sub_request["expected_n"]
+                is_complete = self._accumulate_sub_request(sub_request)
 
-                # Initialize accumulator if needed
-                if base_request_id not in self.request_outputs:
-                    self.request_outputs[base_request_id] = {
-                        "outputs": [],
-                        "expected_n": expected_n,
-                        "tools": sub_request["tools"],
-                    }
-
-                # Add this sub-request output
-                self.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
-
-                # Check if all sub-requests are complete
-                if len(self.request_outputs[base_request_id]["outputs"]) == expected_n:
-                    # Sort outputs by j index (extracted from request_id)
-                    outputs = self.request_outputs[base_request_id]["outputs"]
-                    ordered_outs = sorted(outputs, key=lambda x: int(x.request_id.split("_")[-1]))
-
-                    # Process the completed request
-                    current_time = time.perf_counter()
-                    result, is_eval = process_completed_request(
-                        base_request_id,
-                        ordered_outs,
-                        {},  # tracking dict (empty for now)
-                        current_time,
-                        self.request_outputs[base_request_id]["tools"],
-                        self.request_metadata,
-                    )
-
-                    # Clean up
-                    self.request_outputs.pop(base_request_id)
-                    self.request_metadata.pop(base_request_id, None)
-
-                    # Insert result to appropriate queue
-                    results_queue = self.eval_results_queue if is_eval else self.results_queue
-                    results_queue.put(result)
+                if is_complete:
+                    self._finalize_completed_request(sub_request["base_request_id"])
                     total_processed += 1
 
             except queue.Empty:
@@ -766,15 +749,15 @@ class LLMRayActor:
 
     def init_process_group(
         self,
-        master_address,
-        master_port,
-        rank_offset,
-        world_size,
-        group_name,
-        backend,
-        use_ray=False,
-        timeout_minutes=120,
-    ):
+        master_address: str,
+        master_port: int,
+        rank_offset: int,
+        world_size: int,
+        group_name: str,
+        backend: str,
+        use_ray: bool = False,
+        timeout_minutes: int = 120,
+    ) -> None:
         future = asyncio.run_coroutine_threadsafe(
             self.llm_engine.engine_core.collective_rpc_async(
                 "init_process_group",
@@ -793,33 +776,36 @@ class LLMRayActor:
         )
         return future.result(timeout=timeout_minutes * 60)
 
+    def _run_async_with_timeout(self, coro: Awaitable[Any], timeout: float) -> Any:
+        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+        return future.result(timeout=timeout)
+
     def _prepare_weight_update(self, name: str, dtype: str) -> None:
-        if not self.inflight_updates and self._should_stop():
+        if not self.inflight_updates and self._check_should_stop_with_cache():
             self._wait_for_requests_to_drain()
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
 
-    def update_weight(self, name, dtype, shape, empty_cache=False):
+    def update_weight(self, name: str, dtype: str, shape: Tuple[int, ...], empty_cache: bool = False) -> None:
         self._prepare_weight_update(name, dtype)
-        future = asyncio.run_coroutine_threadsafe(
+        return self._run_async_with_timeout(
             self.llm_engine.engine_core.collective_rpc_async("update_weight", args=(name, dtype, shape, empty_cache)),
-            self.loop,
+            WEIGHT_UPDATE_TIMEOUT_S,
         )
-        return future.result(timeout=WEIGHT_UPDATE_TIMEOUT_S)
 
-    def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
+    def update_weight_cuda_ipc(
+        self, name: str, dtype: str, shape: Tuple[int, ...], ipc_handles: List[Any], empty_cache: bool = False
+    ) -> None:
         self._prepare_weight_update(name, dtype)
-        future = asyncio.run_coroutine_threadsafe(
+        return self._run_async_with_timeout(
             self.llm_engine.engine_core.collective_rpc_async(
                 "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
             ),
-            self.loop,
+            WEIGHT_UPDATE_TIMEOUT_S,
         )
-        return future.result(timeout=WEIGHT_UPDATE_TIMEOUT_S)
 
-    def reset_prefix_cache(self):
-        future = asyncio.run_coroutine_threadsafe(self.llm_engine.reset_prefix_cache(), self.loop)
-        return future.result(timeout=WEIGHT_UPDATE_TIMEOUT_S)
+    def reset_prefix_cache(self) -> None:
+        return self._run_async_with_timeout(self.llm_engine.reset_prefix_cache(), WEIGHT_UPDATE_TIMEOUT_S)
 
     def ready(self) -> bool:
         # Engine and prefetch are already initialized in __init__
