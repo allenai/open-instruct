@@ -467,6 +467,68 @@ def init_process_group(
     return pg
 
 
+def _prefetch_worker(actor: "LLMRayActor") -> None:
+    while True:
+        if actor._check_should_stop_with_cache() or len(actor.active_tasks) >= actor.inference_batch_size:
+            time.sleep(PREFETCH_SLEEP_S)
+            continue
+
+        try:
+            request = actor.prompt_queue.get(timeout=QUEUE_GET_TIMEOUT_S)
+        except queue.Empty:
+            continue
+
+        if request is None:
+            continue
+
+        _add_request(actor, request)
+
+
+def _add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
+    request_id = make_request_id(request)
+
+    sampling_params = request.generation_config.clone()
+    sampling_params.n = 1
+
+    actor.request_metadata[request_id] = {
+        "is_eval": request.is_eval,
+        "dataset_index": request.dataset_index,
+        "training_step": request.training_step,
+        "sampling_params": sampling_params,
+        "original_sampling_params": request.generation_config,
+        "prompt_tokens": len(request.prompt),
+        "prompt_token_ids": list(request.prompt),
+        "start_time": time.perf_counter(),
+    }
+
+    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
+
+    for j in range(request.generation_config.n):
+        sub_sampling_params = sampling_params.clone()
+        if request.generation_config.seed is not None:
+            sub_sampling_params.seed = request.generation_config.seed + j
+        sub_request_id = f"{request_id}_{j}"
+
+        future = asyncio.run_coroutine_threadsafe(
+            process_request_async(
+                actor.llm_engine,
+                sub_request_id,
+                request_id,
+                tokens_prompt,
+                sub_sampling_params,
+                actor.completion_queue,
+                actor.request_metadata,
+                actor.active_tasks,
+                actor.tools,
+                actor.max_tool_calls,
+                actor.executor,
+                actor.llm_engine.tokenizer,
+            ),
+            actor.loop,
+        )
+        actor.active_tasks[sub_request_id] = future
+
+
 class LLMRayActor:
     """Ray actor for LLM generation with optional tool support."""
 
@@ -485,7 +547,7 @@ class LLMRayActor:
         verbose: bool = False,
         **kwargs,
     ):
-        self._validate_actor_type()
+        assert_threaded_actor(self)
         self._init_config(tools, max_tool_calls, inference_batch_size, inflight_updates, verbose)
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
         self._init_executor()
@@ -496,10 +558,6 @@ class LLMRayActor:
 
         self._setup_engine_args(args, bundle_indices, kwargs)
         self._initialize_async_loop()
-        self._start_workers()
-
-    def _validate_actor_type(self) -> None:
-        assert_threaded_actor(self)
 
     def _init_config(
         self,
@@ -530,6 +588,7 @@ class LLMRayActor:
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
 
+        # For caching should_stop status.
         self._last_should_stop_update = float("-inf")
         self._should_stop_value = False
         self._should_stop_timeout_s = SHOULD_STOP_CACHE_TIMEOUT_S
@@ -538,9 +597,7 @@ class LLMRayActor:
     def _init_executor(self) -> None:
         max_workers = DEFAULT_WORKERS + (TOOL_WORKERS if self.tools else 0)
         self.executor = futures.ThreadPoolExecutor(max_workers=max_workers)
-
-    def _start_workers(self) -> None:
-        self._prefetch_future = self.executor.submit(self._prefetch_worker)
+        self._prefetch_future = self.executor.submit(_prefetch_worker, self)
         self._process_future = self.executor.submit(self.process_from_queue)
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
@@ -549,6 +606,9 @@ class LLMRayActor:
             os.environ.pop("CUDA_VISIBLE_DEVICES", None)
             os.environ.pop("ROCR_VISIBLE_DEVICES", None)
         elif noset_visible_devices:
+            # We need to set CUDA_VISIBLE_DEVICES to the ray assigned GPU
+            # when the distributed_executor_backend is not ray and
+            # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
             os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
 
     def _setup_engine_args(self, args, bundle_indices, kwargs) -> None:
@@ -560,7 +620,9 @@ class LLMRayActor:
             self.logger.debug(f"creating LLM with bundle_indices={bundle_indices}")
 
         self.engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
+        # Log stats causes a crash in the engine at assert outputs.scheduler_stats is not None when we call step() and there is nothing to step.
         self.engine_args.disable_log_stats = True
+        # Cascade attention has known performance issues: https://github.com/vllm-project/vllm/issues/17652
         self.engine_args.disable_cascade_attn = True
 
     def _initialize_async_loop(self) -> None:
@@ -585,29 +647,8 @@ class LLMRayActor:
 
         self.loop.run_forever()
 
-    def _prefetch_worker(self) -> None:
-        while True:
-            if self._check_should_stop_with_cache():
-                time.sleep(PREFETCH_SLEEP_S)
-                continue
-
-            if len(self.active_tasks) >= self.inference_batch_size:
-                time.sleep(PREFETCH_SLEEP_S)
-                continue
-
-            try:
-                request = self.prompt_queue.get(timeout=QUEUE_GET_TIMEOUT_S)
-            except queue.Empty:
-                continue
-
-            if request is None:
-                continue
-
-            self._add_request(request)
-
     def get_model_dims_dict(self) -> Dict[str, int]:
         """Get only the model dimensions as a simple dict without loading weights."""
-        # In vLLM v1, use direct attributes
         model_config = self.llm_engine.model_config
         parallel_config = self.llm_engine.vllm_config.parallel_config
 
@@ -634,64 +675,19 @@ class LLMRayActor:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
 
-    def _wait_for_requests_to_drain(self, timeout: float = DRAIN_TIMEOUT_S) -> None:
-        """Wait for all active requests and tool executions to complete."""
-        start_time = time.perf_counter()
-        while len(self.active_tasks) > 0:
-            if time.perf_counter() - start_time > timeout:
-                self.logger.warning(
-                    f"Timeout waiting for requests to drain. {len(self.active_tasks)} tasks remaining."
-                )
-                break
-            time.sleep(PROCESS_SLEEP_S)
+    def maybe_wait_for_requests_to_drain(self, timeout: float = DRAIN_TIMEOUT_S) -> None:
+        """Wait for all active requests and tool executions to complete if conditions are met."""
+        if not self.inflight_updates and self._check_should_stop_with_cache():
+            start_time = time.perf_counter()
+            while len(self.active_tasks) > 0:
+                if time.perf_counter() - start_time > timeout:
+                    self.logger.warning(
+                        f"Timeout waiting for requests to drain. {len(self.active_tasks)} tasks remaining."
+                    )
+                    break
+                time.sleep(PROCESS_SLEEP_S)
 
-    def _add_request(self, request: PromptRequest) -> None:
-        """Add a request by spawning async tasks."""
-        request_id = make_request_id(request)
-
-        sampling_params = request.generation_config.clone()
-        sampling_params.n = 1  # Use n=1 for sub-requests
-
-        self.request_metadata[request_id] = {
-            "is_eval": request.is_eval,
-            "dataset_index": request.dataset_index,
-            "training_step": request.training_step,
-            "sampling_params": sampling_params,
-            "original_sampling_params": request.generation_config,
-            "prompt_tokens": len(request.prompt),
-            "prompt_token_ids": list(request.prompt),
-            "start_time": time.perf_counter(),
-        }
-
-        tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
-
-        for j in range(request.generation_config.n):
-            sub_sampling_params = sampling_params.clone()
-            if request.generation_config.seed is not None:
-                sub_sampling_params.seed = request.generation_config.seed + j
-            sub_request_id = f"{request_id}_{j}"
-
-            # Spawn async task in our event loop
-            future = asyncio.run_coroutine_threadsafe(
-                process_request_async(
-                    self.llm_engine,
-                    sub_request_id,
-                    request_id,
-                    tokens_prompt,
-                    sub_sampling_params,
-                    self.completion_queue,
-                    self.request_metadata,
-                    self.active_tasks,
-                    self.tools,
-                    self.max_tool_calls,
-                    self.executor,
-                    self.llm_engine.tokenizer,
-                ),
-                self.loop,
-            )
-            self.active_tasks[sub_request_id] = future
-
-    def _accumulate_sub_request(self, sub_request: dict) -> bool:
+    def _accumulate_sub_request(self, sub_request: dict) -> int:
         base_request_id = sub_request["base_request_id"]
         expected_n = sub_request["expected_n"]
 
@@ -704,7 +700,11 @@ class LLMRayActor:
 
         self.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
 
-        return len(self.request_outputs[base_request_id]["outputs"]) == expected_n
+        is_complete = len(self.request_outputs[base_request_id]["outputs"]) == expected_n
+        if is_complete:
+            self._finalize_completed_request(base_request_id)
+            return 1
+        return 0
 
     def _finalize_completed_request(self, base_request_id: str) -> None:
         outputs = self.request_outputs[base_request_id]["outputs"]
@@ -735,12 +735,7 @@ class LLMRayActor:
 
             try:
                 sub_request = self.completion_queue.get(timeout=COMPLETION_QUEUE_TIMEOUT_S)
-
-                is_complete = self._accumulate_sub_request(sub_request)
-
-                if is_complete:
-                    self._finalize_completed_request(sub_request["base_request_id"])
-                    total_processed += 1
+                total_processed += self._accumulate_sub_request(sub_request)
 
             except queue.Empty:
                 time.sleep(PROCESS_SLEEP_S)
@@ -781,8 +776,7 @@ class LLMRayActor:
         return future.result(timeout=timeout)
 
     def _prepare_weight_update(self, name: str, dtype: str) -> None:
-        if not self.inflight_updates and self._check_should_stop_with_cache():
-            self._wait_for_requests_to_drain()
+        self.maybe_wait_for_requests_to_drain()
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
 
@@ -808,7 +802,6 @@ class LLMRayActor:
         return self._run_async_with_timeout(self.llm_engine.reset_prefix_cache(), WEIGHT_UPDATE_TIMEOUT_S)
 
     def ready(self) -> bool:
-        # Engine and prefetch are already initialized in __init__
         return True
 
     def get_kv_cache_info(self) -> int:
@@ -816,19 +809,14 @@ class LLMRayActor:
         cache_config = self.llm_engine.vllm_config.cache_config
         model_config = self.llm_engine.model_config
 
-        for attempt in range(KV_CACHE_RETRIES):
-            num_gpu_blocks = cache_config.num_gpu_blocks
-            block_size = cache_config.block_size
-            max_model_len = model_config.max_model_len
+        num_gpu_blocks = cache_config.num_gpu_blocks
+        block_size = cache_config.block_size
+        max_model_len = model_config.max_model_len
 
-            if num_gpu_blocks is not None and num_gpu_blocks != 0:
-                max_concurrency = (num_gpu_blocks * block_size) / max_model_len
-                return int(max_concurrency)
+        assert num_gpu_blocks is not None and num_gpu_blocks != 0, "num_gpu_blocks not initialized"
 
-            time.sleep(KV_CACHE_RETRY_SLEEP_S)
-
-        logger.warning("num_gpu_blocks not initialized after retries, returning default value 1")
-        return 1
+        max_concurrency = (num_gpu_blocks * block_size) / max_model_len
+        return int(max_concurrency)
 
 
 def get_cuda_arch_list() -> str:
