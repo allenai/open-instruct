@@ -81,14 +81,11 @@ async def generate_one_completion(
     llm_engine: vllm.AsyncLLMEngine, request_id: str, prompt: vllm.TokensPrompt, sampling_params: vllm.SamplingParams
 ) -> vllm.RequestOutput:
     """Generate a single completion from the async engine."""
-    logger.info(f"[generate_one_completion] Starting generation for {request_id}")
     outputs = []
     async for o in llm_engine.generate(prompt, sampling_params, request_id):
-        logger.info(f"[generate_one_completion] Got output for {request_id}, finished={o.finished}")
         if o.finished:
             outputs.append(o)
             break
-    logger.info(f"[generate_one_completion] Finished collecting outputs for {request_id}, got {len(outputs)} outputs")
     assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {request_id}"
     return outputs[0]
 
@@ -126,22 +123,12 @@ async def process_request_async(
     iteration = 0
 
     while True:
-        # Use a unique request ID for each iteration to avoid conflicts in vLLM
         iteration_request_id = f"{sub_request_id}_iter{iteration}"
-        logger.info(
-            f"[process_request_async] Starting generation iteration {iteration} for {sub_request_id} with ID {iteration_request_id}"
-        )
         request_output = await generate_one_completion(
             llm_engine, iteration_request_id, current_prompt, current_sampling_params
         )
-        logger.info(
-            f"[process_request_async] ✅ Completed generation for iteration {iteration} on {sub_request_id}, got {len(request_output.outputs)} outputs"
-        )
         iteration += 1
         output = request_output.outputs[0]
-        logger.info(
-            f"[process_request_async] Output {iteration - 1} for {sub_request_id}: text_len={len(output.text)}, tokens={len(output.token_ids)}, finish_reason={output.finish_reason}"
-        )
 
         if final_prompt_token_ids is None:
             final_prompt_token_ids = request_output.prompt_token_ids
@@ -154,13 +141,9 @@ async def process_request_async(
 
         triggered_tool = None
         stop_str = None
-        logger.info(
-            f"[process_request_async] Checking for tool trigger in {sub_request_id}, output ends with: {output.text[-50:] if len(output.text) > 50 else output.text}"
-        )
         for candidate_stop_str in sampling_params.stop:
             if candidate_stop_str in tools and output.text.endswith(candidate_stop_str):
                 stop_str = candidate_stop_str
-                logger.info(f"[process_request_async] Tool trigger detected for {sub_request_id}: {stop_str}")
                 if num_calls < max_tool_calls.get(stop_str, 0):
                     triggered_tool = tools[stop_str]
                 else:
@@ -168,29 +151,13 @@ async def process_request_async(
                 break
 
         if triggered_tool is None:
-            logger.info(f"[process_request_async] No tool triggered for {sub_request_id}, finishing request")
             break
 
-        # Use the passed executor instead of asyncio's default thread pool to avoid exhausting threads
-        # Must use get_running_loop() since we're already in an async context
         if executor is None:
-            logger.error(
-                f"[process_request_async] CRITICAL: executor is None for request {sub_request_id}, will use default thread pool which may deadlock!"
-            )
-
-        # Wrapper function to log tool execution
-        def tool_wrapper(tool, text):
-            logger.info(f"[process_request_async] TOOL CALL START: {sub_request_id} calling {tool.__class__.__name__}")
-            try:
-                result = tool(text)
-                logger.info(f"[process_request_async] TOOL CALL END: {sub_request_id} completed successfully")
-                return result
-            except Exception as e:
-                logger.error(f"[process_request_async] TOOL CALL ERROR: {sub_request_id} failed with {e}")
-                raise
+            logger.error(f"executor is None for request {sub_request_id}, may deadlock!")
 
         loop = asyncio.get_running_loop()
-        tool_result = await loop.run_in_executor(executor, tool_wrapper, triggered_tool, output.text)
+        tool_result = await loop.run_in_executor(executor, triggered_tool, output.text)
 
         tool_called = True
         num_calls += 1
@@ -199,59 +166,27 @@ async def process_request_async(
         tool_output += tool_result.output
         tool_runtime += tool_result.runtime
 
-        logger.info(f"[process_request_async] After tool for {sub_request_id}: encoding tool output")
         tool_output_token_ids = tokenizer.encode(
             "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
         )
-        logger.info(
-            f"[process_request_async] Tool output tokens for {sub_request_id}: {len(tool_output_token_ids)} tokens"
-        )
 
-        logger.info(f"[process_request_async] Concatenating prompts for {sub_request_id}")
-        logger.info(f"[process_request_async] Using cached prompt_token_ids for {sub_request_id}")
-        logger.info(
-            f"[process_request_async] current_prompt_token_ids: {len(current_prompt_token_ids)} tokens for {sub_request_id}"
-        )
-        logger.info(f"[process_request_async] accumulated_tokens: {len(accumulated_tokens)} for {sub_request_id}")
         prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens + tool_output_token_ids
-        logger.info(
-            f"[process_request_async] Concatenation complete for {sub_request_id}: total={len(prompt_and_tool_output)}"
-        )
-        logger.info(f"[process_request_async] Accessing model config for {sub_request_id}")
         max_model_len = llm_engine.model_config.max_model_len
-        logger.info(f"[process_request_async] Got max_model_len={max_model_len} for {sub_request_id}")
         excess = len(prompt_and_tool_output) - max_model_len
-        logger.info(
-            f"[process_request_async] Prompt length check for {sub_request_id}: total={len(prompt_and_tool_output)}, excess={excess}"
-        )
         if excess > 0:
             tool_output_token_ids = tool_output_token_ids[:-excess]
-            logger.info(f"[process_request_async] Truncated tool output for {sub_request_id} due to model max length")
 
         remaining = sampling_params.max_tokens - len(masks)
-        logger.info(
-            f"[process_request_async] Token budget for {sub_request_id}: remaining={remaining}, masks_len={len(masks)}, max_tokens={sampling_params.max_tokens}"
-        )
         if remaining <= 0:
             tool_output_token_ids = []
-            logger.info(
-                f"[process_request_async] No token budget left for {sub_request_id}, clearing tool output tokens"
-            )
         elif len(tool_output_token_ids) > remaining:
             tool_output_token_ids = tool_output_token_ids[:remaining]
-            logger.info(f"[process_request_async] Truncated tool output for {sub_request_id} to fit remaining budget")
 
         accumulated_tokens.extend(tool_output_token_ids)
         masks.extend([0] * len(tool_output_token_ids))
 
         new_sample_tokens = sampling_params.max_tokens - len(masks)
-        logger.info(
-            f"[process_request_async] Next iteration setup for {sub_request_id}: new_sample_tokens={new_sample_tokens}, will_continue={excess <= 0 and new_sample_tokens > 0}"
-        )
         if excess > 0 or new_sample_tokens <= 0:
-            logger.info(
-                f"[process_request_async] Breaking loop for {sub_request_id}: excess={excess}, new_sample_tokens={new_sample_tokens}"
-            )
             break
 
         current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output, cache_salt=base_request_id)
@@ -259,10 +194,6 @@ async def process_request_async(
         final_prompt_token_ids = prompt_and_tool_output
         current_sampling_params = sampling_params.clone()
         current_sampling_params.max_tokens = new_sample_tokens
-        logger.info(
-            f"[process_request_async] Prepared for next iteration of {sub_request_id}: prompt_len={len(prompt_and_tool_output)}, max_tokens={new_sample_tokens}"
-        )
-        logger.info(f"[process_request_async] Looping back to iteration {iteration + 1} for {sub_request_id}")
 
     complete_output = vllm.CompletionOutput(
         index=int(sub_request_id.split("_")[-1]),
@@ -300,23 +231,20 @@ async def process_request_async(
     }
 
     completion_queue.put(sub_request_result)
-    logger.info(f"[process_request_async] Request {sub_request_id} is DONE")
 
 
 async def _process_sync_requests(actor):
     """Background task that processes sync method requests from other threads."""
-    logger.info("[_process_sync_requests] Starting sync request processor")
     while True:
         await asyncio.sleep(0.01)
         try:
             coro, result_container, done_event = actor._sync_request_queue.get_nowait()
-            logger.debug("[_process_sync_requests] Got sync request from queue")
             try:
                 result = await coro
                 result_container["result"] = result
                 result_container["error"] = None
             except Exception as e:
-                logger.error(f"[_process_sync_requests] Error executing sync request: {e}")
+                logger.error(f"Error executing sync request: {e}")
                 result_container["result"] = None
                 result_container["error"] = e
             finally:
@@ -327,10 +255,7 @@ async def _process_sync_requests(actor):
 
 async def _init_engine_async(actor):
     """Initialize the AsyncLLMEngine from within the running event loop."""
-    logger.info("Starting AsyncLLMEngine initialization...")
     running_loop = asyncio.get_running_loop()
-    logger.info(f"Running loop at engine init: {running_loop}")
-    logger.info(f"actor.loop: {actor.loop}")
     assert running_loop == actor.loop, f"Loop mismatch! running={running_loop}, actor.loop={actor.loop}"
 
     actor.llm_engine = vllm.AsyncLLMEngine.from_engine_args(actor.engine_args, start_engine_loop=False)
@@ -571,7 +496,6 @@ class LLMRayActor:
         self.logger = logger_utils.setup_logger(__name__)
         if verbose:
             self.logger.setLevel(logging.DEBUG)
-        self.logger.info("✓ Running in threaded Ray actor")
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inference_batch_size = inference_batch_size
@@ -616,10 +540,6 @@ class LLMRayActor:
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
-        logger.info("[LLMRayActor.__init__] Initialized with queues:")
-        logger.info(f"  - prompt_queue: {prompt_queue}")
-        logger.info(f"  - results_queue: {results_queue}")
-        logger.info(f"  - eval_results_queue: {eval_results_queue}")
 
         # For caching should_stop status.
         self._last_should_stop_update = float("-inf")
@@ -725,12 +645,6 @@ class LLMRayActor:
     def _add_request_sync(self, request: PromptRequest):
         """Add a request by spawning async tasks."""
         request_id = make_request_id(request)
-        logger.info(
-            f"[_add_request_sync] 🎯 Adding request: request_id={request_id}, is_eval={request.is_eval}, n={request.generation_config.n}"
-        )
-        logger.info(
-            f"[_add_request_sync] Loop thread alive: {self.loop_thread.is_alive()}, loop: {self.loop}, loop_running: {self.loop.is_running()}"
-        )
 
         sampling_params = request.generation_config.clone()
         sampling_params.n = 1  # Use n=1 for sub-requests
@@ -772,11 +686,7 @@ class LLMRayActor:
                 ),
                 self.loop,
             )
-            # Track the future
             self.active_tasks[sub_request_id] = future
-            logger.info(
-                f"[_add_request_sync] Scheduled task for {sub_request_id}, future={future}, done={future.done()}"
-            )
 
     def process_from_queue(self, timeout: float = 60.0):
         """Run generation loop pulling from completion queue.
@@ -784,22 +694,14 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
-        logger.info(f"[process_from_queue] ENTRY - timeout={timeout}")
         total_processed = 0
-        loop_iterations = 0
 
-        logger.info("[process_from_queue] Entering while loop")
         while True:
-            loop_iterations += 1
-            logger.debug(f"[process_from_queue] Loop iteration {loop_iterations}")
-
             if self._prefetch_future.done():
                 self._prefetch_future.result()
 
             try:
-                logger.debug("[process_from_queue] Attempting to get from completion_queue (timeout=1.0)")
                 sub_request = self.completion_queue.get(timeout=1.0)
-                logger.info(f"[process_from_queue] Got item from completion_queue: {type(sub_request)}")
 
                 base_request_id = sub_request["base_request_id"]
                 expected_n = sub_request["expected_n"]
@@ -815,14 +717,8 @@ class LLMRayActor:
                 # Add this sub-request output
                 self.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
 
-                logger.info(
-                    f"[process_from_queue] Accumulated {len(self.request_outputs[base_request_id]['outputs'])}/{expected_n} for {base_request_id}"
-                )
-
                 # Check if all sub-requests are complete
                 if len(self.request_outputs[base_request_id]["outputs"]) == expected_n:
-                    logger.info(f"[process_from_queue] All sub-requests complete for {base_request_id}, aggregating")
-
                     # Sort outputs by j index (extracted from request_id)
                     outputs = self.request_outputs[base_request_id]["outputs"]
                     ordered_outs = sorted(outputs, key=lambda x: int(x.request_id.split("_")[-1]))
@@ -847,20 +743,9 @@ class LLMRayActor:
                     results_queue.put(result)
                     total_processed += 1
 
-                # Log memory stats after processing
-                self.logger.info(
-                    f"[Memory Stats] Dicts: metadata={len(self.request_metadata)}, "
-                    f"outputs={len(self.request_outputs)}, tasks={len(self.active_tasks)}"
-                )
-
             except queue.Empty:
-                logger.debug("[process_from_queue] Queue empty, sleeping briefly")
                 time.sleep(0.1)
 
-        logger.info(
-            f"[process_from_queue] EXIT - Exited while loop after {loop_iterations} iterations, "
-            f"total_processed={total_processed}"
-        )
         return total_processed
 
     def _call_async_from_sync(self, coro, timeout=120):
@@ -907,14 +792,11 @@ class LLMRayActor:
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        logger.info(f"[update_weight] ENTRY for param: {name}")
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
-        result = self._call_async_from_sync(
+        return self._call_async_from_sync(
             self.llm_engine.engine_core.collective_rpc_async("update_weight", args=(name, dtype, shape, empty_cache))
         )
-        logger.info(f"[update_weight] EXIT for {name}")
-        return result
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
         expected_dtype = str(self.llm_engine.model_config.dtype)
@@ -947,9 +829,7 @@ class LLMRayActor:
             max_model_len = model_config.max_model_len
 
             if num_gpu_blocks is not None and num_gpu_blocks != 0:
-                # Calculate max concurrency using vLLM's formula
                 max_concurrency = (num_gpu_blocks * block_size) / max_model_len
-                logger.info(f"Calculated max_concurrency: {max_concurrency}")
                 return int(max_concurrency)
 
             # Not initialized yet; wait a bit
@@ -969,13 +849,8 @@ def get_cuda_arch_list() -> str:
         major, minor = torch.cuda.get_device_capability(i)
         cuda_capabilities.append(f"{major}.{minor}")
 
-    # Remove duplicates and sort
     cuda_capabilities = sorted(set(cuda_capabilities))
-    cuda_arch_list = ";".join(cuda_capabilities)
-    logger.info(
-        f"Detected CUDA compute capabilities: {cuda_capabilities}, setting TORCH_CUDA_ARCH_LIST={cuda_arch_list}"
-    )
-    return cuda_arch_list
+    return ";".join(cuda_capabilities)
 
 
 def create_vllm_engines(
@@ -1024,11 +899,7 @@ def create_vllm_engines(
     use_hybrid_engine = pg is not None
     num_gpus = int(tensor_parallel_size == 1)
     if use_hybrid_engine and tensor_parallel_size == 1 and single_gpu_mode:
-        # every worker will use 0.5 GPU, so that we can schedule
-        # 2 instances on the same GPUs.
         num_gpus = 0.5
-
-    logger.info(f"num_gpus: {num_gpus}")
 
     if not use_hybrid_engine:
         # Create a big placement group to ensure that all engines are packed
