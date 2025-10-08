@@ -77,6 +77,28 @@ def assert_threaded_actor(instance):
         return
 
 
+def _truncate_tool_output_tokens(
+    tool_output_token_ids: List[int],
+    current_prompt_token_ids: List[int],
+    accumulated_tokens: List[int],
+    max_model_len: int,
+    max_tokens: int,
+    current_mask_len: int,
+) -> Tuple[List[int], int, List[int]]:
+    prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens + tool_output_token_ids
+    excess = len(prompt_and_tool_output) - max_model_len
+    if excess > 0:
+        tool_output_token_ids = tool_output_token_ids[:-excess]
+
+    remaining = max_tokens - current_mask_len
+    if remaining <= 0:
+        return [], excess, prompt_and_tool_output
+    elif len(tool_output_token_ids) > remaining:
+        return tool_output_token_ids[:remaining], excess, prompt_and_tool_output
+
+    return tool_output_token_ids, excess, prompt_and_tool_output
+
+
 async def process_request_async(
     llm_engine: vllm.AsyncLLMEngine,
     sub_request_id: str,
@@ -111,7 +133,11 @@ async def process_request_async(
 
     while True:
         iteration_request_id = f"{sub_request_id}_iter{iteration}"
-        outputs = [o async for o in llm_engine.generate(current_prompt, current_sampling_params, iteration_request_id) if o.finished]
+        outputs = [
+            o
+            async for o in llm_engine.generate(current_prompt, current_sampling_params, iteration_request_id)
+            if o.finished
+        ]
         assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {iteration_request_id}"
         request_output = outputs[0]
         iteration += 1
@@ -126,19 +152,11 @@ async def process_request_async(
         if not tools or not max_tool_calls:
             break
 
-        triggered_tool = None
-        stop_str = None
-        for candidate_stop_str in sampling_params.stop:
-            if candidate_stop_str in tools and output.text.endswith(candidate_stop_str):
-                stop_str = candidate_stop_str
-                if num_calls < max_tool_calls.get(stop_str, 0):
-                    triggered_tool = tools[stop_str]
-                else:
-                    triggered_tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
-                break
-
-        if triggered_tool is None:
+        tool_result_tuple = get_triggered_tool(output.text, tools, max_tool_calls, num_calls, sampling_params)
+        if tool_result_tuple is None:
             break
+
+        triggered_tool, stop_str = tool_result_tuple
 
         if executor is None:
             logger.error(f"executor is None for request {sub_request_id}, may deadlock!")
@@ -157,17 +175,14 @@ async def process_request_async(
             "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
         )
 
-        prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens + tool_output_token_ids
-        max_model_len = llm_engine.model_config.max_model_len
-        excess = len(prompt_and_tool_output) - max_model_len
-        if excess > 0:
-            tool_output_token_ids = tool_output_token_ids[:-excess]
-
-        remaining = sampling_params.max_tokens - len(masks)
-        if remaining <= 0:
-            tool_output_token_ids = []
-        elif len(tool_output_token_ids) > remaining:
-            tool_output_token_ids = tool_output_token_ids[:remaining]
+        tool_output_token_ids, excess, prompt_and_tool_output = _truncate_tool_output_tokens(
+            tool_output_token_ids,
+            current_prompt_token_ids,
+            accumulated_tokens,
+            llm_engine.model_config.max_model_len,
+            sampling_params.max_tokens,
+            len(masks),
+        )
 
         accumulated_tokens.extend(tool_output_token_ids)
         masks.extend([0] * len(tool_output_token_ids))
