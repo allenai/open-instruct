@@ -486,28 +486,46 @@ class LLMRayActor:
         verbose: bool = False,
         **kwargs,
     ):
-        assert_threaded_actor(self)
-
-        self.logger = logger_utils.setup_logger(__name__)
-        if verbose:
-            self.logger.setLevel(logging.DEBUG)
-        self.tools = tools or {}
-        self.max_tool_calls = max_tool_calls or {}
-        self.inference_batch_size = inference_batch_size
-        self.inflight_updates = inflight_updates
-        self.verbose = verbose
-        self.request_metadata = {}
-        self.completion_queue = queue.Queue()
-
-        max_workers = DEFAULT_WORKERS + (TOOL_WORKERS if self.tools else 0)
-        self.executor = futures.ThreadPoolExecutor(max_workers=max_workers)
+        self._validate_actor_type()
+        self._init_config(tools, max_tool_calls, inference_batch_size, inflight_updates, verbose)
+        self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
+        self._init_executor()
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
 
         self._setup_engine_args(args, bundle_indices, kwargs)
+        self._initialize_async_loop()
+        self._start_workers()
 
+    def _validate_actor_type(self):
+        assert_threaded_actor(self)
+
+    def _init_config(
+        self,
+        tools: Optional[Dict[str, Tool]],
+        max_tool_calls: Optional[Dict[str, int]],
+        inference_batch_size: Optional[int],
+        inflight_updates: bool,
+        verbose: bool,
+    ):
+        self.logger = logger_utils.setup_logger(__name__)
+        if verbose:
+            self.logger.setLevel(logging.DEBUG)
+
+        self.tools = tools or {}
+        self.max_tool_calls = max_tool_calls or {}
+        self.inference_batch_size = inference_batch_size
+        self.inflight_updates = inflight_updates
+        self.verbose = verbose
+
+        self.request_metadata = {}
+        self.completion_queue = queue.Queue()
+        self.active_tasks = {}
+        self.request_outputs = {}
+
+    def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager):
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
@@ -518,11 +536,11 @@ class LLMRayActor:
         self._should_stop_timeout_s = SHOULD_STOP_CACHE_TIMEOUT_S
         self._inflight_ref = None
 
-        self.active_tasks = {}
-        self.request_outputs = {}
+    def _init_executor(self):
+        max_workers = DEFAULT_WORKERS + (TOOL_WORKERS if self.tools else 0)
+        self.executor = futures.ThreadPoolExecutor(max_workers=max_workers)
 
-        self._initialize_async_loop()
-
+    def _start_workers(self):
         self._prefetch_future = self.executor.submit(self._prefetch_worker)
         self._process_future = self.executor.submit(self.process_from_queue)
 

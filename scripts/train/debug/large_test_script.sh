@@ -37,7 +37,7 @@ uv run python mason.py \
         --pack_length 20480 \
         --model_name_or_path Qwen/Qwen2.5-7B \
         --chat_template_name tulu_thinker \
-	--inflight_updates False \
+	--inflight_updates True \
         --stop_strings "</answer>" \
         --non_stop_penalty False \
         --temperature 1.0 \

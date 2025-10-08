@@ -36,7 +36,7 @@ uv run python mason.py \
     --max_prompt_token_length 512 \
     --response_length 512 \
     --pack_length 1024 \
-    --inflight_updates False \
+    --inflight_updates True \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
