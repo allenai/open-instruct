@@ -16,8 +16,6 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 import asyncio
-import logging
-import dataclasses
 import os
 import queue
 import sys
@@ -69,8 +67,7 @@ WEIGHT_UPDATE_SLEEP_INTERVAL_S = 0.1
 
 
 def assert_threaded_actor(instance):
-    """
-    Assert that an instance's class is suitable for use in a threaded (non-async) Ray actor.
+    """Assert that an instance's class is suitable for use in a threaded (non-async) Ray actor.
 
     This function performs two checks:
       1. The class must not define any `async def` methods
@@ -315,7 +312,6 @@ def get_triggered_tool(
     return None, None
 
 
-
 def process_completed_request(request_id, outs, tracking, current_time, tools, request_metadata):
     """Process a completed request with all its samples and return the result.
 
@@ -538,11 +534,10 @@ class LLMRayActor:
         actor_manager: ray.actor.ActorHandle,
         inference_batch_size: Optional[int],
         inflight_updates: bool,
-        verbose: bool = False,
         **kwargs,
     ):
         assert_threaded_actor(self)
-        self._init_config(tools, max_tool_calls, inference_batch_size, inflight_updates, verbose)
+        self._init_config(tools, max_tool_calls, inference_batch_size, inflight_updates)
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
         self._init_executor()
 
@@ -559,17 +554,11 @@ class LLMRayActor:
         max_tool_calls: Optional[Dict[str, int]],
         inference_batch_size: Optional[int],
         inflight_updates: bool,
-        verbose: bool,
     ) -> None:
-        self.logger = logger_utils.setup_logger(__name__)
-        if verbose:
-            self.logger.setLevel(logging.DEBUG)
-
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inference_batch_size = inference_batch_size
         self.inflight_updates = inflight_updates
-        self.verbose = verbose
 
         self.request_metadata = {}
         self.completion_queue = queue.Queue()
@@ -611,7 +600,7 @@ class LLMRayActor:
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
-            self.logger.debug(f"creating LLM with bundle_indices={bundle_indices}")
+            logger.debug(f"creating LLM with bundle_indices={bundle_indices}")
 
         self.engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
         # Log stats causes a crash in the engine at assert outputs.scheduler_stats is not None when we call step() and there is nothing to step.
@@ -846,7 +835,6 @@ def create_vllm_engines(
     inference_batch_size: Optional[int] = None,
     use_fp8_kv_cache=False,
     inflight_updates: bool = False,
-    verbose: bool = False,
 ) -> list[LLMRayActor]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
@@ -931,7 +919,6 @@ def create_vllm_engines(
                 inflight_updates=inflight_updates,
                 kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
                 calculate_kv_scales=use_fp8_kv_cache,
-                verbose=verbose,
             )
         )
 
