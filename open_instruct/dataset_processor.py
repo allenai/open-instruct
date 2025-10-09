@@ -226,7 +226,7 @@ class DatasetConfig:
 
 def get_num_proc(dataset_len: int, num_available_cpus: int, example_per_second_per_cpu) -> int:
     num_required_cpus = max(1, dataset_len // example_per_second_per_cpu)
-    return min(num_required_cpus, num_available_cpus)
+    return min(num_required_cpus, num_available_cpus, dataset_len)
 
 
 def select_nested(dataset: DatasetDict, max_examples_per_split: int):
