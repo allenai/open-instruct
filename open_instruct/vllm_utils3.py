@@ -23,7 +23,7 @@ import time
 from collections import defaultdict
 from concurrent import futures
 from datetime import timedelta
-from typing import Any, Dict, List, Optional, Union, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import ray
 import torch
@@ -49,6 +49,8 @@ from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
+
+WEIGHT_UPDATE_SLEEP_INTERVAL_S = 0.1
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -847,10 +849,12 @@ class LLMRayActor:
             if pending_tools == 0 and unfinished == 0:
                 break
 
-            time.sleep(sleep_s)
+            time.sleep(WEIGHT_UPDATE_SLEEP_INTERVAL_S)
         # Then, check that the dtypes match.
         expected_dtype = str(self.llm_engine.model_config.dtype)
-        assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
+        assert str(dtype) == expected_dtype, (
+            f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
+        )
 
     def update_weight(self, name: str, dtype: str, shape: Tuple[int, ...], empty_cache: bool = False) -> None:
         self._prepare_weight_update(name, dtype)
