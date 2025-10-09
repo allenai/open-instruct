@@ -231,7 +231,10 @@ def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation
 
 
 def setup_vllm_engines(
-    args: grpo_fast.Args, model_config: model_utils.ModelConfig, max_model_len: int = 20480
+    args: grpo_fast.Args,
+    tokenizer_config: dataset_transformation.TokenizerConfig,
+    model_config: model_utils.ModelConfig,
+    max_model_len: int = 20480,
 ) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue]:
     """Set up vLLM engines and queues."""
     logger.info("Setting up vLLM engines...")
@@ -255,7 +258,7 @@ def setup_vllm_engines(
         num_engines=args.vllm_num_engines,
         tensor_parallel_size=args.vllm_tensor_parallel_size,
         enforce_eager=True,
-        tokenizer_name_or_path=model_config.model_name_or_path,
+        tokenizer_name_or_path=tokenizer_config.tokenizer_name_or_path,
         pretrain=model_config.model_name_or_path,
         revision=model_config.model_revision,
         seed=args.seed,
@@ -693,7 +696,9 @@ def main() -> None:
     free_all_gpu_memory()
 
     dataset = setup_dataset(args, tokenizer_config)
-    vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(args, model_config)
+    vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(
+        args, tokenizer_config, model_config
+    )
 
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
