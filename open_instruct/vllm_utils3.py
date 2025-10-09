@@ -419,9 +419,10 @@ class LLMRayActor:
         self.request_outputs = {}
         self._threads_started = threading.Event()
 
-        self._executor = futures.ThreadPoolExecutor(max_workers=2)
-        self._prefetch_future = self._executor.submit(self._prefetch_worker)
-        self._process_future = self._executor.submit(self._process_from_queue)
+        max_workers = 22 if self.tools else 2  # 2 for background threads + 20 for tool execution if tools enabled
+        self.executor = futures.ThreadPoolExecutor(max_workers=max_workers)
+        self._prefetch_future = self.executor.submit(self._prefetch_worker)
+        self._process_future = self.executor.submit(self._process_from_queue)
 
     def _init_config(
         self,
@@ -439,11 +440,6 @@ class LLMRayActor:
         self.verbose = verbose
         self.request_metadata = {}
         self.vllm_active_requests = set()
-
-        if self.tools:
-            self.executor = futures.ThreadPoolExecutor(max_workers=20)
-        else:
-            self.executor = None
 
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.prompt_queue = prompt_queue
