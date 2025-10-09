@@ -479,7 +479,7 @@ def init_process_group(
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
     while True:
-        if actor._check_should_stop_with_cache() or len(actor.active_tasks) >= actor.inference_batch_size:
+        if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(PREFETCH_SLEEP_S)
             continue
 
@@ -488,10 +488,10 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
         except queue.Empty:
             continue
 
-        _add_request(actor, request)
+        add_request(actor, request)
 
 
-def _add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
+def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     request_id = make_request_id(request)
 
     sampling_params = request.generation_config.clone()
@@ -584,7 +584,9 @@ class LLMRayActor:
         self._process_future = self.executor.submit(self.process_from_queue)
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
-        """Configure GPU visibility for Ray and vLLM."""
+        # a hack to make the script work.
+        # stop ray from manipulating *_VISIBLE_DEVICES
+        # at the top-level when the distributed_executor_backend is ray.
         if distributed_executor_backend == "ray":
             os.environ.pop("CUDA_VISIBLE_DEVICES", None)
             os.environ.pop("ROCR_VISIBLE_DEVICES", None)
@@ -635,6 +637,7 @@ class LLMRayActor:
         model_config = self.llm_engine.model_config
         parallel_config = self.llm_engine.vllm_config.parallel_config
 
+        # Extract only the necessary dimensions as simple Python types
         hidden_size = model_config.get_hidden_size()
         intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
 
@@ -647,7 +650,7 @@ class LLMRayActor:
             "num_kv_heads": model_config.get_num_kv_heads(parallel_config),
         }
 
-    def _check_should_stop_with_cache(self) -> bool:
+    def _should_stop(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=RAY_WAIT_TIMEOUT_S)
@@ -701,6 +704,7 @@ class LLMRayActor:
         total_processed = 0
 
         while True:
+            # Health check: ensure prefetch worker is alive. This will raise if it has crashed.
             if self._prefetch_future.done():
                 self._prefetch_future.result()
 
@@ -809,8 +813,13 @@ def get_cuda_arch_list() -> str:
         major, minor = torch.cuda.get_device_capability(i)
         cuda_capabilities.append(f"{major}.{minor}")
 
+    # Remove duplicates and sort
     cuda_capabilities = sorted(set(cuda_capabilities))
-    return ";".join(cuda_capabilities)
+    cuda_arch_list = ";".join(cuda_capabilities)
+    logger.info(
+        f"Detected CUDA compute capabilities: {cuda_capabilities}, setting TORCH_CUDA_ARCH_LIST={cuda_arch_list}"
+    )
+    return cuda_arch_list
 
 
 def create_vllm_engines(
@@ -850,14 +859,15 @@ def create_vllm_engines(
         max_tool_calls_dict = {}
 
     vllm_engines = []
-    if tensor_parallel_size == 1:
-        distributed_executor_backend = "mp"
-    else:
-        distributed_executor_backend = "ray"
+    distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "ray"
     use_hybrid_engine = pg is not None
     num_gpus = int(tensor_parallel_size == 1)
     if use_hybrid_engine and tensor_parallel_size == 1 and single_gpu_mode:
+        # every worker will use 0.5 GPU, so that we can schedule
+        # 2 instances on the same GPUs.
         num_gpus = 0.5
+
+    logger.info(f"num_gpus: {num_gpus}")
 
     if not use_hybrid_engine:
         # Create a big placement group to ensure that all engines are packed
@@ -878,11 +888,6 @@ def create_vllm_engines(
             placement_group_bundle_index=bundle_indices[0],
         )
 
-        env_vars = {"TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
-        if distributed_executor_backend == "mp":
-            # Allow vLLM v1 to spawn helper processes even for single-GPU runs.
-            env_vars["VLLM_ENABLE_V1_MULTIPROCESSING"] = "1"
-
         vllm_engines.append(
             ray.remote(LLMRayActor)
             .options(
@@ -890,7 +895,9 @@ def create_vllm_engines(
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
                 # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
-                runtime_env=ray.runtime_env.RuntimeEnv(env_vars=env_vars),
+                runtime_env=ray.runtime_env.RuntimeEnv(
+                    env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
+                ),
             )
             .remote(
                 model=pretrain,
