@@ -31,6 +31,7 @@ import ray
 import torch
 import torch.distributed
 import vllm
+from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed.distributed_c10d import (
@@ -396,9 +397,9 @@ class LLMRayActor:
         tools: Optional[Dict[str, Tool]] = None,
         max_tool_calls: Optional[Dict[str, int]] = None,
         bundle_indices: Optional[List[int]] = None,
-        prompt_queue: ray.util.queue.Queue,
-        results_queue: ray.util.queue.Queue,
-        eval_results_queue: ray.util.queue.Queue,
+        prompt_queue: ray_queue.Queue,
+        results_queue: ray_queue.Queue,
+        eval_results_queue: ray_queue.Queue,
         actor_manager: ray.actor.ActorHandle,
         inference_batch_size: Optional[int],
         inflight_updates: bool,
