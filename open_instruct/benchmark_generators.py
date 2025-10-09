@@ -382,6 +382,9 @@ def run_benchmark(
     model_dims_dict = ray.get(vllm_engines[0].get_model_dims_dict.remote())
     model_dims = utils.ModelDims(**model_dims_dict)
 
+    # Calculate total number of GPUs for MFU/MBU calculations
+    num_gpus = args.vllm_num_engines * args.vllm_tensor_parallel_size
+
     # Submit warmup batch first
     logger.info("Submitting warmup batch...")
     warmup_start_idx = 0
@@ -478,18 +481,18 @@ def run_benchmark(
                 all_prompt_lengths, all_response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
             )
 
-            # MFU = (FLOPs / time) / peak_FLOPS * 100
+            # MFU = (FLOPs / time) / (peak_FLOPS * num_gpus) * 100
             model_flops_per_second = model_flops / batch_generation_time if batch_generation_time > 0 else 0
-            result_dict["mfu"] = 100 * model_flops_per_second / model_dims.device_flops
+            result_dict["mfu"] = 100 * model_flops_per_second / (model_dims.device_flops * num_gpus)
 
             # Calculate total memory bytes for all prompts and responses in the batch
             model_memory_bytes = model_dims.memory_bytes(
                 all_prompt_lengths, all_response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
             )
 
-            # MBU = (Memory bytes / time) / peak_bandwidth * 100
+            # MBU = (Memory bytes / time) / (peak_bandwidth * num_gpus) * 100
             model_bytes_per_second = model_memory_bytes / batch_generation_time if batch_generation_time > 0 else 0
-            result_dict["mbu"] = 100 * model_bytes_per_second / model_dims.device_memory_bandwidth
+            result_dict["mbu"] = 100 * model_bytes_per_second / (model_dims.device_memory_bandwidth * num_gpus)
 
             save_completion_lengths([result_dict], timestamp, batch_idx)
             results.append(result_dict)
