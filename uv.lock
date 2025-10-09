@@ -1888,6 +1888,11 @@ wheels = [
 ]
 
 [[package]]
+name = "muon-optimizer"
+version = "0.1.0"
+source = { git = "https://github.com/KellerJordan/Muon#f90a42b28e00b8d9d2d05865fe90d9f39abcbcbd" }
+
+[[package]]
 name = "nest-asyncio"
 version = "1.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2196,6 +2201,7 @@ dependencies = [
     { name = "liger-kernel", marker = "sys_platform != 'darwin'" },
     { name = "litellm" },
     { name = "matplotlib" },
+    { name = "muon-optimizer" },
     { name = "nltk" },
     { name = "numpy" },
     { name = "nvitop" },
@@ -2246,6 +2252,7 @@ requires-dist = [
     { name = "liger-kernel", marker = "sys_platform != 'darwin'", specifier = ">=0.5.4" },
     { name = "litellm", specifier = ">=1.72.0,<1.75.2" },
     { name = "matplotlib", specifier = ">=3.9.3" },
+    { name = "muon-optimizer", git = "https://github.com/KellerJordan/Muon" },
     { name = "nltk", specifier = ">=3.9.1" },
     { name = "numpy", specifier = "<2" },
     { name = "nvitop", specifier = ">=1.4.2" },

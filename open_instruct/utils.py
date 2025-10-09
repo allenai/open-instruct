@@ -49,6 +49,7 @@ from multiprocessing import resource_tracker as _rt
 from typing import Any, Iterable, List, NewType, Optional, Tuple, Union
 
 import beaker
+import muon
 import numpy as np
 import ray
 import requests
@@ -1414,7 +1415,7 @@ def make_optimizer(optim_params, optimizer_name: str, optimizer_kwargs: dict):
     if optimizer_name.lower() == "adamw":
         optimizer_fn = torch.optim.AdamW
     elif optimizer_name.lower() == "muon":
-        optimizer_fn = torch.optim.Muon
+        optimizer_fn = muon.Muon
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}. Supported optimizers are 'adamw' and 'muon'.")
     return optimizer_fn(optim_params, **optimizer_kwargs)
