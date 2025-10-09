@@ -454,10 +454,16 @@ class LLMRayActor:
         self._should_stop_timeout_s = 5
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
+        # a hack to make the script work.
+        # stop ray from manipulating *_VISIBLE_DEVICES
+        # at the top-level when the distributed_executor_backend is ray.
         if distributed_executor_backend == "ray":
             os.environ.pop("CUDA_VISIBLE_DEVICES", None)
             os.environ.pop("ROCR_VISIBLE_DEVICES", None)
         elif noset_visible_devices:
+            # We need to set CUDA_VISIBLE_DEVICES to the ray assigned GPU
+            # when the distributed_executor_backend is not ray and
+            # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
             os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
 
     def _setup_engine_args(self, args, bundle_indices, kwargs) -> None:
@@ -469,7 +475,9 @@ class LLMRayActor:
                 logger.info(f"creating LLM with bundle_indices={bundle_indices}")
 
         engine_args = vllm.EngineArgs(*args, **kwargs)
+        # Log stats causes a crash in the engine at assert outputs.scheduler_stats is not None when we call step() and there is nothing to step.
         engine_args.disable_log_stats = True
+        # Cascade attention has known performance issues: https://github.com/vllm-project/vllm/issues/17652
         engine_args.disable_cascade_attn = True
 
         self.llm_engine = vllm.LLMEngine.from_engine_args(engine_args)
