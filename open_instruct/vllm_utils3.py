@@ -1020,7 +1020,6 @@ def create_vllm_engines(
                 revision=revision,
                 tokenizer=tokenizer_name_or_path,
                 tokenizer_revision=revision,
-                trust_remote_code=True,
                 worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
                 tensor_parallel_size=tensor_parallel_size,
                 enforce_eager=enforce_eager,
