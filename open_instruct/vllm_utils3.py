@@ -135,7 +135,7 @@ def get_triggered_tool(
     max_tool_calls: Dict[str, int],
     num_calls: int,
     sampling_params: vllm.SamplingParams,
-) -> Optional[Tuple[Tool, str]]:
+) -> Tuple[Optional[Tool], Optional[str]]:
     """Check if any tool was triggered and return the tool and stop_str if found.
 
     Args:
@@ -146,7 +146,7 @@ def get_triggered_tool(
         sampling_params: Sampling parameters containing stop strings
 
     Returns:
-        Tuple of (tool, stop_str) if a tool was triggered, None otherwise.
+        Tuple of (tool, stop_str) if a tool was triggered, (None, None) otherwise.
     """
     for stop_str in sampling_params.stop:
         if stop_str in tools and output_text.endswith(stop_str):
@@ -154,7 +154,7 @@ def get_triggered_tool(
                 return tools[stop_str], stop_str
             else:
                 return MaxCallsExceededTool(start_str="<tool>", end_str="</tool>"), stop_str
-    return None
+    return None, None
 
 
 def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, executor):
@@ -178,16 +178,15 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
     tracking["masks"][output.request_id].extend([1] * len(o.token_ids))
 
-    tool_result = get_triggered_tool(
+    tool, stop_str = get_triggered_tool(
         o.text, tools, max_tool_calls, tracking["num_calls"][output.request_id], sampling_params
     )
-    if tool_result is not None:
-        tool, stop_str = tool_result
-        future = executor.submit(tool, o.text)
-        tracking["pending_tool_futures"][output.request_id] = (future, o, output)
-        return None
+    if tool is None:
+        return output
 
-    return output
+    future = executor.submit(tool, o.text)
+    tracking["pending_tool_futures"][output.request_id] = (future, o, output)
+    return None
 
 
 def process_completed_request(request_id, outs, tracking, current_time, tools, request_metadata):
