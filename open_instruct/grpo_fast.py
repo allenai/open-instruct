@@ -337,6 +337,8 @@ class Args:
     """inference batch size per vLLM engine. If None, calculated as ceil(num_unique_prompts_rollout / vllm_num_engines) * num_samples_per_prompt_rollout"""
     vllm_tensor_parallel_size: int = 1
     """tensor parallel size of vLLM Engine for multi-GPU inference"""
+    vllm_pipeline_parallel_size: int = 1
+    """pipeline parallel size of vLLM Engine for multi-GPU inference"""
     vllm_enforce_eager: bool = False
     """whether to enforce eager mode for vLLM -- slow inference but needed for multi-node"""
     vllm_sync_backend: str = "nccl"
@@ -807,13 +809,14 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.args.vllm_num_engines,
                 self.args.vllm_tensor_parallel_size,
             )
-            world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
+            vllm_pipeline_parallel_size = self.args.vllm_pipeline_parallel_size
+            world_size = vllm_num_engines * vllm_tensor_parallel_size * vllm_pipeline_parallel_size + 1
             backend = self.args.vllm_sync_backend
             refs = [
                 engine.init_process_group.remote(
                     master_address,
                     master_port,
-                    i * vllm_tensor_parallel_size + 1,
+                    i * vllm_tensor_parallel_size * vllm_pipeline_parallel_size + 1,
                     world_size,
                     "openrlhf",
                     backend=backend,
@@ -2119,6 +2122,7 @@ def create_model_and_optimizer(
     vllm_engines = vllm_utils3.create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
+        args.vllm_pipeline_parallel_size,
         args.vllm_enforce_eager,
         tc.tokenizer_name_or_path,
         model_config.model_name_or_path,
@@ -2376,7 +2380,7 @@ def one_training_step(
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
 
-    num_actor_gpus = args.vllm_num_engines * args.vllm_tensor_parallel_size
+    num_actor_gpus = args.vllm_num_engines * args.vllm_tensor_parallel_size * args.vllm_pipeline_parallel_size
     total_generation_time = data_thread_metrics["time/getting_response"]
 
     utilization_metrics = calculate_utilization_metrics(

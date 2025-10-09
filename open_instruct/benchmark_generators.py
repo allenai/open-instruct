@@ -250,6 +250,7 @@ def setup_vllm_engines(
     vllm_engines = vllm_utils3.create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
+        args.vllm_pipeline_parallel_size,
         True,
         tokenizer_config.tokenizer_name_or_path,
         model_config.model_name_or_path,
@@ -383,7 +384,16 @@ def run_benchmark(
     model_dims = utils.ModelDims(**model_dims_dict)
 
     # Calculate total number of GPUs for MFU/MBU calculations
-    num_gpus = args.vllm_num_engines * args.vllm_tensor_parallel_size
+    num_gpus = args.vllm_num_engines * args.vllm_tensor_parallel_size * args.vllm_pipeline_parallel_size
+
+    original_descriptions = {}
+    benchmark_start_time = time.perf_counter()
+    utils.maybe_update_beaker_description(
+        num_engines=args.vllm_num_engines,
+        tensor_parallel=args.vllm_tensor_parallel_size,
+        pipeline_parallel=args.vllm_pipeline_parallel_size,
+        original_descriptions=original_descriptions,
+    )
 
     # Submit warmup batch first
     logger.info("Submitting warmup batch...")
@@ -504,6 +514,16 @@ def run_benchmark(
                 f"generation time: {batch_generation_time:.2f}s, "
                 f"weight sync time: {weight_sync_time:.2f}s, "
                 f"total new tokens: {total_new_tokens}"
+            )
+
+            utils.maybe_update_beaker_description(
+                current_step=batch_idx,
+                total_steps=num_batches - 1,
+                start_time=benchmark_start_time,
+                num_engines=args.vllm_num_engines,
+                tensor_parallel=args.vllm_tensor_parallel_size,
+                pipeline_parallel=args.vllm_pipeline_parallel_size,
+                original_descriptions=original_descriptions,
             )
 
         # Calculate total time for main benchmark only
