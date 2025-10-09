@@ -402,7 +402,7 @@ class LLMRayActor:
         actor_manager: ray.actor.ActorHandle,
         inference_batch_size: Optional[int],
         inflight_updates: bool,
-        verbose: bool,
+        verbose: bool = False,
         **kwargs,
     ):
         assert_threaded_actor(self)
