@@ -844,6 +844,7 @@ def create_vllm_engines(
     inference_batch_size: Optional[int] = None,
     use_fp8_kv_cache=False,
     inflight_updates: bool = False,
+    verbose: bool = False,
 ) -> list[LLMRayActor]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
