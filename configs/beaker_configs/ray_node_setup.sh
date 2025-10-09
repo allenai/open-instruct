@@ -15,6 +15,7 @@ echo PATH=$PATH
 BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk '{print $1}')
 
 RAY_NODE_PORT=8888
+mkdir -p /root/.triton/autotune
 ray stop --force
 
 if [ "$BEAKER_REPLICA_RANK" == "0" ]; then
