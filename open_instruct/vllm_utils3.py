@@ -53,6 +53,8 @@ from open_instruct.utils import ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
 
+WEIGHT_UPDATE_SLEEP_INTERVAL_S = 0.1
+
 
 def assert_threaded_actor(instance):
     """Assert that an instance's class is suitable for use in a threaded (non-async) Ray actor.
@@ -464,7 +466,7 @@ class LLMRayActor:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             if self.verbose:
-                self.logger.info(f"creating LLM with bundle_indices={bundle_indices}")
+                logger.info(f"creating LLM with bundle_indices={bundle_indices}")
 
         engine_args = vllm.EngineArgs(*args, **kwargs)
         engine_args.disable_log_stats = True
@@ -633,7 +635,7 @@ class LLMRayActor:
 
         # Verify we have all required outputs before proceeding
         if len(outputs_by_index) != expected_n or any(j not in outputs_by_index for j in range(expected_n)):
-            self.logger.warning(
+            logger.warning(
                 f"Incomplete or malformed outputs for {request_id}. "
                 f"Expected {expected_n} samples, got indices {sorted(outputs_by_index.keys())}. Skipping."
             )
@@ -844,7 +846,7 @@ class LLMRayActor:
 
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
-                    self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
+                    logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
             else:
                 # Can't make a new request (hit limits), finalize this sub-request
                 base_req_id = _extract_base_request_id(req_id)
@@ -855,7 +857,7 @@ class LLMRayActor:
                     for other_id in tracking["pending_tool_futures"]
                     if _extract_base_request_id(other_id) == base_req_id and other_id != req_id
                 ]
-                self.logger.info(
+                logger.info(
                     f"[_poll_tool_futures] Finalizing {req_id} (can't continue). "
                     f"Other pending tools for {base_req_id}: {other_pending}"
                 )
@@ -893,7 +895,8 @@ class LLMRayActor:
             args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
         )
 
-    def _maybe_drain_requests(self, sleep_s: float = 0.1):
+    def _prepare_weight_update(self, name: str, dtype: str) -> None:
+        # First, drain all the requests when appropriate:
         while not self.inflight_updates:
             pending_tools = len(self.tracking["pending_tool_futures"])
             unfinished = self.llm_engine.get_num_unfinished_requests()
@@ -901,14 +904,21 @@ class LLMRayActor:
             if pending_tools == 0 and unfinished == 0:
                 break
 
-            time.sleep(sleep_s)
+            time.sleep(WEIGHT_UPDATE_SLEEP_INTERVAL_S)
+        # Then, check that the dtypes match.
+        expected_dtype = str(self.llm_engine.model_config.dtype)
+        assert str(dtype) == expected_dtype, (
+            f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
+        )
 
-    def update_weight(self, name, dtype, shape, empty_cache=False):
-        self._maybe_drain_requests()
+    def update_weight(self, name: str, dtype: str, shape: Tuple[int, ...], empty_cache: bool = False) -> None:
+        self._prepare_weight_update(name, dtype)
         return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
-    def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        self._maybe_drain_requests()
+    def update_weight_cuda_ipc(
+        self, name: str, dtype: str, shape: Tuple[int, ...], ipc_handles: List[Any], empty_cache: bool = False
+    ) -> None:
+        self._prepare_weight_update(name, dtype)
         return self.llm_engine.collective_rpc(
             "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
@@ -1073,7 +1083,6 @@ def create_vllm_engines(
                 revision=revision,
                 tokenizer=tokenizer_name_or_path,
                 tokenizer_revision=revision,
-                trust_remote_code=True,
                 worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
                 tensor_parallel_size=tensor_parallel_size,
                 enforce_eager=enforce_eager,
