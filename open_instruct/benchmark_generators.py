@@ -672,8 +672,12 @@ def main() -> None:
     free_all_gpu_memory()
 
     dataset = setup_dataset(args, tokenizer_config)
+    max_model_len = args.max_prompt_token_length + args.response_length
+    logger.info(
+        f"Setting max_model_len to {max_model_len} (max_prompt_token_length={args.max_prompt_token_length} + response_length={args.response_length})"
+    )
     vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(
-        args, tokenizer_config, model_config
+        args, tokenizer_config, model_config, max_model_len
     )
 
     # Create the timestamp here so we use it for both filenames.
