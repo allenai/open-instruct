@@ -239,14 +239,7 @@ def setup_vllm_engines(
     """Set up vLLM engines and queues."""
     logger.info("Setting up vLLM engines...")
 
-    # Initialize Ray
-    if ray.is_initialized():
-        ray.shutdown()
-    ray.init(num_cpus=4, num_gpus=1, ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"]})
-
-    bundles = [{"GPU": 1, "CPU": 1} for _ in range(args.vllm_num_engines)]
-    pg = ray.util.placement_group(bundles, strategy="PACK")
-    ray.get(pg.ready())
+    ray.init(dashboard_host="0.0.0.0")
 
     param_prompt_Q = ray_queue.Queue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
@@ -266,7 +259,7 @@ def setup_vllm_engines(
         max_model_len,
         args.vllm_gpu_memory_utilization,
         False,
-        pg=pg,
+        pg=None,
         tools={},
         max_tool_calls=[0],
         prompt_queue=param_prompt_Q,
