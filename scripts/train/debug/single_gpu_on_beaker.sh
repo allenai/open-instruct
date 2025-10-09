@@ -41,6 +41,7 @@ uv run python mason.py \
     --inflight_updates True \
     --ground_truths_key ground_truth \
     --chat_template_name r1_simple_chat_postpend_think \
+    --optimizer muon \
     --learning_rate 3e-7 \
     --total_episodes 200 \
     --deepspeed_stage 2 \
