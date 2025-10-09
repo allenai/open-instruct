@@ -15,6 +15,7 @@ import pandas as pd
 from tqdm import tqdm
 import math
 import json
+import argparse
 from datasets import load_dataset
 
 # Set up logging
@@ -461,7 +462,24 @@ Focus on capturing the overarching theme that unites these criteria rather than 
         # Build each level
         while current_level < self.L - 1:
             next_level = current_level + 1
-            n_clusters = level_sizes[next_level]
+            requested_clusters = level_sizes[next_level]
+            n_samples = len(current_clusters)
+            if n_samples == 0:
+                logger.warning(
+                    "No clusters available at level %s; stopping hierarchy construction early.",
+                    current_level,
+                )
+                break
+
+            n_clusters = max(1, min(requested_clusters, n_samples))
+            if n_clusters < requested_clusters:
+                logger.info(
+                    "Adjusting cluster count at level %s from %s to %s due to limited samples (%s)",
+                    next_level,
+                    requested_clusters,
+                    n_clusters,
+                    n_samples,
+                )
             
             logger.info(f"Building level {next_level} with {n_clusters} clusters...")
             
@@ -470,7 +488,7 @@ Focus on capturing the overarching theme that unites these criteria rather than 
             embeddings = self.embed_texts(cluster_texts)
             
             # Apply k-means clustering to form neighborhoods
-            kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+            kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
             cluster_labels = kmeans.fit_predict(embeddings)
             
             # Group clusters by neighborhood
@@ -968,7 +986,14 @@ Focus on capturing the overarching theme that unites these criteria rather than 
         return output_file
     
 # Example usage
-def run_example(rubric_id: str, num_criteria: int):
+def run_example(
+    rubric_id: str,
+    num_criteria: int,
+    n_top_clusters: int = 7,
+    num_levels: int = 4,
+    diversity_sample_size: int = 20000,
+    output_root: str = os.path.join("outputs", "rubric_analysis"),
+):
     # Set your Anthropic API key here or in environment variables
     # api_key = os.environ["ANTHROPIC_API_KEY"]
     openai_api_key = os.environ["OPENAI_API_KEY"]
@@ -1033,8 +1058,8 @@ def run_example(rubric_id: str, num_criteria: int):
     # you would use different parameters
     hierarchical_clustering = HierarchicalClustering(
         criteria=criteria,
-        n_top_clusters=4,  # Desired number of top-level clusters
-        num_levels=4,      # Number of levels in the hierarchy
+        n_top_clusters=n_top_clusters,  # Desired number of top-level clusters
+        num_levels=num_levels,      # Number of levels in the hierarchy
         anthropic_api_key=None,
         openai_api_key=openai_api_key
     )
@@ -1042,7 +1067,7 @@ def run_example(rubric_id: str, num_criteria: int):
     # Build the hierarchy
     hierarchy = hierarchical_clustering.build_hierarchy()
     
-    diversity_metrics = hierarchical_clustering.compute_diversity()
+    diversity_metrics = hierarchical_clustering.compute_diversity(sample_size=diversity_sample_size)
     logger.info(
         "Hierarchy diversity metrics: "
         f"semantic_spread={diversity_metrics['semantic_spread']:.4f}, "
@@ -1050,12 +1075,14 @@ def run_example(rubric_id: str, num_criteria: int):
         f"diversity_score={diversity_metrics['diversity_score']:.4f}"
     )
 
-    # Ensure output directory exists before writing files
-    output_dir = os.path.join("outputs", "rubric_analysis")
-    os.makedirs(output_dir, exist_ok=True)
+    config_dir = os.path.join(
+        output_root,
+        f"n{num_criteria}_top{n_top_clusters}_levels{num_levels}_sample{diversity_sample_size}"
+    )
+    os.makedirs(config_dir, exist_ok=True)
 
     diversity_path = os.path.join(
-        output_dir,
+        config_dir,
         f"{rubric_id}_hierarchy_diversity_{num_criteria}.json",
     )
     with open(diversity_path, "w", encoding="utf-8") as f:
@@ -1063,17 +1090,17 @@ def run_example(rubric_id: str, num_criteria: int):
     logger.info(f"Diversity metrics saved to {diversity_path}")
 
     # Visualize the hierarchy
-    viz_path = os.path.join(output_dir, f"{rubric_id}_hierarchy_{num_criteria}.html")
+    viz_path = os.path.join(config_dir, f"{rubric_id}_hierarchy_{num_criteria}.html")
     viz_file = hierarchical_clustering.visualize_hierarchy(viz_path)
     logger.info(f"Hierarchy visualization saved to {viz_file}")
 
     # Create the tree visualization
-    tree_path = os.path.join(output_dir, f"{rubric_id}_hierarchy_tree_{num_criteria}.html")
+    tree_path = os.path.join(config_dir, f"{rubric_id}_hierarchy_tree_{num_criteria}.html")
     tree_file = hierarchical_clustering.visualize_tree(tree_path)
     logger.info(f"Tree visualization saved to {tree_file}")
     
     # Export to CSV
-    csv_path = os.path.join(output_dir, f"{rubric_id}_hierarchy_{num_criteria}.csv")
+    csv_path = os.path.join(config_dir, f"{rubric_id}_hierarchy_{num_criteria}.csv")
     csv_file = hierarchical_clustering.export_to_csv(csv_path)
     logger.info(f"Hierarchy exported to {csv_file}")
 
@@ -1081,14 +1108,59 @@ def run_example(rubric_id: str, num_criteria: int):
     return hierarchy
 
 if __name__ == "__main__":
-    rubric_ids = [
-        "rl_rag_train_sqa_1k_clean_search_rubric_longform_rubrics",
-        "rl_rag_train_sqa_1k_clean_dr_rubric_longform_rubrics",
-        "rl_rag_train_sqa_1k_clean_cb_rubric_longform_rubrics"
-    ]
-    num_criteria = 300
-    for rubric_id in rubric_ids:
-        hierarchy = run_example(rubric_id, num_criteria)
+    parser = argparse.ArgumentParser(description="Run hierarchical rubric clustering analysis.")
+    parser.add_argument(
+        "--rubric-ids",
+        nargs="+",
+        default=[
+            "rl_rag_train_sqa_1k_clean_search_rubric_longform_rubrics",
+            "rl_rag_train_sqa_1k_clean_dr_rubric_longform_rubrics",
+            "rl_rag_train_sqa_1k_clean_cb_rubric_longform_rubrics",
+        ],
+        help="List of rubric dataset identifiers to process.",
+    )
+    parser.add_argument(
+        "--num-criteria",
+        type=int,
+        default=300,
+        help="Number of criteria to sample per rubric after shuffling.",
+    )
+    parser.add_argument(
+        "--n-top-clusters",
+        type=int,
+        default=8,
+        help="Target number of top-level clusters in the hierarchy.",
+    )
+    parser.add_argument(
+        "--num-levels",
+        type=int,
+        default=4,
+        help="Total number of levels in the hierarchy.",
+    )
+    parser.add_argument(
+        "--diversity-sample-size",
+        type=int,
+        default=20000,
+        help="Number of embedding pairs to sample when estimating semantic spread.",
+    )
+    parser.add_argument(
+        "--output-root",
+        type=str,
+        default=os.path.join("outputs", "rubric_analysis"),
+        help="Root directory for analysis artifacts.",
+    )
+
+    args = parser.parse_args()
+
+    for rubric_id in args.rubric_ids:
+        hierarchy = run_example(
+            rubric_id=rubric_id,
+            num_criteria=args.num_criteria,
+            n_top_clusters=args.n_top_clusters,
+            num_levels=args.num_levels,
+            diversity_sample_size=args.diversity_sample_size,
+            output_root=args.output_root,
+        )
 
     # # Create the tree visualization as well
     # hierarchical_clustering = HierarchicalClustering(
