@@ -495,7 +495,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     request_id = make_request_id(request)
 
     sampling_params = request.generation_config.clone()
-    sampling_params.n = 1
+    sampling_params.n = 1  # Use n=1 for tool processing
 
     actor.request_metadata[request_id] = {
         "is_eval": request.is_eval,
