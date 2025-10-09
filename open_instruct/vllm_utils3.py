@@ -15,15 +15,17 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
+import asyncio
 import dataclasses
 import os
 import queue
+import sys
 import threading
 import time
 from collections import defaultdict
 from concurrent import futures
 from datetime import timedelta
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import ray
 import torch
@@ -49,6 +51,31 @@ from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
+
+
+def assert_threaded_actor(instance):
+    """Assert that an instance's class is suitable for use in a threaded (non-async) Ray actor.
+
+    This function performs two checks:
+      1. The class must not define any `async def` methods
+         (including async generators, staticmethods, or classmethods).
+      2. There must not be a running asyncio event loop in the current thread.
+
+    Args:
+        instance: The instance whose class to inspect.
+
+    Raises:
+        AssertionError: If the class defines one or more async methods, or a running asyncio event loop is detected.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        raise AssertionError(
+            f"{instance.__class__.__name__} must run in a threaded Ray actor (no running event loop). "
+            f"Detected RUNNING loop={loop!r} on thread='{threading.current_thread().name}'. "
+            f"Python={sys.version.split()[0]}."
+        )
+    except RuntimeError:
+        return
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -101,6 +128,34 @@ def _extract_base_request_id(full_request_id: str) -> str:
     return "_".join(full_request_id.split("_")[:-1])
 
 
+def get_triggered_tool(
+    output_text: str,
+    tools: Dict[str, Tool],
+    max_tool_calls: Dict[str, int],
+    num_calls: int,
+    sampling_params: vllm.SamplingParams,
+) -> Optional[Tuple[Tool, str]]:
+    """Check if any tool was triggered and return the tool and stop_str if found.
+
+    Args:
+        output_text: The generated text to check for tool triggers
+        tools: Dictionary mapping stop strings to Tool instances
+        max_tool_calls: Dictionary mapping stop strings to their call limits
+        num_calls: Current number of tool calls for this request
+        sampling_params: Sampling parameters containing stop strings
+
+    Returns:
+        Tuple of (tool, stop_str) if a tool was triggered, None otherwise.
+    """
+    for stop_str in sampling_params.stop:
+        if stop_str in tools and output_text.endswith(stop_str):
+            if num_calls < max_tool_calls.get(stop_str, 0):
+                return tools[stop_str], stop_str
+            else:
+                return MaxCallsExceededTool(start_str="<tool>", end_str="</tool>"), stop_str
+    return None
+
+
 def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, executor):
     """
     Handle a finished output. Returns the output if it should be added to results,
@@ -122,18 +177,14 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
     tracking["masks"][output.request_id].extend([1] * len(o.token_ids))
 
-    # Check for tool calls
-    for stop_str in sampling_params.stop:
-        if stop_str in tools and o.text.endswith(stop_str):
-            if tracking["num_calls"][output.request_id] < max_tool_calls.get(stop_str, 0):
-                tool = tools[stop_str]
-            else:
-                tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
-
-            future = executor.submit(tool, o.text)
-            tracking["pending_tool_futures"][output.request_id] = (future, o, output)
-
-            return None  # Output is being held for tool processing
+    tool_result = get_triggered_tool(
+        o.text, tools, max_tool_calls, tracking["num_calls"][output.request_id], sampling_params
+    )
+    if tool_result is not None:
+        tool, stop_str = tool_result
+        future = executor.submit(tool, o.text)
+        tracking["pending_tool_futures"][output.request_id] = (future, o, output)
+        return None
 
     return output
 
@@ -354,6 +405,32 @@ class LLMRayActor:
         verbose: bool = False,
         **kwargs,
     ):
+        assert_threaded_actor(self)
+        self._init_config(tools, max_tool_calls, inference_batch_size, inflight_updates, verbose)
+        self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
+
+        noset_visible_devices = kwargs.pop("noset_visible_devices")
+        distributed_executor_backend = kwargs.get("distributed_executor_backend")
+        self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
+
+        self._setup_engine_args(args, bundle_indices, kwargs)
+
+        self.tracking = _init_tool_tracking()
+        self.request_outputs = {}
+        self._threads_started = threading.Event()
+
+        self._executor = futures.ThreadPoolExecutor(max_workers=2)
+        self._prefetch_future = self._executor.submit(self._prefetch_worker)
+        self._process_future = self._executor.submit(self._process_from_queue)
+
+    def _init_config(
+        self,
+        tools: Optional[Dict[str, Tool]],
+        max_tool_calls: Optional[Dict[str, int]],
+        inference_batch_size: Optional[int],
+        inflight_updates: bool,
+        verbose: bool,
+    ) -> None:
         self.logger = logger_utils.setup_logger(__name__)
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
@@ -361,26 +438,31 @@ class LLMRayActor:
         self.inflight_updates = inflight_updates
         self.verbose = verbose
         self.request_metadata = {}
-        self.vllm_active_requests = set()  # Track all requests currently in vLLM
+        self.vllm_active_requests = set()
 
         if self.tools:
             self.executor = futures.ThreadPoolExecutor(max_workers=20)
         else:
             self.executor = None
 
-        noset_visible_devices = kwargs.pop("noset_visible_devices")
-        if kwargs.get("distributed_executor_backend") == "ray":
-            # a hack to make the script work.
-            # stop ray from manipulating *_VISIBLE_DEVICES
-            # at the top-level when the distributed_executor_backend is ray.
+    def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
+        self.prompt_queue = prompt_queue
+        self.results_queue = results_queue
+        self.eval_results_queue = eval_results_queue
+        self.actor_manager = actor_manager
+
+        self._last_should_stop_update = float("-inf")
+        self._should_stop_value = False
+        self._should_stop_timeout_s = 5
+
+    def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
+        if distributed_executor_backend == "ray":
             os.environ.pop("CUDA_VISIBLE_DEVICES", None)
             os.environ.pop("ROCR_VISIBLE_DEVICES", None)
         elif noset_visible_devices:
-            # We need to set CUDA_VISIBLE_DEVICES to the ray assigned GPU
-            # when the distributed_executor_backend is not ray and
-            # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
             os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
 
+    def _setup_engine_args(self, args, bundle_indices, kwargs) -> None:
         num_gpus = kwargs.pop("num_gpus")
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
@@ -389,33 +471,10 @@ class LLMRayActor:
                 self.logger.info(f"creating LLM with bundle_indices={bundle_indices}")
 
         engine_args = vllm.EngineArgs(*args, **kwargs)
-        # Log stats causes a crash in the engine at assert outputs.scheduler_stats is not None when we call step() and there is nothing to step.
         engine_args.disable_log_stats = True
-
-        # Cascade attention has known performance issues: https://github.com/vllm-project/vllm/issues/17652
         engine_args.disable_cascade_attn = True
 
         self.llm_engine = vllm.LLMEngine.from_engine_args(engine_args)
-
-        self.prompt_queue = prompt_queue
-        self.results_queue = results_queue
-        self.eval_results_queue = eval_results_queue
-        self.actor_manager = actor_manager
-
-        # For caching should_stop status.
-        self._last_should_stop_update = float("-inf")
-        self._should_stop_value = False
-        self._should_stop_timeout_s = 5
-
-        # Initialize instance variables before starting threads
-        self.tracking = _init_tool_tracking()
-        self.request_outputs = {}
-        self._threads_started = threading.Event()
-
-        # Start background threads
-        self._executor = futures.ThreadPoolExecutor(max_workers=2)
-        self._prefetch_future = self._executor.submit(self._prefetch_worker)
-        self._process_future = self._executor.submit(self._process_from_queue)
 
     def get_model_dims_dict(self):
         """Get only the model dimensions as a simple dict without loading weights."""
