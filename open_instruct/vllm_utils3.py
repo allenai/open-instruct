@@ -17,6 +17,7 @@
 
 import asyncio
 import logging
+import dataclasses
 import os
 import queue
 import sys
@@ -31,6 +32,7 @@ import ray
 import torch
 import torch.distributed
 import vllm
+from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed.distributed_c10d import (
@@ -63,6 +65,7 @@ PROCESS_SLEEP_S = 0.1
 RAY_WAIT_TIMEOUT_S = 0.1
 KV_CACHE_RETRIES = 5
 KV_CACHE_RETRY_SLEEP_S = 0.2
+WEIGHT_UPDATE_SLEEP_INTERVAL_S = 0.1
 
 
 def assert_threaded_actor(instance):
@@ -290,20 +293,27 @@ def get_triggered_tool(
     max_tool_calls: Dict[str, int],
     num_calls: int,
     sampling_params: vllm.SamplingParams,
-) -> Optional[Tuple[Tool, str]]:
+) -> Tuple[Optional[Tool], Optional[str]]:
     """Check if any tool was triggered and return the tool and stop_str if found.
 
+    Args:
+        output_text: The generated text to check for tool triggers
+        tools: Dictionary mapping stop strings to Tool instances
+        max_tool_calls: Dictionary mapping stop strings to their call limits
+        num_calls: Current number of tool calls for this request
+        sampling_params: Sampling parameters containing stop strings
+
     Returns:
-        Tuple of (tool, stop_str) if a tool was triggered, None otherwise.
+        Tuple of (tool, stop_str) if a tool was triggered, (None, None) otherwise.
     """
     for stop_str in sampling_params.stop:
         if stop_str in tools and output_text.endswith(stop_str):
-            # Determine which tool to use
             if num_calls < max_tool_calls.get(stop_str, 0):
                 return tools[stop_str], stop_str
             else:
                 return MaxCallsExceededTool(start_str="<tool>", end_str="</tool>"), stop_str
-    return None
+    return None, None
+
 
 
 def process_completed_request(request_id, outs, tracking, current_time, tools, request_metadata):
@@ -336,6 +346,16 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
     response_ids = [list(out.token_ids) for out in final_output.outputs]
     finish_reasons = [out.finish_reason for out in final_output.outputs]
     use_tools = bool(tools)
+
+    logprobs = []
+    for idx, out in enumerate(final_output.outputs):
+        assert len(out.token_ids) == len(out.logprobs), (
+            f"vLLM CompletionOutput {idx}: token_ids length ({len(out.token_ids)}) "
+            f"!= logprobs length ({len(out.logprobs)})"
+        )
+        logprobs.append(
+            [logprob_dict[token_id].logprob for token_id, logprob_dict in zip(out.token_ids, out.logprobs)]
+        )
 
     # Extract attributes based on whether tools are used
     if use_tools:
@@ -377,6 +397,7 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
             generation_time=current_time - metadata["start_time"],
         ),
         start_time=metadata["start_time"],
+        logprobs=logprobs,
     )
     return result, metadata["is_eval"]
 
@@ -510,13 +531,13 @@ class LLMRayActor:
         *args,
         tools: Optional[Dict[str, Tool]] = None,
         max_tool_calls: Optional[Dict[str, int]] = None,
-        bundle_indices: list = None,
-        prompt_queue=None,
-        results_queue=None,
-        eval_results_queue=None,
-        actor_manager=None,
-        inference_batch_size: Optional[int] = None,
-        inflight_updates: bool = False,
+        bundle_indices: Optional[List[int]] = None,
+        prompt_queue: ray_queue.Queue,
+        results_queue: ray_queue.Queue,
+        eval_results_queue: ray_queue.Queue,
+        actor_manager: ray.actor.ActorHandle,
+        inference_batch_size: Optional[int],
+        inflight_updates: bool,
         verbose: bool = False,
         **kwargs,
     ):
@@ -888,7 +909,6 @@ def create_vllm_engines(
                 revision=revision,
                 tokenizer=tokenizer_name_or_path,
                 tokenizer_revision=revision,
-                trust_remote_code=True,
                 worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
                 tensor_parallel_size=tensor_parallel_size,
                 enforce_eager=enforce_eager,
