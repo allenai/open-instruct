@@ -23,7 +23,7 @@ import time
 from collections import defaultdict
 from concurrent import futures
 from datetime import timedelta
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import ray
 import torch
@@ -49,6 +49,8 @@ from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
+
+WEIGHT_UPDATE_SLEEP_INTERVAL_S = 0.1
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -837,7 +839,8 @@ class LLMRayActor:
             args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
         )
 
-    def _maybe_drain_requests(self, sleep_s: float = 0.1):
+    def _prepare_weight_update(self, name: str, dtype: str) -> None:
+        # First, drain all the requests when appropriate:
         while not self.inflight_updates:
             pending_tools = len(self.tracking["pending_tool_futures"])
             unfinished = self.llm_engine.get_num_unfinished_requests()
@@ -845,14 +848,21 @@ class LLMRayActor:
             if pending_tools == 0 and unfinished == 0:
                 break
 
-            time.sleep(sleep_s)
+            time.sleep(WEIGHT_UPDATE_SLEEP_INTERVAL_S)
+        # Then, check that the dtypes match.
+        expected_dtype = str(self.llm_engine.model_config.dtype)
+        assert str(dtype) == expected_dtype, (
+            f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
+        )
 
-    def update_weight(self, name, dtype, shape, empty_cache=False):
-        self._maybe_drain_requests()
+    def update_weight(self, name: str, dtype: str, shape: Tuple[int, ...], empty_cache: bool = False) -> None:
+        self._prepare_weight_update(name, dtype)
         return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
-    def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        self._maybe_drain_requests()
+    def update_weight_cuda_ipc(
+        self, name: str, dtype: str, shape: Tuple[int, ...], ipc_handles: List[Any], empty_cache: bool = False
+    ) -> None:
+        self._prepare_weight_update(name, dtype)
         return self.llm_engine.collective_rpc(
             "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
