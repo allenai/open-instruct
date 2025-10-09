@@ -73,8 +73,8 @@ for model_name_or_path in "$@"; do
             --num_samples_per_prompt_rollout 4 \
 	    --inflight_updates True \
             --vllm_num_engines 1 \
-            --vllm_tensor_parallel_size 2 \
-            --vllm_pipeline_parallel_size 4 \
+            --vllm_tensor_parallel_size 4 \
+            --vllm_pipeline_parallel_size 2 \
             --vllm_enable_prefix_caching \
             --vllm_gpu_memory_utilization 0.9 \
             --pack_length 40000 \
