@@ -354,7 +354,6 @@ class LLMRayActor:
         verbose: bool = False,
         **kwargs,
     ):
-        self.logger = logger_utils.setup_logger(__name__)
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inference_batch_size = inference_batch_size
@@ -386,7 +385,7 @@ class LLMRayActor:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             if self.verbose:
-                self.logger.info(f"creating LLM with bundle_indices={bundle_indices}")
+                logger.info(f"creating LLM with bundle_indices={bundle_indices}")
 
         engine_args = vllm.EngineArgs(*args, **kwargs)
         # Log stats causes a crash in the engine at assert outputs.scheduler_stats is not None when we call step() and there is nothing to step.
@@ -578,7 +577,7 @@ class LLMRayActor:
 
         # Verify we have all required outputs before proceeding
         if len(outputs_by_index) != expected_n or any(j not in outputs_by_index for j in range(expected_n)):
-            self.logger.warning(
+            logger.warning(
                 f"Incomplete or malformed outputs for {request_id}. "
                 f"Expected {expected_n} samples, got indices {sorted(outputs_by_index.keys())}. Skipping."
             )
@@ -789,7 +788,7 @@ class LLMRayActor:
 
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
-                    self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
+                    logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
             else:
                 # Can't make a new request (hit limits), finalize this sub-request
                 base_req_id = _extract_base_request_id(req_id)
@@ -800,7 +799,7 @@ class LLMRayActor:
                     for other_id in tracking["pending_tool_futures"]
                     if _extract_base_request_id(other_id) == base_req_id and other_id != req_id
                 ]
-                self.logger.info(
+                logger.info(
                     f"[_poll_tool_futures] Finalizing {req_id} (can't continue). "
                     f"Other pending tools for {base_req_id}: {other_pending}"
                 )
