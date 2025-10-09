@@ -127,6 +127,7 @@ from open_instruct.utils import (
     get_wandb_tags,
     is_beaker_job,
     launch_ai2_evals_on_weka,
+    make_optimizer,
     maybe_get_beaker_config,
     maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
@@ -185,8 +186,12 @@ class Args:
     """RUNTIME VALUE: A unique name of this run"""
 
     # Optimizer
+    optimizer: str = "adamw"
+    """Which optimizer to use (adamw or muon)."""
+    optimizer_kwargs: Optional[dict] = None
+    """Additional kwargs to pass to the optimizer."""
     learning_rate: float = 2e-5
-    """The initial learning rate for AdamW optimizer."""
+    """The initial learning rate for the optimizer."""
     lr_scheduler_type: Literal[
         "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
     ] = "linear"
@@ -196,11 +201,9 @@ class Args:
     warmup_ratio: float = 0.0
     """Ratio of warmup steps to total steps (takes precedence over `warm_up_steps`)"""
     weight_decay: float = 0.0
-    """Weight decay for AdamW if we apply some."""
+    """Weight decay if we apply some."""
     set_weight_decay_on_bias_and_norm: bool = True
     """Whether to set weight decay on bias and norm layers"""
-    fused_optimizer: bool = False
-    """Whether to use fused optimizer"""
 
     # Batch sizes
     per_device_train_batch_size: int = 1
@@ -665,8 +668,10 @@ class PolicyTrainerRayProcess(RayProcess):
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
             optim_params = self.policy.parameters()
-        # self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
-        self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
+        optimizer_kwargs = {"lr": args.learning_rate}
+        if args.optimizer_kwargs is not None:
+            optimizer_kwargs.update(args.optimizer_kwargs)
+        self.optimizer = make_optimizer(optim_params, args.optimizer, optimizer_kwargs)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
         if args.warmup_ratio > 0.0:

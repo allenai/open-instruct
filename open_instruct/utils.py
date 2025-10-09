@@ -1410,6 +1410,16 @@ def get_optimizer_grouped_parameters(
     return optimizer_grouped_parameters
 
 
+def make_optimizer(optim_params, optimizer_name: str, optimizer_kwargs: dict):
+    if optimizer_name.lower() == "adamw":
+        optimizer_fn = torch.optim.AdamW
+    elif optimizer_name.lower() == "muon":
+        optimizer_fn = torch.optim.Muon
+    else:
+        raise ValueError(f"Unknown optimizer: {optimizer_name}. Supported optimizers are 'adamw' and 'muon'.")
+    return optimizer_fn(optim_params, **optimizer_kwargs)
+
+
 def _z3_params_to_fetch(param_list):
     return [p for p in param_list if hasattr(p, "ds_id") and p.ds_status == ZeroParamStatus.NOT_AVAILABLE]
 

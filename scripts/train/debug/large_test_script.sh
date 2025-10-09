@@ -24,6 +24,7 @@ uv run python mason.py \
         --num_unique_prompts_rollout 32 \
         --num_mini_batches 1 \
         --num_epochs 1 \
+        --optimizer muon \
         --learning_rate 5e-7 \
         --per_device_train_batch_size 1 \
         --kl_estimator kl3 \
