@@ -1411,14 +1411,46 @@ def get_optimizer_grouped_parameters(
     return optimizer_grouped_parameters
 
 
-def make_optimizer(optim_params, optimizer_name: str, optimizer_kwargs: dict):
+def make_optimizer(optim_params, optimizer_name: str, optimizer_kwargs: dict, model=None):
     if optimizer_name.lower() == "adamw":
         optimizer_fn = torch.optim.AdamW
+        return optimizer_fn(optim_params, **optimizer_kwargs)
     elif optimizer_name.lower() == "muon":
-        optimizer_fn = muon.Muon
+        if model is None:
+            raise ValueError("Model must be provided when using Muon optimizer for parameter separation.")
+
+        hidden_matrix_params = []
+        embed_params = []
+        scalar_params = []
+        head_params = []
+
+        for n, p in model.named_parameters():
+            if "lm_head" in n:
+                head_params.append(p)
+            elif "embed" in n:
+                embed_params.append(p)
+            elif p.ndim >= 2:
+                hidden_matrix_params.append(p)
+            else:
+                scalar_params.append(p)
+
+        lr = optimizer_kwargs.get("lr", 1e-3)
+        betas = optimizer_kwargs.get("betas", (0.9, 0.95))
+        eps = optimizer_kwargs.get("eps", 1e-8)
+        momentum = optimizer_kwargs.get("momentum", 0.95)
+
+        adam_groups = [
+            {"params": head_params, "lr": lr},
+            {"params": embed_params, "lr": lr},
+            {"params": scalar_params, "lr": lr},
+        ]
+        adam_groups = [{**g, "betas": betas, "eps": eps, "use_muon": False} for g in adam_groups]
+        muon_group = {"params": hidden_matrix_params, "lr": lr, "momentum": momentum, "use_muon": True}
+        param_groups = [*adam_groups, muon_group]
+
+        return muon.MuonWithAuxAdam(param_groups)
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}. Supported optimizers are 'adamw' and 'muon'.")
-    return optimizer_fn(optim_params, **optimizer_kwargs)
 
 
 def _z3_params_to_fetch(param_list):

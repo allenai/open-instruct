@@ -671,7 +671,7 @@ class PolicyTrainerRayProcess(RayProcess):
         optimizer_kwargs = {"lr": args.learning_rate}
         if args.optimizer_kwargs is not None:
             optimizer_kwargs.update(args.optimizer_kwargs)
-        self.optimizer = make_optimizer(optim_params, args.optimizer, optimizer_kwargs)
+        self.optimizer = make_optimizer(optim_params, args.optimizer, optimizer_kwargs, model=self.policy)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
         if args.warmup_ratio > 0.0:
