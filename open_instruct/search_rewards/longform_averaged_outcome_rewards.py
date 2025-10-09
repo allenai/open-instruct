@@ -32,8 +32,9 @@ def compute_longform_averaged_outcome_reward(
         use_general_rubric: bool = False,
         no_citation_reward: bool = False,
         use_likert_rubric: bool = False,
+        use_full_response_as_answer: bool = False,
     ) -> Dict[str, Any]:
-    extracted_context, extracted_answer, extracted_citations = extract_answer_context_citations(response)
+    extracted_context, extracted_answer, extracted_citations = extract_answer_context_citations(response, use_full_response_as_answer=use_full_response_as_answer)
     result = {
         "num_search_turns_reward": 0.0,
         "rubric_reward": 0.0,
