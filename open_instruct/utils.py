@@ -956,6 +956,9 @@ def maybe_update_beaker_description(
     start_time: Optional[float] = None,
     wandb_url: Optional[str] = None,
     original_descriptions: dict[str, str] = {},
+    num_engines: Optional[int] = None,
+    tensor_parallel: Optional[int] = None,
+    pipeline_parallel: Optional[int] = None,
 ) -> None:
     """Update Beaker experiment description with training progress and/or wandb URL.
 
@@ -965,6 +968,9 @@ def maybe_update_beaker_description(
         start_time: Training start time (from time.time()) (for progress tracking)
         wandb_url: Optional wandb URL to include
         original_descriptions: Cache of original descriptions for progress updates
+        num_engines: Number of vLLM engines (data parallel)
+        tensor_parallel: Tensor parallel size
+        pipeline_parallel: Pipeline parallel size
     """
     if not is_beaker_job():
         return
@@ -1002,6 +1008,7 @@ def maybe_update_beaker_description(
         original_descriptions[experiment_id],
         f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}",
         f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}",
+        f"DP={num_engines}, TP={tensor_parallel}, PP={pipeline_parallel}",
     ]
 
     if wandb_url:

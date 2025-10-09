@@ -795,6 +795,7 @@ def get_cuda_arch_list() -> str:
 def create_vllm_engines(
     num_engines: int,
     tensor_parallel_size: int,
+    pipeline_parallel_size: int,
     enforce_eager: bool,
     tokenizer_name_or_path: str,
     pretrain: str,
@@ -844,16 +845,17 @@ def create_vllm_engines(
 
     if not use_hybrid_engine:
         # Create a big placement group to ensure that all engines are packed
-        bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size)]
+        bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size * pipeline_parallel_size)]
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
     # ensure we use bundles on the same node where possible if tp>1.
     bundle_indices_list = get_bundle_indices_list(pg)
+    gpus_per_engine = tensor_parallel_size * pipeline_parallel_size
 
     for i in range(num_engines):
         bundle_indices = None
-        bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
+        bundle_indices = bundle_indices_list[i * gpus_per_engine : (i + 1) * gpus_per_engine]
 
         scheduling_strategy = PlacementGroupSchedulingStrategy(
             placement_group=pg,
@@ -878,6 +880,7 @@ def create_vllm_engines(
                 tokenizer_revision=revision,
                 worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
                 tensor_parallel_size=tensor_parallel_size,
+                pipeline_parallel_size=pipeline_parallel_size,
                 enforce_eager=enforce_eager,
                 dtype="bfloat16",
                 seed=seed + i,
