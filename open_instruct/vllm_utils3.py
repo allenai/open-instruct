@@ -845,7 +845,7 @@ def create_vllm_engines(
 
     vllm_engines = []
     if tensor_parallel_size == 1:
-        distributed_executor_backend = "mp"
+        distributed_executor_backend = "uni"
     else:
         distributed_executor_backend = "ray"
     use_hybrid_engine = pg is not None
