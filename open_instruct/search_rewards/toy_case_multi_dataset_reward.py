@@ -230,6 +230,9 @@ def compute_multi_question_reward(
         )
     
     averaged_score = sum(item.score for item in finegrained_scores) / len(finegrained_scores)
+    multiplicative_score = 1.0
+    for item in finegrained_scores:
+        multiplicative_score *= item.score
     
     # Create log values for tracking
     log_values = {
@@ -249,6 +252,12 @@ def compute_multi_question_reward(
         print(f"🎀 averaged_score: {averaged_score}")
         return {
             "score": averaged_score,
+            "log_values": log_values,
+        }
+    elif reward_type == "multiplicative":
+        print(f"🎀 multiplicative_score: {multiplicative_score}")
+        return {
+            "score": multiplicative_score,
             "log_values": log_values,
         }
     else:

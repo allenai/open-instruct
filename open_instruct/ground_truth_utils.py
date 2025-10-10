@@ -1296,6 +1296,22 @@ class RLRAGToyCaseMultiDatasetAveragedVerifier(VerifierFunction):
             log_values=result["log_values"],
         )
 
+class RLRAGToyCaseMultiDatasetMultiplicativeVerifier(VerifierFunction):
+    """
+    Verifier that computes the RL-RAG (toy case) multiplicative score between the prediction and the label.
+    """
+
+    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+        super().__init__("rl_rag_toy_case_multi_dataset_multiplicative", verifier_config=verifier_config, weight=1.0)
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
+        result = compute_multi_question_reward(prediction, label, query, reward_type="multiplicative")
+        return VerificationResult(
+            score=result["score"],
+            log_values=result["log_values"],
+        )
 
 def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     """
