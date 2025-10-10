@@ -25,6 +25,8 @@ class QuantizationConfig:
     """group size for GPTQ weight quantization"""
     gptq_actorder: Optional[Literal["static", "descending", "ascending"]] = "static"
     """activation ordering strategy for GPTQ (None disables actorder)"""
+    quantization_calibration_samples: int = 256
+    """number of prompt sequences to retain for quantization calibration"""
 
 
 def get_quantization_recipe(

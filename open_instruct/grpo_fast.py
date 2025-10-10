@@ -57,7 +57,7 @@ import socket
 import threading
 import time
 from argparse import Namespace
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from queue import Empty, Full, Queue
@@ -376,6 +376,8 @@ class Args:
     """group size for GPTQ weight quantization"""
     gptq_actorder: Optional[Literal["static", "descending", "ascending"]] = "static"
     """activation ordering strategy for GPTQ (None disables actorder)"""
+    quantization_calibration_samples: int = 256
+    """number of prompt sequences to retain for quantization calibration (set <=0 for unlimited)"""
 
     # Experiment tracking
     verbose: bool = False
@@ -2415,9 +2417,13 @@ def weight_sync_thread(
 
         batch_queries = None
         if args.enable_quantization:
-            batch_queries = shared_state.get("current_batch")
-            if batch_queries is None:
-                logger.warning("[Weight Sync Thread] No batch data available for quantization")
+            quant_buffer = shared_state.get("quantization_buffer")
+            if quant_buffer:
+                batch_queries = list(quant_buffer)
+            else:
+                batch_queries = shared_state.get("current_batch")
+            if not batch_queries:
+                logger.warning("[Weight Sync Thread] No calibration data available for quantization")
 
         with Timer("[Weight Sync]") as timer:
             logger.debug("[Weight Sync Thread] Starting weight sync")
@@ -2890,7 +2896,15 @@ def run_training(
 
     logger.info("======== ✅ weight sync thread starts =========")
     weight_sync_trigger_event = threading.Event()
-    shared_state = {"current_batch": None}
+    if args.enable_quantization:
+        max_calibration_samples = args.quantization_calibration_samples if args.quantization_calibration_samples > 0 else None
+        quantization_buffer = (
+            deque(maxlen=max_calibration_samples) if max_calibration_samples is not None else deque()
+        )
+    else:
+        quantization_buffer = None
+
+    shared_state = {"current_batch": None, "quantization_buffer": quantization_buffer}
     weight_sync_thread_future = executor.submit(
         weight_sync_thread,
         args,
@@ -2937,6 +2951,8 @@ def run_training(
     for _ in range(args.async_steps):
         dataset_indices = next(iter_dataloader)
         batch = next_batch(dataset_indices, train_dataset)
+        if quantization_buffer is not None:
+            quantization_buffer.extend(batch.queries)
         split_and_insert_batch(
             batch,
             resume_training_step,
@@ -2979,6 +2995,8 @@ def run_training(
         batch = next_batch(next(iter_dataloader), train_dataset)
 
         if args.enable_quantization:
+            if quantization_buffer is not None:
+                quantization_buffer.extend(batch.queries)
             shared_state["current_batch"] = batch.queries
 
         split_and_insert_batch(
