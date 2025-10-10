@@ -22,15 +22,14 @@ dependencies = [
     "ray[default]>=2.44.1",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
-    "torch>=2.8.0,<2.9",
-    "transformers>=4.55.2", # required by vLLM 0.10.2
-    "vllm==0.10.2",
+    "torch>=2.7.0,<2.8",
+    "transformers>=4.52.4,<4.54.0", # see https://github.com/vllm-project/vllm-ascend/issues/2046
+    "vllm==0.9.1",
     "wandb==0.18.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
-    "flash-attn>=2.8.3; platform_system != 'Darwin'",
+    "flash-attn>=2.8.0.post2; platform_system != 'Darwin'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
-    "memray>=1.18.0",
 ]
 
 [build-system]

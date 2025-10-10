@@ -46,7 +46,7 @@ class WorkerWrap:
     def update_weight(self, name, dtype, shape, empty_cache=False):
         import torch
 
-        assert dtype == str(self.model_config.dtype), (
+        assert str(dtype) == str(self.model_config.dtype), (
             f"mismatch dtype: src {dtype}, dst {str(self.model_config.dtype)}"
         )
         weight = torch.empty(shape, dtype=self.model_config.dtype, device="cuda")
@@ -69,7 +69,7 @@ class WorkerWrap:
 
         from open_instruct.vllm_utils3 import get_physical_gpu_id
 
-        assert dtype == str(self.model_config.dtype), (
+        assert str(dtype) == str(self.model_config.dtype), (
             f"mismatch dtype: src {dtype}, dst {str(self.model_config.dtype)}"
         )
         handle = ipc_handles[get_physical_gpu_id()]
