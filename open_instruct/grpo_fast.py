@@ -2384,7 +2384,7 @@ def weight_sync_thread(
     policy_group: ModelGroup,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
-    batch_data_Q: Queue,
+    shared_state: dict,
     tokenizer: PreTrainedTokenizer,
     resume_training_step: int = 1,
 ):
@@ -2403,9 +2403,8 @@ def weight_sync_thread(
 
         batch_queries = None
         if args.enable_quantization:
-            try:
-                batch_queries = batch_data_Q.get_nowait()
-            except Empty:
+            batch_queries = shared_state.get("current_batch")
+            if batch_queries is None:
                 logger.warning("[Weight Sync Thread] No batch data available for quantization")
 
         with Timer("[Weight Sync]") as timer:
@@ -2879,7 +2878,7 @@ def run_training(
 
     logger.info("======== ✅ weight sync thread starts =========")
     weight_sync_trigger_event = threading.Event()
-    batch_data_Q = Queue(maxsize=1)
+    shared_state = {"current_batch": None}
     weight_sync_thread_future = executor.submit(
         weight_sync_thread,
         args,
@@ -2888,7 +2887,7 @@ def run_training(
         policy_group,
         actor_manager,
         weight_sync_metrics_Q,
-        batch_data_Q,
+        shared_state,
         tokenizer,
         resume_training_step,
     )
@@ -2968,10 +2967,7 @@ def run_training(
         batch = next_batch(next(iter_dataloader), train_dataset)
 
         if args.enable_quantization:
-            try:
-                batch_data_Q.put_nowait(batch.queries)
-            except Full:
-                logger.warning("[Main Thread] batch_data_Q is full, skipping batch data update")
+            shared_state["current_batch"] = batch.queries
 
         split_and_insert_batch(
             batch, training_step, pending_queries_map, param_prompt_Q, generation_configs["train"], is_eval=False
