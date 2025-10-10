@@ -68,8 +68,7 @@ KV_CACHE_RETRY_SLEEP_S = 0.2
 WEIGHT_UPDATE_SLEEP_INTERVAL_S = 0.1
 
 def assert_threaded_actor(instance):
-    """
-    Assert that an instance's class is suitable for use in a threaded (non-async) Ray actor.
+    """Assert that an instance's class is suitable for use in a threaded (non-async) Ray actor.
 
     This function performs two checks:
       1. The class must not define any `async def` methods
@@ -124,6 +123,7 @@ async def process_request_async(
 ):
     """Process a single async request with tool support, awaiting tools inline."""
     accumulated_tokens = []
+    accumulated_logprobs = []
     masks = []
     num_calls = 0
     timeout = False
@@ -154,6 +154,8 @@ async def process_request_async(
             final_prompt_token_ids = request_output.prompt_token_ids
 
         accumulated_tokens.extend(output.token_ids)
+        assert output.logprobs is not None, f"logprobs should not be None for request {iteration_request_id}"
+        accumulated_logprobs.extend(output.logprobs)
         masks.extend([1] * len(output.token_ids))
 
         if not actor.tools or not actor.max_tool_calls:
@@ -193,6 +195,12 @@ async def process_request_async(
         )
 
         accumulated_tokens.extend(tool_output_token_ids)
+        accumulated_logprobs.extend(
+            [
+                {token_id: vllm.Logprob(logprob=float("nan"), rank=None, decoded_token="")}
+                for token_id in tool_output_token_ids
+            ]
+        )
         masks.extend([0] * len(tool_output_token_ids))
 
         new_sample_tokens = sampling_params.max_tokens - len(masks)
@@ -210,7 +218,7 @@ async def process_request_async(
         text="",
         token_ids=accumulated_tokens,
         cumulative_logprob=output.cumulative_logprob,
-        logprobs=None,
+        logprobs=accumulated_logprobs,
         finish_reason=output.finish_reason,
         stop_reason=output.stop_reason,
     )
@@ -292,20 +300,26 @@ def get_triggered_tool(
     max_tool_calls: Dict[str, int],
     num_calls: int,
     sampling_params: vllm.SamplingParams,
-) -> Optional[Tuple[Tool, str]]:
+) -> Tuple[Optional[Tool], Optional[str]]:
     """Check if any tool was triggered and return the tool and stop_str if found.
 
+    Args:
+        output_text: The generated text to check for tool triggers
+        tools: Dictionary mapping stop strings to Tool instances
+        max_tool_calls: Dictionary mapping stop strings to their call limits
+        num_calls: Current number of tool calls for this request
+        sampling_params: Sampling parameters containing stop strings
+
     Returns:
-        Tuple of (tool, stop_str) if a tool was triggered, None otherwise.
+        Tuple of (tool, stop_str) if a tool was triggered, (None, None) otherwise.
     """
     for stop_str in sampling_params.stop:
         if stop_str in tools and output_text.endswith(stop_str):
-            # Determine which tool to use
             if num_calls < max_tool_calls.get(stop_str, 0):
                 return tools[stop_str], stop_str
             else:
                 return MaxCallsExceededTool(start_str="<tool>", end_str="</tool>"), stop_str
-    return None
+    return None, None
 
 
 def process_completed_request(request_id, outs, tracking, current_time, tools, request_metadata):
@@ -475,7 +489,7 @@ def init_process_group(
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
     while True:
-        if actor._check_should_stop_with_cache() or len(actor.active_tasks) >= actor.inference_batch_size:
+        if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(PREFETCH_SLEEP_S)
             continue
 
@@ -484,14 +498,14 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
         except queue.Empty:
             continue
 
-        _add_request(actor, request)
+        add_request(actor, request)
 
 
-def _add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
+def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     request_id = make_request_id(request)
 
     sampling_params = request.generation_config.clone()
-    sampling_params.n = 1
+    sampling_params.n = 1  # Use n=1 for tool processing
 
     actor.request_metadata[request_id] = {
         "is_eval": request.is_eval,
@@ -533,7 +547,7 @@ class LLMRayActor:
         **kwargs,
     ):
         assert_threaded_actor(self)
-        self._init_config(tools, max_tool_calls, inference_batch_size, inflight_updates, verbose)
+        self._init_config(tools, max_tool_calls, inference_batch_size, inflight_updates)
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
         self._init_executor()
 
@@ -550,7 +564,7 @@ class LLMRayActor:
         max_tool_calls: Optional[Dict[str, int]],
         inference_batch_size: Optional[int],
         inflight_updates: bool,
-
+    ) -> None:
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inference_batch_size = inference_batch_size
@@ -579,7 +593,9 @@ class LLMRayActor:
         self._process_future = self.executor.submit(self.process_from_queue)
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
-        """Configure GPU visibility for Ray and vLLM."""
+        # a hack to make the script work.
+        # stop ray from manipulating *_VISIBLE_DEVICES
+        # at the top-level when the distributed_executor_backend is ray.
         if distributed_executor_backend == "ray":
             os.environ.pop("CUDA_VISIBLE_DEVICES", None)
             os.environ.pop("ROCR_VISIBLE_DEVICES", None)
@@ -630,6 +646,7 @@ class LLMRayActor:
         model_config = self.llm_engine.model_config
         parallel_config = self.llm_engine.vllm_config.parallel_config
 
+        # Extract only the necessary dimensions as simple Python types
         hidden_size = model_config.get_hidden_size()
         intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
 
@@ -642,7 +659,7 @@ class LLMRayActor:
             "num_kv_heads": model_config.get_num_kv_heads(parallel_config),
         }
 
-    def _check_should_stop_with_cache(self) -> bool:
+    def _should_stop(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=RAY_WAIT_TIMEOUT_S)
@@ -652,12 +669,6 @@ class LLMRayActor:
             else:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
-
-    def maybe_wait_for_requests_to_drain(self) -> None:
-        """Wait for all active requests and tool executions to complete if conditions are met."""
-        if not self.inflight_updates and self._check_should_stop_with_cache():
-            while len(self.active_tasks) > 0:
-                time.sleep(PROCESS_SLEEP_S)
 
     def _accumulate_sub_request(self, sub_request: dict) -> int:
         base_request_id = sub_request["base_request_id"]
@@ -702,6 +713,7 @@ class LLMRayActor:
         total_processed = 0
 
         while True:
+            # Health check: ensure prefetch worker is alive. This will raise if it has crashed.
             if self._prefetch_future.done():
                 self._prefetch_future.result()
 
@@ -748,7 +760,10 @@ class LLMRayActor:
         return future.result(timeout=timeout)
 
     def _prepare_weight_update(self, name: str, dtype: str) -> None:
-        self.maybe_wait_for_requests_to_drain()
+        # Wait for all active requests to complete.
+        while not self.inflight_updates and len(self.active_tasks) > 0:
+            time.sleep(PROCESS_SLEEP_S)
+
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
 
@@ -807,8 +822,13 @@ def get_cuda_arch_list() -> str:
         major, minor = torch.cuda.get_device_capability(i)
         cuda_capabilities.append(f"{major}.{minor}")
 
+    # Remove duplicates and sort
     cuda_capabilities = sorted(set(cuda_capabilities))
-    return ";".join(cuda_capabilities)
+    cuda_arch_list = ";".join(cuda_capabilities)
+    logger.info(
+        f"Detected CUDA compute capabilities: {cuda_capabilities}, setting TORCH_CUDA_ARCH_LIST={cuda_arch_list}"
+    )
+    return cuda_arch_list
 
 
 def create_vllm_engines(
@@ -855,7 +875,11 @@ def create_vllm_engines(
     use_hybrid_engine = pg is not None
     num_gpus = int(tensor_parallel_size == 1)
     if use_hybrid_engine and tensor_parallel_size == 1 and single_gpu_mode:
+        # every worker will use 0.5 GPU, so that we can schedule
+        # 2 instances on the same GPUs.
         num_gpus = 0.5
+
+    logger.info(f"num_gpus: {num_gpus}")
 
     if not use_hybrid_engine:
         # Create a big placement group to ensure that all engines are packed
@@ -883,8 +907,9 @@ def create_vllm_engines(
                 num_cpus=num_gpus,
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
-                # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
-                runtime_env=ray.runtime_env.RuntimeEnv(env_vars=env_vars),
+                runtime_env=ray.runtime_env.RuntimeEnv(
+                    env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
+                ),
             )
             .remote(
                 model=pretrain,
