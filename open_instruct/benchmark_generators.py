@@ -231,19 +231,15 @@ def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation
 
 
 def setup_vllm_engines(
-    args: grpo_fast.Args, model_config: model_utils.ModelConfig, max_model_len: int = 20480
+    args: grpo_fast.Args,
+    tokenizer_config: dataset_transformation.TokenizerConfig,
+    model_config: model_utils.ModelConfig,
+    max_model_len: int = 20480,
 ) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue]:
     """Set up vLLM engines and queues."""
     logger.info("Setting up vLLM engines...")
 
-    # Initialize Ray
-    if ray.is_initialized():
-        ray.shutdown()
-    ray.init(num_cpus=4, num_gpus=1, ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"]})
-
-    bundles = [{"GPU": 1, "CPU": 1} for _ in range(args.vllm_num_engines)]
-    pg = ray.util.placement_group(bundles, strategy="PACK")
-    ray.get(pg.ready())
+    ray.init(dashboard_host="0.0.0.0")
 
     param_prompt_Q = ray_queue.Queue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
@@ -252,25 +248,28 @@ def setup_vllm_engines(
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
 
     vllm_engines = vllm_utils3.create_vllm_engines(
-        num_engines=args.vllm_num_engines,
-        tensor_parallel_size=args.vllm_tensor_parallel_size,
-        enforce_eager=True,
-        tokenizer_name_or_path=model_config.model_name_or_path,
-        pretrain=model_config.model_name_or_path,
-        revision=model_config.model_revision,
-        seed=args.seed,
-        enable_prefix_caching=False,
-        max_model_len=max_model_len,
-        vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
-        single_gpu_mode=False,
-        pg=pg,
+        args.vllm_num_engines,
+        args.vllm_tensor_parallel_size,
+        args.vllm_pipeline_parallel_size,
+        True,
+        tokenizer_config.tokenizer_name_or_path,
+        model_config.model_name_or_path,
+        model_config.model_revision,
+        args.seed,
+        False,
+        max_model_len,
+        args.vllm_gpu_memory_utilization,
+        False,
+        pg=None,
         tools={},
         max_tool_calls=[0],
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
+        eval_results_queue=None,
         actor_manager=actor_manager,
         inference_batch_size=args.inference_batch_size,
-        inflight_updates=args.inflight_updates,
+        use_fp8_kv_cache=False,
+        verbose=args.verbose,
     )
 
     logger.info("vLLM engines ready")
@@ -292,17 +291,8 @@ def simulate_weight_sync(
     ray.get(actor_manager.set_should_stop.remote(True))
     logger.debug("Set should_stop to True for weight sync simulation")
 
-    # Wait for all engines to acknowledge stop by calling process_from_queue
-    # which will return 0 when stopped
-    stopped_refs = [engine.process_from_queue.remote(timeout=1) for engine in vllm_engines]
-    results = utils.ray_get_with_progress(
-        stopped_refs, desc="Waiting for engines to stop for weight sync", enable=args.verbose
-    )
-
-    # Verify all engines stopped (returned 0)
-    for i, result in enumerate(results):
-        if result != 0:
-            logger.warning(f"Engine {i} processed {result} requests while stopping")
+    # Put engines to sleep to simulate weight sync
+    ray.get([engine.sleep.remote(level=1) for engine in vllm_engines])
 
     # Sleep for 1 second to simulate weight sync time (from wandb metrics)
     time.sleep(1.0)
@@ -314,18 +304,6 @@ def simulate_weight_sync(
     sync_time = time.perf_counter() - sync_start
     logger.info(f"Weight sync simulation took {sync_time:.2f}s")
     return sync_time
-
-
-def generate_thread(vllm_engines: list[ray.actor.ActorHandle], stop_event: threading.Event) -> None:
-    """Thread that repeatedly calls process_from_queue on vllm engines."""
-    logger.info("[Generate Thread] Starting generation thread")
-    while not stop_event.is_set():
-        processed_results = ray.get([engine.process_from_queue.remote(timeout=20) for engine in vllm_engines])
-        num_processed = sum(int(result) for result in processed_results)
-        if num_processed == 0:
-            time.sleep(1)
-        else:
-            logger.debug(f"[Generate Thread] Processed {num_processed} requests")
 
 
 def submission_thread(
@@ -389,7 +367,7 @@ def run_benchmark(
         seed=args.seed,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
-        stop=args.stop_strings,
+        ignore_eos=True,
         # IMPORTANT: Set output_kind to FINAL_ONLY to ensure vLLM V1 properly handles n>1
         # With the default CUMULATIVE mode, vLLM V1 returns separate outputs for each
         # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode
@@ -398,14 +376,24 @@ def run_benchmark(
     )
 
     stop_event = threading.Event()
-    executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="benchmark")
-
-    generation_future = executor.submit(generate_thread, vllm_engines, stop_event)
+    executor = futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="benchmark")
 
     results = []
     # Get the model dimensions from one of the engines without loading weights
     model_dims_dict = ray.get(vllm_engines[0].get_model_dims_dict.remote())
     model_dims = utils.ModelDims(**model_dims_dict)
+
+    # Calculate total number of GPUs for MFU/MBU calculations
+    num_gpus = args.vllm_num_engines * args.vllm_tensor_parallel_size * args.vllm_pipeline_parallel_size
+
+    original_descriptions = {}
+    benchmark_start_time = time.perf_counter()
+    utils.maybe_update_beaker_description(
+        num_engines=args.vllm_num_engines,
+        tensor_parallel=args.vllm_tensor_parallel_size,
+        pipeline_parallel=args.vllm_pipeline_parallel_size,
+        original_descriptions=original_descriptions,
+    )
 
     # Submit warmup batch first
     logger.info("Submitting warmup batch...")
@@ -453,7 +441,8 @@ def run_benchmark(
         # Process remaining batches with timing
         for batch_idx in range(1, num_batches):
             # Quick health check!
-            [future.result() for future in [submission_future, generation_future] if future.done()]
+            if submission_future.done():
+                submission_future.result()
 
             # Collect all results for this batch (one per prompt)
             batch_results = [inference_results_Q.get() for _ in range(args.num_unique_prompts_rollout)]
@@ -502,18 +491,18 @@ def run_benchmark(
                 all_prompt_lengths, all_response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
             )
 
-            # MFU = (FLOPs / time) / peak_FLOPS * 100
+            # MFU = (FLOPs / time) / (peak_FLOPS * num_gpus) * 100
             model_flops_per_second = model_flops / batch_generation_time if batch_generation_time > 0 else 0
-            result_dict["mfu"] = 100 * model_flops_per_second / model_dims.device_flops
+            result_dict["mfu"] = 100 * model_flops_per_second / (model_dims.device_flops * num_gpus)
 
             # Calculate total memory bytes for all prompts and responses in the batch
             model_memory_bytes = model_dims.memory_bytes(
                 all_prompt_lengths, all_response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
             )
 
-            # MBU = (Memory bytes / time) / peak_bandwidth * 100
+            # MBU = (Memory bytes / time) / (peak_bandwidth * num_gpus) * 100
             model_bytes_per_second = model_memory_bytes / batch_generation_time if batch_generation_time > 0 else 0
-            result_dict["mbu"] = 100 * model_bytes_per_second / model_dims.device_memory_bandwidth
+            result_dict["mbu"] = 100 * model_bytes_per_second / (model_dims.device_memory_bandwidth * num_gpus)
 
             save_completion_lengths([result_dict], timestamp, batch_idx)
             results.append(result_dict)
@@ -525,6 +514,16 @@ def run_benchmark(
                 f"generation time: {batch_generation_time:.2f}s, "
                 f"weight sync time: {weight_sync_time:.2f}s, "
                 f"total new tokens: {total_new_tokens}"
+            )
+
+            utils.maybe_update_beaker_description(
+                current_step=batch_idx,
+                total_steps=num_batches - 1,
+                start_time=benchmark_start_time,
+                num_engines=args.vllm_num_engines,
+                tensor_parallel=args.vllm_tensor_parallel_size,
+                pipeline_parallel=args.vllm_pipeline_parallel_size,
+                original_descriptions=original_descriptions,
             )
 
         # Calculate total time for main benchmark only
@@ -693,7 +692,13 @@ def main() -> None:
     free_all_gpu_memory()
 
     dataset = setup_dataset(args, tokenizer_config)
-    vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(args, model_config)
+    max_model_len = args.max_prompt_token_length + args.response_length
+    logger.info(
+        f"Setting max_model_len to {max_model_len} (max_prompt_token_length={args.max_prompt_token_length} + response_length={args.response_length})"
+    )
+    vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(
+        args, tokenizer_config, model_config, max_model_len
+    )
 
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
