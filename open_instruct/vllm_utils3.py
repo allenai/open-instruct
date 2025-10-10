@@ -860,7 +860,7 @@ def create_vllm_engines(
         max_tool_calls_dict = {}
 
     vllm_engines = []
-    distributed_executor_backend = "mp" if tensor_parallel_size == 1 else "ray"
+    distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "ray"
     use_hybrid_engine = pg is not None
     num_gpus = int(tensor_parallel_size == 1)
     if use_hybrid_engine and tensor_parallel_size == 1 and single_gpu_mode:
@@ -895,10 +895,7 @@ def create_vllm_engines(
                 num_cpus=num_gpus,
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
-                # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
-                runtime_env=ray.runtime_env.RuntimeEnv(
-                    env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "1", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
-                ),
+                runtime_env=ray.runtime_env.RuntimeEnv(env_vars={"TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}),
             )
             .remote(
                 model=pretrain,
