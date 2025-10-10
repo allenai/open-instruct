@@ -873,10 +873,6 @@ def create_vllm_engines(
         )
 
         env_vars = {"TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
-        if distributed_executor_backend == "mp":
-            # Allow vLLM v1 to spawn helper processes even for single-GPU runs.
-            env_vars["VLLM_ENABLE_V1_MULTIPROCESSING"] = "1"
-
         vllm_engines.append(
             ray.remote(LLMRayActor)
             .options(
