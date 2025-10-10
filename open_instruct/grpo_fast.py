@@ -553,16 +553,21 @@ class ShufflingIterator:
         self.index = 0
         self.rng = np.random.default_rng(seed)
         self.rng.shuffle(self.data)
+        self.exclude_list = []
 
         # Ensure the effective dataset size is divisible by batch_size
-        self.effective_size = len(self.data) - (len(self.data) % batch_size)
+        self._update_effective_size()
 
     def __iter__(self) -> Iterator[List[int]]:
         return self
 
     def __next__(self) -> List[int]:
+        if self.effective_size == 0:
+            raise StopIteration("No data available to sample from the iterator.")
+
         if self.index >= self.effective_size:
             self.index = 0
+            self._update_effective_size()
             self.rng.shuffle(self.data)
 
         end_index = self.index + self.batch_size
@@ -570,6 +575,10 @@ class ShufflingIterator:
         self.index = end_index
 
         return batch
+
+    def exclude_indices(self, exclude_list: List) -> None:
+        """Exclude provided data points from future sampling."""
+        self.exclude_list.extend(exclude_list)
 
     def get_state(self) -> Dict[str, Any]:
         """Get the current state of the iterator for checkpointing."""
@@ -584,6 +593,17 @@ class ShufflingIterator:
         self.index = state["index"]
         self.data = state["data"].copy()
         self.rng.bit_generator.state = state["rng_state"]
+        self._update_effective_size()
+
+    def _update_effective_size(self) -> None:
+        if self.exclude_list:
+            mask = ~np.isin(self.data, self.exclude_list)
+            if mask.all():
+                return
+
+            self.data = self.data[mask]
+            self.exclude_list = []
+        self.effective_size = len(self.data) - (len(self.data) % self.batch_size)
 
 
 @ray.remote(num_gpus=1)
@@ -1474,6 +1494,7 @@ def accumulate_inference_batches(
     all_ground_truths = []
     all_datasets = []
     all_raw_queries = []
+    all_indices = []
     for i in tqdm(
         range(num_prompts),
         total=num_prompts,
@@ -1500,6 +1521,7 @@ def accumulate_inference_batches(
         all_ground_truths.append(ground_truth)
         all_datasets.append(dataset)
         all_raw_queries.append(raw_query)
+        all_indices.append(result.dataset_index)
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1576,13 +1598,13 @@ def accumulate_inference_batches(
     if actor_manager is not None:
         ray.get(actor_manager.report_token_statistics.remote(accumulated_stats))
 
-    # Note: We don't have dataset_indices here, but they're not needed for the returned batch
+    # Preserve dataset indices so downstream filtering keeps track of original prompts
     batch = Batch(
         queries=all_queries,
         ground_truths=all_ground_truths,
         datasets=all_datasets,
         raw_queries=all_raw_queries,
-        indices=None,  # Not meaningful for combined results
+        indices=all_indices,
     )
     return combined_result, batch, prompt_lengths, response_lengths
 
@@ -1599,6 +1621,7 @@ def data_preparation_thread(
     resume_training_step: int,
     actor_manager=None,
     model_dims: utils.ModelDims = None,
+    train_iterator: ShufflingIterator = None,
 ):
     for training_step in range(resume_training_step, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
@@ -1683,6 +1706,9 @@ def data_preparation_thread(
                 max_possible_score += args.verification_reward
             if args.apply_r1_style_format_reward and args.additive_format_reward:
                 max_possible_score += args.r1_style_format_reward
+
+            # solved_prompts = mean_grouped_rewards == max_possible_score
+
             unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
             # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
             # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
@@ -2781,6 +2807,7 @@ def run_training(
         resume_training_step,
         actor_manager,
         model_dims,
+        iter_dataloader,
     )
 
     logger.info("======== ✅ generation thread starts =========")
