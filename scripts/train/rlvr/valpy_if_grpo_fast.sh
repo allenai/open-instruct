@@ -1,5 +1,5 @@
 python mason.py \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/augusta \
     --workspace ai2/tulu-thinker \
     --priority high \
     --image valpy/open_instruct_dev_multi --pure_docker_mode \

@@ -18,6 +18,7 @@
 import dataclasses
 import os
 import queue
+import threading
 import time
 from collections import defaultdict
 from concurrent import futures
@@ -168,6 +169,16 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
     finish_reasons = [out.finish_reason for out in final_output.outputs]
     use_tools = bool(tools)
 
+    logprobs = []
+    for idx, out in enumerate(final_output.outputs):
+        assert len(out.token_ids) == len(out.logprobs), (
+            f"vLLM CompletionOutput {idx}: token_ids length ({len(out.token_ids)}) "
+            f"!= logprobs length ({len(out.logprobs)})"
+        )
+        logprobs.append(
+            [logprob_dict[token_id].logprob for token_id, logprob_dict in zip(out.token_ids, out.logprobs)]
+        )
+
     # Extract attributes based on whether tools are used
     if use_tools:
         # Extract tool-specific attributes from outputs
@@ -208,6 +219,7 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
             generation_time=current_time - metadata["start_time"],
         ),
         start_time=metadata["start_time"],
+        logprobs=logprobs,
     )
     return result, metadata["is_eval"]
 
@@ -395,10 +407,15 @@ class LLMRayActor:
         self._should_stop_value = False
         self._should_stop_timeout_s = 5
 
-        self._executor = futures.ThreadPoolExecutor(max_workers=1)
-        self._prefetch_future = self._executor.submit(self._prefetch_worker)
+        # Initialize instance variables before starting threads
         self.tracking = _init_tool_tracking()
         self.request_outputs = {}
+        self._threads_started = threading.Event()
+
+        # Start background threads
+        self._executor = futures.ThreadPoolExecutor(max_workers=2)
+        self._prefetch_future = self._executor.submit(self._prefetch_worker)
+        self._process_future = self._executor.submit(self._process_from_queue)
 
     def get_model_dims_dict(self):
         """Get only the model dimensions as a simple dict without loading weights."""
@@ -431,8 +448,9 @@ class LLMRayActor:
 
     def _prefetch_worker(self, sleep_length_s: int = 1):
         """Background worker that prefetches requests until we have enough buffered."""
+        self._threads_started.set()
         while True:
-            if self._should_stop():
+            if not self.inflight_updates and self._should_stop():
                 time.sleep(sleep_length_s)
                 continue
             current_unfinished = self.llm_engine.get_num_unfinished_requests()
@@ -456,58 +474,18 @@ class LLMRayActor:
         results_queue = self.eval_results_queue if is_eval else self.results_queue
         results_queue.put(result)
 
-    def _should_exit(self) -> bool:
-        """Determine if the processing loop should exit.
-
-        Returns:
-            bool: True if the loop should exit, False otherwise.
-        """
-        # Check stop condition first (cheapest check)
-        stop_requested = self._should_stop()
-
-        # Case 1: inflight_updates enabled and stop requested - exit immediately
-        if self.inflight_updates and stop_requested:
-            return True
-
-        # Now check for pending work (only if needed)
-        if stop_requested:
-            # Need to check if we have pending work
-            pending_tools = len(self.tracking["pending_tool_futures"])
-            unfinished = self.llm_engine.get_num_unfinished_requests()
-
-            # Case 2: stop requested and no pending work - exit
-            if pending_tools == 0 and unfinished == 0:
-                return True
-            # Otherwise, we have pending work and should continue
-            return False
-
-        # No stop requested - check if there's any work to do
-        pending_tools = len(self.tracking["pending_tool_futures"])
-        unfinished = self.llm_engine.get_num_unfinished_requests()
-
-        # Case 3: no work left at all - exit
-        if pending_tools == 0 and unfinished == 0:
-            return True
-
-        # Otherwise, continue processing
-        return False
-
-    def process_from_queue(self, timeout: float = 60.0):
+    def _process_from_queue(self, timeout: float = 60.0):
         """Run generation loop using LLMEngine directly, with optional tool support.
 
-        Runs continuously until should_stop is set, periodically adding new requests
-        and yielding control to allow weight synchronization.
+        Runs continuously in a background thread, processing requests from the engine.
 
         Returns:
             int: Number of requests processed
         """
-
-        # Use persistent instance variables for tracking and outputs
-        # This ensures state is maintained across multiple calls
         total_processed = 0
         iteration_count = 0
 
-        while not self._should_exit():
+        while True:
             iteration_count += 1
 
             # Health check: ensure prefetch worker is alive. This will raise if it has crashed.
@@ -558,17 +536,7 @@ class LLMRayActor:
                         total_processed += self._finalize_sub_request(
                             output.request_id, output, complete_output, current_time
                         )
-
-            if self.verbose and iteration_count % 100 == 0:
-                final_unfinished = self.llm_engine.get_num_unfinished_requests()
-                pending_tools = len(self.tracking["pending_tool_futures"])
-                self.logger.info(
-                    f"process_from_queue iteration {iteration_count}: unfinished={final_unfinished}, pending_tools={pending_tools}"
-                )
-
-            # If we have only pending tools but no unfinished requests, sleep briefly
-            # to let pending tools complete before the next iteration
-            if self.llm_engine.get_num_unfinished_requests() == 0 and len(self.tracking["pending_tool_futures"]) > 0:
+            if self.llm_engine.get_num_unfinished_requests() == 0:
                 time.sleep(1)
 
         return total_processed
@@ -870,10 +838,22 @@ class LLMRayActor:
             args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
         )
 
+    def _maybe_drain_requests(self, sleep_s: float = 0.1):
+        while not self.inflight_updates:
+            pending_tools = len(self.tracking["pending_tool_futures"])
+            unfinished = self.llm_engine.get_num_unfinished_requests()
+
+            if pending_tools == 0 and unfinished == 0:
+                break
+
+            time.sleep(sleep_s)
+
     def update_weight(self, name, dtype, shape, empty_cache=False):
+        self._maybe_drain_requests()
         return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
+        self._maybe_drain_requests()
         return self.llm_engine.collective_rpc(
             "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
@@ -888,7 +868,14 @@ class LLMRayActor:
         self.llm_engine.wake_up(tags)
 
     def ready(self):
+        self._threads_started.wait(timeout=30)
         return True
+
+    def check_background_threads(self):
+        if self._prefetch_future.done():
+            self._prefetch_future.result()
+        if self._process_future.done():
+            self._process_future.result()
 
     def get_kv_cache_info(self):
         """Get KV cache max concurrency from the vLLM engine."""
@@ -961,7 +948,6 @@ def create_vllm_engines(
     vllm_gpu_memory_utilization: float = 0.9,
     single_gpu_mode: bool = False,
     pg: Optional[ray.util.placement_group] = None,
-    vllm_enable_sleep=False,
     tools: Optional[Dict[str, Tool]] = None,
     max_tool_calls: List[int] = [5],
     prompt_queue=None,
@@ -1044,7 +1030,6 @@ def create_vllm_engines(
                 gpu_memory_utilization=vllm_gpu_memory_utilization,
                 bundle_indices=bundle_indices,
                 num_gpus=0.2 if use_hybrid_engine else 1,
-                enable_sleep_mode=vllm_enable_sleep,
                 noset_visible_devices=ray_noset_visible_devices(),
                 prompt_queue=prompt_queue,
                 results_queue=results_queue,
@@ -1060,83 +1045,6 @@ def create_vllm_engines(
             )
         )
 
-    # Verify engines initialized successfully
-    try:
-        ray_get_with_progress(
-            [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300
-        )
-    except TimeoutError as e:
-        logger.error(f"vLLM engines failed to initialize: {e}")
-        # Kill partially initialized actors before raising
-        for engine in vllm_engines:
-            ray.kill(engine)
-        raise RuntimeError(f"vLLM engine initialization timed out: {e}")
-
-    if vllm_enable_sleep:
-        batch_vllm_engine_call(vllm_engines, "sleep", rank_0_only=False)
+    ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300)
 
     return vllm_engines
-
-
-def batch_vllm_engine_call(engines: List[Any], method_name: str, *args, rank_0_only: bool = True, **kwargs):
-    """
-    Batch call a method on multiple vLLM engines.
-    Args:
-        engines: List of vLLM engine instances
-        method_name: Name of the method to call
-        rank_0_only: Only execute on rank 0 if True
-        *args: Positional arguments to pass to the method
-        **kwargs: Keyword arguments to pass to the method
-    Returns:
-        List of results from ray.get() if on rank 0, None otherwise
-    """
-    import torch
-
-    if rank_0_only and torch.distributed.get_rank() != 0:
-        return None
-
-    refs = []
-    for engine in engines:
-        method = getattr(engine, method_name)
-        refs.append(method.remote(*args, **kwargs))
-
-    return ray.get(refs)
-
-
-if __name__ == "__main__":
-    num_engines = 1
-    tensor_parallel_size = 1
-    world_size = num_engines * tensor_parallel_size + 1
-    vllm_engines = create_vllm_engines(
-        num_engines=num_engines,
-        tensor_parallel_size=tensor_parallel_size,
-        enforce_eager=True,
-        pretrain="facebook/opt-125m",
-        revision="main",
-        seed=42,
-        enable_prefix_caching=False,
-        max_model_len=1024,
-    )
-    llm = vllm_engines[0]
-    from vllm.utils import get_ip, get_open_port
-
-    master_address = get_ip()
-    master_port = get_open_port()
-    backend = "gloo"
-
-    refs = [
-        engine.init_process_group.remote(
-            master_address, master_port, i * tensor_parallel_size + 1, world_size, "openrlhf", backend=backend
-        )
-        for i, engine in enumerate(vllm_engines)
-    ]
-    model_update_group = init_process_group(
-        backend=backend,
-        init_method=f"tcp://{master_address}:{master_port}",
-        world_size=world_size,
-        rank=0,
-        group_name="openrlhf",
-    )
-    ray.get(refs)
-    output = ray.get(llm.generate.remote("San Franciso is a"))
-    logger.info(f"output: {output}")

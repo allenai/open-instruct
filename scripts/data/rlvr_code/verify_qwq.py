@@ -3,7 +3,7 @@ run source configs/beaker_configs/code_api_setup.sh before running this script.
 Resource intensive, so run as a batch job, not in a session. E.g:
 
 python mason.py \
-    --cluster ai2/saturn-cirrascale \
+    --cluster ai2/saturn \
     --workspace ai2/oe-adapt-code \
     --priority high \
     --description "filtering correct python qwq generations" \

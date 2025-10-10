@@ -19,7 +19,6 @@ with_tracking: true
 report_to:
   - wandb
 logging_steps: 1
-reduce_loss: sum
 checkpointing_steps: epoch
 dataset_mix_dir: /output/
 hf_metadata_dataset: allenai/olmo-instruct-evals

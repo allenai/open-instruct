@@ -1,6 +1,6 @@
 exp_name="0302_qwen2.5_7B_math_grpo_fast1_${RANDOM}"
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2  \
+    --cluster ai2/jupiter  \
     --workspace ai2/tulu-3-dev \
     --priority normal \
     --preemptible \
