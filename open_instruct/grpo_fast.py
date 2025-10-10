@@ -49,6 +49,7 @@ from open_instruct import utils
 # isort: on
 import asyncio
 import json
+import logging
 import math
 import random
 import shutil
@@ -2244,7 +2245,6 @@ def create_model_and_optimizer(
         inference_batch_size=args.inference_batch_size,
         use_fp8_kv_cache=args.use_fp8_kv_cache,
         inflight_updates=args.inflight_updates,
-        verbose=args.verbose,
     )
 
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
@@ -3023,6 +3023,12 @@ def run_training(
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+        for handler in logging.getLogger().handlers:
+            handler.setLevel(logging.DEBUG)
+
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
