@@ -36,6 +36,7 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed.distributed_c10d import (
     Backend,
     PrefixStore,
+    ProcessGroup,
     Store,
     _new_process_group_helper,
     _world,
@@ -434,9 +435,9 @@ def init_process_group(
     world_size: int = -1,
     rank: int = -1,
     store: Optional[Store] = None,
-    group_name: str = None,
+    group_name: Optional[str] = None,
     pg_options: Optional[Any] = None,
-):
+) -> ProcessGroup:
     assert (store is None) or (init_method is None), "Cannot specify both init_method and store."
 
     if store is not None:
