@@ -511,7 +511,9 @@ def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
     )
 
 
-def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None, denominator: Optional[float] = None) -> torch.Tensor:
+def masked_mean(
+    values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None, denominator: Optional[float] = None
+) -> torch.Tensor:
     """Compute mean of tensor with a masked values."""
     if axis is not None:
         numerator = (values * mask).sum(axis=axis)
@@ -1163,10 +1165,18 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_step += 1
                     with torch.no_grad():
                         # NOTE: in packed implementation, kl calculation are averages over response tokens
-                        kl1_stats[i] = masked_mean(kl1, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator).float()
-                        kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator).float()
-                        kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator).float()
-                        kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator).float()
+                        kl1_stats[i] = masked_mean(
+                            kl1, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                        ).float()
+                        kl2_stats[i] = masked_mean(
+                            kl2, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                        ).float()
+                        kl3_stats[i] = masked_mean(
+                            kl3, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                        ).float()
+                        kl4_stats[i] = masked_mean(
+                            kl4, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                        ).float()
                         if args.kl_estimator == "kl1":
                             kl_loss_stats[i] = kl1_stats[i] * args.beta
                         elif args.kl_estimator == "kl2":
@@ -1176,11 +1186,18 @@ class PolicyTrainerRayProcess(RayProcess):
                         elif args.kl_estimator == "kl4":
                             kl_loss_stats[i] = kl4_stats[i] * args.beta
                         pg_clipfrac_stats[i] = masked_mean(
-                            (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                            (pg_losses2 > pg_losses).float(),
+                            mb_response_masks_bool,
+                            args.masked_mean_axis,
+                            args.masked_mean_denominator,
                         )
-                        pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator)
+                        pg_loss_stats[i] = masked_mean(
+                            pg_loss_max, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                        )
                         loss_stats[i] = loss
-                        ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator)
+                        ratio_stats[i] = masked_mean(
+                            ratio, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                        )
                         if args.record_entropy:
                             # Calculate entropy statistics
                             entropy_stats[i] = masked_mean(
