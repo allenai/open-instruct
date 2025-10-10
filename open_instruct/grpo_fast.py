@@ -453,9 +453,11 @@ class Args:
         )
         # Ensure we have enough prompts for all VLLM engines
         if self.num_unique_prompts_rollout < self.vllm_num_engines:
-            logging.warning(f"With num_unique_prompts_rollout={self.num_unique_prompts_rollout} < "
-               f"vllm_num_engines={self.vllm_num_engines}, you will be generating data for multiple"
-               "batches simultaneously. This is fine but might be unexpected behaviour.")
+            logger.warning(
+                f"With num_unique_prompts_rollout={self.num_unique_prompts_rollout} < "
+                f"vllm_num_engines={self.vllm_num_engines}, you will be generating data for multiple"
+                "batches simultaneously. This is fine but might be unexpected behaviour."
+            )
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
