@@ -368,6 +368,7 @@ def run_benchmark(
         include_stop_str_in_output=True,
         skip_special_tokens=False,
         stop=args.stop_strings,
+        ignore_eos=True,
         # IMPORTANT: Set output_kind to FINAL_ONLY to ensure vLLM V1 properly handles n>1
         # With the default CUMULATIVE mode, vLLM V1 returns separate outputs for each
         # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode
