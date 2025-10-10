@@ -122,6 +122,7 @@ async def process_request_async(
 ):
     """Process a single async request with tool support, awaiting tools inline."""
     accumulated_tokens = []
+    accumulated_logprobs = []
     masks = []
     num_calls = 0
     timeout = False
@@ -152,6 +153,8 @@ async def process_request_async(
             final_prompt_token_ids = request_output.prompt_token_ids
 
         accumulated_tokens.extend(output.token_ids)
+        assert output.logprobs is not None, f"logprobs should not be None for request {iteration_request_id}"
+        accumulated_logprobs.extend(output.logprobs)
         masks.extend([1] * len(output.token_ids))
 
         if not actor.tools or not actor.max_tool_calls:
@@ -191,6 +194,9 @@ async def process_request_async(
         )
 
         accumulated_tokens.extend(tool_output_token_ids)
+        accumulated_logprobs.extend(
+            [{token_id: vllm.Logprob(logprob=float("nan"), rank=None, decoded_token="")} for token_id in tool_output_token_ids]
+        )
         masks.extend([0] * len(tool_output_token_ids))
 
         new_sample_tokens = sampling_params.max_tokens - len(masks)
@@ -208,7 +214,7 @@ async def process_request_async(
         text="",
         token_ids=accumulated_tokens,
         cumulative_logprob=output.cumulative_logprob,
-        logprobs=None,
+        logprobs=accumulated_logprobs,
         finish_reason=output.finish_reason,
         stop_reason=output.stop_reason,
     )
