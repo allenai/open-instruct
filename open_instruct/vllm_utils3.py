@@ -153,20 +153,17 @@ async def process_request_async(
             final_prompt_token_ids = request_output.prompt_token_ids
 
         accumulated_tokens.extend(output.token_ids)
-        assert output.logprobs is not None, f"logprobs should not be None for request {iteration_request_id}"
         accumulated_logprobs.extend(output.logprobs)
         masks.extend([1] * len(output.token_ids))
 
         if not actor.tools or not actor.max_tool_calls:
             break
 
-        tool_result_tuple = get_triggered_tool(
+        triggered_tool, stop_str = get_triggered_tool(
             output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
         )
-        if tool_result_tuple is None:
+        if triggered_tool is None:
             break
-
-        triggered_tool, stop_str = tool_result_tuple
 
         assert actor.executor is not None, f"executor is None for request {sub_request_id}"
 
@@ -568,7 +565,6 @@ class LLMRayActor:
         self.max_tool_calls = max_tool_calls or {}
         self.inference_batch_size = inference_batch_size
         self.inflight_updates = inflight_updates
-
         self.request_metadata = {}
         self.completion_queue = queue.Queue()
         self.active_tasks = {}
@@ -853,7 +849,6 @@ def create_vllm_engines(
     inference_batch_size: Optional[int] = None,
     use_fp8_kv_cache=False,
     inflight_updates: bool = False,
-    verbose: bool = False,
 ) -> list[LLMRayActor]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
@@ -869,7 +864,10 @@ def create_vllm_engines(
         max_tool_calls_dict = {}
 
     vllm_engines = []
-    distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "ray"
+    if tensor_parallel_size == 1:
+        distributed_executor_backend = "uni"
+    else:
+        distributed_executor_backend = "ray"
     use_hybrid_engine = pg is not None
     num_gpus = int(tensor_parallel_size == 1)
     if use_hybrid_engine and tensor_parallel_size == 1 and single_gpu_mode:

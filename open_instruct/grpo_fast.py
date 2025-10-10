@@ -49,6 +49,7 @@ from open_instruct import utils
 # isort: on
 import asyncio
 import json
+import logging
 import math
 import random
 import shutil
@@ -856,7 +857,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
                         refs = [
                             engine.update_weight.remote(
-                                name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
+                                name, dtype=str(param.dtype), shape=shape, empty_cache=count == num_params
                             )
                             for engine in self.vllm_engines
                         ]
@@ -870,7 +871,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
                     refs = [
                         engine.update_weight.remote(
-                            name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
+                            name, dtype=str(param.dtype), shape=shape, empty_cache=count == num_params
                         )
                         for engine in self.vllm_engines
                     ]
@@ -1739,9 +1740,7 @@ def data_preparation_thread(
             if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
                 result.responses[i].append(tokenizer.eos_token_id)
                 result.masks[i].append(1)
-                result.logprobs[i].append(
-                    {tokenizer.eos_token_id: vllm.Logprob(logprob=float("nan"), rank=None, decoded_token="")}
-                )
+                result.logprobs[i].append(float("nan"))
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
             decoded_queries = batch.raw_queries
@@ -2246,7 +2245,6 @@ def create_model_and_optimizer(
         inference_batch_size=args.inference_batch_size,
         use_fp8_kv_cache=args.use_fp8_kv_cache,
         inflight_updates=args.inflight_updates,
-        verbose=args.verbose,
     )
 
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
@@ -3025,6 +3023,12 @@ def run_training(
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+        for handler in logging.getLogger().handlers:
+            handler.setLevel(logging.DEBUG)
+
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
