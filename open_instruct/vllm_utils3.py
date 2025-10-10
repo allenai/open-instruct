@@ -16,8 +16,6 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 import asyncio
-import logging
-import dataclasses
 import os
 import queue
 import sys
@@ -66,6 +64,7 @@ RAY_WAIT_TIMEOUT_S = 0.1
 KV_CACHE_RETRIES = 5
 KV_CACHE_RETRY_SLEEP_S = 0.2
 WEIGHT_UPDATE_SLEEP_INTERVAL_S = 0.1
+
 
 def assert_threaded_actor(instance):
     """Assert that an instance's class is suitable for use in a threaded (non-async) Ray actor.
@@ -154,7 +153,6 @@ async def process_request_async(
             final_prompt_token_ids = request_output.prompt_token_ids
 
         accumulated_tokens.extend(output.token_ids)
-        assert output.logprobs is not None, f"logprobs should not be None for request {iteration_request_id}"
         accumulated_logprobs.extend(output.logprobs)
         masks.extend([1] * len(output.token_ids))
 
