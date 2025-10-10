@@ -60,4 +60,8 @@ uv run python mason.py \
     --push_to_hub false \
     --single_gpu_mode \
     --enable_quantization \
-    --quantization_format fp8
+    --quantization_format gptq \
+    --smoothquant_strength 0.5 \
+    --gptq_bits 4 \
+    --gptq_group_size 128 \
+    --gptq_actorder static

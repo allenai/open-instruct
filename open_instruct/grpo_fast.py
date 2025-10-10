@@ -364,10 +364,18 @@ class Args:
     # Quantization
     enable_quantization: bool = False
     """whether to enable quantization of model weights before syncing to vLLM. If disabled, defaults to bf16."""
-    quantization_format: Literal["fp8", "fp4", "nvfp4"] = "fp8"
-    """the quantization format to use (fp8, fp4, or nvfp4)"""
+    quantization_format: Literal["fp8", "fp4", "nvfp4", "gptq"] = "fp8"
+    """the quantization format to use (fp8, fp4, nvfp4, or gptq for SmoothQuant+GPTQ)"""
     quantization_targets: str = "Linear"
     """which layer types to quantize (e.g., 'Linear')"""
+    smoothquant_strength: float = 0.5
+    """alpha used by SmoothQuant when quantization_format='gptq'"""
+    gptq_bits: int = 4
+    """number of weight bits for GPTQ quantization"""
+    gptq_group_size: int = 128
+    """group size for GPTQ weight quantization"""
+    gptq_actorder: Optional[Literal["static", "descending", "ascending"]] = "static"
+    """activation ordering strategy for GPTQ (None disables actorder)"""
 
     # Experiment tracking
     verbose: bool = False
@@ -866,6 +874,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     tokenizer=tokenizer,
                     targets=self.args.quantization_targets,
                     max_seq_length=self.args.max_token_length,
+                    smoothquant_strength=self.args.smoothquant_strength,
+                    gptq_bits=self.args.gptq_bits,
+                    gptq_group_size=self.args.gptq_group_size,
+                    gptq_actorder=self.args.gptq_actorder,
                 )
             quantization_time = quant_timer.duration
             model = model_for_broadcast
