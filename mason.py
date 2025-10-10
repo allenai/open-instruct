@@ -81,6 +81,7 @@ def get_args():
     parser.add_argument("--max_retries", type=int, help="Number of retries", default=0)
     parser.add_argument("--budget", type=str, help="Budget to use.", required=True)
     parser.add_argument("--gpus", type=int, help="Number of gpus", default=0)
+    parser.add_argument("--shared_memory", type=str, help="Shared memory size (e.g., '10gb', '10.24gb')", default="10.24gb")
     parser.add_argument("--num_nodes", type=int, help="Number of nodes", default=1)
     parser.add_argument(
         "--image",
@@ -747,7 +748,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
             args.env,
             args.secret,
         ),
-        resources=beaker.BeakerTaskResources(gpu_count=args.gpus),
+        resources=beaker.BeakerTaskResources(gpu_count=args.gpus, shared_memory=args.shared_memory),
         replicas=args.num_nodes,
     )
     if args.num_nodes > 1:

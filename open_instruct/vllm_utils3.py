@@ -15,25 +15,29 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
+import asyncio
 import dataclasses
 import os
 import queue
+import sys
 import threading
 import time
 from collections import defaultdict
 from concurrent import futures
 from datetime import timedelta
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import ray
 import torch
 import torch.distributed
 import vllm
+from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed.distributed_c10d import (
     Backend,
     PrefixStore,
+    ProcessGroup,
     Store,
     _new_process_group_helper,
     _world,
@@ -49,6 +53,33 @@ from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
+
+WEIGHT_UPDATE_SLEEP_INTERVAL_S = 0.1
+
+
+def assert_threaded_actor(instance):
+    """Assert that an instance's class is suitable for use in a threaded (non-async) Ray actor.
+
+    This function performs two checks:
+      1. The class must not define any `async def` methods
+         (including async generators, staticmethods, or classmethods).
+      2. There must not be a running asyncio event loop in the current thread.
+
+    Args:
+        instance: The instance whose class to inspect.
+
+    Raises:
+        AssertionError: If the class defines one or more async methods, or a running asyncio event loop is detected.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        raise AssertionError(
+            f"{instance.__class__.__name__} must run in a threaded Ray actor (no running event loop). "
+            f"Detected RUNNING loop={loop!r} on thread='{threading.current_thread().name}'. "
+            f"Python={sys.version.split()[0]}."
+        )
+    except RuntimeError:
+        return
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -101,6 +132,34 @@ def _extract_base_request_id(full_request_id: str) -> str:
     return "_".join(full_request_id.split("_")[:-1])
 
 
+def get_triggered_tool(
+    output_text: str,
+    tools: Dict[str, Tool],
+    max_tool_calls: Dict[str, int],
+    num_calls: int,
+    sampling_params: vllm.SamplingParams,
+) -> Tuple[Optional[Tool], Optional[str]]:
+    """Check if any tool was triggered and return the tool and stop_str if found.
+
+    Args:
+        output_text: The generated text to check for tool triggers
+        tools: Dictionary mapping stop strings to Tool instances
+        max_tool_calls: Dictionary mapping stop strings to their call limits
+        num_calls: Current number of tool calls for this request
+        sampling_params: Sampling parameters containing stop strings
+
+    Returns:
+        Tuple of (tool, stop_str) if a tool was triggered, (None, None) otherwise.
+    """
+    for stop_str in sampling_params.stop:
+        if stop_str in tools and output_text.endswith(stop_str):
+            if num_calls < max_tool_calls.get(stop_str, 0):
+                return tools[stop_str], stop_str
+            else:
+                return MaxCallsExceededTool(start_str="<tool>", end_str="</tool>"), stop_str
+    return None, None
+
+
 def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, executor):
     """
     Handle a finished output. Returns the output if it should be added to results,
@@ -122,20 +181,15 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
 
     tracking["masks"][output.request_id].extend([1] * len(o.token_ids))
 
-    # Check for tool calls
-    for stop_str in sampling_params.stop:
-        if stop_str in tools and o.text.endswith(stop_str):
-            if tracking["num_calls"][output.request_id] < max_tool_calls.get(stop_str, 0):
-                tool = tools[stop_str]
-            else:
-                tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
+    tool, stop_str = get_triggered_tool(
+        o.text, tools, max_tool_calls, tracking["num_calls"][output.request_id], sampling_params
+    )
+    if tool is None:
+        return output
 
-            future = executor.submit(tool, o.text)
-            tracking["pending_tool_futures"][output.request_id] = (future, o, output)
-
-            return None  # Output is being held for tool processing
-
-    return output
+    future = executor.submit(tool, o.text)
+    tracking["pending_tool_futures"][output.request_id] = (future, o, output)
+    return None
 
 
 def process_completed_request(request_id, outs, tracking, current_time, tools, request_metadata):
@@ -168,6 +222,16 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
     response_ids = [list(out.token_ids) for out in final_output.outputs]
     finish_reasons = [out.finish_reason for out in final_output.outputs]
     use_tools = bool(tools)
+
+    logprobs = []
+    for idx, out in enumerate(final_output.outputs):
+        assert len(out.token_ids) == len(out.logprobs), (
+            f"vLLM CompletionOutput {idx}: token_ids length ({len(out.token_ids)}) "
+            f"!= logprobs length ({len(out.logprobs)})"
+        )
+        logprobs.append(
+            [logprob_dict[token_id].logprob for token_id, logprob_dict in zip(out.token_ids, out.logprobs)]
+        )
 
     # Extract attributes based on whether tools are used
     if use_tools:
@@ -209,6 +273,7 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
             generation_time=current_time - metadata["start_time"],
         ),
         start_time=metadata["start_time"],
+        logprobs=logprobs,
     )
     return result, metadata["is_eval"]
 
@@ -243,9 +308,9 @@ def init_process_group(
     world_size: int = -1,
     rank: int = -1,
     store: Optional[Store] = None,
-    group_name: str = None,
+    group_name: Optional[str] = None,
     pg_options: Optional[Any] = None,
-):
+) -> ProcessGroup:
     assert (store is None) or (init_method is None), "Cannot specify both init_method and store."
 
     if store is not None:
@@ -333,35 +398,64 @@ class LLMRayActor:
         *args,
         tools: Optional[Dict[str, Tool]] = None,
         max_tool_calls: Optional[Dict[str, int]] = None,
-        bundle_indices: list = None,
-        prompt_queue=None,
-        results_queue=None,
-        eval_results_queue=None,
-        actor_manager=None,
-        inference_batch_size: Optional[int] = None,
-        inflight_updates: bool = False,
-        verbose: bool = False,
+        bundle_indices: Optional[List[int]] = None,
+        prompt_queue: ray_queue.Queue,
+        results_queue: ray_queue.Queue,
+        eval_results_queue: ray_queue.Queue,
+        actor_manager: ray.actor.ActorHandle,
+        inference_batch_size: Optional[int],
+        inflight_updates: bool,
         **kwargs,
     ):
+        assert_threaded_actor(self)
+        self._init_config(tools, max_tool_calls, inference_batch_size, inflight_updates)
+        self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
+
+        noset_visible_devices = kwargs.pop("noset_visible_devices")
+        distributed_executor_backend = kwargs.get("distributed_executor_backend")
+        self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
+
+        self._setup_engine_args(args, bundle_indices, kwargs)
+
+        self.tracking = _init_tool_tracking()
+        self.request_outputs = {}
+        self._threads_started = threading.Event()
+
+        max_workers = 22 if self.tools else 2  # 2 for background threads + 20 for tool execution if tools enabled
+        self.executor = futures.ThreadPoolExecutor(max_workers=max_workers)
+        self._prefetch_future = self.executor.submit(self._prefetch_worker)
+        self._process_future = self.executor.submit(self._process_from_queue)
+
+    def _init_config(
+        self,
+        tools: Optional[Dict[str, Tool]],
+        max_tool_calls: Optional[Dict[str, int]],
+        inference_batch_size: Optional[int],
+        inflight_updates: bool,
+    ) -> None:
         self.logger = logger_utils.setup_logger(__name__)
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inference_batch_size = inference_batch_size
         self.inflight_updates = inflight_updates
-        self.verbose = verbose
         self.request_metadata = {}
-        self.vllm_active_requests = set()  # Track all requests currently in vLLM
+        self.vllm_active_requests = set()
 
-        if self.tools:
-            self.executor = futures.ThreadPoolExecutor(max_workers=20)
-        else:
-            self.executor = None
+    def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
+        self.prompt_queue = prompt_queue
+        self.results_queue = results_queue
+        self.eval_results_queue = eval_results_queue
+        self.actor_manager = actor_manager
 
-        noset_visible_devices = kwargs.pop("noset_visible_devices")
-        if kwargs.get("distributed_executor_backend") == "ray":
-            # a hack to make the script work.
-            # stop ray from manipulating *_VISIBLE_DEVICES
-            # at the top-level when the distributed_executor_backend is ray.
+        self._last_should_stop_update = float("-inf")
+        self._should_stop_value = False
+        self._should_stop_timeout_s = 5
+
+    def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
+        # a hack to make the script work.
+        # stop ray from manipulating *_VISIBLE_DEVICES
+        # at the top-level when the distributed_executor_backend is ray.
+        if distributed_executor_backend == "ray":
             os.environ.pop("CUDA_VISIBLE_DEVICES", None)
             os.environ.pop("ROCR_VISIBLE_DEVICES", None)
         elif noset_visible_devices:
@@ -370,41 +464,20 @@ class LLMRayActor:
             # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
             os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
 
+    def _setup_engine_args(self, args, bundle_indices, kwargs) -> None:
         num_gpus = kwargs.pop("num_gpus")
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
-            if self.verbose:
-                self.logger.info(f"creating LLM with bundle_indices={bundle_indices}")
+            logger.debug(f"creating LLM with bundle_indices={bundle_indices}")
 
         engine_args = vllm.EngineArgs(*args, **kwargs)
         # Log stats causes a crash in the engine at assert outputs.scheduler_stats is not None when we call step() and there is nothing to step.
         engine_args.disable_log_stats = True
-
         # Cascade attention has known performance issues: https://github.com/vllm-project/vllm/issues/17652
         engine_args.disable_cascade_attn = True
 
         self.llm_engine = vllm.LLMEngine.from_engine_args(engine_args)
-
-        self.prompt_queue = prompt_queue
-        self.results_queue = results_queue
-        self.eval_results_queue = eval_results_queue
-        self.actor_manager = actor_manager
-
-        # For caching should_stop status.
-        self._last_should_stop_update = float("-inf")
-        self._should_stop_value = False
-        self._should_stop_timeout_s = 5
-
-        # Initialize instance variables before starting threads
-        self.tracking = _init_tool_tracking()
-        self.request_outputs = {}
-        self._threads_started = threading.Event()
-
-        # Start background threads
-        self._executor = futures.ThreadPoolExecutor(max_workers=2)
-        self._prefetch_future = self._executor.submit(self._prefetch_worker)
-        self._process_future = self._executor.submit(self._process_from_queue)
 
     def get_model_dims_dict(self):
         """Get only the model dimensions as a simple dict without loading weights."""
@@ -567,7 +640,7 @@ class LLMRayActor:
 
         # Verify we have all required outputs before proceeding
         if len(outputs_by_index) != expected_n or any(j not in outputs_by_index for j in range(expected_n)):
-            self.logger.warning(
+            logger.warning(
                 f"Incomplete or malformed outputs for {request_id}. "
                 f"Expected {expected_n} samples, got indices {sorted(outputs_by_index.keys())}. Skipping."
             )
@@ -778,7 +851,7 @@ class LLMRayActor:
 
                 except Exception as e:
                     # Match original ToolUseLLM behavior - just log and continue
-                    self.logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
+                    logger.error(f"[_poll_tool_futures] Error adding request {req_id}: {e}")
             else:
                 # Can't make a new request (hit limits), finalize this sub-request
                 base_req_id = _extract_base_request_id(req_id)
@@ -789,7 +862,7 @@ class LLMRayActor:
                     for other_id in tracking["pending_tool_futures"]
                     if _extract_base_request_id(other_id) == base_req_id and other_id != req_id
                 ]
-                self.logger.info(
+                logger.info(
                     f"[_poll_tool_futures] Finalizing {req_id} (can't continue). "
                     f"Other pending tools for {base_req_id}: {other_pending}"
                 )
@@ -827,7 +900,8 @@ class LLMRayActor:
             args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
         )
 
-    def _maybe_drain_requests(self, sleep_s: float = 0.1):
+    def _prepare_weight_update(self, name: str, dtype: str) -> None:
+        # First, drain all the requests when appropriate:
         while not self.inflight_updates:
             pending_tools = len(self.tracking["pending_tool_futures"])
             unfinished = self.llm_engine.get_num_unfinished_requests()
@@ -835,14 +909,21 @@ class LLMRayActor:
             if pending_tools == 0 and unfinished == 0:
                 break
 
-            time.sleep(sleep_s)
+            time.sleep(WEIGHT_UPDATE_SLEEP_INTERVAL_S)
+        # Then, check that the dtypes match.
+        expected_dtype = str(self.llm_engine.model_config.dtype)
+        assert str(dtype) == expected_dtype, (
+            f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
+        )
 
-    def update_weight(self, name, dtype, shape, empty_cache=False):
-        self._maybe_drain_requests()
+    def update_weight(self, name: str, dtype: str, shape: Tuple[int, ...], empty_cache: bool = False) -> None:
+        self._prepare_weight_update(name, dtype)
         return self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
-    def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        self._maybe_drain_requests()
+    def update_weight_cuda_ipc(
+        self, name: str, dtype: str, shape: Tuple[int, ...], ipc_handles: List[Any], empty_cache: bool = False
+    ) -> None:
+        self._prepare_weight_update(name, dtype)
         return self.llm_engine.collective_rpc(
             "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
@@ -937,7 +1018,6 @@ def create_vllm_engines(
     vllm_gpu_memory_utilization: float = 0.9,
     single_gpu_mode: bool = False,
     pg: Optional[ray.util.placement_group] = None,
-    vllm_enable_sleep=False,
     tools: Optional[Dict[str, Tool]] = None,
     max_tool_calls: List[int] = [5],
     prompt_queue=None,
@@ -947,7 +1027,6 @@ def create_vllm_engines(
     inference_batch_size: Optional[int] = None,
     use_fp8_kv_cache=False,
     inflight_updates: bool = False,
-    verbose: bool = False,
 ) -> list[LLMRayActor]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
@@ -1008,7 +1087,6 @@ def create_vllm_engines(
                 revision=revision,
                 tokenizer=tokenizer_name_or_path,
                 tokenizer_revision=revision,
-                trust_remote_code=True,
                 worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
                 tensor_parallel_size=tensor_parallel_size,
                 enforce_eager=enforce_eager,
@@ -1020,7 +1098,6 @@ def create_vllm_engines(
                 gpu_memory_utilization=vllm_gpu_memory_utilization,
                 bundle_indices=bundle_indices,
                 num_gpus=0.2 if use_hybrid_engine else 1,
-                enable_sleep_mode=vllm_enable_sleep,
                 noset_visible_devices=ray_noset_visible_devices(),
                 prompt_queue=prompt_queue,
                 results_queue=results_queue,
@@ -1032,87 +1109,9 @@ def create_vllm_engines(
                 inflight_updates=inflight_updates,
                 kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
                 calculate_kv_scales=use_fp8_kv_cache,
-                verbose=verbose,
             )
         )
 
-    # Verify engines initialized successfully
-    try:
-        ray_get_with_progress(
-            [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300
-        )
-    except TimeoutError as e:
-        logger.error(f"vLLM engines failed to initialize: {e}")
-        # Kill partially initialized actors before raising
-        for engine in vllm_engines:
-            ray.kill(engine)
-        raise RuntimeError(f"vLLM engine initialization timed out: {e}")
-
-    if vllm_enable_sleep:
-        batch_vllm_engine_call(vllm_engines, "sleep", rank_0_only=False)
+    ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300)
 
     return vllm_engines
-
-
-def batch_vllm_engine_call(engines: List[Any], method_name: str, *args, rank_0_only: bool = True, **kwargs):
-    """
-    Batch call a method on multiple vLLM engines.
-    Args:
-        engines: List of vLLM engine instances
-        method_name: Name of the method to call
-        rank_0_only: Only execute on rank 0 if True
-        *args: Positional arguments to pass to the method
-        **kwargs: Keyword arguments to pass to the method
-    Returns:
-        List of results from ray.get() if on rank 0, None otherwise
-    """
-    import torch
-
-    if rank_0_only and torch.distributed.get_rank() != 0:
-        return None
-
-    refs = []
-    for engine in engines:
-        method = getattr(engine, method_name)
-        refs.append(method.remote(*args, **kwargs))
-
-    return ray.get(refs)
-
-
-if __name__ == "__main__":
-    num_engines = 1
-    tensor_parallel_size = 1
-    world_size = num_engines * tensor_parallel_size + 1
-    vllm_engines = create_vllm_engines(
-        num_engines=num_engines,
-        tensor_parallel_size=tensor_parallel_size,
-        enforce_eager=True,
-        pretrain="facebook/opt-125m",
-        revision="main",
-        seed=42,
-        enable_prefix_caching=False,
-        max_model_len=1024,
-    )
-    llm = vllm_engines[0]
-    from vllm.utils import get_ip, get_open_port
-
-    master_address = get_ip()
-    master_port = get_open_port()
-    backend = "gloo"
-
-    refs = [
-        engine.init_process_group.remote(
-            master_address, master_port, i * tensor_parallel_size + 1, world_size, "openrlhf", backend=backend
-        )
-        for i, engine in enumerate(vllm_engines)
-    ]
-    model_update_group = init_process_group(
-        backend=backend,
-        init_method=f"tcp://{master_address}:{master_port}",
-        world_size=world_size,
-        rank=0,
-        group_name="openrlhf",
-    )
-    ray.get(refs)
-    output = ray.get(llm.generate.remote("San Franciso is a"))
-    logger.info(f"output: {output}")
