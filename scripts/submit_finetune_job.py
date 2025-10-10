@@ -20,7 +20,7 @@ def main():
                         help="Path to the default Beaker config file")
     parser.add_argument("--config", default=None,
                         help="Path to an additional config file to override default settings")
-    parser.add_argument("--cluster", type=str, default="ai2/allennlp-cirrascale", help="Beaker cluster to use")
+    parser.add_argument("--cluster", type=str, default="ai2/jupiter", help="Beaker cluster to use")
     parser.add_argument("--priority", type=str, default="high", help="Priority of the job")
     parser.add_argument("--preemptible", type=bool, default=True, help="Whether to use preemptible instances")
     parser.add_argument("--num_gpus", type=int, default=8, help="Number of GPUs to use")
@@ -175,7 +175,7 @@ def main():
 
     # add cluster-specific env vars
     if args.num_nodes > 1:
-        if args.cluster == "ai2/jupiter-cirrascale-2":
+        if args.cluster == "ai2/jupiter":
             d['tasks'][0]['envVars'] += [
                 {
                     "name": "NCCL_SOCKET_IFNAME",
@@ -202,18 +202,7 @@ def main():
                 #     "value": "/weka/oe-adapt-default/allennlp/.cache/hub",
                 # },
             ]
-        elif args.cluster == "ai2/pluto-cirrascale":
-            d['tasks'][0]['envVars'] += [
-                {
-                    "name": "NCCL_IB_HCA",
-                    "value": "^=mlx5_1,mlx5_2",
-                },
-                {
-                    "name": "NCCL_DEBUG",
-                    "value": "INFO",
-                },
-            ]
-        elif args.cluster == "ai2/augusta-google-1":
+        elif args.cluster == "ai2/augusta":
             d['tasks'][0]['envVars'] += [
                 {
                     "name":"LD_LIBRARY_PATH",

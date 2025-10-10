@@ -128,10 +128,10 @@ fi
 WANDB_ARG=""
 if [[ -n "$WANDB_RUN_PATH" ]]; then
     beaker_user=$(beaker account whoami --format text | awk 'NR==2 {print $2}')
-    echo "Assuming beaker user $beaker_user"
+    echo "Using WANDB_API_KEY from ${beaker_user}"
     if ! beaker secret list --workspace ai2/tulu-3-results | grep -q "${beaker_user}_WANDB_API_KEY"; then
         echo "WARNING: No ${beaker_user}_WANDB_API_KEY secret found in workspace ai2/tulu-3-results."
-        echo "add your WANDB_API_KEY as a secret to this workspace in order to use --oe_eval_log_to_wandb"
+        echo "add your WANDB_API_KEY as a secret to this workspace in order to log oe-eval results to wandb"
     else
         WANDB_ARG=" --wandb-run-path $WANDB_RUN_PATH --gantry-secret-wandb-api-key ${beaker_user}_WANDB_API_KEY"
     fi

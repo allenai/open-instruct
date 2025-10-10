@@ -127,7 +127,7 @@ FILTER_EXAMPLE_PER_SECOND_PER_CPU = 1130
 
 def get_num_proc(dataset_len: int, num_available_cpus: int, example_per_second_per_cpu) -> int:
     num_required_cpus = max(1, dataset_len // example_per_second_per_cpu)
-    return min(num_required_cpus, num_available_cpus)
+    return min(num_required_cpus, num_available_cpus, dataset_len)
 
 
 COLORS = ["on red", "on green", "on blue", "on yellow", "on magenta"]

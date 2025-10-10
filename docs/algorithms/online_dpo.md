@@ -15,10 +15,10 @@ In the sections below, we will include some examples on how to train models and 
 
 ```bash
 python mason.py \
-    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
+    --cluster ai2/jupiter \
     --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
     --priority preemptible \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus $NUM_GPUS -- $YOUR_COMMAND
 ```
 
@@ -108,11 +108,11 @@ Here we are using --vllm_device cuda:7 to say we want to launch the vllm generat
 # for running TL;DR you can likely use GPUs with less memory
 python mason.py \
     --image nathanl/open_instruct_auto --pure_docker_mode \
-    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/general-cirrascale \
+    --cluster ai2/jupiter \
     --priority normal \
     --resumable \
     --preemptible \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
      open_instruct/online_dpo_vllm_thread.py \
     --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
@@ -150,14 +150,13 @@ python mason.py \
 
 ```bash
 # for running chat based models you should use an 8xH100 node.
-# use ai2/jupiter-cirrascale-2 or ai2/pluto-cirrascale
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
     open_instruct/online_dpo_vllm_thread.py \
     --exp_name "online_dpo_vllm_thread_beta_0.03" \
@@ -202,14 +201,13 @@ python mason.py \
 
 ```bash
 # for running chat based models you should use an 8xH100 node.
-# use ai2/jupiter-cirrascale-2 or ai2/pluto-cirrascale
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
     open_instruct/online_dpo_vllm_thread.py \
     --exp_name "online_dpo_vllm_thread_beta_0.03" \
@@ -256,13 +254,13 @@ An example command with beaker datasets models:
 
 ```
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --image nathanl/open_instruct_auto \
     --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --beaker_datasets /model:01J6DC8YQ291QA3QEYQTM3CBHE /reward_model:01J834TT3SB6PTB3QYPH33YJ6M \
     --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
     open_instruct/online_dpo_vllm_thread.py \
@@ -313,7 +311,7 @@ Furthermore, we also track the dataset length visualization in wandb (see detail
 ![token length visualization in wandb](reward_modeling_token_wandb.png)
 
 
-Finally, we also include samples 
+Finally, we also include samples
 
 ![reward modeling preference sample texts](reward_modeling_preference_sample_texts.png)
 
@@ -433,5 +431,3 @@ actor_thread.join()
 --[leaner] get π_6 ->  p_5 D_π_5 -> π_7, time: 7.007669448852539
 --[leaner] get π_7 ->  p_6 D_π_6 -> π_8, time: 8.009439706802368
 ```
-
-
