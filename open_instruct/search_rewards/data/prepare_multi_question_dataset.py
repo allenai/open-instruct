@@ -7,48 +7,14 @@ import os
 import json
 import random
 import pandas as pd
-from datasets import Dataset
+from datasets import Dataset, load_dataset
 from typing import List, Dict, Any
 
 
 def generate_multi_question_prompt(num_questions: int = 2):
     """Generate a multi-question prompt template for variable number of questions."""
-    
-    # Generate answer format instructions
-    answer_format_lines = []
-    for i in range(1, num_questions + 1):
-        if i == 1:
-            answer_format_lines.append(f"- For the first question: Use <answer{i}>\\boxed{{{{your_answer}}}}</answer{i}>")
-        elif i == num_questions:
-            answer_format_lines.append(f"- For the final question: Use <answer{i}>\\boxed{{{{your_answer}}}}</answer{i}>")
-        else:
-            answer_format_lines.append(f"- For question {i}: Use <answer{i}>\\boxed{{{{your_answer}}}}</answer{i}>")
-    
-    # Generate workflow example
-    workflow_examples = []
-    for i in range(1, num_questions + 1):
-        workflow_examples.extend([
-            f"<think>I need to research question {i}</think>",
-            f"<search>relevant query for question {i}</search>",
-            "[results provided]",
-            f"<answer{i}>\\boxed{{{{example_answer_{i}}}}}</answer{i}>",
-            ""
-        ])
-    
-    # Generate requirements
-    requirements_lines = []
-    sequence_text = "Question 1"
-    if num_questions > 2:
-        sequence_text += f", then Question 2, ..., then Question {num_questions}"
-    elif num_questions == 2:
-        sequence_text += ", then Question 2"
-    
-    requirements_lines.append(f"- Answer each question in sequence ({sequence_text})")
-    
-    for i in range(1, num_questions + 1):
-        requirements_lines.append(f"- Use <answer{i}>\\boxed{{{{answer}}}}</answer{i}> for question {i}")
-    
-    # Build the prompt
+    _ = num_questions  # kept for backward compatibility but no longer used dynamically
+
     prompt_parts = [
         "You are a research assistant that answers multiple questions through iterative reasoning and research.",
         "",
@@ -62,39 +28,325 @@ def generate_multi_question_prompt(num_questions: int = 2):
         "- Results appear as: <snippet id=UNIQUE_ID>content</snippet>",
         "",
         "MULTI-QUESTION ANSWERING FORMAT:",
-        f"- You will be given {num_questions} questions to answer"
-    ]
-    
-    if num_questions == 2:
-        prompt_parts.append("- Answer the FIRST question completely, then move to the SECOND question")
-    else:
-        prompt_parts.append(f"- Answer each question completely in sequence (1 through {num_questions})")
-    
-    prompt_parts.extend(answer_format_lines)
-    prompt_parts.extend([
+        "- You will be given multiple questions (Question 1, Question 2, ..., Question N)",
+        "- Answer each question completely before moving to the next",
+        "- For each question k: Use <answerk>\\boxed{{your_answer_k}}</answerk>",
         "- Each answer should be concise and placed within the \\boxed{} format",
-        f"- All {num_questions} answers must be correct for the response to be considered successful",
+        "- All answers must be correct for the response to be considered successful",
         "",
-        "WORKFLOW EXAMPLE:"
-    ])
-    
-    prompt_parts.extend(workflow_examples)
-    prompt_parts.extend([
-        "REQUIREMENTS:"
-    ])
-    
-    prompt_parts.extend(requirements_lines)
-    prompt_parts.extend([
-        "- Think and search as needed for each question before providing its answer",
-        "- Ensure all answers are complete and correct",
+        "WORKFLOW EXAMPLE:",
+        "<think>I need to research Question k</think>",
+        "<search>relevant query for Question k</search>",
+        "[results provided]",
+        "<answerk>\\boxed{{example_answer_k}}</answerk>",
+        "...",
+        "",
+        "REQUIREMENTS:",
+        "- Answer questions in order: Question 1 → Question 2 → ... → Question N",
+        "- Think and search as needed before providing each answer",
+        "- Ensure every <answerk> tag contains exactly one boxed answer",
+        "- Verify that all answers are complete and correct",
         "",
         "{question}"
-    ])
-    
+    ]
+
     return "\n".join(prompt_parts)
 
 
 MULTI_QUESTION_PROMPT = generate_multi_question_prompt(2)  # Default 2-question prompt for backward compatibility
+
+
+def load_asearcher_base_dataset(cache_dir: str = None):
+    """Load the ASearcher Base dataset with short-form QA pairs."""
+
+    data_file = "hf://datasets/inclusionAI/ASearcher-train-data/ASearcher-Base-35k.jsonl"
+
+    dataset_kwargs = {"data_files": data_file}
+    if cache_dir is not None:
+        dataset_kwargs["cache_dir"] = cache_dir
+
+    print("Loading ASearcher Base dataset (ASearcherBase35k split)...")
+    ds = load_dataset("json", split="train", **dataset_kwargs)
+    print(f"ASearcher Base loaded: {len(ds)} examples")
+    return ds
+
+
+def _extract_asearcher_answers(sample: Dict[str, Any]) -> List[str]:
+    """Normalize answer aliases from an ASearcher sample."""
+
+    def _normalize(values) -> List[str]:
+        if values is None:
+            return []
+        if isinstance(values, str):
+            values = [values]
+
+        normalized = []
+        for value in values:
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                normalized.append(text)
+
+        seen = set()
+        deduped = []
+        for text in normalized:
+            if text not in seen:
+                seen.add(text)
+                deduped.append(text)
+        return deduped
+
+    aug_answers = _normalize(sample.get("aug_answer"))
+    if aug_answers:
+        return aug_answers
+
+    return _normalize(sample.get("answer"))
+
+
+def _prepare_asearcher_samples(asearcher_dataset) -> List[Dict[str, Any]]:
+    """Convert raw ASearcher records into a cleaned list of question/answer dicts."""
+
+    processed_samples: List[Dict[str, Any]] = []
+
+    for raw_sample in asearcher_dataset:
+        question_text = str(raw_sample.get("question", "")).strip()
+        if not question_text:
+            continue
+
+        answers = _extract_asearcher_answers(raw_sample)
+        if not answers:
+            continue
+
+        processed_samples.append(
+            {
+                "question": question_text,
+                "answers": answers,
+                "qid": raw_sample.get("qid"),
+                "source": raw_sample.get("source"),
+                "id": raw_sample.get("id"),
+                "idx": raw_sample.get("idx"),
+            }
+        )
+
+    if not processed_samples:
+        raise ValueError(
+            "No valid samples found in ASearcher dataset with non-empty question and aug_answer."
+        )
+
+    return processed_samples
+
+
+def create_multi_question_examples_from_asearcher_base(
+    samples: List[Dict[str, Any]],
+    num_examples: int = 1000,
+    seed: int = 42,
+    num_questions: int = 2,
+    dataset_name: str = "asearcher_multi_question_base",
+    include_metadata: bool = True,
+):
+    """
+    Create multi-question examples from the ASearcher Base split.
+
+    Args:
+        samples: List of cleaned ASearcher samples to draw questions from
+        num_examples: Number of multi-question examples to generate. If -1, generate a full pass over the dataset.
+        seed: Random seed for reproducibility
+        num_questions: Number of questions to concatenate per example (sampled with replacement)
+        dataset_name: Name recorded in the generated examples
+    """
+
+    if not samples:
+        raise ValueError("No samples provided for ASearcher multi-question generation.")
+
+    if num_questions <= 0:
+        raise ValueError("num_questions must be a positive integer")
+
+    if num_examples == -1:
+        num_examples = len(samples)
+        print(f"num_examples set to -1: generating {num_examples} examples (one pass with replacement)")
+
+    if num_examples <= 0:
+        return []
+
+    rng = random.Random(seed)
+
+    prompt_template = generate_multi_question_prompt(num_questions)
+    multi_question_examples = []
+
+    print(f"Generating {num_examples} multi-question examples with {num_questions} questions each from ASearcher Base...")
+
+    for i in range(num_examples):
+        selected_samples = rng.choices(samples, k=num_questions)
+
+        questions = []
+        answer_aliases = []
+        primary_answers = []
+        question_metadata = []
+
+        for sample in selected_samples:
+            questions.append(sample["question"])
+            answer_aliases.append(sample["answers"])
+            primary_answers.append(sample["answers"][0] if sample["answers"] else "")
+            question_metadata.append(
+                {
+                    "qid": sample.get("qid"),
+                    "source": sample.get("source"),
+                    "id": sample.get("id"),
+                    "idx": sample.get("idx"),
+                }
+            )
+
+        combined_question_parts = [f"Question {idx}: {text}" for idx, text in enumerate(questions, 1)]
+        combined_question = "\n".join(combined_question_parts)
+
+        formatted_prompt = prompt_template.replace("{question}", combined_question)
+        combined_ground_truth = json.dumps(answer_aliases)
+
+        example: Dict[str, Any] = {
+            "messages": [{"role": "user", "content": formatted_prompt}],
+            "ground_truth": combined_ground_truth,
+            "dataset": dataset_name,
+            "source_datasets": ["ASearcherBase35k"],
+            "individual_ground_truths": primary_answers,
+            "individual_answer_aliases": answer_aliases,
+            "individual_questions": questions,
+            "num_questions": num_questions,
+        }
+
+        if include_metadata:
+            example["question_metadata"] = question_metadata
+
+        multi_question_examples.append(example)
+
+        if (i + 1) % 100 == 0:
+            print(f"Generated {i + 1}/{num_examples} examples")
+
+    return multi_question_examples
+
+
+def create_multi_question_dataset_from_asearcher_base(
+    num_examples: int = 1000,
+    seed: int = 42,
+    num_questions: int = 2,
+    include_metadata: bool = True,
+    push_to_hub: bool = False,
+    hub_id: str = None,
+    dataset_name: str = "asearcher_multi_question_base",
+    val_size: int = 1000,
+    cache_dir: str = None,
+):
+    """
+    Create a multi-question dataset from the ASearcher Base split.
+
+    Args:
+        num_examples: Number of examples to generate. If -1, generate maximum possible examples.
+        seed: Random seed for reproducibility.
+        num_questions: Number of questions to concatenate in each example.
+        include_metadata: Whether to keep per-question metadata (qid, source, etc.) in each example.
+        push_to_hub: Whether to push the resulting dataset to the Hugging Face Hub.
+        hub_id: Hub ID for pushing (e.g., "username/dataset_name").
+        dataset_name: Name recorded inside each generated example.
+        val_size: Number of examples to reserve for validation. If the dataset is too small, no split is created.
+        cache_dir: Optional cache directory passed to dataset loader.
+    """
+
+    base_dataset = load_asearcher_base_dataset(cache_dir=cache_dir)
+    processed_samples = _prepare_asearcher_samples(base_dataset)
+
+    # Deterministic shuffle for splitting pools
+    shuffle_rng = random.Random(seed)
+    samples_copy = processed_samples.copy()
+    shuffle_rng.shuffle(samples_copy)
+
+    dev_examples = []
+    val_dataset = None
+
+    if val_size is not None and val_size > 0 and len(samples_copy) > 1:
+        total_requested = max(num_examples, 0) + val_size
+        if total_requested <= 0:
+            total_requested = len(samples_copy)
+
+        dev_fraction = min(0.5, max(0.1, val_size / total_requested))
+        dev_pool_size = max(1, int(round(len(samples_copy) * dev_fraction)))
+        if dev_pool_size >= len(samples_copy):
+            dev_pool_size = len(samples_copy) - 1
+
+        dev_samples = samples_copy[:dev_pool_size]
+        train_samples = samples_copy[dev_pool_size:]
+
+        if not train_samples:
+            train_samples = dev_samples
+
+        if val_size > 0:
+            dev_examples = create_multi_question_examples_from_asearcher_base(
+                dev_samples,
+                num_examples=val_size,
+                seed=seed + 1,
+                num_questions=num_questions,
+                dataset_name=dataset_name,
+                include_metadata=include_metadata,
+            )
+    else:
+        train_samples = samples_copy
+        dev_samples = []
+
+    train_examples = create_multi_question_examples_from_asearcher_base(
+        train_samples,
+        num_examples=num_examples,
+        seed=seed,
+        num_questions=num_questions,
+        dataset_name=dataset_name,
+        include_metadata=include_metadata,
+    )
+
+    train_dataset = Dataset.from_list(train_examples)
+
+    if dev_examples:
+        val_dataset = Dataset.from_list(dev_examples)
+        print(
+            f"Created ASearcher Base multi-question dataset with {len(train_dataset)} train examples "
+            f"and {len(val_dataset)} validation examples"
+        )
+    else:
+        print(
+            f"Created ASearcher Base multi-question dataset with {len(train_dataset)} train examples. "
+            "Validation split not created."
+        )
+
+    print("\nSample example:")
+    preview = train_dataset[0]
+    print("Question:", preview["messages"][0]["content"][:300] + "...")
+    print("Ground truth (aliases):", preview["ground_truth"])
+    print("Individual primary answers:", preview["individual_ground_truths"])
+    if include_metadata and "question_metadata" in preview:
+        print("Metadata for first question:", preview["question_metadata"][0])
+
+    print("\nFull training example before upload:")
+    print(json.dumps(preview, indent=2))
+
+    if val_dataset is not None and len(val_dataset) > 0:
+        val_preview = val_dataset[0]
+        print("\nValidation sample:")
+        print("Question:", val_preview["messages"][0]["content"][:300] + "...")
+        print("Individual primary answers:", val_preview["individual_ground_truths"])
+
+    if push_to_hub and hub_id:
+        from datasets import DatasetDict
+
+        dataset_splits = {"train": train_dataset}
+        if val_dataset is not None:
+            dataset_splits["validation"] = val_dataset
+
+        dataset_dict = DatasetDict(dataset_splits)
+        dataset_dict.push_to_hub(hub_id)
+        splits = ", ".join(f"{name} ({len(ds)})" for name, ds in dataset_splits.items())
+        print(f"Dataset pushed to {hub_id} with splits: {splits}")
+
+    result = {"train": train_dataset}
+    if val_dataset is not None:
+        result["validation"] = val_dataset
+
+    return result
 
 
 def load_tqa_dataset():
@@ -767,7 +1019,7 @@ def create_balanced_multi_question_dataset(num_examples: int = 1000, seed: int =
     return dataset
 
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
     # # Example 1: Create a balanced dataset with 2 different datasets (existing functionality)
     # print("=== Creating balanced multi-question dataset from 2 datasets ===")
     # dataset = create_balanced_multi_question_dataset(
@@ -778,95 +1030,107 @@ if __name__ == "__main__":
     #     dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
     # )
     
-    # Example 2: Create multi-question dataset from single TQA source (NEW functionality)
-    print("\n=== Creating multi-question dataset from single TQA source ===")
+    # # Example 2: Create multi-question dataset from single TQA source (NEW functionality)
+    # print("\n=== Creating multi-question dataset from single TQA source ===")
     
-    # Create dataset with 2 questions per example from TQA
-    tqa_2q_datasets = create_multi_question_dataset_from_tqa(
-        num_examples=-1,
+    # # Create dataset with 2 questions per example from TQA
+    # tqa_2q_datasets = create_multi_question_dataset_from_tqa(
+    #     num_examples=-1,
+    #     seed=42,
+    #     num_questions=2,  # 2 questions per example
+    #     push_to_hub=True,  # Set to True to push to hub
+    #     hub_id="rulins/multi_question_synthetic_single_source_tqa_2q",
+    #     dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
+    #     val_size=100  # 300 examples for validation
+    # )
+    
+    # # Create dataset with 5 questions per example from TQA (maximum possible examples)
+    # print("\n=== Creating 5-question dataset from TQA (maximum examples) ===")
+    # tqa_5q_datasets = create_multi_question_dataset_from_tqa(
+    #     num_examples=-1,  # Generate maximum possible examples until no more samples
+    #     seed=42,
+    #     num_questions=5,  # 5 questions per example
+    #     push_to_hub=True,  # Set to True to push to hub
+    #     hub_id="rulins/multi_question_synthetic_single_source_tqa_5q",
+    #     dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
+    #     val_size=100  # 300 examples for validation
+    # )
+    
+    # print(f"\n=== TQA Dataset Summary ===")
+    # tqa_2q_train_size = len(tqa_2q_datasets['train'])
+    # tqa_2q_val_size = len(tqa_2q_datasets['validation']) if 'validation' in tqa_2q_datasets else 0
+    # tqa_2q_test_size = len(tqa_2q_datasets['test'])
+    # tqa_2q_total = tqa_2q_train_size + tqa_2q_val_size + tqa_2q_test_size
+    
+    # tqa_5q_train_size = len(tqa_5q_datasets['train'])
+    # tqa_5q_val_size = len(tqa_5q_datasets['validation']) if 'validation' in tqa_5q_datasets else 0
+    # tqa_5q_test_size = len(tqa_5q_datasets['test'])
+    # tqa_5q_total = tqa_5q_train_size + tqa_5q_val_size + tqa_5q_test_size
+    
+    # print(f"Single source TQA (2Q): {tqa_2q_total} total examples ({tqa_2q_train_size} train, {tqa_2q_val_size} val, {tqa_2q_test_size} test), {tqa_2q_total * 2} total questions used")
+    # print(f"Single source TQA (5Q): {tqa_5q_total} total examples ({tqa_5q_train_size} train, {tqa_5q_val_size} val, {tqa_5q_test_size} test), {tqa_5q_total * 5} total questions used")
+    # print(f"Total TQA questions used: {tqa_2q_total * 2 + tqa_5q_total * 5}")
+    
+    # # Example 3: Create multi-question dataset from single 2Wiki source (NEW functionality)
+    # print("\n=== Creating multi-question dataset from single 2Wiki source ===")
+    
+    # # Create dataset with 2 questions per example from 2Wiki
+    # wiki2_2q_datasets = create_multi_question_dataset_from_2wiki(
+    #     num_examples=-1,
+    #     seed=42,
+    #     num_questions=2,  # 2 questions per example
+    #     push_to_hub=True,  # Set to True to push to hub
+    #     hub_id="rulins/multi_question_synthetic_single_source_2wiki_2q",
+    #     dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
+    #     val_size=100  # 300 examples for validation
+    # )
+    
+    # # Create dataset with 5 questions per example from 2Wiki (maximum possible examples)
+    # print("\n=== Creating 5-question dataset from 2Wiki (maximum examples) ===")
+    # wiki2_5q_datasets = create_multi_question_dataset_from_2wiki(
+    #     num_examples=-1,  # Generate maximum possible examples until no more samples
+    #     seed=42,
+    #     num_questions=5,  # 5 questions per example
+    #     push_to_hub=True,  # Set to True to push to hub
+    #     hub_id="rulins/multi_question_synthetic_single_source_2wiki_5q",
+    #     dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
+    #     val_size=100  # 300 examples for validation
+    # )
+    
+    # print(f"\n=== 2Wiki Dataset Summary ===")
+    # wiki2_2q_train_size = len(wiki2_2q_datasets['train'])
+    # wiki2_2q_val_size = len(wiki2_2q_datasets['validation']) if 'validation' in wiki2_2q_datasets else 0
+    # wiki2_2q_test_size = len(wiki2_2q_datasets['test'])
+    # wiki2_2q_total = wiki2_2q_train_size + wiki2_2q_val_size + wiki2_2q_test_size
+    
+    # wiki2_5q_train_size = len(wiki2_5q_datasets['train'])
+    # wiki2_5q_val_size = len(wiki2_5q_datasets['validation']) if 'validation' in wiki2_5q_datasets else 0
+    # wiki2_5q_test_size = len(wiki2_5q_datasets['test'])
+    # wiki2_5q_total = wiki2_5q_train_size + wiki2_5q_val_size + wiki2_5q_test_size
+    
+    # print(f"Single source 2Wiki (2Q): {wiki2_2q_total} total examples ({wiki2_2q_train_size} train, {wiki2_2q_val_size} val, {wiki2_2q_test_size} test), {wiki2_2q_total * 2} total questions used")
+    # print(f"Single source 2Wiki (5Q): {wiki2_5q_total} total examples ({wiki2_5q_train_size} train, {wiki2_5q_val_size} val, {wiki2_5q_test_size} test), {wiki2_5q_total * 5} total questions used")
+    # print(f"Total 2Wiki questions used: {wiki2_2q_total * 2 + wiki2_5q_total * 5}")
+    
+    # print(f"\n=== Overall Summary ===")
+    # print(f"Total TQA questions used: {tqa_2q_total * 2 + tqa_5q_total * 5}")
+    # print(f"Total 2Wiki questions used: {wiki2_2q_total * 2 + wiki2_5q_total * 5}")
+    # print(f"Grand total questions used: {(tqa_2q_total * 2 + tqa_5q_total * 5) + (wiki2_2q_total * 2 + wiki2_5q_total * 5)}")
+    
+    # print("\nTo push datasets to hub, set push_to_hub=True in the function calls above.")
+    # print("\nNote: Setting num_examples=-1 will generate the maximum possible number of examples")
+    # print("until there are no more training samples to unpack from the source dataset.")
+    # print(f"Each dataset is automatically split into train/validation with {300} examples reserved for validation.")
+    # print("Test sets are created using ALL available test samples from the original datasets.")
+
+
+if __name__ == "__main__":
+    num_questions = 30
+    hub_id = f"rulins/multi_question_synthetic_single_source_asearcher_base_{num_questions}q"
+    asearcher_base_dataset = create_multi_question_dataset_from_asearcher_base(
+        num_examples=1000,
         seed=42,
-        num_questions=2,  # 2 questions per example
-        push_to_hub=True,  # Set to True to push to hub
-        hub_id="rulins/multi_question_synthetic_single_source_tqa_2q",
-        dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
-        val_size=100  # 300 examples for validation
+        num_questions=num_questions,
+        push_to_hub=True,
+        hub_id=hub_id,
     )
-    
-    # Create dataset with 5 questions per example from TQA (maximum possible examples)
-    print("\n=== Creating 5-question dataset from TQA (maximum examples) ===")
-    tqa_5q_datasets = create_multi_question_dataset_from_tqa(
-        num_examples=-1,  # Generate maximum possible examples until no more samples
-        seed=42,
-        num_questions=5,  # 5 questions per example
-        push_to_hub=True,  # Set to True to push to hub
-        hub_id="rulins/multi_question_synthetic_single_source_tqa_5q",
-        dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
-        val_size=100  # 300 examples for validation
-    )
-    
-    print(f"\n=== TQA Dataset Summary ===")
-    tqa_2q_train_size = len(tqa_2q_datasets['train'])
-    tqa_2q_val_size = len(tqa_2q_datasets['validation']) if 'validation' in tqa_2q_datasets else 0
-    tqa_2q_test_size = len(tqa_2q_datasets['test'])
-    tqa_2q_total = tqa_2q_train_size + tqa_2q_val_size + tqa_2q_test_size
-    
-    tqa_5q_train_size = len(tqa_5q_datasets['train'])
-    tqa_5q_val_size = len(tqa_5q_datasets['validation']) if 'validation' in tqa_5q_datasets else 0
-    tqa_5q_test_size = len(tqa_5q_datasets['test'])
-    tqa_5q_total = tqa_5q_train_size + tqa_5q_val_size + tqa_5q_test_size
-    
-    print(f"Single source TQA (2Q): {tqa_2q_total} total examples ({tqa_2q_train_size} train, {tqa_2q_val_size} val, {tqa_2q_test_size} test), {tqa_2q_total * 2} total questions used")
-    print(f"Single source TQA (5Q): {tqa_5q_total} total examples ({tqa_5q_train_size} train, {tqa_5q_val_size} val, {tqa_5q_test_size} test), {tqa_5q_total * 5} total questions used")
-    print(f"Total TQA questions used: {tqa_2q_total * 2 + tqa_5q_total * 5}")
-    
-    # Example 3: Create multi-question dataset from single 2Wiki source (NEW functionality)
-    print("\n=== Creating multi-question dataset from single 2Wiki source ===")
-    
-    # Create dataset with 2 questions per example from 2Wiki
-    wiki2_2q_datasets = create_multi_question_dataset_from_2wiki(
-        num_examples=-1,
-        seed=42,
-        num_questions=2,  # 2 questions per example
-        push_to_hub=True,  # Set to True to push to hub
-        hub_id="rulins/multi_question_synthetic_single_source_2wiki_2q",
-        dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
-        val_size=100  # 300 examples for validation
-    )
-    
-    # Create dataset with 5 questions per example from 2Wiki (maximum possible examples)
-    print("\n=== Creating 5-question dataset from 2Wiki (maximum examples) ===")
-    wiki2_5q_datasets = create_multi_question_dataset_from_2wiki(
-        num_examples=-1,  # Generate maximum possible examples until no more samples
-        seed=42,
-        num_questions=5,  # 5 questions per example
-        push_to_hub=True,  # Set to True to push to hub
-        hub_id="rulins/multi_question_synthetic_single_source_2wiki_5q",
-        dataset_name="rl_rag_toy_case_multi_dataset_finegrained",
-        val_size=100  # 300 examples for validation
-    )
-    
-    print(f"\n=== 2Wiki Dataset Summary ===")
-    wiki2_2q_train_size = len(wiki2_2q_datasets['train'])
-    wiki2_2q_val_size = len(wiki2_2q_datasets['validation']) if 'validation' in wiki2_2q_datasets else 0
-    wiki2_2q_test_size = len(wiki2_2q_datasets['test'])
-    wiki2_2q_total = wiki2_2q_train_size + wiki2_2q_val_size + wiki2_2q_test_size
-    
-    wiki2_5q_train_size = len(wiki2_5q_datasets['train'])
-    wiki2_5q_val_size = len(wiki2_5q_datasets['validation']) if 'validation' in wiki2_5q_datasets else 0
-    wiki2_5q_test_size = len(wiki2_5q_datasets['test'])
-    wiki2_5q_total = wiki2_5q_train_size + wiki2_5q_val_size + wiki2_5q_test_size
-    
-    print(f"Single source 2Wiki (2Q): {wiki2_2q_total} total examples ({wiki2_2q_train_size} train, {wiki2_2q_val_size} val, {wiki2_2q_test_size} test), {wiki2_2q_total * 2} total questions used")
-    print(f"Single source 2Wiki (5Q): {wiki2_5q_total} total examples ({wiki2_5q_train_size} train, {wiki2_5q_val_size} val, {wiki2_5q_test_size} test), {wiki2_5q_total * 5} total questions used")
-    print(f"Total 2Wiki questions used: {wiki2_2q_total * 2 + wiki2_5q_total * 5}")
-    
-    print(f"\n=== Overall Summary ===")
-    print(f"Total TQA questions used: {tqa_2q_total * 2 + tqa_5q_total * 5}")
-    print(f"Total 2Wiki questions used: {wiki2_2q_total * 2 + wiki2_5q_total * 5}")
-    print(f"Grand total questions used: {(tqa_2q_total * 2 + tqa_5q_total * 5) + (wiki2_2q_total * 2 + wiki2_5q_total * 5)}")
-    
-    print("\nTo push datasets to hub, set push_to_hub=True in the function calls above.")
-    print("\nNote: Setting num_examples=-1 will generate the maximum possible number of examples")
-    print("until there are no more training samples to unpack from the source dataset.")
-    print(f"Each dataset is automatically split into train/validation with {300} examples reserved for validation.")
-    print("Test sets are created using ALL available test samples from the original datasets.")
