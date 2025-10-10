@@ -48,6 +48,7 @@ from open_instruct import utils
 
 # isort: on
 import asyncio
+import copy
 import json
 import math
 import random
@@ -856,9 +857,10 @@ class PolicyTrainerRayProcess(RayProcess):
         if self.args.enable_quantization and batch_queries is not None and tokenizer is not None:
             import open_instruct.quantization_utils as quant_utils
 
+            model_for_broadcast = copy.deepcopy(self.model.module)
             with Timer("[Quantization]") as quant_timer:
                 quant_utils.quantize_model_with_batch(
-                    model=self.model.module,
+                    model=model_for_broadcast,
                     quantization_format=self.args.quantization_format,
                     batch_queries=batch_queries,
                     tokenizer=tokenizer,
@@ -866,9 +868,11 @@ class PolicyTrainerRayProcess(RayProcess):
                     max_seq_length=self.args.max_token_length,
                 )
             quantization_time = quant_timer.duration
+            model = model_for_broadcast
+        else:
+            model = self.model.module
 
         torch.cuda.empty_cache()
-        model = self.model.module
         count, num_params = 0, len(list(model.named_parameters()))
         refss = []
         if self.args.gather_whole_model:
