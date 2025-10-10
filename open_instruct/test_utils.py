@@ -85,16 +85,22 @@ def _setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, initial_descri
     mock_client = mock.MagicMock()
     mock_beaker_from_env.return_value = mock_client
 
+    # Mock the workload object
+    mock_workload = mock.MagicMock()
+    mock_client.workload.get.return_value = mock_workload
+
+    # Mock the spec object returned by experiment.get_spec
     mock_spec = mock.MagicMock()
     mock_spec.description = initial_description
-    mock_client.experiment.get.return_value = mock_spec
+    mock_client.experiment.get_spec.return_value = mock_spec
 
     description_history = []
 
-    def track_description(exp_id, desc):
-        description_history.append(desc)
+    def track_description(workload, description=None):
+        if description is not None:
+            description_history.append(description)
 
-    mock_client.experiment.set_description.side_effect = track_description
+    mock_client.workload.update.side_effect = track_description
 
     return mock_client, mock_spec, description_history
 

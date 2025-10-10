@@ -978,13 +978,16 @@ def maybe_update_beaker_description(
 
     try:
         client = beaker.Beaker.from_env()
-    except beaker.exceptions.ConfigurationError as e:
+    except beaker.exceptions.BeakerConfigurationError as e:
         logger.warning(f"Failed to initialize Beaker client: {e}")
         return
 
     try:
-        spec = client.experiment.get(experiment_id)
-    except beaker.exceptions.ExperimentNotFound:
+        # Get the workload first (experiment_id is actually BEAKER_WORKLOAD_ID)
+        workload = client.workload.get(experiment_id)
+        # Then get the experiment spec from the workload
+        spec = client.experiment.get_spec(workload)
+    except (beaker.exceptions.BeakerExperimentNotFound, ValueError):
         logger.warning(
             f"Failed to get Beaker experiment with ID: {experiment_id}"
             "This might be fine if you are e.g. running in an interactive job."
@@ -1025,7 +1028,8 @@ def maybe_update_beaker_description(
         description_components.append(progress_bar)
     new_description = " ".join(description_components)
     try:
-        client.experiment.set_description(experiment_id, new_description)
+        # Update the workload description using the workload object we got earlier
+        client.workload.update(workload, description=new_description)
     except requests.exceptions.HTTPError as e:
         logger.warning(
             f"Failed to update Beaker description due to HTTP error: {e}"
