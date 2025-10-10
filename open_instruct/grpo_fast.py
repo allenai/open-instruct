@@ -1739,7 +1739,9 @@ def data_preparation_thread(
             if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
                 result.responses[i].append(tokenizer.eos_token_id)
                 result.masks[i].append(1)
-                result.logprobs[i].append(float("nan"))
+                result.logprobs[i].append(
+                    {tokenizer.eos_token_id: vllm.Logprob(logprob=float("nan"), rank=None, decoded_token="")}
+                )
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
             decoded_queries = batch.raw_queries

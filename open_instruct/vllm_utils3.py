@@ -195,7 +195,10 @@ async def process_request_async(
 
         accumulated_tokens.extend(tool_output_token_ids)
         accumulated_logprobs.extend(
-            [{token_id: vllm.Logprob(logprob=float("nan"), rank=None, decoded_token="")} for token_id in tool_output_token_ids]
+            [
+                {token_id: vllm.Logprob(logprob=float("nan"), rank=None, decoded_token="")}
+                for token_id in tool_output_token_ids
+            ]
         )
         masks.extend([0] * len(tool_output_token_ids))
 
