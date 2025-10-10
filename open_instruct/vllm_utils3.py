@@ -17,6 +17,7 @@
 
 import asyncio
 import logging
+import dataclasses
 import os
 import queue
 import sys
@@ -31,6 +32,7 @@ import ray
 import torch
 import torch.distributed
 import vllm
+from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed.distributed_c10d import (
@@ -63,7 +65,7 @@ PROCESS_SLEEP_S = 0.1
 RAY_WAIT_TIMEOUT_S = 0.1
 KV_CACHE_RETRIES = 5
 KV_CACHE_RETRY_SLEEP_S = 0.2
-
+WEIGHT_UPDATE_SLEEP_INTERVAL_S = 0.1
 
 def assert_threaded_actor(instance):
     """
@@ -337,6 +339,16 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
     finish_reasons = [out.finish_reason for out in final_output.outputs]
     use_tools = bool(tools)
 
+    logprobs = []
+    for idx, out in enumerate(final_output.outputs):
+        assert len(out.token_ids) == len(out.logprobs), (
+            f"vLLM CompletionOutput {idx}: token_ids length ({len(out.token_ids)}) "
+            f"!= logprobs length ({len(out.logprobs)})"
+        )
+        logprobs.append(
+            [logprob_dict[token_id].logprob for token_id, logprob_dict in zip(out.token_ids, out.logprobs)]
+        )
+
     # Extract attributes based on whether tools are used
     if use_tools:
         # Extract tool-specific attributes from outputs
@@ -377,6 +389,7 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
             generation_time=current_time - metadata["start_time"],
         ),
         start_time=metadata["start_time"],
+        logprobs=logprobs,
     )
     return result, metadata["is_eval"]
 
@@ -510,14 +523,13 @@ class LLMRayActor:
         *args,
         tools: Optional[Dict[str, Tool]] = None,
         max_tool_calls: Optional[Dict[str, int]] = None,
-        bundle_indices: list = None,
-        prompt_queue=None,
-        results_queue=None,
-        eval_results_queue=None,
-        actor_manager=None,
-        inference_batch_size: Optional[int] = None,
-        inflight_updates: bool = False,
-        verbose: bool = False,
+        bundle_indices: Optional[List[int]] = None,
+        prompt_queue: ray_queue.Queue,
+        results_queue: ray_queue.Queue,
+        eval_results_queue: ray_queue.Queue,
+        actor_manager: ray.actor.ActorHandle,
+        inference_batch_size: Optional[int],
+        inflight_updates: bool,
         **kwargs,
     ):
         assert_threaded_actor(self)
@@ -538,18 +550,11 @@ class LLMRayActor:
         max_tool_calls: Optional[Dict[str, int]],
         inference_batch_size: Optional[int],
         inflight_updates: bool,
-        verbose: bool,
-    ) -> None:
-        self.logger = logger_utils.setup_logger(__name__)
-        if verbose:
-            self.logger.setLevel(logging.DEBUG)
 
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inference_batch_size = inference_batch_size
         self.inflight_updates = inflight_updates
-        self.verbose = verbose
-
         self.request_metadata = {}
         self.completion_queue = queue.Queue()
         self.active_tasks = {}
@@ -590,7 +595,7 @@ class LLMRayActor:
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
-            self.logger.debug(f"creating LLM with bundle_indices={bundle_indices}")
+            logger.debug(f"creating LLM with bundle_indices={bundle_indices}")
 
         self.engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
         # Log stats causes a crash in the engine at assert outputs.scheduler_stats is not None when we call step() and there is nothing to step.
@@ -828,7 +833,6 @@ def create_vllm_engines(
     inference_batch_size: Optional[int] = None,
     use_fp8_kv_cache=False,
     inflight_updates: bool = False,
-    verbose: bool = False,
 ) -> list[LLMRayActor]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
@@ -887,7 +891,6 @@ def create_vllm_engines(
                 revision=revision,
                 tokenizer=tokenizer_name_or_path,
                 tokenizer_revision=revision,
-                trust_remote_code=True,
                 worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
                 tensor_parallel_size=tensor_parallel_size,
                 enforce_eager=enforce_eager,
@@ -910,7 +913,6 @@ def create_vllm_engines(
                 inflight_updates=inflight_updates,
                 kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
                 calculate_kv_scales=use_fp8_kv_cache,
-                verbose=verbose,
             )
         )
 
