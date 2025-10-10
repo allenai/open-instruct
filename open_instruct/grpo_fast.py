@@ -259,6 +259,8 @@ class Args:
     """the length of the pack (you should prob set to the max length of the model)"""
     masked_mean_axis: Optional[int] = None
     """the axis to compute the mean of the masked values"""
+    masked_mean_denominator: Optional[float] = None
+    """Optional constant denominator for masked_mean; if set, divides by this instead of mask.sum"""
     alpha: float = 0.6
     """The alpha value for doing polyak updates (ref_param = alpha * param + (1 - alpha) * ref_param)
     reference: [TR-DPO](https://huggingface.co/papers/2404.09656), but it's actually pretty commonly
@@ -509,12 +511,15 @@ def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
     )
 
 
-def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
+def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None, denominator: Optional[float] = None) -> torch.Tensor:
     """Compute mean of tensor with a masked values."""
     if axis is not None:
-        return ((values * mask).sum(axis=axis) / mask.sum(axis=axis)).mean()
+        numerator = (values * mask).sum(axis=axis)
+        denom = denominator if denominator is not None else mask.sum(axis=axis)
+        return (numerator / denom).mean()
     else:
-        return (values * mask).sum() / mask.sum()
+        denom = denominator if denominator is not None else mask.sum()
+        return (values * mask).sum() / denom
 
 
 class MetricsTracker:
@@ -1145,7 +1150,12 @@ class PolicyTrainerRayProcess(RayProcess):
                         kl = kl4
 
                     # grpo change: directly subtract KL in loss (add)
-                    loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
+                    loss = masked_mean(
+                        pg_loss_max + (args.beta * kl),
+                        mb_response_masks_bool,
+                        args.masked_mean_axis,
+                        args.masked_mean_denominator,
+                    )
                     loss = loss / accumulation_steps
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
@@ -1153,10 +1163,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_step += 1
                     with torch.no_grad():
                         # NOTE: in packed implementation, kl calculation are averages over response tokens
-                        kl1_stats[i] = masked_mean(kl1, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, args.masked_mean_axis).float()
+                        kl1_stats[i] = masked_mean(kl1, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator).float()
+                        kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator).float()
+                        kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator).float()
+                        kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator).float()
                         if args.kl_estimator == "kl1":
                             kl_loss_stats[i] = kl1_stats[i] * args.beta
                         elif args.kl_estimator == "kl2":
@@ -1166,15 +1176,15 @@ class PolicyTrainerRayProcess(RayProcess):
                         elif args.kl_estimator == "kl4":
                             kl_loss_stats[i] = kl4_stats[i] * args.beta
                         pg_clipfrac_stats[i] = masked_mean(
-                            (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
+                            (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
                         )
-                        pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
+                        pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator)
                         loss_stats[i] = loss
-                        ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
+                        ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator)
                         if args.record_entropy:
                             # Calculate entropy statistics
                             entropy_stats[i] = masked_mean(
-                                mb_entropy, mb_response_masks_bool, args.masked_mean_axis
+                                mb_entropy, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
                             ).float()
 
             with torch.no_grad():
