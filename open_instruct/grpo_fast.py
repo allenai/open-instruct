@@ -455,7 +455,7 @@ class Args:
         if self.num_unique_prompts_rollout < self.vllm_num_engines:
             logger.warning(
                 f"With num_unique_prompts_rollout={self.num_unique_prompts_rollout} < "
-                f"vllm_num_engines={self.vllm_num_engines}, you will be generating data for multiple"
+                f"vllm_num_engines={self.vllm_num_engines}, you will be generating data for multiple "
                 "batches simultaneously. This is fine but might be unexpected behaviour."
             )
         # Initialize stop_strings if None
