@@ -360,6 +360,14 @@ class Args:
     queue_dashboard_port: Optional[int] = None
     """optional port for the dashboard server (if None, finds a free port automatically)"""
 
+    # Quantization
+    enable_quantization: bool = False
+    """whether to enable quantization of model weights before syncing to vLLM. If disabled, defaults to bf16."""
+    quantization_format: Literal["fp8", "fp4", "nvfp4"] = "fp8"
+    """the quantization format to use (fp8, fp4, or nvfp4)"""
+    quantization_targets: str = "Linear"
+    """which layer types to quantize (e.g., 'Linear')"""
+
     # Experiment tracking
     verbose: bool = False
     """If toggled, debug output will be shown"""
@@ -841,8 +849,24 @@ class PolicyTrainerRayProcess(RayProcess):
             ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=60)
         torch.distributed.barrier()
 
-    def broadcast_to_vllm(self):
-        # avoid OOM
+    def broadcast_to_vllm(
+        self, batch_queries: Optional[torch.Tensor] = None, tokenizer: Optional[PreTrainedTokenizer] = None
+    ):
+        quantization_time = 0.0
+        if self.args.enable_quantization and batch_queries is not None and tokenizer is not None:
+            import open_instruct.quantization_utils as quant_utils
+
+            with Timer("[Quantization]") as quant_timer:
+                quant_utils.quantize_model_with_batch(
+                    model=self.model.module,
+                    quantization_format=self.args.quantization_format,
+                    batch_queries=batch_queries,
+                    tokenizer=tokenizer,
+                    targets=self.args.quantization_targets,
+                    max_seq_length=self.args.max_token_length,
+                )
+            quantization_time = quant_timer.duration
+
         torch.cuda.empty_cache()
         model = self.model.module
         count, num_params = 0, len(list(model.named_parameters()))
@@ -883,7 +907,7 @@ class PolicyTrainerRayProcess(RayProcess):
         all_refs = []
         if torch.distributed.get_rank() == 0:
             all_refs.extend(refss)
-        return all_refs
+        return all_refs, quantization_time
 
     def update_ref_policy(self):
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
@@ -2356,6 +2380,8 @@ def weight_sync_thread(
     policy_group: ModelGroup,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
+    batch_data_Q: Queue,
+    tokenizer: PreTrainedTokenizer,
     resume_training_step: int = 1,
 ):
     """Thread function that handles weight sync operations and actor manager coordination."""
@@ -2371,6 +2397,13 @@ def weight_sync_thread(
         # Clear the event for next iteration
         weight_sync_trigger_event.clear()
 
+        batch_queries = None
+        if args.enable_quantization:
+            try:
+                batch_queries = batch_data_Q.get_nowait()
+            except Empty:
+                logger.warning("[Weight Sync Thread] No batch data available for quantization")
+
         with Timer("[Weight Sync]") as timer:
             logger.debug("[Weight Sync Thread] Starting weight sync")
 
@@ -2380,14 +2413,19 @@ def weight_sync_thread(
 
             # Broadcast weights to vLLM engines
             # First get the futures
-            weight_broadcast_futures: List[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+            weight_broadcast_futures: List[ray.ObjectRef] = [
+                m.broadcast_to_vllm.remote(batch_queries=batch_queries, tokenizer=tokenizer)
+                for m in policy_group.models
+            ]
 
             # Wait for all weight updates to complete and collect individual timings
-            _, actor_sync_times = ray_get_with_progress(
+            results, actor_sync_times = ray_get_with_progress(
                 weight_broadcast_futures,
                 desc="[Weight Sync Thread] Waiting for weight updates to complete",
                 enable=args.verbose,
             )
+
+            quantization_times = [result[1] for result in results] if results else []
 
             # Allow actors to resume
             ray.get(actor_manager.set_should_stop.remote(False))
@@ -2401,6 +2439,9 @@ def weight_sync_thread(
             "time/weight_sync_max": np.max(actor_sync_times),
             "time/weight_sync_median": np.median(actor_sync_times),
         }
+
+        if quantization_times and any(t > 0 for t in quantization_times):
+            sync_time_stats["time/quantization"] = np.mean(quantization_times)
 
         try:
             weight_sync_metrics_Q.put_nowait(sync_time_stats)
@@ -2834,6 +2875,7 @@ def run_training(
 
     logger.info("======== ✅ weight sync thread starts =========")
     weight_sync_trigger_event = threading.Event()
+    batch_data_Q = Queue(maxsize=1)
     weight_sync_thread_future = executor.submit(
         weight_sync_thread,
         args,
@@ -2842,6 +2884,8 @@ def run_training(
         policy_group,
         actor_manager,
         weight_sync_metrics_Q,
+        batch_data_Q,
+        tokenizer,
         resume_training_step,
     )
 
@@ -2918,6 +2962,13 @@ def run_training(
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         batch = next_batch(next(iter_dataloader), train_dataset)
+
+        if args.enable_quantization:
+            try:
+                batch_data_Q.put_nowait(torch.tensor(batch.queries))
+            except Full:
+                logger.warning("[Main Thread] batch_data_Q is full, skipping batch data update")
+
         split_and_insert_batch(
             batch, training_step, pending_queries_map, param_prompt_Q, generation_configs["train"], is_eval=False
         )
