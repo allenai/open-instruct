@@ -21,7 +21,7 @@ uv run python mason.py \
        --preemptible \
        --num_nodes 1 \
        --max_retries 0 \
-       --timeout "45m" \
+       --timeout 2700 \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --budget ai2/oe-adapt \
@@ -48,7 +48,7 @@ uv run python mason.py \
     --sft_messages_key messages \
     --exp_name 0605_general_tool_use_without_good_outputs \
     --learning_rate 5e-7 \
-    --total_episodes 3_200 \
+    --total_episodes $((20 * 8 * 4)) \
     --deepspeed_stage 2 \
     --with_tracking \
     --num_epochs 1 \
