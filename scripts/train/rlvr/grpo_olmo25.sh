@@ -12,7 +12,7 @@ DATASETS="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_templat
 
 # math evals
 # EVALS="minerva_math_500::hamish_zs_reasoning_deepseek"
-EVALS="aime:zs_cot_r1::pass_at_32_2024_temp1,aime:zs_cot_r1::pass_at_32_2025_temp1"
+EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo"
 
 # AIME 2024, 2025 local evals
 LOCAL_EVALS="mnoukhov/aime2024-25-rlvr 1.0 mnoukhov/aime2024-25-rlvr 1.0"
@@ -31,7 +31,7 @@ python mason.py \
     --pure_docker_mode \
     --image michaeln/open_instruct_2.5-rl0 \
     --preemptible \
-    --num_nodes 5 \
+    --num_nodes 9 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gs_model_name $GS_MODEL_NAME \
@@ -45,6 +45,7 @@ python open_instruct/grpo_fast.py \
     --beta 0.0 \
     --async_steps 4 \
     --inflight_updates \
+    --truncated_importance_sampling_ratio_cap 2.0 \
     --num_samples_per_prompt_rollout 8 \
     --num_unique_prompts_rollout 32 \
     --num_mini_batches 1 \
@@ -63,10 +64,10 @@ python open_instruct/grpo_fast.py \
     --chat_template_name olmo_thinker_dapo \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 512000 \
+    --total_episodes 256000 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 \
-    --vllm_num_engines 32 \
+    --vllm_num_engines 64 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \

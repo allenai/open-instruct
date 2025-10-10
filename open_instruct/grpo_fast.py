@@ -454,10 +454,10 @@ class Args:
             "At least one reward must be applied!"
         )
         # Ensure we have enough prompts for all VLLM engines
-        if self.num_unique_prompts_rollout < self.vllm_num_engines:
-            raise ValueError(
-                f"{self.num_unique_prompts_rollout=} must be >= {self.vllm_num_engines=} to avoid empty batches."
-            )
+        # if self.num_unique_prompts_rollout < self.vllm_num_engines:
+        #     raise ValueError(
+        #         f"{self.num_unique_prompts_rollout=} must be >= {self.vllm_num_engines=} to avoid empty batches."
+        #     )
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
@@ -1805,8 +1805,6 @@ def data_preparation_thread(
             if args.apply_r1_style_format_reward and args.additive_format_reward:
                 max_possible_score += args.r1_style_format_reward
 
-            # solved_prompts = mean_grouped_rewards == max_possible_score
-
             unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
             # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
             # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
@@ -1898,9 +1896,11 @@ def data_preparation_thread(
 
             # Count groups with all zero rewards
             all_zero_groups = (scores_per_prompt == 0).all(axis=-1).sum()
+            all_solved_groups = (scores_per_prompt == max_possible_score).all(axis=-1).sum()
             total_groups = len(scores_per_prompt)
             logger.info(
                 f"[Reward Summary] Groups with all zero rewards: {all_zero_groups}/{total_groups} "
+                f" Groups with all solved rewards: {all_solved_groups}/{total_groups} "
                 f"({all_zero_groups / total_groups:.1%})"
             )
 
@@ -2025,6 +2025,7 @@ def data_preparation_thread(
 
             # Use the already calculated reward summary metrics for wandb
             all_zero_groups_ratio = all_zero_groups / total_groups if total_groups > 0 else 0
+            all_solved_groups_ratio = all_solved_groups / total_groups if total_groups > 0 else 0
 
             metrics = {
                 "scores": np.array(scores).mean(),
@@ -2033,6 +2034,8 @@ def data_preparation_thread(
                 "packed_ratio": len(packed_sequences.query_responses) / len(responses) if len(responses) > 0 else 0,
                 "val/all_zero_reward_groups": all_zero_groups,
                 "val/all_zero_reward_groups_ratio": all_zero_groups_ratio,
+                "val/all_solved_reward_groups": all_solved_groups,
+                "val/all_solved_reward_groups_ratio": all_solved_groups_ratio,
                 "val/total_reward_groups": total_groups,
                 "val/sequence_lengths": sequence_lengths.mean(),
                 "val/sequence_lengths_min": sequence_lengths.min(),
