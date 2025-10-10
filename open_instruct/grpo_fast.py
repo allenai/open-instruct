@@ -850,7 +850,7 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.distributed.barrier()
 
     def broadcast_to_vllm(
-        self, batch_queries: Optional[torch.Tensor] = None, tokenizer: Optional[PreTrainedTokenizer] = None
+        self, batch_queries: Optional[List[List[int]]] = None, tokenizer: Optional[PreTrainedTokenizer] = None
     ):
         quantization_time = 0.0
         if self.args.enable_quantization and batch_queries is not None and tokenizer is not None:
@@ -2965,7 +2965,7 @@ def run_training(
 
         if args.enable_quantization:
             try:
-                batch_data_Q.put_nowait(torch.tensor(batch.queries))
+                batch_data_Q.put_nowait(batch.queries)
             except Full:
                 logger.warning("[Main Thread] batch_data_Q is full, skipping batch data update")
 

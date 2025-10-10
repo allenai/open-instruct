@@ -50,7 +50,7 @@ def get_quantization_recipe(
     return recipe
 
 
-def prepare_calibration_dataset(batch_queries: torch.Tensor, tokenizer: transformers.PreTrainedTokenizer):
+def prepare_calibration_dataset(batch_queries: List[List[int]], tokenizer: transformers.PreTrainedTokenizer):
     calibration_texts = tokenizer.batch_decode(batch_queries, skip_special_tokens=False)
 
     calibration_dataset = datasets.Dataset.from_dict({"text": calibration_texts})
@@ -61,7 +61,7 @@ def prepare_calibration_dataset(batch_queries: torch.Tensor, tokenizer: transfor
 def quantize_model_with_batch(
     model: torch.nn.Module,
     quantization_format: Literal["fp8", "fp4", "nvfp4"],
-    batch_queries: torch.Tensor,
+    batch_queries: List[List[int]],
     tokenizer: transformers.PreTrainedTokenizer,
     targets: str = "Linear",
     max_seq_length: int = 2048,
