@@ -65,6 +65,8 @@ ENV UV_CACHE_DIR=/root/.cache/uv
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
 
+RUN git clone -b shanea/olmo2-retrofit https://github.com/2015aroras/vllm.git vllm_olmo2.5
+
 # Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
@@ -78,7 +80,7 @@ COPY configs configs
 COPY scripts scripts
 COPY mason.py mason.py
 # Copy oe-eval-internal if it exists (wildcard pattern won't fail if missing)
-COPY oe-eval-interna[l] oe-eval-internal/
+COPY oe-eval-internal oe-eval-internal
 COPY open_instruct open_instruct
 
 # Add build arguments for git information

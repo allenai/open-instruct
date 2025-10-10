@@ -410,6 +410,8 @@ class Args:
     """the max generation length for evaluation for oe-eval"""
     oe_eval_beaker_image: Optional[str] = None
     """the docker image for evaluation for oe-eval"""
+    oe_eval_gpu_multiplier: Optional[int] = 1
+    """gpu mulitplier for eval jobs"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
 
@@ -453,10 +455,10 @@ class Args:
             "At least one reward must be applied!"
         )
         # Ensure we have enough prompts for all VLLM engines
-        if self.num_unique_prompts_rollout < self.vllm_num_engines:
-            raise ValueError(
-                f"{self.num_unique_prompts_rollout=} must be >= {self.vllm_num_engines=} to avoid empty batches."
-            )
+        # if self.num_unique_prompts_rollout < self.vllm_num_engines:
+        #     raise ValueError(
+        #         f"{self.num_unique_prompts_rollout=} must be >= {self.vllm_num_engines=} to avoid empty batches."
+        #     )
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
@@ -561,16 +563,21 @@ class ShufflingIterator:
         self.index = 0
         self.rng = np.random.default_rng(seed)
         self.rng.shuffle(self.data)
+        self.exclude_list = []
 
         # Ensure the effective dataset size is divisible by batch_size
-        self.effective_size = len(self.data) - (len(self.data) % batch_size)
+        self._update_effective_size()
 
     def __iter__(self) -> Iterator[List[int]]:
         return self
 
     def __next__(self) -> List[int]:
+        if self.effective_size == 0:
+            raise StopIteration("No data available to sample from the iterator.")
+
         if self.index >= self.effective_size:
             self.index = 0
+            self._update_effective_size()
             self.rng.shuffle(self.data)
 
         end_index = self.index + self.batch_size
@@ -578,6 +585,10 @@ class ShufflingIterator:
         self.index = end_index
 
         return batch
+
+    def exclude_indices(self, exclude_list: List) -> None:
+        """Exclude provided data points from future sampling."""
+        self.exclude_list.extend(exclude_list)
 
     def get_state(self) -> Dict[str, Any]:
         """Get the current state of the iterator for checkpointing."""
@@ -592,6 +603,17 @@ class ShufflingIterator:
         self.index = state["index"]
         self.data = state["data"].copy()
         self.rng.bit_generator.state = state["rng_state"]
+        self._update_effective_size()
+
+    def _update_effective_size(self) -> None:
+        if self.exclude_list:
+            mask = ~np.isin(self.data, self.exclude_list)
+            if mask.all():
+                return
+
+            self.data = self.data[mask]
+            self.exclude_list = []
+        self.effective_size = len(self.data) - (len(self.data) % self.batch_size)
 
 
 @ray.remote(num_gpus=1)
@@ -1323,6 +1345,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 args.gs_bucket_path,
                 args.eval_priority,
                 args.oe_eval_beaker_image,
+                args.oe_eval_gpu_multiplier,
             )
 
 
@@ -1570,6 +1593,7 @@ def accumulate_inference_batches(
     all_ground_truths = []
     all_datasets = []
     all_raw_queries = []
+    all_indices = []
     for i in tqdm(
         range(num_prompts),
         total=num_prompts,
@@ -1596,6 +1620,7 @@ def accumulate_inference_batches(
         all_ground_truths.append(ground_truth)
         all_datasets.append(dataset)
         all_raw_queries.append(raw_query)
+        all_indices.append(result.dataset_index)
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1676,13 +1701,13 @@ def accumulate_inference_batches(
     if actor_manager is not None:
         ray.get(actor_manager.report_token_statistics.remote(accumulated_stats))
 
-    # Note: We don't have dataset_indices here, but they're not needed for the returned batch
+    # Preserve dataset indices so downstream filtering keeps track of original prompts
     batch = Batch(
         queries=all_queries,
         ground_truths=all_ground_truths,
         datasets=all_datasets,
         raw_queries=all_raw_queries,
-        indices=None,  # Not meaningful for combined results
+        indices=all_indices,
     )
     return combined_result, batch, prompt_lengths, response_lengths
 
@@ -1699,6 +1724,7 @@ def data_preparation_thread(
     resume_training_step: int,
     actor_manager=None,
     model_dims: utils.ModelDims = None,
+    train_iterator: ShufflingIterator = None,
 ):
     for training_step in range(resume_training_step, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
@@ -1779,6 +1805,7 @@ def data_preparation_thread(
                 max_possible_score += args.verification_reward
             if args.apply_r1_style_format_reward and args.additive_format_reward:
                 max_possible_score += args.r1_style_format_reward
+
             unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
             # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
             # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
@@ -1870,9 +1897,11 @@ def data_preparation_thread(
 
             # Count groups with all zero rewards
             all_zero_groups = (scores_per_prompt == 0).all(axis=-1).sum()
+            all_solved_groups = (scores_per_prompt == max_possible_score).all(axis=-1).sum()
             total_groups = len(scores_per_prompt)
             logger.info(
                 f"[Reward Summary] Groups with all zero rewards: {all_zero_groups}/{total_groups} "
+                f" Groups with all solved rewards: {all_solved_groups}/{total_groups} "
                 f"({all_zero_groups / total_groups:.1%})"
             )
 
@@ -1997,6 +2026,7 @@ def data_preparation_thread(
 
             # Use the already calculated reward summary metrics for wandb
             all_zero_groups_ratio = all_zero_groups / total_groups if total_groups > 0 else 0
+            all_solved_groups_ratio = all_solved_groups / total_groups if total_groups > 0 else 0
 
             metrics = {
                 "scores": np.array(scores).mean(),
@@ -2005,6 +2035,8 @@ def data_preparation_thread(
                 "packed_ratio": len(packed_sequences.query_responses) / len(responses) if len(responses) > 0 else 0,
                 "val/all_zero_reward_groups": all_zero_groups,
                 "val/all_zero_reward_groups_ratio": all_zero_groups_ratio,
+                "val/all_solved_reward_groups": all_solved_groups,
+                "val/all_solved_reward_groups_ratio": all_solved_groups_ratio,
                 "val/total_reward_groups": total_groups,
                 "val/sequence_lengths": sequence_lengths.mean(),
                 "val/sequence_lengths_min": sequence_lengths.min(),
@@ -2453,7 +2485,7 @@ def one_training_step(
             )
 
     save_time = 0
-    if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
+    if args.save_freq > 0 and (training_step % args.save_freq == 0 or (training_step == 1 and args.eval_on_step_0)):
         with Timer("[Main Thread] 🗡️ Saving model") as timer:
             checkpoint_dir = f"{args.output_dir}_checkpoints"
             step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
@@ -2864,6 +2896,7 @@ def run_training(
         resume_training_step,
         actor_manager,
         model_dims,
+        iter_dataloader,
     )
 
     def health_check_fn():
