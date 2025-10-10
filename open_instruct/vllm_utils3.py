@@ -159,13 +159,11 @@ async def process_request_async(
         if not actor.tools or not actor.max_tool_calls:
             break
 
-        tool_result_tuple = get_triggered_tool(
+        triggered_tool, stop_str = get_triggered_tool(
             output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
         )
-        if tool_result_tuple is None:
+        if triggered_tool is None:
             break
-
-        triggered_tool, stop_str = tool_result_tuple
 
         assert actor.executor is not None, f"executor is None for request {sub_request_id}"
 
@@ -898,7 +896,6 @@ def create_vllm_engines(
             placement_group_bundle_index=bundle_indices[0],
         )
 
-        env_vars = {"TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
         vllm_engines.append(
             ray.remote(LLMRayActor)
             .options(
