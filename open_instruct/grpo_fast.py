@@ -866,7 +866,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
                         refs = [
                             engine.update_weight.remote(
-                                name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
+                                name, dtype=str(param.dtype), shape=shape, empty_cache=count == num_params
                             )
                             for engine in self.vllm_engines
                         ]
@@ -880,7 +880,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
                     refs = [
                         engine.update_weight.remote(
-                            name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
+                            name, dtype=str(param.dtype), shape=shape, empty_cache=count == num_params
                         )
                         for engine in self.vllm_engines
                     ]
