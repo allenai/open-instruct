@@ -1,0 +1,49 @@
+python mason.py \
+    --cluster ai2/jupiter \
+    --task_name distill_judge_qwen3-8b_grpo \
+    --description "distill judge into Qwen3-8B via GRPO" \
+    --workspace ai2/oe-data \
+    --priority high \
+    --image nathanl/open_instruct_auto \
+    --preemptible \
+    --num_nodes 1 \
+    --budget ai2/oe-base \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+    --exp_name distill_judge_qwen3-8b_grpo \
+    --beta 0.0 \
+    --num_unique_prompts_rollout 8 \
+    --num_samples_per_prompt_rollout 16 \
+    --kl_estimator kl3 \
+    --learning_rate 5e-7 \
+    --dataset_mixer_list /weka/oe-training-default/yapeic/proc-data/data/distillation/gpt-5_v5_train_15000_grpo.jsonl 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list /weka/oe-training-default/yapeic/proc-data/data/distillation/gpt-5_v5_test_1000.jsonl 1.0 \
+    --dataset_mixer_eval_list_splits train \
+    --max_token_length 8192 \
+    --max_prompt_token_length 4096 \
+    --response_length 2048 \
+    --pack_length 6144 \
+    --model_name_or_path Qwen/Qwen3-8B \
+    --apply_verifiable_reward True \
+    --non_stop_penalty True \
+    --non_stop_penalty_value 0.0 \
+    --temperature 1.0 \
+    --total_episodes 240128 \
+    --deepspeed_stage 3 \
+    --per_device_train_batch_size 1 \
+    --num_mini_batches 1 \
+    --num_learners_per_node 1 \
+    --num_epochs 1 \
+    --vllm_tensor_parallel_size 1 \
+    --vllm_num_engines 4 \
+    --lr_scheduler_type linear \
+    --seed 1 \
+    --local_eval_every 80 \
+    --save_freq 200 \
+    --keep_last_n_checkpoints 10 \
+    --gradient_checkpointing \
+    --with_tracking \
+    --hf_entity yapeichang \
+    --hf_repo_id distill_judge_qwen3-8b_grpo \
+    --wandb_project_name yapeic-exp \
+    --wandb_entity ai2-llm

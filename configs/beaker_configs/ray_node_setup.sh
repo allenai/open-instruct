@@ -14,7 +14,8 @@ echo PATH=$PATH
 
 BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk '{print $1}')
 
-RAY_NODE_PORT=8888
+# Allow overriding the default Ray head port per job to avoid conflicts on shared nodes
+RAY_NODE_PORT=${RAY_NODE_PORT:-8888}
 ray stop --force
 
 if [ "$BEAKER_REPLICA_RANK" == "0" ]; then
