@@ -3,14 +3,15 @@ python mason.py \
     --task_name distill_judge_qwen3-8b_sft_v3 \
     --description "distill judge into Qwen3-8B via SFT (v3 data)" \
     --workspace ai2/oe-data \
-    --priority high \
+    --priority normal \
     --image nathanl/open_instruct_auto \
     --preemptible \
     --num_nodes 1 \
     --budget ai2/oe-base \
-    --gpus 8 -- accelerate launch \
+    --gpus 4 -- accelerate launch \
+    --main_process_port 29504 \
     --mixed_precision bf16 \
-    --num_processes 8 \
+    --num_processes 4 \
     --use_deepspeed \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
@@ -18,6 +19,7 @@ python mason.py \
     --hf_entity yapeichang \
     --hf_repo_id distill_judge_qwen3-8b_sft_v3 \
     --exp_name distill_judge_qwen3-8b_sft_v3 \
+    --resume_from_checkpoint /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/distill_judge_qwen3-8b_sft_v3__8__1759928882 \
     --model_name_or_path Qwen/Qwen3-8B \
     --model_revision main \
     --tokenizer_name Qwen/Qwen3-8B \
@@ -25,9 +27,10 @@ python mason.py \
     --use_slow_tokenizer \
     --dataset_transform_fn sft_qwen3_tokenize_and_truncate_no_thinking_v1 sft_tulu_filter_v1 \
     --dataset_mixer_list /weka/oe-training-default/yapeic/proc-data/data/distillation_v3/gpt-5_v5_train_30000.jsonl 1.0 \
+    --clean_checkpoints_at_end false \
     --max_seq_length 8192 \
-    --per_device_train_batch_size 4 \
-    --gradient_accumulation_steps 2 \
+    --per_device_train_batch_size 2 \
+    --gradient_accumulation_steps 4 \
     --learning_rate 5e-06 \
     --lr_scheduler_type linear \
     --warmup_ratio 0.03 \
