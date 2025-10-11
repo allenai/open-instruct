@@ -1,7 +1,7 @@
 python mason.py \
     --cluster ai2/jupiter \
-    --task_name distill_judge_qwen3-8b_sft_v2_fixed_data \
-    --description "distill judge into Qwen3-8B via SFT (v2 data, fixed data, more epochs)" \
+    --task_name test_save \
+    --description "test save ckpts" \
     --workspace ai2/oe-data \
     --priority high \
     --image nathanl/open_instruct_auto \
@@ -17,15 +17,15 @@ python mason.py \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
     --hf_entity yapeichang \
-    --hf_repo_id distill_judge_qwen3-8b_sft_v2_fixed_data \
-    --exp_name distill_judge_qwen3-8b_sft_v2_fixed_data \
+    --hf_repo_id test_save \
+    --exp_name test_save \
     --model_name_or_path Qwen/Qwen3-8B \
     --model_revision main \
     --tokenizer_name Qwen/Qwen3-8B \
     --tokenizer_revision main \
     --use_slow_tokenizer \
     --dataset_transform_fn sft_qwen3_tokenize_and_truncate_no_thinking_v1 sft_tulu_filter_v1 \
-    --dataset_mixer_list /weka/oe-training-default/yapeic/proc-data/data/distillation_v2/gpt-5_v5_train_42621.jsonl 1.0 \
+    --dataset_mixer_list /weka/oe-training-default/yapeic/proc-data/data/distillation_v2/train_2000.jsonl 1.0 \
     --clean_checkpoints_at_end false \
     --max_seq_length 8192 \
     --per_device_train_batch_size 1 \
@@ -34,9 +34,9 @@ python mason.py \
     --lr_scheduler_type linear \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
-    --num_train_epochs 5 \
+    --num_train_epochs 3 \
     --checkpointing_steps epoch \
-    --keep_last_n_checkpoints 5 \
+    --keep_last_n_checkpoints 10 \
     --use_flash_attn \
     --gradient_checkpointing \
     --report_to wandb \

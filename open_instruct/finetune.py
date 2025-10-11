@@ -917,12 +917,20 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         output_dir = f"step_{completed_steps}"
                         if args.output_dir is not None:
                             output_dir = os.path.join(args.output_dir, output_dir)
+                        
+                        # Save DeepSpeed checkpoint for resumption
                         accelerator.save_state(output_dir)
-                        # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
                         with open(
                             os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w"
                         ) as f:
                             f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
+                        
+                        # Also save in HuggingFace format for easy upload
+                        hf_output_dir = f"{output_dir}_hf"
+                        save_with_accelerate(
+                            accelerator, model, tokenizer, hf_output_dir, args.use_lora, chat_template_name=tc.chat_template_name
+                        )
+                        
                         if accelerator.is_local_main_process:  # TODO: in mason local model this is gonna error out if using something like output/test; because mason used the same shared file ssytem.
                             clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
                         accelerator.wait_for_everyone()
@@ -934,10 +942,18 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             output_dir = f"epoch_{epoch}"
             if args.output_dir is not None:
                 output_dir = os.path.join(args.output_dir, output_dir)
+            
+            # Save DeepSpeed checkpoint for resumption
             accelerator.save_state(output_dir)
-            # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
             with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
                 f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
+            
+            # Also save in HuggingFace format for easy upload
+            hf_output_dir = f"{output_dir}_hf"
+            save_with_accelerate(
+                accelerator, model, tokenizer, hf_output_dir, args.use_lora, chat_template_name=tc.chat_template_name
+            )
+            
             if accelerator.is_local_main_process:
                 clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
             accelerator.wait_for_everyone()
