@@ -13,8 +13,8 @@ logger = logging.getLogger(__name__)
 class QuantizationConfig:
     enable_quantization: bool = False
     """whether to enable quantization of model weights before syncing to vLLM. If disabled, defaults to bf16."""
-    quantization_format: Literal["fp8", "fp4", "nvfp4", "gptq"] = "fp8"
-    """the quantization format to use (fp8, fp4, nvfp4, or gptq for SmoothQuant+GPTQ)"""
+    quantization_format: Literal["fp8", "fp4", "nvfp4", "gptq", "w8a16"] = "fp8"
+    """the quantization format to use (fp8, fp4, nvfp4, gptq, or w8a16 for SmoothQuant+W8A16)"""
     quantization_targets: str = "Linear"
     """which layer types to quantize (e.g., 'Linear')"""
     smoothquant_strength: float = 0.5
@@ -30,7 +30,7 @@ class QuantizationConfig:
 
 
 def get_quantization_recipe(
-    quantization_format: Literal["fp8", "fp4", "nvfp4", "gptq"],
+    quantization_format: Literal["fp8", "fp4", "nvfp4", "gptq", "w8a16"],
     targets: str = "Linear",
     ignore: Optional[List[str]] = None,
     smoothquant_strength: float = 0.5,
@@ -64,6 +64,14 @@ def get_quantization_recipe(
         recipe = llmcompressor.modifiers.quantization.QuantizationModifier(
             targets=targets, scheme="NVFP4", ignore=ignore
         )
+    elif quantization_format == "w8a16":
+        from llmcompressor.modifiers.smoothquant import SmoothQuantModifier
+
+        smooth_modifier = SmoothQuantModifier(smoothing_strength=smoothquant_strength, ignore=ignore)
+        quant_modifier = llmcompressor.modifiers.quantization.QuantizationModifier(
+            targets=targets, scheme="W8A16", ignore=ignore
+        )
+        recipe = [smooth_modifier, quant_modifier]
     elif quantization_format == "gptq":
         from compressed_tensors.quantization.quant_scheme import preset_name_to_scheme
         from llmcompressor.modifiers.quantization import GPTQModifier
@@ -114,7 +122,7 @@ def prepare_calibration_dataset(batch_queries: List[List[int]], tokenizer: trans
 
 def quantize_model_with_batch(
     model: torch.nn.Module,
-    quantization_format: Literal["fp8", "fp4", "nvfp4", "gptq"],
+    quantization_format: Literal["fp8", "fp4", "nvfp4", "gptq", "w8a16"],
     batch_queries: List[List[int]],
     tokenizer: transformers.PreTrainedTokenizer,
     targets: str = "Linear",
@@ -148,6 +156,8 @@ def quantize_model_with_batch(
             gptq_group_size,
             gptq_actorder or "none",
         )
+    elif quantization_format == "w8a16":
+        logger.info("Applying SmoothQuant(alpha=%.3f) + W8A16 weight quantization", smoothquant_strength)
 
     calibration_dataset = prepare_calibration_dataset(batch_queries, tokenizer)
 

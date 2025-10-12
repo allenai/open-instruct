@@ -364,8 +364,8 @@ class Args:
     # Quantization
     enable_quantization: bool = False
     """whether to enable quantization of model weights before syncing to vLLM. If disabled, defaults to bf16."""
-    quantization_format: Literal["fp8", "fp4", "nvfp4", "gptq"] = "fp8"
-    """the quantization format to use (fp8, fp4, nvfp4, or gptq for SmoothQuant+GPTQ)"""
+    quantization_format: Literal["fp8", "fp4", "nvfp4", "gptq", "w8a16"] = "fp8"
+    """the quantization format to use (fp8, fp4, nvfp4, gptq, or w8a16 for SmoothQuant+W8A16)"""
     quantization_targets: str = "Linear"
     """which layer types to quantize (e.g., 'Linear')"""
     smoothquant_strength: float = 0.5
@@ -2418,7 +2418,7 @@ def weight_sync_thread(
         batch_queries = None
         if args.enable_quantization:
             quant_buffer = shared_state.get("quantization_buffer")
-            if quant_buffer:
+            if quant_buffer and len(quant_buffer) > 0:
                 batch_queries = list(quant_buffer)
             else:
                 batch_queries = shared_state.get("current_batch")
