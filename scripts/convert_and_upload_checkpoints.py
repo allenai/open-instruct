@@ -289,6 +289,19 @@ def main():
         default="bf16",
         help="Convert and upload weights in this dtype. 'bf16' reduces size.",
     )
+    parser.add_argument(
+        "--max_shard_size",
+        type=str,
+        default="5GB",
+        help="Shard checkpoint files with this maximum size (e.g., '5GB', '2GB').",
+    )
+    parser.add_argument(
+        "--save_format",
+        type=str,
+        choices=["bin", "safetensors"],
+        default="safetensors",
+        help="Serialization format for model weights on the Hub.",
+    )
 
     args = parser.parse_args()
 
@@ -373,7 +386,8 @@ def main():
                                     )
                                     tmp_model.save_pretrained(
                                         str(temp_save_dir),
-                                        safe_serialization=False,
+                                        safe_serialization=(args.save_format == "safetensors"),
+                                        max_shard_size=args.max_shard_size,
                                     )
                                     state_dict = None
                                 except Exception as e2:
@@ -416,7 +430,8 @@ def main():
                     is_main_process=accelerator.is_main_process,
                     save_function=accelerator.save,
                     state_dict=state_dict,
-                    safe_serialization=False,
+                    safe_serialization=(args.save_format == "safetensors"),
+                    max_shard_size=args.max_shard_size,
                 )
 
             if accelerator.is_main_process:

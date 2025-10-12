@@ -30,4 +30,7 @@ python mason.py \
     --model_name_or_path Qwen/Qwen3-8B \
     --checkpoints_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/distill_judge_qwen3-8b_sft_v2_fixed_data__8__1760158162 \
     --hf_repo_id yapeichang/distill_judge_qwen3-8b_sft_v2_fixed_data \
+    --upload_dtype bf16 \
+    --max_shard_size 5GB \
+    --save_format safetensors \
     --trust_remote_code
