@@ -224,6 +224,37 @@ def _load_state_dict_from_file(weights_path: str) -> dict:
     return _maybe_strip_module_prefix(state_dict)
 
 
+def _load_state_dict_from_zero2_pt(zero2_path: str) -> dict:
+    """
+    Load model parameters from a DeepSpeed ZeRO-2 single-rank checkpoint file
+    located at 'pytorch_model/mp_rank_00_model_states.pt'. Extracts the model
+    state dict and normalizes parameter keys.
+    """
+    ckpt = torch.load(zero2_path, map_location="cpu", weights_only=False)
+    # Common containers used by DeepSpeed/Trainer for model weights
+    for key in ("module", "state_dict", "model", "model_state_dict"):
+        candidate = ckpt.get(key) if isinstance(ckpt, dict) else None
+        if isinstance(candidate, dict):
+            state_dict = candidate
+            break
+    else:
+        # Fallback: if the checkpoint itself looks like a raw state_dict
+        if isinstance(ckpt, dict) and all(isinstance(v, torch.Tensor) for v in ckpt.values()):
+            state_dict = ckpt
+        else:
+            raise RuntimeError(f"Could not locate model state dict in ZeRO-2 checkpoint: {zero2_path}")
+    return _maybe_strip_module_prefix(state_dict)
+
+
+def _find_zero2_model_states(checkpoint_path: str) -> str | None:
+    """
+    Detect DeepSpeed ZeRO-2 single-rank checkpoint file location.
+    Returns the path to 'pytorch_model/mp_rank_00_model_states.pt' if present.
+    """
+    candidate = os.path.join(checkpoint_path, "pytorch_model", "mp_rank_00_model_states.pt")
+    return candidate if os.path.exists(candidate) else None
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Convert and upload raw training checkpoints to the Hugging Face Hub."
@@ -304,12 +335,17 @@ def main():
 
         try:
             # Prefer direct weight files (pytorch_model.bin / .safetensors) if present.
+            # For ZeRO-2, detect and load mp_rank_00_model_states.pt.
             # If DeepSpeed shards are detected, consolidate them. Otherwise, fall back to accelerator.load_state.
             weights_path = _find_or_consolidate_weights(checkpoint_path)
+            zero2_path = _find_zero2_model_states(checkpoint_path) if weights_path is None else None
 
             if weights_path is not None:
                 print(f" -> Found consolidated weights: {weights_path}")
                 state_dict = _load_state_dict_from_file(weights_path)
+            elif zero2_path is not None:
+                print(f" -> Detected ZeRO-2 checkpoint file: {zero2_path}")
+                state_dict = _load_state_dict_from_zero2_pt(zero2_path)
             else:
                 # Try loading with accelerate first (works for many DS layouts)
                 try:
