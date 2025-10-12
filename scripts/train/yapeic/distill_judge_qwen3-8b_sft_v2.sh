@@ -40,7 +40,7 @@ python mason.py \
     --use_flash_attn \
     --gradient_checkpointing \
     --report_to wandb \
-    --wandb_project_name yapeic-exp \
+    --wandb_project_name yapeic-exp \4
     --wandb_entity ai2-llm \
     --with_tracking \
     --logging_steps 1 \
