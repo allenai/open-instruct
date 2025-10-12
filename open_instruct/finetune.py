@@ -958,9 +958,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
             accelerator.wait_for_everyone()
 
-    if args.output_dir is not None:
+    # Save final model to a separate 'final' directory to avoid uploading intermediate checkpoints
+    final_model_dir = os.path.join(args.output_dir, "final") if args.output_dir is not None else None
+    if final_model_dir is not None:
         save_with_accelerate(
-            accelerator, model, tokenizer, args.output_dir, args.use_lora, chat_template_name=tc.chat_template_name
+            accelerator, model, tokenizer, final_model_dir, args.use_lora, chat_template_name=tc.chat_template_name
         )
 
     # remove all checkpoints to save space
@@ -974,11 +976,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         and len(beaker_config.beaker_dataset_id_urls) > 0
         and args.output_dir.rstrip("/") != "/output"
     ):
-        shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
+        shutil.copytree(final_model_dir, "/output", dirs_exist_ok=True)
 
     if is_beaker_job() and accelerator.is_main_process and args.try_launch_beaker_eval_jobs:
         launch_ai2_evals_on_weka(
-            path=args.output_dir,
+            path=final_model_dir,
             leaderboard_name=args.hf_repo_revision,
             oe_eval_max_length=args.oe_eval_max_length,
             wandb_url=wandb_tracker.run.get_url() if wandb_tracker is not None else None,
@@ -986,7 +988,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             gs_bucket_path=args.gs_bucket_path,
         )
     if args.push_to_hub:
-        push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+        # Upload only the final model directory, not the intermediate checkpoints
+        push_folder_to_hub(accelerator, final_model_dir, args.hf_repo_id, args.hf_repo_revision)
     accelerator.wait_for_everyone()
     if args.with_tracking:
         accelerator.end_training()
