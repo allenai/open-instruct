@@ -23,8 +23,6 @@ airportsdata==20250523
     # via outlines
 annotated-types==0.7.0
     # via pydantic
-antlr4-python3-runtime==4.11.0
-    # via open-instruct
 anyio==4.9.0
     # via
     #   httpx
