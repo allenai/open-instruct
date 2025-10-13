@@ -7,12 +7,19 @@ from open_instruct.tool_utils.tools import MaxCallsExceededTool, PythonCodeTool,
 
 class TestToolOutput(unittest.TestCase):
     def test_tool_output_creation(self):
-        output = ToolOutput(output="test output", called=True, error="test error", timeout=False, runtime=1.5)
+        output = ToolOutput(
+            output="test output",
+            called=True,
+            error="test error",
+            timeout=False,
+            runtime=1.5,
+        )
         self.assertEqual(output.output, "test output")
         self.assertTrue(output.called)
         self.assertEqual(output.error, "test error")
         self.assertFalse(output.timeout)
         self.assertEqual(output.runtime, 1.5)
+        self.assertFalse(output.terminate)
         self.assertEqual(output.start_str, "<output>\n")
         self.assertEqual(output.end_str, "\n</output>")
 
@@ -49,11 +56,12 @@ class TestMaxCallsExceededTool(unittest.TestCase):
         result = tool("any prompt")
 
         self.assertIsInstance(result, ToolOutput)
-        self.assertEqual(result.output, "Max tool calls exceeded.")
-        self.assertFalse(result.called)
+        self.assertEqual(result.output, "Max tool calls exceeded. Terminating generation.")
+        self.assertTrue(result.called)
         self.assertEqual(result.error, "")
         self.assertFalse(result.timeout)
         self.assertEqual(result.runtime, 0)
+        self.assertTrue(result.terminate)
 
 
 class TestPythonCodeTool(unittest.TestCase):

@@ -13,6 +13,7 @@ class ToolOutput:
     error: str
     timeout: bool
     runtime: float
+    terminate: bool = False
     start_str: str = "<output>\n"
     end_str: str = "\n</output>"
 
@@ -28,7 +29,14 @@ class Tool:
 
 class MaxCallsExceededTool(Tool):
     def __call__(self, prompt: str) -> ToolOutput:
-        return ToolOutput(output="Max tool calls exceeded.", called=False, error="", timeout=False, runtime=0)
+        return ToolOutput(
+            output="Max tool calls exceeded. Terminating generation.",
+            called=True,
+            error="",
+            timeout=False,
+            runtime=0,
+            terminate=True,
+        )
 
 
 class PythonCodeTool(Tool):

@@ -12,13 +12,14 @@ import json
 import logging
 import os
 import re
+import shlex
 import string
 import warnings
 import weakref
 from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
 import requests
 from litellm import acompletion
@@ -92,6 +93,14 @@ class CodeVerifierConfig(VerifierConfig):
     code_max_execution_time: float
     code_pass_rate_reward_threshold: float
     code_apply_perf_penalty: bool
+
+
+@dataclass
+class CodeAgentVerifierConfig(VerifierConfig):
+    code_agent_url: str
+    code_agent_max_line_span: int = 0  # only reward if the view calls span at most this many lines (0 disables)
+    code_agent_turns_after_view: int = -1  # only reward if the 'correct' view call is followed by at most this many turns (-1 disables)
+    code_agent_repitition_penalty: float = 0.0  # if the same tool call is repeated, penalize the final score by this amount
 
 
 @dataclass
@@ -949,8 +958,195 @@ class CodeSearchVerifier(VerifierFunction):
     Checks that the call looks are the correct file and spans the buggy lines
     """
 
-    def __init__(self, verifier_config: VerifierConfig) -> None:
+    def __init__(self, verifier_config: CodeAgentVerifierConfig) -> None:
         super().__init__("code_search", verifier_config=verifier_config, weight=1.0)
+
+    async def get_file_line_count(self, file_path: str, repo_name: Optional[str] = None) -> Optional[int]:
+        """Resolve the number of lines in a file via the code agent API."""
+
+        logger.warning(
+            "CodeSearchVerifier: resolving line count for path=%s repo=%s",
+            file_path,
+            repo_name,
+        )
+
+        path_candidates = self._generate_path_candidates(file_path, repo_name)
+        logger.warning(
+            "CodeSearchVerifier: candidate paths for %s (repo=%s): %s",
+            file_path,
+            repo_name,
+            path_candidates,
+        )
+        if not path_candidates:
+            logger.debug("No path candidates available when checking line count for %s", file_path)
+            return None
+
+        api_url = self._get_run_bash_url()
+        if not api_url:
+            logger.debug("No code agent URL configured; cannot resolve line count for %s", file_path)
+            return None
+
+        for candidate in path_candidates:
+            line_count = await self._fetch_line_count_via_api(api_url, candidate, repo_name)
+            if line_count is not None:
+                if candidate != file_path:
+                    logger.warning(
+                        "Resolved %s to %s when checking line count (repo=%s)",
+                        file_path,
+                        candidate,
+                        repo_name,
+                    )
+                return line_count
+
+        logger.warning("Unable to resolve file length for %s via code agent", file_path)
+        return None
+
+    def _get_run_bash_url(self) -> Optional[str]:
+        base_url = getattr(self.verifier_config, "code_agent_url", None)
+        if not base_url:
+            return None
+
+        base_url = base_url.rstrip("/")
+        for suffix in ("/run_bash", "/view_file", "/edit_file", "/test_program", "/test_program_stdio"):
+            if base_url.endswith(suffix):
+                base_url = base_url[: -len(suffix)]
+                break
+        if not base_url:
+            return None
+        return f"{base_url}/run_bash"
+
+    def _generate_path_candidates(self, file_path: str, repo_name: Optional[str]) -> List[str]:
+        raw_path = (file_path or "").strip().replace("\\", "/")
+        if not raw_path:
+            return []
+
+        normalized_repo = (repo_name or "").strip().strip("/")
+        candidates: List[str] = []
+        seen: Set[str] = set()
+
+        def add(path: str) -> None:
+            cleaned = (path or "").strip().replace("\\", "/")
+            if not cleaned:
+                return
+            cleaned = re.sub(r"/{2,}", "/", cleaned)
+            if cleaned.startswith("./"):
+                cleaned = cleaned[2:]
+            if cleaned in {"", ".", "/"}:
+                return
+            if cleaned.endswith("/") and len(cleaned) > 1:
+                cleaned = cleaned[:-1]
+            if cleaned.startswith("/") and len(cleaned) > 1:
+                cleaned = "/" + cleaned.lstrip("/")
+            if cleaned not in seen:
+                seen.add(cleaned)
+                candidates.append(cleaned)
+
+        add(raw_path)
+        add(raw_path.lstrip("/"))
+        add("/" + raw_path.lstrip("/"))
+
+        if normalized_repo:
+            repo_prefix = normalized_repo + "/"
+            snapshot = list(candidates)
+            for candidate in snapshot:
+                stripped = candidate.lstrip("/")
+                if not stripped:
+                    continue
+                if stripped.startswith(repo_prefix):
+                    remainder = stripped[len(repo_prefix) :]
+                    if remainder:
+                        add(remainder)
+                        add("/" + remainder)
+                    continue
+                add(f"{normalized_repo}/{stripped}")
+                add(f"/{normalized_repo}/{stripped}")
+                add(f"repos/{normalized_repo}/{stripped}")
+                add(f"/repos/{normalized_repo}/{stripped}")
+
+        for candidate in list(candidates):
+            stripped = candidate.lstrip("/")
+            if not stripped:
+                continue
+            if stripped.startswith("testbed/"):
+                remainder = stripped[len("testbed/") :]
+                if remainder:
+                    add(remainder)
+                    add("/" + remainder)
+            else:
+                add(f"testbed/{stripped}")
+                add(f"/testbed/{stripped}")
+
+        return candidates
+
+    async def _fetch_line_count_via_api(
+        self, api_url: str, candidate_path: str, repo_name: Optional[str]
+    ) -> Optional[int]:
+        quoted_path = shlex.quote(candidate_path)
+        cmd = f"wc -l {quoted_path} 2>/dev/null || echo 'ERROR'"
+        payload = {
+            "cmd": cmd,
+            "repo_name": repo_name,
+            "timeout_seconds": 15,
+        }
+
+        logger.warning(
+            "CodeSearchVerifier: querying line count via %s cmd=%s repo=%s",
+            api_url,
+            cmd,
+            repo_name,
+        )
+
+        try:
+            def make_request() -> Dict[str, Any]:
+                response = requests.post(api_url, json=payload, timeout=10)
+                response.raise_for_status()
+                return response.json()
+
+            result = await asyncio.to_thread(make_request)
+        except Exception as exc:
+            logger.warning(
+                "Error querying code agent for %s using %s: %s", candidate_path, api_url, exc
+            )
+            return None
+
+        content = result.get("content", "")
+        logger.warning(
+            "CodeSearchVerifier: code agent response for %s (repo=%s): returncode=%s content-preview=%s",
+            candidate_path,
+            repo_name,
+            result.get("returncode"),
+            content[:200],
+        )
+        stripped_lines = [line.strip() for line in content.strip().split("\n") if line.strip()]
+        if any(line == "ERROR" for line in stripped_lines):
+            logger.warning(
+                "CodeSearchVerifier: detected ERROR sentinel in response for %s (repo=%s)",
+                candidate_path,
+                repo_name,
+            )
+            return None
+
+        for line in stripped_lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            first_char = stripped[0]
+            if not first_char.isdigit():
+                continue
+            parts = stripped.split()
+            if not parts:
+                continue
+            try:
+                return int(parts[0])
+            except (ValueError, IndexError):
+                continue
+
+        logger.warning(
+            "Could not parse line count for %s from API response: %s", candidate_path, content
+        )
+        return None
+
+    # Removed local filesystem fallbacks; rely solely on the code agent API for line counts.
 
     def parse_tool_calls(self, prediction: str) -> List[Dict[str, Any]]:
         """Parse and validate tool calls using FunctionCallingParser.
@@ -958,8 +1154,7 @@ class CodeSearchVerifier(VerifierFunction):
         Validates each call against a minimal schema for str_replace_editor (view only).
         Returns only validated calls as dictionaries identical to the model JSON.
         """
-        tool_call_pattern = r"<tool_call>\s*(.*?)\s*</tool_call>"
-        tool_calls = re.findall(tool_call_pattern, prediction, re.DOTALL)
+        tool_call_pattern = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 
         # Minimal command schema for the code-view tool
         str_replace_editor_cmd = SWECommand(
@@ -1015,7 +1210,21 @@ class CodeSearchVerifier(VerifierFunction):
             except Exception:
                 return None
 
-        for raw in tool_calls:
+        for match in tool_call_pattern.finditer(prediction):
+            raw = match.group(1)
+            response_start = prediction.find("<tool_response>", match.end())
+            response_end = None
+            if response_start != -1:
+                tmp_response_end = prediction.find("</tool_response>", response_start)
+                if tmp_response_end != -1:
+                    response_end = tmp_response_end + len("</tool_response>")
+            call_meta = {
+                "call_start": match.start(),
+                "call_end": match.end(),
+                "response_start": None if response_start == -1 else response_start,
+                "response_end": response_end,
+            }
+
             data = None
             try:
                 data = json.loads(raw)
@@ -1034,39 +1243,153 @@ class CodeSearchVerifier(VerifierFunction):
                 }
                 # Validate; throws on schema issues
                 _thought, _action = parser(model_response, commands=[str_replace_editor_cmd], strict=True)
+                data["_meta"] = call_meta
                 parsed_calls.append(data)
             except Exception as e:
                 warnings.warn(f"Skipping invalid tool call: {e}")
 
         return parsed_calls
 
+    def _count_turns_after_call(
+        self, prediction: str, tool_calls: List[Dict[str, Any]], call_index: int
+    ) -> int:
+        """
+        Count assistant turns after a given tool call. Each subsequent tool call counts as one turn.
+        Any remaining assistant text after removing tool calls and tool responses counts as an additional turn.
+        """
+        total_calls = len(tool_calls)
+        remaining_calls = max(0, total_calls - call_index - 1)
+        turns = remaining_calls
+
+        meta = tool_calls[call_index].get("_meta", {}) if 0 <= call_index < total_calls else {}
+        response_end = meta.get("response_end")
+        if response_end is None:
+            return turns
+
+        remainder = prediction[response_end:]
+        if not remainder:
+            return turns
+
+        remainder = remainder.replace("<endoftext>", " ")
+        remainder = re.sub(r"<tool_call>.*?</tool_call>", " ", remainder, flags=re.DOTALL)
+        remainder = re.sub(r"user\s*<tool_response>.*?</tool_response>", " ", remainder, flags=re.DOTALL)
+
+        if remainder.strip():
+            turns += 1
+
+        return turns
+
     async def async_call(
         self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
     ) -> VerificationResult:
-        if "<tool_response>\nMax tool calls exceeded. Terminating generation.</tool_response>" in prediction:
+        if "<tool_response>\nMax tool calls exceeded.</tool_response>" in prediction:
             return VerificationResult(score=0.0)
         
         buggy_info = json.loads(label)
         bug_fn_file = buggy_info["bug_fn_file"]
         bug_fn_line_start = buggy_info["line_start"]
         bug_fn_line_end = buggy_info["line_end"]
+        label_repo_name = buggy_info.get("repo_name")
 
-        # parse the tool calls
         tool_calls = self.parse_tool_calls(prediction)
         score = 0.0
-        for tool_call in tool_calls:
-            # check if any of the tools calls identify the correct file and span the buggy lines
-            if "view_range" not in tool_call["arguments"]:
+        max_line_span = getattr(self.verifier_config, "code_agent_max_line_span", None)
+        max_turns_after_view = getattr(self.verifier_config, "code_agent_turns_after_view", None)
+        for idx, tool_call in enumerate(tool_calls):
+            arguments = tool_call.get("arguments", {}) or {}
+            view_range = arguments.get("view_range")
+            if not isinstance(view_range, (list, tuple)) or len(view_range) != 2:
+                logger.debug("Tool call missing valid view_range: %s", tool_call)
                 continue
-            tool_file = tool_call["arguments"]["path"]
-            tool_line_start = tool_call["arguments"]["view_range"][0]
-            tool_line_end = tool_call["arguments"]["view_range"][1]
-            if (
-                (tool_file.endswith(bug_fn_file) or bug_fn_file.endswith(tool_file))
-                and tool_line_start <= bug_fn_line_start
-                and tool_line_end >= bug_fn_line_end
-            ):
-                score = 1.0
+
+            tool_file = arguments.get("path")
+            if not tool_file:
+                logger.debug("Tool call missing path argument: %s", tool_call)
+                continue
+
+            try:
+                tool_line_start = int(view_range[0])
+                tool_line_end = int(view_range[1])
+            except (TypeError, ValueError):
+                logger.debug("Tool call has non-integer view_range values: %s", tool_call)
+                continue
+
+            if tool_line_end < tool_line_start:
+                logger.debug("Tool call has inverted view_range %s", view_range)
+                continue
+
+            if not (tool_file.endswith(bug_fn_file) or bug_fn_file.endswith(tool_file)):
+                logger.debug(f"Tool call requested file {tool_file} but bug is in {bug_fn_file}")
+                continue
+            
+            if not (tool_line_start <= bug_fn_line_start and tool_line_end >= bug_fn_line_end):
+                logger.debug(f"Tool call requested lines {tool_line_start}-{tool_line_end} "
+                             f"but bug is in {bug_fn_line_start}-{bug_fn_line_end}")
+                continue
+
+            if max_line_span is not None and max_line_span > 0:
+                view_span = tool_line_end - tool_line_start + 1
+                if view_span > max_line_span:
+                    logger.debug(
+                        "Tool call view_range %s exceeds max line span %s", view_range, max_line_span
+                    )
+                    continue
+            
+            repo_name = arguments.get("repo_name") or label_repo_name
+            file_line_count = await self.get_file_line_count(tool_file, repo_name)
+            if file_line_count is not None:
+                if tool_line_end > file_line_count:
+                    logger.debug(
+                        f"Tool call requested lines {tool_line_start}-{tool_line_end} "
+                        f"but file {tool_file} only has {file_line_count} lines"
+                    )
+                    continue
+            else:
+                logger.warning(
+                    f"Could not verify file length for {tool_file}, not counting this tool call "
+                )
+                continue
+
+            if max_turns_after_view is not None and max_turns_after_view >= 0:
+                turns_after_view = self._count_turns_after_call(prediction, tool_calls, idx)
+                if turns_after_view > max_turns_after_view:
+                    logger.debug(
+                        "Tool call at index %s followed by %s turns (limit %s)",
+                        idx,
+                        turns_after_view,
+                        max_turns_after_view,
+                    )
+                    continue
+            
+            score = 1.0
+            break
+        penalty_per_repeat = getattr(self.verifier_config, "code_agent_repitition_penalty", 0.0) or 0.0
+        if score > 0.0 and penalty_per_repeat > 0.0:
+            call_counts: Counter = Counter()
+            for call in tool_calls:
+                args = call.get("arguments", {}) or {}
+                path = args.get("path")
+                command = args.get("command")
+                repo = args.get("repo_name")
+                view_range_value = args.get("view_range")
+                if isinstance(view_range_value, (list, tuple)):
+                    try:
+                        view_range_key = tuple(int(v) for v in view_range_value)
+                    except (TypeError, ValueError):
+                        view_range_key = tuple(view_range_value)
+                elif view_range_value is None:
+                    view_range_key = ()
+                else:
+                    view_range_key = (view_range_value,)
+
+                key = (call.get("name"), command, path, view_range_key, repo)
+                call_counts[key] += 1
+
+            repeats = sum(max(0, count - 1) for count in call_counts.values())
+            if repeats > 0:
+                total_penalty = penalty_per_repeat * repeats
+                score = max(0.0, score - total_penalty)
+
         return VerificationResult(score=score)
 
     def __call__(
@@ -1085,6 +1408,16 @@ class CodeSearchVerifier(VerifierFunction):
                 return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
         except RuntimeError:
             return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        """
+        Return the configuration class for this verifier.
+
+        Returns:
+            type: The VerifierConfig class or its subclass
+        """
+        return CodeAgentVerifierConfig
 
 def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     """

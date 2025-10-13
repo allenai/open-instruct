@@ -1,15 +1,17 @@
+rollout_id=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 8 | head -n 1)
 exp_name=rlvr_code_view_tool_sft
     python mason.py \
-        --cluster ai2/jupiter-cirrascale-2 \
+        --cluster ai2/jupiter \
         --image saurabhs/open-coding-agent \
-        --workspace ai2/open-coding-agent-dev \
-        --priority urgent \
+        --workspace ai2/open-coding-agent \
+        --preemptible \
+        --priority high \
         --num_nodes 4 \
         --gs_model_name saurabhs/ethans-Qwen3-8B-nothink \
         --description "rlvr code view tool sft" \
         --max_retries 0 \
-        --auto_output_dir_path /weka/oe-adapt-default/saurabhs/repos/open-instruct-3/output \
-        --auto_checkpoint_state_dir /weka/oe-adapt-default/saurabhs/repos/open-instruct-3/checkpoints \
+        --auto_output_dir_path /weka/oe-adapt-default/saurabhs/repos/open-instruct-coding-agent/output \
+        --auto_checkpoint_state_dir /weka/oe-adapt-default/saurabhs/repos/open-instruct-coding-agent/checkpoints \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         --env VLLM_ENGINE_INIT_TIMEOUT=900 \
         --budget ai2/oe-adapt \
@@ -24,9 +26,9 @@ exp_name=rlvr_code_view_tool_sft
         --per_device_train_batch_size 1 \
         --output_dir /output \
         --kl_estimator kl3 \
-        --dataset_mixer_list saurabh5/rlvr-code-view-tool-new-first-turn-only-user 1.0 \
+        --dataset_mixer_list saurabh5/rlvr-code-view-tool-new-first-turn-only-user-with-repo-name 1.0 \
         --dataset_mixer_list_splits train \
-        --dataset_mixer_eval_list saurabh5/rlvr-code-view-tool-new-first-turn-only-user 16 \
+        --dataset_mixer_eval_list saurabh5/rlvr-code-view-tool-new-first-turn-only-user-with-repo-name 16 \
         --dataset_mixer_eval_list_splits train \
         --max_token_length 4096 \
         --max_prompt_token_length 4096 \
@@ -46,7 +48,6 @@ exp_name=rlvr_code_view_tool_sft
         --backend_timeout 180 \
         --lr_scheduler_type constant \
         --apply_verifiable_reward true \
-        --code_agent_api_endpoint \$CODE_API_URL/view_file \
         --seed 42 \
         --save_freq 25 \
         --try_launch_beaker_eval_jobs_on_weka False \
@@ -61,4 +62,11 @@ exp_name=rlvr_code_view_tool_sft
         --dataset_skip_cache True \
         --checkpoint_state_freq 25 \
         --allow_world_padding True \
-        --log_rollouts_to_file "/weka/oe-adapt-default/saurabhs/repos/open-instruct-coding-agent/rollouts"
+        --code_agent_url \$CODE_API_URL/view_file \
+        --async_steps 4 \
+        --inflight_updates \
+        --truncated_importance_sampling_ratio_cap 2.0 \
+        --code_agent_max_line_span 100 \
+        --code_agent_turns_after_view 10 \
+        --code_agent_repitition_penalty 1.0 \
+        --log_rollouts_to_file "/weka/oe-adapt-default/saurabhs/repos/open-instruct-coding-agent/rollouts/${rollout_id}"

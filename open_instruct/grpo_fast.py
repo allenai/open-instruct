@@ -475,8 +475,14 @@ class Args:
     code_tool_api_endpoint: Optional[str] = None
 
     #code agent specific settings
-    code_agent_api_endpoint: Optional[str] = None
-    """The API endpoint for the code view tool (defaults to code_tool_api_endpoint if not set)."""
+    code_agent_url: Optional[str] = None
+    """The URL for the code view tool (defaults to None if not set)."""
+    code_agent_max_line_span: int = 100
+    """The maximum line span for the code view tool (defaults to 100 if not set)."""
+    code_agent_turns_after_view: int = 10
+    """The maximum turns after the view call for the code view tool (defaults to 10 if not set)."""
+    code_agent_repitition_penalty: float = 1.0
+    """The repitition penalty for the code view tool (defaults to 1.0 if not set)."""
 
     def __post_init__(self):
         if os.environ.get("VLLM_USE_V1") == "0":
@@ -1459,13 +1465,13 @@ def calculate_utilization_metrics(
     )
 
     # Calculate MFU and MBU accounting for multiple GPUs
-    flops_per_second = actor_total_flops / total_generation_time
-    bytes_per_second = actor_total_memory_bytes / total_generation_time
+    flops_per_second = actor_total_flops / total_generation_time if total_generation_time > 0 else 0
+    bytes_per_second = actor_total_memory_bytes / total_generation_time if total_generation_time > 0 else 0
     # Scale device capabilities by number of GPUs
     total_device_flops = model_dims.device_flops * num_inference_gpus
     total_device_bandwidth = model_dims.device_memory_bandwidth * num_inference_gpus
-    actor_mfu = 100 * flops_per_second / total_device_flops
-    actor_mbu = 100 * bytes_per_second / total_device_bandwidth
+    actor_mfu = 100 * flops_per_second / total_device_flops if total_device_flops > 0 else 0
+    actor_mbu = 100 * bytes_per_second / total_device_bandwidth if total_device_bandwidth > 0 else 0
 
     # Calculate learner/training metrics
     # For training, we need to use total sequence lengths (prompt + response) since training
@@ -1483,9 +1489,9 @@ def calculate_utilization_metrics(
     )
 
     # Calculate training MFU
-    training_flops_per_second = training_flops / training_time
+    training_flops_per_second = training_flops / training_time if training_time > 0 else 0
     total_training_device_flops = model_dims.device_flops * num_training_gpus
-    learner_mfu = 100 * training_flops_per_second / total_training_device_flops
+    learner_mfu = 100 * training_flops_per_second / total_training_device_flops if total_training_device_flops > 0 else 0
 
     return {"actor_mfu": actor_mfu, "actor_mbu": actor_mbu, "learner_mfu": learner_mfu}
 
@@ -2055,6 +2061,37 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
 
     wandb_url = None
     if args.with_tracking:
+        from wandb import util as wandb_util
+
+        # Guard W&B's package enumeration against distributions missing metadata.
+        if not getattr(wandb_util.working_set, "_skip_missing_name", False):
+            def _safe_working_set():
+                try:
+                    from importlib.metadata import distributions  # type: ignore
+                except ImportError:  # pragma: no cover - fallback for older Python
+                    from importlib_metadata import distributions  # type: ignore
+
+                for dist in distributions():
+                    metadata = getattr(dist, "metadata", None)
+                    name = None
+                    if metadata is not None:
+                        try:
+                            name = metadata.get("Name")
+                        except AttributeError:
+                            try:
+                                name = metadata["Name"]
+                            except Exception:
+                                name = None
+                    if not name:
+                        continue
+                    version = getattr(dist, "version", None)
+                    yield wandb_util.InstalledDistribution(
+                        key=str(name), version=str(version or "")
+                    )
+
+            _safe_working_set._skip_missing_name = True
+            wandb_util.working_set = _safe_working_set
+
         wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
@@ -2162,10 +2199,10 @@ def create_model_and_optimizer(
             elif tool.lower() == "code_agent":
                 from open_instruct.tool_utils.tool_vllm import CodeAgentTool
 
-                # Use code_agent_api_endpoint if set, otherwise fall back to code_tool_api_endpoint
-                api_endpoint = args.code_agent_api_endpoint
+                # Use code_agent_url if set, otherwise fall back to code_tool_api_endpoint
+                api_endpoint = args.code_agent_url
                 if not api_endpoint:
-                    raise ValueError("code_agent tool requires --code_agent_api_endpoint to be set")
+                    raise ValueError("code_agent tool requires --code_agent_url to be set")
 
                 tool = CodeAgentTool(
                     start_str="<tool_call>",
@@ -2511,7 +2548,7 @@ def one_training_step(
     total_training_time = time.perf_counter() - training_start_time
 
     num_actor_gpus = args.vllm_num_engines * args.vllm_tensor_parallel_size
-    total_generation_time = data_thread_metrics["time/getting_response"]
+    total_generation_time = data_thread_metrics["time/getting_response"] if "time/getting_response" in data_thread_metrics else 0.0
 
     utilization_metrics = calculate_utilization_metrics(
         model_dims=model_dims,
