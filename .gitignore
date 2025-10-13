@@ -159,3 +159,4 @@ dmypy.json
 cache/
 local_dataset_cache/
 scratch/
+open_instruct/code_utils/repos/
