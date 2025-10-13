@@ -129,19 +129,21 @@ def compute_weighted_rubric_reward(response: str, ground_truth: Dict[str, Any]) 
             "rubric_reward": 0.0,
             "format_correct_has_answer": 0.0,
             "num_rubrics": len(rubrics),
-            "rubric_scores_by_title": rubric_scores_by_title,
+            # "rubric_scores_by_title": rubric_scores_by_title,
         }
         return result
 
     # Compute per-rubric scores grouped by title (this includes all the expensive scoring)
-    rubric_scores_by_title, overall_reward = asyncio.run(_compute_rubric_scores_and_reward(extracted_answer, ground_truth))
+    rubric_scores_by_title, overall_reward, persistent_reward, adaptive_reward = asyncio.run(_compute_rubric_scores_and_reward(extracted_answer, ground_truth))
                     
     result["reward"] = overall_reward
     result["log_values"] = {
         "rubric_reward": overall_reward,
         "format_correct_has_answer": 1.0,
         "num_rubrics": num_rubrics,
-        "rubric_scores_by_title": rubric_scores_by_title,
+        "persistent_rubric_reward": persistent_reward,
+        "adaptive_rubric_reward": adaptive_reward,
+        # "rubric_scores_by_title": rubric_scores_by_title,
         }
     return result
 
@@ -178,6 +180,8 @@ def compute_weighted_rubric_reward_with_citation_and_format_reward(response: str
             "format_reward": 0.0,
             "num_search_turns_reward": 0.0,
             "num_rubrics": num_rubrics,
+            "persistent_rubric_reward": 0.0,
+            "adaptive_rubric_reward": 0.0,
         },
         "error": None,
     }
@@ -193,6 +197,8 @@ def compute_weighted_rubric_reward_with_citation_and_format_reward(response: str
     if extracted_answer is None:
         result["error"] = "Failed to extract answer from response"
         result["reward"] = 0.0
+        result["log_values"]["persistent_rubric_reward"] = 0.0
+        result["log_values"]["adaptive_rubric_reward"] = 0.0
         
         # Create zero scores for all rubrics in the ground truth
         rubrics = ground_truth["rubrics"]
@@ -201,7 +207,7 @@ def compute_weighted_rubric_reward_with_citation_and_format_reward(response: str
             rubric_key = create_rubric_key(question, rubric)
             rubric_scores_by_title[rubric_key] = 0.0
         
-        result["log_values"]["rubric_scores_by_title"] = rubric_scores_by_title
+        # result["log_values"]["rubric_scores_by_title"] = rubric_scores_by_title
         
         # Compute final reward using only format and search turn rewards
         reward = 0.0
@@ -217,9 +223,11 @@ def compute_weighted_rubric_reward_with_citation_and_format_reward(response: str
         return result
 
     # Compute per-rubric scores grouped by title using existing logic
-    rubric_scores_by_title, rubric_reward = asyncio.run(_compute_rubric_scores_and_reward(extracted_answer, ground_truth, use_general_rubric=use_general_rubric, use_likert_rubric=use_likert_rubric))
+    rubric_scores_by_title, rubric_reward, persistent_reward, adaptive_reward = asyncio.run(_compute_rubric_scores_and_reward(extracted_answer, ground_truth, use_general_rubric=use_general_rubric, use_likert_rubric=use_likert_rubric))
     result["log_values"]["rubric_reward"] = rubric_reward
-    result["log_values"]["rubric_scores_by_title"] = rubric_scores_by_title
+    result["log_values"]["persistent_rubric_reward"] = persistent_reward
+    result["log_values"]["adaptive_rubric_reward"] = adaptive_reward
+    # result["log_values"]["rubric_scores_by_title"] = rubric_scores_by_title
     result["log_values"]["format_correct_has_answer"] = 1.0
     
     # Score citation reward (copied from longform_averaged_outcome_rewards)
@@ -257,6 +265,7 @@ async def _compute_rubric_scores_and_reward(response: str, ground_truth: Dict[st
     from open_instruct.search_rewards.utils.rubric_utils import _score_property_async
     
     rubrics = ground_truth["rubrics"]
+    rubrics_types = ground_truth.get("rubrics_types", ["persistent"] * len(rubrics))
     question = ground_truth["query"]
     
     # Group rubrics by title and compute scores in one pass
@@ -283,7 +292,7 @@ Example response:
 Your JSON Evaluation:"""
         task = _score_property_async(response, question, None, system_prompt=system_prompt, user_prompt=user_prompt, score_scale=10.0)
         tasks.append(task)
-        task_to_rubric_mapping.append(("likert_rubric", system_prompt))
+        task_to_rubric_mapping.append(("likert_rubric", system_prompt, "persistent"))
     elif use_general_rubric:
             general_rubric = """(1) Overall Comprehensiveness: The report should cover content as comprehensively as possible
                 (2) Thoroughness of Discussion: Each section should be discussed thoroughly, not just superficially
@@ -291,10 +300,11 @@ Your JSON Evaluation:"""
                 (4) Coherence: The discussion should stay focused and relevant to the topic"""
             task = _score_property_async(response, question, general_rubric)
             tasks.append(task)
-            task_to_rubric_mapping.append(("general_rubric", general_rubric))
+            task_to_rubric_mapping.append(("general_rubric", general_rubric, "persistent"))
     else:
-        for rubric in rubrics:
+        for i, rubric in enumerate(rubrics):
             rubric_key = create_rubric_key(question, rubric)
+            rubric_type = rubrics_types[i]
             
             if rubric_key not in title_groups:
                 title_groups[rubric_key] = {"scores": [], "weights": []}
@@ -302,7 +312,7 @@ Your JSON Evaluation:"""
             # Create async task for scoring this rubric   
             task = _score_property_async(response, question, rubric["description"])
             tasks.append(task)
-            task_to_rubric_mapping.append((rubric_key, rubric))
+            task_to_rubric_mapping.append((rubric_key, rubric, rubric_type))
     
     # Execute all scoring tasks in parallel (this is the expensive part, done only once)
     scores = await asyncio.gather(*tasks)
@@ -319,7 +329,12 @@ Your JSON Evaluation:"""
     overall_weighted_sum = 0.0
     overall_total_weight = 0.0
     
-    for score, (rubric_key, rubric) in zip(scores, task_to_rubric_mapping):
+    persistent_total_score = 0.0
+    adaptive_total_score = 0.0
+    persistent_total_weight = 0.0
+    adaptive_total_weight = 0.0
+    
+    for score, (rubric_key, rubric, rubric_type) in zip(scores, task_to_rubric_mapping):
         # Add to title groups
         title_groups[rubric_key]["scores"].append(score)
         title_groups[rubric_key]["weights"].append(rubric["weight"])
@@ -328,6 +343,12 @@ Your JSON Evaluation:"""
         overall_weighted_sum += score * rubric["weight"]
         if rubric["weight"] > 0:
             overall_total_weight += rubric["weight"]
+        if rubric_type == "persistent":
+            persistent_total_score += score * rubric["weight"]
+            persistent_total_weight += rubric["weight"]
+        elif rubric_type == "adaptive":
+            adaptive_total_score += score * rubric["weight"]
+            adaptive_total_weight += rubric["weight"]
     
     # Compute weighted average for each rubric key group
     for rubric_key, group_data in title_groups.items():
@@ -345,7 +366,9 @@ Your JSON Evaluation:"""
     # Compute overall weighted reward
     overall_reward = overall_weighted_sum / max(overall_total_weight, 1.0)
     
-    return title_scores, overall_reward
+    persistent_reward = persistent_total_score / max(persistent_total_weight, 1.0)
+    adaptive_reward = adaptive_total_score / max(adaptive_total_weight, 1.0)
+    return title_scores, overall_reward, persistent_reward, adaptive_reward
 
 
 if __name__ == '__main__':

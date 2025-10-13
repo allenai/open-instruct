@@ -2483,6 +2483,7 @@ if __name__ == "__main__":
     if args.apply_adaptive_rubric_reward:
         from open_instruct.search_rewards.utils.rubric_utils import _generate_instance_wise_adaptive_rubrics, update_ground_truths_with_adaptive_rubrics
         from open_instruct.search_rewards.longform_rubric_rewards import create_rubric_key
+        from open_instruct.search_rewards.utils._direction_agreement import compute_direction_agreement, compute_direction_agreement_per_prompt
     if args.mix_partial_rollouts:
         from open_instruct.search_rewards.rollout_revision import maybe_replace_on_policy_rollouts_with_partial_rollouts
 
@@ -2604,6 +2605,24 @@ if __name__ == "__main__":
                     else:
                         # Skip non-numeric values (like dictionaries) or log them differently
                         print(f"Skipping non-numeric log_values key '{key}' with value types: {[type(v).__name__ for v in value[:3]]}")  # Show first 3 types for debugging
+                # log aggreement between adaptive rubric and persistent rubric
+                if args.apply_adaptive_rubric_reward and "persistent_rubric_reward" in log_values and "adaptive_rubric_reward" in log_values:
+                    with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating direction agreement"):
+                        persistent_rubric_rewards = log_values["persistent_rubric_reward"]
+                        adaptive_rubric_rewards = log_values["adaptive_rubric_reward"]
+                        
+                        # Compute per-prompt directional agreement
+                        if queries is not None:
+                            direction_agreement_dict = compute_direction_agreement_per_prompt(
+                                prompts=queries,
+                                persistent_rubric_rewards=persistent_rubric_rewards,
+                                adaptive_rubric_rewards=adaptive_rubric_rewards
+                            )
+                            for key, value in direction_agreement_dict.items():
+                                metrics[f"analysis/persistent_vs_adaptive_rubric_agreement/{key}"] = value
+                        else:
+                            print("Warning: Cannot compute per-prompt direction agreement because 'queries' is None")
+                
                 # reshuffle around per_func rewards
                 per_func_lists = defaultdict(list)
                 for reward_dict in per_func_rewards:
@@ -2627,7 +2646,6 @@ if __name__ == "__main__":
                 
                 # log direction agreement
                 if args.log_direction_agreement:
-                    from open_instruct.search_rewards.utils._direction_agreement import compute_direction_agreement
                     with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating direction agreement"):
                         direction_agreement_dict = compute_direction_agreement(log_values, verifiable_rewards)
                         for key, value in direction_agreement_dict.items():

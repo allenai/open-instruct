@@ -507,13 +507,14 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, all_adaptive_rubri
             
             # Append new rubrics to active_rubrics in buffer
             rubric_buffer[query]["active_rubrics"].extend(new_active_rubrics)
-            num_active_buffer_rubrics.append(len(new_active_rubrics))
+            num_active_buffer_rubrics.append(len(rubric_buffer[query]["active_rubrics"]))
             processed_queries.add(query)  # Mark this query as processed
             
         # Always use rubrics from buffer if available (for all rollouts of this query)
         if rubric_buffer is not None and query in rubric_buffer:
             # Keep original rubrics and append active rubrics from buffer
             ground_truth_obj["rubrics"] = rubric_buffer[query]["persistent_rubrics"] + rubric_buffer[query]["active_rubrics"]
+            ground_truth_obj["rubrics_types"] = ["persistent"] * len(rubric_buffer[query]["persistent_rubrics"]) + ["adaptive"] * len(rubric_buffer[query]["active_rubrics"])
         else:
             print(f"No buffer found for query {query}, using newly generated rubrics")
             # Keep original rubrics and append newly generated adaptive rubrics
@@ -532,6 +533,7 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, all_adaptive_rubri
                     "title": rubric["title"]
                 })
             ground_truth_obj["rubrics"] = original_rubrics + additional_rubrics
+            ground_truth_obj["rubrics_types"] = ["persistent"] * len(original_rubrics) + ["adaptive"] * len(additional_rubrics)
         
         # Convert back to JSON string and update the original list
         updated_ground_truth_str = json.dumps(ground_truth_obj)
