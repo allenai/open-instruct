@@ -48,7 +48,6 @@ actor = LLMSearchRayActor.options(
     max_output_len=args.model_len,  # Explicitly set a custom max context length
     gpu_memory_utilization=0.95,
     num_gpus=1,
-    enable_sleep_mode=False,
     noset_visible_devices=ray_noset_visible_devices(),
 )
 

@@ -10,9 +10,9 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 # https://github.com/RulinShao/massive-serve
 # and then set the search_api_endpoint accordingly.
 uv run python mason.py \
-       --cluster ai2/jupiter-cirrascale-2 \
-       --cluster ai2/augusta-google-1 \
-       --cluster ai2/saturn-cirrascale \
+       --cluster ai2/jupiter \
+       --cluster ai2/augusta \
+       --cluster ai2/saturn \
        --image "$BEAKER_IMAGE" \
        --description "Single GPU on Beaker with tool use test script." \
        --pure_docker_mode \
@@ -21,6 +21,7 @@ uv run python mason.py \
        --preemptible \
        --num_nodes 1 \
        --max_retries 0 \
+       --timeout 2700 \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --budget ai2/oe-adapt \
@@ -47,7 +48,7 @@ uv run python mason.py \
     --sft_messages_key messages \
     --exp_name 0605_general_tool_use_without_good_outputs \
     --learning_rate 5e-7 \
-    --total_episodes 3_200 \
+    --total_episodes $((20 * 8 * 4)) \
     --deepspeed_stage 2 \
     --with_tracking \
     --num_epochs 1 \
@@ -74,5 +75,5 @@ uv run python mason.py \
     --max_tool_calls 5 \
     --vllm_enable_prefix_caching \
     --tools code search \
-    --search_api_endpoint "http://neptune-cs-aus-258.reviz.ai2.in:43189/search" \
+    --search_api_endpoint "http://saturn-cs-aus-248.reviz.ai2.in:47479/search" \
     --code_tool_api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute

@@ -1,7 +1,7 @@
 '''
 python mason.py \
-  --cluster ai2/saturn ai2/neptune --image nathanl/open_instruct_auto \
-  --workspace ai2/oe-adapt-code \
+  --cluster ai2/jupiter --image nathanl/open_instruct_auto \
+  --workspace ai2/tulu-thinker \
   --priority high \
   --preemptible \
   --gpus 0 \

@@ -37,6 +37,7 @@ class GenerationResult:
     token_statistics: Optional[TokenStatistics] = None
     start_time: Optional[float] = None
     tool_contexts: Optional[List[Optional[str]]] = None
+    logprobs: Optional[List[List[float]]] = None  # logprobs for each token in each response
 
 
 @dataclass
