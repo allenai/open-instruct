@@ -1125,7 +1125,7 @@ def create_balanced_multi_question_dataset(num_examples: int = 1000, seed: int =
 
 
 if __name__ == "__main__":
-    num_questions = 30
+    num_questions = 5
     hub_id = f"rulins/multi_question_synthetic_single_source_asearcher_base_{num_questions}q"
     asearcher_base_dataset = create_multi_question_dataset_from_asearcher_base(
         num_examples=1000,
