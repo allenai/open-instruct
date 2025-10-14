@@ -29,7 +29,7 @@ def main():
     parser.add_argument("--workspace", type=str, default="ai2/tulu-2-improvements", help="Beaker workspace to use.")
     parser.add_argument("--datasets", nargs='+', help="List of datasets to mount in form <beaker_id>:<mount_path>")
     # allow unknown args from CLI, use this to modify loaded config in bash scripts for sweeping
-    # Note, can only override args in --config passed (not default FlatArguments class in open_instruct/finetune.py)
+    # Note, can only override args in --config passed (not default FlatArguments class in open_instruct/utils.py)
 
     # Use parse_known_args instead of parse_args
     args, unknown = parser.parse_known_args()

@@ -84,10 +84,17 @@ class FlatArguments:
     Full arguments class for all fine-tuning jobs.
     """
 
+    # Sometimes users will pass in a `str` repr of a dict in the CLI
+    # We need to track what fields those can be. Each time a new arg
+    # has a dict type, it must be added to this list.
+    # Important: These should be typed with Optional[Union[dict,str,...]]
+    # Note: the suggested ellipses typing above causes errors on python 3.10, so they are omitted.
     _VALID_DICT_FIELDS = ["additional_model_arguments"]
 
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
+    """The name of this experiment"""
     do_not_randomize_output_dir: bool = False
+    """By default the output directory will be randomized"""
     model_name_or_path: Optional[str] = field(
         default=None,
         metadata={
@@ -126,15 +133,23 @@ class FlatArguments:
         default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
     )
     dataset_mixer_list: List[str] = field(default_factory=lambda: ["allenai/tulu-3-sft-personas-algebra", "1.0"])
+    """A list of datasets (local or HF) to sample from."""
     dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
+    """The dataset splits to use for training"""
     dataset_transform_fn: list[str] = field(
         default_factory=lambda: ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
     )
+    """The list of transform functions to apply to the dataset."""
     dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS)
+    """The columns to use for the dataset."""
     dataset_cache_mode: Literal["hf", "local"] = "local"
+    """The mode to use for caching the dataset."""
     dataset_local_cache_dir: str = "local_dataset_cache"
+    """The directory to save the local dataset cache to."""
     dataset_config_hash: Optional[str] = None
+    """The hash of the dataset configuration."""
     dataset_skip_cache: bool = False
+    """Whether to skip the cache."""
     dataset_mix_dir: Optional[str] = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
     )
@@ -266,23 +281,45 @@ class FlatArguments:
     clean_checkpoints_at_end: bool = field(
         default=True, metadata={"help": "Whether to clean up all previous checkpoints at the end of the run."}
     )
+
+    # Experiment tracking
     with_tracking: bool = False
+    """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
+    """The wandb's project name"""
     wandb_entity: Optional[str] = None
+    """The entity (team) of wandb's project"""
     push_to_hub: bool = True
+    """Whether to upload the saved model to huggingface"""
     hf_entity: Optional[str] = None
+    """The user or org name of the model repository from the Hugging Face Hub"""
     hf_repo_id: Optional[str] = None
+    """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
     hf_repo_revision: Optional[str] = None
+    """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
     hf_repo_url: Optional[str] = None
+    """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     try_launch_beaker_eval_jobs: bool = True
+    """Whether to launch beaker evaluation jobs after training"""
     hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
+    """What dataset to upload the metadata to. If unset, don't upload metadata"""
     cache_dataset_only: bool = False
+    """Immediately exit after caching the dataset"""
     add_seed_and_date_to_exp_name: bool = True
+    """Append the seed and date to exp_name"""
+
+    # Ai2 specific settings
     try_auto_save_to_beaker: bool = True
+    """Whether to try to save the model to Beaker dataset `/output` after training"""
     gs_bucket_path: Optional[str] = None
+    """The path to the gs bucket to save the model to"""
     oe_eval_tasks: Optional[List[str]] = None
+    """The beaker evaluation tasks to launch"""
     oe_eval_max_length: int = 4096
+    """the max generation length for evaluation for oe-eval"""
+
     sync_each_batch: bool = False
+    """Optionaly sync grads every batch when using grad accumulation. Can significantly reduce memory costs."""
     packing: bool = field(
         default=False,
         metadata={"help": "Whether to use packing/padding-free collation via TensorDataCollatorWithFlattening"},
@@ -308,10 +345,14 @@ class FlatArguments:
             if not (1.0 >= self.final_lr_ratio >= 0.0):
                 raise ValueError(f"final_lr_ratio must be between 0 and 1, not {self.final_lr_ratio=}")
 
+        # Parse in args that could be `dict` sent in from the CLI as a string
         for dict_feld in self._VALID_DICT_FIELDS:
             passed_value = getattr(self, dict_feld)
+            # We only want to do this if the str starts with a bracket to indicate a `dict`
+            # else its likely a filename if supported
             if isinstance(passed_value, str) and passed_value.startswith("{"):
                 loaded_dict = json.loads(passed_value)
+                # Convert str values to types if applicable
                 loaded_dict = _convert_str_dict(loaded_dict)
                 setattr(self, dict_feld, loaded_dict)
 
