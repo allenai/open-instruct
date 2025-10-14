@@ -672,16 +672,20 @@ class PolicyTrainerRayProcess(RayProcess):
             if args.optimizer_kwargs is not None:
                 optimizer_params.update(args.optimizer_kwargs)
             ds_config["optimizer"] = {"type": "muon", "params": optimizer_params}
+            ds_config["scheduler"] = {
+                "type": "WarmupDecayLR",
+                "params": {
+                    "total_num_steps": num_scheduler_steps,
+                    "warmup_min_lr": 0,
+                    "warmup_max_lr": args.learning_rate,
+                    "warmup_num_steps": warm_up_steps,
+                },
+            }
             self.model, _, _, _ = deepspeed.initialize(
                 model=self.policy, model_parameters=self.policy.parameters(), config=ds_config, dist_init_required=True
             )
             self.optimizer = self.model.optimizer
-            self.scheduler = get_scheduler(
-                args.lr_scheduler_type,
-                optimizer=self.optimizer,
-                num_warmup_steps=warm_up_steps,
-                num_training_steps=num_scheduler_steps,
-            )
+            self.scheduler = self.model.lr_scheduler
         else:
             if args.set_weight_decay_on_bias_and_norm:
                 optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
