@@ -1349,11 +1349,9 @@ def get_train_ds_config(
         "stage3_param_persistence_threshold": "auto",
         "stage3_prefetch_bucket_size": "auto",
         "reduce_bucket_size": "auto",
-        # ZeRO++
         "zero_hpz_partition_size": zpg,
         "zero_quantized_weights": False,
         "zero_quantized_gradients": False,
-        "zero_allow_untested_optimizer": True,
     }
     if disable_trace_cache:
         zero_opt_dict["stage3_prefetch_bucket_size"] = 0
