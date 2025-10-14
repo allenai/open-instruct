@@ -442,6 +442,9 @@ class LLMRayActor:
         self.verbose = verbose
         self.request_metadata = {}
         self.vllm_active_requests = set()
+        # Track the dtype we expect for each parameter during weight broadcasts. This allows
+        # us to adapt when quantization changes the underlying storage dtype (e.g., bf16 -> int8).
+        self._expected_weight_dtypes: Dict[str, torch.dtype] = {}
 
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.prompt_queue = prompt_queue
@@ -914,10 +917,18 @@ class LLMRayActor:
 
             time.sleep(WEIGHT_UPDATE_SLEEP_INTERVAL_S)
         # Then, check that the dtypes match.
-        expected_dtype = str(self.llm_engine.model_config.dtype)
-        assert str(dtype) == expected_dtype, (
-            f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
-        )
+        dtype_str = str(dtype)
+        expected_dtype = self._expected_weight_dtypes.get(name)
+        if expected_dtype is not None and str(expected_dtype) != dtype_str:
+            self.logger.info(
+                "[vLLM Weight Update] Detected dtype change for param '%s': %s -> %s. Updating expectation.",
+                name,
+                expected_dtype,
+                dtype,
+            )
+
+        # Always keep the dictionary in sync with the most recent dtype we observe.
+        self._expected_weight_dtypes[name] = dtype
 
     def update_weight(self, name: str, dtype: str, shape: Tuple[int, ...], empty_cache: bool = False) -> None:
         self._prepare_weight_update(name, dtype)

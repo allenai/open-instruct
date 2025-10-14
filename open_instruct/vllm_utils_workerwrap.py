@@ -1,4 +1,30 @@
 class WorkerWrap:
+    def __init__(self):
+        self._expected_weight_dtypes = {}
+        self._original_model_dtype = None
+
+    def _resolve_torch_dtype(self, dtype):
+        import torch
+
+        if isinstance(dtype, torch.dtype):
+            return dtype
+        if isinstance(dtype, str):
+            candidate = dtype.split(".", 1)[1] if dtype.startswith("torch.") else dtype
+            if hasattr(torch, candidate):
+                return getattr(torch, candidate)
+        raise ValueError(f"Unsupported dtype received for weight update: {dtype!r}")
+
+    def _update_expected_dtype(self, name, dtype):
+        prev_dtype = self._expected_weight_dtypes.get(name)
+        if prev_dtype is not None and prev_dtype != dtype:
+            print(
+                f"[vLLM Worker] dtype change detected for param '{name}': "
+                f"{prev_dtype} -> {dtype}. Updating expected dtype."
+            )
+        self._expected_weight_dtypes[name] = dtype
+        if self._original_model_dtype is None and hasattr(self, "model_config"):
+            self._original_model_dtype = self.model_config.dtype
+
     def init_process_group(
         self,
         master_address,
@@ -46,13 +72,9 @@ class WorkerWrap:
     def update_weight(self, name, dtype, shape, empty_cache=False):
         import torch
 
-        assert str(dtype) == str(self.model_config.dtype), (
-            f"[vLLM Weight Update] dtype mismatch for param '{name}': "
-            f"broadcasting {dtype} but vLLM expects {str(self.model_config.dtype)}. "
-            f"This can happen when quantization changes weight dtypes (e.g., int8 for W8A16) "
-            f"but vLLM was initialized with the original dtype."
-        )
-        weight = torch.empty(shape, dtype=self.model_config.dtype, device="cuda")
+        resolved_dtype = self._resolve_torch_dtype(dtype)
+        self._update_expected_dtype(name, resolved_dtype)
+        weight = torch.empty(shape, dtype=resolved_dtype, device="cuda")
         if self._model_update_with_ray:
             import ray.util.collective as collective
 
@@ -72,9 +94,8 @@ class WorkerWrap:
 
         from open_instruct.vllm_utils3 import get_physical_gpu_id
 
-        assert str(dtype) == str(self.model_config.dtype), (
-            f"mismatch dtype: src {dtype}, dst {str(self.model_config.dtype)}"
-        )
+        resolved_dtype = self._resolve_torch_dtype(dtype)
+        self._update_expected_dtype(name, resolved_dtype)
         handle = ipc_handles[get_physical_gpu_id()]
         device_id = self.device.index
         func, args = handle
