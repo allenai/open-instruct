@@ -902,6 +902,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Fire all vllm engines for broadcast
                     if torch.distributed.get_rank() == 0:
                         shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
+                        if count == 1:
+                            logger.info(f"[Weight Broadcast] First param dtype: {param.dtype}, name: {name}")
                         refs = [
                             engine.update_weight.remote(
                                 name, dtype=param.dtype, shape=shape, empty_cache=count == num_params

@@ -47,7 +47,10 @@ class WorkerWrap:
         import torch
 
         assert str(dtype) == str(self.model_config.dtype), (
-            f"mismatch dtype: src {dtype}, dst {str(self.model_config.dtype)}"
+            f"[vLLM Weight Update] dtype mismatch for param '{name}': "
+            f"broadcasting {dtype} but vLLM expects {str(self.model_config.dtype)}. "
+            f"This can happen when quantization changes weight dtypes (e.g., int8 for W8A16) "
+            f"but vLLM was initialized with the original dtype."
         )
         weight = torch.empty(shape, dtype=self.model_config.dtype, device="cuda")
         if self._model_update_with_ray:
