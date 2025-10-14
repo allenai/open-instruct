@@ -22,6 +22,7 @@ from dateutil import parser
 from parameterized import parameterized
 
 from open_instruct import utils
+from open_instruct.finetune import FlatArguments
 
 
 class GetDatasetsTest(unittest.TestCase):
@@ -251,6 +252,25 @@ class TestUtilityFunctions(unittest.TestCase):
     )
     def test_wandb_url_to_run_path(self, url: str, expected_run_path: str):
         self.assertEqual(utils.wandb_url_to_run_path(url), expected_run_path)
+
+
+class TestFlatArguments(unittest.TestCase):
+    def test_additional_model_args(self) -> None:
+        parser = utils.ArgumentParserPlus(FlatArguments)
+        (args,) = parser.parse_args_into_dataclasses(
+            ["--additional_model_arguments", '{"int": 1, "bool": true, "float": 0.0, "float2": 5e-7}']
+        )
+        self.assertIsInstance(args.additional_model_arguments, dict)
+        self.assertIsInstance(args.additional_model_arguments["int"], int)
+        self.assertIsInstance(args.additional_model_arguments["bool"], bool)
+        self.assertIsInstance(args.additional_model_arguments["float"], float)
+        self.assertIsInstance(args.additional_model_arguments["float2"], float)
+
+    def test_no_additional_model_args(self) -> None:
+        parser = utils.ArgumentParserPlus(FlatArguments)
+        (args,) = parser.parse_args_into_dataclasses(["--exp_name", "test"])
+        self.assertIsInstance(args.additional_model_arguments, dict)
+        self.assertFalse(args.additional_model_arguments)
 
 
 # useful for checking if public datasets are still available
