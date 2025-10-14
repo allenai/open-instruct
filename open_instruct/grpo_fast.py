@@ -2448,6 +2448,13 @@ def weight_sync_thread(
 
             quantization_times = [result[1] for result in results] if results else []
 
+            # Wait for nested weight update refs to vLLM engines to complete
+            ray_get_with_progress(
+                [ref for result in results for ref in result[0]],
+                desc="[Weight Sync Thread] Waiting for vLLM weight updates to complete",
+                enable=args.verbose,
+            )
+
             # Allow actors to resume
             ray.get(actor_manager.set_should_stop.remote(False))
             logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
