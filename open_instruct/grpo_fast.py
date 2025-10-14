@@ -1941,6 +1941,7 @@ def data_preparation_thread(
                     dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
                     dummy_response_mask = torch.zeros_like(dummy_qr)
                     dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
+                    dummy_vllm_logprob = torch.full((dummy_qr.size(0),), float("nan"), dtype=torch.float)
                     # pad out the world size
                     for _ in range(shortfall):
                         packed_sequences.query_responses.append(dummy_qr)
@@ -1949,6 +1950,7 @@ def data_preparation_thread(
                         packed_sequences.position_ids.append(dummy_position_ids)
                         packed_sequences.response_masks.append(dummy_response_mask)
                         packed_sequences.advantages.append(dummy_advantage)
+                        packed_sequences.vllm_logprobs.append(dummy_vllm_logprob)
 
         with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
             B = (
