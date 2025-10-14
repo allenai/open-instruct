@@ -1,12 +1,10 @@
-import sys
 import unittest
 from copy import deepcopy
-from pathlib import Path
 
-import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from parameterized import parameterized
 from torch.utils.data import DataLoader
 from transformers import (
     AutoTokenizer,
@@ -17,9 +15,6 @@ from transformers import (
     LlamaForCausalLM,
 )
 
-# HACK for being able to load the collator without needing to install open-instruct
-open_instruct_dir = Path(__file__).parent.parent.absolute()
-sys.path.append(open_instruct_dir)
 from open_instruct.dataset_processor import CHAT_TEMPLATES
 from open_instruct.dataset_transformation import sft_tulu_tokenize_and_truncate_v1
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
@@ -32,12 +27,6 @@ try:
 except ImportError:
     mamba_and_causal_conv_available = False
 
-try:
-    import flash_attn  # noqa
-
-    flash_attn_available = True
-except ImportError:
-    flash_attn_available = False
 
 MODEL_CLASSES = {"bamba": BambaForCausalLM, "llama": LlamaForCausalLM}
 MODEL_CFGS = {"bamba": BambaConfig, "llama": LlamaConfig}
@@ -92,13 +81,11 @@ class TestPaddingFree(unittest.TestCase):
     batch_size = 2
     dtype = torch.bfloat16
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="Padding free tests require CUDA")
-    @pytest.mark.skipif(not flash_attn_available, reason="Padding free requires flash_attn")
-    @pytest.mark.parametrize("model_name", ["bamba", "llama"])
-    @pytest.mark.parametrize("loss_type", ["mean", "sum"])
+    @unittest.skipIf(not torch.cuda.is_available(), reason="Padding free tests require CUDA")
+    @parameterized.expand([("bamba", "mean"), ("bamba", "sum"), ("llama", "mean"), ("llama", "sum")])
     def test_padding_free(self, model_name: str, loss_type: str) -> None:
         if model_name == "bamba" and not mamba_and_causal_conv_available:
-            pytest.skip("bamba padding-free tests require mamba_ssm and causal_conv1d")
+            self.skipTest("bamba padding-free tests require mamba_ssm and causal_conv1d")
         torch.manual_seed(42)
 
         tokenizer = AutoTokenizer.from_pretrained("ibm-ai-platform/Bamba-9B-v2")
@@ -109,8 +96,6 @@ class TestPaddingFree(unittest.TestCase):
         model, cfg = _get_fa2_model_and_cfg(model_name, vocab_size, self.dtype)
         model.initialize_weights()
         pf_model = deepcopy(model)
-
-        inputs = torch.randint(cfg.vocab_size, size=(self.batch_size, self.seqlen), device="cpu")
 
         data = {
             0: {
@@ -163,7 +148,7 @@ class TestPaddingFree(unittest.TestCase):
         pf_logits = pf_outputs.logits
         incorrect_pf_logits = incorrect_pf_outputs.logits
         torch.testing.assert_close(pf_logits, non_masked_logits)
-        with pytest.raises(AssertionError, match="Mismatched elements:"):
+        with self.assertRaisesRegex(AssertionError, "Mismatched elements:"):
             torch.testing.assert_close(pf_logits, incorrect_pf_logits)
 
         if loss_type == "mean":
