@@ -1,4 +1,5 @@
 import sys
+import unittest
 from copy import deepcopy
 from pathlib import Path
 
@@ -75,7 +76,7 @@ MODEL_KWARGS = {
 }
 
 
-class TestPaddingFree:
+class TestPaddingFree(unittest.TestCase):
     seqlen = 128
     batch_size = 2
     dtype = torch.bfloat16
@@ -147,8 +148,8 @@ class TestPaddingFree:
                 if torch.is_tensor(b[k]):
                     b[k] = b[k].cuda()
 
-        assert batch["input_ids"].shape[0] == 2
-        assert pf_batch["input_ids"].shape[0] == 1
+        self.assertEqual(batch["input_ids"].shape[0], 2)
+        self.assertEqual(pf_batch["input_ids"].shape[0], 1)
 
         incorrect_pf_batch = {
             "input_ids": pf_batch["input_ids"],
