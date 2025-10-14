@@ -639,9 +639,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
-        ds_config = get_train_ds_config(
-            offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True, grad_accum_dtype="bf16"
-        )
+        ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
         # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
@@ -664,33 +662,52 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
-        # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
-        # AdamOptimizer = FusedAdam
-        if args.set_weight_decay_on_bias_and_norm:
-            optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
-        else:
-            optim_params = self.policy.parameters()
-        optimizer_kwargs = {"lr": args.learning_rate}
-        if args.optimizer_kwargs is not None:
-            optimizer_kwargs.update(args.optimizer_kwargs)
-        self.optimizer = make_optimizer(optim_params, args.optimizer, optimizer_kwargs, model=self.policy)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
         if args.warmup_ratio > 0.0:
             warm_up_steps = int(num_scheduler_steps * args.warmup_ratio)
-        scheduler = get_scheduler(
-            args.lr_scheduler_type,
-            optimizer=self.optimizer,
-            num_warmup_steps=warm_up_steps,
-            num_training_steps=num_scheduler_steps,
-        )
-        self.model, self.optimizer, _, self.scheduler = deepspeed.initialize(
-            model=self.policy,
-            optimizer=self.optimizer,
-            config=ds_config,
-            lr_scheduler=scheduler,
-            dist_init_required=True,
-        )
+
+        if args.optimizer.lower() == "muon":
+            optimizer_params = {"lr": args.learning_rate, "momentum": 0.95, "weight_decay": args.weight_decay}
+            if args.optimizer_kwargs is not None:
+                optimizer_params.update(args.optimizer_kwargs)
+            ds_config["optimizer"] = {"type": "muon", "params": optimizer_params}
+            scheduler = get_scheduler(
+                args.lr_scheduler_type,
+                optimizer=None,
+                num_warmup_steps=warm_up_steps,
+                num_training_steps=num_scheduler_steps,
+            )
+            self.model, _, _, self.scheduler = deepspeed.initialize(
+                model=self.policy,
+                model_parameters=self.policy.parameters(),
+                config=ds_config,
+                lr_scheduler=scheduler,
+                dist_init_required=True,
+            )
+            self.optimizer = self.model.optimizer
+        else:
+            if args.set_weight_decay_on_bias_and_norm:
+                optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
+            else:
+                optim_params = self.policy.parameters()
+            optimizer_kwargs = {"lr": args.learning_rate}
+            if args.optimizer_kwargs is not None:
+                optimizer_kwargs.update(args.optimizer_kwargs)
+            self.optimizer = make_optimizer(optim_params, args.optimizer, optimizer_kwargs, model=self.policy)
+            scheduler = get_scheduler(
+                args.lr_scheduler_type,
+                optimizer=self.optimizer,
+                num_warmup_steps=warm_up_steps,
+                num_training_steps=num_scheduler_steps,
+            )
+            self.model, self.optimizer, _, self.scheduler = deepspeed.initialize(
+                model=self.policy,
+                optimizer=self.optimizer,
+                config=ds_config,
+                lr_scheduler=scheduler,
+                dist_init_required=True,
+            )
         optimization_steps_done = 0
         if args.checkpoint_state_dir:
             # check if the dir exists
