@@ -1428,12 +1428,16 @@ def make_optimizer(optim_params, optimizer_name: str, optimizer_kwargs: dict, mo
         for n, p in model.named_parameters():
             if "lm_head" in n:
                 head_params.append(p)
+                p.use_muon = False
             elif "embed" in n:
                 embed_params.append(p)
+                p.use_muon = False
             elif p.ndim >= 2:
                 hidden_matrix_params.append(p)
+                p.use_muon = True
             else:
                 scalar_params.append(p)
+                p.use_muon = False
 
         lr = optimizer_kwargs.get("lr", 1e-3)
         betas = optimizer_kwargs.get("betas", (0.9, 0.95))
