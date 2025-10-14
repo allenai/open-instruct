@@ -886,13 +886,19 @@ class PolicyTrainerRayProcess(RayProcess):
         else:
             model = self.model.module
 
+        logger.info(f"[Weight Broadcast] Starting weight broadcast, rank={torch.distributed.get_rank()}")
         torch.cuda.empty_cache()
         count, num_params = 0, len(list(model.named_parameters()))
+        logger.info(f"[Weight Broadcast] Broadcasting {num_params} parameters, rank={torch.distributed.get_rank()}")
         refss = []
         if self.args.gather_whole_model:
+            logger.info(f"[Weight Broadcast] Using gather_whole_model mode, rank={torch.distributed.get_rank()}")
             with deepspeed.zero.GatheredParameters(model.parameters(), enabled=self.args.deepspeed_stage == 3):
+                logger.info(f"[Weight Broadcast] Inside GatheredParameters context, rank={torch.distributed.get_rank()}")
                 for name, param in model.named_parameters():
                     count += 1  # empty_cache at last param
+                    if count % 50 == 0:
+                        logger.info(f"[Weight Broadcast] Processing param {count}/{num_params}, rank={torch.distributed.get_rank()}")
                     # Fire all vllm engines for broadcast
                     if torch.distributed.get_rank() == 0:
                         shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
@@ -906,8 +912,11 @@ class PolicyTrainerRayProcess(RayProcess):
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
         else:  # broadcast each parameter independently
+            logger.info(f"[Weight Broadcast] Using broadcast_each_parameter mode, rank={torch.distributed.get_rank()}")
             for name, param in model.named_parameters():
                 count += 1
+                if count % 50 == 0:
+                    logger.info(f"[Weight Broadcast] Processing param {count}/{num_params}, rank={torch.distributed.get_rank()}")
                 if torch.distributed.get_rank() == 0:
                     shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
                     refs = [
@@ -921,6 +930,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
 
+        logger.info(f"[Weight Broadcast] Completed parameter loop, returning {len(refss)} refs, rank={torch.distributed.get_rank()}")
         # Return futures instead of blocking - let caller handle completion
         all_refs = []
         if torch.distributed.get_rank() == 0:
