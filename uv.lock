@@ -605,9 +605,10 @@ wheels = [
 
 [[package]]
 name = "deepspeed"
-version = "0.15.4"
+version = "0.18.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "einops" },
     { name = "hjson" },
     { name = "msgpack" },
     { name = "ninja" },
@@ -620,7 +621,7 @@ dependencies = [
     { name = "torch", version = "2.7.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform != 'darwin'" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/34/c5/dfa824defc1919289a00cbb722aee92cee85ce1e11f7349779235dbe4810/deepspeed-0.15.4.tar.gz", hash = "sha256:60e7c044b7fc386cdad1206212d22b6963ea551f656ed51f7cb34b299459bf2c", size = 1403058, upload-time = "2024-11-08T16:31:30.123Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/95/e8/77fbbbb0fa0549f0fec68bfef7ba835ccd80d5001a9dde69f6ede9211d7b/deepspeed-0.18.0.tar.gz", hash = "sha256:285901ac891a580d834fe6fd0f6c94a32d17433ecf0a3c789739b15a6c5d80fb", size = 1607522, upload-time = "2025-10-07T23:38:43.106Z" }
 
 [[package]]
 name = "depyf"
@@ -2243,7 +2244,7 @@ requires-dist = [
     { name = "bitsandbytes", marker = "sys_platform != 'darwin'", specifier = ">=0.44.1" },
     { name = "datasets", specifier = ">=4.0.0" },
     { name = "debugpy", specifier = ">=1.8.13" },
-    { name = "deepspeed", specifier = "==0.15.4" },
+    { name = "deepspeed", specifier = "==0.18.0" },
     { name = "fastapi", marker = "extra == 'code'", specifier = ">=0.100.0" },
     { name = "flash-attn", marker = "sys_platform != 'darwin'", specifier = ">=2.8.0.post2" },
     { name = "hf-transfer", specifier = ">=0.1.8" },
