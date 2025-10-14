@@ -49,7 +49,6 @@ from multiprocessing import resource_tracker as _rt
 from typing import Any, Iterable, List, NewType, Optional, Tuple, Union
 
 import beaker
-import muon
 import numpy as np
 import ray
 import requests
@@ -1416,6 +1415,8 @@ def make_optimizer(optim_params, optimizer_name: str, optimizer_kwargs: dict, mo
         optimizer_fn = torch.optim.AdamW
         return optimizer_fn(optim_params, **optimizer_kwargs)
     elif optimizer_name.lower() == "muon":
+        from deepspeed.runtime.zero.muon.muon_optimizer import MuonWithAuxAdam
+
         if model is None:
             raise ValueError("Model must be provided when using Muon optimizer for parameter separation.")
 
@@ -1437,6 +1438,7 @@ def make_optimizer(optim_params, optimizer_name: str, optimizer_kwargs: dict, mo
         lr = optimizer_kwargs.get("lr", 1e-3)
         betas = optimizer_kwargs.get("betas", (0.9, 0.95))
         eps = optimizer_kwargs.get("eps", 1e-8)
+        weight_decay = optimizer_kwargs.get("weight_decay", 0.0)
         momentum = optimizer_kwargs.get("momentum", 0.95)
 
         adam_groups = [
@@ -1444,11 +1446,19 @@ def make_optimizer(optim_params, optimizer_name: str, optimizer_kwargs: dict, mo
             {"params": embed_params, "lr": lr},
             {"params": scalar_params, "lr": lr},
         ]
-        adam_groups = [{**g, "betas": betas, "eps": eps, "use_muon": False} for g in adam_groups]
-        muon_group = {"params": hidden_matrix_params, "lr": lr, "momentum": momentum, "use_muon": True}
+        adam_groups = [
+            {**g, "betas": betas, "eps": eps, "weight_decay": weight_decay, "use_muon": False} for g in adam_groups
+        ]
+        muon_group = {
+            "params": hidden_matrix_params,
+            "lr": lr,
+            "momentum": momentum,
+            "weight_decay": weight_decay,
+            "use_muon": True,
+        }
         param_groups = [*adam_groups, muon_group]
 
-        return muon.MuonWithAuxAdam(param_groups)
+        return MuonWithAuxAdam(param_groups)
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}. Supported optimizers are 'adamw' and 'muon'.")
 
