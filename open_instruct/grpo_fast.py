@@ -639,7 +639,9 @@ class PolicyTrainerRayProcess(RayProcess):
 
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
-        ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
+        ds_config = get_train_ds_config(
+            offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True, grad_accum_dtype="bf16"
+        )
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
         # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
