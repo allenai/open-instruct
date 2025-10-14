@@ -81,8 +81,8 @@ class TestPaddingFree(unittest.TestCase):
     batch_size = 2
     dtype = torch.bfloat16
 
-    @unittest.skipIf(not torch.cuda.is_available(), reason="Padding free tests require CUDA")
     @parameterized.expand([("bamba", "mean"), ("bamba", "sum"), ("llama", "mean"), ("llama", "sum")])
+    @unittest.skipIf(not torch.cuda.is_available(), reason="Padding free tests require CUDA")
     def test_padding_free(self, model_name: str, loss_type: str) -> None:
         if model_name == "bamba" and not mamba_and_causal_conv_available:
             self.skipTest("bamba padding-free tests require mamba_ssm and causal_conv1d")
