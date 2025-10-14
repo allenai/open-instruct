@@ -1361,6 +1361,7 @@ def get_train_ds_config(
     return {
         "steps_per_print": 100,
         "zero_optimization": zero_opt_dict,
+        "zero_allow_untested_optimizer": True,
         "bf16": {"enabled": bf16},
         "gradient_clipping": max_norm,
         "prescale_gradients": False,
