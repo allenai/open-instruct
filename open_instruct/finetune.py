@@ -56,6 +56,7 @@ from transformers.training_args import _convert_str_dict
 from open_instruct import logger_utils, utils
 from open_instruct.dataset_transformation import (
     INPUT_IDS_KEY,
+    TOKENIZED_SFT_DATASET_KEYS,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
@@ -129,11 +130,7 @@ class FlatArguments:
     dataset_transform_fn: list[str] = field(
         default_factory=lambda: ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
     )
-    dataset_target_columns: List[str] = field(
-        default_factory=lambda: __import__(
-            "open_instruct.dataset_transformation", fromlist=["TOKENIZED_SFT_DATASET_KEYS"]
-        ).TOKENIZED_SFT_DATASET_KEYS
-    )
+    dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS)
     dataset_cache_mode: Literal["hf", "local"] = "local"
     dataset_local_cache_dir: str = "local_dataset_cache"
     dataset_config_hash: Optional[str] = None
