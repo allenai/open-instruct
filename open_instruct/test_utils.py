@@ -22,6 +22,7 @@ from dateutil import parser
 from parameterized import parameterized
 
 from open_instruct import utils
+from open_instruct.finetune import FlatArguments
 
 
 class GetDatasetsTest(unittest.TestCase):
@@ -255,7 +256,7 @@ class TestUtilityFunctions(unittest.TestCase):
 
 class TestFlatArguments(unittest.TestCase):
     def test_additional_model_args(self) -> None:
-        parser = utils.ArgumentParserPlus(utils.FlatArguments)
+        parser = utils.ArgumentParserPlus(FlatArguments)
         (args,) = parser.parse_args_into_dataclasses(
             ["--additional_model_arguments", '{"int": 1, "bool": true, "float": 0.0, "float2": 5e-7}']
         )
@@ -266,7 +267,7 @@ class TestFlatArguments(unittest.TestCase):
         self.assertIsInstance(args.additional_model_arguments["float2"], float)
 
     def test_no_additional_model_args(self) -> None:
-        parser = utils.ArgumentParserPlus(utils.FlatArguments)
+        parser = utils.ArgumentParserPlus(FlatArguments)
         (args,) = parser.parse_args_into_dataclasses(["--exp_name", "test"])
         self.assertIsInstance(args.additional_model_arguments, dict)
         self.assertFalse(args.additional_model_arguments)

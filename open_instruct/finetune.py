@@ -29,11 +29,14 @@ try:
 except Exception:
     pass
 # isort: on
+import json
 import math
 import os
 import shutil
 import time
+from dataclasses import dataclass, field
 from datetime import timedelta
+from typing import List, Literal, Optional, Union
 
 import datasets
 import torch
@@ -48,6 +51,7 @@ from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, DataCollatorForSeq2Seq, get_scheduler
+from transformers.training_args import _convert_str_dict
 
 from open_instruct import logger_utils, utils
 from open_instruct.dataset_transformation import (
@@ -60,7 +64,6 @@ from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
 from open_instruct.utils import (
     ArgumentParserPlus,
-    FlatArguments,
     clean_last_n_checkpoints,
     get_last_checkpoint_path,
     get_wandb_tags,
@@ -72,6 +75,248 @@ from open_instruct.utils import (
 )
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class FlatArguments:
+    """
+    Full arguments class for all fine-tuning jobs.
+    """
+
+    _VALID_DICT_FIELDS = ["additional_model_arguments"]
+
+    exp_name: str = os.path.basename(__file__)[: -len(".py")]
+    do_not_randomize_output_dir: bool = False
+    model_name_or_path: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The model checkpoint for weights initialization. Don't set if you want to train a model from scratch."
+            )
+        },
+    )
+    config_name: Optional[str] = field(
+        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
+    )
+    use_flash_attn: bool = field(
+        default=True, metadata={"help": "Whether to use flash attention in the model training"}
+    )
+    model_revision: Optional[str] = field(
+        default=None,
+        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+    )
+    additional_model_arguments: Optional[Union[dict, str]] = field(
+        default_factory=dict, metadata={"help": "A dictionary of additional model args used to construct the model."}
+    )
+    low_cpu_mem_usage: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "It is an option to create the model as an empty shell, "
+                "then only materialize its parameters when the pretrained weights are loaded. "
+                "set True will benefit LLM loading time and RAM consumption."
+            )
+        },
+    )
+    dataset_name: Optional[str] = field(
+        default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
+    )
+    dataset_mixer: Optional[dict] = field(
+        default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
+    )
+    dataset_mixer_list: List[str] = field(default_factory=lambda: ["allenai/tulu-3-sft-personas-algebra", "1.0"])
+    dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
+    dataset_transform_fn: list[str] = field(
+        default_factory=lambda: ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
+    )
+    dataset_target_columns: List[str] = field(
+        default_factory=lambda: __import__(
+            "open_instruct.dataset_transformation", fromlist=["TOKENIZED_SFT_DATASET_KEYS"]
+        ).TOKENIZED_SFT_DATASET_KEYS
+    )
+    dataset_cache_mode: Literal["hf", "local"] = "local"
+    dataset_local_cache_dir: str = "local_dataset_cache"
+    dataset_config_hash: Optional[str] = None
+    dataset_skip_cache: bool = False
+    dataset_mix_dir: Optional[str] = field(
+        default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
+    )
+    dataset_config_name: Optional[str] = field(
+        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
+    )
+    max_train_samples: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "For debugging purposes or quicker training, truncate the number of training examples to this "
+                "value if set."
+            )
+        },
+    )
+    preprocessing_num_workers: Optional[int] = field(
+        default=None, metadata={"help": "The number of processes to use for the preprocessing."}
+    )
+    max_seq_length: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The maximum total input sequence length after tokenization. "
+                "Sequences longer than this will be truncated,"
+            )
+        },
+    )
+    overwrite_cache: bool = field(
+        default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
+    )
+    clip_grad_norm: float = field(
+        default=-1,
+        metadata={"help": "Clip gradient norm. Not compatible with deepspeed (use deepspeed config instead)."},
+    )
+    gradient_accumulation_steps: int = field(
+        default=1, metadata={"help": "Number of updates steps to accumulate before performing a backward/update pass."}
+    )
+    learning_rate: float = field(default=2e-5, metadata={"help": "The initial learning rate for AdamW optimizer."})
+    logging_steps: Optional[int] = field(
+        default=None, metadata={"help": "Log the training loss and learning rate every logging_steps steps."}
+    )
+    lora_rank: int = field(default=64, metadata={"help": "The rank of lora."})
+    lora_alpha: float = field(default=16, metadata={"help": "The alpha parameter of lora."})
+    lora_dropout: float = field(default=0.1, metadata={"help": "The dropout rate of lora modules."})
+    lr_scheduler_type: str = field(
+        default="linear",
+        metadata={
+            "help": "The scheduler type to use for learning rate adjustment.",
+            "choices": ["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
+        },
+    )
+    num_train_epochs: int = field(default=2, metadata={"help": "Total number of training epochs to perform."})
+    output_dir: str = field(
+        default="output/",
+        metadata={"help": "The output directory where the model predictions and checkpoints will be written."},
+    )
+    per_device_train_batch_size: int = field(
+        default=8, metadata={"help": "Batch size per GPU/TPU core/CPU for training."}
+    )
+    use_lora: bool = field(
+        default=False,
+        metadata={"help": "If True, will use LORA (low-rank parameter-efficient training) to train the model."},
+    )
+    use_qlora: bool = field(
+        default=False,
+        metadata={"help": "Use qLoRA training - initializes model in quantized form. Not compatible with deepspeed."},
+    )
+    use_8bit_optimizer: bool = field(
+        default=False, metadata={"help": "Use 8bit optimizer from bitsandbytes. Not compatible with deepspeed."}
+    )
+    warmup_ratio: float = field(
+        default=0.03, metadata={"help": "Linear warmup over warmup_ratio fraction of total steps."}
+    )
+    final_lr_ratio: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "Set the final lr value at the end of training to be final_lr_ratio * learning_rate."
+            " Only for linear schedulers, currently."
+        },
+    )
+    weight_decay: float = field(default=0.0, metadata={"help": "Weight decay for AdamW if we apply some."})
+    timeout: int = field(
+        default=1800,
+        metadata={
+            "help": "Timeout for the training process in seconds."
+            "Useful if tokenization process is long. Default is 1800 seconds (30 minutes)."
+        },
+    )
+    resume_from_checkpoint: Optional[str] = field(
+        default=None, metadata={"help": "If the training should continue from a checkpoint folder."}
+    )
+    report_to: Union[str, List[str]] = field(
+        default="all",
+        metadata={
+            "help": "The integration(s) to report results and logs to. "
+            "Can be a single string or a list of strings. "
+            "Options are 'tensorboard', 'wandb', 'comet_ml', 'clearml', or 'all'. "
+            "Specify multiple by listing them: e.g., ['tensorboard', 'wandb']"
+        },
+    )
+    save_to_hub: Optional[str] = field(
+        default=None, metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"}
+    )
+    gradient_checkpointing: bool = field(
+        default=False, metadata={"help": "Turn on gradient checkpointing. Saves memory but slows training."}
+    )
+    use_liger_kernel: bool = field(default=False, metadata={"help": "Whether to use LigerKernel for training."})
+    max_train_steps: Optional[int] = field(
+        default=None,
+        metadata={"help": "If set, overrides the number of training steps. Otherwise, num_train_epochs is used."},
+    )
+    seed: int = field(default=42, metadata={"help": "Random seed for initialization and dataset shuffling."})
+    checkpointing_steps: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."
+        },
+    )
+    keep_last_n_checkpoints: int = field(
+        default=3, metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."}
+    )
+    fused_optimizer: bool = field(default=True, metadata={"help": "Whether to use fused AdamW or not."})
+    load_balancing_loss: bool = field(
+        default=False, metadata={"help": "Whether to include a load balancing loss (for OLMoE) or not."}
+    )
+    load_balancing_weight: float = field(
+        default=0.5, metadata={"help": "Weight for load balancing loss if applicable."}
+    )
+    clean_checkpoints_at_end: bool = field(
+        default=True, metadata={"help": "Whether to clean up all previous checkpoints at the end of the run."}
+    )
+    with_tracking: bool = False
+    wandb_project_name: str = "open_instruct_internal"
+    wandb_entity: Optional[str] = None
+    push_to_hub: bool = True
+    hf_entity: Optional[str] = None
+    hf_repo_id: Optional[str] = None
+    hf_repo_revision: Optional[str] = None
+    hf_repo_url: Optional[str] = None
+    try_launch_beaker_eval_jobs: bool = True
+    hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
+    cache_dataset_only: bool = False
+    add_seed_and_date_to_exp_name: bool = True
+    try_auto_save_to_beaker: bool = True
+    gs_bucket_path: Optional[str] = None
+    oe_eval_tasks: Optional[List[str]] = None
+    oe_eval_max_length: int = 4096
+    sync_each_batch: bool = False
+    packing: bool = field(
+        default=False,
+        metadata={"help": "Whether to use packing/padding-free collation via TensorDataCollatorWithFlattening"},
+    )
+    verbose: bool = field(
+        default=False, metadata={"help": "Optionally print additional statistics at each reporting period"}
+    )
+
+    def __post_init__(self):
+        if self.dataset_name is None and self.dataset_mixer is None and self.dataset_mixer_list is None:
+            raise ValueError("Need either a dataset name, dataset mixer, or dataset mixer list.")
+        if (
+            (self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None))
+            or (self.dataset_name is not None)
+            or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
+        ):
+            raise ValueError("Cannot provide two dataset selection mechanisms.")
+        if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
+            raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
+        if self.final_lr_ratio is not None:
+            if self.lr_scheduler_type != "linear":
+                raise NotImplementedError("final_lr_ratio only currently implemented for linear schedulers")
+            if not (1.0 >= self.final_lr_ratio >= 0.0):
+                raise ValueError(f"final_lr_ratio must be between 0 and 1, not {self.final_lr_ratio=}")
+
+        for dict_feld in self._VALID_DICT_FIELDS:
+            passed_value = getattr(self, dict_feld)
+            if isinstance(passed_value, str) and passed_value.startswith("{"):
+                loaded_dict = json.loads(passed_value)
+                loaded_dict = _convert_str_dict(loaded_dict)
+                setattr(self, dict_feld, loaded_dict)
 
 
 def main(args: FlatArguments, tc: TokenizerConfig):
