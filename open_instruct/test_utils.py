@@ -253,6 +253,25 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertEqual(utils.wandb_url_to_run_path(url), expected_run_path)
 
 
+class TestFlatArguments:
+    def test_additional_model_args(self) -> None:
+        parser = utils.ArgumentParserPlus(utils.FlatArguments)
+        (args,) = parser.parse_args_into_dataclasses(
+            ["--additional_model_arguments", '{"int": 1, "bool": true, "float": 0.0, "float2": 5e-7}']
+        )
+        assert isinstance(args.additional_model_arguments, dict)
+        assert isinstance(args.additional_model_arguments["int"], int)
+        assert isinstance(args.additional_model_arguments["bool"], bool)
+        assert isinstance(args.additional_model_arguments["float"], float)
+        assert isinstance(args.additional_model_arguments["float2"], float)
+
+    def test_no_additional_model_args(self) -> None:
+        parser = utils.ArgumentParserPlus(utils.FlatArguments)
+        (args,) = parser.parse_args_into_dataclasses(["--exp_name", "test"])
+        assert isinstance(args.additional_model_arguments, dict)
+        assert not args.additional_model_arguments
+
+
 # useful for checking if public datasets are still available
 # class CheckTuluDatasetsTest(unittest.TestCase):
 #     """
