@@ -1051,11 +1051,18 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Compare vLLM logprobs with local logprobs
                     with torch.no_grad():
                         valid_mask = mb_response_masks_bool & ~torch.isnan(mb_vllm_logprobs)
+                        valid_count = valid_mask.sum()
+                        valid_count_value = int(valid_count.item())
                         logprob_diff = (mb_local_logprobs - mb_vllm_logprobs).abs()
                         masked_diff = torch.masked_fill(logprob_diff, ~valid_mask, 0.0)
-                        mean_diff = masked_diff.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
+                        if valid_count_value > 0:
+                            mean_diff = masked_diff.sum() / valid_count
+                        else:
+                            mean_diff = masked_diff.new_tensor(0.0)
+                        std_diff = (
+                            masked_diff[valid_mask].std() if valid_count_value > 1 else masked_diff.new_tensor(0.0)
+                        )
                         max_diff = masked_diff.max()
-                        std_diff = masked_diff[valid_mask].std() if valid_mask.sum() > 1 else 0.0
 
                         self.local_metrics.add("debug/vllm_vs_local_logprob_diff_mean", mean_diff.item())
                         self.local_metrics.add("debug/vllm_vs_local_logprob_diff_max", max_diff.item())
@@ -1063,7 +1070,10 @@ class PolicyTrainerRayProcess(RayProcess):
 
                         reverse_kl = torch.exp(mb_vllm_logprobs) * (mb_vllm_logprobs - mb_local_logprobs)
                         masked_reverse_kl = torch.masked_fill(reverse_kl, ~valid_mask, 0.0)
-                        mean_reverse_kl = masked_reverse_kl.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
+                        if valid_count_value > 0:
+                            mean_reverse_kl = masked_reverse_kl.sum() / valid_count
+                        else:
+                            mean_reverse_kl = masked_reverse_kl.new_tensor(0.0)
                         self.local_metrics.add("debug/vllm_local_reverse_kl", mean_reverse_kl.item())
 
                     mb_new_logprobs = mb_local_logprobs
