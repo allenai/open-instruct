@@ -35,6 +35,7 @@ uv run python mason.py \
     --num_samples_per_prompt_rollout 4 \
     --model_name_or_path Qwen/Qwen3-1.7B \
     --stop_strings "</answer>" \
+    --verbose \
     --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
     --temperature 0.7 \
