@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import vllm
 
-from open_instruct.vllm_utils3 import process_completed_request
+from open_instruct.vllm_utils import process_completed_request
 
 
 class TestVllmUtils3(unittest.TestCase):
