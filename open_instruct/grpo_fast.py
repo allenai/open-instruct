@@ -886,6 +886,11 @@ class PolicyTrainerRayProcess(RayProcess):
         else:
             model = self.model.module
 
+        if self.args.enable_quantization:
+            expected_dtypes = {name: param.dtype for name, param in self.model.module.named_parameters()}
+        else:
+            expected_dtypes = None
+
         logger.info(f"[Weight Broadcast] Starting weight broadcast, rank={torch.distributed.get_rank()}")
         torch.cuda.empty_cache()
         count, num_params = 0, len(list(model.named_parameters()))
@@ -900,6 +905,18 @@ class PolicyTrainerRayProcess(RayProcess):
                     if count % 50 == 0:
                         logger.info(f"[Weight Broadcast] Processing param {count}/{num_params}, rank={torch.distributed.get_rank()}")
                     # Fire all vllm engines for broadcast
+                    if expected_dtypes is not None:
+                        expected_dtype = expected_dtypes.get(name)
+                        if expected_dtype is not None and param.dtype != expected_dtype:
+                            raise RuntimeError(
+                                (
+                                    "[Weight Broadcast] dtype mismatch for parameter "
+                                    f"'{name}': broadcast has dtype {param.dtype} but vLLM expects {expected_dtype}. "
+                                    f"Quantizing weights before broadcast is not supported with "
+                                    f"quantization_format={self.args.quantization_format}. Disable quantization or "
+                                    "update the vLLM engine to accept the new dtype to proceed."
+                                )
+                            )
                     if torch.distributed.get_rank() == 0:
                         shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
                         if count == 1:
@@ -919,6 +936,18 @@ class PolicyTrainerRayProcess(RayProcess):
                 count += 1
                 if count % 50 == 0:
                     logger.info(f"[Weight Broadcast] Processing param {count}/{num_params}, rank={torch.distributed.get_rank()}")
+                if expected_dtypes is not None:
+                    expected_dtype = expected_dtypes.get(name)
+                    if expected_dtype is not None and param.dtype != expected_dtype:
+                        raise RuntimeError(
+                            (
+                                "[Weight Broadcast] dtype mismatch for parameter "
+                                f"'{name}': broadcast has dtype {param.dtype} but vLLM expects {expected_dtype}. "
+                                f"Quantizing weights before broadcast is not supported with "
+                                f"quantization_format={self.args.quantization_format}. Disable quantization or "
+                                "update the vLLM engine to accept the new dtype to proceed."
+                            )
+                        )
                 if torch.distributed.get_rank() == 0:
                     shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
                     refs = [
