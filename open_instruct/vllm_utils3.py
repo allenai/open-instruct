@@ -951,13 +951,6 @@ class LLMRayActor:
         """Get KV cache max concurrency from the vLLM engine."""
         kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
         kv_cache_spec = kv_cache_specs[0]
-        # Group layers by their attention type (type_id) to handle models
-        # with sliding attention in some layers but not others
-        type_groups = defaultdict(list)
-        for layer_name, layer_spec in kv_cache_spec.items():
-            type_groups[layer_spec.type_id].append(layer_name)
-
-        grouped_layer_names = list(type_groups.values())
 
         page_size = kv_cache_utils.get_uniform_page_size(kv_cache_spec)
 
@@ -974,10 +967,10 @@ class LLMRayActor:
             for layer_name in kv_cache_spec
         ]
 
+        kv_cache_groups = kv_cache_utils.get_kv_cache_groups(vllm_config, kv_cache_spec)
+
         kv_cache_config = kv_cache_interface.KVCacheConfig(
-            num_blocks=num_blocks,
-            kv_cache_tensors=kv_cache_tensors,
-            kv_cache_groups=kv_cache_utils.create_kv_cache_group_specs(kv_cache_spec, grouped_layer_names),
+            num_blocks=num_blocks, kv_cache_tensors=kv_cache_tensors, kv_cache_groups=kv_cache_groups
         )
         max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(
             self.llm_engine.vllm_config, kv_cache_config
@@ -1008,6 +1001,7 @@ def get_cuda_arch_list() -> str:
 def create_vllm_engines(
     num_engines: int,
     tensor_parallel_size: int,
+    pipeline_parallel_size: int,
     enforce_eager: bool,
     tokenizer_name_or_path: str,
     pretrain: str,
@@ -1054,16 +1048,17 @@ def create_vllm_engines(
 
     if not use_hybrid_engine:
         # Create a big placement group to ensure that all engines are packed
-        bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size)]
+        bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size * pipeline_parallel_size)]
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
     # ensure we use bundles on the same node where possible if tp>1.
     bundle_indices_list = get_bundle_indices_list(pg)
+    gpus_per_engine = tensor_parallel_size * pipeline_parallel_size
 
     for i in range(num_engines):
         bundle_indices = None
-        bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
+        bundle_indices = bundle_indices_list[i * gpus_per_engine : (i + 1) * gpus_per_engine]
 
         scheduling_strategy = PlacementGroupSchedulingStrategy(
             placement_group=pg,
@@ -1089,6 +1084,7 @@ def create_vllm_engines(
                 tokenizer_revision=revision,
                 worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
                 tensor_parallel_size=tensor_parallel_size,
+                pipeline_parallel_size=pipeline_parallel_size,
                 enforce_eager=enforce_eager,
                 dtype="bfloat16",
                 seed=seed + i,
@@ -1112,6 +1108,6 @@ def create_vllm_engines(
             )
         )
 
-    ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300)
+    ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=1200)
 
     return vllm_engines
