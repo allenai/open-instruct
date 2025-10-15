@@ -43,7 +43,6 @@ uv run python mason.py \
     --chat_template_name r1_simple_chat_postpend_think \
     --learning_rate 3e-7 \
     --total_episodes 200 \
-    --deepspeed_stage 2 \
     --with_tracking \
     --update_progress_every 1 \
     --num_epochs 1 \
