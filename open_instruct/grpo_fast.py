@@ -1085,9 +1085,12 @@ class PolicyTrainerRayProcess(RayProcess):
                         args.masked_mean_denominator,
                     )
                     loss = loss / accumulation_steps
-                    self.model.backward(loss)
+                    loss.backward()
                     if (local_step + 1) % accumulation_steps == 0:
-                        self.model.step()
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                        self.optimizer.step()
+                        self.scheduler.step()
+                        self.optimizer.zero_grad()
                     local_step += 1
                     with torch.no_grad():
                         # NOTE: in packed implementation, kl calculation are averages over response tokens
