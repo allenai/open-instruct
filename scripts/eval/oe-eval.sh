@@ -342,9 +342,9 @@ for TASK in "${TASKS[@]}"; do
     fi
 
     # For compatability with safety evals, ensure that the v0 engine is being used
-    if [[ "$TASK" == "safety::olmo3" ]]; then
+    if [ "$TASK" == "safety::olmo3" ]; then
         ENGINE_ARG=", \"env#133\": \"VLLM_USE_V1=0\""
-    elif [[ "$TASK" == "safety_reasoning::olmo3"]]; then 
+    elif [ "$TASK" == "safety_reasoning::olmo3"]; then 
         ENGINE_ARG=", \"env#133\": \"VLLM_USE_V1=0\", \"env#134\": \"VLLM_USE_PRECOMPILED=1\""
     else
         # For other tasks, do not add the engine arg
