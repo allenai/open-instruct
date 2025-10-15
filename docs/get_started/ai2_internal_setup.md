@@ -55,7 +55,7 @@ You can take your command above and run it on the weka cluster with the followin
 
 ```bash
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale ai2/neptune-cirrascale \
+    --cluster ai2/jupiter ai2/saturn ai2/neptune \
     --workspace ai2/tulu-3-dev \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --priority normal \
@@ -96,7 +96,7 @@ mason.py will auto call `--cache_dataset_only` for you, so you do the tokenizati
 
 **Auto upload to Google Cloud Storage:**
 
-When submitting to the `ai2/augusta-google-1` cluster, mason will try to read your model and upload it to Google Cloud Storage and download it to the job (since the cluster does not have a reliable shared filesystem).
+When submitting to the `ai2/augusta` cluster, mason will try to read your model and upload it to Google Cloud Storage and download it to the job (since the cluster does not have a reliable shared filesystem).
 
 
 
@@ -106,7 +106,7 @@ The [/scripts/train](/scripts/train) directory contains many examples on how to 
 
 ```bash
 python update_command_args.py scripts/train/tulu3/grpo_fast_8b.sh \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/augusta \
     --priority normal \
     --image costah/open_instruct_dev0320_11  --non_stop_penalty False | uv run bash
 ```
@@ -140,7 +140,7 @@ We provide a script integrated with beaker for use internally at Ai2. There are 
 for model in allenai/OLMoE-1B-7B-0125-Instruct allenai/OLMoE-1B-7B-0125-DPO allenai/OLMoE-1B-7B-0125-SFT allenai/OLMoE-1B-7B-0924-SFT allenai/OLMoE-1B-7B-0924-Instruct; do
 python scripts/submit_eval_jobs.py \
     --model_name hf-$model \
-    --cluster ai2/jupiter-cirrascale-2 ai2/neptune-cirrascale ai2/saturn-cirrascale ai2/ceres-cirrascale  \
+    --cluster ai2/jupiter ai2/neptune ai2/saturn ai2/ceres  \
     --priority high \
     --location $model \
     --is_tuned \
@@ -164,7 +164,7 @@ url=https://wandb.ai/ai2-llm/open_instruct_internal/runs/7afq8x28
 location=01JNMHSM8DDSFB3GJDBM5MP6J8
 python scripts/submit_eval_jobs.py \
     --model_name $model_name \
-    --cluster ai2/jupiter-cirrascale-2 ai2/neptune-cirrascale ai2/saturn-cirrascale ai2/ceres-cirrascale  \
+    --cluster ai2/jupiter ai2/neptune ai2/saturn ai2/ceres  \
     --priority high \
     --location $location \
     --is_tuned \
@@ -187,7 +187,7 @@ This will later show up in the [internal leaderboard](https://huggingface.co/spa
 python scripts/submit_eval_jobs.py \
     --model_name test_no_hf_upload \
     --location /weka/oe-adapt-default/costah/models/0129_grpo_math_kl_fix_zs_0.0_16_half-m_461_checkpoints/step_640 \
-    --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
+    --cluster ai2/saturn ai2/neptune \
     --is_tuned \
     --workspace "tulu-3-results" \
     --priority high \
@@ -209,7 +209,7 @@ python scripts/submit_eval_jobs.py \
 python scripts/submit_eval_jobs.py \
     --model_name test_gs_location \
     --location gs://ai2-llm/post-training/allenai/Llama-3.1-Tulu-3.1-8B \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/augusta \
     --is_tuned \
     --workspace tulu-3-results \
     --preemptible \
@@ -230,7 +230,7 @@ You can also run with gantry, if you want to test changes.
 See the "One-Time Setup" section below before running commands. To test your setup, run the following command -- if this job succeeds, then you're ready to run evaluations with gantry.
 
 ```bash
-gantry run --workspace {workspace} --budget ai2/oe-adapt --beaker-image kavelr/oe-safety --venv base --cluster ai2/mosaic-cirrascale --env-secret OPENAI_API_KEY=openai_api_key --env-secret HF_TOKEN=hf_token -- python -c 'print("Hello world")'
+gantry run --workspace {workspace} --budget ai2/oe-adapt --beaker-image kavelr/oe-safety --venv base --cluster ai2/jupiter --env-secret OPENAI_API_KEY=openai_api_key --env-secret HF_TOKEN=hf_token -- python -c 'print("Hello world")'
 ```
 
 You can freely add any additional arguments to give to Beaker, such as a `--priority` tag which can be set to preemptible, normal, high, or urgent. AI2 policies may restrict the priorities that are available to users on certain clusters.

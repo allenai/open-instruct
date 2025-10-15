@@ -32,7 +32,7 @@ spec = ExperimentSpec(
             ],
             context=beaker.TaskContext(priority=beaker.Priority("high")),
             constraints=beaker.Constraints(
-                cluster=["ai2/s2-cirrascale", "ai2/allennlp-cirrascale"]
+                cluster=["ai2/s2-cirrascale", "ai2/jupiter"]
             ),
             env_vars=[
                 beaker.EnvVar(

@@ -1,7 +1,7 @@
 # full example
 launch_server_mason.sh  # to launch the server - in massive_ds repo.
 python mason.py \
-    --cluster ai2/augusta-google-1 --image hamishivi/0704_testing_rl_rag \
+    --cluster ai2/augusta --image hamishivi/0704_testing_rl_rag \
     --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority high \

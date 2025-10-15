@@ -60,14 +60,6 @@ MODELS: dict[str, dict[str, Any]] = {
         "generate": default_generation_params,
         "task": {"gpu_count": 2},
     },
-    "allenai/tulu-2-7b": {
-        "model": {
-            "name_or_path": "allenai/tulu-2-7b",
-            "num_scheduler_steps": 1,
-        },
-        "generate": default_generation_params,
-        "task": {"gpu_count": 1},
-    },
     "allenai/tulu-2-13b": {
         "model": {
             "name_or_path": "allenai/tulu-2-13b",

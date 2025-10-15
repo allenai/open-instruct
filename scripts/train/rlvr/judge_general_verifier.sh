@@ -10,7 +10,7 @@ JUDGE_BASE_URL=http://saturn-cs-aus-236.reviz.ai2.in:8000/v1
 
 # finally, launch the training job:
 python mason.py \
-        --cluster ai2/jupiter-cirrascale-2 --image hamishivi/open_instruct_judge_8 \
+        --cluster ai2/jupiter --image hamishivi/open_instruct_judge_8 \
         --pure_docker_mode \
         --workspace ai2/tulu-thinker \
         --priority high \
@@ -51,7 +51,7 @@ python mason.py \
             --vllm_tensor_parallel_size 1 \
             --beta 0.0 \
             --seed 3 \
-            --num_evals 20 \
+            --local_eval_every 10 \
             --vllm_enforce_eager \
             --gradient_checkpointing \
             --push_to_hub false \

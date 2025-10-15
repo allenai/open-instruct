@@ -2,7 +2,7 @@ base=DPO
 description="4 dataset code mix (ocr personas algorithm acecoder) on top of Tulu ${base}"
 exp_name=rlvr_tulu3.1_8b_${base}_grpo_fast_code
 python mason.py \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/augusta \
     --image saurabhs/code \
     --pure_docker_mode \
     --workspace ai2/oe-adapt-code \
@@ -45,7 +45,7 @@ python mason.py \
     --vllm_num_engines 10 \
     --lr_scheduler_type constant \
     --seed 1 \
-    --num_evals 100 \
+    --local_eval_every 250 \
     --save_freq 40 \
     --gradient_checkpointing \
     --with_tracking 

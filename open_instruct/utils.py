@@ -44,15 +44,16 @@ import threading
 import time
 from concurrent import futures
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from multiprocessing import resource_tracker as _rt
 from typing import Any, Iterable, List, NewType, Optional, Tuple, Union
 
+import beaker
 import numpy as np
 import ray
 import requests
 import torch
-from accelerate.logging import get_logger
+import vllm.config
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
@@ -62,10 +63,13 @@ from rich.pretty import pprint
 from tqdm import tqdm
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
+from open_instruct import logger_utils
+
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
-logger = get_logger(__name__)
+
+logger = logger_utils.setup_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
 
@@ -77,8 +81,8 @@ def repeat_each(seq, k):
 
 def ray_get_with_progress(
     ray_refs: List[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: Optional[float] = None
-) -> List[Any]:
-    """Execute ray.get() with a progress bar using futures.
+):
+    """Execute ray.get() with a progress bar using futures and collect timings.
 
     Args:
         ray_refs: List of ray object references
@@ -87,23 +91,31 @@ def ray_get_with_progress(
         timeout: Optional timeout in seconds for all operations to complete
 
     Returns:
-        List of results in the same order as ray_refs
+        (results, completion_times)
+        - results: List of results in the same order as ray_refs
+        - completion_times: time from function start until each ref completed (seconds), aligned to ray_refs
 
     Raises:
         TimeoutError: If timeout is specified and operations don't complete in time
     """
+    t0 = time.perf_counter()
+
     ray_futures = [ref.future() for ref in ray_refs]
+    fut_to_idx = {f: i for i, f in enumerate(ray_futures)}
+
     results = [None] * len(ray_refs)
+    completion_times = [None] * len(ray_refs)
 
     futures_iter = futures.as_completed(ray_futures, timeout=timeout)
     if enable:
         futures_iter = tqdm(futures_iter, total=len(ray_futures), desc=desc, bar_format="{l_bar}{bar}{r_bar}\n")
 
     for future in futures_iter:
-        idx = ray_futures.index(future)
+        idx = fut_to_idx[future]
         results[idx] = future.result()
+        completion_times[idx] = time.perf_counter() - t0
 
-    return results
+    return results, completion_times
 
 
 """
@@ -649,66 +661,23 @@ class ArgumentParserPlus(HfArgumentParser):
 
 # ----------------------------------------------------------------------------
 # Experiment tracking utilities
-def get_git_tag() -> str:
-    """Try to get the latest Git tag (e.g., `no-tag-404-g98dc659` or `v1.0.0-4-g98dc659`)"""
-    git_tag = ""
-    try:
-        git_tag = (
-            subprocess.check_output(["git", "describe", "--tags"], stderr=subprocess.DEVNULL).decode("ascii").strip()
-        )
-    except subprocess.CalledProcessError as e:
-        logging.debug(f"Failed to get Git tag: {e}")
-
-    # If no Git tag found, create a custom tag based on commit count and hash
-    if len(git_tag) == 0:
-        try:
-            count = int(
-                subprocess.check_output(["git", "rev-list", "--count", "HEAD"], stderr=subprocess.DEVNULL)
-                .decode("ascii")
-                .strip()
-            )
-            hash = (
-                subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL)
-                .decode("ascii")
-                .strip()
-            )
-            git_tag = f"no-tag-{count}-g{hash}"
-        except subprocess.CalledProcessError as e:
-            logging.debug(f"Failed to get commit count and hash: {e}")
-
-    return git_tag
-
-
-def get_pr_tag() -> str:
-    """Try to find associated pull request on GitHub (e.g., `pr-123`)"""
-    pr_tag = ""
-    try:
-        git_commit = (
-            subprocess.check_output(["git", "rev-parse", "--verify", "HEAD"], stderr=subprocess.DEVNULL)
-            .decode("ascii")
-            .strip()
-        )
+def get_wandb_tags() -> List[str]:
+    """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123,branch-main`)"""
+    tags = [t for t in os.environ.get("WANDB_TAGS", "").split(",") if t != ""]
+    if "GIT_COMMIT" in os.environ:
+        git_commit = os.environ["GIT_COMMIT"]
+        tags.append(f"commit: {git_commit}")
         # try finding the pull request number on github
         prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
         if prs.status_code == 200:
             prs = prs.json()
-            if len(prs["items"]) > 0:
+            if len(prs["items"]):
                 pr = prs["items"][0]
-                pr_number = pr["number"]
-                pr_tag = f"pr-{pr_number}"
-    except Exception as e:
-        logging.debug(f"Failed to get PR number: {e}")
-
-    return pr_tag
-
-
-def get_wandb_tags() -> List[str]:
-    """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123`)"""
-    existing_wandb_tags = os.environ.get("WANDB_TAGS", "")
-    git_tag = get_git_tag()
-    pr_tag = get_pr_tag()
-    non_empty_tags = [tag for tag in [existing_wandb_tags, git_tag, pr_tag] if len(tag) > 0]
-    return non_empty_tags
+                tags.append(f"pr: {pr['number']}")
+    if "GIT_BRANCH" in os.environ:
+        tags.append(f"branch: {os.environ['GIT_BRANCH']}")
+    tags = [tag[:64] for tag in tags if len(tag) > 64]
+    return tags
 
 
 # ----------------------------------------------------------------------------
@@ -966,6 +935,108 @@ def maybe_get_beaker_config():
     )
 
 
+def format_eta(seconds: float) -> str:
+    """Format ETA in a human-readable format."""
+    seconds = int(seconds)
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    minutes = (seconds % 3600) // 60
+
+    if days > 0:
+        return f"{days}d {hours}h {minutes}m"
+    elif hours > 0:
+        return f"{hours}h {minutes}m"
+    else:
+        return f"{minutes}m"
+
+
+def maybe_update_beaker_description(
+    current_step: Optional[int] = None,
+    total_steps: Optional[int] = None,
+    start_time: Optional[float] = None,
+    wandb_url: Optional[str] = None,
+    original_descriptions: dict[str, str] = {},
+) -> None:
+    """Update Beaker experiment description with training progress and/or wandb URL.
+
+    Args:
+        current_step: Current training step (for progress tracking)
+        total_steps: Total number of training steps (for progress tracking)
+        start_time: Training start time (from time.time()) (for progress tracking)
+        wandb_url: Optional wandb URL to include
+        original_descriptions: Cache of original descriptions for progress updates
+    """
+    if not is_beaker_job():
+        return
+
+    experiment_id = os.environ.get("BEAKER_WORKLOAD_ID")
+    if not experiment_id:
+        logger.warning(
+            f"BEAKER_WORKLOAD_ID not found in environment. Available env vars: {', '.join(sorted([k for k in os.environ.keys() if 'BEAKER' in k]))}"
+        )
+        return
+
+    try:
+        client = beaker.Beaker.from_env()
+    except beaker.exceptions.BeakerConfigurationError as e:
+        logger.warning(f"Failed to initialize Beaker client: {e}")
+        return
+
+    try:
+        # Get the workload first (experiment_id is actually BEAKER_WORKLOAD_ID)
+        workload = client.workload.get(experiment_id)
+        # Then get the experiment spec from the workload
+        spec = client.experiment.get_spec(workload)
+    except (beaker.exceptions.BeakerExperimentNotFound, ValueError):
+        logger.warning(
+            f"Failed to get Beaker experiment with ID: {experiment_id}"
+            "This might be fine if you are e.g. running in an interactive job."
+        )
+        return
+
+    if experiment_id not in original_descriptions:
+        original_descriptions[experiment_id] = spec.description or ""
+
+    # Build description from scratch each time
+    description_components = [
+        original_descriptions[experiment_id],
+        f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}",
+        f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}",
+    ]
+
+    if wandb_url:
+        description_components.append(wandb_url)
+
+    if current_step is not None:
+        progress_pct = (current_step / total_steps) * 100
+        elapsed_time = time.perf_counter() - start_time
+
+        if current_step >= total_steps:
+            time_str = format_eta(elapsed_time)
+            time_label = "finished in"
+        else:
+            if current_step > 0:
+                time_per_step = elapsed_time / current_step
+                remaining_steps = total_steps - current_step
+                eta_seconds = time_per_step * remaining_steps
+                time_str = format_eta(eta_seconds)
+            else:
+                time_str = "calculating..."
+            time_label = "eta"
+
+        progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), {time_label} {time_str}]"
+        description_components.append(progress_bar)
+    new_description = " ".join(description_components)
+    try:
+        # Update the workload description using the workload object we got earlier
+        client.workload.update(workload, description=new_description)
+    except requests.exceptions.HTTPError as e:
+        logger.warning(
+            f"Failed to update Beaker description due to HTTP error: {e}"
+            "Continuing without updating description - this is likely a temporary Beaker service issue"
+        )
+
+
 def live_subprocess_output(cmd: List[str]) -> str:
     output_lines = []
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
@@ -1077,9 +1148,10 @@ def launch_ai2_evals_on_weka(
     stop_strings: Optional[List[str]] = None,
     gs_bucket_path: Optional[str] = None,
     eval_priority: Optional[str] = "normal",
+    beaker_image: Optional[str] = None,
 ) -> None:
-    weka_cluster = "ai2/saturn-cirrascale ai2/neptune-cirrascale"
-    gcp_cluster = "ai2/augusta-google-1"
+    weka_cluster = "ai2/saturn ai2/neptune"
+    gcp_cluster = "ai2/augusta"
     cluster = weka_cluster if gs_bucket_path is None else gcp_cluster
     beaker_users = get_beaker_whoami()
 
@@ -1118,6 +1190,8 @@ python scripts/submit_eval_jobs.py \
 --skip_oi_evals"""
     if wandb_url is not None:
         command += f" --run_id {wandb_url}"
+        wandb_run_path = wandb_url_to_run_path(wandb_url)
+        command += f" --wandb_run_path {wandb_run_path}"
     if oe_eval_max_length is not None:
         command += f" --oe_eval_max_length {oe_eval_max_length}"
     if training_step is not None:
@@ -1128,12 +1202,41 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
     if stop_strings is not None:
         command += f" --oe_eval_stop_sequences '{','.join(stop_strings)}'"
+    if beaker_image is not None:
+        command += f" --beaker_image {beaker_image}"
     print(f"Launching eval jobs with command: {command}")
     process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
     print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
     print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
     print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+
+
+def wandb_url_to_run_path(url: str) -> str:
+    """
+    Convert a wandb URL to a wandb run path.
+
+    Args:
+        url (str): wandb URL in format https://wandb.ai/entity/project/runs/run_id
+
+    Returns:
+        str: wandb run path in format entity/project/run_id
+
+    >>> wandb_url_to_run_path("https://wandb.ai/org/project/runs/runid")
+    org/project/runid
+
+    >>> wandb_url_to_run_path("https://wandb.ai/ai2-llm/open_instruct_internal/runs/5nigq0mz")
+    ai2-llm/open_instruct_internal/5nigq0mz
+    """
+    # Remove the base URL and split by '/'
+    path_parts = url.replace("https://wandb.ai/", "").split("/")
+
+    # Extract entity, project, and run_id
+    entity = path_parts[0]
+    project = path_parts[1]
+    run_id = path_parts[3]  # Skip 'runs' at index 2
+
+    return f"{entity}/{project}/{run_id}"
 
 
 # ----------------------------------------------------------------------------
@@ -1325,9 +1428,7 @@ _SET_AFFINITY = False
 
 class RayProcess:
     def __init__(self, world_size, rank, local_rank, master_addr, master_port):
-        logging.basicConfig(
-            format="%(asctime)s %(levelname)-8s %(message)s", level=logging.INFO, datefmt="%Y-%m-%d %H:%M:%S"
-        )
+        logger_utils.setup_logger()
         self.world_size = world_size
         self.rank = rank
         self.local_rank = local_rank
@@ -1436,19 +1537,24 @@ class RayProcess:
 
 
 def extract_user_query(conversation: str, chat_template_name: str = None) -> str:
-    # Define the regex pattern
-    # if chat_template_name == "tulu_thinker":
-    #     pattern = r"<answer>.*?</answer>\.\n\nUser: (.*?)\nAssistant: <think>"
-    # elif chat_template_name == "tulu_thinker_r1_style":
-    #     pattern = r"<answer>.*?</answer>\.\n\nUser: (.*?)\n<|assistant|>\n<think>"
-    # else:
-    #     # runtime error, the template is not supported
-    #     raise ValueError(f"Can not extract user query for template {chat_template_name}.")
-    pattern = r"\n\n<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
+    pattern = re.compile(
+        r"(?:"
+        r"<\|user\|\>\n(?P<simple>.*?)\n<\|assistant\|\>\n<think>"  # template 0 (your original)
+        r"|"
+        r"<\|im_start\|\>user\n(?P<im>.*?)(?:\n<functions>.*?</functions>)?<\|im_end\|\>\n"  # templates 1 & 2
+        r"(?=[\s\S]*?<\|im_start\|\>assistant\n<think>)"  # ensure it's the turn before <think>
+        r")",
+        re.DOTALL,
+    )
+    # Get the last user query matched (most recent user turn before assistant <think>)
+    matches = list(pattern.finditer(conversation))
+    if matches:
+        m = matches[-1]
+        user_query = (m.group("simple") or m.group("im")).strip()
+    else:
+        user_query = conversation
 
-    match = re.search(pattern, conversation, re.DOTALL)
-    # Return the captured group if found, else return None
-    return match.group(1).strip() if match else None
+    return user_query
 
 
 def extract_final_answer(prediction: str) -> str:
@@ -1496,106 +1602,468 @@ DEFAULT_THREAD_ALLOW_PREFIXES = {
 }
 
 
-@dataclass
-class LeakReport:
-    bad_threads: List[threading.Thread] = field(default_factory=list)
-    bad_processes: List[mp.Process] = field(default_factory=list)
-    ray_actors: list = field(default_factory=list)
-    ray_tasks: list = field(default_factory=list)
-    ray_workers: list = field(default_factory=list)
-    leaked_semaphores: List[str] = field(default_factory=list)
-    leaked_shm: List[str] = field(default_factory=list)
-
-    @property
-    def is_clean(self) -> bool:
-        return not (
-            self.bad_threads
-            or self.bad_processes
-            or self.ray_actors
-            or self.ray_tasks
-            or self.ray_workers
-            or self.leaked_semaphores
-            or self.leaked_shm
-        )
-
-    def pretty(self) -> str:
-        lines = []
-        if self.bad_threads:
-            lines.append("Leaked threads:")
-            for t in self.bad_threads:
-                target = getattr(t, "_target", None)
-                tgt_name = getattr(target, "__name__", repr(target)) if target else "?"
-                lines.append(f"  - {t.name} (alive={t.is_alive()}, daemon={t.daemon}, target={tgt_name})")
-        if self.bad_processes:
-            lines.append("Leaked multiprocessing children:")
-            for p in self.bad_processes:
-                lines.append(f"  - PID {p.pid} alive={p.is_alive()} name={p.name}")
-        if self.ray_actors:
-            lines.append("Live Ray actors:")
-            for a in self.ray_actors:
-                lines.append(f"  - {a.get('class_name')} id={a.get('actor_id')}")
-        if self.ray_tasks:
-            lines.append("Live Ray tasks:")
-            for t in self.ray_tasks:
-                lines.append(f"  - {t.get('name')} id={t.get('task_id')}")
-        if self.ray_workers:
-            lines.append("Live Ray workers:")
-            for w in self.ray_workers:
-                lines.append(f"  - pid={w.get('pid')} id={w.get('worker_id')}")
-        if self.leaked_semaphores:
-            lines.append("Leaked POSIX semaphores (multiprocessing):")
-            for name in self.leaked_semaphores:
-                lines.append(f"  - {name}")
-        if self.leaked_shm:
-            lines.append("Leaked shared_memory blocks:")
-            for name in self.leaked_shm:
-                lines.append(f"  - {name}")
-        return "\n".join(lines) if lines else "No leaks detected."
-
-
 def check_runtime_leaks(
     thread_allowlist: Iterable[str] = DEFAULT_THREAD_ALLOWLIST,
     thread_allow_prefixes: Iterable[str] = DEFAULT_THREAD_ALLOW_PREFIXES,
     include_daemon_threads: bool = False,
-) -> LeakReport:
+) -> None:
     """
-    Inspect runtime state for leftovers.
-
-    Returns a LeakReport; call .is_clean or .pretty().
+    Inspect runtime state for leftovers and log any leaks immediately.
     """
-    report = LeakReport()
+    leak_logger = logging.getLogger(__name__)
 
-    # Threads
-    for t in threading.enumerate():
-        if t.name in thread_allowlist or any(t.name.startswith(p) for p in thread_allow_prefixes):
-            continue
-        if not include_daemon_threads and t.daemon:
-            continue
-        if t is threading.main_thread():
-            continue
-        # ignore ones already finished
-        if not t.is_alive():
-            continue
-        report.bad_threads.append(t)
+    def is_allowed_thread(t):
+        return (
+            t.name in thread_allowlist
+            or any(t.name.startswith(p) for p in thread_allow_prefixes)
+            or t is threading.main_thread()
+            or (not include_daemon_threads and t.daemon)
+            or not t.is_alive()
+        )
 
-    # Multiprocessing children
-    for child in mp.active_children():
-        if child.is_alive():
-            report.bad_processes.append(child)
+    bad_threads = [t for t in threading.enumerate() if not is_allowed_thread(t)]
+    if bad_threads:
+        leak_logger.warning("Leaked threads:")
+        for t in bad_threads:
+            target = getattr(t, "_target", None)
+            tgt_name = getattr(target, "__name__", repr(target)) if target else "?"
+            leak_logger.warning(f"  - {t.name} (alive={t.is_alive()}, daemon={t.daemon}, target={tgt_name})")
 
-    # Ray state (only if ray is present & initialized)
-    if ray_state is not None and ray is not None and ray.is_initialized():
-        report.ray_actors = ray_state.list_actors(filters=[("state", "=", "ALIVE")])
-        report.ray_tasks = ray_state.list_tasks(filters=[("state", "=", "RUNNING")])
-        report.ray_workers = ray_state.list_workers(filters=[("is_alive", "=", True)])
+    bad_processes = [p for p in mp.active_children() if p.is_alive()]
+    if bad_processes:
+        leak_logger.warning("Leaked multiprocessing children:")
+        for p in bad_processes:
+            leak_logger.warning(f"  - PID {p.pid} alive={p.is_alive()} name={p.name}")
 
-    # Multiprocessing resource_tracker cache (private API, so guard carefully)
-    if _rt is not None and hasattr(_rt, "_resource_tracker"):
+    if ray_state and ray and ray.is_initialized():
+        ray_checks = [
+            (
+                "Live Ray actors:",
+                ray_state.list_actors(filters=[("state", "=", "ALIVE")]),
+                lambda a: f"  - {a.get('class_name')} id={a.get('actor_id')}",
+            ),
+            (
+                "Live Ray tasks:",
+                ray_state.list_tasks(filters=[("state", "=", "RUNNING")]),
+                lambda t: f"  - {t.get('name')} id={t.get('task_id')}",
+            ),
+            (
+                "Live Ray workers:",
+                ray_state.list_workers(filters=[("is_alive", "=", True)]),
+                lambda w: f"  - pid={w.get('pid')} id={w.get('worker_id')}",
+            ),
+        ]
+
+        for header, items, formatter in ray_checks:
+            if items:
+                leak_logger.warning(header)
+                for item in items:
+                    leak_logger.warning(formatter(item))
+
+    if _rt and hasattr(_rt, "_resource_tracker"):
         cache = getattr(_rt._resource_tracker, "_cache", {})
         for name, (count, rtype) in cache.items():
-            if count > 0 and rtype == "semaphore":
-                report.leaked_semaphores.append(name)
-            if count > 0 and rtype == "shared_memory":
-                report.leaked_shm.append(name)
+            if count > 0:
+                leak_logger.warning(f"Leaked {rtype} resources: {count}")
 
-    return report
+
+def check_oe_eval_internal():
+    """Check if oe-eval-internal is available when running in Beaker.
+
+    Raises an error if we're running in Beaker but oe-eval-internal is not present.
+    This is needed because oe-eval-internal is required for certain evaluation tasks
+    but is only available internally at AI2.
+    """
+    # Return early if not running in Beaker
+    if not os.environ.get("BEAKER_EXPERIMENT_ID"):
+        return
+
+    # We're in Beaker, check if oe-eval-internal exists
+    if not os.path.exists("/stage/oe-eval-internal"):
+        raise RuntimeError(
+            "Running in Beaker but oe-eval-internal directory is not found. "
+            "The oe-eval-internal repository is required for evaluation tasks "
+            "when running in Beaker. Please ensure the Docker image was built "
+            "with access to the oe-eval-internal repository."
+        )
+
+
+# For FLOPS, we assume bf16 and ignore sparsity.
+# Memory bandwidth values are peak theoretical bandwidth.
+GPU_SPECS = {
+    "a100": {"flops": 312e12, "memory_size": 80e9, "memory_bandwidth": 1.6e12},  # 1.6 TB/s HBM2e
+    "b200": {"flops": 2250e12, "memory_size": 192e9, "memory_bandwidth": 8e12},  # 8 TB/s HBM3e
+    "h100": {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12},  # 3.35 TB/s HBM3
+    "a6000": {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9},  # 768 GB/s GDDR6
+    "l40s": {"flops": 362e12, "memory_size": 48e9, "memory_bandwidth": 864e9},  # 864 GB/s GDDR6
+}
+
+# Conventions for FLOPs calculations (fixed; not switches)
+FLOP_PER_MAC = 2
+# Approximate softmax cost per attention score:
+# ~4 scalar ops/score: exp + subtract max (stabilization) + sum + divide.
+SOFTMAX_FLOPS_PER_SCORE = 4
+
+
+@dataclasses.dataclass
+class ModelDims:
+    num_layers: int
+    hidden_size: int
+    intermediate_size: int
+    vocab_size: int
+    num_attn_heads: int
+    num_kv_heads: Optional[int] = None
+    device_name: Optional[str] = None
+
+    def __post_init__(self):
+        if self.num_kv_heads is None:
+            self.num_kv_heads = self.num_attn_heads
+
+        if self.device_name is None:
+            self.device_name = get_device_name(torch.cuda.get_device_name(0))
+
+        assert self.hidden_size % self.num_attn_heads == 0, "hidden_size must be divisible by num_attn_heads"
+        assert self.num_attn_heads % self.num_kv_heads == 0, (
+            "num_attn_heads must be divisible by num_kv_heads (GQA/MQA)"
+        )
+
+    @classmethod
+    def from_vllm_config(cls, vllm_config: vllm.config.VllmConfig) -> "ModelDims":
+        """Create ModelDims from a vLLM config object."""
+        model_config = vllm_config.model_config
+        hidden_size = model_config.get_hidden_size()
+
+        # Try to get intermediate_size, default to 4x hidden_size if not present
+        intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
+
+        return cls(
+            num_layers=model_config.get_num_layers(vllm_config.parallel_config),
+            hidden_size=hidden_size,
+            intermediate_size=intermediate_size,
+            vocab_size=model_config.get_vocab_size(),
+            num_attn_heads=model_config.get_num_attention_heads(vllm_config.parallel_config),
+            num_kv_heads=model_config.get_num_kv_heads(vllm_config.parallel_config),
+        )
+
+    @property
+    def head_dim(self) -> int:
+        return self.hidden_size // self.num_attn_heads
+
+    @property
+    def device_flops(self) -> float:
+        assert self.device_name is not None, "device_name must be set"
+        assert self.device_name in GPU_SPECS, f"Unknown device: {self.device_name}"
+        return GPU_SPECS[self.device_name]["flops"]
+
+    @property
+    def device_memory_bandwidth(self) -> float:
+        assert self.device_name is not None, "device_name must be set"
+        assert self.device_name in GPU_SPECS, f"Unknown device: {self.device_name}"
+        return GPU_SPECS[self.device_name]["memory_bandwidth"]
+
+    def attn_flops(self, query_len: int, kv_len: int) -> int:
+        """FLOPs for one layer of self-attention given query_len and kv_len.
+
+        Assumptions:
+          - 1 MAC = 2 FLOPs (FLOP_PER_MAC).
+          - Efficient GQA/MQA K/V projections with width = num_kv_heads * head_dim.
+          - Softmax ≈ 4 FLOPs per score (see SOFTMAX_FLOPS_PER_SCORE).
+          - LayerNorms and minor ops ignored (dominated by matmuls).
+        """
+        d = self.head_dim
+        mul = FLOP_PER_MAC
+
+        # Projections for the query_len new tokens
+        q_proj = mul * query_len * self.hidden_size * self.hidden_size
+        kv_proj = mul * 2 * query_len * self.hidden_size * (self.num_kv_heads * d)  # GQA/MQA
+
+        # Scores and attention-weighted values
+        qk = mul * self.num_attn_heads * query_len * kv_len * d
+        softmax = SOFTMAX_FLOPS_PER_SCORE * self.num_attn_heads * query_len * kv_len
+        av = mul * self.num_attn_heads * query_len * kv_len * d
+
+        # Output projection
+        out_proj = mul * query_len * self.hidden_size * self.hidden_size
+
+        return q_proj + kv_proj + qk + softmax + av + out_proj
+
+    def mlp_flops(self, seq_len: int) -> int:
+        """Two matmuls dominate; activation cost under-counted on purpose."""
+        mul = FLOP_PER_MAC
+        first = mul * seq_len * self.hidden_size * self.intermediate_size
+        act = seq_len * self.intermediate_size  # under-counted on purpose
+        second = mul * seq_len * self.intermediate_size * self.hidden_size
+        return first + act + second
+
+    def prefill_flops(self, prompt_lengths: list[int]) -> int:
+        """Prefill builds the KV cache; logits are computed once after each prompt."""
+        total = 0
+        for L in prompt_lengths:
+            total += self.num_layers * (self.attn_flops(L, L) + self.mlp_flops(L))
+            # Always include a single LM head after prefill (next-token logits)
+            total += FLOP_PER_MAC * self.hidden_size * self.vocab_size
+        return total
+
+    def decode_flops(self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int = 1) -> int:
+        """Decode/generation FLOPs.
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+
+        Embedding lookups are ignored by design.
+        """
+        assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+            f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+        )
+
+        total = 0
+        response_idx = 0
+        for P in prompt_lengths:
+            # Process all samples for this prompt
+            for _ in range(samples_per_prompt):
+                R = response_lengths[response_idx]
+                total += R * self.num_layers * self.mlp_flops(seq_len=1)
+                for t in range(R):
+                    kv_len = P + t + 1  # prompt + generated so far + current
+                    total += self.num_layers * self.attn_flops(query_len=1, kv_len=kv_len)
+                total += R * FLOP_PER_MAC * self.hidden_size * self.vocab_size
+                response_idx += 1
+        return total
+
+    def flops(
+        self,
+        prompt_lengths: list[int],
+        response_lengths: Optional[list[int]] = None,
+        samples_per_prompt: int = 1,
+        is_training: bool = False,
+    ) -> int:
+        """Total FLOPs for prefill and (optionally) decode.
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+            is_training: If True, multiply FLOPs by 3 to account for forward and backward passes
+        """
+        total = self.prefill_flops(prompt_lengths)
+        if response_lengths is not None:
+            total += self.decode_flops(prompt_lengths, response_lengths, samples_per_prompt)
+        if is_training:
+            # Training includes forward pass (1x) + backward pass (2x)
+            total *= 3
+        return total
+
+    def weight_memory_bytes(self, num_tokens: int, dtype_bytes: int = 2) -> int:
+        """Memory bytes for reading model weights for a given number of tokens.
+
+        Args:
+            num_tokens: Number of tokens to process
+            dtype_bytes: Bytes per element (2 for FP16/BF16)
+
+        Returns:
+            Total bytes for weight reads across all layers
+        """
+        num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
+        head_dim = self.hidden_size // self.num_attn_heads
+        hidden_kv = num_kv * head_dim
+
+        # Per-layer weight params (Q, K, V, O, MLP up, MLP down)
+        w_q = self.hidden_size * self.hidden_size
+        w_k = self.hidden_size * hidden_kv
+        w_v = self.hidden_size * hidden_kv
+        w_o = self.hidden_size * self.hidden_size
+        w_up = self.hidden_size * self.intermediate_size
+        w_dn = self.intermediate_size * self.hidden_size
+
+        per_layer_weight_bytes = (w_q + w_k + w_v + w_o + w_up + w_dn) * dtype_bytes
+        return self.num_layers * num_tokens * per_layer_weight_bytes
+
+    def kv_cache_write_bytes(self, num_tokens: int, dtype_bytes: int = 2) -> int:
+        """Memory bytes for writing KV cache for a given number of tokens.
+
+        Args:
+            num_tokens: Number of tokens being cached
+            dtype_bytes: Bytes per element (2 for FP16/BF16)
+
+        Returns:
+            Total bytes for KV cache writes across all layers
+        """
+        num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
+        head_dim = self.hidden_size // self.num_attn_heads
+
+        # 2x for K and V
+        kv_write_bytes_per_token = 2 * num_kv * head_dim * dtype_bytes
+        return self.num_layers * num_tokens * kv_write_bytes_per_token
+
+    def kv_cache_read_bytes(
+        self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int = 1, dtype_bytes: int = 2
+    ) -> int:
+        """Memory bytes for reading KV cache during decode.
+
+        For each new token generated, we read all previous tokens' KV cache.
+        When generating multiple samples per prompt, the prompt KV cache is shared.
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+            dtype_bytes: Bytes per element (2 for FP16/BF16)
+
+        Returns:
+            Total bytes for KV cache reads during decode
+        """
+        assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+            f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+        )
+
+        num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
+        head_dim = self.hidden_size // self.num_attn_heads
+
+        # For batched sampling with shared prompt KV cache:
+        # - Prompt KV is read once per new token position across ALL samples (not per sample)
+        # - Each sample has its own KV for generated tokens
+        kv_read_terms = 0
+        response_idx = 0
+
+        for P in prompt_lengths:
+            # For this prompt, collect all response lengths
+            prompt_responses = []
+            for _ in range(samples_per_prompt):
+                prompt_responses.append(response_lengths[response_idx])
+                response_idx += 1
+
+            # Prompt KV reads: In synchronized batch generation with vLLM n>1,
+            # the prompt KV cache is stored once but each sample reads it independently.
+            # At each decoding position, each sample reads the prompt KV cache.
+            # Number of positions = max response length (all generate synchronously)
+            max_response_length = max(prompt_responses) if prompt_responses else 0
+            # Each of the samples_per_prompt samples reads prompt KV at each position
+            kv_read_terms += max_response_length * samples_per_prompt * P
+
+            # Per-sample generated KV reads: Each sample reads its own previously generated tokens
+            for R in prompt_responses:
+                # Each token in this sample reads its previously generated tokens
+                # sum_{i=0}^{R-1} i = R*(R-1)/2
+                kv_read_terms += R * (R - 1) // 2
+
+        # 2x for K and V
+        kv_bytes_per_token = 2 * num_kv * head_dim * dtype_bytes
+        return self.num_layers * kv_bytes_per_token * kv_read_terms
+
+    def prefill_memory_bytes(self, prompt_lengths: list[int], dtype_bytes: int = 2) -> int:
+        """Memory bytes for prefill phase.
+
+        During prefill:
+        - Read weights once for the entire batch (batched matmul)
+        - Write KV cache for each token
+
+        Args:
+            prompt_lengths: List of prompt lengths
+            dtype_bytes: Bytes per element (2 for FP16/BF16)
+
+        Returns:
+            Total memory bytes for prefill
+        """
+        # In batched prefill, weights are read once for the entire operation,
+        # not once per token. We process all prompts in a single batch.
+        num_prefill_batches = len(prompt_lengths)  # Each prompt is a "batch"
+        weight_bytes = self.weight_memory_bytes(num_prefill_batches, dtype_bytes)
+
+        # KV cache is written for every token
+        total_prefill_tokens = sum(prompt_lengths)
+        kv_write_bytes = self.kv_cache_write_bytes(total_prefill_tokens, dtype_bytes)
+        return weight_bytes + kv_write_bytes
+
+    def decode_memory_bytes(
+        self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int = 1, dtype_bytes: int = 2
+    ) -> int:
+        """Memory bytes for decode/generation phase.
+
+        During decode:
+        - Read weights for each new token position (shared across samples in batch)
+        - Write KV cache for each new token
+        - Read all previous KV cache for attention
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+            dtype_bytes: Bytes per element (2 for FP16/BF16)
+
+        Returns:
+            Total memory bytes for decode
+        """
+        # In synchronized batch generation, weights are read once per position,
+        # not once per token. With multiple samples per prompt generating in parallel,
+        # we only need to read weights for the number of unique positions.
+        unique_positions = 0
+        response_idx = 0
+        for _ in prompt_lengths:
+            # Get response lengths for this prompt's samples
+            prompt_responses = response_lengths[response_idx : response_idx + samples_per_prompt]
+            response_idx += samples_per_prompt
+            # In synchronized generation, all samples generate the same number of positions
+            # (up to the max length among them)
+            unique_positions += max(prompt_responses) if prompt_responses else 0
+
+        weight_bytes = self.weight_memory_bytes(unique_positions, dtype_bytes)
+
+        # KV writes happen for all tokens (each sample writes its own KV)
+        total_decode_tokens = sum(response_lengths)
+        kv_write_bytes = self.kv_cache_write_bytes(total_decode_tokens, dtype_bytes)
+
+        kv_read_bytes = self.kv_cache_read_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
+        return weight_bytes + kv_write_bytes + kv_read_bytes
+
+    def memory_bytes(
+        self,
+        prompt_lengths: list[int],
+        response_lengths: Optional[list[int]] = None,
+        samples_per_prompt: int = 1,
+        dtype_bytes: int = 2,
+    ) -> int:
+        """Approximate total HBM bytes moved for prefill + decode.
+
+        Returns an integer number of bytes. Divide by elapsed seconds to get B/s;
+        compare against peak bandwidth to get utilization.
+
+        Args:
+            prompt_lengths: List of prompt lengths (one per unique prompt)
+            response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
+            samples_per_prompt: Number of samples generated per prompt
+            dtype_bytes: Bytes per element (2 for FP16/BF16)
+
+        Returns:
+            Total memory bytes moved
+
+        Assumptions:
+          - Weights are read once per token per layer (Q,K,V,O + MLP up/down)
+          - KV cache: write K/V for every token; during decode, read all past K/V per new token
+          - When batching samples, prompt KV cache is shared across samples
+          - Embedding and LM head reads are ignored (usually dominated by matmul weight traffic)
+        """
+        total = self.prefill_memory_bytes(prompt_lengths, dtype_bytes)
+
+        if response_lengths is not None:
+            assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+                f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+            )
+
+            # Pass original prompt_lengths with samples_per_prompt to correctly handle shared KV cache
+            total += self.decode_memory_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
+
+        return total
+
+
+def get_device_name(device_name: str) -> str:
+    tokens = device_name.lower().replace("-", " ").split()
+
+    filtered = [val for val in tokens if val not in ["nvidia", "80gb", "40gb", "48gb", "hbm3", "rtx", "sxm4", "pcie"]]
+
+    for token in filtered:
+        if token in GPU_SPECS:
+            return token
+
+    raise ValueError(f"Unsupported device name: {device_name}. Expected one of: {list(GPU_SPECS.keys())}")

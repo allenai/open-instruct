@@ -1,5 +1,5 @@
 python mason.py \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/augusta \
     --workspace ai2/tulu-thinker \
     --priority high \
     --image valpy/open_instruct_dev_multi --pure_docker_mode \
@@ -41,7 +41,7 @@ python mason.py \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --num_evals 100 \
+    --local_eval_every 25 \
     --save_freq 10 \
     --gradient_checkpointing \
     --with_tracking

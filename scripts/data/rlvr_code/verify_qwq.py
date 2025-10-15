@@ -3,7 +3,7 @@ run source configs/beaker_configs/code_api_setup.sh before running this script.
 Resource intensive, so run as a batch job, not in a session. E.g:
 
 python mason.py \
-    --cluster ai2/saturn-cirrascale \
+    --cluster ai2/saturn \
     --workspace ai2/oe-adapt-code \
     --priority high \
     --description "filtering correct python qwq generations" \
@@ -23,16 +23,10 @@ import time
 from tqdm.asyncio import tqdm_asyncio
 import logging
 
+from open_instruct import logger_utils
+
 # Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("verification.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 CONCURRENCY_LIMIT = 256
 SOURCE_DATASET = "saurabh5/correct-python-sft-187k-x16-thoughts"

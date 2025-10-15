@@ -1,4 +1,3 @@
-import logging
 import re
 import signal
 from typing import Optional
@@ -6,7 +5,9 @@ from typing import Optional
 import sympy
 from sympy.parsing.latex import parse_latex
 
-eval_logger = logging.getLogger("math_utils")
+from open_instruct import logger_utils
+
+eval_logger = logger_utils.setup_logger("math_utils")
 
 
 # from https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/minerva_math/utils.py#L187
@@ -316,7 +317,6 @@ def strip_string(string):
 
     # remove percentage
     string = string.replace("\\%", "")
-    string = string.replace("\%", "")  # noqa: W605
 
     # " 0." equivalent to " ." and "{0." equivalent to "{." Alternatively, add "0" if "." is the start of the string
     string = string.replace(" .", " 0.")

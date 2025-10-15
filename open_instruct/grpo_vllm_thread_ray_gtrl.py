@@ -48,7 +48,6 @@ except Exception:
 import asyncio
 import gc
 import json
-import logging
 import math
 import random
 import shutil
@@ -88,6 +87,7 @@ from transformers import (
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
+from open_instruct import utils
 from open_instruct.dataset_processor import SimpleGenerateCollatorWithGroundTruth
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
@@ -119,8 +119,10 @@ from open_instruct.utils import (
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
+    maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
+    setup_logger,
     upload_metadata_to_hf,
 )
 from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
@@ -606,9 +608,7 @@ class ShufflingIterator:
 
 class RayProcess:
     def __init__(self, world_size, rank, local_rank, master_addr, master_port):
-        logging.basicConfig(
-            format="%(asctime)s %(levelname)-8s %(message)s", level=logging.INFO, datefmt="%Y-%m-%d %H:%M:%S"
-        )
+        setup_logger()
         self.world_size = world_size
         self.rank = rank
         self.local_rank = local_rank
@@ -1714,6 +1714,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     inits = []
     policy_group = ModelGroup(pg, PolicyTrainerRayProcess, args.actor_num_gpus_per_node, args.single_gpu_mode)
     wandb_url = wandb.run.get_url() if args.with_tracking else None
+    maybe_update_beaker_description(wandb_url=wandb_url)
     inits.extend(
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url) for model in policy_group.models
     )
@@ -1757,7 +1758,22 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
     # train and gather metrics
     resume_training_step = 1
+    training_start_time = time.time()  # Track overall training start time
+
     for training_step in range(resume_training_step, args.num_training_steps + 1):
+        # Update Beaker progress every 10 steps or on first/last step
+        if (
+            training_step == resume_training_step
+            or training_step % 10 == 0
+            or training_step == args.num_training_steps
+        ):
+            maybe_update_beaker_description(
+                current_step=training_step,
+                total_steps=args.num_training_steps,
+                start_time=training_start_time,
+                wandb_url=wandb_url,
+            )
+
         result = metrics_queue.get()
         metrics, episode, df = result
         for key, value in metrics.items():
@@ -1799,10 +1815,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         if args.try_launch_beaker_eval_jobs and len(beaker_config.beaker_dataset_id_urls) > 0:
             command = f"""\
             python mason.py  \
-                --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/s2-cirrascale ai2/general-cirrascale \
+                --cluster ai2/jupiter \
                 --priority low \
                 --preemptible \
-                --budget ai2/allennlp \
+                --budget ai2/jupiter \
                 --workspace ai2/tulu-2-improvements \
                 --image nathanl/open_instruct_auto \
                 --pure_docker_mode \
@@ -1825,5 +1841,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
 
 if __name__ == "__main__":
+    utils.check_oe_eval_internal()
+
     parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
     main(*parser.parse())

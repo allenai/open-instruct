@@ -1,21 +1,6 @@
 name: Beaker Experiment Launch
 
 on:
-  push:
-    # Run this workflow anytime a push updates one of the files in the image's directory
-    # (other than the README), and anytime there's a new release tag for this image.
-    paths:
-      - 'mason.py'
-      - 'open_instruct/**'
-      - '!open_instruct/README.md'
-      - 'requirements.txt'
-      - 'Dockerfile'
-      - '.github/workflows/push-image.yml'
-      # Note, add .olmo dockerfile + requirements if adding auto build to those.
-
-    # But only on pushes to main.
-    branches: [main]
-
   merge_group:
 
   # Adding a comment to trigger a run.
@@ -39,22 +24,24 @@ env:
 jobs:
   launch-experiment:
     name: Launch Beaker Experiment
-    runs-on: ubuntu-latest
+    runs-on: 8-Core-XL-Runner-Ubuntu-Latest
     timeout-minutes: 35
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Need full history to get commit author info
-      
+
       - name: Checkout oe-eval-internal
         uses: actions/checkout@v4
         with:
           repository: allenai/oe-eval-internal
           path: './oe-eval-internal'
           ssh-key: ${{ secrets.OE_EVAL_GIT_CLONE_ACCESS_PRIVATE_SSH_DEPLOY_KEY }}
-      
+          fetch-depth: 1
+          filter: 'blob:none'
+
       - name: Get trigger information
         id: get-trigger-info
         run: |
@@ -69,60 +56,25 @@ jobs:
             # For scheduled runs
             echo "trigger_info=Scheduled run" >> $GITHUB_OUTPUT
           fi
-      
+
       - name: Setup Python environment
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      
+
       - name: Install uv
         uses: astral-sh/setup-uv@v3
-      
+
       - name: Setup Beaker
         uses: allenai/setup-beaker@v2
         with:
           token: ${{ secrets.BEAKER_TOKEN }}
           workspace: ai2/tulu-thinker
-      
+
       - name: Install dependencies
         run: |
           # Install development dependencies needed for mason.py
-          uv sync --only-group dev
-
-      - name: Delete huge unnecessary tools folder
-        run: |
-          echo "Disk space before cleanup:"
-          df -h /
-          
-          # Remove unnecessary directories
-          DIRS_TO_REMOVE=(
-            "/opt/hostedtoolcache"
-            "/usr/share/dotnet"
-            "$AGENT_TOOLSDIRECTORY"
-            "/usr/local/lib/android"
-            "/usr/local/share/boost"
-          )
-          
-          for dir in "${DIRS_TO_REMOVE[@]}"; do
-            [ -d "$dir" ] && sudo rm -rf "$dir" && echo "Removed: $dir"
-          done
-          
-          # Remove unnecessary packages
-          PACKAGES_TO_REMOVE=(
-            '^aspnetcore-.*' '^dotnet-.*' '^llvm-.*' 'php.*'
-            '^mongodb-.*' '^mysql-.*' azure-cli google-chrome-stable
-            firefox powershell mono-devel
-          )
-          
-          sudo apt-get remove -y "${PACKAGES_TO_REMOVE[@]}" 2>/dev/null || true
-          sudo apt-get autoremove -y
-          sudo apt-get clean
-          
-          # Clean up Docker
-          docker system prune -af --volumes
-          
-          echo "Disk space after cleanup:"
-          df -h /
+          uv sync --frozen
 
       - name: Build image and launch experiment
         id: launch
@@ -132,21 +84,21 @@ jobs:
           GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          
+
           # Make scripts executable
           chmod +x scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh
-          
+
           echo "Building Docker image and launching experiment..."
           echo "Git commit: $(git rev-parse --short HEAD)"
-          
+
           # Build image and launch experiment
           # Use tee to both stream output and capture it for parsing
-          ./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh 2>&1 | tee /tmp/beaker_output.log || {
+          ./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_integration_test.sh 2>&1 | tee /tmp/beaker_output.log || {
             EXIT_CODE=$?
             echo "ERROR: build_image_and_launch.sh failed with exit code $EXIT_CODE"
             exit $EXIT_CODE
           }
-          
+
           # Extract experiment ID from the saved output
           EXPERIMENT_ID=$(grep -oP 'https://beaker.org/ex/\K[a-zA-Z0-9]+' /tmp/beaker_output.log | tail -1)
           if [ -z "$EXPERIMENT_ID" ]; then
@@ -157,45 +109,45 @@ jobs:
             echo "Please check that the experiment was created successfully."
             exit 1
           fi
-          
+
           echo "experiment_id=$EXPERIMENT_ID" >> $GITHUB_OUTPUT
           echo "Experiment ID: $EXPERIMENT_ID"
           echo "Experiment URL: https://beaker.org/ex/$EXPERIMENT_ID"
-      
+
       - name: Wait for Beaker experiment completion
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
         run: |
           EXPERIMENT_ID="${{ steps.launch.outputs.experiment_id }}"
           echo "Waiting for experiment $EXPERIMENT_ID to complete..."
-          
+
           # Maximum wait time: 20 minutes (1200 seconds)
           MAX_WAIT_TIME=1200
           CHECK_INTERVAL=30
           ELAPSED_TIME=0
-          
+
           while [ $ELAPSED_TIME -lt $MAX_WAIT_TIME ]; do
             # Get job status directly
             JOB_STATUS=$(beaker experiment get $EXPERIMENT_ID --format json | jq -r '.[0].jobs[0].status' 2>/dev/null || echo "null")
-            
+
             # Check if exitCode exists (experiment is done)
             if [ "$JOB_STATUS" = "null" ]; then
               EXIT_CODE="pending"
             else
               EXIT_CODE=$(echo "$JOB_STATUS" | jq -r '.exitCode // "pending"')
             fi
-            
+
             if [ "$EXIT_CODE" = "pending" ]; then
               echo "=== Experiment still running (elapsed: ${ELAPSED_TIME}s) ==="
             else
               echo "=== Experiment finished with exit code: $EXIT_CODE (elapsed: ${ELAPSED_TIME}s) ==="
             fi
-            
+
             # Stream new logs since last check
             echo "--- Recent logs ---"
             beaker experiment logs $EXPERIMENT_ID 2>/dev/null | tail -n 50 || echo "No logs available yet"
             echo "--- End of logs ---"
-            
+
             # Check if experiment has completed
             if [ "$EXIT_CODE" != "pending" ]; then
               if [ "$EXIT_CODE" = "0" ]; then
@@ -212,15 +164,15 @@ jobs:
                 exit 1
               fi
             fi
-            
+
             # Wait before next check
             sleep $CHECK_INTERVAL
             ELAPSED_TIME=$((ELAPSED_TIME + CHECK_INTERVAL))
           done
-          
+
           echo "⏱️ Timeout: Experiment did not complete within 20 minutes"
           exit 1
-      
+
       - name: Summary
         if: always()
         run: |

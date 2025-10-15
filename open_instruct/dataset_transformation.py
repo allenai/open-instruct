@@ -127,7 +127,7 @@ FILTER_EXAMPLE_PER_SECOND_PER_CPU = 1130
 
 def get_num_proc(dataset_len: int, num_available_cpus: int, example_per_second_per_cpu) -> int:
     num_required_cpus = max(1, dataset_len // example_per_second_per_cpu)
-    return min(num_required_cpus, num_available_cpus)
+    return min(num_required_cpus, num_available_cpus, dataset_len)
 
 
 COLORS = ["on red", "on green", "on blue", "on yellow", "on magenta"]
@@ -245,90 +245,6 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% if loop.last and add_generation_prompt %}"
         "{{ '<|im_start|>assistant\n' }}"
-        "{% endif %}"
-        "{% endfor %}"
-    ),
-    "olmo_thinker": (
-        "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
-        "{% if not has_system %}"
-        "{{ '<|im_start|>system\nYou are OLMo, a helpful function-calling AI assistant built by Ai2. Your date cutoff is November 2024, and your model weights are available at https://huggingface.co/allenai. You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
-        "{% endif %}"
-        "{% for message in messages %}"
-        "{% if message['role'] == 'system' %}"
-        "{{ '<|im_start|>system\n' + message['content'] }}"
-        "{% if message.get('functions', none) is not none %}"
-        "{{ ' <functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
-        "{% else %}"
-        "{{ ' You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
-        "{% endif %}"
-        "{% elif message['role'] == 'user' %}"
-        "{% if message.get('functions', none) is not none %}"
-        "{{ '<|im_start|>user\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
-        "{% else %}"
-        "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
-        "{% endif %}"
-        "{% elif message['role'] == 'assistant' %}"
-        "{{ '<|im_start|>assistant\n' }}"
-        "{% if message.get('content', none) is not none %}"
-        "{{ message['content'] }}"
-        "{% endif %}"
-        "{% if message.get('function_calls', none) is not none %}"
-        "{{ '<function_calls>' + message['function_calls'] + '</function_calls>' }}"
-        "{% endif %}"
-        "{% if not loop.last %}"
-        "{{ '<|im_end|>' + '\n' }}"
-        "{% else %}"
-        "{{ eos_token }}"
-        "{% endif %}"
-        "{% elif message['role'] == 'environment' %}"
-        "{{ '<|im_start|>environment\n' + message['content'] + '<|im_end|>\n' }}"
-        "{% endif %}"
-        "{% if loop.last and add_generation_prompt %}"
-        "{{ '<|im_start|>assistant\n<think>' }}"
-        "{% endif %}"
-        "{% endfor %}"
-    ),
-    "olmo_thinker_r1_style": (
-        "A conversation between user and assistant. "
-        "The user asks a question, and the assistant solves it. "
-        "The assistant first thinks and reasons about the question "
-        "and after thinking provides the user with the answer. "
-        "The reasoning process is enclosed in <think> </think> tags "
-        "and the answer are enclosed in <answer> </answer> tags "
-        "so the full response is <think> reasoning process here </think> "
-        "<answer> answer here </answer>."
-        "\n\n"
-        "{% for message in messages %}"
-        "{% if message['role'] == 'system' %}"
-        "{% if message.get('functions', none) is not none %}"
-        "{{ '<|im_start|>system\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
-        "{% else %}"
-        "{{ '<|im_start|>system\n' + message['content']  + '<|im_end|>\n' }}"
-        "{% endif %}"
-        "{% elif message['role'] == 'user' %}"
-        "{% if message.get('functions', none) is not none %}"
-        "{{ '<|im_start|>user\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
-        "{% else %}"
-        "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
-        "{% endif %}"
-        "{% elif message['role'] == 'assistant' %}"
-        "{{ '<|im_start|>assistant\n' }}"
-        "{% if message.get('content', none) is not none %}"
-        "{{ message['content'] }}"
-        "{% endif %}"
-        "{% if message.get('function_calls', none) is not none %}"
-        "{{ '<function_calls>' + message['function_calls'] + '</function_calls>' }}"
-        "{% endif %}"
-        "{% if not loop.last %}"
-        "{{ '<|im_end|>' + '\n' }}"
-        "{% else %}"
-        "{{ eos_token }}"
-        "{% endif %}"
-        "{% elif message['role'] == 'environment' %}"
-        "{{ '<|im_start|>environment\n' + message['content'] + '<|im_end|>\n' }}"
-        "{% endif %}"
-        "{% if loop.last and add_generation_prompt %}"
-        "{{ '<|im_start|>assistant\n<think>' }}"
         "{% endif %}"
         "{% endfor %}"
     ),
@@ -737,15 +653,17 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
     # and saved together with the tokenizer to be used later.
-    if tc.chat_template_name in CHAT_TEMPLATES:
-        tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
-    else:
+    if tc.chat_template_name is None:
         try:
             tokenizer.chat_template = AutoTokenizer.from_pretrained(
                 tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
             ).chat_template
         except Exception:
             raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
+    elif tc.chat_template_name in CHAT_TEMPLATES:
+        tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
+    else:
+        raise ValueError(f"Could not find chat template for {tc.chat_template_name}.")
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -764,7 +682,9 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
     config = AutoConfig.from_pretrained(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision)
     # @vwxyzjn: "olmo" handles both `olmo2` and `olmoe`.
     if "olmo" in config.model_type:
-        if "olmo" in tc.chat_template_name:
+        if tc.chat_template_name is None:
+            pass  # just assume the user knows what they're doing
+        elif "olmo" in tc.chat_template_name:
             assert not tc.add_bos, "For newer OLMo chat templates, you must *not* run with `--add_bos`."
         else:
             assert tc.add_bos, "For OLMo, you must run with `--add_bos`."
@@ -847,6 +767,7 @@ GET_TOKENIZER_FN = {
 DEFAULT_SFT_MESSAGES_KEY = "messages"
 GROUND_TRUTHS_KEY = "ground_truth"
 VERIFIER_SOURCE_KEY = "dataset"
+RAW_PROMPT_KEY = "prompt"
 
 
 @dataclass
@@ -855,7 +776,7 @@ class TokenizerConfig:
     tokenizer_revision: Optional[str] = None
     trust_remote_code: bool = False
     use_fast: bool = True
-    chat_template_name: str = "tulu"
+    chat_template_name: Optional[str] = None  # default to using the tokenizer chat template
     add_bos: bool = False
     get_tokenizer_fn: str = "get_tokenizer_tulu_v2_2"
 
@@ -955,6 +876,7 @@ def sft_tokenize_v1(
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
+    row.pop(RAW_PROMPT_KEY, None)
     return row
 
 
@@ -1269,6 +1191,8 @@ def rlvr_tokenize_v1(
     row[LABELS_KEY] = labels
     row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
     row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
+    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
+    row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
     return row
 
 
@@ -1296,6 +1220,10 @@ def rlvr_tokenize_v2(
     row[LABELS_KEY] = labels
     row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
     row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
+    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
+    # row[DEFAULT_SFT_MESSAGES_KEY] = prompt
+    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
+    row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
     # some basic transformations:
     # if ground truths is a string, make it a list
     if isinstance(row[ground_truths_key], str):
@@ -1393,6 +1321,7 @@ class DatasetConfig:
     transform_fn: List[str] = field(default_factory=list)
     transform_fn_args: List[Dict[str, Any]] = field(default_factory=list)
     target_columns: Optional[List[str]] = None
+    dataset_config_seed: int = 42
 
     # for tracking purposes
     dataset_commit_hash: Optional[str] = None
@@ -1444,7 +1373,7 @@ class DatasetConfig:
         # Add randomly sampled extra samples
         if extra_samples > 0:
             # Use numpy for reproducible random sampling
-            rng = np.random.RandomState(42)  # Fixed seed for reproducibility
+            rng = np.random.RandomState(self.dataset_config_seed)
             extra_indices = rng.choice(original_size, size=extra_samples, replace=False)
             indices.extend(extra_indices.tolist())
 
@@ -1670,12 +1599,15 @@ class LocalDatasetTransformationCache:
             if INPUT_IDS_KEY in dataset.column_names:
                 total_tokens = 0
                 trainable_tokens = 0
-                for sample in dataset:
-                    tokens = len(sample[INPUT_IDS_KEY])
-                    total_tokens += tokens
-                    if LABELS_KEY in sample:
-                        trainable_tokens += sum(1 for label in sample[LABELS_KEY] if label != -100)
 
+                def count_tokens(sample):
+                    token_count = len(sample[INPUT_IDS_KEY])
+                    trainable_tokens = sum(1 for label in sample[LABELS_KEY] if label != -100)
+                    return {"token_count": token_count, "label_token_count": trainable_tokens}
+
+                token_count_dataset = dataset.map(count_tokens, batched=False)
+                total_tokens = sum(token_count_dataset["token_count"])
+                trainable_tokens = sum(token_count_dataset["label_token_count"])
                 stats["total_tokens"] = total_tokens
                 stats["trainable_tokens"] = trainable_tokens
                 stats["avg_tokens_per_instance"] = total_tokens / len(dataset) if len(dataset) > 0 else 0
@@ -1735,6 +1667,7 @@ def get_cached_dataset_tulu_with_statistics(
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
     drop_dataset_source: bool = True,
+    dataset_config_seed: int = 42,
 ) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
     dcs = []
     if dataset_config_hash is None:
@@ -1754,7 +1687,6 @@ def get_cached_dataset_tulu_with_statistics(
                 frac_or_num_samples = float(frac_or_num_samples)
             else:
                 frac_or_num_samples = int(frac_or_num_samples)
-
             dataset_config = DatasetConfig(
                 dataset_name=dataset_name,
                 dataset_split=dataset_mixer_list_splits[i],
@@ -1763,6 +1695,7 @@ def get_cached_dataset_tulu_with_statistics(
                 transform_fn_args=transform_fn_args,
                 target_columns=target_columns,
                 frac_or_num_samples=frac_or_num_samples,
+                dataset_config_seed=dataset_config_seed,
             )
 
             # Calculate target size properly handling fractional upsampling
@@ -1808,6 +1741,7 @@ def get_cached_dataset_tulu(
     hf_entity: Optional[str] = None,
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
+    dataset_config_seed: int = 42,
 ) -> Dataset:
     return get_cached_dataset_tulu_with_statistics(
         dataset_mixer_list,
@@ -1821,6 +1755,8 @@ def get_cached_dataset_tulu(
         hf_entity,
         dataset_local_cache_dir,
         dataset_skip_cache,
+        True,
+        dataset_config_seed,
     )[0]
 
 

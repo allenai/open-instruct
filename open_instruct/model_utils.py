@@ -15,7 +15,6 @@
 
 
 import itertools
-import logging
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -41,10 +40,11 @@ from rich.table import Table
 from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
+from open_instruct import logger_utils
 from open_instruct.ground_truth_utils import VerifierFunction
 from open_instruct.utils import retry_on_exception
 
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
 @dataclass
@@ -54,6 +54,7 @@ class Batch:
     queries: List[List[int]]
     ground_truths: List[List[int]]
     datasets: List[str]
+    raw_queries: Optional[List[str]]
     indices: Optional[List[int]]
 
     def __getitem__(self, key: Union[slice, int, List[int]]) -> "Batch":
@@ -64,6 +65,7 @@ class Batch:
                 queries=self.queries[key],
                 ground_truths=self.ground_truths[key],
                 datasets=self.datasets[key],
+                raw_queries=self.raw_queries[key],
                 indices=self.indices[key] if self.indices else None,
             )
         elif isinstance(key, int):
@@ -72,6 +74,7 @@ class Batch:
                 queries=[self.queries[key]],
                 ground_truths=[self.ground_truths[key]],
                 datasets=[self.datasets[key]],
+                raw_queries=[self.raw_queries[key]],
                 indices=[self.indices[key]] if self.indices else None,
             )
         else:
@@ -80,6 +83,7 @@ class Batch:
                 queries=[self.queries[i] for i in key],
                 ground_truths=[self.ground_truths[i] for i in key],
                 datasets=[self.datasets[i] for i in key],
+                raw_queries=[self.raw_queries[i] for i in key],
                 indices=[self.indices[i] for i in key] if self.indices else None,
             )
 
