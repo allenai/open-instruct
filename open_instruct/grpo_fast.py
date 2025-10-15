@@ -85,6 +85,7 @@ from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import logger_utils, vllm_utils3
 from open_instruct.actor_manager import ActorManager
+from open_instruct import quantization
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -362,6 +363,8 @@ class Args:
     """whether to enable the ActorManager queue monitoring dashboard"""
     queue_dashboard_port: Optional[int] = None
     """optional port for the dashboard server (if None, finds a free port automatically)"""
+    quantization_config: Optional[Any] = None
+    """GPTQ quantization configuration (QuantizationConfig from open_instruct.quantization)"""
 
     # Experiment tracking
     verbose: bool = False
@@ -814,6 +817,71 @@ class PolicyTrainerRayProcess(RayProcess):
                 entropy = entropy_from_logits(logits)
 
         return logprob, entropy
+
+    def calibrate_gptq(self, calibration_data: Dict[str, torch.Tensor]) -> None:
+        """Calibrate GPTQ quantization using a batch of data.
+
+        Args:
+            calibration_data: Dict with 'input_ids', 'attention_mask', 'position_ids'
+        """
+        if not self.args.quantization_config or not self.args.quantization_config.enable_gptq:
+            logger.info("GPTQ not enabled, skipping calibration")
+            return
+
+        logger.info("Starting GPTQ calibration...")
+        config = self.args.quantization_config
+        model = self.model.module if hasattr(self.model, "module") else self.model
+
+        if not hasattr(self, "_gptq_hessians"):
+            self._gptq_hessians = {}
+            self._gptq_num_samples = {}
+
+        hooks = []
+        modules_to_calibrate = {}
+
+        def make_calibration_hook(module):
+            def hook(mod, args, output):
+                inp = args[0]
+                if module not in self._gptq_hessians:
+                    self._gptq_hessians[module] = None
+                    self._gptq_num_samples[module] = 0
+
+                hessian, num_samples = quantization.calibrate_module_with_data(
+                    module=module,
+                    calibration_data=inp,
+                    existing_hessian=self._gptq_hessians[module],
+                    existing_num_samples=self._gptq_num_samples[module],
+                    offload_to_cpu=config.offload_hessians,
+                )
+                self._gptq_hessians[module] = hessian
+                self._gptq_num_samples[module] = num_samples
+
+            return hook
+
+        for name, module in model.named_modules():
+            if quantization.is_quantizable_layer(name, module):
+                hook = module.register_forward_hook(make_calibration_hook(module))
+                hooks.append(hook)
+                modules_to_calibrate[module] = name
+
+        with torch.no_grad():
+            input_ids = calibration_data["input_ids"].to(self.device)
+            attention_mask = calibration_data["attention_mask"].to(self.device)
+            position_ids = calibration_data.get("position_ids")
+            if position_ids is not None:
+                position_ids = position_ids.to(self.device)
+
+            model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                return_dict=True,
+            )
+
+        for hook in hooks:
+            hook.remove()
+
+        logger.info(f"GPTQ calibration complete. Calibrated {len(self._gptq_hessians)} modules.")
 
     def setup_model_update_group(self, vllm_engines):
         self.vllm_engines = vllm_engines
