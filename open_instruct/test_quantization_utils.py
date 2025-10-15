@@ -4,17 +4,12 @@ import unittest
 
 import torch
 import torch.nn as nn
+import transformers
 
-try:
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-    from open_instruct import quantization
-    LLMCOMPRESSOR_AVAILABLE = True
-except ImportError:
-    LLMCOMPRESSOR_AVAILABLE = False
+from open_instruct import quantization
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-@unittest.skipIf(not LLMCOMPRESSOR_AVAILABLE, "llmcompressor not available")
 class TestQuantizationUtils(unittest.TestCase):
     """Test GPTQ quantization utilities."""
 
@@ -74,10 +69,10 @@ class TestQuantizationUtils(unittest.TestCase):
 
     def test_end_to_end_model_calibration_and_compression(self):
         """Test end-to-end: load model, calibrate, compress weights."""
-        model = AutoModelForCausalLM.from_pretrained(
+        model = transformers.AutoModelForCausalLM.from_pretrained(
             self.model_name, torch_dtype=torch.bfloat16, device_map=self.device
         )
-        tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        tokenizer = transformers.AutoTokenizer.from_pretrained(self.model_name)
         tokenizer.pad_token = tokenizer.eos_token
 
         text = ["Hello world! This is a test.", "Another test sentence for calibration."]
