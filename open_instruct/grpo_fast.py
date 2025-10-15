@@ -1792,13 +1792,14 @@ def data_preparation_thread(
         total_completions = 0
 
         total_prompts_kept = 0
+        total_prompts_filtered = 0
         prompts_to_request = target_prompt_count
         getting_response_time = 0.0
 
         fill_iteration = 0
         while prompts_to_request > 0:
             fill_iteration += 1
-            with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
+            with Timer(f"🚀 [Data Preparation Thread] Getting {prompts_to_request} response ids") as timer:
                 result_step, batch_step, prompt_lengths_step, response_lengths_step = accumulate_inference_batches(
                     inference_results_Q,
                     pending_queries_map,
@@ -1872,6 +1873,7 @@ def data_preparation_thread(
 
                 num_zero_std_prompts = (~non_zero_std_mask).sum()
                 num_filtered_responses = len(scores_step) - len(non_zero_indices)
+                total_prompts_filtered += num_zero_std_prompts
                 if num_filtered_responses > 0:
                     logger.info(
                         f"[Zero-gradient filtering] Filtered {num_zero_std_prompts} prompts with zero std "
@@ -2260,6 +2262,7 @@ def data_preparation_thread(
                 "val/all_zero_reward_groups_ratio": all_zero_groups_ratio,
                 "val/all_solved_reward_groups": all_solved_groups,
                 "val/all_solved_reward_groups_ratio": all_solved_groups_ratio,
+                "val/total_filtered_groups": total_prompts_filtered,
                 "val/total_reward_groups": total_groups,
                 "val/sequence_lengths": sequence_lengths.mean(),
                 "val/sequence_lengths_min": sequence_lengths.min(),
@@ -3149,6 +3152,7 @@ def run_training(
     else:
         num_total_tokens = 0
 
+    filtered_prompts_count = 0
     training_start_time = time.perf_counter()  # Track overall training start time
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
@@ -3178,6 +3182,12 @@ def run_training(
         split_and_insert_batch(
             batch, training_step, pending_queries_map, param_prompt_Q, generation_configs["train"], is_eval=False
         )
+        while filtered_prompts_count > args.num_unique_prompts_rollout:
+            split_and_insert_batch(
+                batch, training_step, pending_queries_map, param_prompt_Q, generation_configs["train"], is_eval=False
+            )
+            filtered_prompts_count -= args.num_unique_prompts_rollout
+
         if (
             training_step % args.local_eval_every == 0
             and eval_batch is not None
@@ -3192,11 +3202,13 @@ def run_training(
                 is_eval=True,
             )
 
-        collated_data, data_thread_metrics, num_total_tokens, num_step_tokens, prompt_lengths, response_lengths = (
+        (collated_data, data_thread_metrics, num_total_tokens, num_step_tokens, prompt_lengths, response_lengths) = (
             load_data_from_packing_thread(packed_sequences_Q, num_total_tokens, stop_event, health_check_fn)
         )
         if collated_data is None:
             continue
+
+        filtered_prompts_count += data_thread_metrics["val/total_filtered_groups"]
 
         for metrics_Q in [generate_metrics_Q, weight_sync_metrics_Q]:
             try:
