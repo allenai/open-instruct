@@ -243,6 +243,7 @@ def setup_vllm_engines(
 
     param_prompt_Q = ray_queue.Queue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
+    eval_results_Q = ray_queue.Queue()
 
     queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
@@ -265,10 +266,11 @@ def setup_vllm_engines(
         max_tool_calls=[0],
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
-        eval_results_queue=None,
+        eval_results_queue=eval_results_Q,
         actor_manager=actor_manager,
         inference_batch_size=args.inference_batch_size,
         use_fp8_kv_cache=False,
+        inflight_updates=args.inflight_updates,
     )
 
     logger.info("vLLM engines ready")
