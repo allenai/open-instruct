@@ -34,15 +34,6 @@ from concurrent import futures
 # We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
 # https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
-try:
-    import deepspeed
-
-    # @vwxyzjn: when importing on CPU-only machines, we get the following error:
-    # RuntimeError: 0 active drivers ([]). There should only be one.
-    # so we need to catch the exception and do nothing
-    # https://github.com/deepspeedai/DeepSpeed/issues/7028
-except Exception:
-    pass
 
 from open_instruct import utils
 
@@ -79,9 +70,9 @@ from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
+from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
-from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import logger_utils, vllm_utils3
 from open_instruct.actor_manager import ActorManager
@@ -117,14 +108,10 @@ from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
     RayProcess,
-    _z3_params_to_fetch,
     calibrate_checkpoint_state_dir,
-    clean_last_n_checkpoints_deepspeed,
     download_latest_checkpoint_from_gs,
     get_beaker_whoami,
-    get_eval_ds_config,
     get_optimizer_grouped_parameters,
-    get_train_ds_config,
     get_wandb_tags,
     is_beaker_job,
     launch_ai2_evals_on_weka,
@@ -354,8 +341,6 @@ class Args:
     """whether to enable prefix caching"""
     vllm_top_p: float = 1.0
     """vLLM top p for nucleus sampling"""
-    deepspeed_stage: int = 0
-    """the deepspeed stage"""
     gather_whole_model: bool = True
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
     enable_queue_dashboard: bool = True
@@ -613,22 +598,6 @@ class PolicyTrainerRayProcess(RayProcess):
         wandb_url: str,
         tokenizer: PreTrainedTokenizer,
     ):
-        # ------------------------------------------------------------
-        # Monkey patch to load checkpoints with `weights_only=False`
-        # otherwise it errors out with:
-        # `_pickle.UnpicklingError: Weights only load failed. ` with pytorch 2.6.0
-        from deepspeed.runtime.checkpoint_engine import torch_checkpoint_engine
-        from deepspeed.utils import logger
-
-        def load(self, path: str, map_location=None):
-            logger.info(f"[Torch] Loading checkpoint from {path}...")
-            partition = torch.load(path, map_location=map_location, weights_only=False)
-            logger.info(f"[Torch] Loaded checkpoint from {path}.")
-            return partition
-
-        torch_checkpoint_engine.TorchCheckpointEngine.load = load
-
-        # ------------------------------------------------------------
         self.args = args
         self.tokenizer = tokenizer
         self.model_config = model_config
@@ -644,20 +613,8 @@ class PolicyTrainerRayProcess(RayProcess):
         np.random.seed(worker_seed)
         random.seed(worker_seed)
 
-        deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
-
-        ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
-        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-        ds_config["gradient_accumulation_steps"] = 1
-        # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
-        # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
-        # next line instructs transformers to partition the model directly over multiple gpus using
-        # deepspeed.zero.Init when model's `from_pretrained` method is called.
-        if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            dschf = HfDeepSpeedConfig(ds_config)
-        else:
-            dschf = None
-        logger.info(f"Deepspeed config: {dschf=}")
+        if not dist.is_initialized():
+            dist.init_process_group(backend="nccl", timeout=timedelta(minutes=args.backend_timeout))
 
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
@@ -665,98 +622,74 @@ class PolicyTrainerRayProcess(RayProcess):
             torch_dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
             use_cache=False,
-            **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
-        # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
-        # AdamOptimizer = FusedAdam
+
+        mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16, reduce_dtype=torch.float32)
+        for layer_id, layer in enumerate(self.policy.model.layers):
+            fully_shard(layer, mp_policy=mp_policy)
+        fully_shard(self.policy, mp_policy=mp_policy)
+
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
             optim_params = self.policy.parameters()
-        # self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
         self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
         if args.warmup_ratio > 0.0:
             warm_up_steps = int(num_scheduler_steps * args.warmup_ratio)
-        scheduler = get_scheduler(
+        self.scheduler = get_scheduler(
             args.lr_scheduler_type,
             optimizer=self.optimizer,
             num_warmup_steps=warm_up_steps,
             num_training_steps=num_scheduler_steps,
         )
-        self.model, self.optimizer, _, self.scheduler = deepspeed.initialize(
-            model=self.policy,
-            optimizer=self.optimizer,
-            config=ds_config,
-            lr_scheduler=scheduler,
-            dist_init_required=True,
-        )
+        self.model = self.policy
         optimization_steps_done = 0
         if args.checkpoint_state_dir:
-            # check if the dir exists
             if not os.path.exists(args.checkpoint_state_dir):
                 logger.warning(
                     f"Skipping loading checkpoint state from {args.checkpoint_state_dir} because it does not exist!"
                 )
             else:
-                path, states = self.model.load_checkpoint(
-                    args.checkpoint_state_dir,
-                    load_module_strict=True,
-                    load_optimizer_states=True,
-                    load_lr_scheduler_states=True,
-                    load_module_only=False,
-                )
-                if path is None:
-                    raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
-                optimization_steps_done = states["training_step"]
+                checkpoint_path = os.path.join(args.checkpoint_state_dir, "checkpoint.pt")
+                if os.path.exists(checkpoint_path):
+                    checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
+                    self.model.load_state_dict(checkpoint["model_state_dict"])
+                    self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+                    self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+                    optimization_steps_done = checkpoint["training_step"]
 
-                rng_states = states["rng_states"]
-                torch.set_rng_state(rng_states["torch_cpu_rng_state"])
-                np.random.set_state(rng_states["numpy_rng_state"])
-                random.setstate(rng_states["python_rng_state"])
+                    rng_states = checkpoint["rng_states"]
+                    torch.set_rng_state(rng_states["torch_cpu_rng_state"])
+                    np.random.set_state(rng_states["numpy_rng_state"])
+                    random.setstate(rng_states["python_rng_state"])
 
-                if torch.cuda.is_available() and "torch_cuda_rng_states" in rng_states:
-                    # device_str, e.g. "cuda:0"
-                    for device_str, rng_state in rng_states["torch_cuda_rng_states"].items():
-                        device_id = int(device_str.split(":")[1])
-                        torch.cuda.set_rng_state(rng_state, device_id)
-                    if "torch_cuda_rng_state_all" in rng_states:
-                        torch.cuda.set_rng_state_all(rng_states["torch_cuda_rng_state_all"])
+                    if torch.cuda.is_available() and "torch_cuda_rng_states" in rng_states:
+                        for device_str, rng_state in rng_states["torch_cuda_rng_states"].items():
+                            device_id = int(device_str.split(":")[1])
+                            torch.cuda.set_rng_state(rng_state, device_id)
+                        if "torch_cuda_rng_state_all" in rng_states:
+                            torch.cuda.set_rng_state_all(rng_states["torch_cuda_rng_state_all"])
 
-                logger.info(f"{self.rank=}: Restored RNG states from checkpoint")
+                    logger.info(f"{self.rank=}: Restored RNG states from checkpoint")
 
-                # Save reference policy path to load later (after ref_policy is initialized)
-                self.ref_policy_checkpoint_path = None
-                if states.get("ref_policy_saved", False):
-                    ref_policy_dir = os.path.join(args.checkpoint_state_dir, "ref_policy")
-                    model_path = os.path.join(ref_policy_dir, "pytorch_model.bin")
-                    if os.path.exists(model_path):
-                        self.ref_policy_checkpoint_path = model_path
-                        logger.info(f"{self.rank=}: Will load reference policy from {model_path}")
+                    self.ref_policy_checkpoint_path = None
+                    if checkpoint.get("ref_policy_saved", False):
+                        ref_policy_dir = os.path.join(args.checkpoint_state_dir, "ref_policy")
+                        model_path = os.path.join(ref_policy_dir, "pytorch_model.bin")
+                        if os.path.exists(model_path):
+                            self.ref_policy_checkpoint_path = model_path
+                            logger.info(f"{self.rank=}: Will load reference policy from {model_path}")
 
-                logger.info(
-                    f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}"
-                )
+                    logger.info(
+                        f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}"
+                    )
+                else:
+                    logger.warning(f"Checkpoint file not found at {checkpoint_path}")
         self.model.train()
-
-        # reference model
-        ds_config = get_eval_ds_config(
-            offload=False,
-            # inference model only has stage 3 (sharding) or stage 0 (no sharding)
-            # stage 2 is optimizer sharding which doesn't apply to inference
-            stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
-            bf16=True,
-        )
-        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-        ds_config["gradient_accumulation_steps"] = 1
-        if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            dschf = HfDeepSpeedConfig(ds_config)
-        else:
-            dschf = None
-        logger.info(f"DeepSpeed config: {dschf=}")
 
         self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
@@ -764,20 +697,17 @@ class PolicyTrainerRayProcess(RayProcess):
             torch_dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
             use_cache=False,
-            **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
         disable_dropout_in_model(self.ref_policy)
-        self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
+
+        for layer_id, layer in enumerate(self.ref_policy.model.layers):
+            fully_shard(layer, mp_policy=mp_policy)
+        fully_shard(self.ref_policy, mp_policy=mp_policy)
         self.ref_policy.eval()
 
-        # Load reference policy checkpoint if available
         if hasattr(self, "ref_policy_checkpoint_path") and self.ref_policy_checkpoint_path:
-            state_dict = torch.load(self.ref_policy_checkpoint_path, map_location=self.device)
-            if hasattr(self.ref_policy, "module"):
-                # If wrapped by DeepSpeed
-                self.ref_policy.module.load_state_dict(state_dict)
-            else:
-                self.ref_policy.load_state_dict(state_dict)
+            state_dict = torch.load(self.ref_policy_checkpoint_path, map_location=self.device, weights_only=False)
+            self.ref_policy.load_state_dict(state_dict)
             logger.info(f"{self.rank=}: Loaded reference policy checkpoint from {self.ref_policy_checkpoint_path}")
         self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
         return optimization_steps_done
@@ -852,18 +782,16 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
-        # avoid OOM
         torch.cuda.empty_cache()
-        model = self.model.module
+        model = self.model
         count, num_params = 0, len(list(model.named_parameters()))
         refss = []
         if self.args.gather_whole_model:
-            with deepspeed.zero.GatheredParameters(model.parameters(), enabled=self.args.deepspeed_stage == 3):
+            with model.unshard():
                 for name, param in model.named_parameters():
-                    count += 1  # empty_cache at last param
-                    # Fire all vllm engines for broadcast
+                    count += 1
                     if torch.distributed.get_rank() == 0:
-                        shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
+                        shape = param.shape
                         refs = [
                             engine.update_weight.remote(
                                 name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
@@ -873,11 +801,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         refss.extend(refs)
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
-        else:  # broadcast each parameter independently
+        else:
             for name, param in model.named_parameters():
                 count += 1
                 if torch.distributed.get_rank() == 0:
-                    shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
+                    shape = param.shape
                     refs = [
                         engine.update_weight.remote(
                             name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
@@ -885,24 +813,20 @@ class PolicyTrainerRayProcess(RayProcess):
                         for engine in self.vllm_engines
                     ]
                     refss.extend(refs)
-                with deepspeed.zero.GatheredParameters([param], enabled=self.args.deepspeed_stage == 3):
+                with model.unshard():
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
 
-        # Return futures instead of blocking - let caller handle completion
         all_refs = []
         if torch.distributed.get_rank() == 0:
             all_refs.extend(refss)
         return all_refs
 
     def update_ref_policy(self):
-        for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
-            if self.args.deepspeed_stage == 3:
-                with deepspeed.zero.GatheredParameters([param, ref_param], modifier_rank=0):
-                    if deepspeed.comm.get_rank() == 0:
-                        ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
-            else:
-                ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
+        with self.model.unshard(), self.ref_policy.unshard():
+            for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
+                if dist.get_rank() == 0:
+                    ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
 
     def train(
         self,
@@ -1239,39 +1163,36 @@ class PolicyTrainerRayProcess(RayProcess):
             }
             rng_states["torch_cuda_rng_state_all"] = torch.cuda.get_rng_state_all()
 
-        # Add RNG states to client_state
         client_state["rng_states"] = rng_states
         client_state["rank"] = self.rank
 
-        # Save reference policy checkpoint (model only, no optimizer)
         if hasattr(self, "ref_policy") and self.ref_policy is not None:
             ref_policy_dir = os.path.join(checkpoint_state_dir, "ref_policy")
             os.makedirs(ref_policy_dir, exist_ok=True)
 
-            # For reference policy, we save just the model weights
-            # We can't use save_checkpoint because it would try to save DummyOptim
-            # which doesn't have state_dict
             if self.rank == 0:
-                # Only rank 0 saves the model state
-                if hasattr(self.ref_policy, "module"):
-                    # If wrapped by DeepSpeed, get the underlying module
-                    model_to_save = self.ref_policy.module
-                else:
-                    model_to_save = self.ref_policy
-
-                # Save the state dict
-                torch.save(model_to_save.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
+                with self.ref_policy.unshard():
+                    torch.save(self.ref_policy.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
                 logger.info(f"Saved reference policy model to {ref_policy_dir}")
 
             client_state["ref_policy_saved"] = True
 
-        # Save the main model checkpoint with enhanced client state
-        self.model.save_checkpoint(checkpoint_state_dir, client_state=client_state)
-
-        # `save_checkpoint` needs to be called on all ranks, only rank 0 will have all the states
         if self.rank == 0:
+            checkpoint_path = os.path.join(checkpoint_state_dir, "checkpoint.pt")
+            with self.model.unshard():
+                checkpoint = {
+                    "model_state_dict": self.model.state_dict(),
+                    "optimizer_state_dict": self.optimizer.state_dict(),
+                    "scheduler_state_dict": self.scheduler.state_dict(),
+                    **client_state,
+                }
+                torch.save(checkpoint, checkpoint_path)
+            logger.info(f"Saved checkpoint to {checkpoint_path}")
+
             if args.keep_last_n_checkpoints >= 0:
-                clean_last_n_checkpoints_deepspeed(checkpoint_state_dir, args.keep_last_n_checkpoints)
+                from open_instruct.utils import clean_last_n_checkpoints
+
+                clean_last_n_checkpoints(checkpoint_state_dir, args.keep_last_n_checkpoints)
 
             # Sync to GCS if configured (check the actual target, not just gs_bucket_path)
             if args.gs_checkpoint_state_dir is not None:
@@ -1282,60 +1203,27 @@ class PolicyTrainerRayProcess(RayProcess):
     def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
         model_to_save = self.model
         if chat_template_name is not None and "olmo" in chat_template_name:
-            # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
             model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
         if self.rank == 0:
             os.makedirs(output_dir, exist_ok=True)
 
-        # save model weights for ZeRO2/3
-        if hasattr(model_to_save, "module"):
-            model_to_save = model_to_save.module
+            with model_to_save.unshard():
+                output_state_dict = {k: v.data.cpu() for k, v in model_to_save.named_parameters()}
 
-        # gather parameters
-        output_state_dict = {}
-        for k, v in model_to_save.named_parameters():
-            # only gather z3 params
-            params_to_fetch = _z3_params_to_fetch([v])
-            with deepspeed.zero.GatheredParameters(params_to_fetch, enabled=len(params_to_fetch) > 0):
-                vv = v.data.cpu()
-                if self.rank == 0:
-                    output_state_dict[k] = vv
+                for k, v in model_to_save.named_buffers():
+                    output_state_dict[k] = v.data.cpu()
 
-        if self.rank == 0:
-            state_dict = model_to_save.state_dict()
-
-            # copy named_buffers with `persistent=True`
-            for k, v in model_to_save.named_buffers():
-                if k not in state_dict:
-                    continue
-                vv = v.data.cpu()
-                output_state_dict[k] = vv
-
-            state_dict_keys = set(state_dict.keys())
-            output_state_dict_keys = set(output_state_dict.keys())
-
-            # corner case for tie_word_embeddings, such as Qwen2-0.5B
-            if getattr(model_to_save.config, "tie_word_embeddings", False) and "lm_head.weight" in state_dict_keys:
-                state_dict_keys.remove("lm_head.weight")
-
-            assert state_dict_keys.issubset(output_state_dict_keys), (
-                f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
-            )
-
-            # only save peft weights https://github.com/microsoft/DeepSpeed/issues/4295
-            if isinstance(model_to_save, PeftModel):
-                model_to_save.save_pretrained(output_dir)
-                if self.stage == 3:
+                if isinstance(model_to_save, PeftModel):
+                    model_to_save.save_pretrained(output_dir)
                     torch.save(
                         get_peft_model_state_dict(model_to_save, output_state_dict),
                         os.path.join(output_dir, "adapter_model.bin"),
                     )
-            else:
-                model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)
+                else:
+                    model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)
 
-            # save tokenizer
-            self.tokenizer.save_pretrained(output_dir)
+                self.tokenizer.save_pretrained(output_dir)
 
     # we need this because we don't know which node is rank 0 is on
     def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):
