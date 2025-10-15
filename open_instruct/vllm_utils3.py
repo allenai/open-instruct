@@ -796,14 +796,30 @@ class LLMRayActor:
 
     def get_kv_cache_info(self) -> int:
         """Get KV cache max concurrency from the vLLM engine."""
-        cache_config = self.llm_engine.vllm_config.cache_config
-        model_config = self.llm_engine.model_config
+        kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
+        kv_cache_spec = kv_cache_specs[0]
+
+        page_size = kv_cache_utils.get_uniform_page_size(kv_cache_spec)
+
+        vllm_config = self.llm_engine.vllm_config
+        gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
+        total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
+        available_memory = int(gpu_memory_utilization * total_gpu_memory)
+
+        num_blocks = kv_cache_utils.get_num_blocks(vllm_config, len(kv_cache_spec), available_memory, page_size)
 
         num_gpu_blocks = cache_config.num_gpu_blocks
         block_size = cache_config.block_size
         max_model_len = model_config.max_model_len
 
-        assert num_gpu_blocks is not None and num_gpu_blocks != 0, "num_gpu_blocks not initialized"
+        kv_cache_groups = kv_cache_utils.get_kv_cache_groups(vllm_config, kv_cache_spec)
+
+        kv_cache_config = kv_cache_interface.KVCacheConfig(
+            num_blocks=num_blocks, kv_cache_tensors=kv_cache_tensors, kv_cache_groups=kv_cache_groups
+        )
+        max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(
+            self.llm_engine.vllm_config, kv_cache_config
+        )
 
         max_concurrency = (num_gpu_blocks * block_size) / max_model_len
         return int(max_concurrency)
