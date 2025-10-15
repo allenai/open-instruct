@@ -623,6 +623,7 @@ class LMJudgeVerifier(VerifierFunction):
 
     def __init__(self, judge_type: str, verifier_config: LMJudgeVerifierConfig) -> None:
         super().__init__(f"general-{judge_type}", verifier_config=verifier_config, weight=1.0)
+        self.judge_type = judge_type
         self.prompt_template = JUDGE_PROMPT_MAP[judge_type]
         self.extractor = EXTRACTOR_MAP[judge_type]
         os.environ["AZURE_API_VERSION"] = "2024-12-01-preview"
@@ -677,7 +678,25 @@ class LMJudgeVerifier(VerifierFunction):
         """
         # client = self._get_client()
         final_answer = extract_final_answer(prediction)
-        prompt = self.prompt_template.format(input=query, output=final_answer, label=label)
+        # Build prompt. For the procedure judge variants, we expect label to be a JSON with
+        # {"goal": <str>, "reference_steps": <str>} and use final_answer as {steps}.
+        # Otherwise, use the standard {input}/{output}/{label} formatting.
+        use_procedure_format = self.judge_type in {"procedure_judge", "procedure_judge_binary", "procedure_judge_ratio"}
+        if use_procedure_format:
+            goal = ""
+            reference_steps = ""
+            try:
+                label_obj = json.loads(label) if isinstance(label, str) else label
+                if isinstance(label_obj, dict):
+                    goal = label_obj.get("goal", "") or ""
+                    reference_steps = label_obj.get("reference_steps", "") or ""
+                else:
+                    reference_steps = str(label)
+            except Exception:
+                reference_steps = str(label)
+            prompt = self.prompt_template.format(goal=goal, reference_steps=reference_steps, steps=final_answer)
+        else:
+            prompt = self.prompt_template.format(input=query, output=final_answer, label=label)
 
         max_retries = 3  # for rate limits
         retry_delay = 1.0
@@ -736,10 +755,55 @@ class LMJudgeVerifier(VerifierFunction):
                     seed=self.verifier_config.seed,
                     timeout=self.verifier_config.llm_judge_timeout,
                 )
-                reasoning, score = self.parse_completion(response)
                 cost = self.get_cost(response, self.verifier_config.llm_judge_model)
-                # normalize score to be between 0 and 1
-                return VerificationResult(score=score, cost=cost, reasoning=reasoning)
+                # Remove hidden chain-of-thought and parse model JSON
+                pattern = r"<think>\s*.*?\s*</think>\s*"
+                content = re.sub(pattern, "", response.choices[0].message.content, flags=re.DOTALL)
+                content = content.replace("<answer>", "").replace("</answer>", "")
+
+                if use_procedure_format:
+                    # Parse critical_failures JSON and compute score per variant
+                    cleaned = content.strip()
+                    if cleaned.startswith("```json"):
+                        cleaned = cleaned[7:]
+                    if cleaned.startswith("```"):
+                        cleaned = cleaned[3:]
+                    if cleaned.endswith("```"):
+                        cleaned = cleaned[:-3]
+                    cleaned = cleaned.strip()
+                    score = 0.0
+                    try:
+                        data = json.loads(cleaned)
+                        failures = data.get("critical_failures", []) if isinstance(data, dict) else []
+                        if self.judge_type == "procedure_judge_binary":
+                            score = 1.0 if (isinstance(failures, list) and len(failures) == 0) else 0.0
+                        elif self.judge_type == "procedure_judge_ratio":
+                            # Determine K from label.reference_steps numbered lines
+                            K = 0
+                            try:
+                                label_obj = json.loads(label) if isinstance(label, str) else label
+                                ref = ""
+                                if isinstance(label_obj, dict):
+                                    ref = label_obj.get("reference_steps", "") or ""
+                                if ref:
+                                    # Count non-empty lines as steps (data is guaranteed clean)
+                                    K = sum(1 for line in ref.splitlines() if line.strip())
+                            except Exception:
+                                K = 0
+                            N = len(failures) if isinstance(failures, list) else 0
+                            if K > 0:
+                                score = max(0.0, min(1.0, (K - N) / K))
+                            else:
+                                score = 0.0
+                        else:
+                            # plain procedure_judge returns no score; default to 0/1 by emptiness for safety
+                            score = 1.0 if (isinstance(failures, list) and len(failures) == 0) else 0.0
+                    except Exception:
+                        score = 0.0
+                    return VerificationResult(score=score, cost=cost, reasoning=content)
+                else:
+                    reasoning, score = self.parse_completion(response)
+                    return VerificationResult(score=score, cost=cost, reasoning=reasoning)
 
             except Exception as e:
                 logger.warning(f"LLM judge attempt {attempt + 1}/{max_retries} failed: {str(e)}")
@@ -992,6 +1056,120 @@ class ProcedureBinaryVerifier(VerifierFunction):
         return VerificationResult(score=1.0 if label_has_failures == answer_has_failures else 0.0)
 
 
+class ProcedureStepFormatVerifier(VerifierFunction):
+    """
+    Verifier that rewards correct step numbering format and expected count.
+
+    The prediction is expected to contain a numbered list of steps (e.g., "1. ...", "2) ...").
+    It returns 1.0 if and only if:
+      - numbering starts at 1 and is consecutive without gaps, and
+      - the number of steps equals the expected count K.
+
+    How K is determined (in order of precedence):
+      1) If label parses to an integer, use it directly.
+      2) If label parses as JSON with keys like {"K": <int>} or {"num_l1_steps": <int>}.
+      3) Otherwise, try to infer K by counting numbered steps in the L1 section within the query text.
+    """
+
+    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+        super().__init__("procedure_step_format", verifier_config=verifier_config, weight=1.0)
+
+    @staticmethod
+    def _extract_expected_k_from_label(label: Any) -> Optional[int]:
+        # int-like label
+        try:
+            if isinstance(label, (int, float)):
+                k = int(label)
+                return k if k >= 0 else None
+            if isinstance(label, str) and label.strip().isdigit():
+                return int(label.strip())
+        except Exception:
+            pass
+
+        # JSON-like label
+        try:
+            if isinstance(label, str):
+                obj = json.loads(label)
+            else:
+                obj = label
+            if isinstance(obj, dict):
+                for key in ["K", "k", "num_l1_steps", "num_steps_expected", "expected_steps"]:
+                    if key in obj and isinstance(obj[key], (int, float)):
+                        val = int(obj[key])
+                        return val if val >= 0 else None
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _count_steps_in_text(text: str) -> int:
+        # counts unique ordered step indices detected via regex at line starts
+        pattern = re.compile(r"^\s*(\d+)[\.)]\s+", re.MULTILINE)
+        nums = [int(m.group(1)) for m in pattern.finditer(text or "")]
+        return len(nums)
+
+    @staticmethod
+    def _extract_l1_block(query: Optional[str]) -> Optional[str]:
+        if not isinstance(query, str):
+            return None
+        # Try to isolate the L1 section: anything after a line starting with "L1:" until next section marker
+        try:
+            # Simple split around L1:
+            l1_start = query.lower().find("\nl1:")
+            if l1_start == -1:
+                l1_start = query.lower().find("l1:")
+            if l1_start == -1:
+                return None
+            after = query[l1_start + (2 if query.lower().startswith("l1:") else 3):]
+            # find next marker (heuristic)
+            next_markers = []
+            for marker in ["\nl2:", "\ngoal:", "\n# output", "\n# input", "\ninput", "\noutput"]:
+                idx = after.lower().find(marker)
+                if idx != -1:
+                    next_markers.append(idx)
+            end = min(next_markers) if next_markers else len(after)
+            return after[:end]
+        except Exception:
+            return None
+
+    @staticmethod
+    def _infer_k_from_query(query: Optional[str]) -> Optional[int]:
+        l1_block = ProcedureStepFormatVerifier._extract_l1_block(query)
+        if not l1_block:
+            return None
+        k = ProcedureStepFormatVerifier._count_steps_in_text(l1_block)
+        return k if k >= 0 else None
+
+    @staticmethod
+    def _extract_steps_from_prediction(prediction: str) -> list[int]:
+        pattern = re.compile(r"^\s*(\d+)[\.)]\s+", re.MULTILINE)
+        return [int(m.group(1)) for m in pattern.finditer(prediction or "")]
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
+    ) -> VerificationResult:
+        try:
+            expected_k = self._extract_expected_k_from_label(label)
+            if expected_k is None:
+                expected_k = self._infer_k_from_query(query)
+
+            steps = self._extract_steps_from_prediction(prediction)
+            if not steps:
+                return VerificationResult(score=0.0)
+
+            # Check consecutive numbering from 1..n
+            n = len(steps)
+            is_consecutive = steps == list(range(1, n + 1))
+
+            # If expected_k is unknown, only enforce numbering; else also enforce count match
+            if expected_k is None:
+                return VerificationResult(score=1.0 if is_consecutive else 0.0)
+            else:
+                count_matches = (n == expected_k)
+                return VerificationResult(score=1.0 if (is_consecutive and count_matches) else 0.0)
+        except Exception:
+            return VerificationResult(score=0.0)
+
 def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     """
     Build all verifiers with the given judge config.
@@ -1016,6 +1194,15 @@ def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     for judge_type in JUDGE_PROMPT_MAP:
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args))
         verifiers[instance.name.lower()] = instance
+
+    # Provide aliases for scoring variants that reuse the same procedure prompt but compute scores differently.
+    if "procedure_judge" in JUDGE_PROMPT_MAP:
+        verifiers["general-procedure_judge_binary"] = LMJudgeVerifier(
+            "procedure_judge_binary", LMJudgeVerifierConfig.from_args(args)
+        )
+        verifiers["general-procedure_judge_ratio"] = LMJudgeVerifier(
+            "procedure_judge_ratio", LMJudgeVerifierConfig.from_args(args)
+        )
 
     # if we have remap arg, remap!
     if args.remap_verifier:

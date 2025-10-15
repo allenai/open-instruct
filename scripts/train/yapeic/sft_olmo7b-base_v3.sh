@@ -1,30 +1,32 @@
 python mason.py \
     --cluster ai2/jupiter \
-    --task_name sft_olmo7b_v1 \
-    --description "SFT OLMo-2-1124-7B-Instruct, v1 data" \
+    --task_name sft_olmo7b-base_v3 \
+    --description "SFT OLMo-2-1124-7B, v3 data" \
     --workspace ai2/oe-data \
     --priority high \
     --image nathanl/open_instruct_auto \
     --preemptible \
     --num_nodes 1 \
     --budget ai2/oe-base \
-    --gpus 8 -- accelerate launch \
+    --gpus 4 -- accelerate launch \
     --main_process_port 29505 \
     --mixed_precision bf16 \
-    --num_processes 8 \
+    --num_processes 4 \
     --use_deepspeed \
     --deepspeed_config_file configs/ds_configs/stage2_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
     --hf_entity yapeichang \
-    --hf_repo_id sft_olmo7b_v1 \
-    --exp_name sft_olmo7b_v1 \
-    --model_name_or_path allenai/OLMo-2-1124-7B-Instruct \
+    --hf_repo_id sft_olmo7b-base_v3 \
+    --exp_name sft_olmo7b-base_v3 \
+    --model_name_or_path allenai/OLMo-2-1124-7B \
     --model_revision main \
-    --tokenizer_name allenai/OLMo-2-1124-7B-Instruct \
+    --tokenizer_name allenai/OLMo-2-1124-7B \
     --tokenizer_revision main \
+    --chat_template_name tulu \
+    --add_bos \
     --use_slow_tokenizer False \
-    --dataset_mixer_list /weka/oe-training-default/yapeic/proc-data/data/dclm/tutorial_subset/sft_data/v1_goal_steps_simple_template.jsonl 1.0 \
+    --dataset_mixer_list /weka/oe-training-default/yapeic/proc-data/data/dclm/tutorial_subset/sft_data/v3_goal_resource_steps_low_variation_simple_template.jsonl 1.0 \
     --clean_checkpoints_at_end false \
     --max_seq_length 4096 \
     --per_device_train_batch_size 1 \
@@ -33,9 +35,9 @@ python mason.py \
     --lr_scheduler_type linear \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
-    --num_train_epochs 3 \
+    --num_train_epochs 1 \
     --checkpointing_steps epoch \
-    --keep_last_n_checkpoints 3 \
+    --keep_last_n_checkpoints 1 \
     --use_flash_attn \
     --gradient_checkpointing \
     --report_to wandb \
