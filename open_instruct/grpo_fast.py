@@ -787,20 +787,21 @@ class PolicyTrainerRayProcess(RayProcess):
         count, num_params = 0, len(list(model.named_parameters()))
         refss = []
         if self.args.gather_whole_model:
-            with model.unshard():
-                for name, param in model.named_parameters():
-                    count += 1
-                    if torch.distributed.get_rank() == 0:
-                        shape = param.shape
-                        refs = [
-                            engine.update_weight.remote(
-                                name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
-                            )
-                            for engine in self.vllm_engines
-                        ]
-                        refss.extend(refs)
-                    if torch.distributed.get_rank() == 0:
-                        torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+            model.unshard()
+            for name, param in model.named_parameters():
+                count += 1
+                if torch.distributed.get_rank() == 0:
+                    shape = param.shape
+                    refs = [
+                        engine.update_weight.remote(
+                            name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
+                        )
+                        for engine in self.vllm_engines
+                    ]
+                    refss.extend(refs)
+                if torch.distributed.get_rank() == 0:
+                    torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+            model.reshard()
         else:
             for name, param in model.named_parameters():
                 count += 1
@@ -813,9 +814,10 @@ class PolicyTrainerRayProcess(RayProcess):
                         for engine in self.vllm_engines
                     ]
                     refss.extend(refs)
-                with model.unshard():
-                    if torch.distributed.get_rank() == 0:
-                        torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+                model.unshard()
+                if torch.distributed.get_rank() == 0:
+                    torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+                model.reshard()
 
         all_refs = []
         if torch.distributed.get_rank() == 0:
@@ -823,10 +825,13 @@ class PolicyTrainerRayProcess(RayProcess):
         return all_refs
 
     def update_ref_policy(self):
-        with self.model.unshard(), self.ref_policy.unshard():
-            for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
-                if dist.get_rank() == 0:
-                    ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
+        self.model.unshard()
+        self.ref_policy.unshard()
+        for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
+            if dist.get_rank() == 0:
+                ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
+        self.ref_policy.reshard()
+        self.model.reshard()
 
     def train(
         self,
@@ -1174,22 +1179,24 @@ class PolicyTrainerRayProcess(RayProcess):
             os.makedirs(ref_policy_dir, exist_ok=True)
 
             if self.rank == 0:
-                with self.ref_policy.unshard():
-                    torch.save(self.ref_policy.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
+                self.ref_policy.unshard()
+                torch.save(self.ref_policy.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
+                self.ref_policy.reshard()
                 logger.info(f"Saved reference policy model to {ref_policy_dir}")
 
             client_state["ref_policy_saved"] = True
 
         if self.rank == 0:
             checkpoint_path = os.path.join(checkpoint_state_dir, "checkpoint.pt")
-            with self.model.unshard():
-                checkpoint = {
-                    "model_state_dict": self.model.state_dict(),
-                    "optimizer_state_dict": self.optimizer.state_dict(),
-                    "scheduler_state_dict": self.scheduler.state_dict(),
-                    **client_state,
-                }
-                torch.save(checkpoint, checkpoint_path)
+            self.model.unshard()
+            checkpoint = {
+                "model_state_dict": self.model.state_dict(),
+                "optimizer_state_dict": self.optimizer.state_dict(),
+                "scheduler_state_dict": self.scheduler.state_dict(),
+                **client_state,
+            }
+            torch.save(checkpoint, checkpoint_path)
+            self.model.reshard()
             logger.info(f"Saved checkpoint to {checkpoint_path}")
 
             if args.keep_last_n_checkpoints >= 0:
@@ -1211,22 +1218,23 @@ class PolicyTrainerRayProcess(RayProcess):
         if self.rank == 0:
             os.makedirs(output_dir, exist_ok=True)
 
-            with model_to_save.unshard():
-                output_state_dict = {k: v.data.cpu() for k, v in model_to_save.named_parameters()}
+            model_to_save.unshard()
+            output_state_dict = {k: v.data.cpu() for k, v in model_to_save.named_parameters()}
 
-                for k, v in model_to_save.named_buffers():
-                    output_state_dict[k] = v.data.cpu()
+            for k, v in model_to_save.named_buffers():
+                output_state_dict[k] = v.data.cpu()
 
-                if isinstance(model_to_save, PeftModel):
-                    model_to_save.save_pretrained(output_dir)
-                    torch.save(
-                        get_peft_model_state_dict(model_to_save, output_state_dict),
-                        os.path.join(output_dir, "adapter_model.bin"),
-                    )
-                else:
-                    model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)
+            if isinstance(model_to_save, PeftModel):
+                model_to_save.save_pretrained(output_dir)
+                torch.save(
+                    get_peft_model_state_dict(model_to_save, output_state_dict),
+                    os.path.join(output_dir, "adapter_model.bin"),
+                )
+            else:
+                model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)
 
-                self.tokenizer.save_pretrained(output_dir)
+            self.tokenizer.save_pretrained(output_dir)
+            model_to_save.reshard()
 
     # we need this because we don't know which node is rank 0 is on
     def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):
