@@ -70,6 +70,7 @@ while [[ "$#" -gt 0 ]]; do
         --evaluate_on_weka) EVALUATE_ON_WEKA="true" ;;
         --step) STEP="$2"; shift ;;
         --run-id) RUN_ID="$2"; shift ;;
+        --wandb-run-path) WANDB_RUN_PATH="$2"; shift ;;
         --stop-sequences) STOP_SEQUENCES="$2"; shift ;;
         --beaker-image) BEAKER_IMAGE="$2"; shift ;;
         --cluster) CLUSTER="$2"; shift ;;
@@ -79,6 +80,13 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
+# cluster/weka mount logic: default true (to use non-augusta)
+# if model starts with gs://, set evaluate_on_weka to false.
+# All the logic is now handled internally, the flag is useless but keeping for backwards compatibility since people have scripts with it
+EVALUATE_ON_WEKA="true"
+if [[ "$MODEL_LOCATION" == gs://* ]]; then
+    EVALUATE_ON_WEKA="false"
+fi
 
 # Optional: Default number of GPUs if not specified
 NUM_GPUS="${NUM_GPUS:-1}"
@@ -98,6 +106,7 @@ TASK_SUITE="${TASK_SUITE:-NEXT_MODEL_DEV}"
 PRIORITY="${PRIORITY:normal}"
 EVALUATE_ON_WEKA="${EVALUATE_ON_WEKA:-false}"
 RUN_ID="${RUN_ID:-}"
+WANDB_RUN_PATH="${WANDB_RUN_PATH:-}"
 STEP="${STEP:-}"
 
 # Process stop sequences if provided
@@ -115,12 +124,28 @@ if [[ -n "$STOP_SEQUENCES" ]]; then
     STOP_SEQUENCES_JSON+="]"
 fi
 
+# Set wandb run path to upload to wandb if available
+WANDB_ARG=""
+if [[ -n "$WANDB_RUN_PATH" ]]; then
+    beaker_user=$(beaker account whoami --format text | awk 'NR==2 {print $2}')
+    echo "Using WANDB_API_KEY from ${beaker_user}"
+    if ! beaker secret list --workspace ai2/tulu-3-results | grep -q "${beaker_user}_WANDB_API_KEY"; then
+        echo "WARNING: No ${beaker_user}_WANDB_API_KEY secret found in workspace ai2/tulu-3-results."
+        echo "add your WANDB_API_KEY as a secret to this workspace in order to log oe-eval results to wandb"
+    else
+        WANDB_ARG=" --wandb-run-path $WANDB_RUN_PATH --gantry-secret-wandb-api-key ${beaker_user}_WANDB_API_KEY"
+    fi
+fi
+
 DATALAKE_ARGS=""
 if [[ -n "$RUN_ID" ]]; then
     DATALAKE_ARGS+="run_id=$RUN_ID"
 fi
 if [[ -n "$STEP" ]]; then
     DATALAKE_ARGS+=",step=$STEP"
+    if [[ -n "$WANDB_ARG" ]]; then
+        WANDB_ARG+=" --wandb-run-step $STEP"
+    fi
 fi
 
 # Set HF_UPLOAD_ARG only if UPLOAD_TO_HF is specified
@@ -168,34 +193,34 @@ TULU_3_UNSEEN=(
 # New default task suites
 NEXT_MODEL_DEV=(
     # Knowledge
-    "mmlu:cot::hamish_zs_reasoning"
-    "popqa::hamish_zs_reasoning"
-    "simpleqa::tulu-thinker"
+    "mmlu:cot::hamish_zs_reasoning_deepseek"
+    "popqa::hamish_zs_reasoning_deepseek"
+    "simpleqa::tulu-thinker_deepseek"
     
     # Reasoning
-    "bbh:cot::hamish_zs_reasoning"
-    "gpqa:0shot_cot::hamish_zs_reasoning"
-    "zebralogic::hamish_zs_reasoning"
-    "agi_eval_english:0shot_cot::hamish_zs_reasoning"
+    "bbh:cot::hamish_zs_reasoning_deepseek"
+    "gpqa:0shot_cot::hamish_zs_reasoning_deepseek"
+    "zebralogic::hamish_zs_reasoning_deepseek"
+    "agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek"
 
     # Math
     # [faster] minerva_math_500::hamish_zs_reasoning
-    "minerva_math::hamish_zs_reasoning"
-    "gsm8k::zs_cot_latex"
-    "omega:0-shot-chat"
-    "aime:zs_cot_r1::pass_at_32_2024_temp1"
-    "aime:zs_cot_r1::pass_at_32_2025_temp1"  # OLD: "aime::hamish_zs_reasoning"
+    "minerva_math::hamish_zs_reasoning_deepseek"
+    "gsm8k::zs_cot_latex_deepseek"
+    "omega_500:0-shot-chat_deepseek" # OLD: "omega:0-shot-chat"
+    "aime:zs_cot_r1::pass_at_32_2024_deepseek"
+    "aime:zs_cot_r1::pass_at_32_2025_deepseek"  # OLD: "aime::hamish_zs_reasoning"
     
     # Coding
-    "codex_humanevalplus:0-shot-chat::tulu-thinker"
-    "mbppplus:0-shot-chat::tulu-thinker"
-    "livecodebench_codegeneration::tulu-thinker"
+    "codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek"
+    "mbppplus:0-shot-chat::tulu-thinker_deepseek"
+    "livecodebench_codegeneration::tulu-thinker_deepseek"
     # [TODO not merged] codeeditorbench - requires separate server
     # [TODO, maybe] cruxeval
     
     # Chat / IF / Vibes
-    "alpaca_eval_v3::hamish_zs_reasoning"
-    "ifeval::hamish_zs_reasoning"
+    "alpaca_eval_v3::hamish_zs_reasoning_deepseek"
+    "ifeval::hamish_zs_reasoning_deepseek"
     # [expensive, multi-turn all versions] multiturn_alpacaeval::tulu
     # [expensive, typos vibes] styled_evals::tulu
     # [optional, typos compare] styled_math500::tulu
@@ -319,7 +344,7 @@ for TASK in "${TASKS[@]}"; do
     # NOTE: For gantry args here and below, random numbers like #42 are added to the env variables because they need to be unique names. The numbers are ignored.
     # Build gantry args
     if [ "$EVALUATE_ON_WEKA" == "true" ]; then
-        GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"weka\": \"oe-adapt-default:/weka/oe-adapt-default\", \"weka#44\": \"oe-training-default:/weka/oe-training-default\", \"env#132\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#42\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\"${MAX_TOKENS_ARG}, \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\"}"
+        GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"weka\": \"oe-adapt-default:/weka/oe-adapt-default\", \"weka#44\": \"oe-training-default:/weka/oe-training-default\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"env#132\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#42\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\"${MAX_TOKENS_ARG}}"
     else
         GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env-secret#43\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"${MAX_TOKENS_ARG}}"
     fi
@@ -339,6 +364,7 @@ for TASK in "${TASKS[@]}"; do
             --gpus "$GPU_COUNT" \
             --gantry-args "$GANTRY_ARGS" \
             ${REVISION_ARG} \
+            ${WANDB_ARG} \
             --cluster "$CLUSTER" \
             --beaker-retries 2 \
             --beaker-image "$BEAKER_IMAGE" \
@@ -360,7 +386,8 @@ for TASK in "${TASKS[@]}"; do
         --gpus "$GPU_COUNT" \
         --gantry-args "$GANTRY_ARGS" \
         ${REVISION_ARG} \
-        --cluster ai2/augusta-google-1 \
+        ${WANDB_ARG} \
+        --cluster ai2/augusta \
         --beaker-retries 2 \
         --beaker-image "$BEAKER_IMAGE" \
         --beaker-priority  "$PRIORITY" \

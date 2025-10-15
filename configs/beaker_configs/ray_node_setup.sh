@@ -15,12 +15,34 @@ echo PATH=$PATH
 BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk '{print $1}')
 
 RAY_NODE_PORT=8888
+mkdir -p "$HOME/.triton/autotune"  # Create Triton autotune cache directory to silence warnings
 ray stop --force
 
 if [ "$BEAKER_REPLICA_RANK" == "0" ]; then
     echo "Starting Ray head node"
-    ray start --head --port=$RAY_NODE_PORT
+    ray start --head --port=$RAY_NODE_PORT --dashboard-host=0.0.0.0
 else
     echo "Starting Ray worker node $BEAKER_REPLICA_RANK"
-    ray start --address="${BEAKER_LEADER_REPLICA_IP}:${RAY_NODE_PORT}" --block
+    export RAY_ADDRESS="${BEAKER_LEADER_REPLICA_IP}:${RAY_NODE_PORT}"
+    # Start worker without --block so we can control lifecycle and exit code.
+    ray start --address="${RAY_ADDRESS}" --dashboard-host=0.0.0.0
+
+    cleanup() {
+        echo "[ray_node_setup] Cleanup: stopping Ray worker and exiting 0"
+        ray stop --force >/dev/null 2>&1 || true
+        trap - TERM INT HUP EXIT
+        exit 0
+    }
+
+    trap cleanup TERM INT HUP EXIT
+
+    echo "[ray_node_setup] Monitoring Ray head at ${RAY_ADDRESS}"
+    # Poll head availability. Exit 0 when head is gone.
+    while true; do
+        if ! ray status --address="${RAY_ADDRESS}" >/dev/null 2>&1; then
+            echo "[ray_node_setup] Head is unreachable. Stopping worker and exiting 0."
+            cleanup
+        fi
+        sleep 5
+    done
 fi

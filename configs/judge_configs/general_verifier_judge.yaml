@@ -16,7 +16,7 @@ tasks:
             --trust-remote-code \
             --port 8001 \
             --enforce-eager \
-            --chat-template '/weka/oe-adapt-default/faezeb/qwen_no_think_tokenizer_config.jinja'"
+            --chat-template '/weka/oe-adapt-default/hamishi/qwen_no_think_config.jinja'"
       ]
     datasets:
       - mountPath: /weka/oe-adapt-default
@@ -24,7 +24,7 @@ tasks:
           weka: oe-adapt-default
     constraints:
       cluster:
-        - ai2/saturn-cirrascale
+        - ai2/saturn
     resources:
       gpuCount: 2
     context:

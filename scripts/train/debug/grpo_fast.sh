@@ -10,7 +10,7 @@ uv run python open_instruct/grpo_fast.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path Qwen/Qwen3-1.7B \
+    --model_name_or_path Qwen/Qwen3-0.6B \
     --stop_strings "</answer>" \
     --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
@@ -25,11 +25,12 @@ uv run python open_instruct/grpo_fast.py \
     --vllm_tensor_parallel_size 1 \
     --beta 0.01 \
     --seed 3 \
-    --num_evals 20 \
+    --local_eval_every 1 \
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.3 \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --single_gpu_mode \
+    --push_to_hub false \
     # --with_tracking

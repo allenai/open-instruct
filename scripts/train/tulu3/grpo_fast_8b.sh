@@ -1,5 +1,5 @@
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \
@@ -39,7 +39,7 @@ python mason.py \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --num_evals 100 \
+    --local_eval_every 25 \
     --save_freq 40 \
     --gradient_checkpointing \
     --with_tracking

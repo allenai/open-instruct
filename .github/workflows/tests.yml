@@ -1,10 +1,6 @@
 name: Tests
 
 on:
-  push:
-    branches:
-      - main
-      - v*-release
   pull_request:
     branches:
       - main
@@ -15,14 +11,16 @@ jobs:
   unit-tests:
     name: Run unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
+
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
-          version: "0.7.17"
+          version: "0.8.6"
       - name: Set up Python
-        run: uv python install
+        run: uv sync --frozen
       - name: Run unit tests
-        run: uv run pytest -n auto
+        run: uv run --frozen pytest

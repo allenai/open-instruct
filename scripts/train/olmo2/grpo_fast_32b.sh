@@ -1,5 +1,5 @@
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \
@@ -43,7 +43,7 @@ python mason.py \
     --vllm_num_engines 40 \
     --lr_scheduler_type linear \
     --seed 1 \
-    --num_evals 100 \
+    --local_eval_every 5 \
     --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka \
     --gradient_checkpointing \

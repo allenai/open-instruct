@@ -1,3 +1,5 @@
+[![Beaker Experiment Launch](https://github.com/allenai/open-instruct/actions/workflows/beaker-experiment.yml/badge.svg)](https://github.com/allenai/open-instruct/actions/workflows/beaker-experiment.yml) [![build_open_instruct](https://github.com/allenai/open-instruct/actions/workflows/push-image.yml/badge.svg)](https://github.com/allenai/open-instruct/actions/workflows/push-image.yml)
+
 # Training Open Instruction-Following Language Models
 
 This repo serves as an open effort on instruction-tuning and post-training popular pretrained language models on publicly available datasets. We release this repo and will keep updating it with:
@@ -10,8 +12,8 @@ We also support some evaluations natively in the codebase, but these are now unm
 
 The lastest details on open post-training are found in [TÜLU 3: Pushing Frontiers in Open Language Model Post-Training](https://arxiv.org/abs/2411.15124).
 
-Please see our first paper [How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources](https://arxiv.org/abs/2306.04751) for more thoughts behind this project and our initial findings. 
-Please see our second paper [Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2](https://arxiv.org/abs/2311.10702) for results using Llama-2 models and direct preference optimization. We are still working on more models. 
+Please see our first paper [How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources](https://arxiv.org/abs/2306.04751) for more thoughts behind this project and our initial findings.
+Please see our second paper [Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2](https://arxiv.org/abs/2311.10702) for results using Llama-2 models and direct preference optimization. We are still working on more models.
 For more recent results involving PPO and DPO please see our third paper [Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback](https://arxiv.org/abs/2406.09279).
 
 <p align="center" width="100%">
@@ -45,58 +47,24 @@ Try some of the models we train with Open Instruct. There is a [free demo](https
 
 ## Setup
 
-Our setup mostly follows our [Dockerfile](./Dockerfile), which uses Python 3.10. *Note that Open Instruct is a research codebase and does not guarantee backward compatibility.* We offer two installation strategies:
+Our setup follows our [Dockerfile](./Dockerfile). *Note that Open Instruct is a research codebase and does not guarantee backward compatibility.*
 
-* **Local installation**: This is the recommended way to install Open Instruct. You can install the dependencies by running the following commands:
-```bash
-pip install --upgrade pip "setuptools<70.0.0" wheel 
-# TODO, unpin setuptools when this issue in flash attention is resolved
-pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
-pip install packaging
-pip install flash-attn==2.7.2.post2 flashinfer-python>=0.2.7.post1 --no-build-isolation
-pip install -r requirements.txt
-pip install -e .
-python -m nltk.downloader punkt
-```
+### Installation with uv
 
-* **Local installation with uv (preview)**: We are experimenting with using [uv](https://docs.astral.sh/uv/). You can install via
-```bash
-uv sync
-uv sync --extra compile --extra liger # to install flash attention, flash infer, and liger-kernel
-```
-
+We use [uv](https://docs.astral.sh/uv/) for installation and running code. You can install with `uv sync`.
 
 * **Docker installation**: You can also use the Dockerfile to build a Docker image. You can build the image with the following command:
 
 ```bash
-# If you are internal at Ai2, defaults are set to use an internal base image.
-docker build . -t open_instruct_dev
+docker build . \
+    --build-arg GIT_COMMIT=$(git rev-parse --short HEAD) \
+	--build-arg GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD) \
+	-t open_instruct_dev
 
-# if you are external to Ai2, please build the base image first and then build the open_instruct_dev image.
-docker build -f Dockerfile.base --build-arg CUDA="12.8.0" --build-arg VARIANT=devel --build-arg DIST=ubuntu22.04 --build-arg TORCH_VER="2.7.0" --build-arg BEAKER_VERSION=v1.5.208 --build-arg VULKAN_SDK_VERSION="1.3.275" --target default-cuda -t open_instruct_dev:latest .
-docker build . -t open_instruct_dev --build-arg BASE_IMAGE=open_instruct_dev:latest
-
-# if you are interally at AI2, you can create a beaker image like this:
+# if you are internally at AI2, you can create a beaker image like this:
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
-beaker image delete $beaker_user/open_instruct_dev 
+beaker image delete $beaker_user/open_instruct_dev
 beaker image create open_instruct_dev -n open_instruct_dev -w ai2/$beaker_user
-```
-
-Optionally you can build the base image with the following command:
-
-```bash
-docker build -f Dockerfile.base --build-arg CUDA="12.8.0" --build-arg VARIANT=devel --build-arg DIST=ubuntu22.04 --build-arg TORCH_VER="2.7.0" --build-arg BEAKER_VERSION=v1.5.208 --build-arg VULKAN_SDK_VERSION="1.3.275" --target default-cuda -t open_instruct_dev:latest .
-```
-
-* **Docker with uv**: You can also use the Dockerfile to build a Docker image with uv. You can build the image with the following command:
-
-```bash
-# similar to above, you need to provide the base image if you are external to Ai2.
-docker build -f Dockerfile.uv --build-arg UV_CACHE_DIR=$UV_CACHE_DIR -t open_instruct_dev_uv .
-# if you are interally at AI2, you can create an image like this:
-beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
-beaker image delete $beaker_user/open_instruct_dev_uv 
-beaker image create open_instruct_dev_uv -n open_instruct_dev_uv -w ai2/$beaker_user
 ```
 
 If you are internally at AI2, you may launch experiments using our always-up-to-date auto-built image `nathanl/open_instruct_auto`.
@@ -108,23 +76,19 @@ After having setup the environment, you are ready to launch some experiments. We
 
 ### Finetuning
 
-You can run the following commands for getting started:
+You can run the following command for getting started:
 
 ```bash
-# quick debugging run using 1 GPU
-bash scripts/train/finetune/mini.sh
 # train an 8B tulu3 model using 8 GPU
-bash scripts/train/finetune/tulu_finetune_mix.sh
+bash scripts/train/tulu3/finetune_8b.sh
 ```
 
 
 ### Preference Tuning
 
 ```bash
-# quick debugging run using 1 GPU
-bash scripts/train/dpo/mini.sh
 # train an 8B tulu3 model using 8 GPU
-bash scripts/train/dpo/tulu_preference_mix.sh
+bash scripts/train/tulu3/dpo_8b.sh
 ```
 
 
@@ -133,9 +97,7 @@ bash scripts/train/dpo/tulu_preference_mix.sh
 ```bash
 # quick debugging run using 1 GPU (0.5 for inference, 0.5 for training)
 # here we are using a small model, so it's prob not gonna train good models, but it's easy to test run and print stuff.
-bash scripts/train/rlvr/ppo_mini.sh
-bash scripts/train/rlvr/ppo2_mini.sh # experimental support (ppo2 adds kl to loss directly instead of using KL penalty in rewards)
-bash scripts/train/rlvr/grpo_mini.sh
+bash scripts/train/debug/single_gpu_on_beaker.sh
 
 # train an 8B tulu3 model using 8 GPU (1 for inference, 7 for training)
 bash scripts/train/rlvr/tulu_rlvr.sh
@@ -158,7 +120,7 @@ Run the tests with `uv run pytest`.
 ### Repo structure
 ```
 ├── assets/                     <- Images, licenses, etc.
-├── configs/                    
+├── configs/
 |     ├── beaker_configs/       <- AI2 Beaker configs
 |     ├── ds_configs/           <- DeepSpeed configs
 |     └── train_configs/        <- Training configs
@@ -197,7 +159,7 @@ If you used this repository or our models, please cite our work:
 Tulu 1:
 ```bibtex
 @misc{wang2023far,
-   title={How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources}, 
+   title={How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources},
    author={Yizhong Wang and Hamish Ivison and Pradeep Dasigi and Jack Hessel and Tushar Khot and Khyathi Raghavi Chandu and David Wadden and Kelsey MacMillan and Noah A. Smith and Iz Beltagy and Hannaneh Hajishirzi},
    year={2023},
    eprint={2306.04751},
@@ -209,7 +171,7 @@ Tulu 1:
 Tulu 2:
 ```bibtex
 @misc{ivison2023camels,
-      title={Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2}, 
+      title={Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2},
       author={Hamish Ivison and Yizhong Wang and Valentina Pyatkin and Nathan Lambert and Matthew Peters and Pradeep Dasigi and Joel Jang and David Wadden and Noah A. Smith and Iz Beltagy and Hannaneh Hajishirzi},
       year={2023},
       eprint={2311.10702},
@@ -221,7 +183,7 @@ Tulu 2:
 Tulu 2.5:
 ```bibtex
 @misc{ivison2024unpacking,
-      title={Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback}, 
+      title={Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback},
       author={Hamish Ivison and Yizhong Wang and Jiacheng Liu and Zeqiu Wu and Valentina Pyatkin and Nathan Lambert and Noah A. Smith and Yejin Choi and Hannaneh Hajishirzi},
       year={2024},
       eprint={2406.09279},
