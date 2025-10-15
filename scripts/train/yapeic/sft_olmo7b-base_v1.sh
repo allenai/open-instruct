@@ -1,28 +1,30 @@
 python mason.py \
     --cluster ai2/jupiter \
-    --task_name sft_olmo7b_v1 \
-    --description "SFT OLMo-2-1124-7B-Instruct, v1 data" \
+    --task_name sft_olmo7b-base_v1 \
+    --description "SFT OLMo-2-1124-7B, v1 data" \
     --workspace ai2/oe-data \
     --priority high \
     --image nathanl/open_instruct_auto \
     --preemptible \
     --num_nodes 1 \
     --budget ai2/oe-base \
-    --gpus 8 -- accelerate launch \
-    --main_process_port 29505 \
+    --gpus 4 -- accelerate launch \
+    --main_process_port 29506 \
     --mixed_precision bf16 \
-    --num_processes 8 \
+    --num_processes 4 \
     --use_deepspeed \
     --deepspeed_config_file configs/ds_configs/stage2_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
     --hf_entity yapeichang \
-    --hf_repo_id sft_olmo7b_v1 \
-    --exp_name sft_olmo7b_v1 \
-    --model_name_or_path allenai/OLMo-2-1124-7B-Instruct \
+    --hf_repo_id sft_olmo7b-base_v1 \
+    --exp_name sft_olmo7b-base_v1 \
+    --model_name_or_path allenai/OLMo-2-1124-7B \
     --model_revision main \
-    --tokenizer_name allenai/OLMo-2-1124-7B-Instruct \
+    --tokenizer_name allenai/OLMo-2-1124-7B \
     --tokenizer_revision main \
+    --chat_template_name tulu \
+    --add_bos \
     --use_slow_tokenizer False \
     --dataset_mixer_list /weka/oe-training-default/yapeic/proc-data/data/dclm/tutorial_subset/sft_data/v1_goal_steps_simple_template.jsonl 1.0 \
     --clean_checkpoints_at_end false \
