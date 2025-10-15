@@ -1,11 +1,10 @@
-import sys
+import unittest
 from copy import deepcopy
-from pathlib import Path
 
-import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from parameterized import parameterized
 from torch.utils.data import DataLoader
 from transformers import (
     AutoTokenizer,
@@ -16,9 +15,6 @@ from transformers import (
     LlamaForCausalLM,
 )
 
-# HACK for being able to load the collator without needing to install open-instruct
-open_instruct_dir = Path(__file__).parent.parent.absolute()
-sys.path.append(open_instruct_dir)
 from open_instruct.dataset_processor import CHAT_TEMPLATES
 from open_instruct.dataset_transformation import sft_tulu_tokenize_and_truncate_v1
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
@@ -31,12 +27,6 @@ try:
 except ImportError:
     mamba_and_causal_conv_available = False
 
-try:
-    import flash_attn  # noqa
-
-    flash_attn_available = True
-except ImportError:
-    flash_attn_available = False
 
 MODEL_CLASSES = {"bamba": BambaForCausalLM, "llama": LlamaForCausalLM}
 MODEL_CFGS = {"bamba": BambaConfig, "llama": LlamaConfig}
@@ -75,33 +65,27 @@ MODEL_KWARGS = {
 }
 
 
-class TestPaddingFree:
+def _get_fa2_model_and_cfg(model_name: str, vocab_size: int, dtype: torch.dtype) -> nn.Module:
+    model_cls = MODEL_CLASSES[model_name]
+    model_cfg = MODEL_CFGS[model_name]
+    model_kwargs = MODEL_KWARGS[model_name]
+    cfg = model_cfg(
+        **{**model_kwargs, "torch_dtype": dtype, "attn_implementation": "flash_attention_2", "vocab_size": vocab_size}
+    )
+    model = model_cls(cfg).to("cuda", dtype=dtype)
+    return model, cfg
+
+
+class TestPaddingFree(unittest.TestCase):
     seqlen = 128
     batch_size = 2
     dtype = torch.bfloat16
 
-    def get_fa2_model_and_cfg(self, model_name: str, vocab_size: int) -> nn.Module:
-        model_cls = MODEL_CLASSES[model_name]
-        model_cfg = MODEL_CFGS[model_name]
-        model_kwargs = MODEL_KWARGS[model_name]
-        cfg = model_cfg(
-            **{
-                **model_kwargs,
-                "torch_dtype": self.dtype,
-                "attn_implementation": "flash_attention_2",
-                "vocab_size": vocab_size,
-            }
-        )
-        model = model_cls(cfg).to("cuda", dtype=self.dtype)
-        return model, cfg
-
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="Padding free tests require CUDA")
-    @pytest.mark.skipif(not flash_attn_available, reason="Padding free requires flash_attn")
-    @pytest.mark.parametrize("model_name", ["bamba", "llama"])
-    @pytest.mark.parametrize("loss_type", ["mean", "sum"])
+    @parameterized.expand([("bamba", "mean"), ("bamba", "sum"), ("llama", "mean"), ("llama", "sum")])
+    @unittest.skipIf(not torch.cuda.is_available(), reason="Padding free tests require CUDA")
     def test_padding_free(self, model_name: str, loss_type: str) -> None:
         if model_name == "bamba" and not mamba_and_causal_conv_available:
-            pytest.skip("bamba padding-free tests require mamba_ssm and causal_conv1d")
+            self.skipTest("bamba padding-free tests require mamba_ssm and causal_conv1d")
         torch.manual_seed(42)
 
         tokenizer = AutoTokenizer.from_pretrained("ibm-ai-platform/Bamba-9B-v2")
@@ -109,11 +93,9 @@ class TestPaddingFree:
         tokenizer.chat_template = CHAT_TEMPLATES["tulu"]
         vocab_size = len(tokenizer)
 
-        model, cfg = self.get_fa2_model_and_cfg(model_name, vocab_size)
+        model, cfg = _get_fa2_model_and_cfg(model_name, vocab_size, self.dtype)
         model.initialize_weights()
         pf_model = deepcopy(model)
-
-        inputs = torch.randint(cfg.vocab_size, size=(self.batch_size, self.seqlen), device="cpu")
 
         data = {
             0: {
@@ -147,11 +129,8 @@ class TestPaddingFree:
                 if torch.is_tensor(b[k]):
                     b[k] = b[k].cuda()
 
-        assert batch["input_ids"].shape[0] == 2
-        assert pf_batch["input_ids"].shape[0] == 1
-
-        # Also create a batch with the pf style concatenation, but without the pf seq markers as a
-        # control. Passing this through the model should give incorrect results.
+        self.assertEqual(batch["input_ids"].shape[0], self.batch_size)
+        self.assertEqual(pf_batch["input_ids"].shape[0], 1)
 
         incorrect_pf_batch = {
             "input_ids": pf_batch["input_ids"],
@@ -164,13 +143,12 @@ class TestPaddingFree:
         with torch.no_grad():
             incorrect_pf_outputs = model(**incorrect_pf_batch)
 
-        # Compare logits (properly reshaped and masked)
         logits = outputs.logits.reshape(1, -1, outputs.logits.shape[-1])
         non_masked_logits = logits[:, batch["attention_mask"].flatten().bool()]
         pf_logits = pf_outputs.logits
         incorrect_pf_logits = incorrect_pf_outputs.logits
         torch.testing.assert_close(pf_logits, non_masked_logits)
-        with pytest.raises(AssertionError, match="Mismatched elements:"):
+        with self.assertRaisesRegex(AssertionError, "Mismatched elements:"):
             torch.testing.assert_close(pf_logits, incorrect_pf_logits)
 
         if loss_type == "mean":
@@ -188,10 +166,5 @@ class TestPaddingFree:
 
         grads = {n: p.grad for n, p in model.named_parameters()}
         pf_grads = {n: p.grad for n, p in pf_model.named_parameters()}
-        non_nan_grads = set()
-        nan_grads = set()
         for k, g in grads.items():
             torch.testing.assert_close(g, pf_grads[k])
-            non_nan_grads.add(k)
-        print(f"{non_nan_grads=}")
-        print(f"{nan_grads=}")
