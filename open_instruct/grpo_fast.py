@@ -670,6 +670,11 @@ class PolicyTrainerRayProcess(RayProcess):
             warm_up_steps = int(num_scheduler_steps * args.warmup_ratio)
 
         if args.optimizer.lower() == "muon":
+            for name, param in self.policy.named_parameters():
+                if param.ndim >= 2 and "embed" not in name.lower() and "lm_head" not in name.lower():
+                    param.use_muon = True
+                else:
+                    param.use_muon = False
             optimizer_params = {"lr": args.learning_rate, "momentum": 0.95, "weight_decay": args.weight_decay}
             if args.optimizer_kwargs is not None:
                 optimizer_params.update(args.optimizer_kwargs)
