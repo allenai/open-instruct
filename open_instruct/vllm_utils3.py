@@ -951,13 +951,6 @@ class LLMRayActor:
         """Get KV cache max concurrency from the vLLM engine."""
         kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
         kv_cache_spec = kv_cache_specs[0]
-        # Group layers by their attention type (type_id) to handle models
-        # with sliding attention in some layers but not others
-        type_groups = defaultdict(list)
-        for layer_name, layer_spec in kv_cache_spec.items():
-            type_groups[layer_spec.type_id].append(layer_name)
-
-        grouped_layer_names = list(type_groups.values())
 
         page_size = kv_cache_utils.get_uniform_page_size(kv_cache_spec)
 
@@ -974,10 +967,10 @@ class LLMRayActor:
             for layer_name in kv_cache_spec
         ]
 
+        kv_cache_groups = kv_cache_utils.get_kv_cache_groups(vllm_config, kv_cache_spec)
+
         kv_cache_config = kv_cache_interface.KVCacheConfig(
-            num_blocks=num_blocks,
-            kv_cache_tensors=kv_cache_tensors,
-            kv_cache_groups=kv_cache_utils.create_kv_cache_group_specs(kv_cache_spec, grouped_layer_names),
+            num_blocks=num_blocks, kv_cache_tensors=kv_cache_tensors, kv_cache_groups=kv_cache_groups
         )
         max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(
             self.llm_engine.vllm_config, kv_cache_config
