@@ -34,6 +34,7 @@ uv run python mason.py \
     --num_samples_per_prompt_rollout 4 \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --apply_verifiable_reward true \
+    --verbose True \
     --temperature 0.7 \
     --ground_truths_key ground_truth \
     --chat_template_name r1_simple_chat_postpend_think_tool_vllm \
