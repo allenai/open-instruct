@@ -19,6 +19,7 @@ uv run python mason.py \
        --timeout 900 \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --budget ai2/oe-adapt \
+       --no-host-networking \
        --gpus 1 \
 	   -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
