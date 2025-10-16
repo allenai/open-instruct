@@ -22,11 +22,11 @@ import queue
 import sys
 import threading
 import time
+import types
 from collections import defaultdict
 from concurrent import futures
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple, Union
-import types
 
 import ray
 import torch
@@ -850,9 +850,7 @@ class LLMRayActor:
             concat_out.token_ids.extend(tool_output_token_ids)
             # use placeholder logprobs for new tokens
             # TODO: can we do something fancier here, or allow it?
-            concat_out.logprobs.extend(
-                [{tid: types.SimpleNamespace(logprob=0.0)} for tid in tool_output_token_ids]
-            )
+            concat_out.logprobs.extend([{tid: types.SimpleNamespace(logprob=0.0)} for tid in tool_output_token_ids])
             tracking["masks"][req_id].extend([0] * len(tool_output_token_ids))
             new_sample_tokens = sampling_params.max_tokens - len(tracking["masks"][req_id])
             can_make_new_request = can_make_new_request and new_sample_tokens > 0
