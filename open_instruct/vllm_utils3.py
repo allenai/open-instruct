@@ -43,6 +43,7 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
@@ -751,31 +752,20 @@ class LLMRayActor:
     def get_kv_cache_info(self) -> int:
         """Get KV cache max concurrency from the vLLM engine."""
         kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
-        kv_cache_spec = kv_cache_specs[0]
-
-        page_size = kv_cache_utils.get_uniform_page_size(kv_cache_spec)
 
         vllm_config = self.llm_engine.vllm_config
         gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
         total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
         available_memory = int(gpu_memory_utilization * total_gpu_memory)
 
-        num_blocks = kv_cache_utils.get_num_blocks(vllm_config, len(kv_cache_spec), available_memory, page_size)
+        kv_cache_groups = kv_cache_utils.get_kv_cache_groups(vllm_config, kv_cache_specs[0])
 
-        num_gpu_blocks = cache_config.num_gpu_blocks
-        block_size = cache_config.block_size
-        max_model_len = model_config.max_model_len
-
-        kv_cache_groups = kv_cache_utils.get_kv_cache_groups(vllm_config, kv_cache_spec)
-
-        kv_cache_config = kv_cache_interface.KVCacheConfig(
-            num_blocks=num_blocks, kv_cache_tensors=kv_cache_tensors, kv_cache_groups=kv_cache_groups
-        )
-        max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(
-            self.llm_engine.vllm_config, kv_cache_config
+        kv_cache_config = kv_cache_utils.get_kv_cache_config_from_groups(
+            vllm_config, kv_cache_groups, kv_cache_specs, available_memory
         )
 
-        max_concurrency = (num_gpu_blocks * block_size) / max_model_len
+        max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(vllm_config, kv_cache_config)
+
         return int(max_concurrency)
 
 
