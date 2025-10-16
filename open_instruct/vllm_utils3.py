@@ -21,6 +21,7 @@ import queue
 import sys
 import threading
 import time
+import types
 from collections import defaultdict
 from concurrent import futures
 from datetime import timedelta
