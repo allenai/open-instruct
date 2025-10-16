@@ -4,6 +4,7 @@ This makes debugging and eval fun. See the bottom of the file for examples.
 """
 
 import copy
+import types
 import warnings
 from collections import defaultdict
 from collections.abc import Sequence
@@ -145,6 +146,9 @@ class ToolUseLLM(LLM):
                     elif len(tool_output_token_ids) > remaining:
                         tool_output_token_ids = tool_output_token_ids[:remaining]
                     concat_outputs[req_id].outputs[0].token_ids.extend(tool_output_token_ids)
+                    concat_outputs[req_id].outputs[0].logprobs.extend(
+                        [{tid: types.SimpleNamespace(logprob=0.0)} for tid in tool_output_token_ids]
+                    )
                     if len(concat_outputs[req_id].outputs[0].token_ids) > self.single_n_sampling_params.max_tokens:
                         breakpoint()
                         raise ValueError(
@@ -186,9 +190,14 @@ class ToolUseLLM(LLM):
                         o = output.outputs[0]
                         output_processed = False
                         if output.request_id not in concat_outputs:
+                            # Ensure initial logprobs is present
+                            if getattr(o, "logprobs", None) is None:
+                                o.logprobs = [{tid: types.SimpleNamespace(logprob=0.0)} for tid in o.token_ids]
                             concat_outputs[output.request_id] = output
                         else:
+                            # Extend token ids and corresponding logprobs for continued model output
                             concat_outputs[output.request_id].outputs[0].token_ids.extend(o.token_ids)
+                            concat_outputs[output.request_id].outputs[0].logprobs.extend(o.logprobs)
                             if (
                                 len(concat_outputs[output.request_id].outputs[0].token_ids)
                                 > self.single_n_sampling_params.max_tokens
@@ -203,7 +212,7 @@ class ToolUseLLM(LLM):
                             if (
                                 o.text.endswith(stop_str)
                                 and stop_str in self.tools
-                                and num_calls[output.request_id] <= self.max_tool_calls[stop_str]
+                                and num_calls[output.request_id] < self.max_tool_calls[stop_str]
                             ):
                                 # Schedule tool call asynchronously
                                 tool = self.tools[stop_str]
@@ -214,7 +223,7 @@ class ToolUseLLM(LLM):
                             elif (
                                 o.text.endswith(stop_str)
                                 and stop_str in self.tools
-                                and num_calls[output.request_id] > self.max_tool_calls[stop_str]
+                                and num_calls[output.request_id] >= self.max_tool_calls[stop_str]
                             ):
                                 # If the tool has been called too many times, we tell the model it has exceeded the limit.
                                 # use a dummy tool object to keep things simple.
@@ -284,6 +293,7 @@ class ToolUseLLM(LLM):
 
 
 if __name__ == "__main__":
+    ## basic example of how to use tool_vllm.
     console = Console()
     from transformers import AutoTokenizer
 
@@ -345,70 +355,4 @@ and you will get the output between the <output> and </output> tags.
             # visualize_token(o.token_ids, tok)
     print(f"{sampling_params.n=}")
     print("debugging tests 2 all done")
-    # breakpoint()
-    # More serious benchmarks
 
-    # from datasets import load_dataset
-    # tok = AutoTokenizer.from_pretrained(model_name)
-    # ds = load_dataset("ai2-adapt-dev/rlvr_open_reasoner_math", split="train")
-    # ds = ds.select(range(8192))
-    # def process(example):
-    #     messages = [{"role": "system", "content": system_prompt}] + example["messages"]
-    #     example["input_ids_prompt"] = tok.apply_chat_template(messages, add_generation_prompt=True)
-    #     return example
-    # ds = ds.map(process, remove_columns=["messages"])
-
-    # print("ds:", ds)
-    # outputs = llm.generate(prompt_token_ids=ds["input_ids_prompt"], sampling_params=sampling_params)
-    # print(f"len(outputs): {len(outputs)}")
-    # print("debugging tests all done")
-    # # need to handle the case the response length actually goes down overtime
-    from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
-
-    tc = TokenizerConfig(tokenizer_name_or_path=model_name, chat_template_name="r1_simple_chat_postpend_think_tools7")
-    transform_fn_args = [{}, {"max_token_length": 8192, "max_prompt_token_length": 2048}]
-    train_dataset = get_cached_dataset_tulu(
-        dataset_mixer_list=["ai2-adapt-dev/rlvr_open_reasoner_math", "1.0"],
-        dataset_mixer_list_splits=["train"],
-        tc=tc,
-        dataset_transform_fn=["rlvr_tokenize_v1", "rlvr_filter_v1"],
-        transform_fn_args=transform_fn_args,
-        dataset_cache_mode="local",
-        hf_entity="allenai",
-        dataset_local_cache_dir="/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache",
-    )
-    outputs = llm.generate(prompt_token_ids=train_dataset["input_ids_prompt"][:30], sampling_params=sampling_params)
-    # calculate the percentage of timeout
-    timeouts = [o for output in outputs for o in output.outputs if o.timeout]
-    print(f"Timeout percentage: {len(timeouts) / (len(outputs) * sampling_params.n)}")
-    empty_outputs = [o for output in outputs for o in output.outputs if len(o.tool_output) == 0 and o.tool_called]
-    print(f"Empty output percentage: {len(empty_outputs) / (len(outputs) * sampling_params.n)}")
-    errors = [o for output in outputs for o in output.outputs if len(o.tool_error) > 0]
-    print(f"Error percentage: {len(errors) / (len(outputs) * sampling_params.n)}")
-    tool_called = [o for output in outputs for o in output.outputs if o.tool_called]
-    print(f"Tool called percentage: {len(tool_called) / (len(outputs) * sampling_params.n)}")
-    tool_runtime = [o for output in outputs for o in output.outputs if o.tool_runtime > 0]
-    print(f"Tool runtime > 0 percentage: {len(tool_runtime) / (len(outputs) * sampling_params.n)}")
-    # print(tok.decode(empty_outputs[0].token_ids))
-
-    print_samples = True
-    if print_samples:
-        for i, output in enumerate(outputs):
-            prompt = tok.decode(output.prompt_token_ids)
-            console.rule(f"Conversation {i}")
-            console.rule("Prompt")
-            console.print(prompt)
-            console.rule("Ground truth")
-            console.print(train_dataset[i]["ground_truth"])
-            for j, o in enumerate(output.outputs):
-                generated_text = tok.decode(o.token_ids)
-                assert len(o.mask) == len(o.token_ids)
-                console.rule(f"Generated text {j}")
-                console.rule("Generated text w/ masks")
-                visualize_token_role(o.token_ids, o.mask, tok)
-                # console.rule("Generated text")
-                # visualize_token(o.token_ids, tok)
-            breakpoint()
-
-    # breakpoint()
-    print("debugging tests all done")
