@@ -118,7 +118,7 @@ def _init_tool_tracking():
 def make_request_id(request: PromptRequest) -> str:
     """Generate a unique tracking key for a request."""
     prefix = "eval" if request.is_eval else "train"
-    return f"{prefix}_{request.training_step}_{request.dataset_index}"
+    return f"{prefix}_{request.epoch_number}_{request.dataset_index}"
 
 
 def _extract_base_request_id(full_request_id: str) -> str:
@@ -266,7 +266,7 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
             tool_calleds=tool_calleds,
         ),
         dataset_index=metadata["dataset_index"],
-        training_step=metadata["training_step"],
+        epoch_number=metadata["epoch_number"],
         token_statistics=TokenStatistics(
             num_prompt_tokens=metadata["prompt_tokens"],
             num_response_tokens=total_generation_tokens,
@@ -371,7 +371,7 @@ def add_request(
     request_metadata[request_id] = {
         "is_eval": request.is_eval,
         "dataset_index": request.dataset_index,
-        "training_step": request.training_step,
+        "epoch_number": request.epoch_number,
         "sampling_params": sampling_params,
         "original_sampling_params": request.generation_config,
         "prompt_tokens": len(request.prompt),
