@@ -26,6 +26,7 @@ from collections import defaultdict
 from concurrent import futures
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple, Union
+import types
 
 import ray
 import torch
@@ -173,9 +174,19 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     assert len(output.outputs) <= 1, f"{len(output.outputs)=}"  # In tool mode, sampling_params.n == 1
     o = output.outputs[0]
 
-    # Update concatenated outputs
+    # Update concatenated outputs (token_ids and logprobs) in tool mode only
     if output.request_id in tracking["concat_outputs"]:
-        tracking["concat_outputs"][output.request_id].outputs[0].token_ids.extend(o.token_ids)
+        stored = tracking["concat_outputs"][output.request_id].outputs[0]
+        # Extend tokens
+        stored.token_ids.extend(o.token_ids)
+        # Extend logprobs to keep lengths aligned
+        if getattr(stored, "logprobs", None) is None:
+            stored.logprobs = []
+        if getattr(o, "logprobs", None) is not None:
+            stored.logprobs.extend(o.logprobs)
+        else:
+            # No logprobs provided for new tokens; create placeholders
+            stored.logprobs.extend([{tid: types.SimpleNamespace(logprob=0.0)} for tid in o.token_ids])
     else:
         tracking["concat_outputs"][output.request_id] = output
 
@@ -831,7 +842,14 @@ class LLMRayActor:
             elif len(tool_output_token_ids) > remaining:
                 tool_output_token_ids = tool_output_token_ids[:remaining]
 
-            tracking["concat_outputs"][req_id].outputs[0].token_ids.extend(tool_output_token_ids)
+            # Extend token_ids and logprobs for tool output tokens so lengths stay aligned
+            concat_out = tracking["concat_outputs"][req_id].outputs[0]
+            concat_out.token_ids.extend(tool_output_token_ids)
+            if getattr(concat_out, "logprobs", None) is None:
+                concat_out.logprobs = []
+            concat_out.logprobs.extend(
+                [{tid: types.SimpleNamespace(logprob=0.0)} for tid in tool_output_token_ids]
+            )
             tracking["masks"][req_id].extend([0] * len(tool_output_token_ids))
             new_sample_tokens = sampling_params.max_tokens - len(tracking["masks"][req_id])
             can_make_new_request = can_make_new_request and new_sample_tokens > 0
@@ -905,6 +923,8 @@ class LLMRayActor:
         while not self.inflight_updates:
             pending_tools = len(self.tracking["pending_tool_futures"])
             unfinished = self.llm_engine.get_num_unfinished_requests()
+            # if a background thread is dead, raise an error.
+            self.check_background_threads()
 
             if pending_tools == 0 and unfinished == 0:
                 break
