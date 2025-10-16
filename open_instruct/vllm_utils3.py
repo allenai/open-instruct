@@ -51,19 +51,11 @@ from open_instruct.utils import ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
 
-DEFAULT_WORKERS = 2
-TOOL_WORKERS = 20
-INIT_TIMEOUT_S = 120
-DRAIN_TIMEOUT_S = 300.0
+NUM_PREFETCH_WORKERS = 2
+NUM_TOOL_WORKERS = 20
 SHOULD_STOP_CACHE_TIMEOUT_S = 5
-PREFETCH_SLEEP_S = 1
-QUEUE_GET_TIMEOUT_S = 0.1
-COMPLETION_QUEUE_TIMEOUT_S = 1.0
-PROCESS_SLEEP_S = 0.1
-RAY_WAIT_TIMEOUT_S = 0.1
-KV_CACHE_RETRIES = 5
-KV_CACHE_RETRY_SLEEP_S = 0.2
-WEIGHT_UPDATE_SLEEP_INTERVAL_S = 0.1
+DRAIN_ACTIVE_TASKS_SLEEP_S = 1
+SHOULD_STOP_TIMEOUT_S = 0.1
 
 
 def assert_threaded_actor(instance):
@@ -210,7 +202,7 @@ async def process_request_async(
         current_sampling_params.max_tokens = new_sample_tokens
 
     complete_output = vllm.CompletionOutput(
-        index=int(sub_request_id.split("_")[-1]),
+        index=sub_request_id.split("_")[-1],
         text="",
         token_ids=accumulated_tokens,
         cumulative_logprob=output.cumulative_logprob,
@@ -245,14 +237,6 @@ async def process_request_async(
             "tools": actor.tools,
         }
     )
-
-
-async def _init_engine_async(actor):
-    """Initialize the AsyncLLMEngine from within the running event loop."""
-    running_loop = asyncio.get_running_loop()
-    assert running_loop == actor.loop, f"Loop mismatch! running={running_loop}, actor.loop={actor.loop}"
-
-    actor.llm_engine = vllm.AsyncLLMEngine.from_engine_args(actor.engine_args, start_engine_loop=False)
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -318,13 +302,12 @@ def get_triggered_tool(
     return None, None
 
 
-def process_completed_request(request_id, outs, tracking, current_time, tools, request_metadata):
+def process_completed_request(request_id, outs, current_time, tools, request_metadata):
     """Process a completed request with all its samples and return the result.
 
     Args:
         request_id: The base request ID
         outs: List of vllm.RequestOutput objects for all sub-requests
-        tracking: Dictionary containing tool tracking information
         current_time: Current timestamp for performance metrics
         tools: Dictionary of available tools (may be None or empty)
         request_metadata: Dictionary containing metadata for all requests
@@ -486,14 +469,10 @@ def init_process_group(
 def _prefetch_worker(actor: "LLMRayActor") -> None:
     while True:
         if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
-            time.sleep(PREFETCH_SLEEP_S)
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
-        try:
-            request = actor.prompt_queue.get(timeout=QUEUE_GET_TIMEOUT_S)
-        except queue.Empty:
-            continue
-
+        request = actor.prompt_queue.get()
         add_request(actor, request)
 
 
@@ -550,9 +529,7 @@ class LLMRayActor:
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
-
-        self._setup_engine_args(args, bundle_indices, kwargs)
-        self._initialize_async_loop()
+        self._setup_and_start_async_engine(args, bundle_indices, kwargs)
 
     def _init_config(
         self,
@@ -566,11 +543,11 @@ class LLMRayActor:
         self.inference_batch_size = inference_batch_size
         self.inflight_updates = inflight_updates
         self.request_metadata = {}
-        self.completion_queue = queue.Queue()
         self.active_tasks = {}
         self.request_outputs = {}
 
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
+        self.completion_queue = queue.Queue()
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
@@ -580,10 +557,9 @@ class LLMRayActor:
         self._last_should_stop_update = float("-inf")
         self._should_stop_value = False
         self._should_stop_timeout_s = SHOULD_STOP_CACHE_TIMEOUT_S
-        self._inflight_ref = None
 
     def _init_executor(self) -> None:
-        max_workers = DEFAULT_WORKERS + (TOOL_WORKERS if self.tools else 0)
+        max_workers = NUM_PREFETCH_WORKERS + (NUM_TOOL_WORKERS if self.tools else 0)
         self.executor = futures.ThreadPoolExecutor(max_workers=max_workers)
         self._prefetch_future = self.executor.submit(_prefetch_worker, self)
         self._process_future = self.executor.submit(self.process_from_queue)
@@ -601,41 +577,36 @@ class LLMRayActor:
             # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
             os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
 
-    def _setup_engine_args(self, args, bundle_indices, kwargs) -> None:
-        """Create and configure vLLM engine arguments."""
+    def _setup_and_start_async_engine(self, args, bundle_indices, kwargs) -> None:
         num_gpus = kwargs.pop("num_gpus")
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             logger.debug(f"creating LLM with bundle_indices={bundle_indices}")
 
-        self.engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
-        # Log stats causes a crash in the engine at assert outputs.scheduler_stats is not None when we call step() and there is nothing to step.
-        self.engine_args.disable_log_stats = True
-        # Cascade attention has known performance issues: https://github.com/vllm-project/vllm/issues/17652
-        self.engine_args.disable_cascade_attn = True
+        engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
+        engine_args.disable_log_stats = True
+        engine_args.disable_cascade_attn = True
 
-    def _initialize_async_loop(self) -> None:
-        """Start async event loop and initialize the engine."""
-        self.init_complete = threading.Event()
+        init_complete = threading.Event()
         self.loop = None
         self.llm_engine = None
 
-        self.loop_thread = threading.Thread(target=self._run_async_loop, daemon=True)
+        async def _init_engine():
+            running_loop = asyncio.get_running_loop()
+            assert running_loop == self.loop, f"Loop mismatch! running={running_loop}, actor.loop={self.loop}"
+            return vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
+
+        def _run_loop():
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
+            self.llm_engine = self.loop.run_until_complete(_init_engine())
+            init_complete.set()
+            self.loop.run_forever()
+
+        self.loop_thread = threading.Thread(target=_run_loop, daemon=True)
         self.loop_thread.start()
-
-        if not self.init_complete.wait(timeout=INIT_TIMEOUT_S):
-            raise RuntimeError(f"Failed to initialize AsyncLLMEngine within {INIT_TIMEOUT_S} seconds")
-
-    def _run_async_loop(self) -> None:
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-
-        self.loop.run_until_complete(_init_engine_async(self))
-
-        self.init_complete.set()
-
-        self.loop.run_forever()
+        init_complete.wait()
 
     def get_model_dims_dict(self) -> Dict[str, int]:
         """Get only the model dimensions as a simple dict without loading weights."""
@@ -658,7 +629,7 @@ class LLMRayActor:
     def _should_stop(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
             should_stop_ref = self.actor_manager.should_stop.remote()
-            ready_refs, _ = ray.wait([should_stop_ref], timeout=RAY_WAIT_TIMEOUT_S)
+            ready_refs, _ = ray.wait([should_stop_ref], timeout=SHOULD_STOP_TIMEOUT_S)
             if ready_refs:
                 self._should_stop_value = ray.get(ready_refs[0])
                 self._last_should_stop_update = time.perf_counter()
@@ -666,7 +637,7 @@ class LLMRayActor:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
 
-    def _accumulate_sub_request(self, sub_request: dict) -> int:
+    def _accumulate_sub_request(self, sub_request: dict) -> None:
         base_request_id = sub_request["base_request_id"]
         expected_n = sub_request["expected_n"]
 
@@ -682,18 +653,15 @@ class LLMRayActor:
         is_complete = len(self.request_outputs[base_request_id]["outputs"]) == expected_n
         if is_complete:
             self._finalize_completed_request(base_request_id)
-            return 1
-        return 0
 
     def _finalize_completed_request(self, base_request_id: str) -> None:
         outputs = self.request_outputs[base_request_id]["outputs"]
-        ordered_outs = sorted(outputs, key=lambda x: int(x.request_id.split("_")[-1]))
+        ordered_outs = sorted(outputs, key=lambda x: _extract_base_request_id(x.request_id))
 
         current_time = time.perf_counter()
         result, is_eval = process_completed_request(
             base_request_id,
             ordered_outs,
-            {},
             current_time,
             self.request_outputs[base_request_id]["tools"],
             self.request_metadata,
@@ -705,19 +673,11 @@ class LLMRayActor:
         results_queue = self.eval_results_queue if is_eval else self.results_queue
         results_queue.put(result)
 
-    def process_from_queue(self) -> int:
-        total_processed = 0
-
+    def process_from_queue(self) -> None:
         while True:
             self.check_background_threads()
-            try:
-                sub_request = self.completion_queue.get(timeout=COMPLETION_QUEUE_TIMEOUT_S)
-                total_processed += self._accumulate_sub_request(sub_request)
-
-            except queue.Empty:
-                time.sleep(PROCESS_SLEEP_S)
-
-        return total_processed
+            sub_request = self.completion_queue.get()
+            self._accumulate_sub_request(sub_request)
 
     def init_process_group(
         self,
@@ -755,7 +715,7 @@ class LLMRayActor:
     def _prepare_weight_update(self, name: str, dtype: str) -> None:
         # Wait for all active requests to complete.
         while not self.inflight_updates and len(self.active_tasks) > 0:
-            time.sleep(PROCESS_SLEEP_S)
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
 
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
