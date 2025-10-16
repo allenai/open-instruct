@@ -237,16 +237,23 @@ def setup_vllm_engines(
     max_model_len: int = 20480,
 ) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue]:
     """Set up vLLM engines and queues."""
-    logger.info("Setting up vLLM engines...")
+    logger.info("[SETUP] Setting up vLLM engines...")
+    logger.info(f"[SETUP] Config: num_engines={args.vllm_num_engines}, TP={args.vllm_tensor_parallel_size}, PP={args.vllm_pipeline_parallel_size}")
 
+    logger.info("[SETUP] Initializing Ray...")
     ray.init(dashboard_host="0.0.0.0")
+    logger.info("[SETUP] Ray initialized successfully")
 
+    logger.info("[SETUP] Creating queues...")
     param_prompt_Q = ray_queue.Queue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
 
     queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
+    logger.info("[SETUP] Creating ActorManager...")
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
+    logger.info("[SETUP] ActorManager created")
 
+    logger.info("[SETUP] Calling create_vllm_engines...")
     vllm_engines = vllm_utils3.create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
@@ -272,7 +279,9 @@ def setup_vllm_engines(
         verbose=args.verbose,
     )
 
-    logger.info("vLLM engines ready")
+    logger.info("[SETUP] create_vllm_engines returned successfully!")
+    logger.info(f"[SETUP] Created {len(vllm_engines)} vLLM engines")
+    logger.info("[SETUP] vLLM engines ready - setup complete!")
 
     return vllm_engines, param_prompt_Q, inference_results_Q, actor_manager
 

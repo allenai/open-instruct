@@ -437,6 +437,8 @@ class LLMRayActor:
         inflight_updates: bool,
     ) -> None:
         self.logger = logger_utils.setup_logger(__name__)
+        self.logger.info(f"[INIT START] LLMRayActor.__init__ starting with bundle_indices={bundle_indices}")
+
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inference_batch_size = inference_batch_size
@@ -461,11 +463,11 @@ class LLMRayActor:
         if distributed_executor_backend == "ray":
             os.environ.pop("CUDA_VISIBLE_DEVICES", None)
             os.environ.pop("ROCR_VISIBLE_DEVICES", None)
+            self.logger.info("[INIT] Using ray distributed backend, cleared VISIBLE_DEVICES")
         elif noset_visible_devices:
-            # We need to set CUDA_VISIBLE_DEVICES to the ray assigned GPU
-            # when the distributed_executor_backend is not ray and
-            # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
+            gpu_ids = ray.get_gpu_ids()
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_ids[0])
+            self.logger.info(f"[INIT] Set CUDA_VISIBLE_DEVICES to {gpu_ids[0]}")
 
     def _setup_engine_args(self, args, bundle_indices, kwargs) -> None:
         num_gpus = kwargs.pop("num_gpus")
@@ -474,13 +476,18 @@ class LLMRayActor:
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             logger.debug(f"creating LLM with bundle_indices={bundle_indices}")
 
+        self.logger.info(
+            f"[INIT] Creating EngineArgs with model={kwargs.get('model')}, tp={kwargs.get('tensor_parallel_size')}, pp={kwargs.get('pipeline_parallel_size')}"
+        )
         engine_args = vllm.EngineArgs(*args, **kwargs)
-        # Log stats causes a crash in the engine at assert outputs.scheduler_stats is not None when we call step() and there is nothing to step.
         engine_args.disable_log_stats = True
         # Cascade attention has known performance issues: https://github.com/vllm-project/vllm/issues/17652
         engine_args.disable_cascade_attn = True
+        self.logger.info("[INIT] EngineArgs created successfully")
 
+        self.logger.info("[INIT] Creating LLMEngine from engine args - this may take a while...")
         self.llm_engine = vllm.LLMEngine.from_engine_args(engine_args)
+        self.logger.info("[INIT] LLMEngine created successfully!")
 
     def get_model_dims_dict(self):
         """Get only the model dimensions as a simple dict without loading weights."""
@@ -513,7 +520,9 @@ class LLMRayActor:
 
     def _prefetch_worker(self, sleep_length_s: int = 1):
         """Background worker that prefetches requests until we have enough buffered."""
+        self.logger.info("[PREFETCH WORKER] Starting prefetch worker thread")
         self._threads_started.set()
+        self.logger.info("[PREFETCH WORKER] Set _threads_started event")
         while True:
             if not self.inflight_updates and self._should_stop():
                 time.sleep(sleep_length_s)
@@ -547,9 +556,11 @@ class LLMRayActor:
         Returns:
             int: Number of requests processed
         """
+        self.logger.info("[PROCESS WORKER] Starting process worker thread")
         total_processed = 0
         iteration_count = 0
 
+        self.logger.info("[PROCESS WORKER] Entering main processing loop")
         while True:
             iteration_count += 1
 
@@ -948,8 +959,13 @@ class LLMRayActor:
         self.llm_engine.wake_up(tags)
 
     def ready(self):
-        self._threads_started.wait(timeout=30)
-        return True
+        self.logger.info("[READY] ready() called, waiting for threads to start (timeout=30s)...")
+        result = self._threads_started.wait(timeout=30)
+        if result:
+            self.logger.info("[READY] Threads started successfully, actor is ready!")
+        else:
+            self.logger.error("[READY] TIMEOUT: Threads did not start within 30 seconds!")
+        return result
 
     def check_background_threads(self):
         if self._prefetch_future.done():
@@ -1055,20 +1071,30 @@ def create_vllm_engines(
         num_gpus = 0.5
 
     logger.info(f"num_gpus: {num_gpus}")
+    logger.info(
+        f"[CREATE ENGINES] Configuration: num_engines={num_engines}, TP={tensor_parallel_size}, PP={pipeline_parallel_size}"
+    )
 
     if not use_hybrid_engine:
-        # Create a big placement group to ensure that all engines are packed
-        bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size * pipeline_parallel_size)]
+        total_bundles = num_engines * tensor_parallel_size * pipeline_parallel_size
+        logger.info(f"[CREATE ENGINES] Creating placement group with {total_bundles} bundles (PACK strategy)")
+        bundles = [{"GPU": 1, "CPU": 1} for _ in range(total_bundles)]
         pg = placement_group(bundles, strategy="PACK")
+        logger.info("[CREATE ENGINES] Waiting for placement group to be ready...")
         ray.get(pg.ready())
+        logger.info("[CREATE ENGINES] Placement group ready!")
 
-    # ensure we use bundles on the same node where possible if tp>1.
+    logger.info("[CREATE ENGINES] Getting bundle indices list...")
     bundle_indices_list = get_bundle_indices_list(pg)
+    logger.info(f"[CREATE ENGINES] Bundle indices: {bundle_indices_list}")
     gpus_per_engine = tensor_parallel_size * pipeline_parallel_size
+    logger.info(f"[CREATE ENGINES] Each engine will use {gpus_per_engine} GPUs")
 
     for i in range(num_engines):
+        logger.info(f"[CREATE ENGINES] Creating engine {i + 1}/{num_engines}")
         bundle_indices = None
         bundle_indices = bundle_indices_list[i * gpus_per_engine : (i + 1) * gpus_per_engine]
+        logger.info(f"[CREATE ENGINES] Engine {i + 1} will use bundle_indices={bundle_indices}")
 
         scheduling_strategy = PlacementGroupSchedulingStrategy(
             placement_group=pg,
@@ -1076,6 +1102,7 @@ def create_vllm_engines(
             placement_group_bundle_index=bundle_indices[0],
         )
 
+        logger.info(f"[CREATE ENGINES] Submitting Ray actor creation for engine {i + 1}")
         vllm_engines.append(
             ray.remote(LLMRayActor)
             .options(
@@ -1117,7 +1144,12 @@ def create_vllm_engines(
                 calculate_kv_scales=use_fp8_kv_cache,
             )
         )
+        logger.info(f"[CREATE ENGINES] Engine {i + 1} Ray actor submitted successfully")
 
+    logger.info(
+        f"[CREATE ENGINES] All {num_engines} engines submitted, now waiting for them to be ready (timeout=300s)..."
+    )
     ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300)
+    logger.info("[CREATE ENGINES] All engines ready!")
 
     return vllm_engines

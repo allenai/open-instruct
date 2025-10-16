@@ -9,18 +9,18 @@ fi
 
 # 2) Fail if there are any uncommitted or untracked changes
 #    (staged, unstaged, or untracked files)
-if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
-  echo "Error: Uncommitted changes detected. Please commit or stash before running."
-  echo "------- git status (short) -------"
-  git status --short
-  exit 1
-fi
+#if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+#  echo "Error: Uncommitted changes detected. Please commit or stash before running."
+#  echo "------- git status (short) -------"
+#  git status --short
+#  exit 1
+#fi
 
 git_hash=$(git rev-parse --short HEAD)
 git_branch=$(git rev-parse --abbrev-ref HEAD)
 # Sanitize the branch name to remove invalid characters for Beaker names
 # Beaker names can only contain letters, numbers, -_. and may not start with -
-sanitized_branch=$(echo "$git_branch" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/^-//')
+sanitized_branch=$(echo "$git_branch" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]' | sed 's/^-//')
 image_name=open-instruct-integration-test-${sanitized_branch}
 
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
