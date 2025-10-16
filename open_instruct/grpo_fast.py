@@ -3169,8 +3169,8 @@ def run_training(
         split_and_insert_batch(
             batch, training_step, pending_queries_map, param_prompt_Q, generation_configs["train"], is_eval=False
         )
+        i = 0.1
         while filtered_prompts_count > args.num_unique_prompts_rollout:
-            i = 0.1
             another_batch = next_batch(next(iter_dataloader), train_dataset)
             # little hack to make sure that we don't have the same training step, otherwise vllm requests can break
             # putting both batches in the same training step might also break if we accidentally sample the same dataset index twice
