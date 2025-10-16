@@ -1706,10 +1706,19 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         desc=f"Adding dataset source field for {dc.dataset_name}",
     )
 
+    # Add temporary unique IDs to track which rows survive transformations
+    TEMP_ID_KEY = "__temp_transformation_id__"
+    dataset = dataset.map(
+        lambda example, idx: {**example, TEMP_ID_KEY: idx},
+        with_indices=True,
+        num_proc=num_proc,
+        desc=f"Adding temporary IDs for {dc.dataset_name}",
+    )
+
     # save a copy of the dataset pre-transformation
     untokenized_dataset = copy.deepcopy(dataset)
-    print("not transforming, returning untokenized dataset as is...")
-    return dataset, untokenized_dataset
+    
+    # Apply all transformations
     for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
         fn, fn_type = TRANSFORM_FNS[fn_name]
         # always pass in tokenizer and other args if needed
@@ -1718,9 +1727,15 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
         # perform the transformation
         target_columns = dataset.column_names if dc.target_columns is None else dc.target_columns
-        # Always preserve dataset_source if it exists
+        # Always preserve dataset_source and temp_id if they exist
+        preserved_columns = []
         if DATASET_ORIGIN_KEY in dataset.column_names and DATASET_ORIGIN_KEY not in target_columns:
-            target_columns = target_columns + [DATASET_ORIGIN_KEY]
+            preserved_columns.append(DATASET_ORIGIN_KEY)
+        if TEMP_ID_KEY in dataset.column_names and TEMP_ID_KEY not in target_columns:
+            preserved_columns.append(TEMP_ID_KEY)
+        
+        if preserved_columns:
+            target_columns = target_columns + preserved_columns
         
         if fn_type == "map":
             dataset = dataset.map(
@@ -1741,8 +1756,22 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     if len(dataset) == 0:
         raise ValueError("No examples left after transformation")
+    
+    # Filter untokenized_dataset to only keep rows that survived transformations
+    surviving_ids = set(dataset[TEMP_ID_KEY])
+    untokenized_dataset = untokenized_dataset.filter(
+        lambda example: example[TEMP_ID_KEY] in surviving_ids,
+        num_proc=num_proc,
+        desc=f"Filtering untokenized dataset to surviving rows for {dc.dataset_name}",
+    )
+    
+    # Remove the temporary ID column from both datasets
+    if TEMP_ID_KEY in dataset.column_names:
+        dataset = dataset.remove_columns([TEMP_ID_KEY])
+    if TEMP_ID_KEY in untokenized_dataset.column_names:
+        untokenized_dataset = untokenized_dataset.remove_columns([TEMP_ID_KEY])
+    
     return dataset, untokenized_dataset
-
 
 def compute_config_hash(dcs: List[DatasetConfig], tc: TokenizerConfig) -> str:
     """Compute a deterministic hash of both configs for caching."""
@@ -1854,9 +1883,7 @@ class LocalDatasetTransformationCache:
         with open(config_path, "w") as f:
             json.dump(config_dict, f, indent=2)
 
-    def load_or_transform_dataset(
-        self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
-    ) -> Tuple[Dataset, Dict[str, Any]]:
+    def load_or_transform_dataset(self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False) -> Tuple[Dataset, Dict[str, Any]]:
         """Load dataset from local cache if it exists, otherwise transform and cache it locally."""
         cache_path = self.get_cache_path()
 
@@ -1888,9 +1915,14 @@ class LocalDatasetTransformationCache:
 
             dataset, untokenized_dataset = get_dataset_v1(dc, tc)
             transformed_datasets.append(dataset)
-            #assert len(dataset) == len(untokenized_dataset), "Transformed and untokenized datasets should have the same length"
 
-            # add id
+            # Verify that untokenized dataset has the same length as transformed dataset
+            assert len(dataset) == len(untokenized_dataset), (
+                f"Transformed and untokenized datasets should have the same length after filtering. "
+                f"Got {len(dataset)} vs {len(untokenized_dataset)}"
+            )
+
+            # Add id column to untokenized dataset
             name = dc.dataset_name.split("/")[-1]
             print(f"Adding id column with prefix {name}_ to untokenized dataset...")
             if "id" in untokenized_dataset.column_names:
@@ -1899,27 +1931,30 @@ class LocalDatasetTransformationCache:
                 base_vals = untokenized_dataset["source_id"]           # list
             else:
                 base_vals = list(range(len(untokenized_dataset)))      # fallback: indices
+            
             # build the new id column
             id_col = [f"{name}_{str(v)}" for v in base_vals]
-            # replace or add the 'id' column
+            
+            # Keep only necessary columns
             columns_to_keep = dc.target_columns + ["messages", DATASET_ORIGIN_KEY] if dc.target_columns is not None else ["messages", DATASET_ORIGIN_KEY]
+            # Filter to columns that actually exist
+            columns_to_keep = [col for col in columns_to_keep if col in untokenized_dataset.column_names]
             untokenized_dataset = untokenized_dataset.remove_columns(
-                [col for col in untokenized_dataset.column_names if col not in (columns_to_keep)]
+                [col for col in untokenized_dataset.column_names if col not in columns_to_keep]
             )   
+            
             from datasets import Value
             untokenized_dataset = untokenized_dataset.add_column("id", id_col)
-            print(untokenized_dataset["id"])
+            print(f"Length of id_col: {len(id_col)}, Length of dataset: {len(untokenized_dataset)}")
             untokenized_dataset = untokenized_dataset.cast_column("id", Value("string"))
 
-            print(f"Length of id_col: {len(id_col)}, Length of dataset: {len(untokenized_dataset)}")
-            # drop columns 
-
+            # Check for tool_calls in messages
             for message in untokenized_dataset[0]["messages"]:
                 if "tool_calls" in message.keys():
                     print("WARNING: tool_calls found in messages for dataset ", dc.dataset_name)
-            print("NO issue with tool_calls")
+            print("No issue with tool_calls")
+            
             untransformed_datasets.append(untokenized_dataset)
-
 
             # Collect statistics for this dataset
             stats = {
@@ -1957,12 +1992,12 @@ class LocalDatasetTransformationCache:
             dataset_order.append(dc.dataset_name)
 
         # Combine datasets
-        # combined_dataset = concatenate_datasets(transformed_datasets)
+        combined_dataset = concatenate_datasets(transformed_datasets)
         # Combine untransformed datasets
         combined_untransformed_datasets = concatenate_datasets(untransformed_datasets)
         print("Uploading untransformed dataset to hub for inspection...")
-        combined_untransformed_datasets.push_to_hub("allenai/olmo-3-thinking-sft", private=True)
-        return dataset, {}
+        combined_untransformed_datasets.push_to_hub("allenai/olmo-3-instruct-sft", private=True)
+        
         # Prepare return statistics
         all_statistics = {"per_dataset_stats": dataset_statistics, "dataset_order": dataset_order}
 
