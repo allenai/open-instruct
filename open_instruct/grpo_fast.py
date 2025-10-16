@@ -2861,7 +2861,7 @@ def run_training(
 
     """Run the main training loop with worker threads."""
     ray_get_with_progress(
-        [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
+        [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=1200
     )
 
     logger.info("======== ✅ data preparation thread starts =========")
