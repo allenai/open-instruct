@@ -676,7 +676,6 @@ class LLMRayActor:
 
     def process_from_queue(self) -> None:
         while True:
-            self.check_background_threads()
             sub_request = self.completion_queue.get()
             self._accumulate_sub_request(sub_request)
 
