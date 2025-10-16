@@ -113,6 +113,8 @@ from open_instruct.model_utils import (
 )
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.rl_utils2 import Timer, pack_sequences
+from open_instruct.tool_utils.tool_actor import TOOL_CLASS_REGISTRY, ToolActor
+from open_instruct.tool_utils.tool_proxy import ToolProxy
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -421,22 +423,25 @@ class Args:
 
     # Tool settings
     tools: Optional[List[str]] = None
-    """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
+    """If set, use the tool mapped to the string. Currently only supports `search`, `code`, and `mcp`"""
     max_tool_calls: List[int] = field(default_factory=lambda: [5])
     """Maximum number of tool calls allowed. If a list is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
     mask_tool_use: bool = True
     """Whether to mask the tool output. By default on."""
     only_reward_good_outputs: bool = False
     """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
+    tool_max_concurrency: int = 512
+    """The maximum number of concurrent tool calls allowed across all rollouts per tool."""
 
-    # rl-rag specific settngs
+    # code-tool specific settings
+    code_tool_api_endpoint: Optional[str] = None
+
+    # search-tool specific settings
+    # rl-rag tool settings. These are shared across different tools.
     number_documents_to_search: int = 3
     """The maximum number of documents to retrieve for each query."""
     search_api_endpoint: Optional[str] = None
     """The API endpoint for the search engine."""
-
-    # code-tool specific settings
-    code_tool_api_endpoint: Optional[str] = None
 
     def __post_init__(self):
         if os.environ.get("VLLM_USE_V1") == "0":
@@ -500,13 +505,11 @@ class Args:
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
         if self.tools is not None and len(self.tools) > 0:
             for tool in self.tools:
-                if tool not in ["search", "code"]:
-                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
+                if tool not in TOOL_CLASS_REGISTRY:
+                    raise ValueError(
+                        f"Tool {tool} is not supported. Supported tools are: {', '.join(TOOL_CLASS_REGISTRY.keys())}"
+                    )
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
-            if self.use_vllm_logprobs or self.truncated_importance_sampling_ratio_cap > 0.0:
-                assert self.mask_tool_use, (
-                    "Must mask tool use when using vLLM logprobs or truncated importance sampling."
-                )
 
 
 def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
@@ -2224,29 +2227,26 @@ def create_model_and_optimizer(
     # Set up tools
     max_len = args.max_prompt_token_length + args.response_length
     tool_objects = {}
+    tool_max_conc = args.tool_max_concurrency
+
+    def _register_actor_backed_tool(class_path: str, init_kwargs: dict):
+        actor = ToolActor.options(max_concurrency=tool_max_conc).remote(class_path=class_path, init_kwargs=init_kwargs)
+        start = ray.get(actor.get_start_str.remote())
+        stop_strings = ray.get(actor.get_stop_strings.remote())
+        # If the tool provides multiple stop strings, register each as an entry.
+        for end_str in stop_strings:
+            tool_objects[end_str] = ToolProxy(actor_handle=actor, start_str=start, end_str=end_str)
+            # Add tool end string to stop_strings
+            args.stop_strings.append(end_str)
+
+    # Register tools via actors
     if args.tools:
         for tool in args.tools:
-            if tool.lower() == "search":
-                from open_instruct.search_utils.search_tool import SearchTool
-
-                tool = SearchTool(
-                    start_str="<query>",
-                    end_str="</query>",
-                    api_endpoint=args.search_api_endpoint,
-                    number_documents_to_search=args.number_documents_to_search,
-                )
-                tool_objects[tool.end_str] = tool
-                # Add tool end string to stop_strings
-                args.stop_strings.append(tool.end_str)
-            elif tool.lower() == "code":
-                from open_instruct.tool_utils.tools import PythonCodeTool
-
-                tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
-                tool_objects[tool.end_str] = tool
-                # Add tool end string to stop_strings
-                args.stop_strings.append(tool.end_str)
-            else:
+            class_path = TOOL_CLASS_REGISTRY.get(tool.lower(), None)
+            if class_path is None:
                 raise ValueError(f"Unknown tool: {tool}")
+            # Pass the entire args namespace; ToolActor will filter valid kwargs
+            _register_actor_backed_tool(class_path=class_path, init_kwargs=vars(args))
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
