@@ -54,7 +54,6 @@ logger = logger_utils.setup_logger(__name__)
 DEFAULT_WORKERS = 2
 TOOL_WORKERS = 20
 INIT_TIMEOUT_S = 120
-WEIGHT_UPDATE_TIMEOUT_S = 120
 DRAIN_TIMEOUT_S = 300.0
 SHOULD_STOP_CACHE_TIMEOUT_S = 5
 PREFETCH_SLEEP_S = 1
@@ -710,10 +709,7 @@ class LLMRayActor:
         total_processed = 0
 
         while True:
-            # Health check: ensure prefetch worker is alive. This will raise if it has crashed.
-            if self._prefetch_future.done():
-                self._prefetch_future.result()
-
+            self.check_background_threads()
             try:
                 sub_request = self.completion_queue.get(timeout=COMPLETION_QUEUE_TIMEOUT_S)
                 total_processed += self._accumulate_sub_request(sub_request)
@@ -752,9 +748,9 @@ class LLMRayActor:
         )
         return future.result(timeout=timeout_minutes * 60)
 
-    def _run_async_with_timeout(self, coro: Awaitable[Any], timeout: float) -> Any:
+    def _run_async(self, coro: Awaitable[Any]) -> Any:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-        return future.result(timeout=timeout)
+        return future.result()
 
     def _prepare_weight_update(self, name: str, dtype: str) -> None:
         # Wait for all active requests to complete.
@@ -766,24 +762,22 @@ class LLMRayActor:
 
     def update_weight(self, name: str, dtype: str, shape: Tuple[int, ...], empty_cache: bool = False) -> None:
         self._prepare_weight_update(name, dtype)
-        return self._run_async_with_timeout(
-            self.llm_engine.engine_core.collective_rpc_async("update_weight", args=(name, dtype, shape, empty_cache)),
-            WEIGHT_UPDATE_TIMEOUT_S,
+        return self._run_async(
+            self.llm_engine.engine_core.collective_rpc_async("update_weight", args=(name, dtype, shape, empty_cache))
         )
 
     def update_weight_cuda_ipc(
         self, name: str, dtype: str, shape: Tuple[int, ...], ipc_handles: List[Any], empty_cache: bool = False
     ) -> None:
         self._prepare_weight_update(name, dtype)
-        return self._run_async_with_timeout(
+        return self._run_async(
             self.llm_engine.engine_core.collective_rpc_async(
                 "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
-            ),
-            WEIGHT_UPDATE_TIMEOUT_S,
+            )
         )
 
     def reset_prefix_cache(self) -> None:
-        return self._run_async_with_timeout(self.llm_engine.reset_prefix_cache(), WEIGHT_UPDATE_TIMEOUT_S)
+        return self._run_async(self.llm_engine.reset_prefix_cache())
 
     def ready(self) -> bool:
         return True
