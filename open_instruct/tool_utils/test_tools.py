@@ -51,7 +51,7 @@ class TestMaxCallsExceededTool(unittest.TestCase):
         self.assertIsInstance(result, ToolOutput)
         self.assertEqual(result.output, "Max tool calls exceeded.")
         self.assertFalse(result.called)
-        self.assertEqual(result.error, "")
+        self.assertEqual(result.error, "Max tool calls exceeded")
         self.assertFalse(result.timeout)
         self.assertEqual(result.runtime, 0)
 
