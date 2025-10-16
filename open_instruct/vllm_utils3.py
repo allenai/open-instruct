@@ -174,20 +174,23 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     assert len(output.outputs) <= 1, f"{len(output.outputs)=}"  # In tool mode, sampling_params.n == 1
     o = output.outputs[0]
 
-    # Update concatenated outputs (token_ids and logprobs) in tool mode only
     if output.request_id in tracking["concat_outputs"]:
         stored = tracking["concat_outputs"][output.request_id].outputs[0]
-        # Extend tokens
+        assert getattr(stored, "logprobs", None) is not None, f"{stored.logprobs=}"
+        new_logprobs = getattr(o, "logprobs", None)
+        # e.g. tools may not return logprobs, so we provide placeholders.
+        # these will be masked out during training.
+        if new_logprobs is None:
+            new_logprobs = [{tid: types.SimpleNamespace(logprob=0.0)} for tid in o.token_ids]
+
         stored.token_ids.extend(o.token_ids)
-        # Extend logprobs to keep lengths aligned
-        if getattr(stored, "logprobs", None) is None:
-            stored.logprobs = []
-        if getattr(o, "logprobs", None) is not None:
-            stored.logprobs.extend(o.logprobs)
-        else:
-            # No logprobs provided for new tokens; create placeholders
-            stored.logprobs.extend([{tid: types.SimpleNamespace(logprob=0.0)} for tid in o.token_ids])
+        stored.logprobs.extend(new_logprobs)
     else:
+        # First time seeing this request, store it and ensure logprobs are present.
+        # in reality, the first time seeing should involve model generation and always appear,
+        # but we'll handle there being some initial tool call here just in case.
+        if getattr(o, "logprobs", None) is None:
+            o.logprobs = [{tid: types.SimpleNamespace(logprob=0.0)} for tid in o.token_ids]
         tracking["concat_outputs"][output.request_id] = output
 
     tracking["masks"][output.request_id].extend([1] * len(o.token_ids))
@@ -845,8 +848,8 @@ class LLMRayActor:
             # Extend token_ids and logprobs for tool output tokens so lengths stay aligned
             concat_out = tracking["concat_outputs"][req_id].outputs[0]
             concat_out.token_ids.extend(tool_output_token_ids)
-            if getattr(concat_out, "logprobs", None) is None:
-                concat_out.logprobs = []
+            # use placeholder logprobs for new tokens
+            # TODO: can we do something fancier here, or allow it?
             concat_out.logprobs.extend(
                 [{tid: types.SimpleNamespace(logprob=0.0)} for tid in tool_output_token_ids]
             )
