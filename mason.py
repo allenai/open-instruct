@@ -82,7 +82,9 @@ def get_args():
     parser.add_argument("--max_retries", type=int, help="Number of retries", default=0)
     parser.add_argument("--budget", type=str, help="Budget to use.", required=True)
     parser.add_argument("--gpus", type=int, help="Number of gpus", default=0)
-    parser.add_argument("--shared_memory", type=str, help="Shared memory size (e.g., '10gb', '10.24gb')", default="10.24gb")
+    parser.add_argument(
+        "--shared_memory", type=str, help="Shared memory size (e.g., '10gb', '10.24gb')", default="10.24gb"
+    )
     parser.add_argument("--num_nodes", type=int, help="Number of nodes", default=1)
     parser.add_argument(
         "--image",
@@ -238,10 +240,14 @@ def get_env_vars(
         if name not in additional_env_var_names
     ]
 
-    env_vars.extend([beaker.BeakerEnvVar(name=env_var["name"], value=env_var["value"]) for env_var in additional_env_vars])
+    env_vars.extend(
+        [beaker.BeakerEnvVar(name=env_var["name"], value=env_var["value"]) for env_var in additional_env_vars]
+    )
 
     # add user-specific secrets
-    env_vars.extend([beaker.BeakerEnvVar(name=secret["name"], secret=secret["value"]) for secret in additional_secrets])
+    env_vars.extend(
+        [beaker.BeakerEnvVar(name=secret["name"], secret=secret["value"]) for secret in additional_secrets]
+    )
 
     useful_secrets = [
         "HF_TOKEN",
