@@ -46,6 +46,7 @@ python open_instruct/grpo_fast.py \
     --async_steps 4 \
     --inflight_updates \
     --truncated_importance_sampling_ratio_cap 2.0 \
+    --active_fill_completions \
     --num_samples_per_prompt_rollout 8 \
     --num_unique_prompts_rollout 32 \
     --num_mini_batches 1 \
@@ -64,7 +65,7 @@ python open_instruct/grpo_fast.py \
     --chat_template_name olmo_thinker_dapo \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 256000 \
+    --total_episodes 512000 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 \
     --vllm_num_engines 64 \
