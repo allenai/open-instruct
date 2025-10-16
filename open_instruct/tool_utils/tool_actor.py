@@ -15,8 +15,6 @@ TOOL_CLASS_REGISTRY: Dict[str, str] = {
     "search": "open_instruct.search_utils.search_tool:SearchTool",
     # Code execution proxy tool (client)
     "code": "open_instruct.tool_utils.tools:PythonCodeTool",
-    # Unified MCP tool wrapper
-    "mcp": "open_instruct.search_utils.mcp_tools:MCPTool",
 }
 
 

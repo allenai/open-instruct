@@ -1,5 +1,6 @@
 """
-python open_instruct/tool_utils/tool_vllm.py
+vLLM wrapper for tool use. You can instantiate this just like vLLM, but also with a tool dictionary.
+This makes debugging and eval fun. See the bottom of the file for examples.
 """
 
 import copy
