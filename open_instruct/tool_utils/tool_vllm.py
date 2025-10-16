@@ -10,6 +10,12 @@ from collections import defaultdict
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor  # add import for async execution
 from typing import Optional, Union
+import os
+import sys
+import time
+import signal
+import subprocess
+import requests
 
 from rich.console import Console
 from tqdm import tqdm
@@ -315,44 +321,106 @@ and you will get the output between the <output> and </output> tags.
     ]
     prompts = [system_prompt + "\n\n" + p for p in prompts]
 
-    # Create a tool.
-    python_code_tool = PythonCodeTool(api_endpoint="http://localhost:1212", start_str="<code>", end_str="</code>")
-    tools = {python_code_tool.end_str: python_code_tool}
-    # Create a sampling params object.
-    sampling_params = SamplingParams(
-        temperature=0.8,
-        top_p=0.95,
-        stop=[item.end_str for item in tools.values()] + ["<endoftext>"],
-        n=3,
-        max_tokens=1000,
-        include_stop_str_in_output=True,
-    )
-    print(f"{sampling_params.n=}")
-    # Create an LLM.
-    model_name = "Qwen/Qwen2.5-7B"
-    llm = ToolUseLLM(
-        tools=tools, model=model_name, tensor_parallel_size=1, gpu_memory_utilization=0.9, max_model_len=10000
+    # launch the tool server (portable: uses current python, no dependency on `uv` CLI)
+    tool_utils_dir = os.path.dirname(__file__)
+    server_cmd = [
+        sys.executable,
+        "-m",
+        "uvicorn",
+        "tool_server:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "1212",
+    ]
+    server_process = subprocess.Popen(
+        server_cmd,
+        cwd=tool_utils_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,  # Create new process group
     )
 
-    # Tokenization generation
-    from open_instruct.dataset_transformation import visualize_token_role
+    try:
+        # Wait for server readiness
+        base_url = "http://127.0.0.1:1212"
+        health_url = f"{base_url}/"
+        start_wait = time.time()
+        while True:
+            if server_process.poll() is not None:
+                raise RuntimeError("Tool server exited unexpectedly. Check stderr for details.")
+            try:
+                r = requests.get(health_url, timeout=0.5)
+                if r.status_code == 200:
+                    break
+            except Exception:
+                pass
+            if time.time() - start_wait > 30:
+                raise TimeoutError("Timed out waiting for tool server to start")
+            time.sleep(0.2)
 
-    tok = AutoTokenizer.from_pretrained(model_name)
-    prompt_token_ids = [tok.encode(p) for p in prompts]
-    outputs = llm.generate(prompt_token_ids=prompt_token_ids, sampling_params=sampling_params)
-    for i, output in enumerate(outputs):
-        prompt = tok.decode(output.prompt_token_ids)
-        console.rule(f"Conversation {i}")
-        console.rule("Prompt")
-        console.print(prompt)
-        for j, o in enumerate(output.outputs):
-            generated_text = tok.decode(o.token_ids)
-            assert len(o.mask) == len(o.token_ids)
-            console.rule(f"Generated text {j}")
-            console.rule("Generated text w/ masks")
-            visualize_token_role(o.token_ids, o.mask, tok)
-            # console.rule("Generated text")
-            # visualize_token(o.token_ids, tok)
-    print(f"{sampling_params.n=}")
-    print("debugging tests 2 all done")
+        # Create a tool.
+        python_code_tool = PythonCodeTool(
+            api_endpoint=f"{base_url}/execute", start_str="<code>", end_str="</code>"
+        )
+        tools = {python_code_tool.end_str: python_code_tool}
+        # Create a sampling params object.
+        sampling_params = SamplingParams(
+            temperature=0.8,
+            top_p=0.95,
+            stop=[item.end_str for item in tools.values()] + ["<endoftext>"],
+            n=3,
+            max_tokens=1000,
+            include_stop_str_in_output=True,
+        )
+        print(f"{sampling_params.n=}")
+        # Create an LLM.
+        model_name = "Qwen/Qwen2.5-7B"
+        llm = ToolUseLLM(
+            tools=tools, model=model_name, tensor_parallel_size=1, gpu_memory_utilization=0.9, max_model_len=10000
+        )
+
+        # Tokenization generation
+        from open_instruct.dataset_transformation import visualize_token_role
+
+        tok = AutoTokenizer.from_pretrained(model_name)
+        prompt_token_ids = [tok.encode(p) for p in prompts]
+        outputs = llm.generate(prompt_token_ids=prompt_token_ids, sampling_params=sampling_params)
+        for i, output in enumerate(outputs):
+            prompt = tok.decode(output.prompt_token_ids)
+            console.rule(f"Conversation {i}")
+            console.rule("Prompt")
+            console.print(prompt)
+            for j, o in enumerate(output.outputs):
+                generated_text = tok.decode(o.token_ids)
+                assert len(o.mask) == len(o.token_ids)
+                console.rule(f"Generated text {j}")
+                console.print(generated_text)
+                console.rule("Generated text w/ masks")
+                visualize_token_role(o.token_ids, o.mask, tok)
+                # Print tool usage details if available
+                tool_called = getattr(o, "tool_called", False)
+                if tool_called:
+                    num_calls = getattr(o, "num_calls", 0)
+                    timeout_flag = getattr(o, "timeout", False)
+                    tool_err = getattr(o, "tool_error", "")
+                    tool_out = getattr(o, "tool_output", "")
+                    console.rule("Tool execution summary")
+                    console.print(f"tool_called={tool_called}, num_calls={num_calls}, timeout={timeout_flag}")
+                    if tool_err:
+                        console.print(f"tool_error=\n{tool_err}")
+                    if tool_out:
+                        console.print(f"tool_output=\n{tool_out}")
+        print(f"{sampling_params.n=}")
+        print("Self-contained tool_vllm example complete.")
+    finally:
+        # Gracefully terminate the tool server
+        try:
+            os.killpg(server_process.pid, signal.SIGTERM)
+            try:
+                server_process.wait(timeout=5)
+            except Exception:
+                os.killpg(server_process.pid, signal.SIGKILL)
+        except Exception:
+            pass
 
