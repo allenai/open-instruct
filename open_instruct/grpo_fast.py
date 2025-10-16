@@ -3183,6 +3183,7 @@ def run_training(
             batch, training_step, pending_queries_map, param_prompt_Q, generation_configs["train"], is_eval=False
         )
         while filtered_prompts_count > args.num_unique_prompts_rollout:
+            batch = next_batch(next(iter_dataloader), train_dataset)
             split_and_insert_batch(
                 batch, training_step, pending_queries_map, param_prompt_Q, generation_configs["train"], is_eval=False
             )
