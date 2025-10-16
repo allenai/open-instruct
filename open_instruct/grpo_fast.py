@@ -2332,6 +2332,7 @@ def create_generation_configs(args: Args):
 def split_and_insert_batch(
     batch: Batch,
     epoch_number: int,
+    training_step: int,
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q: ray_queue.Queue,
     generation_config,
@@ -2347,6 +2348,7 @@ def split_and_insert_batch(
                 prompt=query,
                 generation_config=generation_config,
                 epoch_number=epoch_number,
+                training_step=training_step,
                 dataset_index=idx,
                 is_eval=is_eval,
             )
@@ -2915,6 +2917,7 @@ def run_training(
         split_and_insert_batch(
             batch,
             iter_dataloader.epoch_number,
+            resume_training_step,
             pending_queries_map,
             param_prompt_Q,
             generation_configs["train"],
@@ -2955,6 +2958,7 @@ def run_training(
         split_and_insert_batch(
             batch,
             iter_dataloader.epoch_number,
+            training_step,
             pending_queries_map,
             param_prompt_Q,
             generation_configs["train"],
@@ -2968,6 +2972,7 @@ def run_training(
             split_and_insert_batch(
                 eval_batch,
                 iter_dataloader.epoch_number,
+                training_step,
                 eval_pending_queries_map,
                 param_prompt_Q,
                 generation_configs["eval"],

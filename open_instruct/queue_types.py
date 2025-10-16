@@ -51,6 +51,7 @@ class PromptRequest:
     prompt: List[int]
     generation_config: Any
     epoch_number: Optional[int] = None
+    training_step: Optional[int] = None
     dataset_index: Optional[int] = None
     is_eval: bool = False
     start_time: Optional[float] = None
