@@ -503,6 +503,10 @@ class Args:
                 if tool not in ["search", "code"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
+            if self.use_vllm_logprobs or self.truncated_importance_sampling_ratio_cap > 0.0:
+                assert self.mask_tool_use, (
+                    "Must mask tool use when using vLLM logprobs or truncated importance sampling."
+                )
 
 
 def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
