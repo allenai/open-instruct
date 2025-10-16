@@ -747,6 +747,11 @@ class LLMRayActor:
         if self._process_future.done():
             self._process_future.result()
 
+        if not self.loop_thread.is_alive():
+            raise RuntimeError(
+                "vLLM engine loop thread has died. Check logs for errors in EngineCore or async engine."
+            )
+
     def get_kv_cache_info(self) -> int:
         """Get KV cache max concurrency from the vLLM engine."""
         kv_cache_specs = self._run_async(self.llm_engine.collective_rpc("get_kv_cache_spec"))
