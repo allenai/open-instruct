@@ -3179,21 +3179,24 @@ def run_training(
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         batch = next_batch(next(iter_dataloader), train_dataset)
-        while filtered_prompts_count > args.num_unique_prompts_rollout:
-            another_batch = next_batch(next(iter_dataloader), train_dataset)
-            # concatenate batches
-            batch = Batch(
-                queries=batch.queries + another_batch.queries,
-                ground_truths=batch.ground_truths + another_batch.ground_truths,
-                datasets=batch.datasets + another_batch.datasets,
-                raw_queries=(batch.raw_queries or []) + (another_batch.raw_queries or []),
-                indices=(batch.indices or []) + (another_batch.indices or []),
-            )
-            filtered_prompts_count -= args.num_unique_prompts_rollout
-
         split_and_insert_batch(
             batch, training_step, pending_queries_map, param_prompt_Q, generation_configs["train"], is_eval=False
         )
+        while filtered_prompts_count > args.num_unique_prompts_rollout:
+            i = 0.1
+            another_batch = next_batch(next(iter_dataloader), train_dataset)
+            # little hack to make sure that we don't have the same training step, otherwise vllm requests can break
+            # putting both batches in the same training step might also break if we accidentally sample the same dataset index twice
+            split_and_insert_batch(
+                another_batch,
+                training_step + i,
+                pending_queries_map,
+                param_prompt_Q,
+                generation_configs["train"],
+                is_eval=False,
+            )
+            filtered_prompts_count -= args.num_unique_prompts_rollout
+            i += 0.1
 
         if (
             training_step % args.local_eval_every == 0
