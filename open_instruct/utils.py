@@ -1696,6 +1696,7 @@ GPU_SPECS = {
     "h100": {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12},  # 3.35 TB/s HBM3
     "a6000": {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9},  # 768 GB/s GDDR6
     "l40s": {"flops": 362e12, "memory_size": 48e9, "memory_bandwidth": 864e9},  # 864 GB/s GDDR6
+    "6000": {"flops": 503.8e12, "memory_size": 96e9, "memory_bandwidth": 1792e9},  # 1792 GB/s GDDR7
 }
 
 # Conventions for FLOPs calculations (fixed; not switches)
