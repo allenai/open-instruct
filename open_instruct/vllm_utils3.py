@@ -692,7 +692,7 @@ class LLMRayActor:
         timeout_minutes: int = 120,
     ) -> None:
         future = asyncio.run_coroutine_threadsafe(
-            self.llm_engine.engine_core.collective_rpc_async(
+            self.llm_engine.collective_rpc(
                 "init_process_group",
                 args=(
                     master_address,
@@ -723,16 +723,14 @@ class LLMRayActor:
 
     def update_weight(self, name: str, dtype: str, shape: Tuple[int, ...], empty_cache: bool = False) -> None:
         self._prepare_weight_update(name, dtype)
-        return self._run_async(
-            self.llm_engine.engine_core.collective_rpc_async("update_weight", args=(name, dtype, shape, empty_cache))
-        )
+        return self._run_async(self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache)))
 
     def update_weight_cuda_ipc(
         self, name: str, dtype: str, shape: Tuple[int, ...], ipc_handles: List[Any], empty_cache: bool = False
     ) -> None:
         self._prepare_weight_update(name, dtype)
         return self._run_async(
-            self.llm_engine.engine_core.collective_rpc_async(
+            self.llm_engine.collective_rpc(
                 "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
             )
         )
@@ -751,7 +749,7 @@ class LLMRayActor:
 
     def get_kv_cache_info(self) -> int:
         """Get KV cache max concurrency from the vLLM engine."""
-        kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
+        kv_cache_specs = self.llm_engine.engine_core.model_executor.get_kv_cache_specs()
 
         vllm_config = self.llm_engine.vllm_config
         gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
