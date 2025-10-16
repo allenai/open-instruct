@@ -749,7 +749,7 @@ class LLMRayActor:
 
     def get_kv_cache_info(self) -> int:
         """Get KV cache max concurrency from the vLLM engine."""
-        kv_cache_specs = self.llm_engine.engine_core.model_executor.get_kv_cache_specs()
+        kv_cache_specs = self.llm_engine.engine_core.get_kv_cache_specs()
 
         vllm_config = self.llm_engine.vllm_config
         gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
