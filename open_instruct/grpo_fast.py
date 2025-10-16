@@ -1900,31 +1900,18 @@ def data_preparation_thread(
                 tool_calleds_kept = [result_step.request_info.tool_calleds[i] for i in non_zero_indices]
 
                 if args.mask_truncated_completions:
-                    stop_idxes = torch.tensor(
-                        [i for i in range(len(finish_reasons_step)) if finish_reasons_step[i] == "stop"]
-                    )
-                    num_truncated = len(finish_reasons_step) - len(stop_idxes)
+                    truncated_mask = np.array([reason != "stop" for reason in finish_reasons_step], dtype=bool)
+                    num_truncated = int(truncated_mask.sum())
                     if num_truncated > 0:
+                        scores_step = scores_step.copy()
+                        scores_step[truncated_mask] = 0.0
+                        advantages_step = advantages_step.copy()
+                        advantages_step[truncated_mask] = 0.0
+                        for idx in np.where(truncated_mask)[0]:
+                            masks_step[idx] = [0 for _ in masks_step[idx]]
                         logger.info(
-                            f"[Truncated completions filtering] Filtered {num_truncated} responses that didn't finish with 'stop'. "
-                            f"Retention rate: {len(stop_idxes) / len(finish_reasons_step):.2%}"
+                            f"[Truncated completions masking] Zeroed scores/advantages and response masks for {num_truncated} responses that didn't finish with 'stop'."
                         )
-                    indices_list = stop_idxes.tolist()
-                    scores_step = scores_step[stop_idxes]
-                    advantages_step = advantages_step[stop_idxes]
-                    responses_step = [responses_step[i] for i in indices_list]
-                    masks_step = [masks_step[i] for i in indices_list]
-                    batch_step = batch_step[indices_list]
-                    finish_reasons_step = [finish_reasons_step[i] for i in indices_list]
-                    vllm_logprobs_step = [vllm_logprobs_step[i] for i in indices_list]
-                    response_lengths_kept = [response_lengths_kept[i] for i in indices_list]
-                    num_calls_kept = [num_calls_kept[i] for i in indices_list]
-                    timeouts_kept = [timeouts_kept[i] for i in indices_list]
-                    tool_errors_kept = [tool_errors_kept[i] for i in indices_list]
-                    tool_outputs_kept = [tool_outputs_kept[i] for i in indices_list]
-                    tool_runtimes_kept = [tool_runtimes_kept[i] for i in indices_list]
-                    tool_calleds_kept = [tool_calleds_kept[i] for i in indices_list]
-
             aggregated_scores.append(scores_step)
             aggregated_advantages.append(advantages_step)
             aggregated_reward_metrics.append((reward_metrics_step, len(scores_step)))
