@@ -764,7 +764,7 @@ class LLMRayActor:
         kv_cache_groups = kv_cache_utils.get_kv_cache_groups(vllm_config, kv_cache_specs[0])
 
         kv_cache_config = kv_cache_utils.get_kv_cache_config_from_groups(
-            vllm_config, kv_cache_groups, kv_cache_specs, available_memory
+            vllm_config, kv_cache_groups, [kv_cache_specs[0]], available_memory
         )
 
         max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(vllm_config, kv_cache_config)
