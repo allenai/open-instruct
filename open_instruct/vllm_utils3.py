@@ -21,7 +21,6 @@ import queue
 import sys
 import threading
 import time
-import types
 from collections import defaultdict
 from concurrent import futures
 from datetime import timedelta
@@ -55,7 +54,6 @@ logger = logger_utils.setup_logger(__name__)
 
 NUM_PREFETCH_WORKERS = 2
 NUM_TOOL_WORKERS = 20
-SHOULD_STOP_CACHE_TIMEOUT_S = 5
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 
@@ -558,7 +556,6 @@ class LLMRayActor:
         # For caching should_stop status.
         self._last_should_stop_update = float("-inf")
         self._should_stop_value = False
-        self._should_stop_timeout_s = SHOULD_STOP_CACHE_TIMEOUT_S
 
     def _init_executor(self) -> None:
         max_workers = NUM_PREFETCH_WORKERS + (NUM_TOOL_WORKERS if self.tools else 0)
@@ -629,7 +626,7 @@ class LLMRayActor:
         }
 
     def _should_stop(self) -> bool:
-        if (time.perf_counter() - self._last_should_stop_update) > self._should_stop_timeout_s:
+        if (time.perf_counter() - self._last_should_stop_update) > SHOULD_STOP_TIMEOUT_S:
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=SHOULD_STOP_TIMEOUT_S)
             if ready_refs:
