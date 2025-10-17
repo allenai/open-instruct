@@ -10,20 +10,18 @@ import subprocess
 import sys
 import time
 import types
-import warnings
 from collections import defaultdict
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor  # add import for async execution
-from typing import Optional, Union, Callable
+from typing import Callable, Union
 
 import requests
 from rich.console import Console
 from tqdm import tqdm
 from vllm import LLM, PoolingParams, PoolingRequestOutput, PromptType, RequestOutput, SamplingParams, TokensPrompt
-from vllm.lora.request import LoRARequest
-from vllm.sampling_params import GuidedDecodingParams
-from vllm.sampling_params import RequestOutputKind
 from vllm.inputs import DataPrompt
+from vllm.lora.request import LoRARequest
+from vllm.sampling_params import RequestOutputKind
 
 # Import base classes from tools.py to avoid duplication
 from open_instruct.tool_utils.tools import MaxCallsExceededTool, PythonCodeTool, Tool
@@ -45,10 +43,7 @@ class ToolUseLLM(LLM):
     def _validate_and_add_requests(
         self,
         prompts: PromptType | Sequence[PromptType] | DataPrompt,
-        params: SamplingParams
-        | Sequence[SamplingParams]
-        | PoolingParams
-        | Sequence[PoolingParams],
+        params: SamplingParams | Sequence[SamplingParams] | PoolingParams | Sequence[PoolingParams],
         *,
         use_tqdm: bool | Callable[..., tqdm] = True,
         lora_request: Sequence[LoRARequest] | LoRARequest | None,
@@ -63,9 +58,7 @@ class ToolUseLLM(LLM):
         if isinstance(params, Sequence) and len(params) != num_requests:
             raise ValueError("The lengths of prompts and params must be the same.")
         if isinstance(lora_request, Sequence) and len(lora_request) != num_requests:
-            raise ValueError(
-                "The lengths of prompts and lora_request must be the same."
-            )
+            raise ValueError("The lengths of prompts and lora_request must be the same.")
 
         for sp in params if isinstance(params, Sequence) else (params,):
             if isinstance(sp, SamplingParams):
@@ -73,7 +66,9 @@ class ToolUseLLM(LLM):
                 sp.output_kind = RequestOutputKind.FINAL_ONLY
 
         # TOOL VLLM CHANGE: override the sampling params to have n=1
-        assert not isinstance(params, Sequence), "ToolUseLLM only supports one sampling param setting for all requests."
+        assert not isinstance(params, Sequence), (
+            "ToolUseLLM only supports one sampling param setting for all requests."
+        )
         self.single_n_sampling_params = copy.deepcopy(params)
         self.single_n_sampling_params.n = 1
 
@@ -81,21 +76,17 @@ class ToolUseLLM(LLM):
         for i, prompt in enumerate(prompts):
             for j in range(params.n):
                 if isinstance(prompt, dict):
-                    self._validate_mm_data_and_uuids(
-                        prompt.get("multi_modal_data"), prompt.get("multi_modal_uuids")
-                    )
+                    self._validate_mm_data_and_uuids(prompt.get("multi_modal_data"), prompt.get("multi_modal_uuids"))
                 request_id = f"{i}-{j}"
                 lora_request = lora_request[i] if isinstance(lora_request, Sequence) else lora_request
                 priority = priority[i] if priority else 0
                 self.llm_engine.add_request(
-                    request_id,
-                    prompt,
-                    self.single_n_sampling_params,
-                    lora_request=lora_request,
-                    priority=priority,
+                    request_id, prompt, self.single_n_sampling_params, lora_request=lora_request, priority=priority
                 )
 
-    def _run_engine(self, *, use_tqdm: bool | Callable[..., tqdm] = True) -> list[Union[RequestOutput, PoolingRequestOutput]]:
+    def _run_engine(
+        self, *, use_tqdm: bool | Callable[..., tqdm] = True
+    ) -> list[Union[RequestOutput, PoolingRequestOutput]]:
         # Initialize tqdm.
         if use_tqdm:
             num_requests = self.llm_engine.get_num_unfinished_requests()
