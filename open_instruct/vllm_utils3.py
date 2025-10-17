@@ -200,7 +200,7 @@ async def process_request_async(
         current_sampling_params.max_tokens = new_sample_tokens
 
     complete_output = vllm.CompletionOutput(
-        index=sub_request_id.split("_")[-1],
+        index=split_request_id(sub_request_id)["request_index"],
         text="",
         token_ids=accumulated_tokens,
         cumulative_logprob=output.cumulative_logprob,
@@ -261,15 +261,16 @@ def make_request_id(request: PromptRequest) -> str:
     return f"{prefix}_{request.training_step}_{request.dataset_index}"
 
 
-def _extract_base_request_id(full_request_id: str) -> str:
-    """Extract base request ID by removing the sample suffix.
+def split_request_id(full_request_id: str) -> dict:
+    """Split request ID into base ID and request index.
 
-    >>> _extract_base_request_id("train_1_43039_0")
-    'train_1_43039'
-    >>> _extract_base_request_id("eval_5_12345_2")
-    'eval_5_12345'
+    >>> split_request_id("train_1_43039_0")
+    {'base_id': 'train_1_43039', 'request_index': 0}
+    >>> split_request_id("eval_5_12345_2")
+    {'base_id': 'eval_5_12345', 'request_index': 2}
     """
-    return "_".join(full_request_id.split("_")[:-1])
+    parts = full_request_id.split("_")
+    return {"base_id": "_".join(parts[:-1]), "request_index": int(parts[-1])}
 
 
 def get_triggered_tool(
@@ -654,7 +655,7 @@ class LLMRayActor:
 
     def _finalize_completed_request(self, base_request_id: str) -> None:
         outputs = self.request_outputs[base_request_id]["outputs"]
-        ordered_outs = sorted(outputs, key=lambda x: _extract_base_request_id(x.request_id))
+        ordered_outs = sorted(outputs, key=lambda x: split_request_id(x.request_id)["request_index"])
 
         current_time = time.perf_counter()
         result, is_eval = process_completed_request(
