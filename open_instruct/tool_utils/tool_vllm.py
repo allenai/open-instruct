@@ -399,6 +399,18 @@ and you will get the output between the <output> and </output> tags.
                         console.print(f"tool_output=\n{tool_out}")
         print(f"{sampling_params.n=}")
         print("Self-contained tool_vllm example complete.")
+        # Explicitly shutdown the vLLM engine and thread pool to avoid
+        # the background monitor logging an unexpected death on program exit.
+        try:
+            # Cleanly stop engine core processes first
+            llm.llm_engine.engine_core.shutdown()
+        except Exception:
+            pass
+        try:
+            # Then stop the local thread pool used for tool calls
+            llm.executor.shutdown(wait=True)
+        except Exception:
+            pass
     finally:
         # Gracefully terminate the tool server
         try:
