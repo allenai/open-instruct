@@ -1,47 +1,29 @@
 import re
 import time
 import traceback
-from dataclasses import dataclass
 
 import requests
 
-
-@dataclass
-class ToolOutput:
-    output: str
-    called: bool
-    error: str
-    timeout: bool
-    runtime: float
-    start_str: str = "<output>\n"
-    end_str: str = "\n</output>"
-
-
-class Tool:
-    def __init__(self, start_str: str, end_str: str):
-        self.start_str = start_str
-        self.end_str = end_str
-
-    def __call__(self, prompt: str) -> ToolOutput:
-        raise NotImplementedError("Subclasses must implement this method")
-
-
-class MaxCallsExceededTool(Tool):
-    def __call__(self, prompt: str) -> ToolOutput:
-        return ToolOutput(output="Max tool calls exceeded.", called=False, error="", timeout=False, runtime=0)
+from open_instruct.tools.utils.tool_classes import Tool, ToolOutput
 
 
 class PythonCodeTool(Tool):
-    """@vwxyzjn: I recommend using something like a FastAPI for this kind of stuff; 1) you
-    won't accidentally block the main vLLM process and 2) way easier to parallelize via load balancing."""
-
-    def __init__(self, api_endpoint: str, *args, **kwargs):
-        self.api_endpoint = api_endpoint
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        api_endpoint: str | None = None,
+        code_tool_api_endpoint: str | None = None,
+        start_str: str = "<code>",
+        end_str: str = "</code>",
+        *args,
+        **kwargs,
+    ):
+        # Prefer explicit api_endpoint, fall back to code_tool_api_endpoint
+        self.api_endpoint = api_endpoint or code_tool_api_endpoint
+        super().__init__(start_str=start_str, end_str=end_str, *args, **kwargs)
 
     def __call__(self, prompt: str) -> ToolOutput:
         r"""
-        NOTE: We avoid using `r'<tool>\s*(.*?)\s*</tool>'` because it will fail in this case  # noqa: W605
+        NOTE: We avoid using `r'<tool>\s*(.*?)\s*</tool>'` because it will fail in this case # noqa: W605
         Let's implement this in Python using the `<code>` tag to execute the code and get the result.
         </think>
 

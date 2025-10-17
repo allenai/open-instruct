@@ -50,7 +50,7 @@ from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
-from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
+from open_instruct.tools.utils.tool_classes import MaxCallsExceededTool, Tool
 from open_instruct.utils import ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
@@ -179,6 +179,11 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
         stored.token_ids.extend(o.token_ids)
         stored.logprobs.extend(o.logprobs)
     else:
+        # First time seeing this request, store it and ensure logprobs are present.
+        # in reality, the first time seeing should involve model generation and always appear,
+        # but we'll handle there being some initial tool call here just in case.
+        if getattr(o, "logprobs", None) is None:
+            o.logprobs = [{tid: types.SimpleNamespace(logprob=0.0)} for tid in o.token_ids]
         tracking["concat_outputs"][output.request_id] = output
 
     tracking["masks"][output.request_id].extend([1] * len(o.token_ids))
@@ -809,7 +814,7 @@ class LLMRayActor:
             last_prompt_token_ids = last_output.prompt_token_ids
             last_token_ids = last_o.token_ids
             tool_output_token_ids = tokenizer.encode(
-                "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+                tool_result.start_str + tool_result.output + tool_result.end_str, add_special_tokens=False
             )
             tracking["timeout"][req_id] = tool_result.timeout
             tracking["tool_error"][req_id] += "" if tool_result.error is None else tool_result.error

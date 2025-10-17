@@ -1236,6 +1236,48 @@ def rlvr_tokenize_v2(
     return row
 
 
+def rlvr_tokenize_v3(
+    row: Dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
+    ground_truths_key: str = GROUND_TRUTHS_KEY,
+    verifier_source_key: str = VERIFIER_SOURCE_KEY,
+    system_prompt_override: Optional[str] = None,
+):
+    prompt = row[sft_messages_key]
+    # if the prompt has multiple messages, make sure we don't end in an assistant message.
+    if len(prompt) > 1:
+        if prompt[-1]["role"] == "assistant":
+            prompt = prompt[:-1]
+    # override the system prompt if we have a new one provided.
+    if system_prompt_override is not None and str(system_prompt_override):
+        # if the first message is a system message, override it.
+        if prompt[0]["role"] == "system":
+            prompt[0]["content"] = system_prompt_override
+        else:
+            prompt = [{"role": "system", "content": system_prompt_override}] + prompt
+
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
+    if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
+        row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
+    row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
+    row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
+    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
+    # row[DEFAULT_SFT_MESSAGES_KEY] = prompt
+    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
+    row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
+    # some basic transformations:
+    # if ground truths is a string, make it a list
+    if isinstance(row[ground_truths_key], str):
+        row[ground_truths_key] = [row[ground_truths_key]]
+    # if dataset source is a string, make it a list
+    if isinstance(row[verifier_source_key], str):
+        row[verifier_source_key] = [row[verifier_source_key]]
+    # drop the messages field as it often causes issues.
+    row.pop(sft_messages_key)
+    return row
+
+
 def rlvr_filter_v1(
     row: Dict[str, Any],
     tokenizer: PreTrainedTokenizer,
@@ -1255,6 +1297,14 @@ def rlvr_filter_v1(
     return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
 
 
+def rlvr_filter_v2(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_prompt_token_length: Optional[int] = None):
+    max_prompt_token_length_ok = True
+    if max_prompt_token_length is not None:
+        max_prompt_token_length_ok = len(row[INPUT_IDS_PROMPT_KEY]) <= max_prompt_token_length
+
+    return max_prompt_token_length_ok
+
+
 TRANSFORM_FNS = {
     "sft_tokenize_v1": (sft_tokenize_v1, "map"),
     "sft_tokenize_mask_out_prompt_v1": (sft_tokenize_mask_out_prompt_v1, "map"),
@@ -1265,8 +1315,8 @@ TRANSFORM_FNS = {
     "preference_filter_v1": (preference_filter_v1, "filter"),
     "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1_2, "map"),
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
-    "rlvr_tokenize_v1": (rlvr_tokenize_v2, "map"),
-    "rlvr_filter_v1": (rlvr_filter_v1, "filter"),
+    "rlvr_tokenize_v1": (rlvr_tokenize_v3, "map"),
+    "rlvr_filter_v1": (rlvr_filter_v2, "filter"),
 }
 
 
@@ -1668,6 +1718,7 @@ def get_cached_dataset_tulu_with_statistics(
     dataset_skip_cache: bool = False,
     drop_dataset_source: bool = True,
     dataset_config_seed: int = 42,
+    system_prompt_override: Optional[str] = None,
 ) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
     dcs = []
     if dataset_config_hash is None:
@@ -1742,21 +1793,23 @@ def get_cached_dataset_tulu(
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
     dataset_config_seed: int = 42,
+    system_prompt_override: Optional[str] = None,
 ) -> Dataset:
     return get_cached_dataset_tulu_with_statistics(
-        dataset_mixer_list,
-        dataset_mixer_list_splits,
-        tc,
-        dataset_transform_fn,
-        transform_fn_args,
-        target_columns,
-        dataset_cache_mode,
-        dataset_config_hash,
-        hf_entity,
-        dataset_local_cache_dir,
-        dataset_skip_cache,
-        True,
-        dataset_config_seed,
+        dataset_mixer_list=dataset_mixer_list,
+        dataset_mixer_list_splits=dataset_mixer_list_splits,
+        tc=tc,
+        dataset_transform_fn=dataset_transform_fn,
+        transform_fn_args=transform_fn_args,
+        target_columns=target_columns,
+        dataset_cache_mode=dataset_cache_mode,
+        dataset_config_hash=dataset_config_hash,
+        hf_entity=hf_entity,
+        dataset_local_cache_dir=dataset_local_cache_dir,
+        dataset_skip_cache=dataset_skip_cache,
+        drop_dataset_source=True,
+        dataset_config_seed=dataset_config_seed,
+        system_prompt_override=system_prompt_override,
     )[0]
 
 

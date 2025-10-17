@@ -1,12 +1,16 @@
 import re
 import time
+from typing import Callable, List
 
-from open_instruct.search_utils.massive_ds import get_snippets_for_query
-from open_instruct.tool_utils.tools import Tool, ToolOutput
+from open_instruct.tools.search_tool.massive_ds import get_snippets_for_query as massive_ds_get_snippets_for_query
+from open_instruct.tools.search_tool.s2 import get_snippets_for_query as s2_get_snippets_for_query
+from open_instruct.tools.search_tool.you import get_snippets_for_query as you_get_snippets_for_query
+from open_instruct.tools.utils.tool_classes import Tool, ToolOutput
 
 
 class SearchTool(Tool):
-    def __init__(self, api_endpoint: str, *args, **kwargs):
+    def __init__(self, snippet_fn: Callable[[str], List[str]], api_endpoint: str, *args, **kwargs):
+        self.snippet_fn = snippet_fn
         self.api_endpoint = api_endpoint
         self.start_str = "<query>"
         self.end_str = "</query>"
@@ -38,7 +42,7 @@ class SearchTool(Tool):
         start_time = time.time()
         timeout = False
         error = ""
-        snippets = get_snippets_for_query(
+        snippets = self.snippet_fn(
             query_string, api_endpoint=self.api_endpoint, number_of_results=self.number_documents_to_search
         )
 
@@ -64,3 +68,24 @@ class SearchTool(Tool):
             start_str="<document>\n",
             end_str="\n</document>",
         )
+
+
+class S2SearchTool(SearchTool):
+    def __init__(self, *args, **kwargs):
+        super().__init__(s2_get_snippets_for_query, *args, **kwargs)
+        self.start_str = "<query_s2>"
+        self.end_str = "</query_s2>"
+
+
+class YouSearchTool(SearchTool):
+    def __init__(self, *args, **kwargs):
+        super().__init__(you_get_snippets_for_query, *args, **kwargs)
+        self.start_str = "<query_you>"
+        self.end_str = "</query_you>"
+
+
+class MassiveDSSearchTool(SearchTool):
+    def __init__(self, *args, **kwargs):
+        super().__init__(massive_ds_get_snippets_for_query, *args, **kwargs)
+        self.start_str = "<query_massive_ds>"
+        self.end_str = "</query_massive_ds>"

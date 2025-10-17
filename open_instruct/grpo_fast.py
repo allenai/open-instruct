@@ -113,6 +113,8 @@ from open_instruct.model_utils import (
 )
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.rl_utils2 import Timer, pack_sequences
+from open_instruct.tools.tool_actor import TOOL_CLASS_REGISTRY, ToolActor
+from open_instruct.tools.utils.tool_proxy import ToolProxy
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -171,10 +173,10 @@ class Args:
     """Whether to skip the cache."""
     shuffle_eval_dataset: bool = False
     """Whether to shuffle the evaluation dataset."""
-    max_token_length: int = 512
-    """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
     """The maximum prompt token length to use for the dataset"""
+    system_prompt_override_file: Optional[str] = None
+    """Path to a text file containing a system prompt to override the dataset's system prompts"""
 
     # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -420,22 +422,25 @@ class Args:
 
     # Tool settings
     tools: Optional[List[str]] = None
-    """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
+    """If set, use the tool mapped to the string. Currently only supports `search`, `code` by default."""
     max_tool_calls: List[int] = field(default_factory=lambda: [5])
     """Maximum number of tool calls allowed. If a list is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
     mask_tool_use: bool = True
     """Whether to mask the tool output. By default on."""
     only_reward_good_outputs: bool = False
     """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
+    tool_max_concurrency: int = 512
+    """The maximum number of concurrent tool calls allowed across all rollouts per tool."""
 
-    # rl-rag specific settngs
+    # code-tool specific settings
+    code_tool_api_endpoint: Optional[str] = None
+
+    # search-tool specific settings
+    # rl-rag tool settings. These are shared across different tools.
     number_documents_to_search: int = 3
     """The maximum number of documents to retrieve for each query."""
     search_api_endpoint: Optional[str] = None
     """The API endpoint for the search engine."""
-
-    # code-tool specific settings
-    code_tool_api_endpoint: Optional[str] = None
 
     def __post_init__(self):
         if os.environ.get("VLLM_USE_V1") == "0":
@@ -499,8 +504,10 @@ class Args:
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
         if self.tools is not None and len(self.tools) > 0:
             for tool in self.tools:
-                if tool not in ["search", "code"]:
-                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
+                if tool not in TOOL_CLASS_REGISTRY:
+                    raise ValueError(
+                        f"Tool {tool} is not supported. Supported tools are: {', '.join(TOOL_CLASS_REGISTRY.keys())}"
+                    )
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
             if self.use_vllm_logprobs or self.truncated_importance_sampling_ratio_cap > 0.0:
                 assert self.mask_tool_use, (
@@ -2132,10 +2139,18 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
 
 
 def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer):
+    # load system prompt override if provided
+    system_prompt_override = None
+    if args.system_prompt_override_file is not None:
+        logger.info(f"Loading system prompt override from {args.system_prompt_override_file}")
+        with open(args.system_prompt_override_file, "r") as f:
+            system_prompt_override = f.read().strip()
+        logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
+
     """Set up training and evaluation datasets."""
     transform_fn_args = [
-        {},
-        {"max_token_length": args.max_token_length, "max_prompt_token_length": args.max_prompt_token_length},
+        {"system_prompt_override": system_prompt_override},
+        {"max_prompt_token_length": args.max_prompt_token_length},
     ]
     train_dataset = get_cached_dataset_tulu(
         dataset_mixer_list=args.dataset_mixer_list,
@@ -2148,22 +2163,24 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
         hf_entity=args.hf_entity,
         dataset_local_cache_dir=args.dataset_local_cache_dir,
         dataset_skip_cache=args.dataset_skip_cache,
+        system_prompt_override=system_prompt_override,
     )
     train_dataset = train_dataset.shuffle(seed=args.seed)
 
     eval_dataset = None
     if len(args.dataset_mixer_eval_list) > 0:
         eval_dataset = get_cached_dataset_tulu(
-            args.dataset_mixer_eval_list,
-            args.dataset_mixer_eval_list_splits,
-            tc,
-            args.dataset_transform_fn,
-            transform_fn_args,
-            hf_entity=args.hf_entity,
+            dataset_mixer_list=args.dataset_mixer_eval_list,
+            dataset_mixer_list_splits=args.dataset_mixer_eval_list_splits,
+            tc=tc,
+            dataset_transform_fn=args.dataset_transform_fn,
+            transform_fn_args=transform_fn_args,
             dataset_cache_mode=args.dataset_cache_mode,
             dataset_config_hash=args.dataset_config_eval_hash,
+            hf_entity=args.hf_entity,
             dataset_local_cache_dir=args.dataset_local_cache_dir,
             dataset_skip_cache=args.dataset_skip_cache,
+            system_prompt_override=system_prompt_override,
         )
         if args.shuffle_eval_dataset:
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
@@ -2200,29 +2217,26 @@ def create_model_and_optimizer(
     # Set up tools
     max_len = args.max_prompt_token_length + args.response_length
     tool_objects = {}
+    tool_max_conc = args.tool_max_concurrency
+
+    def _register_actor_backed_tool(class_path: str, init_kwargs: dict):
+        actor = ToolActor.options(max_concurrency=tool_max_conc).remote(class_path=class_path, init_kwargs=init_kwargs)
+        start = ray.get(actor.get_start_str.remote())
+        stop_strings = ray.get(actor.get_stop_strings.remote())
+        # If the tool provides multiple stop strings, register each as an entry.
+        for end_str in stop_strings:
+            tool_objects[end_str] = ToolProxy(actor_handle=actor, start_str=start, end_str=end_str)
+            # Add tool end string to stop_strings
+            args.stop_strings.append(end_str)
+
+    # Register tools via actors
     if args.tools:
         for tool in args.tools:
-            if tool.lower() == "search":
-                from open_instruct.search_utils.search_tool import SearchTool
-
-                tool = SearchTool(
-                    start_str="<query>",
-                    end_str="</query>",
-                    api_endpoint=args.search_api_endpoint,
-                    number_documents_to_search=args.number_documents_to_search,
-                )
-                tool_objects[tool.end_str] = tool
-                # Add tool end string to stop_strings
-                args.stop_strings.append(tool.end_str)
-            elif tool.lower() == "code":
-                from open_instruct.tool_utils.tools import PythonCodeTool
-
-                tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
-                tool_objects[tool.end_str] = tool
-                # Add tool end string to stop_strings
-                args.stop_strings.append(tool.end_str)
-            else:
+            class_path = TOOL_CLASS_REGISTRY.get(tool.lower(), None)
+            if class_path is None:
                 raise ValueError(f"Unknown tool: {tool}")
+            # Pass the entire args namespace; ToolActor will filter valid kwargs
+            _register_actor_backed_tool(class_path=class_path, init_kwargs=vars(args))
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
@@ -3062,7 +3076,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     pprint([args, model_config])
 
     # Initialize Ray before creating Ray objects
-    ray.init(dashboard_host="0.0.0.0")
+    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"]})
 
     # Create Ray queues.
     # Since we now send/receive individual prompts, queue size should accommodate
