@@ -4,7 +4,8 @@ from unittest.mock import MagicMock
 
 import vllm
 
-from open_instruct.vllm_utils import process_completed_request
+from open_instruct.vllm_utils import make_request_id, process_completed_request
+from open_instruct.queue_types import PromptRequest
 
 
 class TestVllmUtils3(unittest.TestCase):
@@ -22,6 +23,16 @@ class TestVllmUtils3(unittest.TestCase):
 
         def create_mock_logprobs(token_ids):
             return [{tid: MagicMock(logprob=-0.1 * tid)} for tid in token_ids]
+
+        mock_request = PromptRequest(
+            prompt=[1, 2, 3],
+            generation_config=None,
+            is_eval=False,
+            dataset_index=43039,
+            epoch_number=0,
+            training_step=1,
+        )
+        request_id = make_request_id(mock_request)
 
         mock_output1 = MagicMock(spec=vllm.CompletionOutput)
         mock_output1.token_ids = [1, 2, 3]
@@ -47,18 +58,16 @@ class TestVllmUtils3(unittest.TestCase):
         mock_output2.tool_called = True
         mock_output2.finish_reason = "stop"
 
-        # Create mock RequestOutput with multiple outputs
         mock_request_output = MagicMock(spec=vllm.RequestOutput)
-        mock_request_output.request_id = "train_1_43039"
+        mock_request_output.request_id = request_id
         mock_request_output.outputs = [mock_output1, mock_output2]
         mock_request_output.prompt = "test prompt"
         mock_request_output.prompt_token_ids = [1, 2, 3]
         mock_request_output.prompt_logprobs = None
         mock_request_output.finished = True
 
-        # Setup request metadata
         request_metadata = {
-            "train_1_43039": {
+            request_id: {
                 "is_eval": False,
                 "dataset_index": 43039,
                 "epoch_number": 0,
@@ -68,13 +77,15 @@ class TestVllmUtils3(unittest.TestCase):
             }
         }
 
-        # Mock tools dict to enable tool mode
         tools = {"</tool>": MagicMock()}
 
-        # Call the function under test with tools enabled
         result, is_eval = process_completed_request(
-            request_id="train_1_43039",
+            request_id=request_id,
             outs=[mock_request_output],
+<<<<<<< HEAD
+=======
+            tracking={},
+>>>>>>> 85b56b51 (updated code)
             current_time=1001.0,
             tools=tools,
             request_metadata=request_metadata,
@@ -107,6 +118,11 @@ class TestVllmUtils3(unittest.TestCase):
         def create_mock_logprobs(token_ids):
             return [{tid: MagicMock(logprob=-0.1 * tid)} for tid in token_ids]
 
+        mock_request = PromptRequest(
+            prompt=[1, 2, 3], generation_config=None, is_eval=True, dataset_index=200, epoch_number=0, training_step=2
+        )
+        request_id = make_request_id(mock_request)
+
         mock_output1 = MagicMock(spec=vllm.CompletionOutput)
         mock_output1.token_ids = [1, 2, 3]
         mock_output1.logprobs = create_mock_logprobs([1, 2, 3])
@@ -117,18 +133,16 @@ class TestVllmUtils3(unittest.TestCase):
         mock_output2.logprobs = create_mock_logprobs([4, 5, 6])
         mock_output2.finish_reason = "length"
 
-        # Create mock RequestOutput with multiple outputs
         mock_request_output = MagicMock(spec=vllm.RequestOutput)
-        mock_request_output.request_id = "eval_2_200"
+        mock_request_output.request_id = request_id
         mock_request_output.outputs = [mock_output1, mock_output2]
         mock_request_output.prompt = "test prompt"
         mock_request_output.prompt_token_ids = [1, 2, 3]
         mock_request_output.prompt_logprobs = None
         mock_request_output.finished = True
 
-        # Setup request metadata
         request_metadata = {
-            "eval_2_200": {
+            request_id: {
                 "is_eval": True,
                 "dataset_index": 200,
                 "epoch_number": 0,
@@ -138,10 +152,13 @@ class TestVllmUtils3(unittest.TestCase):
             }
         }
 
-        # Call the function under test without tools (None or empty dict)
         result, is_eval = process_completed_request(
-            request_id="eval_2_200",
+            request_id=request_id,
             outs=[mock_request_output],
+<<<<<<< HEAD
+=======
+            tracking={},
+>>>>>>> 85b56b51 (updated code)
             current_time=2000.5,
             tools=None,
             request_metadata=request_metadata,
