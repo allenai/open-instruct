@@ -21,6 +21,7 @@ import queue
 import sys
 import threading
 import time
+import types
 from collections import defaultdict
 from concurrent import futures
 from datetime import timedelta
@@ -184,10 +185,7 @@ async def process_request_async(
 
         accumulated_tokens.extend(tool_output_token_ids)
         accumulated_logprobs.extend(
-            [
-                {token_id: vllm.Logprob(logprob=float("nan"), rank=None, decoded_token="")}
-                for token_id in tool_output_token_ids
-            ]
+            [{token_id: types.SimpleNamespace(logprob=0.0)} for token_id in tool_output_token_ids]
         )
         masks.extend([0] * len(tool_output_token_ids))
 
@@ -713,6 +711,7 @@ class LLMRayActor:
     def _prepare_weight_update(self, name: str, dtype: str) -> None:
         # Wait for all active requests to complete.
         while not self.inflight_updates and len(self.active_tasks) > 0:
+            self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
 
         expected_dtype = str(self.llm_engine.model_config.dtype)
@@ -743,7 +742,9 @@ class LLMRayActor:
             self._prefetch_future.result()
         if self._process_future.done():
             self._process_future.result()
-
+        for task_id, task in self.active_tasks.items():
+            if task.done():
+                task.result()
         if not self.loop_thread.is_alive():
             raise RuntimeError(
                 "vLLM engine loop thread has died. Check logs for errors in EngineCore or async engine."
