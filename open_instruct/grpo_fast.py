@@ -707,7 +707,7 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         torch.set_float32_matmul_precision("high")
         with Timer("compile main model"):
-            self.model.compile(mode="max-autotune")
+            self.model.compile(compile_kwargs={"mode": "max-autotune"})
         optimization_steps_done = 0
         if args.checkpoint_state_dir:
             # check if the dir exists
@@ -783,7 +783,7 @@ class PolicyTrainerRayProcess(RayProcess):
         disable_dropout_in_model(self.ref_policy)
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
         with Timer("compile reference model"):
-            self.ref_policy.compile(mode="max-autotune")
+            self.ref_policy.compile(compile_kwargs={"mode": "max-autotune"})
         self.ref_policy.eval()
 
         # Load reference policy checkpoint if available
