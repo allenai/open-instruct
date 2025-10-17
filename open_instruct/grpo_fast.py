@@ -114,7 +114,7 @@ from open_instruct.model_utils import (
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.rl_utils2 import Timer, pack_sequences
 from open_instruct.tools.tool_actor import TOOL_CLASS_REGISTRY, ToolActor
-from open_instruct.tools.tool_proxy import ToolProxy
+from open_instruct.tools.utils.tool_proxy import ToolProxy
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,

@@ -41,7 +41,7 @@ Search external data sources for relevant information.
 **Available backends**:
 - `search_s2`: Semantic Scholar academic papers (requires `S2_API_KEY` env var)
 - `search_you`: You.com web search (requires `YOUCOM_API_KEY` env var)
-- `search_massive_ds`: Alternative search backend
+- `search_massive_ds`: Alternative search backend (requires setting up a [massive-serve](https://github.com/RulinShao/massive-serve) server and setting the `MASSIVE_DS_URL` env var or passing the `search_api_endpoint` argument to the script)
 
 ## Adding Your Own Tool
 
