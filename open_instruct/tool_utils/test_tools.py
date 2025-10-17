@@ -2,7 +2,8 @@ import subprocess
 import time
 import unittest
 
-from open_instruct.tool_utils.tools import MaxCallsExceededTool, PythonCodeTool, Tool, ToolOutput
+from open_instruct.tools.python_tool.tool import PythonCodeTool
+from open_instruct.tools.utils.tools import MaxCallsExceededTool, Tool, ToolOutput
 
 
 class TestToolOutput(unittest.TestCase):
@@ -63,7 +64,7 @@ class TestPythonCodeTool(unittest.TestCase):
         # Start the server in a subprocess
         cls.server_process = subprocess.Popen(
             ["uv", "run", "uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1212"],
-            cwd="open_instruct/tool_utils",
+            cwd="open_instruct/tools/python_tool/python_server",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,  # Create new process group

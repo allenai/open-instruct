@@ -1611,7 +1611,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     if args.tools:
         for tool in args.tools:
             if tool.lower() == "search":
-                from open_instruct.search_utils.search_tool import SearchTool
+                from open_instruct.tools.search_tool.search_tool import SearchTool
 
                 tool = SearchTool(
                     start_str="<query>",
@@ -1621,7 +1621,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 )
                 tool_objects[tool.end_str] = tool
             elif tool.lower() == "code":
-                from open_instruct.tool_utils.tools import PythonCodeTool
+                from open_instruct.tools.python_tool.tool import PythonCodeTool
 
                 tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
                 tool_objects[tool.end_str] = tool

@@ -1,44 +1,13 @@
-"""Base tool classes that can be imported without vllm dependencies."""
-
 import re
 import time
 import traceback
-from dataclasses import dataclass
 
 import requests
 
-
-@dataclass
-class ToolOutput:
-    output: str
-    called: bool
-    error: str
-    timeout: bool
-    runtime: float
-    start_str: str = "<output>\n"
-    end_str: str = "\n</output>"
-
-
-class Tool:
-    def __init__(self, start_str: str, end_str: str):
-        self.start_str = start_str
-        self.end_str = end_str
-
-    def __call__(self, prompt: str) -> ToolOutput:
-        raise NotImplementedError("Subclasses must implement this method")
-
-
-class MaxCallsExceededTool(Tool):
-    def __call__(self, prompt: str) -> ToolOutput:
-        return ToolOutput(
-            output="Max tool calls exceeded.", called=False, error="Max tool calls exceeded", timeout=False, runtime=0
-        )
+from open_instruct.tools.utils.tools import Tool, ToolOutput
 
 
 class PythonCodeTool(Tool):
-    """@vwxyzjn: I recommend using something like a FastAPI for this kind of stuff; 1) you
-    won't accidentally block the main vLLM process and 2) way easier to parallelize via load balancing."""
-
     def __init__(
         self,
         api_endpoint: str | None = None,

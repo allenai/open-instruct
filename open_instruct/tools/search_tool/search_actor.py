@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Tuple
 
 import ray
 
-from open_instruct.search_utils.massive_ds import get_snippets_for_query
+from open_instruct.tools.search_tool.massive_ds import get_snippets_for_query
 
 
 def process_vllm_output_for_search(text: str, number_documents_to_search: int = 10) -> str:

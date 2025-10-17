@@ -3,7 +3,7 @@ from typing import List
 
 import requests
 
-from open_instruct.search_utils.s2 import create_session_with_retries
+from open_instruct.tools.search_tool.s2 import create_session_with_retries
 
 
 def get_snippets_for_query(query: str, number_of_results=10) -> List[str]:

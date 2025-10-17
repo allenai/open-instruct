@@ -6,15 +6,15 @@ from typing import Any, Dict, List, Optional
 
 import ray
 
-from open_instruct.tool_utils.tools import Tool, ToolOutput
+from open_instruct.tools.utils.tools import Tool, ToolOutput
 
 # Central registry mapping simple tool names to their import paths.
 # We keep values as import paths to avoid importing heavy modules on the driver.
 TOOL_CLASS_REGISTRY: Dict[str, str] = {
     # Lightweight search tool
-    "search": "open_instruct.search_utils.search_tool:SearchTool",
+    "search": "open_instruct.tools.search_tool.search_tool:SearchTool",
     # Code execution proxy tool (client)
-    "code": "open_instruct.tool_utils.tools:PythonCodeTool",
+    "code": "open_instruct.tools.python_tool.tool:PythonCodeTool",
 }
 
 

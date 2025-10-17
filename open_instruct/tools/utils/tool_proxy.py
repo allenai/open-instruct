@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ray
 
-from open_instruct.tool_utils.tools import Tool, ToolOutput
+from open_instruct.tools.utils.tools import Tool, ToolOutput
 
 
 class ToolProxy(Tool):

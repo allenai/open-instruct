@@ -24,7 +24,7 @@ from vllm.lora.request import LoRARequest
 from vllm.sampling_params import RequestOutputKind
 
 # Import base classes from tools.py to avoid duplication
-from open_instruct.tool_utils.tools import MaxCallsExceededTool, PythonCodeTool, Tool
+from open_instruct.tools.utils.tools import MaxCallsExceededTool, PythonCodeTool, Tool
 
 
 class ToolUseLLM(LLM):
