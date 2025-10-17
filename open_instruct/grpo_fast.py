@@ -502,6 +502,10 @@ class Args:
                 if tool not in ["search", "code"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
+            if self.use_vllm_logprobs or self.truncated_importance_sampling_ratio_cap > 0.0:
+                assert self.mask_tool_use, (
+                    "Must mask tool use when using vLLM logprobs or truncated importance sampling."
+                )
 
 
 def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
@@ -567,6 +571,7 @@ class ShufflingIterator:
         self.data = data.copy()
         self.batch_size = batch_size
         self.index = 0
+        self.epoch_number = 0
         self.rng = np.random.default_rng(seed)
         self.rng.shuffle(self.data)
 
@@ -579,6 +584,7 @@ class ShufflingIterator:
     def __next__(self) -> List[int]:
         if self.index >= self.effective_size:
             self.index = 0
+            self.epoch_number += 1
             self.rng.shuffle(self.data)
 
         end_index = self.index + self.batch_size
@@ -591,13 +597,15 @@ class ShufflingIterator:
         """Get the current state of the iterator for checkpointing."""
         return {
             "index": self.index,
-            "data": self.data.copy(),  # Current shuffled order
+            "epoch_number": self.epoch_number,
+            "data": self.data.copy(),
             "rng_state": self.rng.bit_generator.state,
         }
 
     def set_state(self, state: Dict[str, Any]) -> None:
         """Restore the iterator state from a checkpoint."""
         self.index = state["index"]
+        self.epoch_number = state["epoch_number"]
         self.data = state["data"].copy()
         self.rng.bit_generator.state = state["rng_state"]
 
@@ -1546,7 +1554,6 @@ def accumulate_inference_batches(
     inference_results_Q: ray_queue.Queue,
     pending_queries_map: PendingQueriesMap,
     args: Args,
-    training_step: int,
     generation_config: vllm.SamplingParams,
     num_prompts: int,
     model_dims: utils.ModelDims,
@@ -1559,7 +1566,6 @@ def accumulate_inference_batches(
         inference_results_Q: Queue containing individual GenerationResult objects (one per prompt)
         pending_queries_map: PendingQueriesMap instance for thread-safe query tracking
         args: Arguments containing vllm_num_engines and batch size info
-        training_step: Current training step for error reporting
         generation_config: Generation config containing n (number of samples per prompt)
         num_prompts: Number of prompts to accumulate
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
@@ -1592,7 +1598,7 @@ def accumulate_inference_batches(
         assert len(result.responses) == generation_config.n, (
             f"Mismatch: individual prompt result has {len(result.responses)} responses "
             f"but expected {generation_config.n} samples per prompt. "
-            f"Dataset index: {result.dataset_index}, Training step: {training_step}"
+            f"Dataset index: {result.dataset_index}, Epoch: {result.epoch_number}"
         )
 
         query, ground_truth, dataset, raw_query = pending_queries_map.pop(result.dataset_index)
@@ -1674,7 +1680,8 @@ def accumulate_inference_batches(
         finish_reasons=combined_finish_reasons,
         masks=combined_masks,
         request_info=combined_request_info,
-        dataset_index=None,  # Not meaningful for combined result
+        dataset_index=None,
+        epoch_number=results[0].epoch_number,
         token_statistics=accumulated_stats,
         logprobs=combined_logprobs,
     )
@@ -1713,7 +1720,6 @@ def data_preparation_thread(
                 inference_results_Q,
                 pending_queries_map,
                 args,
-                training_step,
                 generation_config,
                 num_prompts=args.num_unique_prompts_rollout,
                 model_dims=model_dims,
@@ -2302,6 +2308,7 @@ def create_generation_configs(args: Args):
 
 def split_and_insert_batch(
     batch: Batch,
+    epoch_number: int,
     training_step: int,
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q: ray_queue.Queue,
@@ -2317,6 +2324,7 @@ def split_and_insert_batch(
             PromptRequest(
                 prompt=query,
                 generation_config=generation_config,
+                epoch_number=epoch_number,
                 training_step=training_step,
                 dataset_index=idx,
                 is_eval=is_eval,
@@ -2557,7 +2565,6 @@ def maybe_evaluate(
             evaluation_inference_results_Q,
             eval_pending_queries_map,
             args,
-            training_step,
             eval_generation_config,
             num_prompts=num_eval_prompts,
             model_dims=model_dims,
@@ -2886,6 +2893,7 @@ def run_training(
         batch = next_batch(dataset_indices, train_dataset)
         split_and_insert_batch(
             batch,
+            iter_dataloader.epoch_number,
             resume_training_step,
             pending_queries_map,
             param_prompt_Q,
@@ -2925,7 +2933,13 @@ def run_training(
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         batch = next_batch(next(iter_dataloader), train_dataset)
         split_and_insert_batch(
-            batch, training_step, pending_queries_map, param_prompt_Q, generation_configs["train"], is_eval=False
+            batch,
+            iter_dataloader.epoch_number,
+            training_step,
+            pending_queries_map,
+            param_prompt_Q,
+            generation_configs["train"],
+            is_eval=False,
         )
         if (
             training_step % args.local_eval_every == 0
@@ -2934,6 +2948,7 @@ def run_training(
         ):
             split_and_insert_batch(
                 eval_batch,
+                iter_dataloader.epoch_number,
                 training_step,
                 eval_pending_queries_map,
                 param_prompt_Q,
