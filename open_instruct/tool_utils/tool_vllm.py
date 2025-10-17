@@ -14,7 +14,7 @@ import warnings
 from collections import defaultdict
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor  # add import for async execution
-from typing import Optional, Union
+from typing import Optional, Union, Callable
 
 import requests
 from rich.console import Console
