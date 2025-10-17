@@ -2078,20 +2078,8 @@ def get_device_name(device_name: str) -> str:
         >>> get_device_name("NVIDIA H100 80GB HBM3")
         'h100'
 
-        >>> get_device_name("NVIDIA L40S")
-        'l40s'
-
-        >>> get_device_name("NVIDIA RTX A6000")
-        'a6000'
-
-        >>> get_device_name("NVIDIA A100-SXM4-80GB")
-        'a100'
-
         >>> get_device_name("NVIDIA RTX PRO 6000 Blackwell Server Edition")
         'pro 6000'
-
-        >>> get_device_name("NVIDIA RTX 6000 Ada Generation")
-        '6000'
     """
     normalized_device_name = device_name.lower().replace("-", " ")
 

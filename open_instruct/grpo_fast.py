@@ -139,7 +139,6 @@ from open_instruct.utils import (
 
 logger = logger_utils.setup_logger(__name__)
 
-api = HfApi()
 INVALID_LOGPROB = 1.0
 
 
@@ -1442,28 +1441,6 @@ class PendingQueriesMap:
             else:
                 # New entry - count starts at 1
                 self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, 1)
-
-    def insert_many(self, dataset_indices, queries, ground_truths, datasets, raw_queries):
-        """Insert or increment count for multiple dataset indices at once."""
-        with self._lock:
-            for i, dataset_idx in enumerate(dataset_indices):
-                current_raw_query = raw_queries[i]
-
-                if dataset_idx in self._map:
-                    # Already exists - just increment count
-                    existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count = self._map[
-                        dataset_idx
-                    ]
-                    self._map[dataset_idx] = (
-                        existing_query,
-                        existing_ground_truth,
-                        existing_dataset,
-                        existing_raw_query,
-                        count + 1,
-                    )
-                else:
-                    # New entry - count starts at 1
-                    self._map[dataset_idx] = (queries[i], ground_truths[i], datasets[i], current_raw_query, 1)
 
     def pop(self, dataset_idx):
         """Retrieve data and decrement count. Removes entry when count reaches 0."""
