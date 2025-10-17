@@ -3046,6 +3046,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
 
+    torch.set_float32_matmul_precision("high")
+
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
         for handler in logging.getLogger().handlers:

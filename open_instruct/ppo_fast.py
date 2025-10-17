@@ -1472,6 +1472,8 @@ def data_preparation_thread(
 
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
+    torch.set_float32_matmul_precision("high")
+
     # ------------------------------------------------------------
     # Setup tokenizer
     tc.tokenizer_revision = model_config.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
