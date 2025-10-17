@@ -1696,6 +1696,7 @@ GPU_SPECS = {
     "h100": {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12},  # 3.35 TB/s HBM3
     "a6000": {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9},  # 768 GB/s GDDR6
     "l40s": {"flops": 362e12, "memory_size": 48e9, "memory_bandwidth": 864e9},  # 864 GB/s GDDR6
+    "pro 6000": {"flops": 503.8e12, "memory_size": 96e9, "memory_bandwidth": 1792e9},  # 1792 GB/s GDDR7
 }
 
 # Conventions for FLOPs calculations (fixed; not switches)
@@ -2058,12 +2059,10 @@ class ModelDims:
 
 
 def get_device_name(device_name: str) -> str:
-    tokens = device_name.lower().replace("-", " ").split()
+    normalized_device_name = device_name.lower().replace("-", " ")
 
-    filtered = [val for val in tokens if val not in ["nvidia", "80gb", "40gb", "48gb", "hbm3", "rtx", "sxm4", "pcie"]]
-
-    for token in filtered:
-        if token in GPU_SPECS:
-            return token
+    for key in GPU_SPECS.keys():
+        if key in normalized_device_name:
+            return key
 
     raise ValueError(f"Unsupported device name: {device_name}. Expected one of: {list(GPU_SPECS.keys())}")

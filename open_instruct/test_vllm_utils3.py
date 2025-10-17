@@ -61,6 +61,7 @@ class TestVllmUtils3(unittest.TestCase):
             "train_1_43039": {
                 "is_eval": False,
                 "dataset_index": 43039,
+                "epoch_number": 0,
                 "training_step": 1,
                 "prompt_token_ids": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
                 "start_time": 1000.0,
@@ -130,6 +131,7 @@ class TestVllmUtils3(unittest.TestCase):
             "eval_2_200": {
                 "is_eval": True,
                 "dataset_index": 200,
+                "epoch_number": 0,
                 "training_step": 2,
                 "prompt_token_ids": [1, 2, 3, 4, 5],
                 "start_time": 2000.0,
