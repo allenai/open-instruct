@@ -511,3 +511,74 @@ class TestModelDims(unittest.TestCase):
         training_flops = self.model_dims.flops(prompt_lengths, response_lengths, is_training=True)
 
         self.assertEqual(training_flops, 3 * inference_flops)
+
+    def test_compare_flops_with_palm_estimate(self):
+        num_kv = (
+            self.model_dims.num_kv_heads
+            if self.model_dims.num_kv_heads is not None
+            else self.model_dims.num_attn_heads
+        )
+        head_dim = self.model_dims.hidden_size // self.model_dims.num_attn_heads
+
+        w_q = self.model_dims.hidden_size * self.model_dims.hidden_size
+        w_k = self.model_dims.hidden_size * (num_kv * head_dim)
+        w_v = self.model_dims.hidden_size * (num_kv * head_dim)
+        w_o = self.model_dims.hidden_size * self.model_dims.hidden_size
+        w_up = self.model_dims.hidden_size * self.model_dims.intermediate_size
+        w_dn = self.model_dims.intermediate_size * self.model_dims.hidden_size
+
+        nparams_per_layer = w_q + w_k + w_v + w_o + w_up + w_dn
+        nparams_total_no_embed = self.model_dims.num_layers * nparams_per_layer
+        nparams_embedding = self.model_dims.hidden_size * self.model_dims.vocab_size
+
+        seq_len = 100
+        palm_matmul_term = 6 * (nparams_total_no_embed + nparams_embedding)
+        palm_attn_term = 12 * self.model_dims.num_layers * self.model_dims.num_attn_heads * head_dim * seq_len
+        palm_estimate = palm_matmul_term + palm_attn_term
+
+        our_prefill_flops = self.model_dims.prefill_flops([seq_len])
+
+        attn_flops = self.model_dims.attn_flops(seq_len, seq_len)
+        mlp_flops = self.model_dims.mlp_flops(seq_len)
+        lm_head_flops = 2 * self.model_dims.hidden_size * self.model_dims.vocab_size
+
+        print(f"\n--- FLOPs Comparison for seq_len={seq_len} ---")
+        print("\nPaLM estimate:")
+        print(f"  Matmul term (6*nparams): {palm_matmul_term / 1e12:.3f} TFLOPs")
+        print(f"  Attention term (12*l*h*q*t): {palm_attn_term / 1e12:.3f} TFLOPs")
+        print(f"  Total: {palm_estimate / 1e12:.3f} TFLOPs")
+        print(f"  Per token: {palm_estimate / seq_len / 1e9:.2f} GFLOPs")
+        print("\nOur implementation:")
+        print(f"  Attn per layer: {attn_flops / 1e12:.3f} TFLOPs")
+        print(f"  MLP per layer: {mlp_flops / 1e12:.3f} TFLOPs")
+        print(f"  LM head: {lm_head_flops / 1e12:.3f} TFLOPs")
+        print(f"  Total prefill: {our_prefill_flops / 1e12:.3f} TFLOPs")
+        print(f"  Per token avg: {our_prefill_flops / seq_len / 1e9:.2f} GFLOPs")
+        print(f"\nRatio (our/PaLM): {our_prefill_flops / palm_estimate:.3f}")
+        print("Note: PaLM uses 6*nparams (assumes forward=2x, backward=4x for training)")
+        print(f"Our implementation counts FLOPs more explicitly with FLOP_PER_MAC={utils.FLOP_PER_MAC}")
+
+        self.assertGreater(our_prefill_flops, 0)
+        self.assertGreater(palm_estimate, 0)
+
+    def test_assertions_catch_expanded_prompt_lengths_bug(self):
+        num_unique_prompts = 64
+        samples_per_prompt = 4
+        prompt_lengths_buggy = [100] * (num_unique_prompts * samples_per_prompt)
+        response_lengths = [32000] * (num_unique_prompts * samples_per_prompt)
+
+        with self.assertRaises(AssertionError) as context:
+            self.model_dims.memory_bytes(prompt_lengths_buggy, response_lengths, samples_per_prompt=samples_per_prompt)
+
+        self.assertIn("Expected 1024 response lengths, got 256", str(context.exception))
+
+    def test_assertions_catch_wrong_samples_per_prompt(self):
+        num_unique_prompts = 64
+        samples_per_prompt_actual = 4
+        prompt_lengths = [100] * num_unique_prompts
+        response_lengths = [32000] * (num_unique_prompts * samples_per_prompt_actual)
+
+        with self.assertRaises(AssertionError) as context:
+            self.model_dims.memory_bytes(prompt_lengths, response_lengths, samples_per_prompt=1)
+
+        self.assertIn("Expected 64 response lengths, got 256", str(context.exception))
