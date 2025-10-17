@@ -214,7 +214,7 @@ class TestGrpoFastBase(unittest.TestCase):
         mock_args.inference_batch_size = max(1, len(queries) // num_engines)
 
         grpo_fast.split_and_insert_batch(
-            batch, training_step, pending_queries_map, param_prompt_Q, mock_generation_config, False
+            batch, 0, training_step, pending_queries_map, param_prompt_Q, mock_generation_config, False
         )
 
         return param_prompt_Q, inference_results_Q, pending_queries_map
@@ -733,6 +733,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         grpo_fast.split_and_insert_batch(
             batch,
+            epoch_number=0,
             training_step=1,
             pending_queries_map=pending_queries_map,
             param_prompt_Q=param_prompt_Q,
@@ -786,6 +787,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         grpo_fast.split_and_insert_batch(
             batch,
+            epoch_number=0,
             training_step=1,
             pending_queries_map=pending_queries_map,
             param_prompt_Q=param_prompt_Q,
