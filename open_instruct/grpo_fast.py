@@ -701,7 +701,8 @@ class PolicyTrainerRayProcess(RayProcess):
             lr_scheduler=scheduler,
             dist_init_required=True,
         )
-        self.model.compile()
+        with Timer("torch.compile()"):
+            self.model.compile()
         optimization_steps_done = 0
         if args.checkpoint_state_dir:
             # check if the dir exists
