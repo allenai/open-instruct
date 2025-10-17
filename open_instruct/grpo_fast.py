@@ -620,6 +620,10 @@ class PolicyTrainerRayProcess(RayProcess):
         wandb_url: str,
         tokenizer: PreTrainedTokenizer,
     ):
+        logging.getLogger().setLevel(logging.INFO)
+        for handler in logging.getLogger().handlers:
+            handler.setLevel(logging.INFO)
+
         # ------------------------------------------------------------
         # Monkey patch to load checkpoints with `weights_only=False`
         # otherwise it errors out with:
@@ -698,6 +702,9 @@ class PolicyTrainerRayProcess(RayProcess):
             lr_scheduler=scheduler,
             dist_init_required=True,
         )
+        torch.set_float32_matmul_precision("high")
+        with Timer("compile main model"):
+            self.model.compile()
         optimization_steps_done = 0
         if args.checkpoint_state_dir:
             # check if the dir exists
@@ -772,6 +779,8 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         disable_dropout_in_model(self.ref_policy)
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
+        with Timer("compile reference model"):
+            self.ref_policy.compile()
         self.ref_policy.eval()
 
         # Load reference policy checkpoint if available
@@ -3041,6 +3050,8 @@ def run_training(
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
+
+    torch.set_float32_matmul_precision("high")
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
