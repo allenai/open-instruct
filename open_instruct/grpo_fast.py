@@ -48,6 +48,7 @@ from open_instruct import utils
 
 # isort: on
 import asyncio
+import copy
 import json
 import logging
 import math
@@ -174,10 +175,10 @@ class Args:
     """Whether to skip the cache."""
     shuffle_eval_dataset: bool = False
     """Whether to shuffle the evaluation dataset."""
-    max_token_length: int = 512
-    """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
     """The maximum prompt token length to use for the dataset"""
+    system_prompt_override_file: Optional[str] = None
+    """Path to a text file containing a system prompt to override the dataset's system prompts"""
 
     # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -2163,10 +2164,20 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
 
 
 def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer):
+    # load system prompt override if provided
+    system_prompt_override = None
+    if args.system_prompt_override_file is not None:
+        logger.info(f"Loading system prompt override from {args.system_prompt_override_file}")
+        with open(args.system_prompt_override_file, "r") as f:
+            system_prompt_override = f.read().strip()
+        logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
+
     """Set up training and evaluation datasets."""
     transform_fn_args = [
-        {},
-        {"max_token_length": args.max_token_length, "max_prompt_token_length": args.max_prompt_token_length},
+        {
+            "system_prompt_override": system_prompt_override,
+        },
+        {"max_prompt_token_length": args.max_prompt_token_length},
     ]
     train_dataset = get_cached_dataset_tulu(
         dataset_mixer_list=args.dataset_mixer_list,
@@ -2179,22 +2190,24 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
         hf_entity=args.hf_entity,
         dataset_local_cache_dir=args.dataset_local_cache_dir,
         dataset_skip_cache=args.dataset_skip_cache,
+        system_prompt_override=system_prompt_override,
     )
     train_dataset = train_dataset.shuffle(seed=args.seed)
 
     eval_dataset = None
     if len(args.dataset_mixer_eval_list) > 0:
         eval_dataset = get_cached_dataset_tulu(
-            args.dataset_mixer_eval_list,
-            args.dataset_mixer_eval_list_splits,
-            tc,
-            args.dataset_transform_fn,
-            transform_fn_args,
-            hf_entity=args.hf_entity,
+            dataset_mixer_list=args.dataset_mixer_eval_list,
+            dataset_mixer_list_splits=args.dataset_mixer_eval_list_splits,
+            tc=tc,
+            dataset_transform_fn=args.dataset_transform_fn,
+            transform_fn_args=transform_fn_args,
             dataset_cache_mode=args.dataset_cache_mode,
             dataset_config_hash=args.dataset_config_eval_hash,
+            hf_entity=args.hf_entity,
             dataset_local_cache_dir=args.dataset_local_cache_dir,
             dataset_skip_cache=args.dataset_skip_cache,
+            system_prompt_override=system_prompt_override,
         )
         if args.shuffle_eval_dataset:
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
