@@ -4,19 +4,19 @@ This makes debugging and eval fun. See the bottom of the file for examples.
 """
 
 import copy
+import os
+import signal
+import subprocess
+import sys
+import time
 import types
 import warnings
 from collections import defaultdict
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor  # add import for async execution
 from typing import Optional, Union
-import os
-import sys
-import time
-import signal
-import subprocess
-import requests
 
+import requests
 from rich.console import Console
 from tqdm import tqdm
 from vllm import LLM, PoolingParams, PoolingRequestOutput, PromptType, RequestOutput, SamplingParams, TokensPrompt
@@ -323,16 +323,7 @@ and you will get the output between the <output> and </output> tags.
 
     # launch the tool server (portable: uses current python, no dependency on `uv` CLI)
     tool_utils_dir = os.path.dirname(__file__)
-    server_cmd = [
-        sys.executable,
-        "-m",
-        "uvicorn",
-        "tool_server:app",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        "1212",
-    ]
+    server_cmd = [sys.executable, "-m", "uvicorn", "tool_server:app", "--host", "127.0.0.1", "--port", "1212"]
     server_process = subprocess.Popen(
         server_cmd,
         cwd=tool_utils_dir,
@@ -360,9 +351,7 @@ and you will get the output between the <output> and </output> tags.
             time.sleep(0.2)
 
         # Create a tool.
-        python_code_tool = PythonCodeTool(
-            api_endpoint=f"{base_url}/execute", start_str="<code>", end_str="</code>"
-        )
+        python_code_tool = PythonCodeTool(api_endpoint=f"{base_url}/execute", start_str="<code>", end_str="</code>")
         tools = {python_code_tool.end_str: python_code_tool}
         # Create a sampling params object.
         sampling_params = SamplingParams(
@@ -423,4 +412,3 @@ and you will get the output between the <output> and </output> tags.
                 os.killpg(server_process.pid, signal.SIGKILL)
         except Exception:
             pass
-
