@@ -103,11 +103,9 @@ parser.add_argument("--add_stop_sequence", type=str, nargs="+", default=[], help
 parser.add_argument("--upload_to_hf", type=str, default=None, help="If given, upload the eval results to the Hugging Face model hub. Provide the HF dataset and path in form <hf dataset>//<hf path>.")
 parser.add_argument("--hf_upload_experiments", type=str, nargs="*", default=None, help="Upload given experiment to the Hugging Face model hub.")
 parser.add_argument("--run_oe_eval_experiments", action="store_true", help="Run the OE eval tool and experiments too.")
-parser.add_argument("--run_safety_evaluations", action="store_true", help="Run the OE safety evaluations too.")
 parser.add_argument("--skip_oi_evals", action="store_true", help="Don't run open instruct evals.")
 parser.add_argument("--oe_eval_max_length", type=int, default=4096, help="Max length for OE eval.")
-parser.add_argument("--oe_eval_task_suite", type=str, default="NEXT_MODEL_DEV", help="Task suite for OE eval: NEXT_MODEL_DEV, NEXT_MODEL_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN (default: NEXT_MODEL_DEV)")
-parser.add_argument("--use_alternate_safety_image", type=str, default=None, help="Use a different image for safety eval.")
+parser.add_argument("--oe_eval_task_suite", type=str, default="NEXT_MODEL_DEV", help="Task suite for OE eval: NEXT_MODEL_DEV, NEXT_MODEL_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN, SAFETY_EVAL, SAFETY_EVAL_REASONING (default: NEXT_MODEL_DEV)")
 parser.add_argument("--evaluate_on_weka", action="store_true", help="Evaluate OE eval on Beaker.")
 # NOTE: evaluate on weka is expected to be on by default. If not, the evals will run on the google augusta cluster.
 # TODO: fix this logic at a future date
@@ -640,7 +638,11 @@ if args.run_oe_eval_experiments:
     # tested reasonably extensively with 70B
     if num_gpus > 1:
         num_gpus *= 2
+    # double GPUs for reasoning models
+    if args.oe_eval_task_suite == 'SAFETY_EVAL_REASONING':
+        num_gpus *= 2
     oe_eval_cmd += f" --num_gpus {num_gpus}"
+
     if args.oe_eval_max_length:
         oe_eval_cmd += f" --max-length {args.oe_eval_max_length}"
     # Add task suite parameter
@@ -669,70 +671,3 @@ if args.run_oe_eval_experiments:
 
     print(f"Running OE eval with command: {oe_eval_cmd}")
     subprocess.Popen(oe_eval_cmd, shell=True)
-
-# create an experiment that runs the safety eval tasks
-if args.run_safety_evaluations:
-    # just take the original spec we had, modify it for safety eval.
-    experiment_name = f"oi_safety_{model_name}"
-    experiment_name = experiment_name.replace('β', '').replace(r"{", "").replace(r"}", "") # hack: remove characters beaker doesn't like
-    d["description"] = experiment_name
-    # specific image for safety eval
-    d["tasks"][0]["image"]["beaker"] = "hamishivi/open-safety"
-    if args.use_alternate_safety_image:
-        d["tasks"][0]["image"]["beaker"] = args.use_alternate_safety_image
-    d["tasks"] = [d["tasks"][0]]
-    task_spec = d["tasks"][0]
-    task_spec["name"] = experiment_name
-    task_spec["arguments"][0] = '''
-VLLM_WORKER_MULTIPROC_METHOD=spawn PYTHONPATH=. python evaluation/run_all_generation_benchmarks.py \
-    --model_name_or_path /model \
-    --model_input_template_path_or_name hf \
-    --report_output_path /output/metrics.json \
-    --save_individual_results_path /output/all.json \
-'''
-    # some copied logic
-    if model_info[0].startswith("hf-"):  # if it's a huggingface model, load it from the model hub and delete mount `/model`
-        task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", f"--model_name_or_path {model_info[1]} --hf_revision {args.hf_revision}")]
-        task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", f"--tokenizer_name_or_path {model_info[1]}")]
-        del task_spec['datasets'][1]
-    elif model_info[1].startswith("/"):  # if it's a local model, load it from the local directory and delete mount `/model`
-        assert weka_available, "NFS / Weka is required for path-based models."  # to be safe.
-        task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
-        task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", "--tokenizer_name_or_path "+model_info[1])]
-        del task_spec['datasets'][1]
-    else:  # if it's a beaker model, mount the beaker dataset to `/model`
-        task_spec['datasets'][1]['source']['beaker'] = model_info[1]
-
-    task_spec = adjust_gpus(
-        task_spec=task_spec,
-        experiment_group="safety_eval",
-        model_name=model_info[0],
-        gpu_multiplier=args.gpu_multiplier,
-    )
-
-    # add gpu information.
-    # we just assume you want to use all the gpus for one task at a time
-    if "70B" in model_info[0]:
-        task_spec['resources']['gpuCount'] = 8
-    num_gpus = task_spec['resources']['gpuCount']
-    task_spec["arguments"][0]+= f" --min_gpus_per_task {num_gpus}"
-
-    if args.upload_to_hf:
-        hf_dataset = args.upload_to_hf
-        # to match the way oe-eval script works.
-        # if we prepended hf- to the model name, remove it.
-        # if model_name.startswith("hf-"):
-        #     model_name = model_name[3:]
-        # Above is no longer the case, oe-eval includes hf- again
-        task_spec['arguments'] = [task_spec['arguments'][0] + f" --upload_to_hf {hf_dataset} --hf_upload_name results/{model_name}"]
-
-    d["tasks"] = [task_spec]
-    if not os.path.exists("configs/beaker_configs/auto_created"):
-        os.makedirs("configs/beaker_configs/auto_created")
-    fn = "configs/beaker_configs/auto_created/{}.yaml".format(experiment_name)
-    os.makedirs(os.path.dirname(fn), exist_ok=True)
-    with open(fn, "w") as file:
-        yaml.dump(d, file, default_flow_style=True)
-
-    cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
-    subprocess.Popen(cmd, shell=True)
