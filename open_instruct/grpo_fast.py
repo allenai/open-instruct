@@ -706,8 +706,10 @@ class PolicyTrainerRayProcess(RayProcess):
             dist_init_required=True,
         )
         torch.set_float32_matmul_precision("high")
-        with Timer("torch.compile()"):
+        logger.info("About to compile main model")
+        with Timer("compile main model"):
             self.model.compile()
+        logger.info("Finished compiling main model")
         optimization_steps_done = 0
         if args.checkpoint_state_dir:
             # check if the dir exists
@@ -782,6 +784,10 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         disable_dropout_in_model(self.ref_policy)
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
+        logger.info("About to compile reference model")
+        with Timer("compile reference model"):
+            self.ref_policy.compile()
+        logger.info("Finished compiling reference model")
         self.ref_policy.eval()
 
         # Load reference policy checkpoint if available
