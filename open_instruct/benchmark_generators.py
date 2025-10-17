@@ -519,6 +519,25 @@ def run_benchmark(
             model_flops_per_second = model_flops / batch_generation_time if batch_generation_time > 0 else 0
             result_dict["mfu"] = 100 * model_flops_per_second / (model_dims.device_flops * num_gpus)
 
+            if result_dict["mfu"] > 100:
+                logger.error(
+                    f"MFU exceeds 100%! MFU={result_dict['mfu']:.2f}%. "
+                    f"This indicates a bug in the calculation. Logging inputs for reproduction:\n"
+                    f"  prompt_lengths={all_prompt_lengths}\n"
+                    f"  response_lengths={all_response_lengths}\n"
+                    f"  samples_per_prompt={args.num_samples_per_prompt_rollout}\n"
+                    f"  batch_generation_time={batch_generation_time:.4f}s\n"
+                    f"  num_gpus={num_gpus}\n"
+                    f"  model_flops={model_flops / 1e15:.4f} PFLOPs\n"
+                    f"  flops_per_second={model_flops_per_second / 1e12:.4f} TFLOPs/s\n"
+                    f"  peak_flops_per_gpu={model_dims.device_flops / 1e12:.4f} TFLOPs/s\n"
+                    f"  total_peak_flops={model_dims.device_flops * num_gpus / 1e12:.4f} TFLOPs/s\n"
+                    f"  device_name={model_dims.device_name}\n"
+                    f"  model: layers={model_dims.num_layers}, hidden={model_dims.hidden_size}, "
+                    f"intermediate={model_dims.intermediate_size}, vocab={model_dims.vocab_size}, "
+                    f"  heads={model_dims.num_attn_heads}, kv_heads={model_dims.num_kv_heads}"
+                )
+
             # Calculate total memory bytes for all prompts and responses in the batch
             model_memory_bytes = model_dims.memory_bytes(
                 all_prompt_lengths, all_response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
@@ -527,6 +546,25 @@ def run_benchmark(
             # MBU = (Memory bytes / time) / (peak_bandwidth * num_gpus) * 100
             model_bytes_per_second = model_memory_bytes / batch_generation_time if batch_generation_time > 0 else 0
             result_dict["mbu"] = 100 * model_bytes_per_second / (model_dims.device_memory_bandwidth * num_gpus)
+
+            if result_dict["mbu"] > 100:
+                logger.error(
+                    f"MBU exceeds 100%! MBU={result_dict['mbu']:.2f}%. "
+                    f"This indicates a bug in the calculation. Logging inputs for reproduction:\n"
+                    f"  prompt_lengths={all_prompt_lengths}\n"
+                    f"  response_lengths={all_response_lengths}\n"
+                    f"  samples_per_prompt={args.num_samples_per_prompt_rollout}\n"
+                    f"  batch_generation_time={batch_generation_time:.4f}s\n"
+                    f"  num_gpus={num_gpus}\n"
+                    f"  model_memory_bytes={model_memory_bytes / 1e12:.4f} TB\n"
+                    f"  bytes_per_second={model_bytes_per_second / 1e12:.4f} TB/s\n"
+                    f"  peak_bandwidth_per_gpu={model_dims.device_memory_bandwidth / 1e12:.4f} TB/s\n"
+                    f"  total_peak_bandwidth={model_dims.device_memory_bandwidth * num_gpus / 1e12:.4f} TB/s\n"
+                    f"  device_name={model_dims.device_name}\n"
+                    f"  model: layers={model_dims.num_layers}, hidden={model_dims.hidden_size}, "
+                    f"intermediate={model_dims.intermediate_size}, vocab={model_dims.vocab_size}, "
+                    f"heads={model_dims.num_attn_heads}, kv_heads={model_dims.num_kv_heads}"
+                )
 
             save_completion_lengths([result_dict], timestamp, batch_idx, args.num_samples_per_prompt_rollout)
             results.append(result_dict)
