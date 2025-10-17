@@ -620,6 +620,10 @@ class PolicyTrainerRayProcess(RayProcess):
         wandb_url: str,
         tokenizer: PreTrainedTokenizer,
     ):
+        logging.getLogger().setLevel(logging.INFO)
+        for handler in logging.getLogger().handlers:
+            handler.setLevel(logging.INFO)
+
         # ------------------------------------------------------------
         # Monkey patch to load checkpoints with `weights_only=False`
         # otherwise it errors out with:
@@ -701,6 +705,7 @@ class PolicyTrainerRayProcess(RayProcess):
             lr_scheduler=scheduler,
             dist_init_required=True,
         )
+        torch.set_float32_matmul_precision("high")
         with Timer("torch.compile()"):
             self.model.compile()
         optimization_steps_done = 0
