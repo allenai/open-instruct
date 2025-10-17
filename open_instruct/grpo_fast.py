@@ -3091,7 +3091,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     pprint([args, model_config])
 
     # Initialize Ray before creating Ray objects
-    ray.init(dashboard_host="0.0.0.0", runtime_env={'excludes': ['.git/']})
+    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"]})
 
     # Create Ray queues.
     # Since we now send/receive individual prompts, queue size should accommodate
