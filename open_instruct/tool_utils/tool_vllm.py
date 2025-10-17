@@ -71,27 +71,29 @@ class ToolUseLLM(LLM):
             if isinstance(sp, SamplingParams):
                 # We only care about the final output
                 sp.output_kind = RequestOutputKind.FINAL_ONLY
-                # TOOL VLLM CHANGE: override the sampling params to have n=1
-                sp.n = 1
-        
-        # TOOL VLLM CHANGE: duplicate out prompts based on n.
-        prompts = [prompt for prompt in prompts for _ in range(sp.n)]
+
+        # TOOL VLLM CHANGE: override the sampling params to have n=1
+        assert not isinstance(params, Sequence), "ToolUseLLM only supports one sampling param setting for all requests."
+        self.single_n_sampling_params = copy.deepcopy(params)
+        self.single_n_sampling_params.n = 1
 
         # Add requests to the engine.
         for i, prompt in enumerate(prompts):
-            if isinstance(prompt, dict):
-                self._validate_mm_data_and_uuids(
-                    prompt.get("multi_modal_data"), prompt.get("multi_modal_uuids")
+            for j in range(params.n):
+                if isinstance(prompt, dict):
+                    self._validate_mm_data_and_uuids(
+                        prompt.get("multi_modal_data"), prompt.get("multi_modal_uuids")
+                    )
+                request_id = f"{i}-{j}"
+                lora_request = lora_request[i] if isinstance(lora_request, Sequence) else lora_request
+                priority = priority[i] if priority else 0
+                self.llm_engine.add_request(
+                    request_id,
+                    prompt,
+                    self.single_n_sampling_params,
+                    lora_request=lora_request,
+                    priority=priority,
                 )
-
-            self._add_request(
-                prompt,
-                params[i] if isinstance(params, Sequence) else params,
-                lora_request=lora_request[i]
-                if isinstance(lora_request, Sequence)
-                else lora_request,
-                priority=priority[i] if priority else 0,
-            )
 
     def _run_engine(self, *, use_tqdm: bool | Callable[..., tqdm] = True) -> list[Union[RequestOutput, PoolingRequestOutput]]:
         # Initialize tqdm.
@@ -204,6 +206,8 @@ class ToolUseLLM(LLM):
                         else:
                             # Extend token ids and corresponding logprobs for continued model output
                             concat_outputs[output.request_id].outputs[0].token_ids.extend(o.token_ids)
+                            if getattr(o, "logprobs", None) is None:
+                                o.logprobs = [{tid: types.SimpleNamespace(logprob=0.0)} for tid in o.token_ids]
                             concat_outputs[output.request_id].outputs[0].logprobs.extend(o.logprobs)
                             if (
                                 len(concat_outputs[output.request_id].outputs[0].token_ids)
@@ -318,7 +322,7 @@ and you will get the output between the <output> and </output> tags.
     console.print(f"system_prompt: {system_prompt}")
     prompts = [
         "User: Write a python program which calculates the sum of 1 3 4. Then write another separate program to calculate the product of 1 3 4.\nAssistant:",
-        "User: Write a python program which prints 'Hello, Costa!'.\nAssistant:",
+        "User: Write a python program which prints 'Hello, Hamish!'.\nAssistant:",
     ]
     prompts = [system_prompt + "\n\n" + p for p in prompts]
 
@@ -375,7 +379,8 @@ and you will get the output between the <output> and </output> tags.
 
         tok = AutoTokenizer.from_pretrained(model_name)
         prompt_token_ids = [tok.encode(p) for p in prompts]
-        outputs = llm.generate(prompt_token_ids=prompt_token_ids, sampling_params=sampling_params)
+        prompt = [TokensPrompt(prompt_token_ids=p) for p in prompt_token_ids]
+        outputs = llm.generate(prompt, sampling_params=sampling_params)
         for i, output in enumerate(outputs):
             prompt = tok.decode(output.prompt_token_ids)
             console.rule(f"Conversation {i}")
