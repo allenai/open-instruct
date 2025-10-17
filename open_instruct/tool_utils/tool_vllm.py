@@ -21,7 +21,7 @@ from rich.console import Console
 from tqdm import tqdm
 from vllm import LLM, PoolingParams, PoolingRequestOutput, PromptType, RequestOutput, SamplingParams, TokensPrompt
 from vllm.lora.request import LoRARequest
-from vllm.model_executor.guided_decoding.guided_fields import GuidedDecodingRequest
+from vllm.sampling_params import GuidedDecodingParams
 from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sampling_params import RequestOutputKind
 
@@ -48,7 +48,7 @@ class ToolUseLLM(LLM):
         params: Union[SamplingParams, Sequence[SamplingParams], PoolingParams, Sequence[PoolingParams]],
         lora_request: Optional[Union[Sequence[LoRARequest], LoRARequest]],
         prompt_adapter_request: Optional[PromptAdapterRequest],
-        guided_options: Optional[GuidedDecodingRequest] = None,
+        guided_options: Optional[GuidedDecodingParams] = None,
         priority: Optional[list[int]] = None,
     ) -> None:
         """@vwxyzjn: we keep everything the same except override the sampling params to have n=1 for `ToolUseLLM`"""
@@ -71,7 +71,9 @@ class ToolUseLLM(LLM):
 
         for sp in params if isinstance(params, list) else (params,):
             if isinstance(sp, SamplingParams):
-                self._add_guided_params(sp, guided_options)
+                # Use new API: set guided decoding directly on SamplingParams
+                if guided_options is not None:
+                    sp.guided_decoding = guided_options
 
                 # We only care about the final output
                 sp.output_kind = RequestOutputKind.FINAL_ONLY
