@@ -1697,6 +1697,7 @@ GPU_SPECS = {
     "a6000": {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9},  # 768 GB/s GDDR6
     "l40s": {"flops": 362e12, "memory_size": 48e9, "memory_bandwidth": 864e9},  # 864 GB/s GDDR6
     "pro 6000": {"flops": 503.8e12, "memory_size": 96e9, "memory_bandwidth": 1792e9},  # 1792 GB/s GDDR7
+    "6000": {"flops": 728.5e12, "memory_size": 48e9, "memory_bandwidth": 960e9},  # 960 GB/s GDDR6
 }
 
 # Conventions for FLOPs calculations (fixed; not switches)
@@ -2059,10 +2060,33 @@ class ModelDims:
 
 
 def get_device_name(device_name: str) -> str:
+    """Normalize a GPU device name to a standard key used in GPU_SPECS.
+
+    The function converts device names from torch.cuda.get_device_name() format
+    to a standardized key that can be used to look up GPU specifications.
+
+    Args:
+        device_name: Raw device name string (e.g., "NVIDIA H100 80GB HBM3")
+
+    Returns:
+        Standardized GPU key (e.g., "h100")
+
+    Raises:
+        ValueError: If the device name is not recognized
+
+    Examples:
+        >>> get_device_name("NVIDIA H100 80GB HBM3")
+        'h100'
+
+        >>> get_device_name("NVIDIA RTX PRO 6000 Blackwell Server Edition")
+        'pro 6000'
+    """
     normalized_device_name = device_name.lower().replace("-", " ")
 
     for key in GPU_SPECS.keys():
         if key in normalized_device_name:
             return key
-
-    raise ValueError(f"Unsupported device name: {device_name}. Expected one of: {list(GPU_SPECS.keys())}")
+    raise ValueError(
+        f"Unknown device name: {device_name}. Expected one of: {list(GPU_SPECS.keys())}. "
+        f"Please raise an issue at https://github.com/allenai/open-instruct/issues with the device you need. In the interim, you can add the specs for your device using the name {normalized_device_name} to the GPU_SPECS dictionary in utils.py."
+    )
