@@ -3,7 +3,7 @@ import time
 import unittest
 
 from open_instruct.tools.python_tool.tool import PythonCodeTool
-from open_instruct.tools.utils.tools import MaxCallsExceededTool, Tool, ToolOutput
+from open_instruct.tools.utils.tool_classes import MaxCallsExceededTool, Tool, ToolOutput
 
 
 class TestToolOutput(unittest.TestCase):

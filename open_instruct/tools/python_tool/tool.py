@@ -4,7 +4,7 @@ import traceback
 
 import requests
 
-from open_instruct.tools.utils.tools import Tool, ToolOutput
+from open_instruct.tools.utils.tool_classes import Tool, ToolOutput
 
 
 class PythonCodeTool(Tool):
