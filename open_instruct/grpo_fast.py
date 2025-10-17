@@ -48,7 +48,6 @@ from open_instruct import utils
 
 # isort: on
 import asyncio
-import copy
 import json
 import logging
 import math
@@ -2174,9 +2173,7 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
 
     """Set up training and evaluation datasets."""
     transform_fn_args = [
-        {
-            "system_prompt_override": system_prompt_override,
-        },
+        {"system_prompt_override": system_prompt_override},
         {"max_prompt_token_length": args.max_prompt_token_length},
     ]
     train_dataset = get_cached_dataset_tulu(

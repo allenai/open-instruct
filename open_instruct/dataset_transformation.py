@@ -1235,6 +1235,7 @@ def rlvr_tokenize_v2(
     row.pop(sft_messages_key)
     return row
 
+
 def rlvr_tokenize_v3(
     row: Dict[str, Any],
     tokenizer: PreTrainedTokenizer,
@@ -1296,11 +1297,7 @@ def rlvr_filter_v1(
     return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
 
 
-def rlvr_filter_v2(
-    row: Dict[str, Any],
-    tokenizer: PreTrainedTokenizer,
-    max_prompt_token_length: Optional[int] = None,
-):
+def rlvr_filter_v2(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_prompt_token_length: Optional[int] = None):
     max_prompt_token_length_ok = True
     if max_prompt_token_length is not None:
         max_prompt_token_length_ok = len(row[INPUT_IDS_PROMPT_KEY]) <= max_prompt_token_length
