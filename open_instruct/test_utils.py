@@ -326,3 +326,188 @@ class TestFlatArguments(unittest.TestCase):
 #             "natolambert/tulu-v2-sft-mixture-science": 7468,  # original data slightly different
 #         }
 #         _ = get_datasets(dataset_mixer, splits=["train"], columns_to_keep=["messages"])
+
+
+class TestModelDims(unittest.TestCase):
+    def setUp(self):
+        self.model_dims = utils.ModelDims(
+            num_layers=32,
+            hidden_size=4096,
+            intermediate_size=11008,
+            vocab_size=32000,
+            num_attn_heads=32,
+            num_kv_heads=8,
+            device_name="a100",
+        )
+
+    def test_basic_properties(self):
+        self.assertEqual(self.model_dims.head_dim, 128)
+        self.assertEqual(self.model_dims.device_flops, 312e12)
+        self.assertEqual(self.model_dims.device_memory_bandwidth, 1.6e12)
+
+    def test_flops_are_positive(self):
+        prompt_lengths = [100]
+        response_lengths = [50]
+
+        prefill_flops = self.model_dims.prefill_flops(prompt_lengths)
+        decode_flops = self.model_dims.decode_flops(prompt_lengths, response_lengths)
+        total_flops = self.model_dims.flops(prompt_lengths, response_lengths)
+
+        self.assertGreater(prefill_flops, 0)
+        self.assertGreater(decode_flops, 0)
+        self.assertGreater(total_flops, 0)
+        self.assertEqual(total_flops, prefill_flops + decode_flops)
+
+    def test_memory_bytes_are_positive(self):
+        prompt_lengths = [100]
+        response_lengths = [50]
+
+        prefill_memory = self.model_dims.prefill_memory_bytes(prompt_lengths)
+        decode_memory = self.model_dims.decode_memory_bytes(prompt_lengths, response_lengths)
+        total_memory = self.model_dims.memory_bytes(prompt_lengths, response_lengths)
+
+        self.assertGreater(prefill_memory, 0)
+        self.assertGreater(decode_memory, 0)
+        self.assertGreater(total_memory, 0)
+        self.assertEqual(total_memory, prefill_memory + decode_memory)
+
+    def test_flops_scale_with_batch_size(self):
+        single_batch_flops = self.model_dims.flops([100], [50])
+        double_batch_flops = self.model_dims.flops([100, 100], [50, 50])
+
+        self.assertAlmostEqual(double_batch_flops, 2 * single_batch_flops, delta=single_batch_flops * 0.01)
+
+    def test_memory_bytes_scale_with_batch_size(self):
+        single_batch_memory = self.model_dims.memory_bytes([100], [50])
+        double_batch_memory = self.model_dims.memory_bytes([100, 100], [50, 50])
+
+        self.assertGreater(double_batch_memory, single_batch_memory)
+
+    @parameterized.expand(
+        [
+            ("single_sample", [100], [50], 1, 8823.30, 8),
+            ("multiple_samples", [100], [50, 50], 2, 8823.30, 8),
+            ("bug_case_256_completions", [100] * 64, [32000] * 256, 4, 8823.30, 8),
+        ]
+    )
+    def test_mbu_never_exceeds_100_percent(
+        self, name, prompt_lengths, response_lengths, samples_per_prompt, elapsed_time_seconds, num_gpus
+    ):
+        total_memory_bytes = self.model_dims.memory_bytes(
+            prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt
+        )
+        bytes_per_second = total_memory_bytes / elapsed_time_seconds
+        total_bandwidth = self.model_dims.device_memory_bandwidth * num_gpus
+        mbu_percent = 100 * bytes_per_second / total_bandwidth
+
+        self.assertLessEqual(
+            mbu_percent,
+            100,
+            f"{name}: MBU should never exceed 100%, but got {mbu_percent:.2f}%. "
+            f"Memory bytes: {total_memory_bytes / 1e9:.2f} GB, "
+            f"Elapsed time: {elapsed_time_seconds:.2f}s, "
+            f"Bytes/sec: {bytes_per_second / 1e12:.2f} TB/s, "
+            f"Total bandwidth: {total_bandwidth / 1e12:.2f} TB/s",
+        )
+
+    @parameterized.expand(
+        [
+            ("single_sample", [100], [50], 1, 8823.30, 8),
+            ("multiple_samples", [100], [50, 50], 2, 8823.30, 8),
+            ("bug_case_256_completions", [100] * 64, [32000] * 256, 4, 8823.30, 8),
+        ]
+    )
+    def test_mfu_never_exceeds_100_percent(
+        self, name, prompt_lengths, response_lengths, samples_per_prompt, elapsed_time_seconds, num_gpus
+    ):
+        total_flops = self.model_dims.flops(prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt)
+        flops_per_second = total_flops / elapsed_time_seconds
+        total_device_flops = self.model_dims.device_flops * num_gpus
+        mfu_percent = 100 * flops_per_second / total_device_flops
+
+        self.assertLessEqual(
+            mfu_percent,
+            100,
+            f"{name}: MFU should never exceed 100%, but got {mfu_percent:.2f}%. "
+            f"FLOPs: {total_flops / 1e12:.2f} TFLOPs, "
+            f"Elapsed time: {elapsed_time_seconds:.2f}s, "
+            f"FLOPs/sec: {flops_per_second / 1e12:.2f} TFLOPs/s, "
+            f"Total device FLOPs: {total_device_flops / 1e12:.2f} TFLOPs/s",
+        )
+
+    def test_bug_case_256_completions_32k_tokens(self):
+        num_unique_prompts = 64
+        samples_per_prompt = 4
+        prompt_lengths = [100] * num_unique_prompts
+        response_lengths = [32000] * (num_unique_prompts * samples_per_prompt)
+        elapsed_time = 8823.30
+        num_gpus = 8
+
+        total_memory_bytes = self.model_dims.memory_bytes(
+            prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt
+        )
+        bytes_per_second = total_memory_bytes / elapsed_time
+        total_bandwidth = self.model_dims.device_memory_bandwidth * num_gpus
+        mbu_percent = 100 * bytes_per_second / total_bandwidth
+
+        total_flops = self.model_dims.flops(prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt)
+        flops_per_second = total_flops / elapsed_time
+        total_device_flops = self.model_dims.device_flops * num_gpus
+        mfu_percent = 100 * flops_per_second / total_device_flops
+
+        self.assertLessEqual(
+            mbu_percent,
+            100,
+            f"Bug case: MBU={mbu_percent:.2f}% should be <= 100%. "
+            f"Total tokens: {sum(response_lengths)}, "
+            f"Memory bytes: {total_memory_bytes / 1e12:.2f} TB, "
+            f"Bandwidth: {bytes_per_second / 1e12:.2f} TB/s, "
+            f"Peak: {total_bandwidth / 1e12:.2f} TB/s",
+        )
+
+        self.assertLessEqual(
+            mfu_percent,
+            100,
+            f"Bug case: MFU={mfu_percent:.2f}% should be <= 100%. "
+            f"FLOPs: {total_flops / 1e15:.2f} PFLOPs, "
+            f"FLOPs/s: {flops_per_second / 1e12:.2f} TFLOPs/s, "
+            f"Peak: {total_device_flops / 1e12:.2f} TFLOPs/s",
+        )
+
+    def test_samples_per_prompt_scaling(self):
+        prompt_lengths = [100]
+
+        memory_1_sample = self.model_dims.memory_bytes(prompt_lengths, [50], samples_per_prompt=1)
+        memory_4_samples = self.model_dims.memory_bytes(prompt_lengths, [50, 50, 50, 50], samples_per_prompt=4)
+
+        self.assertGreater(memory_4_samples, memory_1_sample)
+
+    def test_decode_flops_increase_with_response_length(self):
+        prompt_lengths = [100]
+        short_response = [10]
+        long_response = [100]
+
+        short_flops = self.model_dims.decode_flops(prompt_lengths, short_response)
+        long_flops = self.model_dims.decode_flops(prompt_lengths, long_response)
+
+        self.assertGreater(long_flops, short_flops)
+
+    def test_kv_cache_read_bytes_with_multiple_samples(self):
+        prompt_lengths = [100]
+        response_lengths = [50, 50]
+        samples_per_prompt = 2
+
+        kv_read_bytes = self.model_dims.kv_cache_read_bytes(
+            prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt
+        )
+
+        self.assertGreater(kv_read_bytes, 0)
+
+    def test_training_flops_are_3x_inference(self):
+        prompt_lengths = [100]
+        response_lengths = [50]
+
+        inference_flops = self.model_dims.flops(prompt_lengths, response_lengths, is_training=False)
+        training_flops = self.model_dims.flops(prompt_lengths, response_lengths, is_training=True)
+
+        self.assertEqual(training_flops, 3 * inference_flops)

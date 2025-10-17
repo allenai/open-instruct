@@ -42,26 +42,38 @@ else:
     DATA_DIR = pathlib.Path("/tmp") / "open_instruct_generators_benchmark"
 
 
-def save_completion_lengths(batch_results: list[dict], timestamp: int, batch_idx: int):
+def save_completion_lengths(batch_results: list[dict], timestamp: int, batch_idx: int, num_samples_per_prompt: int):
     """
-    Save completion lengths to CSV file.
+    Save completion and prompt lengths to CSV file.
 
     Args:
         batch_results: List of batch result dictionaries
         timestamp: Unix timestamp
+        num_samples_per_prompt: Number of samples per prompt
     """
     csv_path = DATA_DIR / f"completion_lengths_{timestamp}.csv"
 
     with open(csv_path, "a", newline="") as csvfile:
-        fieldnames = ["batch_num", "prompt_num", "completion_length"]
+        fieldnames = ["batch_num", "prompt_num", "prompt_length", "completion_length"]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
 
         for batch_result in batch_results:
             response_lengths = batch_result["response_lengths"]
-            for i, length in enumerate(response_lengths):
-                writer.writerow({"batch_num": batch_idx, "prompt_num": i, "completion_length": length})
-    logger.info(f"Saved completion lengths to {csv_path}.")
+            prompt_lengths = batch_result["prompt_lengths"]
+            expanded_prompt_lengths = []
+            for prompt_length in prompt_lengths:
+                expanded_prompt_lengths.extend([prompt_length] * num_samples_per_prompt)
+            for i, (prompt_length, response_length) in enumerate(zip(expanded_prompt_lengths, response_lengths)):
+                writer.writerow(
+                    {
+                        "batch_num": batch_idx,
+                        "prompt_num": i,
+                        "prompt_length": prompt_length,
+                        "completion_length": response_length,
+                    }
+                )
+    logger.info(f"Saved completion and prompt lengths to {csv_path}.")
 
 
 def save_config(args, tokenizer_config, model_config, timestamp: int):
@@ -238,7 +250,9 @@ def setup_vllm_engines(
 ) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue]:
     """Set up vLLM engines and queues."""
     logger.info("[SETUP] Setting up vLLM engines...")
-    logger.info(f"[SETUP] Config: num_engines={args.vllm_num_engines}, TP={args.vllm_tensor_parallel_size}, PP={args.vllm_pipeline_parallel_size}")
+    logger.info(
+        f"[SETUP] Config: num_engines={args.vllm_num_engines}, TP={args.vllm_tensor_parallel_size}, PP={args.vllm_pipeline_parallel_size}"
+    )
 
     logger.info("[SETUP] Initializing Ray...")
     ray.init(dashboard_host="0.0.0.0")
@@ -491,6 +505,7 @@ def run_benchmark(
                 "num_new_tokens": total_new_tokens,
                 "finish_reasons": collections.Counter(all_finish_reasons),
                 "response_lengths": all_response_lengths,
+                "prompt_lengths": all_prompt_lengths,
                 "dataset_indices": all_dataset_indices,
             }
 
@@ -513,7 +528,7 @@ def run_benchmark(
             model_bytes_per_second = model_memory_bytes / batch_generation_time if batch_generation_time > 0 else 0
             result_dict["mbu"] = 100 * model_bytes_per_second / (model_dims.device_memory_bandwidth * num_gpus)
 
-            save_completion_lengths([result_dict], timestamp, batch_idx)
+            save_completion_lengths([result_dict], timestamp, batch_idx, args.num_samples_per_prompt_rollout)
             results.append(result_dict)
             logger.info(
                 f"Batch {batch_idx}/{num_batches - 1}: "
@@ -658,6 +673,20 @@ def print_summary(
     print(f"- 90th percentile: {np.percentile(agg_results['response_lengths'], 90):.2f} tokens")
     print(f"- 95th percentile: {np.percentile(agg_results['response_lengths'], 95):.2f} tokens")
     print(f"- 99th percentile: {np.percentile(agg_results['response_lengths'], 99):.2f} tokens")
+
+    print("\nPrompt lengths:")
+    print(f"- Min: {min(agg_results['prompt_lengths'])} tokens")
+    print(f"- Max: {max(agg_results['prompt_lengths'])} tokens")
+    print(f"- Mean: {np.mean(agg_results['prompt_lengths']):.2f} tokens")
+    print(f"- Median: {np.median(agg_results['prompt_lengths']):.2f} tokens")
+
+    print("\nPrompt length percentiles:")
+    print(f"- 25th percentile: {np.percentile(agg_results['prompt_lengths'], 25):.2f} tokens")
+    print(f"- 50th percentile: {np.percentile(agg_results['prompt_lengths'], 50):.2f} tokens")
+    print(f"- 75th percentile: {np.percentile(agg_results['prompt_lengths'], 75):.2f} tokens")
+    print(f"- 90th percentile: {np.percentile(agg_results['prompt_lengths'], 90):.2f} tokens")
+    print(f"- 95th percentile: {np.percentile(agg_results['prompt_lengths'], 95):.2f} tokens")
+    print(f"- 99th percentile: {np.percentile(agg_results['prompt_lengths'], 99):.2f} tokens")
 
     print("=" * 60)
 
