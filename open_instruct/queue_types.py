@@ -33,10 +33,10 @@ class GenerationResult:
     masks: List[List[int]]
     request_info: RequestInfo
     dataset_index: Optional[int] = None
-    training_step: Optional[int] = None
+    epoch_number: Optional[int] = None
     token_statistics: Optional[TokenStatistics] = None
     start_time: Optional[float] = None
-    logprobs: Optional[List[List[float]]] = None  # logprobs for each token in each response
+    logprobs: Optional[List[List[float]]] = None
 
 
 @dataclass
@@ -50,6 +50,7 @@ class PromptRequest:
 
     prompt: List[int]
     generation_config: Any
+    epoch_number: Optional[int] = None
     training_step: Optional[int] = None
     dataset_index: Optional[int] = None
     is_eval: bool = False

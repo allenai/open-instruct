@@ -22,6 +22,7 @@ import queue
 import sys
 import threading
 import time
+import types
 from collections import defaultdict
 from concurrent import futures
 from datetime import timedelta
@@ -173,9 +174,10 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     assert len(output.outputs) <= 1, f"{len(output.outputs)=}"  # In tool mode, sampling_params.n == 1
     o = output.outputs[0]
 
-    # Update concatenated outputs
     if output.request_id in tracking["concat_outputs"]:
-        tracking["concat_outputs"][output.request_id].outputs[0].token_ids.extend(o.token_ids)
+        stored = tracking["concat_outputs"][output.request_id].outputs[0]
+        stored.token_ids.extend(o.token_ids)
+        stored.logprobs.extend(o.logprobs)
     else:
         tracking["concat_outputs"][output.request_id] = output
 
@@ -266,7 +268,7 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
             tool_calleds=tool_calleds,
         ),
         dataset_index=metadata["dataset_index"],
-        training_step=metadata["training_step"],
+        epoch_number=metadata["epoch_number"],
         token_statistics=TokenStatistics(
             num_prompt_tokens=metadata["prompt_tokens"],
             num_response_tokens=total_generation_tokens,
@@ -371,6 +373,7 @@ def add_request(
     request_metadata[request_id] = {
         "is_eval": request.is_eval,
         "dataset_index": request.dataset_index,
+        "epoch_number": request.epoch_number,
         "training_step": request.training_step,
         "sampling_params": sampling_params,
         "original_sampling_params": request.generation_config,
@@ -831,7 +834,12 @@ class LLMRayActor:
             elif len(tool_output_token_ids) > remaining:
                 tool_output_token_ids = tool_output_token_ids[:remaining]
 
-            tracking["concat_outputs"][req_id].outputs[0].token_ids.extend(tool_output_token_ids)
+            # Extend token_ids and logprobs for tool output tokens so lengths stay aligned
+            concat_out = tracking["concat_outputs"][req_id].outputs[0]
+            concat_out.token_ids.extend(tool_output_token_ids)
+            # use placeholder logprobs for new tokens
+            # TODO: can we do something fancier here, or allow it?
+            concat_out.logprobs.extend([{tid: types.SimpleNamespace(logprob=0.0)} for tid in tool_output_token_ids])
             tracking["masks"][req_id].extend([0] * len(tool_output_token_ids))
             new_sample_tokens = sampling_params.max_tokens - len(tracking["masks"][req_id])
             can_make_new_request = can_make_new_request and new_sample_tokens > 0
@@ -905,6 +913,8 @@ class LLMRayActor:
         while not self.inflight_updates:
             pending_tools = len(self.tracking["pending_tool_futures"])
             unfinished = self.llm_engine.get_num_unfinished_requests()
+            # if a background thread is dead, raise an error.
+            self.check_background_threads()
 
             if pending_tools == 0 and unfinished == 0:
                 break
