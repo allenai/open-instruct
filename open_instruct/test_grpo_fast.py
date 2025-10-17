@@ -1,7 +1,10 @@
 import gc
 import os
+import random
+import threading
+import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 import numpy as np
 import ray
@@ -12,7 +15,7 @@ from transformers import AutoTokenizer
 from vllm import SamplingParams
 
 from open_instruct import grpo_fast, model_utils, utils
-from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo
+from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.vllm_utils3 import create_vllm_engines
 
 
@@ -156,12 +159,8 @@ class TestGrpoFastBase(unittest.TestCase):
 
         return mock_dims
 
-    def create_mock_result(self, dataset_index, training_step, num_samples_per_prompt=1):
+    def create_mock_result(self, dataset_index, epoch_number, num_samples_per_prompt=1):
         """Create a mock GenerationResult."""
-        import time
-
-        from open_instruct.queue_types import TokenStatistics
-
         total_responses = num_samples_per_prompt
 
         return GenerationResult(
@@ -177,11 +176,12 @@ class TestGrpoFastBase(unittest.TestCase):
                 tool_calleds=[False] * total_responses,
             ),
             dataset_index=dataset_index,
-            training_step=training_step,
+            epoch_number=epoch_number,
             start_time=time.perf_counter(),
             token_statistics=TokenStatistics(
                 num_prompt_tokens=10, num_response_tokens=3 * total_responses, generation_time=0.1
             ),
+            logprobs=[[0.0, 0.0, 0.0] for _ in range(total_responses)],
         )
 
     def setup_and_split_batch(
@@ -201,9 +201,6 @@ class TestGrpoFastBase(unittest.TestCase):
             queries=queries, ground_truths=ground_truths, datasets=datasets, raw_queries=raw_queries, indices=indices
         )
 
-        # Create a mock generation_config for testing
-        from unittest.mock import MagicMock
-
         mock_generation_config = MagicMock()
         mock_generation_config.n = 4
 
@@ -213,7 +210,7 @@ class TestGrpoFastBase(unittest.TestCase):
         mock_args.inference_batch_size = max(1, len(queries) // num_engines)
 
         grpo_fast.split_and_insert_batch(
-            batch, training_step, pending_queries_map, param_prompt_Q, mock_generation_config, False
+            batch, 0, training_step, pending_queries_map, param_prompt_Q, mock_generation_config, False
         )
 
         return param_prompt_Q, inference_results_Q, pending_queries_map
@@ -319,7 +316,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
             self.assertEqual(request.training_step, 1)
             self.assertIsInstance(request.dataset_index, int)
 
-            mock_result = self.create_mock_result(request.dataset_index, request.training_step)
+            mock_result = self.create_mock_result(request.dataset_index, request.epoch_number)
             inference_results_Q.put(mock_result)
             batch_idx += 1
 
@@ -394,7 +391,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         batch_idx = 0
         while not param_prompt_Q.empty():
             request = param_prompt_Q.get()
-            mock_result = self.create_mock_result(request.dataset_index, request.training_step)
+            mock_result = self.create_mock_result(request.dataset_index, request.epoch_number)
             inference_results_Q.put(mock_result)
             batch_idx += 1
 
@@ -447,7 +444,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         batch_idx = 0
         while not param_prompt_Q.empty():
             request = param_prompt_Q.get()
-            mock_result = self.create_mock_result(request.dataset_index, request.training_step, num_samples_per_prompt)
+            mock_result = self.create_mock_result(request.dataset_index, request.epoch_number, num_samples_per_prompt)
             inference_results_Q.put(mock_result)
             batch_idx += 1
 
@@ -506,9 +503,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
     @ray.remote
     def mock_vllm_engine(engine_id, prompt_queue, results_queue, num_samples_per_prompt=1):
         """Mock vLLM engine that processes prompts from queue."""
-        import random
-        import time
-
         while True:
             # Get request from queue
             request = prompt_queue.get()
@@ -562,7 +556,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
         # Put results back in REVERSE order to simulate out-of-order processing
         for request in reversed(requests):
-            mock_result = self.create_mock_result(request.dataset_index, request.training_step, num_samples_per_prompt)
+            mock_result = self.create_mock_result(request.dataset_index, request.epoch_number, num_samples_per_prompt)
             inference_results_Q.put(mock_result)
 
         # Accumulate results
@@ -576,7 +570,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
             inference_results_Q,
             pending_queries_map,
             mock_args,
-            training_step=1,
             generation_config=mock_generation_config,
             num_prompts=num_prompts,
             model_dims=mock_model_dims,
@@ -589,9 +582,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
     def test_thread_safety_pending_queries_map(self):
         """Test concurrent access to pending_queries_map."""
-        import threading
-        import time
-
         pending_queries_map = grpo_fast.PendingQueriesMap()
         errors = []
         num_threads = 4
@@ -662,9 +652,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
         mock_args = self.create_mock_args(num_engines)
 
-        # Test that accumulate blocks when missing an engine
-        import threading
-
         completed = threading.Event()
 
         def run_accumulate():
@@ -678,7 +665,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                     inference_results_Q,
                     pending_queries_map,
                     mock_args,
-                    training_step=1,
                     generation_config=mock_generation_config,
                     num_prompts=num_prompts,
                     model_dims=mock_model_dims,
@@ -720,9 +706,6 @@ class TestStreamingAccumulation(TestGrpoFastBase):
             queries=queries, ground_truths=ground_truths, datasets=datasets, raw_queries=raw_queries, indices=indices
         )
 
-        # Create a mock generation_config
-        from unittest.mock import MagicMock
-
         mock_generation_config = MagicMock()
         mock_generation_config.n = 1
 
@@ -732,6 +715,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         grpo_fast.split_and_insert_batch(
             batch,
+            epoch_number=0,
             training_step=1,
             pending_queries_map=pending_queries_map,
             param_prompt_Q=param_prompt_Q,
@@ -773,9 +757,6 @@ class TestStreamingAccumulation(TestGrpoFastBase):
             queries=queries, ground_truths=ground_truths, datasets=datasets, raw_queries=raw_queries, indices=indices
         )
 
-        # Create a mock generation_config
-        from unittest.mock import MagicMock
-
         mock_generation_config = MagicMock()
         mock_generation_config.n = 1
 
@@ -785,6 +766,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         grpo_fast.split_and_insert_batch(
             batch,
+            epoch_number=0,
             training_step=1,
             pending_queries_map=pending_queries_map,
             param_prompt_Q=param_prompt_Q,
@@ -826,7 +808,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         # Create mock results - one per prompt
         for i in range(num_prompts):
-            mock_result = self.create_mock_result(i, training_step=1)
+            mock_result = self.create_mock_result(i, epoch_number=1)
             inference_results_Q.put(mock_result)
 
         # Simulate streaming accumulation logic
@@ -879,7 +861,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         # Create results - one per prompt with multiple samples
         for i in range(num_prompts):
-            mock_result = self.create_mock_result(i, training_step=1, num_samples_per_prompt=num_samples)
+            mock_result = self.create_mock_result(i, epoch_number=1, num_samples_per_prompt=num_samples)
             inference_results_Q.put(mock_result)
 
         # Process results

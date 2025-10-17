@@ -22,6 +22,7 @@ import queue
 import sys
 import threading
 import time
+import types
 from collections import defaultdict
 from concurrent import futures
 from datetime import timedelta
@@ -37,6 +38,7 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed.distributed_c10d import (
     Backend,
     PrefixStore,
+    ProcessGroup,
     Store,
     _new_process_group_helper,
     _world,
@@ -172,9 +174,10 @@ def _handle_output(output, tools, tracking, sampling_params, max_tool_calls, exe
     assert len(output.outputs) <= 1, f"{len(output.outputs)=}"  # In tool mode, sampling_params.n == 1
     o = output.outputs[0]
 
-    # Update concatenated outputs
     if output.request_id in tracking["concat_outputs"]:
-        tracking["concat_outputs"][output.request_id].outputs[0].token_ids.extend(o.token_ids)
+        stored = tracking["concat_outputs"][output.request_id].outputs[0]
+        stored.token_ids.extend(o.token_ids)
+        stored.logprobs.extend(o.logprobs)
     else:
         tracking["concat_outputs"][output.request_id] = output
 
@@ -265,7 +268,7 @@ def process_completed_request(request_id, outs, tracking, current_time, tools, r
             tool_calleds=tool_calleds,
         ),
         dataset_index=metadata["dataset_index"],
-        training_step=metadata["training_step"],
+        epoch_number=metadata["epoch_number"],
         token_statistics=TokenStatistics(
             num_prompt_tokens=metadata["prompt_tokens"],
             num_response_tokens=total_generation_tokens,
@@ -307,9 +310,9 @@ def init_process_group(
     world_size: int = -1,
     rank: int = -1,
     store: Optional[Store] = None,
-    group_name: str = None,
+    group_name: Optional[str] = None,
     pg_options: Optional[Any] = None,
-):
+) -> ProcessGroup:
     assert (store is None) or (init_method is None), "Cannot specify both init_method and store."
 
     if store is not None:
@@ -370,6 +373,7 @@ def add_request(
     request_metadata[request_id] = {
         "is_eval": request.is_eval,
         "dataset_index": request.dataset_index,
+        "epoch_number": request.epoch_number,
         "training_step": request.training_step,
         "sampling_params": sampling_params,
         "original_sampling_params": request.generation_config,
@@ -404,11 +408,10 @@ class LLMRayActor:
         actor_manager: ray.actor.ActorHandle,
         inference_batch_size: Optional[int],
         inflight_updates: bool,
-        verbose: bool = False,
         **kwargs,
     ):
         assert_threaded_actor(self)
-        self._init_config(tools, max_tool_calls, inference_batch_size, inflight_updates, verbose)
+        self._init_config(tools, max_tool_calls, inference_batch_size, inflight_updates)
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
@@ -432,14 +435,12 @@ class LLMRayActor:
         max_tool_calls: Optional[Dict[str, int]],
         inference_batch_size: Optional[int],
         inflight_updates: bool,
-        verbose: bool,
     ) -> None:
         self.logger = logger_utils.setup_logger(__name__)
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.inference_batch_size = inference_batch_size
         self.inflight_updates = inflight_updates
-        self.verbose = verbose
         self.request_metadata = {}
         self.vllm_active_requests = set()
 
@@ -471,8 +472,7 @@ class LLMRayActor:
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
-            if self.verbose:
-                logger.info(f"creating LLM with bundle_indices={bundle_indices}")
+            logger.debug(f"creating LLM with bundle_indices={bundle_indices}")
 
         engine_args = vllm.EngineArgs(*args, **kwargs)
         # Log stats causes a crash in the engine at assert outputs.scheduler_stats is not None when we call step() and there is nothing to step.
@@ -834,7 +834,12 @@ class LLMRayActor:
             elif len(tool_output_token_ids) > remaining:
                 tool_output_token_ids = tool_output_token_ids[:remaining]
 
-            tracking["concat_outputs"][req_id].outputs[0].token_ids.extend(tool_output_token_ids)
+            # Extend token_ids and logprobs for tool output tokens so lengths stay aligned
+            concat_out = tracking["concat_outputs"][req_id].outputs[0]
+            concat_out.token_ids.extend(tool_output_token_ids)
+            # use placeholder logprobs for new tokens
+            # TODO: can we do something fancier here, or allow it?
+            concat_out.logprobs.extend([{tid: types.SimpleNamespace(logprob=0.0)} for tid in tool_output_token_ids])
             tracking["masks"][req_id].extend([0] * len(tool_output_token_ids))
             new_sample_tokens = sampling_params.max_tokens - len(tracking["masks"][req_id])
             can_make_new_request = can_make_new_request and new_sample_tokens > 0
@@ -908,6 +913,8 @@ class LLMRayActor:
         while not self.inflight_updates:
             pending_tools = len(self.tracking["pending_tool_futures"])
             unfinished = self.llm_engine.get_num_unfinished_requests()
+            # if a background thread is dead, raise an error.
+            self.check_background_threads()
 
             if pending_tools == 0 and unfinished == 0:
                 break
@@ -954,13 +961,6 @@ class LLMRayActor:
         """Get KV cache max concurrency from the vLLM engine."""
         kv_cache_specs = self.llm_engine.model_executor.get_kv_cache_specs()
         kv_cache_spec = kv_cache_specs[0]
-        # Group layers by their attention type (type_id) to handle models
-        # with sliding attention in some layers but not others
-        type_groups = defaultdict(list)
-        for layer_name, layer_spec in kv_cache_spec.items():
-            type_groups[layer_spec.type_id].append(layer_name)
-
-        grouped_layer_names = list(type_groups.values())
 
         page_size = kv_cache_utils.get_uniform_page_size(kv_cache_spec)
 
@@ -977,10 +977,10 @@ class LLMRayActor:
             for layer_name in kv_cache_spec
         ]
 
+        kv_cache_groups = kv_cache_utils.get_kv_cache_groups(vllm_config, kv_cache_spec)
+
         kv_cache_config = kv_cache_interface.KVCacheConfig(
-            num_blocks=num_blocks,
-            kv_cache_tensors=kv_cache_tensors,
-            kv_cache_groups=kv_cache_utils.create_kv_cache_group_specs(kv_cache_spec, grouped_layer_names),
+            num_blocks=num_blocks, kv_cache_tensors=kv_cache_tensors, kv_cache_groups=kv_cache_groups
         )
         max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(
             self.llm_engine.vllm_config, kv_cache_config
@@ -1030,7 +1030,6 @@ def create_vllm_engines(
     inference_batch_size: Optional[int] = None,
     use_fp8_kv_cache=False,
     inflight_updates: bool = False,
-    verbose: bool = False,
 ) -> list[LLMRayActor]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
@@ -1113,7 +1112,6 @@ def create_vllm_engines(
                 inflight_updates=inflight_updates,
                 kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
                 calculate_kv_scales=use_fp8_kv_cache,
-                verbose=verbose,
             )
         )
 

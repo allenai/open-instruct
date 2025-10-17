@@ -978,13 +978,16 @@ def maybe_update_beaker_description(
 
     try:
         client = beaker.Beaker.from_env()
-    except beaker.exceptions.ConfigurationError as e:
+    except beaker.exceptions.BeakerConfigurationError as e:
         logger.warning(f"Failed to initialize Beaker client: {e}")
         return
 
     try:
-        spec = client.experiment.get(experiment_id)
-    except beaker.exceptions.ExperimentNotFound:
+        # Get the workload first (experiment_id is actually BEAKER_WORKLOAD_ID)
+        workload = client.workload.get(experiment_id)
+        # Then get the experiment spec from the workload
+        spec = client.experiment.get_spec(workload)
+    except (beaker.exceptions.BeakerExperimentNotFound, ValueError):
         logger.warning(
             f"Failed to get Beaker experiment with ID: {experiment_id}"
             "This might be fine if you are e.g. running in an interactive job."
@@ -1025,7 +1028,8 @@ def maybe_update_beaker_description(
         description_components.append(progress_bar)
     new_description = " ".join(description_components)
     try:
-        client.experiment.set_description(experiment_id, new_description)
+        # Update the workload description using the workload object we got earlier
+        client.workload.update(workload, description=new_description)
     except requests.exceptions.HTTPError as e:
         logger.warning(
             f"Failed to update Beaker description due to HTTP error: {e}"
@@ -1692,6 +1696,8 @@ GPU_SPECS = {
     "h100": {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12},  # 3.35 TB/s HBM3
     "a6000": {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9},  # 768 GB/s GDDR6
     "l40s": {"flops": 362e12, "memory_size": 48e9, "memory_bandwidth": 864e9},  # 864 GB/s GDDR6
+    "pro 6000": {"flops": 503.8e12, "memory_size": 96e9, "memory_bandwidth": 1792e9},  # 1792 GB/s GDDR7
+    "6000": {"flops": 728.5e12, "memory_size": 48e9, "memory_bandwidth": 960e9},  # 960 GB/s GDDR6
 }
 
 # Conventions for FLOPs calculations (fixed; not switches)
@@ -2054,12 +2060,33 @@ class ModelDims:
 
 
 def get_device_name(device_name: str) -> str:
-    tokens = device_name.lower().replace("-", " ").split()
+    """Normalize a GPU device name to a standard key used in GPU_SPECS.
 
-    filtered = [val for val in tokens if val not in ["nvidia", "80gb", "40gb", "48gb", "hbm3", "rtx", "sxm4", "pcie"]]
+    The function converts device names from torch.cuda.get_device_name() format
+    to a standardized key that can be used to look up GPU specifications.
 
-    for token in filtered:
-        if token in GPU_SPECS:
-            return token
+    Args:
+        device_name: Raw device name string (e.g., "NVIDIA H100 80GB HBM3")
 
-    raise ValueError(f"Unsupported device name: {device_name}. Expected one of: {list(GPU_SPECS.keys())}")
+    Returns:
+        Standardized GPU key (e.g., "h100")
+
+    Raises:
+        ValueError: If the device name is not recognized
+
+    Examples:
+        >>> get_device_name("NVIDIA H100 80GB HBM3")
+        'h100'
+
+        >>> get_device_name("NVIDIA RTX PRO 6000 Blackwell Server Edition")
+        'pro 6000'
+    """
+    normalized_device_name = device_name.lower().replace("-", " ")
+
+    for key in GPU_SPECS.keys():
+        if key in normalized_device_name:
+            return key
+    raise ValueError(
+        f"Unknown device name: {device_name}. Expected one of: {list(GPU_SPECS.keys())}. "
+        f"Please raise an issue at https://github.com/allenai/open-instruct/issues with the device you need. In the interim, you can add the specs for your device using the name {normalized_device_name} to the GPU_SPECS dictionary in utils.py."
+    )

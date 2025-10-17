@@ -49,6 +49,7 @@ from open_instruct import utils
 # isort: on
 import asyncio
 import json
+import logging
 import math
 import random
 import shutil
@@ -138,7 +139,6 @@ from open_instruct.utils import (
 
 logger = logger_utils.setup_logger(__name__)
 
-api = HfApi()
 INVALID_LOGPROB = 1.0
 
 
@@ -258,6 +258,8 @@ class Args:
     """the length of the pack (you should prob set to the max length of the model)"""
     masked_mean_axis: Optional[int] = None
     """the axis to compute the mean of the masked values"""
+    masked_mean_denominator: Optional[float] = None
+    """Optional constant denominator for masked_mean; if set, divides by this instead of mask.sum"""
     alpha: float = 0.6
     """The alpha value for doing polyak updates (ref_param = alpha * param + (1 - alpha) * ref_param)
     reference: [TR-DPO](https://huggingface.co/papers/2404.09656), but it's actually pretty commonly
@@ -445,6 +447,10 @@ class Args:
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
+        if self.masked_mean_denominator is not None:
+            assert self.masked_mean_denominator > 0, (
+                f"masked_mean_denominator (={self.masked_mean_denominator}) must be greater than 0!"
+            )
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
@@ -453,8 +459,10 @@ class Args:
         )
         # Ensure we have enough prompts for all VLLM engines
         if self.num_unique_prompts_rollout < self.vllm_num_engines:
-            raise ValueError(
-                f"{self.num_unique_prompts_rollout=} must be >= {self.vllm_num_engines=} to avoid empty batches."
+            logger.warning(
+                f"With num_unique_prompts_rollout={self.num_unique_prompts_rollout} < "
+                f"vllm_num_engines={self.vllm_num_engines}, vllm will be generating data for multiple "
+                "batches simultaneously. This is fine but might be unexpected behaviour."
             )
         # Initialize stop_strings if None
         if self.stop_strings is None:
@@ -494,6 +502,10 @@ class Args:
                 if tool not in ["search", "code"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
+            if self.use_vllm_logprobs or self.truncated_importance_sampling_ratio_cap > 0.0:
+                assert self.mask_tool_use, (
+                    "Must mask tool use when using vLLM logprobs or truncated importance sampling."
+                )
 
 
 def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
@@ -508,12 +520,13 @@ def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
     )
 
 
-def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
+def masked_mean(
+    values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None, denominator: Optional[float] = None
+) -> torch.Tensor:
     """Compute mean of tensor with a masked values."""
-    if axis is not None:
-        return ((values * mask).sum(axis=axis) / mask.sum(axis=axis)).mean()
-    else:
-        return (values * mask).sum() / mask.sum()
+    numerator = (values * mask).sum(axis=axis)
+    denom = mask.sum(axis=axis) if denominator is None else denominator
+    return (numerator / denom).mean()
 
 
 class MetricsTracker:
@@ -558,6 +571,7 @@ class ShufflingIterator:
         self.data = data.copy()
         self.batch_size = batch_size
         self.index = 0
+        self.epoch_number = 0
         self.rng = np.random.default_rng(seed)
         self.rng.shuffle(self.data)
 
@@ -570,6 +584,7 @@ class ShufflingIterator:
     def __next__(self) -> List[int]:
         if self.index >= self.effective_size:
             self.index = 0
+            self.epoch_number += 1
             self.rng.shuffle(self.data)
 
         end_index = self.index + self.batch_size
@@ -582,13 +597,15 @@ class ShufflingIterator:
         """Get the current state of the iterator for checkpointing."""
         return {
             "index": self.index,
-            "data": self.data.copy(),  # Current shuffled order
+            "epoch_number": self.epoch_number,
+            "data": self.data.copy(),
             "rng_state": self.rng.bit_generator.state,
         }
 
     def set_state(self, state: Dict[str, Any]) -> None:
         """Restore the iterator state from a checkpoint."""
         self.index = state["index"]
+        self.epoch_number = state["epoch_number"]
         self.data = state["data"].copy()
         self.rng.bit_generator.state = state["rng_state"]
 
@@ -1144,7 +1161,12 @@ class PolicyTrainerRayProcess(RayProcess):
                         kl = kl4
 
                     # grpo change: directly subtract KL in loss (add)
-                    loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
+                    loss = masked_mean(
+                        pg_loss_max + (args.beta * kl),
+                        mb_response_masks_bool,
+                        args.masked_mean_axis,
+                        args.masked_mean_denominator,
+                    )
                     loss = loss / accumulation_steps
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
@@ -1152,10 +1174,18 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_step += 1
                     with torch.no_grad():
                         # NOTE: in packed implementation, kl calculation are averages over response tokens
-                        kl1_stats[i] = masked_mean(kl1, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, args.masked_mean_axis).float()
+                        kl1_stats[i] = masked_mean(
+                            kl1, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                        ).float()
+                        kl2_stats[i] = masked_mean(
+                            kl2, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                        ).float()
+                        kl3_stats[i] = masked_mean(
+                            kl3, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                        ).float()
+                        kl4_stats[i] = masked_mean(
+                            kl4, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                        ).float()
                         if args.kl_estimator == "kl1":
                             kl_loss_stats[i] = kl1_stats[i] * args.beta
                         elif args.kl_estimator == "kl2":
@@ -1165,15 +1195,22 @@ class PolicyTrainerRayProcess(RayProcess):
                         elif args.kl_estimator == "kl4":
                             kl_loss_stats[i] = kl4_stats[i] * args.beta
                         pg_clipfrac_stats[i] = masked_mean(
-                            (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
+                            (pg_losses2 > pg_losses).float(),
+                            mb_response_masks_bool,
+                            args.masked_mean_axis,
+                            args.masked_mean_denominator,
                         )
-                        pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
+                        pg_loss_stats[i] = masked_mean(
+                            pg_loss_max, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                        )
                         loss_stats[i] = loss
-                        ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
+                        ratio_stats[i] = masked_mean(
+                            ratio, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                        )
                         if args.record_entropy:
                             # Calculate entropy statistics
                             entropy_stats[i] = masked_mean(
-                                mb_entropy, mb_response_masks_bool, args.masked_mean_axis
+                                mb_entropy, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
                             ).float()
 
             with torch.no_grad():
@@ -1405,28 +1442,6 @@ class PendingQueriesMap:
                 # New entry - count starts at 1
                 self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, 1)
 
-    def insert_many(self, dataset_indices, queries, ground_truths, datasets, raw_queries):
-        """Insert or increment count for multiple dataset indices at once."""
-        with self._lock:
-            for i, dataset_idx in enumerate(dataset_indices):
-                current_raw_query = raw_queries[i]
-
-                if dataset_idx in self._map:
-                    # Already exists - just increment count
-                    existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count = self._map[
-                        dataset_idx
-                    ]
-                    self._map[dataset_idx] = (
-                        existing_query,
-                        existing_ground_truth,
-                        existing_dataset,
-                        existing_raw_query,
-                        count + 1,
-                    )
-                else:
-                    # New entry - count starts at 1
-                    self._map[dataset_idx] = (queries[i], ground_truths[i], datasets[i], current_raw_query, 1)
-
     def pop(self, dataset_idx):
         """Retrieve data and decrement count. Removes entry when count reaches 0."""
         with self._lock:
@@ -1539,7 +1554,6 @@ def accumulate_inference_batches(
     inference_results_Q: ray_queue.Queue,
     pending_queries_map: PendingQueriesMap,
     args: Args,
-    training_step: int,
     generation_config: vllm.SamplingParams,
     num_prompts: int,
     model_dims: utils.ModelDims,
@@ -1552,7 +1566,6 @@ def accumulate_inference_batches(
         inference_results_Q: Queue containing individual GenerationResult objects (one per prompt)
         pending_queries_map: PendingQueriesMap instance for thread-safe query tracking
         args: Arguments containing vllm_num_engines and batch size info
-        training_step: Current training step for error reporting
         generation_config: Generation config containing n (number of samples per prompt)
         num_prompts: Number of prompts to accumulate
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
@@ -1585,7 +1598,7 @@ def accumulate_inference_batches(
         assert len(result.responses) == generation_config.n, (
             f"Mismatch: individual prompt result has {len(result.responses)} responses "
             f"but expected {generation_config.n} samples per prompt. "
-            f"Dataset index: {result.dataset_index}, Training step: {training_step}"
+            f"Dataset index: {result.dataset_index}, Epoch: {result.epoch_number}"
         )
 
         query, ground_truth, dataset, raw_query = pending_queries_map.pop(result.dataset_index)
@@ -1667,7 +1680,8 @@ def accumulate_inference_batches(
         finish_reasons=combined_finish_reasons,
         masks=combined_masks,
         request_info=combined_request_info,
-        dataset_index=None,  # Not meaningful for combined result
+        dataset_index=None,
+        epoch_number=results[0].epoch_number,
         token_statistics=accumulated_stats,
         logprobs=combined_logprobs,
     )
@@ -1706,7 +1720,6 @@ def data_preparation_thread(
                 inference_results_Q,
                 pending_queries_map,
                 args,
-                training_step,
                 generation_config,
                 num_prompts=args.num_unique_prompts_rollout,
                 model_dims=model_dims,
@@ -2244,7 +2257,6 @@ def create_model_and_optimizer(
         inference_batch_size=args.inference_batch_size,
         use_fp8_kv_cache=args.use_fp8_kv_cache,
         inflight_updates=args.inflight_updates,
-        verbose=args.verbose,
     )
 
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
@@ -2296,6 +2308,7 @@ def create_generation_configs(args: Args):
 
 def split_and_insert_batch(
     batch: Batch,
+    epoch_number: int,
     training_step: int,
     pending_queries_map: PendingQueriesMap,
     param_prompt_Q: ray_queue.Queue,
@@ -2311,6 +2324,7 @@ def split_and_insert_batch(
             PromptRequest(
                 prompt=query,
                 generation_config=generation_config,
+                epoch_number=epoch_number,
                 training_step=training_step,
                 dataset_index=idx,
                 is_eval=is_eval,
@@ -2551,7 +2565,6 @@ def maybe_evaluate(
             evaluation_inference_results_Q,
             eval_pending_queries_map,
             args,
-            training_step,
             eval_generation_config,
             num_prompts=num_eval_prompts,
             model_dims=model_dims,
@@ -2880,6 +2893,7 @@ def run_training(
         batch = next_batch(dataset_indices, train_dataset)
         split_and_insert_batch(
             batch,
+            iter_dataloader.epoch_number,
             resume_training_step,
             pending_queries_map,
             param_prompt_Q,
@@ -2919,7 +2933,13 @@ def run_training(
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         batch = next_batch(next(iter_dataloader), train_dataset)
         split_and_insert_batch(
-            batch, training_step, pending_queries_map, param_prompt_Q, generation_configs["train"], is_eval=False
+            batch,
+            iter_dataloader.epoch_number,
+            training_step,
+            pending_queries_map,
+            param_prompt_Q,
+            generation_configs["train"],
+            is_eval=False,
         )
         if (
             training_step % args.local_eval_every == 0
@@ -2928,6 +2948,7 @@ def run_training(
         ):
             split_and_insert_batch(
                 eval_batch,
+                iter_dataloader.epoch_number,
                 training_step,
                 eval_pending_queries_map,
                 param_prompt_Q,
@@ -3023,6 +3044,12 @@ def run_training(
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+        for handler in logging.getLogger().handlers:
+            handler.setLevel(logging.DEBUG)
+
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
