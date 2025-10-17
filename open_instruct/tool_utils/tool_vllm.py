@@ -22,8 +22,8 @@ from tqdm import tqdm
 from vllm import LLM, PoolingParams, PoolingRequestOutput, PromptType, RequestOutput, SamplingParams, TokensPrompt
 from vllm.lora.request import LoRARequest
 from vllm.sampling_params import GuidedDecodingParams
-from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sampling_params import RequestOutputKind
+from vllm.inputs import DataPrompt
 
 # Import base classes from tools.py to avoid duplication
 from open_instruct.tool_utils.tools import MaxCallsExceededTool, PythonCodeTool, Tool
@@ -44,62 +44,61 @@ class ToolUseLLM(LLM):
 
     def _validate_and_add_requests(
         self,
-        prompts: Union[PromptType, Sequence[PromptType]],
-        params: Union[SamplingParams, Sequence[SamplingParams], PoolingParams, Sequence[PoolingParams]],
-        lora_request: Optional[Union[Sequence[LoRARequest], LoRARequest]],
-        prompt_adapter_request: Optional[PromptAdapterRequest],
-        guided_options: Optional[GuidedDecodingParams] = None,
-        priority: Optional[list[int]] = None,
+        prompts: PromptType | Sequence[PromptType] | DataPrompt,
+        params: SamplingParams
+        | Sequence[SamplingParams]
+        | PoolingParams
+        | Sequence[PoolingParams],
+        *,
+        use_tqdm: bool | Callable[..., tqdm] = True,
+        lora_request: Sequence[LoRARequest] | LoRARequest | None,
+        priority: list[int] | None = None,
     ) -> None:
         """@vwxyzjn: we keep everything the same except override the sampling params to have n=1 for `ToolUseLLM`"""
-        if guided_options is not None:
-            warnings.warn(
-                "guided_options_request is deprecated, use SamplingParams.guided_decoding instead",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
         if isinstance(prompts, (str, dict)):
             # Convert a single prompt to a list.
-            prompts = [prompts]
+            prompts = [prompts]  # type: ignore[list-item]
 
         num_requests = len(prompts)
-        if isinstance(params, list) and len(params) != num_requests:
+        if isinstance(params, Sequence) and len(params) != num_requests:
             raise ValueError("The lengths of prompts and params must be the same.")
-        if isinstance(lora_request, list) and len(lora_request) != num_requests:
-            raise ValueError("The lengths of prompts and lora_request must be the same.")
+        if isinstance(lora_request, Sequence) and len(lora_request) != num_requests:
+            raise ValueError(
+                "The lengths of prompts and lora_request must be the same."
+            )
 
-        for sp in params if isinstance(params, list) else (params,):
+        for sp in params if isinstance(params, Sequence) else (params,):
             if isinstance(sp, SamplingParams):
-                # Use new API: set guided decoding directly on SamplingParams
-                if guided_options is not None:
-                    sp.guided_decoding = guided_options
-
                 # We only care about the final output
                 sp.output_kind = RequestOutputKind.FINAL_ONLY
+                # TOOL VLLM CHANGE: override the sampling params to have n=1
+                sp.n = 1
+        
+        # TOOL VLLM CHANGE: duplicate out prompts based on n.
+        prompts = [prompt for prompt in prompts for _ in range(sp.n)]
 
-        # @vwxyzjn: ToolUseLLM change 1: override the sampling params to have n=1
-        assert not isinstance(params, list)
-        self.single_n_sampling_params = copy.deepcopy(params)
-        self.single_n_sampling_params.n = 1
         # Add requests to the engine.
         for i, prompt in enumerate(prompts):
-            for j in range(params.n):
-                request_id = f"{i}-{j}"
-                self.llm_engine.add_request(
-                    request_id,
-                    prompt,
-                    self.single_n_sampling_params,
-                    lora_request=lora_request[i] if isinstance(lora_request, Sequence) else lora_request,
-                    prompt_adapter_request=prompt_adapter_request,
-                    priority=priority[i] if priority else 0,
+            if isinstance(prompt, dict):
+                self._validate_mm_data_and_uuids(
+                    prompt.get("multi_modal_data"), prompt.get("multi_modal_uuids")
                 )
 
-    def _run_engine(self, *, use_tqdm: bool) -> list[Union[RequestOutput, PoolingRequestOutput]]:
+            self._add_request(
+                prompt,
+                params[i] if isinstance(params, Sequence) else params,
+                lora_request=lora_request[i]
+                if isinstance(lora_request, Sequence)
+                else lora_request,
+                priority=priority[i] if priority else 0,
+            )
+
+    def _run_engine(self, *, use_tqdm: bool | Callable[..., tqdm] = True) -> list[Union[RequestOutput, PoolingRequestOutput]]:
         # Initialize tqdm.
         if use_tqdm:
             num_requests = self.llm_engine.get_num_unfinished_requests()
-            pbar = tqdm(
+            tqdm_func = use_tqdm if callable(use_tqdm) else tqdm
+            pbar = tqdm_func(
                 total=num_requests,
                 desc="Processed prompts",
                 dynamic_ncols=True,
