@@ -33,9 +33,11 @@ print(result)
 
 Search external data sources for relevant information.
 
-**Usage**: Wrap queries in `<query>...</query>` tags:
+**Usage**: Wrap queries in `<query_s2>...</query_s2>`, `<query_you>...</query_you>`, or `<query_massive_ds>...</query_massive_ds>` tags:
 ```
-<query>machine learning transformers</query>
+<query_s2>machine learning transformers</query_s2>
+<query_you>machine learning transformers</query_you>
+<query_massive_ds>machine learning transformers</query_massive_ds>
 ```
 
 **Available backends**:

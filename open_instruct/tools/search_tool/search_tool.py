@@ -73,13 +73,19 @@ class SearchTool(Tool):
 class S2SearchTool(SearchTool):
     def __init__(self, *args, **kwargs):
         super().__init__(s2_get_snippets_for_query, *args, **kwargs)
+        self.start_str = "<query_s2>"
+        self.end_str = "</query_s2>"
 
 
 class YouSearchTool(SearchTool):
     def __init__(self, *args, **kwargs):
         super().__init__(you_get_snippets_for_query, *args, **kwargs)
+        self.start_str = "<query_you>"
+        self.end_str = "</query_you>"
 
 
 class MassiveDSSearchTool(SearchTool):
     def __init__(self, *args, **kwargs):
         super().__init__(massive_ds_get_snippets_for_query, *args, **kwargs)
+        self.start_str = "<query_massive_ds>"
+        self.end_str = "</query_massive_ds>"
