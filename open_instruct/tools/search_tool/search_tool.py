@@ -1,5 +1,6 @@
 import re
 import time
+from typing import Callable, List
 
 from open_instruct.tools.search_tool.massive_ds import get_snippets_for_query as massive_ds_get_snippets_for_query
 from open_instruct.tools.search_tool.s2 import get_snippets_for_query as s2_get_snippets_for_query
@@ -68,13 +69,16 @@ class SearchTool(Tool):
             end_str="\n</document>",
         )
 
+
 class S2SearchTool(SearchTool):
     def __init__(self, *args, **kwargs):
         super().__init__(s2_get_snippets_for_query, *args, **kwargs)
 
+
 class YouSearchTool(SearchTool):
     def __init__(self, *args, **kwargs):
         super().__init__(you_get_snippets_for_query, *args, **kwargs)
+
 
 class MassiveDSSearchTool(SearchTool):
     def __init__(self, *args, **kwargs):
