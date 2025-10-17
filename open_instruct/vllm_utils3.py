@@ -119,16 +119,16 @@ def _init_tool_tracking():
 def make_request_id(request: PromptRequest) -> str:
     """Generate a unique tracking key for a request."""
     prefix = "eval" if request.is_eval else "train"
-    return f"{prefix}_{request.training_step}_{request.dataset_index}"
+    return f"{prefix}_{request.epoch_number}_{request.training_step}_{request.dataset_index}"
 
 
 def _extract_base_request_id(full_request_id: str) -> str:
     """Extract base request ID by removing the sample suffix.
 
-    >>> _extract_base_request_id("train_1_43039_0")
-    'train_1_43039'
-    >>> _extract_base_request_id("eval_5_12345_2")
-    'eval_5_12345'
+    >>> _extract_base_request_id("train_0_1_43039_0")
+    'train_0_1_43039'
+    >>> _extract_base_request_id("eval_0_5_12345_2")
+    'eval_0_5_12345'
     """
     return "_".join(full_request_id.split("_")[:-1])
 
