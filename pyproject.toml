@@ -10,7 +10,7 @@ dependencies = [
     "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
     "datasets>=4.0.0",
     "debugpy>=1.8.13",
-    "deepspeed<0.17.6",
+    "deepspeed<0.17.6",  # version 17.6 and up break our training code right now
     "hf-transfer>=0.1.8",
     "litellm>=1.72.0,<1.75.2",  # avoid needing backoff https://github.com/BerriAI/litellm/issues/13827
     "matplotlib>=3.9.3",
