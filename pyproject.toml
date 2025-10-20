@@ -5,12 +5,12 @@ description = "Train open, instruction-following language models"
 readme = "README.md"
 requires-python = "==3.12.*"
 dependencies = [
-    "accelerate>=1.1.1",
+    "accelerate>=1.10.1",
     "antlr4-python3-runtime==4.11",
     "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
     "datasets>=4.0.0",
     "debugpy>=1.8.13",
-    "deepspeed==0.15.4", # 0.16.0 bugs out https://github.com/microsoft/DeepSpeed/issues/6793
+    "deepspeed<0.17.6",  # version 17.6 and up break our training code right now
     "hf-transfer>=0.1.8",
     "litellm>=1.72.0,<1.75.2",  # avoid needing backoff https://github.com/BerriAI/litellm/issues/13827
     "matplotlib>=3.9.3",
