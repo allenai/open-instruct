@@ -1698,7 +1698,7 @@ def check_oe_eval_internal():
 # For FLOPS, we assume bf16 and ignore sparsity.
 # Memory bandwidth values are peak theoretical bandwidth.
 GPU_SPECS = {
-    "a100": {"flops": 312e12, "memory_size": 80e9, "memory_bandwidth": 1.6e12},  # 1.6 TB/s HBM2e
+    "a100": {"flops": 312e12, "memory_size": 80e9, "memory_bandwidth": 2.0e12},  # 2.0 TB/s HBM2e (80GB variant)
     "b200": {"flops": 2250e12, "memory_size": 192e9, "memory_bandwidth": 8e12},  # 8 TB/s HBM3e
     "h100": {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12},  # 3.35 TB/s HBM3
     "a6000": {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9},  # 768 GB/s GDDR6
@@ -2015,7 +2015,10 @@ class ModelDims:
             response_idx += samples_per_prompt
             # In synchronized generation, all samples generate the same number of positions
             # (up to the max length among them)
-            unique_positions += max(prompt_responses) if prompt_responses else 0
+            max_response = max(prompt_responses) if prompt_responses else 0
+            # Weights are streamed once per global decode step, so only the largest response
+            # length across the batch contributes to weight read traffic.
+            unique_positions = max(unique_positions, max_response)
 
         weight_bytes = self.weight_memory_bytes(unique_positions, dtype_bytes)
 

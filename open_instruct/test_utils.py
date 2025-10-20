@@ -343,7 +343,7 @@ class TestModelDims(unittest.TestCase):
     def test_basic_properties(self):
         self.assertEqual(self.model_dims.head_dim, 128)
         self.assertEqual(self.model_dims.device_flops, 312e12)
-        self.assertEqual(self.model_dims.device_memory_bandwidth, 1.6e12)
+        self.assertEqual(self.model_dims.device_memory_bandwidth, 2.0e12)
 
     def test_flops_are_positive(self):
         prompt_lengths = [100]
