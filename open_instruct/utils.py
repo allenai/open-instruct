@@ -1769,7 +1769,6 @@ class ModelDims:
           - Efficient GQA/MQA K/V projections with width = num_kv_heads * head_dim.
           - Softmax ≈ 4 FLOPs per score (see SOFTMAX_FLOPS_PER_SCORE).
           - LayerNorms and minor ops ignored (dominated by matmuls).
-          - Causal attention
         """
         d = self.head_dim
         mul = FLOP_PER_MAC
