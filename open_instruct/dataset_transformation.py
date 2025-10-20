@@ -1247,16 +1247,13 @@ def rlvr_tokenize_v3(
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
     # if the prompt has multiple messages, make sure we don't end in an assistant message.
-    if len(prompt) > 1:
-        if prompt[-1]["role"] == "assistant":
-            prompt = prompt[:-1]
+    if len(prompt) > 1 and prompt[-1]["role"] == "assistant":
+        prompt = prompt[:-1]
     # override the system prompt if we have a new one provided.
     if system_prompt_override:
-        # if the first message is a system message, override it.
         if prompt[0]["role"] == "system":
-            prompt[0]["content"] = system_prompt_override
-        else:
-            prompt = [{"role": "system", "content": system_prompt_override}] + prompt
+            del prompt[0]
+        prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
