@@ -253,6 +253,38 @@ class TestUtilityFunctions(unittest.TestCase):
     def test_wandb_url_to_run_path(self, url: str, expected_run_path: str):
         self.assertEqual(utils.wandb_url_to_run_path(url), expected_run_path)
 
+    @parameterized.expand(
+        [
+            ("NVIDIA H100 80GB HBM3", "h100"),
+            ("NVIDIA L40S", "l40s"),
+            ("NVIDIA RTX A6000", "a6000"),
+            ("NVIDIA A100-SXM4-80GB", "a100"),
+            ("NVIDIA RTX PRO 6000 Blackwell Server Edition", "pro 6000"),
+            ("NVIDIA RTX 6000 Ada Generation", "6000"),
+        ]
+    )
+    def test_get_device_name(self, device_name: str, expected_name: str):
+        result = utils.get_device_name(device_name)
+        self.assertEqual(result, expected_name)
+
+    @parameterized.expand(
+        [
+            ("NVIDIA H100 80GB HBM3", {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12}),
+            ("NVIDIA RTX A6000", {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9}),
+            (
+                "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+                {"flops": 503.8e12, "memory_size": 96e9, "memory_bandwidth": 1792e9},
+            ),
+            ("NVIDIA RTX 6000 Ada Generation", {"flops": 728.5e12, "memory_size": 48e9, "memory_bandwidth": 960e9}),
+        ]
+    )
+    def test_get_device_name_returns_correct_specs(self, device_name: str, expected_specs: dict):
+        device_key = utils.get_device_name(device_name)
+        specs = utils.GPU_SPECS[device_key]
+        self.assertEqual(specs["flops"], expected_specs["flops"])
+        self.assertEqual(specs["memory_size"], expected_specs["memory_size"])
+        self.assertEqual(specs["memory_bandwidth"], expected_specs["memory_bandwidth"])
+
 
 class TestFlatArguments(unittest.TestCase):
     def test_additional_model_args(self) -> None:

@@ -139,7 +139,6 @@ from open_instruct.utils import (
 
 logger = logger_utils.setup_logger(__name__)
 
-api = HfApi()
 INVALID_LOGPROB = 1.0
 
 
@@ -677,13 +676,10 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
-        # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
-        # AdamOptimizer = FusedAdam
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
             optim_params = self.policy.parameters()
-        # self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
         self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
@@ -874,7 +870,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
                         refs = [
                             engine.update_weight.remote(
-                                name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
+                                name, dtype=str(param.dtype), shape=shape, empty_cache=count == num_params
                             )
                             for engine in self.vllm_engines
                         ]
@@ -888,7 +884,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
                     refs = [
                         engine.update_weight.remote(
-                            name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
+                            name, dtype=str(param.dtype), shape=shape, empty_cache=count == num_params
                         )
                         for engine in self.vllm_engines
                     ]
@@ -1442,28 +1438,6 @@ class PendingQueriesMap:
             else:
                 # New entry - count starts at 1
                 self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, 1)
-
-    def insert_many(self, dataset_indices, queries, ground_truths, datasets, raw_queries):
-        """Insert or increment count for multiple dataset indices at once."""
-        with self._lock:
-            for i, dataset_idx in enumerate(dataset_indices):
-                current_raw_query = raw_queries[i]
-
-                if dataset_idx in self._map:
-                    # Already exists - just increment count
-                    existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count = self._map[
-                        dataset_idx
-                    ]
-                    self._map[dataset_idx] = (
-                        existing_query,
-                        existing_ground_truth,
-                        existing_dataset,
-                        existing_raw_query,
-                        count + 1,
-                    )
-                else:
-                    # New entry - count starts at 1
-                    self._map[dataset_idx] = (queries[i], ground_truths[i], datasets[i], current_raw_query, 1)
 
     def pop(self, dataset_idx):
         """Retrieve data and decrement count. Removes entry when count reaches 0."""
@@ -3088,7 +3062,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     pprint([args, model_config])
 
     # Initialize Ray before creating Ray objects
-    ray.init(dashboard_host="0.0.0.0")
+    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"]})
 
     # Create Ray queues.
     # Since we now send/receive individual prompts, queue size should accommodate

@@ -72,7 +72,7 @@ class TestVllmUtils3(unittest.TestCase):
                 "dataset_index": 43039,
                 "epoch_number": 0,
                 "training_step": 1,
-                "prompt_tokens": 10,
+                "prompt_token_ids": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
                 "start_time": 1000.0,
             }
         }
@@ -82,7 +82,6 @@ class TestVllmUtils3(unittest.TestCase):
         result, is_eval = process_completed_request(
             request_id=request_id,
             outs=[mock_request_output],
-            tracking={},
             current_time=1001.0,
             tools=tools,
             request_metadata=request_metadata,
@@ -144,7 +143,7 @@ class TestVllmUtils3(unittest.TestCase):
                 "dataset_index": 200,
                 "epoch_number": 0,
                 "training_step": 2,
-                "prompt_tokens": 5,
+                "prompt_token_ids": [1, 2, 3, 4, 5],
                 "start_time": 2000.0,
             }
         }
@@ -152,7 +151,6 @@ class TestVllmUtils3(unittest.TestCase):
         result, is_eval = process_completed_request(
             request_id=request_id,
             outs=[mock_request_output],
-            tracking={},
             current_time=2000.5,
             tools=None,
             request_metadata=request_metadata,
