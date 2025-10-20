@@ -1763,7 +1763,7 @@ class ModelDims:
         assert self.device_name in GPU_SPECS, f"Unknown device: {self.device_name}"
         return GPU_SPECS[self.device_name]["memory_bandwidth"]
 
-    def attn_flops(self, query_len: int, kv_len: int) -> int:
+    def attn_flops(self, query_len: int, kv_len: int, prefill: bool) -> int:
         """FLOPs for one layer of self-attention given query_len and kv_len.
 
         Assumptions:
@@ -1771,7 +1771,13 @@ class ModelDims:
           - Efficient GQA/MQA K/V projections with width = num_kv_heads * head_dim.
           - Softmax ≈ 4 FLOPs per score (see SOFTMAX_FLOPS_PER_SCORE).
           - LayerNorms and minor ops ignored (dominated by matmuls).
+          - Causal attention
         """
+        if prefill:
+            assert query_len == kv_len
+        else:
+            assert query_len == 1
+
         d = self.head_dim
         mul = FLOP_PER_MAC
 
@@ -1787,7 +1793,12 @@ class ModelDims:
         # Output projection
         out_proj = mul * query_len * self.hidden_size * self.hidden_size
 
-        return q_proj + kv_proj + qk + softmax + av + out_proj
+        if prefill:
+            # KV is cached, hence kv_proj is ignored.
+            # causal attention, hence attention flops is divided by 2.
+            return q_proj + (qk + softmax + av) / 2 + out_proj
+        else:
+            return q_proj + kv_proj + qk + softmax + av + out_proj
 
     def mlp_flops(self, seq_len: int) -> int:
         """Two matmuls dominate; activation cost under-counted on purpose."""
@@ -1801,7 +1812,7 @@ class ModelDims:
         """Prefill builds the KV cache; logits are computed once after each prompt."""
         total = 0
         for L in prompt_lengths:
-            total += self.num_layers * (self.attn_flops(L, L) + self.mlp_flops(L))
+            total += self.num_layers * (self.attn_flops(L, L, prefill=True) + self.mlp_flops(L))
             # Always include a single LM head after prefill (next-token logits)
             total += FLOP_PER_MAC * self.hidden_size * self.vocab_size
         return total
@@ -1829,7 +1840,7 @@ class ModelDims:
                 total += R * self.num_layers * self.mlp_flops(seq_len=1)
                 for t in range(R):
                     kv_len = P + t + 1  # prompt + generated so far + current
-                    total += self.num_layers * self.attn_flops(query_len=1, kv_len=kv_len)
+                    total += self.num_layers * self.attn_flops(query_len=1, kv_len=kv_len, prefill=False)
                 total += R * FLOP_PER_MAC * self.hidden_size * self.vocab_size
                 response_idx += 1
         return total
