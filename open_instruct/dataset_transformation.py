@@ -1688,7 +1688,42 @@ class DatasetConfig:
 
         return self.dataset.select(indices)
 
-
+def normalize_messages_field_order(dataset: Dataset) -> Dataset:
+    """Normalize the order of fields in messages structs to be consistent."""
+    if "messages" not in dataset.column_names:
+        return dataset
+    
+    # Check if messages is a list of structs
+    feature = dataset.features["messages"]
+    if not (hasattr(feature, 'feature') and hasattr(feature.feature, 'keys')):
+        return dataset
+    
+    # Define the canonical field order
+    canonical_order = ["role", "content"]
+    
+    def reorder_message_fields(example):
+        """Reorder fields in each message to match canonical order."""
+        if "messages" not in example:
+            return example
+            
+        reordered_messages = []
+        for msg in example["messages"]:
+            if isinstance(msg, dict):
+                # Create new dict with canonical field order
+                reordered_msg = {field: msg.get(field) for field in canonical_order if field in msg}
+                # Add any extra fields that weren't in canonical order
+                for key in msg:
+                    if key not in canonical_order:
+                        reordered_msg[key] = msg[key]
+                reordered_messages.append(reordered_msg)
+            else:
+                reordered_messages.append(msg)
+        
+        example["messages"] = reordered_messages
+        return example
+    
+    return dataset.map(reorder_message_fields, num_proc=1, desc="Normalizing message field order")
+    
 def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     assert len(dc.transform_fn) == len(dc.transform_fn_args), (
         f"transform_fn and transform_fn_args must have the same length: {dc.transform_fn=} != {dc.transform_fn_args=}"
@@ -1698,7 +1733,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     tokenizer = tc.tokenizer
     dataset = dc.dataset
-
+    dataset = normalize_messages_field_order(dataset)
     # Add dataset source field to track origin after shuffling
     dataset = dataset.map(
         lambda example: {**example, DATASET_ORIGIN_KEY: dc.dataset_name},
@@ -1717,7 +1752,9 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     # save a copy of the dataset pre-transformation
     untokenized_dataset = copy.deepcopy(dataset)
-    
+    tmp_dataset_name = dc.dataset_name.split('/')[-1]
+    untokenized_dataset.push_to_hub(f"allenai/{tmp_dataset_name}_tmp_ids", private=True)
+
     # Apply all transformations
     for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
         fn, fn_type = TRANSFORM_FNS[fn_name]
@@ -1949,10 +1986,10 @@ class LocalDatasetTransformationCache:
             untokenized_dataset = untokenized_dataset.cast_column("id", Value("string"))
 
             # Check for tool_calls in messages
-            for message in untokenized_dataset[0]["messages"]:
-                if "tool_calls" in message.keys():
-                    print("WARNING: tool_calls found in messages for dataset ", dc.dataset_name)
-            print("No issue with tool_calls")
+            # for message in untokenized_dataset[0]["messages"]:
+            #     if "tool_calls" in message.keys():
+            #         print("WARNING: tool_calls found in messages for dataset ", dc.dataset_name)
+            # print("No issue with tool_calls")
             
             untransformed_datasets.append(untokenized_dataset)
 
@@ -1996,7 +2033,7 @@ class LocalDatasetTransformationCache:
         # Combine untransformed datasets
         combined_untransformed_datasets = concatenate_datasets(untransformed_datasets)
         print("Uploading untransformed dataset to hub for inspection...")
-        combined_untransformed_datasets.push_to_hub("allenai/olmo-3-instruct-sft", private=True)
+        combined_untransformed_datasets.push_to_hub("allenai/olmo-3-instruct-sft-main", private=True)
         
         # Prepare return statistics
         all_statistics = {"per_dataset_stats": dataset_statistics, "dataset_order": dataset_order}
