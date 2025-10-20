@@ -1792,11 +1792,11 @@ class ModelDims:
         out_proj = mul * query_len * self.hidden_size * self.hidden_size
 
         if prefill:
-            # KV is cached, hence kv_proj is ignored.
             # causal attention, hence attention flops is divided by 2.
-            return q_proj + (qk + softmax + av) / 2 + out_proj
+            return q_proj + kv_proj + (qk + softmax + av) / 2 + out_proj
         else:
-            return q_proj + kv_proj + qk + softmax + av + out_proj
+            # KV is cached, hence kv_proj is ignored.
+            return q_proj + (qk + softmax + av) + out_proj
 
     def mlp_flops(self, seq_len: int) -> int:
         """Two matmuls dominate; activation cost under-counted on purpose."""
