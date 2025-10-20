@@ -1776,7 +1776,7 @@ class ModelDims:
         mul = FLOP_PER_MAC
 
         # Projections for the query_len new tokens
-        q_proj = mul * query_len * self.hidden_size * self.hidden_size
+        q_proj = mul * query_len * self.hidden_size * (self.num_attn_heads * d)
         kv_proj = mul * 2 * query_len * self.hidden_size * (self.num_kv_heads * d)  # GQA/MQA
 
         # Scores and attention-weighted values
@@ -1792,7 +1792,7 @@ class ModelDims:
     def mlp_flops(self, seq_len: int) -> int:
         """Two matmuls dominate; activation cost under-counted on purpose."""
         mul = FLOP_PER_MAC
-        first = mul * seq_len * self.hidden_size * self.intermediate_size
+        first = mul * seq_len * self.hidden_size * (self.intermediate_size * 2)  # times 2 due to SwiGLU
         act = seq_len * self.intermediate_size  # under-counted on purpose
         second = mul * seq_len * self.intermediate_size * self.hidden_size
         return first + act + second
