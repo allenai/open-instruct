@@ -1714,6 +1714,7 @@ class ModelDims:
     intermediate_size: int
     vocab_size: int
     num_attn_heads: int
+    head_dim: int
     num_kv_heads: Optional[int] = None
     device_name: Optional[str] = None
 
@@ -1744,12 +1745,9 @@ class ModelDims:
             intermediate_size=intermediate_size,
             vocab_size=model_config.get_vocab_size(),
             num_attn_heads=model_config.get_num_attention_heads(vllm_config.parallel_config),
+            head_dim=model_config.get_head_size(),
             num_kv_heads=model_config.get_num_kv_heads(vllm_config.parallel_config),
         )
-
-    @property
-    def head_dim(self) -> int:
-        return self.hidden_size // self.num_attn_heads
 
     @property
     def device_flops(self) -> float:
@@ -1903,10 +1901,9 @@ class ModelDims:
             Total bytes for KV cache writes across all layers
         """
         num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
-        head_dim = self.hidden_size // self.num_attn_heads
 
         # 2x for K and V
-        kv_write_bytes_per_token = 2 * num_kv * head_dim * dtype_bytes
+        kv_write_bytes_per_token = 2 * num_kv * self.head_dim * dtype_bytes
         return self.num_layers * num_tokens * kv_write_bytes_per_token
 
     def kv_cache_read_bytes(
@@ -1931,7 +1928,6 @@ class ModelDims:
         )
 
         num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
-        head_dim = self.hidden_size // self.num_attn_heads
 
         # For batched sampling with shared prompt KV cache:
         # - Prompt KV is read once per new token position across ALL samples (not per sample)
@@ -1961,7 +1957,7 @@ class ModelDims:
                 kv_read_terms += R * (R - 1) // 2
 
         # 2x for K and V
-        kv_bytes_per_token = 2 * num_kv * head_dim * dtype_bytes
+        kv_bytes_per_token = 2 * num_kv * self.head_dim * dtype_bytes
         return self.num_layers * kv_bytes_per_token * kv_read_terms
 
     def prefill_memory_bytes(self, prompt_lengths: list[int], dtype_bytes: int = 2) -> int:
