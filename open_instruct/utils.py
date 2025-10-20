@@ -1773,9 +1773,12 @@ class ModelDims:
         d = self.head_dim
         mul = FLOP_PER_MAC
 
+        q_dim = self.num_attn_heads * d
+        kv_dim = self.num_kv_heads * d
+
         # Projections for the query_len new tokens
-        q_proj = mul * query_len * self.hidden_size * (self.num_attn_heads * d)
-        kv_proj = mul * 2 * query_len * self.hidden_size * (self.num_kv_heads * d)  # GQA/MQA
+        q_proj = mul * query_len * self.hidden_size * q_dim
+        kv_proj = mul * 2 * query_len * self.hidden_size * kv_dim  # GQA/MQA
 
         # Scores and attention-weighted values
         qk = mul * self.num_attn_heads * query_len * kv_len * d
@@ -1783,7 +1786,7 @@ class ModelDims:
         av = mul * self.num_attn_heads * query_len * kv_len * d
 
         # Output projection
-        out_proj = mul * query_len * self.hidden_size * self.hidden_size
+        out_proj = mul * query_len * q_dim * self.hidden_size
 
         return q_proj + kv_proj + qk + softmax + av + out_proj
 
@@ -1866,13 +1869,14 @@ class ModelDims:
             Total bytes for weight reads across all layers
         """
         num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
+        hidden_q = self.num_attn_heads * self.head_dim
         hidden_kv = num_kv * self.head_dim
 
         # Per-layer weight params (Q, K, V, O, MLP up, MLP down)
-        w_q = self.hidden_size * (self.num_attn_heads * self.head_dim)
+        w_q = self.hidden_size * hidden_q
         w_k = self.hidden_size * hidden_kv
         w_v = self.hidden_size * hidden_kv
-        w_o = self.hidden_size * self.hidden_size
+        w_o = hidden_q * self.hidden_size
         w_up = self.hidden_size * (self.intermediate_size * 2)  # times 2 due to SwiGLU
         w_dn = self.intermediate_size * self.hidden_size
 
