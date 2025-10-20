@@ -355,6 +355,8 @@ class Args:
     """vLLM top p for nucleus sampling"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
+    compile_mode: str = "default"
+    """torch.compile mode: 'default', 'reduce-overhead', 'max-autotune', or 'max-autotune-no-cudagraphs'"""
     gather_whole_model: bool = True
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
     enable_queue_dashboard: bool = True
@@ -707,7 +709,7 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         torch.set_float32_matmul_precision("high")
         with Timer("compile main model"):
-            self.model.compile(compile_kwargs={"mode": "max-autotune"})
+            self.model.compile(compile_kwargs={"mode": args.compile_mode})
         optimization_steps_done = 0
         if args.checkpoint_state_dir:
             # check if the dir exists
@@ -783,7 +785,7 @@ class PolicyTrainerRayProcess(RayProcess):
         disable_dropout_in_model(self.ref_policy)
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
         with Timer("compile reference model"):
-            self.ref_policy.compile(compile_kwargs={"mode": "max-autotune"})
+            self.ref_policy.compile(compile_kwargs={"mode": args.compile_mode})
         self.ref_policy.eval()
 
         # Load reference policy checkpoint if available
