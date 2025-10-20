@@ -32,4 +32,5 @@ uv run python open_instruct/grpo_fast.py \
     --gradient_checkpointing \
     --single_gpu_mode \
     --push_to_hub false \
+    --system_prompt_override_file open_instruct/tools/system_prompts/cute_debug_system_prompt.txt \
     # --with_tracking
