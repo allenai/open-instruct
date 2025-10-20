@@ -5,6 +5,7 @@ from typing import Callable, List
 from open_instruct.tools.search_tool.massive_ds import get_snippets_for_query as massive_ds_get_snippets_for_query
 from open_instruct.tools.search_tool.s2 import get_snippets_for_query as s2_get_snippets_for_query
 from open_instruct.tools.search_tool.you import get_snippets_for_query as you_get_snippets_for_query
+from open_instruct.tools.search_tool.serper import get_snippets_for_query as serper_get_snippets_for_query
 from open_instruct.tools.utils.tool_classes import Tool, ToolOutput
 
 
@@ -89,3 +90,9 @@ class MassiveDSSearchTool(SearchTool):
         super().__init__(massive_ds_get_snippets_for_query, *args, **kwargs)
         self.start_str = "<query_massive_ds>"
         self.end_str = "</query_massive_ds>"
+
+class SerperSearchTool(SearchTool):
+    def __init__(self, *args, **kwargs):
+        super().__init__(serper_get_snippets_for_query, *args, **kwargs)
+        self.start_str = "<query_serper>"
+        self.end_str = "</query_serper>"

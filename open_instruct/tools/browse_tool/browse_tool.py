@@ -1,0 +1,77 @@
+import re
+import time
+from typing import Callable, Optional
+
+from open_instruct.tools.utils.tool_classes import Tool, ToolOutput
+
+from open_instruct.tools.browse_tool.crawl4ai import crawl_url as crawl4ai_crawl_url
+
+
+class BrowseTool(Tool):
+    def __init__(self, crawl_fn: Callable[[str], Optional[str]], api_endpoint: str, *args, **kwargs):
+        self.crawl_fn = crawl_fn
+        self.api_endpoint = api_endpoint
+        self.start_str = "<url>"
+        self.end_str = "</url>"
+        super().__init__(*args, **kwargs)
+
+    def __call__(self, prompt: str) -> ToolOutput:
+        # Find URL blocks using regex
+        re_str = r"<tool>\s*(.*?)\s*</tool>"  # we replace <tool> immediately with the custom start_str
+        re_str = re_str.replace("<tool>", self.start_str).replace("</tool>", self.end_str)
+
+        url_blocks = re.findall(re_str, prompt, re.DOTALL)
+
+        if len(url_blocks) == 0:
+            return ToolOutput(output="", called=False, error="", timeout=False, runtime=0)
+
+        # Only execute the last URL block
+        url_string = url_blocks[-1].strip()
+
+        if not url_string:
+            return ToolOutput(
+                output="", error="Empty URL. Please provide a valid URL.", called=True, timeout=False, runtime=0
+            )
+
+        # Validate URL format (basic check)
+        if not url_string.startswith(("http://", "https://")):
+            return ToolOutput(
+                output="",
+                error=f"Invalid URL format: {url_string}. URL must start with http:// or https://",
+                called=True,
+                timeout=False,
+                runtime=0,
+            )
+
+        start_time = time.time()
+        timeout = False
+        error = ""
+
+        markdown_content = self.crawl_fn(url_string, api_endpoint=self.api_endpoint)
+
+        if not markdown_content:
+            return ToolOutput(
+                output="",
+                error=f"Failed to crawl URL: {url_string}",
+                called=True,
+                timeout=False,
+                runtime=time.time() - start_time,
+            )
+
+        # Return the markdown content
+        return ToolOutput(
+            output=markdown_content.strip(),
+            called=True,
+            error=error,
+            timeout=timeout,
+            runtime=time.time() - start_time,
+            start_str="<webpage>\n",
+            end_str="\n</webpage>",
+        )
+
+
+class Crawl4aiBrowseTool(BrowseTool):
+    def __init__(self, *args, **kwargs):
+        super().__init__(crawl4ai_crawl_url, *args, **kwargs)
+        self.start_str = "<url_crawl4ai>"
+        self.end_str = "</url_crawl4ai>"
