@@ -1879,15 +1879,14 @@ class ModelDims:
             Total bytes for weight reads across all layers
         """
         num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
-        head_dim = self.hidden_size // self.num_attn_heads
-        hidden_kv = num_kv * head_dim
+        hidden_kv = num_kv * self.head_dim
 
         # Per-layer weight params (Q, K, V, O, MLP up, MLP down)
-        w_q = self.hidden_size * self.hidden_size
+        w_q = self.hidden_size * (self.num_attn_heads * self.head_dim)
         w_k = self.hidden_size * hidden_kv
         w_v = self.hidden_size * hidden_kv
         w_o = self.hidden_size * self.hidden_size
-        w_up = self.hidden_size * self.intermediate_size
+        w_up = self.hidden_size * (self.intermediate_size * 2)  # times 2 due to SwiGLU
         w_dn = self.intermediate_size * self.hidden_size
 
         per_layer_weight_bytes = (w_q + w_k + w_v + w_o + w_up + w_dn) * dtype_bytes
