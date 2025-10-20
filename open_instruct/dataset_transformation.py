@@ -1723,7 +1723,7 @@ def normalize_messages_field_order(dataset: Dataset) -> Dataset:
         return example
     
     return dataset.map(reorder_message_fields, num_proc=1, desc="Normalizing message field order")
-    
+
 def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     assert len(dc.transform_fn) == len(dc.transform_fn_args), (
         f"transform_fn and transform_fn_args must have the same length: {dc.transform_fn=} != {dc.transform_fn_args=}"
@@ -1752,8 +1752,9 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     # save a copy of the dataset pre-transformation
     untokenized_dataset = copy.deepcopy(dataset)
+    untokenized_dataset = normalize_messages_field_order(untokenized_dataset)
     tmp_dataset_name = dc.dataset_name.split('/')[-1]
-    untokenized_dataset.push_to_hub(f"allenai/{tmp_dataset_name}_tmp_ids", private=True)
+    #untokenized_dataset.push_to_hub(f"allenai/{tmp_dataset_name}_tmp_ids", private=True)
 
     # Apply all transformations
     for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
