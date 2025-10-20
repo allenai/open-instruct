@@ -49,7 +49,7 @@ from vllm.v1.core import kv_cache_utils
 from open_instruct import logger_utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
-from open_instruct.utils import ray_get_with_progress
+from open_instruct.utils import ModelDims, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -607,23 +607,9 @@ class LLMRayActor:
         self.loop_thread.start()
         init_complete.wait()
 
-    def get_model_dims_dict(self) -> Dict[str, int]:
-        """Get only the model dimensions as a simple dict without loading weights."""
-        model_config = self.llm_engine.model_config
-        parallel_config = self.llm_engine.vllm_config.parallel_config
-
-        # Extract only the necessary dimensions as simple Python types
-        hidden_size = model_config.get_hidden_size()
-        intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
-
-        return {
-            "num_layers": model_config.get_num_layers(parallel_config),
-            "hidden_size": hidden_size,
-            "intermediate_size": intermediate_size,
-            "vocab_size": model_config.get_vocab_size(),
-            "num_attn_heads": model_config.get_num_attention_heads(parallel_config),
-            "num_kv_heads": model_config.get_num_kv_heads(parallel_config),
-        }
+    def get_model_dims(self):
+        """Get only the model dimensions without loading weights."""
+        return ModelDims.from_vllm_config(self.llm_engine.vllm_config)
 
     def _should_stop(self) -> bool:
         if (time.perf_counter() - self._last_should_stop_update) > SHOULD_STOP_TIMEOUT_S:
