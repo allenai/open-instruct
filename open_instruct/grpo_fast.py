@@ -605,7 +605,7 @@ class ShufflingIterator:
     def set_state(self, state: Dict[str, Any]) -> None:
         """Restore the iterator state from a checkpoint."""
         self.index = state["index"]
-        self.epoch_number = state["epoch_number"]
+        self.epoch_number = state.get("epoch_number", 0)
         self.data = state["data"].copy()
         self.rng.bit_generator.state = state["rng_state"]
 
