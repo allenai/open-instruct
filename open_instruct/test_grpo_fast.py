@@ -16,7 +16,7 @@ from vllm import SamplingParams
 
 from open_instruct import grpo_fast, model_utils, utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
-from open_instruct.vllm_utils3 import create_vllm_engines
+from open_instruct.vllm_utils import create_vllm_engines
 
 
 class TestGrpoFastBase(unittest.TestCase):

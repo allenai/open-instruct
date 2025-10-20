@@ -26,7 +26,7 @@ import torch.utils.flop_counter
 import vllm
 from ray.util import queue as ray_queue
 
-from open_instruct import dataset_transformation, grpo_fast, logger_utils, model_utils, utils, vllm_utils3
+from open_instruct import dataset_transformation, grpo_fast, logger_utils, model_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.queue_types import PromptRequest
 
@@ -251,7 +251,7 @@ def setup_vllm_engines(
     queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
 
-    vllm_engines = vllm_utils3.create_vllm_engines(
+    vllm_engines = vllm_utils.create_vllm_engines(
         num_engines=args.vllm_num_engines,
         tensor_parallel_size=args.vllm_tensor_parallel_size,
         enforce_eager=True,
