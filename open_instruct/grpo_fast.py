@@ -171,8 +171,6 @@ class Args:
     """Whether to skip the cache."""
     shuffle_eval_dataset: bool = False
     """Whether to shuffle the evaluation dataset."""
-    max_token_length: int = 512
-    """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
     """The maximum prompt token length to use for the dataset"""
     system_prompt_override_file: Optional[str] = None
@@ -2144,7 +2142,7 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
 
     transform_fn_args = [
         {"system_prompt_override": system_prompt_override},
-        {"max_token_length": args.max_token_length, "max_prompt_token_length": args.max_prompt_token_length},
+        {"max_prompt_token_length": args.max_prompt_token_length},
     ]
     train_dataset = get_cached_dataset_tulu(
         dataset_mixer_list=args.dataset_mixer_list,
