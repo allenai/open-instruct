@@ -1296,7 +1296,9 @@ def rlvr_filter_v1(
     return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
 
 
-def rlvr_filter_v2(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_prompt_token_length: Optional[int] = None):
+def rlvr_max_length_filter_v2(
+    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_prompt_token_length: Optional[int] = None
+):
     if max_prompt_token_length is None:
         return True
     return len(row[INPUT_IDS_PROMPT_KEY]) <= max_prompt_token_length
@@ -1313,7 +1315,7 @@ TRANSFORM_FNS = {
     "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1_2, "map"),
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
     "rlvr_tokenize_v1": (rlvr_tokenize_v3, "map"),
-    "rlvr_filter_v1": (rlvr_filter_v2, "filter"),
+    "rlvr_max_lengthfilter_v1": (rlvr_max_length_filter_v2, "filter"),
 }
 
 
