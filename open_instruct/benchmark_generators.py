@@ -42,38 +42,26 @@ else:
     DATA_DIR = pathlib.Path("/tmp") / "open_instruct_generators_benchmark"
 
 
-def save_completion_lengths(batch_results: list[dict], timestamp: int, batch_idx: int, num_samples_per_prompt: int):
+def save_completion_lengths(batch_results: list[dict], timestamp: int, batch_idx: int):
     """
-    Save completion and prompt lengths to CSV file.
+    Save completion lengths to CSV file.
 
     Args:
         batch_results: List of batch result dictionaries
         timestamp: Unix timestamp
-        num_samples_per_prompt: Number of samples per prompt
     """
     csv_path = DATA_DIR / f"completion_lengths_{timestamp}.csv"
 
     with open(csv_path, "a", newline="") as csvfile:
-        fieldnames = ["batch_num", "prompt_num", "prompt_length", "completion_length"]
+        fieldnames = ["batch_num", "prompt_num", "completion_length"]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
 
         for batch_result in batch_results:
             response_lengths = batch_result["response_lengths"]
-            prompt_lengths = batch_result["prompt_lengths"]
-            expanded_prompt_lengths = []
-            for prompt_length in prompt_lengths:
-                expanded_prompt_lengths.extend([prompt_length] * num_samples_per_prompt)
-            for i, (prompt_length, response_length) in enumerate(zip(expanded_prompt_lengths, response_lengths)):
-                writer.writerow(
-                    {
-                        "batch_num": batch_idx,
-                        "prompt_num": i,
-                        "prompt_length": prompt_length,
-                        "completion_length": response_length,
-                    }
-                )
-    logger.info(f"Saved completion and prompt lengths to {csv_path}.")
+            for i, length in enumerate(response_lengths):
+                writer.writerow({"batch_num": batch_idx, "prompt_num": i, "completion_length": length})
+    logger.info(f"Saved completion lengths to {csv_path}.")
 
 
 def save_config(args, tokenizer_config, model_config, timestamp: int):
@@ -249,25 +237,16 @@ def setup_vllm_engines(
     max_model_len: int = 20480,
 ) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue]:
     """Set up vLLM engines and queues."""
-    logger.info("[SETUP] Setting up vLLM engines...")
-    logger.info(
-        f"[SETUP] Config: num_engines={args.vllm_num_engines}, TP={args.vllm_tensor_parallel_size}, PP={args.vllm_pipeline_parallel_size}"
-    )
+    logger.info("Setting up vLLM engines...")
 
-    logger.info("[SETUP] Initializing Ray...")
     ray.init(dashboard_host="0.0.0.0")
-    logger.info("[SETUP] Ray initialized successfully")
 
-    logger.info("[SETUP] Creating queues...")
     param_prompt_Q = ray_queue.Queue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
 
     queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
-    logger.info("[SETUP] Creating ActorManager...")
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
-    logger.info("[SETUP] ActorManager created")
 
-    logger.info("[SETUP] Calling create_vllm_engines...")
     vllm_engines = vllm_utils3.create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
@@ -292,9 +271,7 @@ def setup_vllm_engines(
         use_fp8_kv_cache=False,
     )
 
-    logger.info("[SETUP] create_vllm_engines returned successfully!")
-    logger.info(f"[SETUP] Created {len(vllm_engines)} vLLM engines")
-    logger.info("[SETUP] vLLM engines ready - setup complete!")
+    logger.info("vLLM engines ready")
 
     return vllm_engines, param_prompt_Q, inference_results_Q, actor_manager
 
@@ -408,13 +385,11 @@ def run_benchmark(
     # Calculate total number of GPUs for MFU/MBU calculations
     num_gpus = args.vllm_num_engines * args.vllm_tensor_parallel_size * args.vllm_pipeline_parallel_size
 
-    original_descriptions = {}
     benchmark_start_time = time.perf_counter()
     utils.maybe_update_beaker_description(
         num_engines=args.vllm_num_engines,
         tensor_parallel=args.vllm_tensor_parallel_size,
         pipeline_parallel=args.vllm_pipeline_parallel_size,
-        original_descriptions=original_descriptions,
     )
 
     # Submit warmup batch first
@@ -517,25 +492,7 @@ def run_benchmark(
             # MFU = (FLOPs / time) / (peak_FLOPS * num_gpus) * 100
             model_flops_per_second = model_flops / batch_generation_time if batch_generation_time > 0 else 0
             result_dict["mfu"] = 100 * model_flops_per_second / (model_dims.device_flops * num_gpus)
-
-            if result_dict["mfu"] > 100:
-                logger.error(
-                    f"MFU exceeds 100%! MFU={result_dict['mfu']:.2f}%. "
-                    f"This indicates a bug in the calculation. Logging inputs for reproduction:\n"
-                    f"  prompt_lengths={all_prompt_lengths}\n"
-                    f"  response_lengths={all_response_lengths}\n"
-                    f"  samples_per_prompt={args.num_samples_per_prompt_rollout}\n"
-                    f"  batch_generation_time={batch_generation_time:.4f}s\n"
-                    f"  num_gpus={num_gpus}\n"
-                    f"  model_flops={model_flops / 1e15:.4f} PFLOPs\n"
-                    f"  flops_per_second={model_flops_per_second / 1e12:.4f} TFLOPs/s\n"
-                    f"  peak_flops_per_gpu={model_dims.device_flops / 1e12:.4f} TFLOPs/s\n"
-                    f"  total_peak_flops={model_dims.device_flops * num_gpus / 1e12:.4f} TFLOPs/s\n"
-                    f"  device_name={model_dims.device_name}\n"
-                    f"  model: layers={model_dims.num_layers}, hidden={model_dims.hidden_size}, "
-                    f"intermediate={model_dims.intermediate_size}, vocab={model_dims.vocab_size}, "
-                    f"  heads={model_dims.num_attn_heads}, kv_heads={model_dims.num_kv_heads}"
-                )
+            assert result_dict["mfu"] <= 100, f"MFU exceeds 100%: {result_dict['mfu']:.2f}%"
 
             # Calculate total memory bytes for all prompts and responses in the batch
             model_memory_bytes = model_dims.memory_bytes(
@@ -545,27 +502,9 @@ def run_benchmark(
             # MBU = (Memory bytes / time) / (peak_bandwidth * num_gpus) * 100
             model_bytes_per_second = model_memory_bytes / batch_generation_time if batch_generation_time > 0 else 0
             result_dict["mbu"] = 100 * model_bytes_per_second / (model_dims.device_memory_bandwidth * num_gpus)
+            assert result_dict["mbu"] <= 100, f"MBU exceeds 100%: {result_dict['mbu']:.2f}%"
 
-            if result_dict["mbu"] > 100:
-                logger.error(
-                    f"MBU exceeds 100%! MBU={result_dict['mbu']:.2f}%. "
-                    f"This indicates a bug in the calculation. Logging inputs for reproduction:\n"
-                    f"  prompt_lengths={all_prompt_lengths}\n"
-                    f"  response_lengths={all_response_lengths}\n"
-                    f"  samples_per_prompt={args.num_samples_per_prompt_rollout}\n"
-                    f"  batch_generation_time={batch_generation_time:.4f}s\n"
-                    f"  num_gpus={num_gpus}\n"
-                    f"  model_memory_bytes={model_memory_bytes / 1e12:.4f} TB\n"
-                    f"  bytes_per_second={model_bytes_per_second / 1e12:.4f} TB/s\n"
-                    f"  peak_bandwidth_per_gpu={model_dims.device_memory_bandwidth / 1e12:.4f} TB/s\n"
-                    f"  total_peak_bandwidth={model_dims.device_memory_bandwidth * num_gpus / 1e12:.4f} TB/s\n"
-                    f"  device_name={model_dims.device_name}\n"
-                    f"  model: layers={model_dims.num_layers}, hidden={model_dims.hidden_size}, "
-                    f"intermediate={model_dims.intermediate_size}, vocab={model_dims.vocab_size}, "
-                    f"heads={model_dims.num_attn_heads}, kv_heads={model_dims.num_kv_heads}"
-                )
-
-            save_completion_lengths([result_dict], timestamp, batch_idx, args.num_samples_per_prompt_rollout)
+            save_completion_lengths([result_dict], timestamp, batch_idx)
             results.append(result_dict)
             logger.info(
                 f"Batch {batch_idx}/{num_batches - 1}: "
@@ -584,7 +523,6 @@ def run_benchmark(
                 num_engines=args.vllm_num_engines,
                 tensor_parallel=args.vllm_tensor_parallel_size,
                 pipeline_parallel=args.vllm_pipeline_parallel_size,
-                original_descriptions=original_descriptions,
             )
 
         # Calculate total time for main benchmark only

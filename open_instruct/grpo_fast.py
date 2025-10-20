@@ -2129,7 +2129,12 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
             tags=[args.exp_name] + get_wandb_tags(),
         )
         wandb_url = wandb.run.get_url()
-        maybe_update_beaker_description(wandb_url=wandb_url)
+        maybe_update_beaker_description(
+            wandb_url=wandb_url,
+            num_engines=args.vllm_num_engines,
+            tensor_parallel=args.vllm_tensor_parallel_size,
+            pipeline_parallel=args.vllm_pipeline_parallel_size,
+        )
 
     return beaker_config, wandb_url
 
@@ -2921,6 +2926,9 @@ def run_training(
                 total_steps=args.num_training_steps,
                 start_time=training_start_time,
                 wandb_url=wandb_url,
+                num_engines=args.vllm_num_engines,
+                tensor_parallel=args.vllm_tensor_parallel_size,
+                pipeline_parallel=args.vllm_pipeline_parallel_size,
             )
 
         # Check if any of the threads have raised an exception.
