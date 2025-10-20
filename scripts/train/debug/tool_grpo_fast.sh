@@ -32,7 +32,6 @@ uv run python mason.py \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 32 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 512 \
     --max_prompt_token_length 512 \
     --response_length 512 \
     --pack_length 1024 \
