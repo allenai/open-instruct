@@ -1244,18 +1244,16 @@ def rlvr_tokenize_v3(
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
     system_prompt_override: Optional[str] = None,
 ):
-    prompt = row[sft_messages_key]
+    prompt = row.pop(sft_messages_key)
+    assert len(prompt) > 0, "Empty prompt in dataset"
     # if the prompt has multiple messages, make sure we don't end in an assistant message.
-    if len(prompt) > 1:
-        if prompt[-1]["role"] == "assistant":
-            prompt = prompt[:-1]
+    if len(prompt) > 1 and prompt[-1]["role"] == "assistant":
+        prompt = prompt[:-1]
     # override the system prompt if we have a new one provided.
-    if system_prompt_override is not None and str(system_prompt_override):
-        # if the first message is a system message, override it.
+    if system_prompt_override:
         if prompt[0]["role"] == "system":
-            prompt[0]["content"] = system_prompt_override
-        else:
-            prompt = [{"role": "system", "content": system_prompt_override}] + prompt
+            del prompt[0]
+        prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
@@ -1273,8 +1271,6 @@ def rlvr_tokenize_v3(
     # if dataset source is a string, make it a list
     if isinstance(row[verifier_source_key], str):
         row[verifier_source_key] = [row[verifier_source_key]]
-    # drop the messages field as it often causes issues.
-    row.pop(sft_messages_key)
     return row
 
 
@@ -1297,12 +1293,13 @@ def rlvr_filter_v1(
     return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
 
 
-def rlvr_filter_v2(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_prompt_token_length: Optional[int] = None):
-    max_prompt_token_length_ok = True
-    if max_prompt_token_length is not None:
-        max_prompt_token_length_ok = len(row[INPUT_IDS_PROMPT_KEY]) <= max_prompt_token_length
 
-    return max_prompt_token_length_ok
+def rlvr_max_length_filter_v2(
+    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_prompt_token_length: Optional[int] = None
+):
+    if max_prompt_token_length is None:
+        return True
+    return len(row[INPUT_IDS_PROMPT_KEY]) <= max_prompt_token_length
 
 
 TRANSFORM_FNS = {
@@ -1317,6 +1314,7 @@ TRANSFORM_FNS = {
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
     "rlvr_tokenize_v1": (rlvr_tokenize_v3, "map"),
     "rlvr_filter_v1": (rlvr_filter_v2, "filter"),
+    "rlvr_max_length_filter_v1": (rlvr_max_length_filter_v2, "filter"),
 }
 
 

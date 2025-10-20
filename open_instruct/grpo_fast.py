@@ -159,7 +159,7 @@ class Args:
     """The dataset splits to use for training"""
     dataset_mixer_eval_list_splits: List[str] = field(default_factory=lambda: ["test"])
     """The dataset splits to use for evaluation"""
-    dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_filter_v1"])
+    dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_max_length_filter_v1"])
     """The list of transform functions to apply to the dataset."""
     dataset_cache_mode: Literal["hf", "local"] = "local"
     """The mode to use for caching the dataset."""
@@ -2148,6 +2148,13 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
         logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
 
     """Set up training and evaluation datasets."""
+    system_prompt_override = None
+    if args.system_prompt_override_file is not None:
+        logger.info(f"Loading system prompt override from {args.system_prompt_override_file}")
+        with open(args.system_prompt_override_file, "r") as f:
+            system_prompt_override = f.read().strip()
+        logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
+
     transform_fn_args = [
         {"system_prompt_override": system_prompt_override},
         {"max_prompt_token_length": args.max_prompt_token_length},
