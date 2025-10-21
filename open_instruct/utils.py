@@ -1857,58 +1857,77 @@ class ModelDims:
     def memory_bytes(
         self,
         prompt_lengths: list[int],
+        num_engines: int,
         response_lengths: Optional[list[int]] = None,
         samples_per_prompt: int = 1,
         dtype_bytes: int = 2,
     ) -> int:
-        embedding_params = self.vocab_size * self.hidden_size
-        weight_params = self.num_params - embedding_params
-        lm_head_bytes = self.vocab_size * self.hidden_size
-        embedding_bytes = self.hidden_size
+        hidden_q = self.num_attn_heads * self.head_dim
+        hidden_kv = self.num_kv_heads * self.head_dim
+
+        w_q = self.hidden_size * hidden_q
+        w_k = self.hidden_size * hidden_kv
+        w_v = self.hidden_size * hidden_kv
+        w_o = hidden_q * self.hidden_size
+        w_up = self.hidden_size * (self.intermediate_size * 2)
+        w_dn = self.intermediate_size * self.hidden_size
+
+        per_layer_weight_bytes = (w_q + w_k + w_v + w_o + w_up + w_dn) * dtype_bytes
+        lm_head_bytes = self.vocab_size * self.hidden_size * dtype_bytes
+        embedding_bytes = self.hidden_size * dtype_bytes
 
         num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
         num_sliding_layers = self.num_sliding_window_layers
+        kv_bytes_per_token = 2 * self.num_kv_heads * self.head_dim * dtype_bytes
 
         total_bytes = 0
-
         batch_size = len(prompt_lengths)
+
         for P in prompt_lengths:
-            for i in range(1, P + 1):
-                total_bytes += weight_params / batch_size
-                total_bytes += lm_head_bytes + embedding_bytes
-
-                if num_full_attn_layers > 0:
-                    total_bytes += 2 * self.num_kv_heads * self.head_dim * num_full_attn_layers * (i - 1)
-
-                if num_sliding_layers > 0 and self.sliding_window is not None:
-                    kv_read_len = min(i - 1, self.sliding_window)
-                    total_bytes += 2 * self.num_kv_heads * self.head_dim * num_sliding_layers * kv_read_len
-
-                total_bytes += 2 * self.num_layers * self.num_kv_heads * self.head_dim
+            total_bytes += self.num_layers * P * per_layer_weight_bytes / batch_size
+            total_bytes += P * embedding_bytes
+            total_bytes += lm_head_bytes
+            total_bytes += self.num_layers * P * kv_bytes_per_token
 
         if response_lengths is not None:
             assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt
 
+            total_sequences = len(prompt_lengths) * samples_per_prompt
+            global_max_response_len = max(response_lengths)
+            total_response_tokens = sum(response_lengths)
+
+            total_bytes += (
+                self.num_layers * global_max_response_len * per_layer_weight_bytes * num_engines / total_sequences
+            )
+            total_bytes += total_response_tokens * embedding_bytes
+            total_bytes += global_max_response_len * num_engines * lm_head_bytes
+            total_bytes += self.num_layers * total_response_tokens * kv_bytes_per_token
+
             response_idx = 0
             for P in prompt_lengths:
-                for _ in range(samples_per_prompt):
-                    R = response_lengths[response_idx]
-                    for t in range(R):
-                        seq_len = P + t
-                        total_bytes += weight_params / samples_per_prompt
-                        total_bytes += lm_head_bytes + embedding_bytes
+                prompt_responses = response_lengths[response_idx : response_idx + samples_per_prompt]
 
-                        if num_full_attn_layers > 0:
-                            total_bytes += 2 * self.num_kv_heads * self.head_dim * num_full_attn_layers * seq_len
+                if num_full_attn_layers > 0:
+                    max_response_len_for_prompt = max(prompt_responses)
+                    total_bytes += (
+                        kv_bytes_per_token
+                        * num_full_attn_layers
+                        * max_response_len_for_prompt
+                        * samples_per_prompt
+                        * P
+                    )
 
-                        if num_sliding_layers > 0 and self.sliding_window is not None:
-                            kv_read_len = min(seq_len, self.sliding_window)
-                            total_bytes += 2 * self.num_kv_heads * self.head_dim * num_sliding_layers * kv_read_len
+                for R in prompt_responses:
+                    if num_full_attn_layers > 0:
+                        total_bytes += kv_bytes_per_token * num_full_attn_layers * R * (R - 1) / 2
 
-                        total_bytes += 2 * self.num_layers * self.num_kv_heads * self.head_dim
-                    response_idx += 1
+                    if num_sliding_layers > 0 and self.sliding_window is not None:
+                        kv_read_sum = sum(min(P + t, self.sliding_window) for t in range(R))
+                        total_bytes += kv_bytes_per_token * num_sliding_layers * kv_read_sum
 
-        return int(total_bytes * dtype_bytes)
+                response_idx += samples_per_prompt
+
+        return int(total_bytes)
 
 
 def get_device_name(device_name: str) -> str:
