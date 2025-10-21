@@ -203,10 +203,7 @@ def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation
     logger.info("Loading and processing dataset...")
 
     # Transform function arguments
-    transform_fn_args = [
-        {},  # For rlvr_tokenize_v1
-        {"max_prompt_token_length": args.max_prompt_token_length},  # For rlvr_filter_v1
-    ]
+    transform_fn_args = [{}, {"max_prompt_token_length": args.max_prompt_token_length}]
 
     # Load dataset
     dataset = dataset_transformation.get_cached_dataset_tulu(

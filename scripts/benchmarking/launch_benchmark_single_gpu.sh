@@ -80,7 +80,7 @@ for model_name_or_path in "$@"; do
             --add_bos \
             --dataset_local_cache_dir "benchmark_cache" \
             --dataset_cache_mode "local" \
-            --dataset_transform_fn "rlvr_tokenize_v1" "rlvr_filter_v1"
+            --dataset_transform_fn "rlvr_tokenize_v1" "rlvr_max_length_filter_v1"
 
     echo "Launched benchmark for model: $model_name_or_path"
     echo "----------------------------------------"
