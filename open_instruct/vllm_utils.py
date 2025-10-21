@@ -709,16 +709,6 @@ class LLMRayActor:
         self._prepare_weight_update(name, dtype)
         return self._run_async(self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache)))
 
-    def update_weight_cuda_ipc(
-        self, name: str, dtype: str, shape: Tuple[int, ...], ipc_handles: List[Any], empty_cache: bool = False
-    ) -> None:
-        self._prepare_weight_update(name, dtype)
-        return self._run_async(
-            self.llm_engine.collective_rpc(
-                "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
-            )
-        )
-
     def reset_prefix_cache(self) -> None:
         return self._run_async(self.llm_engine.reset_prefix_cache())
 
@@ -862,7 +852,7 @@ def create_vllm_engines(
                 revision=revision,
                 tokenizer=tokenizer_name_or_path,
                 tokenizer_revision=revision,
-                worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
+                worker_extension_cls="checkpoint_engine.worker.VllmColocateWorkerExtension",
                 tensor_parallel_size=tensor_parallel_size,
                 enforce_eager=enforce_eager,
                 dtype="bfloat16",
