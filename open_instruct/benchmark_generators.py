@@ -394,6 +394,7 @@ def run_benchmark(
     warmup_end_idx = min(args.num_unique_prompts_rollout, len(dataset))
     warmup_data = dataset[warmup_start_idx:warmup_end_idx]
     warmup_prompts = warmup_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+    logger.info(f"Warmup batch size: {len(warmup_prompts)} prompts")
     # Create individual PromptRequest for each warmup prompt
     for i, prompt in enumerate(warmup_prompts):
         dataset_index = warmup_start_idx + i
@@ -405,6 +406,19 @@ def run_benchmark(
                 start_time=time.perf_counter(),
             )
         )
+        logger.info(f"Submitted warmup prompt {i + 1}/{len(warmup_prompts)} (dataset_index={dataset_index})")
+
+    logger.info(f"All warmup prompts submitted. Param queue size: {param_prompt_Q.qsize()}")
+
+    should_stop = ray.get(actor_manager.should_stop.remote())
+    logger.info(f"Actor manager should_stop status: {should_stop}")
+
+    for i, engine in enumerate(vllm_engines):
+        try:
+            engine_ready = ray.get(engine.ready.remote(), timeout=2)
+            logger.info(f"Engine {i} ready status: {engine_ready}")
+        except Exception as e:
+            logger.warning(f"Error checking engine {i} ready status: {e}")
 
     try:
         logger.info("Running warmup batch...")
@@ -413,6 +427,7 @@ def run_benchmark(
         warmup_results = []
         for i in range(warmup_batch_size):
             logger.info(f"Warmup: Waiting for result {i + 1}/{warmup_batch_size}...")
+            logger.info(f"Inference results queue size: {inference_results_Q.qsize()}")
             result = inference_results_Q.get()
             warmup_results.append(result)
             logger.info(f"Warmup: Received result {i + 1}/{warmup_batch_size}")

@@ -466,20 +466,40 @@ def init_process_group(
 
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
+    logger.info("_prefetch_worker started")
+    iteration = 0
     while True:
-        if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
+        should_stop = actor._should_stop()
+        active_tasks_count = len(actor.active_tasks)
+
+        if iteration < 5 or iteration % 10 == 0:
+            logger.info(
+                f"_prefetch_worker iteration {iteration}: should_stop={should_stop}, "
+                f"active_tasks={active_tasks_count}/{actor.inference_batch_size}"
+            )
+
+        if should_stop or active_tasks_count >= actor.inference_batch_size:
+            if iteration < 5:
+                logger.info(
+                    f"_prefetch_worker sleeping: should_stop={should_stop}, "
+                    f"active_tasks_full={active_tasks_count >= actor.inference_batch_size}"
+                )
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+            iteration += 1
             continue
 
+        logger.info(f"_prefetch_worker waiting for request from queue (qsize={actor.prompt_queue.qsize()})")
         request = actor.prompt_queue.get()
+        logger.info(f"_prefetch_worker got request, adding to actor (dataset_index={request.dataset_index})")
         add_request(actor, request)
+        iteration += 1
 
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     request_id = make_request_id(request)
 
     sampling_params = request.generation_config.clone()
-    sampling_params.n = 1  # Use n=1 for tool processing
+    sampling_params.n = 1
 
     actor.request_metadata[request_id] = {
         "is_eval": request.is_eval,
@@ -494,14 +514,23 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
 
     tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
 
-    for j in range(request.generation_config.n):
+    num_samples = request.generation_config.n
+    logger.info(
+        f"add_request: request_id={request_id}, dataset_index={request.dataset_index}, "
+        f"num_samples={num_samples}, prompt_length={len(request.prompt)}"
+    )
+
+    for j in range(num_samples):
         sub_sampling_params = sampling_params.clone()
         if request.generation_config.seed is not None:
             sub_sampling_params.seed = request.generation_config.seed + j
         sub_request_id = f"{request_id}_{j}"
+        logger.info(f"add_request: Creating async task for sub_request_id={sub_request_id}")
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
             process_request_async(actor, sub_request_id, request_id, tokens_prompt, sub_sampling_params), actor.loop
         )
+
+    logger.info(f"add_request: Created {num_samples} async tasks for request_id={request_id}")
 
 
 class LLMRayActor:
@@ -635,8 +664,14 @@ class LLMRayActor:
 
         self.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
 
-        is_complete = len(self.request_outputs[base_request_id]["outputs"]) == expected_n
+        current_count = len(self.request_outputs[base_request_id]["outputs"])
+        logger.info(
+            f"_accumulate_sub_request: base_request_id={base_request_id}, outputs={current_count}/{expected_n}"
+        )
+
+        is_complete = current_count == expected_n
         if is_complete:
+            logger.info(f"_accumulate_sub_request: Request complete, finalizing {base_request_id}")
             self._finalize_completed_request(base_request_id)
 
     def _finalize_completed_request(self, base_request_id: str) -> None:
@@ -644,6 +679,7 @@ class LLMRayActor:
         ordered_outs = sorted(outputs, key=lambda x: split_request_id(x.request_id)["request_index"])
 
         current_time = time.perf_counter()
+        logger.info(f"_finalize_completed_request: Processing {base_request_id} with {len(ordered_outs)} outputs")
         result, is_eval = process_completed_request(
             base_request_id,
             ordered_outs,
@@ -656,12 +692,24 @@ class LLMRayActor:
         self.request_metadata.pop(base_request_id, None)
 
         results_queue = self.eval_results_queue if is_eval else self.results_queue
+        queue_type = "eval_results_queue" if is_eval else "results_queue"
+        logger.info(
+            f"_finalize_completed_request: Putting result for {base_request_id} "
+            f"(dataset_index={result.dataset_index}) into {queue_type}"
+        )
         results_queue.put(result)
+        logger.info(f"_finalize_completed_request: Result sent to queue for {base_request_id}")
 
     def process_from_queue(self) -> None:
+        logger.info("process_from_queue thread started")
+        iteration = 0
         while True:
+            if iteration < 5 or iteration % 10 == 0:
+                logger.info(f"process_from_queue iteration {iteration}: waiting for completion_queue")
             sub_request = self.completion_queue.get()
+            logger.info(f"process_from_queue: Got sub_request for base_request_id={sub_request['base_request_id']}")
             self._accumulate_sub_request(sub_request)
+            iteration += 1
 
     def init_process_group(
         self,
