@@ -92,5 +92,11 @@ class PythonCodeTool(Tool):
 
         # Return all captured outputs as a single string
         return ToolOutput(
-            output="\n".join(all_outputs), called=True, error=error, timeout=timeout, runtime=time.time() - start_time
+            output="\n".join(all_outputs),
+            called=True,
+            error=error,
+            timeout=timeout,
+            runtime=time.time() - start_time,
+            start_str="<output>\n",
+            end_str="\n</output>",
         )

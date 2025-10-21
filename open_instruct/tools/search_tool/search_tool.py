@@ -66,8 +66,8 @@ class SearchTool(Tool):
             error=error,
             timeout=timeout,
             runtime=time.time() - start_time,
-            start_str="<document>\n",
-            end_str="\n</document>",
+            start_str="<output>\n",
+            end_str="\n</output>",
         )
 
 
@@ -90,6 +90,7 @@ class MassiveDSSearchTool(SearchTool):
         super().__init__(massive_ds_get_snippets_for_query, *args, **kwargs)
         self.start_str = "<query_massive_ds>"
         self.end_str = "</query_massive_ds>"
+
 
 class SerperSearchTool(SearchTool):
     def __init__(self, *args, **kwargs):

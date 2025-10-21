@@ -8,7 +8,14 @@ from open_instruct.tools.browse_tool.crawl4ai import crawl_url as crawl4ai_crawl
 
 
 class BrowseTool(Tool):
-    def __init__(self, crawl_fn: Callable[[str], Optional[str]], api_endpoint: str, max_context_chars: int = 2000, *args, **kwargs):
+    def __init__(
+        self,
+        crawl_fn: Callable[[str], Optional[str]],
+        api_endpoint: str,
+        max_context_chars: int = 2000,
+        *args,
+        **kwargs,
+    ):
         self.crawl_fn = crawl_fn
         self.api_endpoint = api_endpoint
         self.start_str = "<url>"
@@ -61,7 +68,7 @@ class BrowseTool(Tool):
 
         markdown_content = markdown_content.strip()
         if len(markdown_content) > self.max_context_chars:
-            markdown_content = markdown_content[:self.max_context_chars]
+            markdown_content = markdown_content[: self.max_context_chars]
             markdown_content += "..."
 
         # Return the markdown content
@@ -71,8 +78,8 @@ class BrowseTool(Tool):
             error=error,
             timeout=timeout,
             runtime=time.time() - start_time,
-            start_str="<webpage>\n",
-            end_str="\n</webpage>",
+            start_str="<output>\n",
+            end_str="\n</output>",
         )
 
 
@@ -92,10 +99,7 @@ if __name__ == "__main__":
 
     tool = Crawl4aiBrowseTool(api_endpoint=api_endpoint, start_str="<url>", end_str="</url>")
 
-    prompt = (
-        "Here is a test. Please fetch this page.\n"
-        "<url_crawl4ai>https://ivison.id.au</url_crawl4ai>\n"
-    )
+    prompt = "Here is a test. Please fetch this page.\n<url_crawl4ai>https://ivison.id.au</url_crawl4ai>\n"
 
     out = tool(prompt)
     print("called:", out.called)

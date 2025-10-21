@@ -1293,7 +1293,6 @@ def rlvr_filter_v1(
     return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
 
 
-
 def rlvr_max_length_filter_v2(
     row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_prompt_token_length: Optional[int] = None
 ):

@@ -128,7 +128,7 @@ def crawl_url(url: str, api_endpoint: str = None, timeout: int = 60) -> Optional
         print(f"Error crawling {url}: {error_msg}")
         return None
 
-    results = data['results']
+    results = data["results"]
 
     result = results[0] if isinstance(results, list) else results
     markdown = result.get("markdown", {})
