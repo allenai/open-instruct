@@ -847,6 +847,10 @@ CHAT_TEMPLATES = {
 # flake8: noqa
 
 
+from datasets import Sequence, Value
+
+# put this near your other constants/utilities
+MESSAGES_FEATURE = Sequence({"role": Value("string"), "content": Value("string")})
 def get_tokenizer_simple_v1(tc: "TokenizerConfig"):
     tokenizer = AutoTokenizer.from_pretrained(
         tc.tokenizer_name_or_path,
@@ -1688,54 +1692,17 @@ class DatasetConfig:
 
         return self.dataset.select(indices)
 
-def normalize_messages_field_order(dataset: Dataset) -> Dataset:
-    """Normalize the order of fields in messages structs to be consistent."""
-    if "messages" not in dataset.column_names:
-        return dataset
-    
-    # Check if messages is a list of structs
-    feature = dataset.features["messages"]
-    if not (hasattr(feature, 'feature') and hasattr(feature.feature, 'keys')):
-        return dataset
-    
-    # Define the canonical field order - ensure consistent ordering
-    canonical_order = ["role", "content"]
-    
-    def reorder_message_fields(example):
-        """Reorder fields in each message to match canonical order."""
-        if "messages" not in example:
-            return example
-            
-        reordered_messages = []
-        for msg in example["messages"]:
-            if isinstance(msg, dict):
-                # Create new dict with canonical field order
-                reordered_msg = {field: msg.get(field) for field in canonical_order if field in msg}
-                # Add any extra fields that weren't in canonical order
-                for key in msg:
-                    if key not in canonical_order:
-                        reordered_msg[key] = msg[key]
-                reordered_messages.append(reordered_msg)
-            else:
-                reordered_messages.append(msg)
-        
-        example["messages"] = reordered_messages
-        return example
-    
-    # Apply the reordering
-    dataset = dataset.map(reorder_message_fields, num_proc=1, desc="Normalizing message field order")
-    
-    # Force cast to ensure schema is consistent
-    from datasets import Features, Sequence, Value
-    if "messages" in dataset.features:
-        new_features = dataset.features.copy()
-        new_features["messages"] = Sequence({
-            "role": Value("string"),
-            "content": Value("string")
-        })
-        dataset = dataset.cast(new_features)
-    
-    return dataset
+def normalize_messages_fn(example):
+    out = []
+    for msg in example["messages"]:
+        role = msg.get("role")
+        content = msg.get("content")
+        # coerce to strings; avoid None sneaking in
+        out.append({"role": "" if role is None else str(role),
+                    "content": "" if content is None else str(content)})
+    example["messages"] = out
+    return example
+
 
 def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     assert len(dc.transform_fn) == len(dc.transform_fn_args), (
@@ -1746,7 +1713,22 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     tokenizer = tc.tokenizer
     dataset = dc.dataset
-    dataset = normalize_messages_field_order(dataset)
+    dataset = dataset.map(normalize_messages_fn, num_proc=num_proc)
+
+    # Only cast once after normalization
+    # if "messages" in dataset.column_names:
+    #     # Check if the column is already in the right format
+    #     try:
+    #         # Try to access the first element to see if it's already correct
+    #         if len(dataset) > 0:
+    #             first_msg = dataset[0]["messages"]
+    #             if isinstance(first_msg, list) and len(first_msg) > 0 and isinstance(first_msg[0], dict):
+    #                 # Already in correct format, ensure proper casting
+    #                 dataset = dataset.cast_column("messages", MESSAGES_FEATURE)
+    #     except Exception:
+    #         # If there's any issue, try casting
+    #         dataset = dataset.cast_column("messages", MESSAGES_FEATURE)
+    
     # Add dataset source field to track origin after shuffling
     dataset = dataset.map(
         lambda example: {**example, DATASET_ORIGIN_KEY: dc.dataset_name},
@@ -1765,9 +1747,8 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     # save a copy of the dataset pre-transformation
     untokenized_dataset = copy.deepcopy(dataset)
-    untokenized_dataset = normalize_messages_field_order(untokenized_dataset)
+    # Don't re-normalize or re-cast the untokenized dataset since it's already done
     tmp_dataset_name = dc.dataset_name.split('/')[-1]
-    #untokenized_dataset.push_to_hub(f"allenai/{tmp_dataset_name}_tmp_ids", private=True)
 
     # Apply all transformations
     for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
@@ -1822,6 +1803,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     if TEMP_ID_KEY in untokenized_dataset.column_names:
         untokenized_dataset = untokenized_dataset.remove_columns([TEMP_ID_KEY])
     
+    untokenized_dataset.push_to_hub(f"allenai/{tmp_dataset_name}_tmp_ids", private=True)
     return dataset, untokenized_dataset
 
 def compute_config_hash(dcs: List[DatasetConfig], tc: TokenizerConfig) -> str:
@@ -2005,6 +1987,7 @@ class LocalDatasetTransformationCache:
             #         print("WARNING: tool_calls found in messages for dataset ", dc.dataset_name)
             # print("No issue with tool_calls")
             
+            #untokenized_dataset = untokenized_dataset.cast_column("messages", MESSAGES_FEATURE)
             untransformed_datasets.append(untokenized_dataset)
 
             # Collect statistics for this dataset
@@ -2045,9 +2028,6 @@ class LocalDatasetTransformationCache:
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
         # Combine untransformed datasets
-        combined_untransformed_datasets = concatenate_datasets(untransformed_datasets)
-        print("Uploading untransformed dataset to hub for inspection...")
-        combined_untransformed_datasets.push_to_hub("allenai/olmo-3-instruct-sft-main", private=True)
         
         # Prepare return statistics
         all_statistics = {"per_dataset_stats": dataset_statistics, "dataset_order": dataset_order}
@@ -2066,7 +2046,9 @@ class LocalDatasetTransformationCache:
 
         print(f"🚀 Saved transformed dataset to {cache_path}")
         print(f"✅ Found cached dataset at {cache_path}")
-
+        combined_untransformed_datasets = concatenate_datasets(untransformed_datasets)
+        print("Uploading untransformed dataset to hub for inspection...")
+        combined_untransformed_datasets.push_to_hub("allenai/olmo-3-instruct-sft-main", private=True)
         loaded_dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
         return loaded_dataset, all_statistics
 
