@@ -415,6 +415,8 @@ class Args:
     """the docker image for evaluation for oe-eval"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
+    beaker_eval_freq: Optional[int] = None
+    """the frequency of auto-launched evaluation jobs. Must be a multiple of save_freq"""
 
     # Evaluation behavior
     eval_on_step_0: bool = False
@@ -513,6 +515,8 @@ class Args:
                 assert self.mask_tool_use, (
                     "Must mask tool use when using vLLM logprobs or truncated importance sampling."
                 )
+        if self.beaker_eval_freq is not None and self.save_freq is not None:
+            assert self.beaker_eval_freq % self.save_freq == 0, "beaker_eval_freq must be a multiple of save_freq"
 
 
 def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
@@ -752,6 +756,11 @@ class PolicyTrainerRayProcess(RayProcess):
                     f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}"
                 )
         self.model.train()
+
+        # take a dummy step to force good logprobs on step 1.
+        dummy_loss = torch.tensor(0.0, device=self.device, requires_grad=True)
+        self.model.backward(dummy_loss)
+        self.model.step()
 
         # reference model
         ds_config = get_eval_ds_config(
@@ -2497,7 +2506,7 @@ def one_training_step(
                 ],
                 desc=f"Saving model at step {training_step}",
             )
-            if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
+            if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job() and (args.beaker_eval_freq is None or training_step % args.beaker_eval_freq == 0):
                 leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
                 for i in range(args.world_size):
                     policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(

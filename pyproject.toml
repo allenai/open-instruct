@@ -22,14 +22,14 @@ dependencies = [
     "ray[default]>=2.49.2",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
-    "torch>=2.8.0,<2.9",
-    "transformers>=4.57.0",
-    "vllm==0.11.0",
+    "torch>=2.7.0,<2.8",
+    "transformers @ git+https://github.com/2015aroras/transformers.git@4f2fbde7eaa7253b1ca977e294da6c9fcddfa345",
     "wandb==0.18.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
     "flash-attn>=2.8.3; platform_system != 'Darwin'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
+    "vllm"
 ]
 
 [build-system]
@@ -44,17 +44,22 @@ flash-attn = [{ requirement = "torch", match-runtime = true }]
 
 [tool.uv.extra-build-variables]
 flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
+vllm = { VLLM_USE_PRECOMPILED = "1" }
 
 # pytorch related setups
 [tool.uv.sources]
 torch = [
   { index = "pytorch-cu128", marker = "platform_system != 'Darwin'"},
 ]
+vllm = { path = "vllm_olmo2.5", editable = true }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
+vllm = [
+    "vllm"
+]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
@@ -130,6 +135,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["open-instruct"]
+known-third-party = ["wandb"]
 # case insensitive to match isort --profile black
 case-sensitive = false
 # Disable split-on-trailing-comma to work with skip-magic-trailing-comma
