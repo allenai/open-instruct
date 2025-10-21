@@ -23,7 +23,7 @@ MCP_TOOL_REGISTRY = {
     "google_search": SerperSearchTool,
     "massive_serve": MassiveServeSearchTool,
     "browse_webpage": Crawl4AIBrowseTool
-    # "browse_webpage": SerperBrowseTool
+    "browse_webpage_serper": SerperBrowseTool
 }
 
 def truncate_at_second_last_stop(text: str, stops: list[str]) -> str:
