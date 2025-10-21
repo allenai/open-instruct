@@ -1698,7 +1698,7 @@ def normalize_messages_field_order(dataset: Dataset) -> Dataset:
     if not (hasattr(feature, 'feature') and hasattr(feature.feature, 'keys')):
         return dataset
     
-    # Define the canonical field order
+    # Define the canonical field order - ensure consistent ordering
     canonical_order = ["role", "content"]
     
     def reorder_message_fields(example):
@@ -1722,7 +1722,20 @@ def normalize_messages_field_order(dataset: Dataset) -> Dataset:
         example["messages"] = reordered_messages
         return example
     
-    return dataset.map(reorder_message_fields, num_proc=1, desc="Normalizing message field order")
+    # Apply the reordering
+    dataset = dataset.map(reorder_message_fields, num_proc=1, desc="Normalizing message field order")
+    
+    # Force cast to ensure schema is consistent
+    from datasets import Features, Sequence, Value
+    if "messages" in dataset.features:
+        new_features = dataset.features.copy()
+        new_features["messages"] = Sequence({
+            "role": Value("string"),
+            "content": Value("string")
+        })
+        dataset = dataset.cast(new_features)
+    
+    return dataset
 
 def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     assert len(dc.transform_fn) == len(dc.transform_fn_args), (
