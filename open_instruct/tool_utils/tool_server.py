@@ -80,7 +80,7 @@ from concurrent.futures.process import BrokenProcessPool
 from contextlib import redirect_stderr, redirect_stdout
 from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 from open_instruct import logger_utils
@@ -203,10 +203,26 @@ class CodeResponse(BaseModel):
 
 
 ###############################################################################
+# API Key Authentication
+###############################################################################
+EXPECTED_API_KEY = os.getenv("OPEN_INSTRUCT_TOOL_API_KEY")
+
+
+async def verify_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
+    if not EXPECTED_API_KEY:
+        logger.warning("OPEN_INSTRUCT_TOOL_API_KEY not set - API key validation disabled")
+        return
+    if x_api_key != EXPECTED_API_KEY:
+        logger.warning("Invalid API key attempt")
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    return x_api_key
+
+
+###############################################################################
 # Endpoints
 ###############################################################################
 @app.post("/execute", response_model=CodeResponse)
-async def execute_code(req: CodeRequest):  # noqa: D401
+async def execute_code(req: CodeRequest, api_key: str = Depends(verify_api_key)):  # noqa: D401
     global process_pool  # noqa: PLW0603
 
     # Log input (truncate to 200 chars to avoid huge logs)
