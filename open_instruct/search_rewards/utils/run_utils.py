@@ -217,11 +217,6 @@ def run_litellm(
         else [{"role": "user", "content": user_prompt}]
     )
 
-    # Apply default timeout if not provided
-    chat_kwargs["timeout"] = chat_kwargs.get(
-        "timeout", float(os.environ.get("LITELLM_DEFAULT_TIMEOUT", "120"))
-    )
-
     # Create chat completion
     response = litellm.completion(
         messages=msgs,
