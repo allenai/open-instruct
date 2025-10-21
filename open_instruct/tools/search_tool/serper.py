@@ -36,9 +36,11 @@ def get_snippets_for_query(query: str, api_endpoint: str = None, number_of_resul
         snippets = []
         # Extract snippets from organic search results
         for result in data.get("organic", []):
-            snippet = result.get("snippet", "")
-            if snippet:
-                snippets.append(snippet)
+            title = result.get("title", "Title not found")
+            link = result.get("link", "Link not found")
+            snippet = result.get("snippet", "Snippet not found")
+            output_string = f"Title: {title}\nLink: {link}\nSnippet: {snippet}\n"
+            snippets.append(output_string)
 
         if not snippets:
             return None
@@ -51,6 +53,19 @@ def get_snippets_for_query(query: str, api_endpoint: str = None, number_of_resul
 
 
 if __name__ == "__main__":
-    result = get_snippets_for_query("attention is all you need", number_of_results=5)
-    if result:
-        print(result[0])
+    # Minimal quick test for manual running
+    import sys
+
+    api_key = os.environ.get("SERPER_API_KEY")
+    if not api_key:
+        print("SERPER_API_KEY not set; skipping live Serper test.")
+        sys.exit(0)
+
+    query = "attention is all you need"
+    print(f"Running Serper quick test for query: {query!r}")
+    result = get_snippets_for_query(query, number_of_results=5)
+    if not result:
+        print("No snippets returned or request failed.")
+    else:
+        print("Received snippets:")
+        print(result)

@@ -75,3 +75,27 @@ class Crawl4aiBrowseTool(BrowseTool):
         super().__init__(crawl4ai_crawl_url, *args, **kwargs)
         self.start_str = "<url_crawl4ai>"
         self.end_str = "</url_crawl4ai>"
+
+
+if __name__ == "__main__":
+    # Minimal quick test for manual running
+    import os
+
+    # Prefer env var for endpoint; this will raise in crawl4ai_crawl_url if unset
+    api_endpoint = os.environ.get("CRAWL4AI_API_URL")
+
+    tool = Crawl4aiBrowseTool(api_endpoint=api_endpoint, start_str="<url>", end_str="</url>")
+
+    prompt = (
+        "Here is a test. Please fetch this page.\n"
+        "<url_crawl4ai>https://ivison.id.au</url_crawl4ai>\n"
+    )
+
+    out = tool(prompt)
+    print("called:", out.called)
+    print("error:", out.error)
+    print("runtime:", round(out.runtime, 3), "s")
+    if out.output:
+        preview = out.output
+        print("output preview:")
+        print(preview)
