@@ -310,18 +310,6 @@ def simulate_weight_sync(
     return sync_time
 
 
-def generate_thread(vllm_engines: list[ray.actor.ActorHandle], stop_event: threading.Event) -> None:
-    """Thread that repeatedly calls process_from_queue on vllm engines."""
-    logger.info("[Generate Thread] Starting generation thread")
-    while not stop_event.is_set():
-        processed_results = ray.get([engine.process_from_queue.remote(timeout=20) for engine in vllm_engines])
-        num_processed = sum(int(result) for result in processed_results)
-        if num_processed == 0:
-            time.sleep(1)
-        else:
-            logger.debug(f"[Generate Thread] Processed {num_processed} requests")
-
-
 def submission_thread(
     param_prompt_Q: ray_queue.Queue,
     dataset: datasets.Dataset,
@@ -338,13 +326,12 @@ def submission_thread(
             logger.info("[Submission Thread] Stopped due to stop event")
             break
 
-        # Get batch data from dataset
+        logger.info(f"[Submission Thread] Submitting batch {batch_idx - start_batch_idx + 1}/{num_batches}...")
         start_idx = batch_idx * batch_size
         end_idx = min(start_idx + batch_size, len(dataset))
         batch_data = dataset[start_idx:end_idx]
         prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
 
-        # Create individual PromptRequest for each prompt in the batch
         for i, prompt in enumerate(prompts):
             dataset_index = start_idx + i
             param_prompt_Q.put(
@@ -355,6 +342,9 @@ def submission_thread(
                     start_time=time.perf_counter(),
                 )
             )
+        logger.info(
+            f"[Submission Thread] Batch {batch_idx - start_batch_idx + 1}/{num_batches} submitted ({len(prompts)} prompts)"
+        )
     logger.info(f"[Submission Thread] All {num_batches} batches submitted")
 
 
@@ -392,9 +382,7 @@ def run_benchmark(
     )
 
     stop_event = threading.Event()
-    executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="benchmark")
-
-    generation_future = executor.submit(generate_thread, vllm_engines, stop_event)
+    executor = futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="benchmark")
 
     results = []
     # Get the model dimensions from one of the engines without loading weights
@@ -421,12 +409,13 @@ def run_benchmark(
     try:
         logger.info("Running warmup batch...")
 
-        # Collect all warmup results (one per prompt)
         warmup_batch_size = warmup_end_idx - warmup_start_idx
         warmup_results = []
         for i in range(warmup_batch_size):
+            logger.info(f"Warmup: Waiting for result {i + 1}/{warmup_batch_size}...")
             result = inference_results_Q.get()
             warmup_results.append(result)
+            logger.info(f"Warmup: Received result {i + 1}/{warmup_batch_size}")
 
         total_warmup_responses = sum(len(result.responses) for result in warmup_results)
         logger.info(
@@ -446,10 +435,19 @@ def run_benchmark(
         # Process remaining batches with timing
         for batch_idx in range(1, num_batches):
             # Quick health check!
-            [future.result() for future in [submission_future, generation_future] if future.done()]
+            [future.result() for future in [submission_future] if future.done()]
 
-            # Collect all results for this batch (one per prompt)
-            batch_results = [inference_results_Q.get() for _ in range(args.num_unique_prompts_rollout)]
+            logger.info(
+                f"Batch {batch_idx}/{num_batches - 1}: Waiting for {args.num_unique_prompts_rollout} results..."
+            )
+            batch_results = []
+            for i in range(args.num_unique_prompts_rollout):
+                result = inference_results_Q.get()
+                batch_results.append(result)
+                if (i + 1) % max(
+                    1, args.num_unique_prompts_rollout // 4
+                ) == 0 or i == args.num_unique_prompts_rollout - 1:
+                    logger.info(f"Batch {batch_idx}: Received {i + 1}/{args.num_unique_prompts_rollout} results")
 
             # Simulate weight sync between batches
             weight_sync_time = simulate_weight_sync(actor_manager, vllm_engines, args)
