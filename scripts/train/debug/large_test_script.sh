@@ -53,6 +53,7 @@ uv run python mason.py \
         --code_api_url \$CODE_API_URL/test_program \
         --seed 1 \
         --local_eval_every 1 \
+	--add_bos \
         --gradient_checkpointing \
         --try_launch_beaker_eval_jobs_on_weka True \
         --with_tracking \
