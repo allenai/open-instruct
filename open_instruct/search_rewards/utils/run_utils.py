@@ -1,5 +1,6 @@
 import json
 import asyncio
+import weakref
 import logging
 import os
 from typing import Any, Dict, Optional, List
@@ -14,20 +15,22 @@ litellm.drop_params = True
 LOGGER = logging.getLogger(__name__)
 
 
-# Global concurrency control for LiteLLM async calls to avoid socket/port exhaustion
-_LITELLM_SEMAPHORE: Optional[asyncio.Semaphore] = None
+# Per-event-loop concurrency control for LiteLLM async calls to avoid event loop binding issues
+_LITELLM_SEMAPHORES = weakref.WeakKeyDictionary()
 
 
 def _get_litellm_semaphore() -> asyncio.Semaphore:
-    """Return a module-wide semaphore limiting concurrent LiteLLM async requests.
+    """Return a per-event-loop semaphore limiting concurrent LiteLLM async requests.
 
-    Limit can be configured with env var `LITELLM_MAX_CONCURRENT_CALLS` (default 32).
+    Limit can be configured with env var `LITELLM_MAX_CONCURRENT_CALLS` (default 256).
     """
-    global _LITELLM_SEMAPHORE
-    if _LITELLM_SEMAPHORE is None:
+    loop = asyncio.get_running_loop()
+    sem = _LITELLM_SEMAPHORES.get(loop)
+    if sem is None:
         max_concurrent = int(os.environ.get("LITELLM_MAX_CONCURRENT_CALLS", "256"))
-        _LITELLM_SEMAPHORE = asyncio.Semaphore(max_concurrent)
-    return _LITELLM_SEMAPHORE
+        sem = asyncio.Semaphore(max_concurrent)
+        _LITELLM_SEMAPHORES[loop] = sem
+    return sem
 
 
 def extract_json_from_response(response: str) -> Optional[Dict[str, Any]]:
