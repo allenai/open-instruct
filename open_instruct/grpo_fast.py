@@ -3097,8 +3097,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     )
 
     # Get the model dimensions from one of the engines without loading weights
-    model_dims_dict = ray.get(vllm_engines[0].get_model_dims_dict.remote())
-    model_dims = utils.ModelDims(**model_dims_dict)
+    model_dims = ray.get(vllm_engines[0].get_model_dims.remote())
 
     generation_configs = create_generation_configs(args)
 
