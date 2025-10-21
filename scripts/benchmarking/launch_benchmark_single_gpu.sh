@@ -62,7 +62,6 @@ for model_name_or_path in "$@"; do
             --tokenizer_name_or_path "allenai/OLMo-2-1124-7B" \
             --dataset_mixer_list "hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2" "1.0" \
             --dataset_mixer_list_splits "train" \
-            --max_token_length 10240 \
             --max_prompt_token_length 2048 \
             --temperature 1.0 \
 	          --verbose False \

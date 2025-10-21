@@ -205,10 +205,7 @@ def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation
     # Transform function arguments
     transform_fn_args = [
         {},  # For rlvr_tokenize_v1
-        {
-            "max_token_length": args.max_token_length,
-            "max_prompt_token_length": args.max_prompt_token_length,
-        },  # For rlvr_filter_v1
+        {"max_prompt_token_length": args.max_prompt_token_length},  # For rlvr_filter_v1
     ]
 
     # Load dataset
