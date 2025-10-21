@@ -254,6 +254,8 @@ def get_env_vars(
         "WANDB_API_KEY",
         "BEAKER_TOKEN",
         "OPENAI_API_KEY",
+        # Needed for tool use scripts.
+        "OPEN_INSTRUCT_TOOL_API_KEY",
         # litellm expects these env vars
         "AZURE_API_KEY",
         "AZURE_API_BASE",

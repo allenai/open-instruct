@@ -3,8 +3,19 @@
 
 This script sets up a FastAPI server that allows users to execute Python code snippets
 
+# API Key Authentication
+
+The server requires an API key for authentication. Set the OPEN_INSTRUCT_TOOL_API_KEY environment variable:
+
+```bash
+export OPEN_INSTRUCT_TOOL_API_KEY="your-api-key-here"
+```
+
+When running locally:
+```bash
 cd open_instruct/tool_utils
-PREIMPORT_PKGS=pandas,numpy,sympy,time,math,networkx uv run uvicorn tool_server:app --host 0.0.0.0 --port 1212
+OPEN_INSTRUCT_TOOL_API_KEY="your-api-key-here" PREIMPORT_PKGS=pandas,numpy,sympy,time,math,networkx uv run uvicorn tool_server:app --host 0.0.0.0 --port 1212
+```
 
 ```bash
 docker build -t tool-server .
@@ -16,8 +27,8 @@ beaker image create tool-server -n tool-server -w ai2/$beaker_user
 docker build -t ghcr.io/allenai/open-instruct/python-code-executor -f open_instruct/tool_utils/Dockerfile .
 docker push ghcr.io/allenai/open-instruct/python-code-executor
 
-# Run the server
-docker run -p 1212:8080 tool-server
+# Run the server (pass API key via environment variable)
+docker run -p 1212:8080 -e OPEN_INSTRUCT_TOOL_API_KEY="your-api-key-here" tool-server
 
 # gcloud run deploy:
 gcloud run deploy open-instruct-tool-server --project ai2-allennlp --region us-central1 --source .
@@ -39,25 +50,31 @@ You can test with the following. You prob want to test to make sure the
 1) the timeout works
 2) the timeout in the first curl does not block the second curl
 
+All requests now require the X-API-Key header:
+
 ```
 curl -X POST https://open-instruct-tool-server-10554368204.us-central1.run.app/execute \
      -H "Content-Type: application/json" \
+     -H "X-API-Key: $OPEN_INSTRUCT_TOOL_API_KEY" \
      -d '{"code": "import time;time.sleep(4)", "timeout": 3}' \
      -w '\nTotal time: %{time_total}s\n'
 
 
 curl -X POST https://open-instruct-tool-server-10554368204.us-central1.run.app/execute \
      -H "Content-Type: application/json" \
+     -H "X-API-Key: $OPEN_INSTRUCT_TOOL_API_KEY" \
      -d '{"code": "print(1)", "timeout": 3}' \
      -w '\nTotal time: %{time_total}s\n'
 
 curl -X POST https://open-instruct-tool-server-10554368204.us-central1.run.app/execute \
      -H "Content-Type: application/json" \
+     -H "X-API-Key: $OPEN_INSTRUCT_TOOL_API_KEY" \
      -d '{"code": "import sympy", "timeout": 3}' \
      -w '\nTotal time: %{time_total}s\n'
 
 curl -X POST https://open-instruct-tool-server-10554368204.us-central1.run.app/execute \
      -H "Content-Type: application/json" \
+     -H "X-API-Key: $OPEN_INSTRUCT_TOOL_API_KEY" \
      -d '{"code": "import sympy", "timeout": 3}' \
      -w '\nTotal time: %{time_total}s\n'
 ```
