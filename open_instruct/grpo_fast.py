@@ -1511,6 +1511,38 @@ def calculate_utilization_metrics(
     actor_mfu = 100 * flops_per_second / total_device_flops
     actor_mbu = 100 * bytes_per_second / total_device_bandwidth
 
+    assert actor_mfu <= 100, (
+        f"Actor MFU exceeded 100%: {actor_mfu:.2f}%\n"
+        f"Debug info:\n"
+        f"  flops_per_second: {flops_per_second:,}\n"
+        f"  total_device_flops: {total_device_flops:,}\n"
+        f"  actor_total_flops: {actor_total_flops:,}\n"
+        f"  total_generation_time: {total_generation_time:.6f}s\n"
+        f"  num_inference_gpus: {num_inference_gpus}\n"
+        f"  device_flops: {model_dims.device_flops:,}\n"
+        f"  device_name: {model_dims.device_name}\n"
+        f"  num_prompts: {len(prompt_lengths)}\n"
+        f"  samples_per_prompt: {samples_per_prompt}\n"
+        f"  avg_prompt_length: {sum(prompt_lengths) / len(prompt_lengths):.1f}\n"
+        f"  avg_response_length: {sum(response_lengths) / len(response_lengths):.1f}"
+    )
+
+    assert actor_mbu <= 100, (
+        f"Actor MBU exceeded 100%: {actor_mbu:.2f}%\n"
+        f"Debug info:\n"
+        f"  bytes_per_second: {bytes_per_second:,}\n"
+        f"  total_device_bandwidth: {total_device_bandwidth:,}\n"
+        f"  actor_total_memory_bytes: {actor_total_memory_bytes:,}\n"
+        f"  total_generation_time: {total_generation_time:.6f}s\n"
+        f"  num_inference_gpus: {num_inference_gpus}\n"
+        f"  device_memory_bandwidth: {model_dims.device_memory_bandwidth:,}\n"
+        f"  device_name: {model_dims.device_name}\n"
+        f"  num_prompts: {len(prompt_lengths)}\n"
+        f"  samples_per_prompt: {samples_per_prompt}\n"
+        f"  avg_prompt_length: {sum(prompt_lengths) / len(prompt_lengths):.1f}\n"
+        f"  avg_response_length: {sum(response_lengths) / len(response_lengths):.1f}"
+    )
+
     # Calculate learner/training metrics
     # For training, we need to use total sequence lengths (prompt + response) since training
     # processes the full sequences, not separate prefill/decode operations
@@ -1530,6 +1562,20 @@ def calculate_utilization_metrics(
     training_flops_per_second = training_flops / training_time
     total_training_device_flops = model_dims.device_flops * num_training_gpus
     learner_mfu = 100 * training_flops_per_second / total_training_device_flops
+
+    assert learner_mfu <= 100, (
+        f"Learner MFU exceeded 100%: {learner_mfu:.2f}%\n"
+        f"Debug info:\n"
+        f"  training_flops_per_second: {training_flops_per_second:,}\n"
+        f"  total_training_device_flops: {total_training_device_flops:,}\n"
+        f"  training_flops: {training_flops:,}\n"
+        f"  training_time: {training_time:.6f}s\n"
+        f"  num_training_gpus: {num_training_gpus}\n"
+        f"  device_flops: {model_dims.device_flops:,}\n"
+        f"  device_name: {model_dims.device_name}\n"
+        f"  num_training_sequences: {len(total_sequence_lengths)}\n"
+        f"  avg_total_sequence_length: {sum(total_sequence_lengths) / len(total_sequence_lengths):.1f}"
+    )
 
     return {"actor_mfu": actor_mfu, "actor_mbu": actor_mbu, "learner_mfu": learner_mfu}
 

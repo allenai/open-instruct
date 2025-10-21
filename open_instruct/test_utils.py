@@ -304,6 +304,52 @@ class TestFlatArguments(unittest.TestCase):
         self.assertFalse(args.additional_model_arguments)
 
 
+class TestModelDimsQwen25(unittest.TestCase):
+    def setUp(self):
+        self.qwen25_7b_dims = utils.ModelDims(
+            num_layers=28,
+            hidden_size=3584,
+            intermediate_size=18944,
+            vocab_size=152064,
+            num_attn_heads=28,
+            head_dim=128,
+            num_kv_heads=4,
+            device_name="h100",
+        )
+        self.sequence_length = 34048
+        self.batch_size = 16
+
+    def test_qwen25_7b_flops_calculation(self):
+        total_flops = self.qwen25_7b_dims.flops([self.sequence_length], [1])
+        prefill_flops = self.qwen25_7b_dims.flops([self.sequence_length], None)
+        decode_flops = total_flops - prefill_flops
+        decode_flops_in_gflops = decode_flops / 1e9
+        self.assertAlmostEqual(decode_flops_in_gflops, 27.0, delta=1.0)
+
+    def test_qwen25_7b_memory_calculation(self):
+        embedding_params = self.qwen25_7b_dims.vocab_size * self.qwen25_7b_dims.hidden_size
+        weight_params = self.qwen25_7b_dims.num_params - embedding_params
+        lm_head_bytes = self.qwen25_7b_dims.vocab_size * self.qwen25_7b_dims.hidden_size
+        embedding_bytes = self.qwen25_7b_dims.hidden_size
+
+        total_bytes = weight_params / self.batch_size
+        total_bytes += lm_head_bytes + embedding_bytes
+        total_bytes += (
+            2
+            * self.qwen25_7b_dims.num_kv_heads
+            * self.qwen25_7b_dims.head_dim
+            * self.qwen25_7b_dims.num_layers
+            * self.sequence_length
+        )
+        total_bytes += (
+            2 * self.qwen25_7b_dims.num_layers * self.qwen25_7b_dims.num_kv_heads * self.qwen25_7b_dims.head_dim
+        )
+        total_bytes *= 2
+
+        memory_in_gb = total_bytes / 1e9
+        self.assertAlmostEqual(memory_in_gb, 3.926, delta=0.01)
+
+
 # useful for checking if public datasets are still available
 # class CheckTuluDatasetsTest(unittest.TestCase):
 #     """
