@@ -34,7 +34,7 @@ uv run python mason.py \
         --max_prompt_token_length 2048 \
         --response_length 4096 \
         --pack_length 20480 \
-        --model_name_or_path Qwen/Qwen2.5-7B \
+        --model_name_or_path /weka/oe-adapt-default/finbarrt/stego32/step17000-hf \
         --chat_template_name tulu_thinker \
 	--inflight_updates True \
         --stop_strings "</answer>" \
@@ -44,10 +44,10 @@ uv run python mason.py \
         --ground_truths_key ground_truth \
         --sft_messages_key messages \
         --total_episodes 10_000 \
-        --deepspeed_stage 2 \
+        --deepspeed_stage 3 \
         --num_learners_per_node 8 \
-        --vllm_num_engines 8 \
-        --vllm_tensor_parallel_size 1 \
+        --vllm_num_engines 2 \
+        --vllm_tensor_parallel_size 4 \
         --lr_scheduler_type constant \
         --apply_verifiable_reward true \
         --code_api_url \$CODE_API_URL/test_program \
