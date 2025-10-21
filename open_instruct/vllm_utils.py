@@ -673,6 +673,7 @@ class LLMRayActor:
         backend: str,
         use_ray: bool = False,
         timeout_minutes: int = 120,
+        group_specs: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         future = asyncio.run_coroutine_threadsafe(
             self.llm_engine.collective_rpc(
@@ -686,6 +687,7 @@ class LLMRayActor:
                     backend,
                     use_ray,
                     timeout_minutes,
+                    group_specs,
                 ),
             ),
             self.loop,
@@ -724,6 +726,13 @@ class LLMRayActor:
 
     def ready(self) -> bool:
         return True
+
+    def describe_update_worker(self) -> dict:
+        """Return placement metadata for hierarchical weight broadcasts."""
+        ctx = ray.get_runtime_context()
+        return {
+            "node_id": ctx.get_node_id(),
+        }
 
     def check_background_threads(self) -> None:
         if self._prefetch_future.done():

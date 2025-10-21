@@ -643,6 +643,12 @@ class PolicyTrainerRayProcess(RayProcess):
         self.wandb_url = wandb_url
         torch.cuda.set_device(self.local_rank)
         self.device = torch.device(self.local_rank)
+        self.vllm_group_specs: list[dict] = []
+        self.vllm_inter_node_group = None
+        self.vllm_intra_node_groups: dict[str, torch.distributed.ProcessGroup] = {}
+        self.vllm_node_leader_ranks: dict[str, int] = {}
+        self.vllm_broadcast_group = None
+        self.vllm_hierarchical_enabled = False
 
         # Set seeds for this worker (different per rank to avoid correlation)
         worker_seed = args.seed + self.local_rank
@@ -821,6 +827,12 @@ class PolicyTrainerRayProcess(RayProcess):
 
     def setup_model_update_group(self, vllm_engines):
         self.vllm_engines = vllm_engines
+        self.vllm_group_specs = []
+        self.vllm_inter_node_group = None
+        self.vllm_intra_node_groups = {}
+        self.vllm_node_leader_ranks = {}
+        self.vllm_broadcast_group = None
+        self.vllm_hierarchical_enabled = False
         if self.rank == 0:
             master_address = ray._private.services.get_node_ip_address()
             with socket.socket() as sock:
@@ -832,6 +844,29 @@ class PolicyTrainerRayProcess(RayProcess):
             )
             world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
             backend = self.args.vllm_sync_backend
+            node_infos = ray.get([engine.describe_update_worker.remote() for engine in vllm_engines])
+            next_rank = 1
+            engine_rank_blocks: list[list[int]] = []
+            for _ in vllm_engines:
+                ranks = list(range(next_rank, next_rank + vllm_tensor_parallel_size))
+                engine_rank_blocks.append(ranks)
+                next_rank += vllm_tensor_parallel_size
+            node_to_ranks: dict[str, list[int]] = defaultdict(list)
+            for info, ranks in zip(node_infos, engine_rank_blocks):
+                node_to_ranks[info["node_id"]].extend(ranks)
+            node_leader_ranks = {node_id: min(ranks) for node_id, ranks in node_to_ranks.items()}
+            inter_node_ranks = [0] + sorted(node_leader_ranks.values())
+            group_specs: list[dict[str, Any]] = []
+            if len(inter_node_ranks) > 1:
+                group_specs.append({"tag": "inter_node", "ranks": inter_node_ranks})
+            for node_id in sorted(node_to_ranks.keys()):
+                ranks = sorted(node_to_ranks[node_id])
+                leader_rank = node_leader_ranks[node_id]
+                ordered_ranks = [leader_rank] + [r for r in ranks if r != leader_rank]
+                if len(ordered_ranks) > 1:
+                    group_specs.append({"tag": "intra_node", "node_id": node_id, "ranks": ordered_ranks})
+            self.vllm_group_specs = group_specs
+            self.vllm_node_leader_ranks = node_leader_ranks
             refs = [
                 engine.init_process_group.remote(
                     master_address,
@@ -841,6 +876,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     "openrlhf",
                     backend=backend,
                     timeout_minutes=self.args.backend_timeout,
+                    group_specs=group_specs,
                 )
                 for i, engine in enumerate(vllm_engines)
             ]
@@ -852,8 +888,31 @@ class PolicyTrainerRayProcess(RayProcess):
                 group_name="openrlhf",
                 timeout=timedelta(minutes=self.args.backend_timeout),
             )
+            from torch.distributed.distributed_c10d import GroupMember, ProcessGroup
+
+            for spec in group_specs:
+                group = torch.distributed.new_group(
+                    ranks=spec["ranks"],
+                    backend=backend,
+                    group=self.model_update_group,
+                )
+                if isinstance(group, ProcessGroup):
+                    if spec.get("tag") == "inter_node":
+                        self.vllm_inter_node_group = group
+                        self.vllm_hierarchical_enabled = True
+                    elif spec.get("tag") == "intra_node":
+                        node_id = spec.get("node_id")
+                        if node_id is not None:
+                            self.vllm_intra_node_groups[node_id] = group
+                            self.vllm_hierarchical_enabled = True
+                elif group == GroupMember.NON_GROUP_MEMBER:
+                    continue
+            self.vllm_broadcast_group = self.vllm_inter_node_group or self.model_update_group
             ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=60)
         torch.distributed.barrier()
+        if self.rank != 0:
+            # Non-root ranks rely on root to decide group; default to global broadcast for safety.
+            self.vllm_broadcast_group = self.model_update_group if self.vllm_broadcast_group is None else self.vllm_broadcast_group
 
     def broadcast_to_vllm(self):
         # avoid OOM
@@ -861,6 +920,7 @@ class PolicyTrainerRayProcess(RayProcess):
         model = self.model.module
         count, num_params = 0, len(list(model.named_parameters()))
         refss = []
+        broadcast_group = self.vllm_broadcast_group or self.model_update_group
         if self.args.gather_whole_model:
             with deepspeed.zero.GatheredParameters(model.parameters(), enabled=self.args.deepspeed_stage == 3):
                 for name, param in model.named_parameters():
@@ -876,7 +936,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         ]
                         refss.extend(refs)
                     if torch.distributed.get_rank() == 0:
-                        torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+                        torch.distributed.broadcast(param.data, 0, group=broadcast_group)
         else:  # broadcast each parameter independently
             for name, param in model.named_parameters():
                 count += 1
@@ -891,7 +951,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     refss.extend(refs)
                 with deepspeed.zero.GatheredParameters([param], enabled=self.args.deepspeed_stage == 3):
                     if torch.distributed.get_rank() == 0:
-                        torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+                        torch.distributed.broadcast(param.data, 0, group=broadcast_group)
 
         # Return futures instead of blocking - let caller handle completion
         all_refs = []

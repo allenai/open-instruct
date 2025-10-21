@@ -9,6 +9,7 @@ class WorkerWrap:
         backend="nccl",
         use_ray=False,
         timeout_minutes=120,
+        group_specs=None,
     ):
         """Init torch process group for model weights update"""
         from datetime import timedelta
@@ -38,6 +39,40 @@ class WorkerWrap:
                 timeout=timedelta(minutes=timeout_minutes),
             )
         self._model_update_with_ray = use_ray
+        self._global_rank = rank
+        self._inter_node_group = None
+        self._intra_node_group = None
+        self._intra_group_root = None
+        self._hierarchical_broadcast_enabled = False
+        self._is_node_leader = False
+        if not use_ray and group_specs:
+            from torch.distributed.distributed_c10d import GroupMember, ProcessGroup
+
+            for spec in group_specs:
+                ranks = spec.get("ranks", [])
+                pg = torch.distributed.new_group(
+                    ranks=ranks,
+                    backend=backend,
+                    group=self._model_update_group,
+                )
+                if isinstance(pg, ProcessGroup):
+                    if spec.get("tag") == "inter_node":
+                        self._inter_node_group = pg
+                        self._hierarchical_broadcast_enabled = True
+                        # Trainer is rank 0; any other rank present here is the node leader.
+                        if self._global_rank in ranks and self._global_rank != 0:
+                            self._is_node_leader = True
+                    elif spec.get("tag") == "intra_node":
+                        self._intra_node_group = pg
+                        leader_rank = ranks[0] if ranks else None
+                        self._intra_group_root = leader_rank
+                        self._hierarchical_broadcast_enabled = True
+                        if self._global_rank == leader_rank:
+                            self._is_node_leader = True
+                elif pg == GroupMember.NON_GROUP_MEMBER:
+                    if spec.get("tag") == "inter_node" and self._global_rank in ranks and self._global_rank != 0:
+                        self._is_node_leader = True
+                        self._hierarchical_broadcast_enabled = True
         print(
             f"init_process_group: master_address={master_address}, master_port={master_port}, ",
             f"rank={rank}, world_size={world_size}, group_name={group_name}",
@@ -55,7 +90,20 @@ class WorkerWrap:
 
             collective.broadcast(weight, 0, group_name=self._model_update_group)
         else:
-            torch.distributed.broadcast(weight, 0, group=self._model_update_group)
+            if getattr(self, "_hierarchical_broadcast_enabled", False) and (
+                self._inter_node_group is not None or self._intra_node_group is not None
+            ):
+                if self._inter_node_group is not None and self._is_node_leader:
+                    torch.distributed.broadcast(weight, 0, group=self._inter_node_group)
+                    if self._intra_node_group is not None:
+                        root = self._intra_group_root if self._intra_group_root is not None else self._global_rank
+                        torch.distributed.broadcast(weight, root, group=self._intra_node_group)
+                elif self._intra_node_group is not None and self._intra_group_root is not None:
+                    torch.distributed.broadcast(weight, self._intra_group_root, group=self._intra_node_group)
+                else:
+                    torch.distributed.broadcast(weight, 0, group=self._model_update_group)
+            else:
+                torch.distributed.broadcast(weight, 0, group=self._model_update_group)
 
         self.model_runner.model.load_weights(weights=[(name, weight)])
 
