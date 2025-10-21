@@ -485,7 +485,10 @@ def run_benchmark(
 
             # Calculate total memory bytes for all prompts and responses in the batch
             model_memory_bytes = model_dims.memory_bytes(
-                all_prompt_lengths, all_response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
+                all_prompt_lengths,
+                args.vllm_num_engines,
+                response_lengths=all_response_lengths,
+                samples_per_prompt=args.num_samples_per_prompt_rollout,
             )
 
             # MBU = (Memory bytes / time) / peak_bandwidth * 100

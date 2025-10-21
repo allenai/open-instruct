@@ -1471,6 +1471,7 @@ def calculate_utilization_metrics(
     total_generation_time: float,
     samples_per_prompt: int,
     num_inference_gpus: int,
+    num_engines: int,
     training_time: float,
     num_training_gpus: int,
 ) -> dict:
@@ -1483,6 +1484,7 @@ def calculate_utilization_metrics(
         total_generation_time: Total time taken for generation (for actor metrics)
         samples_per_prompt: Number of samples generated per prompt
         num_inference_gpus: Number of GPUs used for inference
+        num_engines: Number of vLLM engines for inference
         training_time: Time taken for training step (for learner metrics)
         num_training_gpus: Number of GPUs used for training (for learner metrics)
 
@@ -1499,7 +1501,7 @@ def calculate_utilization_metrics(
     # Calculate FLOPs and memory bytes for inference
     actor_total_flops = model_dims.flops(prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt)
     actor_total_memory_bytes = model_dims.memory_bytes(
-        prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt
+        prompt_lengths, num_engines, response_lengths=response_lengths, samples_per_prompt=samples_per_prompt
     )
 
     # Calculate MFU and MBU accounting for multiple GPUs
@@ -2545,6 +2547,7 @@ def one_training_step(
         total_generation_time=total_generation_time,
         samples_per_prompt=args.num_samples_per_prompt_rollout,
         num_inference_gpus=num_actor_gpus,
+        num_engines=args.vllm_num_engines,
         training_time=train_timer.duration,
         num_training_gpus=args.world_size,
     )
