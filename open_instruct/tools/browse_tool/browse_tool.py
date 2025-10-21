@@ -1,10 +1,12 @@
 import re
 import time
+import asyncio
+import inspect
 from typing import Callable, Optional
 
 from open_instruct.tools.utils.tool_classes import Tool, ToolOutput
 
-from open_instruct.tools.browse_tool.crawl4ai import crawl_url as crawl4ai_crawl_url
+from open_instruct.tools.browse_tool.crawl4ai_browse import crawl_url as crawl4ai_crawl_url
 
 
 class BrowseTool(Tool):
@@ -55,7 +57,18 @@ class BrowseTool(Tool):
         timeout = False
         error = ""
 
-        markdown_content = self.crawl_fn(url_string, api_endpoint=self.api_endpoint)
+        # Support both sync and async crawl functions
+        markdown_content = None
+        try:
+            markdown_content = asyncio.run(self.crawl_fn(url_string, api_endpoint=self.api_endpoint))
+        except Exception as e:
+            return ToolOutput(
+                output="",
+                error=f"Exception during crawl: {e}",
+                called=True,
+                timeout=False,
+                runtime=time.time() - start_time,
+            )
 
         if not markdown_content:
             return ToolOutput(
