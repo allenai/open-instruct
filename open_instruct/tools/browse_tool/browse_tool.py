@@ -8,11 +8,12 @@ from open_instruct.tools.browse_tool.crawl4ai import crawl_url as crawl4ai_crawl
 
 
 class BrowseTool(Tool):
-    def __init__(self, crawl_fn: Callable[[str], Optional[str]], api_endpoint: str, *args, **kwargs):
+    def __init__(self, crawl_fn: Callable[[str], Optional[str]], api_endpoint: str, max_context_chars: int = 2000, *args, **kwargs):
         self.crawl_fn = crawl_fn
         self.api_endpoint = api_endpoint
         self.start_str = "<url>"
         self.end_str = "</url>"
+        self.max_context_chars = max_context_chars
         super().__init__(*args, **kwargs)
 
     def __call__(self, prompt: str) -> ToolOutput:
@@ -58,9 +59,14 @@ class BrowseTool(Tool):
                 runtime=time.time() - start_time,
             )
 
+        markdown_content = markdown_content.strip()
+        if len(markdown_content) > self.max_context_chars:
+            markdown_content = markdown_content[:self.max_context_chars]
+            markdown_content += "..."
+
         # Return the markdown content
         return ToolOutput(
-            output=markdown_content.strip(),
+            output=markdown_content,
             called=True,
             error=error,
             timeout=timeout,
