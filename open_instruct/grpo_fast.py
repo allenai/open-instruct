@@ -356,6 +356,8 @@ class Args:
     """Where to save the model"""
     save_traces: bool = False
     """Whether to save learning data traces"""
+    save_adaptive_rubrics: bool = False
+    """Whether to save adaptive rubrics generated during training"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
     keep_last_n_checkpoints: int = 3
@@ -1324,7 +1326,10 @@ def data_preparation_thread(
                     responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries, rubric_buffer=rubric_buffer, is_training=True, training_step=training_step, transform_fn_args=transform_fn_args, tokenizer=tokenizer, masks=masks
                 )
             )
-            if len(result) == 3:
+            adaptive_rubric_scores_for_saving = None
+            if len(result) == 4:
+                scores, reward_metrics, rubric_buffer, adaptive_rubric_scores_for_saving = result
+            elif len(result) == 3:
                 scores, reward_metrics, rubric_buffer = result
             else:
                 scores, reward_metrics = result
@@ -1607,6 +1612,26 @@ def data_preparation_thread(
             with open(f"{args.output_dir}/traces_{args.run_name}.jsonl", "a") as f:
                 json.dump(traces, f)
                 f.write("\n")
+        
+        # Save adaptive rubrics if requested
+        if args.save_adaptive_rubrics and adaptive_rubric_scores_for_saving is not None:
+            adaptive_rubrics_data = {
+                "training_step": training_step,
+                "decoded_responses": decoded_responses,
+                "queries": decoded_queries,
+                "ground_truths": ground_truths,
+                "datasets": datasets,
+                "adaptive_rubric_scores": adaptive_rubric_scores_for_saving,
+            }
+            os.makedirs(args.output_dir, exist_ok=True)
+            adaptive_rubrics_file = f"{args.output_dir}/adaptive_rubrics_{args.run_name}.jsonl"
+            try:
+                with open(adaptive_rubrics_file, "a") as f:
+                    json.dump(adaptive_rubrics_data, f)
+                    f.write("\n")
+            except Exception as e:
+                print(f"Warning: Failed to save adaptive rubrics: {e}")
+                # Continue training even if saving fails
 
         # Put the packed sequences and metrics into the output queue
         packed_sequences_Q.put(
@@ -2510,6 +2535,7 @@ if __name__ == "__main__":
         ]
         scores = [0] * len(decoded_responses)
         metrics = {}
+        adaptive_rubric_scores_data = None  # Will store adaptive rubric data if generated
 
         if args.apply_r1_style_format_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
@@ -2555,6 +2581,11 @@ if __name__ == "__main__":
         if args.apply_adaptive_rubric_reward and is_training:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating adaptive rubric reward"):
                 adaptive_rubric_scores = await _generate_instance_wise_adaptive_rubrics(decoded_responses, ground_truths, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer)
+                
+                # Store adaptive rubric scores for saving if requested
+                if args.save_adaptive_rubrics:
+                    adaptive_rubric_scores_data = adaptive_rubric_scores
+                
                 # Update ground truths with adaptive rubrics and incorporate rubric buffer
                 ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, avg_num_active_buffer_rubrics, rubric_buffer = update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubric_scores, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer)
                 metrics["objective/valid_adaptive_rubric_rate"] = valid_adaptive_rubric_rate
@@ -2798,6 +2829,9 @@ if __name__ == "__main__":
                     if moved_count > 0 or capped_count > 0:
                         print(f"[Adaptive Rubric Filtering] Moved {moved_count} zero-std rubrics and {capped_count} low-std rubrics to inactive")
 
+        # Return adaptive rubric scores if they were generated and saving is requested
+        if adaptive_rubric_scores_data is not None:
+            return scores, metrics, rubric_buffer, adaptive_rubric_scores_data
         return scores, metrics, rubric_buffer
 
     main(args, tokenizer_config, model_config, reward_fn)
