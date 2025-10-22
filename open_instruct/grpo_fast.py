@@ -829,17 +829,27 @@ class PolicyTrainerRayProcess(RayProcess):
         self.vllm_inter_node_group = None
         self.vllm_broadcast_group = None
         self.vllm_hierarchical_enabled = False
+        self.model_update_group = None
+        master_address = ""
+        master_port = 0
         if self.rank == 0:
             master_address = ray._private.services.get_node_ip_address()
             with socket.socket() as sock:
                 sock.bind(("", 0))
                 master_port = sock.getsockname()[1]
-            vllm_num_engines, vllm_tensor_parallel_size = (
-                self.args.vllm_num_engines,
-                self.args.vllm_tensor_parallel_size,
-            )
-            world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
-            backend = self.args.vllm_sync_backend
+        addr_payload = [master_address, master_port]
+        torch.distributed.broadcast_object_list(addr_payload, src=0)
+        master_address, master_port = addr_payload
+
+        vllm_num_engines, vllm_tensor_parallel_size = (
+            self.args.vllm_num_engines,
+            self.args.vllm_tensor_parallel_size,
+        )
+        world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
+        backend = self.args.vllm_sync_backend
+
+        group_specs: list[dict[str, Any]] = []
+        if self.rank == 0:
             node_infos = ray.get([engine.describe_update_worker.remote() for engine in vllm_engines])
             next_rank = 1
             engine_rank_blocks: list[list[int]] = []
@@ -877,7 +887,6 @@ class PolicyTrainerRayProcess(RayProcess):
                             "leader_rank": leader_rank,
                         }
                     )
-            self.vllm_group_specs = group_specs
             refs = [
                 engine.init_process_group.remote(
                     master_address,
@@ -924,12 +933,10 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.vllm_hierarchical_enabled = True
             self.vllm_broadcast_group = self.vllm_inter_node_group or self.model_update_group
             ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=60)
+        specs_payload = [group_specs]
+        torch.distributed.broadcast_object_list(specs_payload, src=0)
+        self.vllm_group_specs = specs_payload[0]
         torch.distributed.barrier()
-        if self.rank != 0:
-            # Non-root ranks rely on root to decide group; default to global broadcast for safety.
-            self.vllm_broadcast_group = (
-                self.model_update_group if self.vllm_broadcast_group is None else self.vllm_broadcast_group
-            )
 
     def broadcast_to_vllm(self):
         # avoid OOM
