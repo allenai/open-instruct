@@ -160,6 +160,8 @@ async def process_request_async(
 
         assert actor.executor is not None, f"executor is None for request {sub_request_id}"
 
+        logger.info(f"Tool {triggered_tool} triggered.")
+
         loop = asyncio.get_running_loop()
         tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
 
