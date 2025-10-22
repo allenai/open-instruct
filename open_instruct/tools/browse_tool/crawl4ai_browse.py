@@ -239,18 +239,14 @@ async def crawl_url(
             if results:
                 result = results[0] if isinstance(results, list) else results
                 if getattr(result, "success", False):
-                    final_output = (
-                        result.markdown.fit_markdown
-                        or result.markdown.raw_markdown
-                        or result.html
-                    )
+                    final_output = result.markdown.fit_markdown or result.markdown.raw_markdown or result.html
                     if final_output:
                         return final_output
 
             # Retry if attempts remain
             if attempt < max_retries:
                 # Exponential backoff with jitter
-                delay = min(backoff_cap_seconds, backoff_base_seconds * (2 ** attempt))
+                delay = min(backoff_cap_seconds, backoff_base_seconds * (2**attempt))
                 jitter_multiplier = random.uniform(1.0 - backoff_jitter, 1.0 + backoff_jitter)
                 await asyncio.sleep(delay * jitter_multiplier)
 

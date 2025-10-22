@@ -7,6 +7,7 @@ from typing import Callable, Optional
 from open_instruct.tools.utils.tool_classes import Tool, ToolOutput
 
 from open_instruct.tools.browse_tool.crawl4ai_browse import crawl_url as crawl4ai_crawl_url
+import os
 
 
 class BrowseTool(Tool):
@@ -20,10 +21,10 @@ class BrowseTool(Tool):
     ):
         self.crawl_fn = crawl_fn
         self.api_endpoint = api_endpoint
-        self.start_str = "<url>"
-        self.end_str = "</url>"
+        self.start_str = kwargs.pop("start_str", "<url>")
+        self.end_str = kwargs.pop("end_str", "</url>")
         self.max_context_chars = max_context_chars
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs, start_str=self.start_str, end_str=self.end_str)
 
     def __call__(self, prompt: str) -> ToolOutput:
         # Find URL blocks using regex
@@ -98,9 +99,7 @@ class BrowseTool(Tool):
 
 class Crawl4aiBrowseTool(BrowseTool):
     def __init__(self, *args, **kwargs):
-        super().__init__(crawl4ai_crawl_url, *args, **kwargs)
-        self.start_str = "<url_crawl4ai>"
-        self.end_str = "</url_crawl4ai>"
+        super().__init__(crawl4ai_crawl_url, *args, **kwargs, start_str="<url_crawl4ai>", end_str="</url_crawl4ai>")
         # If the CRAWL4AI_API_URL environment variable is set, use it as the API endpoint
         if os.environ.get("CRAWL4AI_API_URL") is not None:
             self.api_endpoint = os.environ.get("CRAWL4AI_API_URL")
@@ -113,7 +112,7 @@ if __name__ == "__main__":
     # Prefer env var for endpoint; this will raise in crawl4ai_crawl_url if unset
     api_endpoint = os.environ.get("CRAWL4AI_API_URL")
 
-    tool = Crawl4aiBrowseTool(api_endpoint=api_endpoint, start_str="<url>", end_str="</url>")
+    tool = Crawl4aiBrowseTool(api_endpoint=api_endpoint)
 
     prompt = "Here is a test. Please fetch this page.\n<url_crawl4ai>https://ivison.id.au</url_crawl4ai>\n"
 

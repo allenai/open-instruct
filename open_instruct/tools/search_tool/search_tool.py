@@ -14,10 +14,10 @@ class SearchTool(Tool):
     def __init__(self, snippet_fn: Callable[[str], List[str]], api_endpoint: str | None = None, *args, **kwargs):
         self.snippet_fn = snippet_fn
         self.api_endpoint = api_endpoint
-        self.start_str = "<query>"
-        self.end_str = "</query>"
+        self.start_str = kwargs.pop("start_str", "<query>")
+        self.end_str = kwargs.pop("end_str", "</query>")
         self.number_documents_to_search = kwargs.pop("number_documents_to_search", 3)
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs, start_str=self.start_str, end_str=self.end_str)
 
     def __call__(self, prompt: str) -> ToolOutput:
         # Find Python code blocks using regex
@@ -74,23 +74,23 @@ class SearchTool(Tool):
 
 class S2SearchTool(SearchTool):
     def __init__(self, *args, **kwargs):
-        super().__init__(s2_get_snippets_for_query, *args, **kwargs)
-        self.start_str = "<query_s2>"
-        self.end_str = "</query_s2>"
+        super().__init__(s2_get_snippets_for_query, *args, **kwargs, start_str="<query_s2>", end_str="</query_s2>")
 
 
 class YouSearchTool(SearchTool):
     def __init__(self, *args, **kwargs):
-        super().__init__(you_get_snippets_for_query, *args, **kwargs)
-        self.start_str = "<query_you>"
-        self.end_str = "</query_you>"
+        super().__init__(you_get_snippets_for_query, *args, **kwargs, start_str="<query_you>", end_str="</query_you>")
 
 
 class MassiveDSSearchTool(SearchTool):
     def __init__(self, *args, **kwargs):
-        super().__init__(massive_ds_get_snippets_for_query, *args, **kwargs)
-        self.start_str = "<query_massive_ds>"
-        self.end_str = "</query_massive_ds>"
+        super().__init__(
+            massive_ds_get_snippets_for_query,
+            *args,
+            **kwargs,
+            start_str="<query_massive_ds>",
+            end_str="</query_massive_ds>",
+        )
         # If the MASSIVE_DS_API_URL environment variable is set, use it as the API endpoint
         if os.environ.get("MASSIVE_DS_API_URL") is not None:
             self.api_endpoint = os.environ.get("MASSIVE_DS_API_URL")
@@ -98,6 +98,6 @@ class MassiveDSSearchTool(SearchTool):
 
 class SerperSearchTool(SearchTool):
     def __init__(self, *args, **kwargs):
-        super().__init__(serper_get_snippets_for_query, *args, **kwargs)
-        self.start_str = "<query_serper>"
-        self.end_str = "</query_serper>"
+        super().__init__(
+            serper_get_snippets_for_query, *args, **kwargs, start_str="<query_serper>", end_str="</query_serper>"
+        )
