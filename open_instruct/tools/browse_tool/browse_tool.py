@@ -13,7 +13,7 @@ class BrowseTool(Tool):
     def __init__(
         self,
         crawl_fn: Callable[[str], Optional[str]],
-        api_endpoint: str,
+        api_endpoint: str | None = None,
         max_context_chars: int = 2000,
         *args,
         **kwargs,
@@ -101,6 +101,9 @@ class Crawl4aiBrowseTool(BrowseTool):
         super().__init__(crawl4ai_crawl_url, *args, **kwargs)
         self.start_str = "<url_crawl4ai>"
         self.end_str = "</url_crawl4ai>"
+        # If the CRAWL4AI_API_URL environment variable is set, use it as the API endpoint
+        if os.environ.get("CRAWL4AI_API_URL") is not None:
+            self.api_endpoint = os.environ.get("CRAWL4AI_API_URL")
 
 
 if __name__ == "__main__":

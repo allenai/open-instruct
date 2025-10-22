@@ -1,4 +1,5 @@
 import re
+import os
 import time
 from typing import Callable, List
 
@@ -10,7 +11,7 @@ from open_instruct.tools.utils.tool_classes import Tool, ToolOutput
 
 
 class SearchTool(Tool):
-    def __init__(self, snippet_fn: Callable[[str], List[str]], api_endpoint: str, *args, **kwargs):
+    def __init__(self, snippet_fn: Callable[[str], List[str]], api_endpoint: str | None = None, *args, **kwargs):
         self.snippet_fn = snippet_fn
         self.api_endpoint = api_endpoint
         self.start_str = "<query>"
@@ -90,6 +91,9 @@ class MassiveDSSearchTool(SearchTool):
         super().__init__(massive_ds_get_snippets_for_query, *args, **kwargs)
         self.start_str = "<query_massive_ds>"
         self.end_str = "</query_massive_ds>"
+        # If the MASSIVE_DS_API_URL environment variable is set, use it as the API endpoint
+        if os.environ.get("MASSIVE_DS_API_URL") is not None:
+            self.api_endpoint = os.environ.get("MASSIVE_DS_API_URL")
 
 
 class SerperSearchTool(SearchTool):
