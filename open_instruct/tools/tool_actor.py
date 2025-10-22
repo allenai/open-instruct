@@ -15,7 +15,7 @@ TOOL_CLASS_REGISTRY: Dict[str, str] = {
     "search_s2": "open_instruct.tools.search_tool.search_tool:S2SearchTool",
     "search_you": "open_instruct.tools.search_tool.search_tool:YouSearchTool",
     "search_massive_ds": "open_instruct.tools.search_tool.search_tool:MassiveDSSearchTool",
-    "search_serper": "open_instruct.tools.search_tool.serper:get_snippets_for_query",
+    "search_serper": "open_instruct.tools.search_tool.search_tool:SerperSearchTool",
     # browse tool, for Ai2 internal use for now.
     "browse_crawl4ai": "open_instruct.tools.browse_tool.browse_tool:BrowseTool",
     # Code execution proxy tool (client)
