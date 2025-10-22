@@ -1,4 +1,6 @@
 import json
+import asyncio
+import weakref
 import logging
 import os
 from typing import Any, Dict, Optional, List
@@ -11,6 +13,24 @@ from openai import AzureOpenAI
 litellm.drop_params = True
 
 LOGGER = logging.getLogger(__name__)
+
+
+# Per-event-loop concurrency control for LiteLLM async calls to avoid event loop binding issues
+_LITELLM_SEMAPHORES = weakref.WeakKeyDictionary()
+
+
+def _get_litellm_semaphore() -> asyncio.Semaphore:
+    """Return a per-event-loop semaphore limiting concurrent LiteLLM async requests.
+
+    Limit can be configured with env var `LITELLM_MAX_CONCURRENT_CALLS` (default 256).
+    """
+    loop = asyncio.get_running_loop()
+    sem = _LITELLM_SEMAPHORES.get(loop)
+    if sem is None:
+        max_concurrent = int(os.environ.get("LITELLM_MAX_CONCURRENT_CALLS", "256"))
+        sem = asyncio.Semaphore(max_concurrent)
+        _LITELLM_SEMAPHORES[loop] = sem
+    return sem
 
 
 def extract_json_from_response(response: str) -> Optional[Dict[str, Any]]:
@@ -253,12 +273,20 @@ async def run_litellm_async(
             else [{"role": "user", "content": user_prompt}]
         )
 
-    # Create chat completion
-    response = await litellm.acompletion(
-        messages=msgs,
-        model=model_name,
-        **chat_kwargs,
+    # Apply default timeout if not provided
+    chat_kwargs["timeout"] = chat_kwargs.get(
+        "timeout", float(os.environ.get("LITELLM_DEFAULT_TIMEOUT", "120"))
     )
+
+    # Guard concurrent calls with a global semaphore
+    semaphore = _get_litellm_semaphore()
+    async with semaphore:
+        # Create chat completion
+        response = await litellm.acompletion(
+            messages=msgs,
+            model=model_name,
+            **chat_kwargs,
+        )
 
     return response.choices[0].message.content
 
