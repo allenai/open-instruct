@@ -2766,7 +2766,7 @@ if __name__ == "__main__":
                             rubric_key_stats[rubric_key]["count"] = 0
                 
                 # Filter rubrics based on statistics
-                if rubric_key_stats and training_step % 10 == 0:  # Filter every 10 steps
+                if rubric_key_stats:
                     rubrics_to_deactivate = []
                     rubrics_by_query_std = {}
                     

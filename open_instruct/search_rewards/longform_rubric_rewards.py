@@ -207,7 +207,7 @@ def compute_weighted_rubric_reward_with_citation_and_format_reward(response: str
             rubric_key = create_rubric_key(question, rubric)
             rubric_scores_by_title[rubric_key] = 0.0
         
-        # result["log_values"]["rubric_scores_by_title"] = rubric_scores_by_title
+        result["log_values"]["rubric_scores_by_title"] = rubric_scores_by_title
         
         # Compute final reward using only format and search turn rewards
         reward = 0.0
@@ -227,7 +227,7 @@ def compute_weighted_rubric_reward_with_citation_and_format_reward(response: str
     result["log_values"]["rubric_reward"] = rubric_reward
     result["log_values"]["persistent_rubric_reward"] = persistent_reward
     result["log_values"]["adaptive_rubric_reward"] = adaptive_reward
-    # result["log_values"]["rubric_scores_by_title"] = rubric_scores_by_title
+    result["log_values"]["rubric_scores_by_title"] = rubric_scores_by_title
     result["log_values"]["format_correct_has_answer"] = 1.0
     
     # Score citation reward (copied from longform_averaged_outcome_rewards)
