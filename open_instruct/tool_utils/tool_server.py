@@ -277,4 +277,21 @@ async def execute_code(req: CodeRequest, api_key: str = Depends(verify_api_key))
 
 @app.get("/")
 async def root():  # noqa: D401
-    return {"message": "Python Code Executor API — POST /execute {code, timeout}"}
+    host = os.getenv("HOST", "http://localhost:1212")
+
+    examples = f"""Python Code Executor API
+
+Example usage:
+
+curl -X POST {host}/execute \\
+     -H "Content-Type: application/json" \\
+     -H "X-API-Key: $OPEN_INSTRUCT_TOOL_API_KEY" \\
+     -d '{{"code": "print(1 + 1)", "timeout": 3}}'
+
+curl -X POST {host}/execute \\
+     -H "Content-Type: application/json" \\
+     -H "X-API-Key: $OPEN_INSTRUCT_TOOL_API_KEY" \\
+     -d '{{"code": "import sympy; print(sympy.__version__)", "timeout": 3}}'
+"""
+
+    return {"message": examples}

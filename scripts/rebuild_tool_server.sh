@@ -21,7 +21,7 @@ echo "Building Docker image for ghcr.io..."
 docker build -t ghcr.io/allenai/open-instruct/python-code-executor -f open_instruct/tool_utils/Dockerfile .
 
 echo "Starting server locally on port 1212..."
-docker run -p 1212:8080 tool-server &
+docker run -p 1212:8080 -e OPEN_INSTRUCT_TOOL_API_KEY="$OPEN_INSTRUCT_TOOL_API_KEY" tool-server &
 SERVER_PID=$!
 
 echo ""
@@ -35,14 +35,16 @@ echo "1) The timeout works correctly"
 echo "2) The timeout in the first curl does not block the second curl"
 echo ""
 echo "Test 1 - This should timeout after 3 seconds:"
-echo "curl -X POST https://open-instruct-tool-server-10554368204.us-central1.run.app/execute \\"
+echo "curl -X POST http://localhost:1212/execute \\"
 echo "     -H \"Content-Type: application/json\" \\"
+echo "     -H \"X-API-Key: \$OPEN_INSTRUCT_TOOL_API_KEY\" \\"
 echo "     -d '{\"code\": \"import time;time.sleep(4)\", \"timeout\": 3}' \\"
 echo "     -w '\\nTotal time: %{time_total}s\\n'"
 echo ""
 echo "Test 2 - This should complete quickly:"
-echo "curl -X POST https://open-instruct-tool-server-10554368204.us-central1.run.app/execute \\"
+echo "curl -X POST http://localhost:1212/execute \\"
 echo "     -H \"Content-Type: application/json\" \\"
+echo "     -H \"X-API-Key: \$OPEN_INSTRUCT_TOOL_API_KEY\" \\"
 echo "     -d '{\"code\": \"print(1)\", \"timeout\": 3}' \\"
 echo "     -w '\\nTotal time: %{time_total}s\\n'"
 echo ""
