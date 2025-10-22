@@ -2627,8 +2627,8 @@ if __name__ == "__main__":
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
                 # log anything additional
                 for key, value in log_values.items():
-                    if key == "rubric_scores_by_title":
-                        # do not log rubric scores by title
+                    if key in ["rubric_scores_by_title", "per_rubric_rewards"]:
+                        # do not log rubric scores by title or per_rubric_rewards (used for buffer management)
                         continue
                     # Check if all values in the list are numeric (not dictionaries)
                     if value and all(isinstance(v, (int, float, np.number)) for v in value):
@@ -2700,13 +2700,14 @@ if __name__ == "__main__":
                 if args.apply_verifiable_reward and 'per_rubric_rewards' in log_values:
                     per_rubric_rewards = log_values['per_rubric_rewards']
                     
-                    # Group rewards by query
+                    # Group rewards by query and collect rubric weights
                     rewards_by_query = {}
-                    for i, (query, rubrics) in enumerate(zip(queries or [], ground_truths)):
-                        if isinstance(rubrics, str):
-                            rubrics = json.loads(rubrics)
-                        elif isinstance(rubrics, list) and len(rubrics) > 0 and isinstance(rubrics[0], str):
-                            rubrics = json.loads(rubrics[0])
+                    rubric_key_weights = {}
+                    for i, (query, ground_truth) in enumerate(zip(queries or [], ground_truths)):
+                        if isinstance(ground_truth, str):
+                            ground_truth = json.loads(ground_truth)
+                        elif isinstance(ground_truth, list) and len(ground_truth) > 0 and isinstance(ground_truth[0], str):
+                            ground_truth = json.loads(ground_truth[0])
                         
                         if query not in rewards_by_query:
                             rewards_by_query[query] = []
@@ -2714,15 +2715,14 @@ if __name__ == "__main__":
                         # Get the rewards for this specific response
                         if i < len(per_rubric_rewards):
                             rewards_by_query[query].append(per_rubric_rewards[i])
-                    
-                    # Create rubric_key->weight mapping
-                    rubric_key_weights = {}
-                    for rubric in rubrics:
-                        # Import the helper function here to avoid circular imports
-                        rubric_key = create_rubric_key(query, rubric)
-                        if rubric_key not in rubric_key_weights:
-                            rubric_key_weights[rubric_key] = []
-                        rubric_key_weights[rubric_key].append(rubric["weight"])
+                        
+                        # Extract rubrics list and build rubric_key->weight mapping
+                        rubrics_list = ground_truth.get("rubrics", [])
+                        for rubric in rubrics_list:
+                            rubric_key = create_rubric_key(query, rubric)
+                            if rubric_key not in rubric_key_weights:
+                                rubric_key_weights[rubric_key] = []
+                            rubric_key_weights[rubric_key].append(rubric["weight"])
                     
                     # Average weights for rubric keys with multiple rubrics (though this should be rare now)
                     for rubric_key in rubric_key_weights:

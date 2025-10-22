@@ -129,12 +129,13 @@ def compute_weighted_rubric_reward(response: str, ground_truth: Dict[str, Any]) 
             "rubric_reward": 0.0,
             "format_correct_has_answer": 0.0,
             "num_rubrics": len(rubrics),
-            # "rubric_scores_by_title": rubric_scores_by_title,
+            "rubric_scores_by_title": rubric_scores_by_title,
+            "per_rubric_rewards": {k: [v] for k, v in rubric_scores_by_title.items()},  # For rubric buffer management
         }
         return result
 
     # Compute per-rubric scores grouped by title (this includes all the expensive scoring)
-    rubric_scores_by_title, overall_reward, persistent_reward, adaptive_reward = asyncio.run(_compute_rubric_scores_and_reward(extracted_answer, ground_truth))
+    rubric_scores_by_title, per_rubric_scores, overall_reward, persistent_reward, adaptive_reward = asyncio.run(_compute_rubric_scores_and_reward(extracted_answer, ground_truth))
                     
     result["reward"] = overall_reward
     result["log_values"] = {
@@ -143,7 +144,8 @@ def compute_weighted_rubric_reward(response: str, ground_truth: Dict[str, Any]) 
         "num_rubrics": num_rubrics,
         "persistent_rubric_reward": persistent_reward,
         "adaptive_rubric_reward": adaptive_reward,
-        # "rubric_scores_by_title": rubric_scores_by_title,
+        "rubric_scores_by_title": rubric_scores_by_title,
+        "per_rubric_rewards": per_rubric_scores,  # For rubric buffer management
         }
     return result
 
@@ -208,6 +210,7 @@ def compute_weighted_rubric_reward_with_citation_and_format_reward(response: str
             rubric_scores_by_title[rubric_key] = 0.0
         
         result["log_values"]["rubric_scores_by_title"] = rubric_scores_by_title
+        result["log_values"]["per_rubric_rewards"] = {k: [v] for k, v in rubric_scores_by_title.items()}  # For rubric buffer management
         
         # Compute final reward using only format and search turn rewards
         reward = 0.0
@@ -223,11 +226,12 @@ def compute_weighted_rubric_reward_with_citation_and_format_reward(response: str
         return result
 
     # Compute per-rubric scores grouped by title using existing logic
-    rubric_scores_by_title, rubric_reward, persistent_reward, adaptive_reward = asyncio.run(_compute_rubric_scores_and_reward(extracted_answer, ground_truth, use_general_rubric=use_general_rubric, use_likert_rubric=use_likert_rubric))
+    rubric_scores_by_title, per_rubric_scores, rubric_reward, persistent_reward, adaptive_reward = asyncio.run(_compute_rubric_scores_and_reward(extracted_answer, ground_truth, use_general_rubric=use_general_rubric, use_likert_rubric=use_likert_rubric))
     result["log_values"]["rubric_reward"] = rubric_reward
     result["log_values"]["persistent_rubric_reward"] = persistent_reward
     result["log_values"]["adaptive_rubric_reward"] = adaptive_reward
     result["log_values"]["rubric_scores_by_title"] = rubric_scores_by_title
+    result["log_values"]["per_rubric_rewards"] = per_rubric_scores  # For rubric buffer management
     result["log_values"]["format_correct_has_answer"] = 1.0
     
     # Score citation reward (copied from longform_averaged_outcome_rewards)
@@ -319,10 +323,12 @@ Your JSON Evaluation:"""
     
     if use_likert_rubric:
         title_scores = {"likert_rubric": scores[0]}
-        return title_scores, scores[0]
+        per_rubric_scores = {"likert_rubric": [scores[0]]}
+        return title_scores, per_rubric_scores, scores[0], scores[0], 0.0
     elif use_general_rubric:
         title_scores = {"general_rubric": scores[0]}
-        return title_scores, scores[0]
+        per_rubric_scores = {"general_rubric": [scores[0]]}
+        return title_scores, per_rubric_scores, scores[0], scores[0], 0.0
     
     # Organize results by title and compute overall reward simultaneously
     title_scores = {}
@@ -368,7 +374,11 @@ Your JSON Evaluation:"""
     
     persistent_reward = persistent_total_score / max(persistent_total_weight, 1.0)
     adaptive_reward = adaptive_total_score / max(adaptive_total_weight, 1.0)
-    return title_scores, overall_reward, persistent_reward, adaptive_reward
+    
+    # For buffer management, wrap the averaged scores in lists
+    per_rubric_scores = {k: [v] for k, v in title_scores.items()}
+    
+    return title_scores, per_rubric_scores, overall_reward, persistent_reward, adaptive_reward
 
 
 if __name__ == '__main__':

@@ -2355,8 +2355,8 @@ if __name__ == "__main__":
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
                 # log anything additional
                 for key, value in log_values.items():
-                    if key == "rubric_scores_by_title":
-                        # do not log rubric scores by title
+                    if key in ["rubric_scores_by_title", "per_rubric_rewards"]:
+                        # do not log rubric scores by title or per_rubric_rewards (used for buffer management)
                         continue
                     metrics[f"objective/reward_log_values/{key}"] = np.array(value).mean()
                 # reshuffle around per_func rewards
