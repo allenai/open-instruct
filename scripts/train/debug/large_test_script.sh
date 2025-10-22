@@ -8,6 +8,7 @@ uv run python mason.py \
         --cluster ai2/jupiter \
         --cluster ai2/saturn \
         --cluster ai2/ceres \
+        --cluster ai2/titan \
         --image "$BEAKER_IMAGE" \
 	--pure_docker_mode \
         --workspace ai2/open-instruct-dev \
