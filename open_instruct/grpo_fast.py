@@ -645,8 +645,6 @@ class PolicyTrainerRayProcess(RayProcess):
         self.device = torch.device(self.local_rank)
         self.vllm_group_specs: list[dict] = []
         self.vllm_inter_node_group = None
-        self.vllm_intra_node_groups: dict[str, torch.distributed.ProcessGroup] = {}
-        self.vllm_node_leader_ranks: dict[str, int] = {}
         self.vllm_broadcast_group = None
         self.vllm_hierarchical_enabled = False
 
@@ -829,8 +827,6 @@ class PolicyTrainerRayProcess(RayProcess):
         self.vllm_engines = vllm_engines
         self.vllm_group_specs = []
         self.vllm_inter_node_group = None
-        self.vllm_intra_node_groups = {}
-        self.vllm_node_leader_ranks = {}
         self.vllm_broadcast_group = None
         self.vllm_hierarchical_enabled = False
         if self.rank == 0:
@@ -866,7 +862,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 if len(ordered_ranks) > 1:
                     group_specs.append({"tag": "intra_node", "node_id": node_id, "ranks": ordered_ranks})
             self.vllm_group_specs = group_specs
-            self.vllm_node_leader_ranks = node_leader_ranks
             refs = [
                 engine.init_process_group.remote(
                     master_address,
@@ -891,20 +886,11 @@ class PolicyTrainerRayProcess(RayProcess):
             from torch.distributed.distributed_c10d import GroupMember, ProcessGroup
 
             for spec in group_specs:
-                group = torch.distributed.new_group(
-                    ranks=spec["ranks"],
-                    backend=backend,
-                    group=self.model_update_group,
-                )
+                group = torch.distributed.new_group(ranks=spec["ranks"], backend=backend)
                 if isinstance(group, ProcessGroup):
                     if spec.get("tag") == "inter_node":
                         self.vllm_inter_node_group = group
                         self.vllm_hierarchical_enabled = True
-                    elif spec.get("tag") == "intra_node":
-                        node_id = spec.get("node_id")
-                        if node_id is not None:
-                            self.vllm_intra_node_groups[node_id] = group
-                            self.vllm_hierarchical_enabled = True
                 elif group == GroupMember.NON_GROUP_MEMBER:
                     continue
             self.vllm_broadcast_group = self.vllm_inter_node_group or self.model_update_group
