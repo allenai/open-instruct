@@ -898,7 +898,9 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.distributed.barrier()
         if self.rank != 0:
             # Non-root ranks rely on root to decide group; default to global broadcast for safety.
-            self.vllm_broadcast_group = self.model_update_group if self.vllm_broadcast_group is None else self.vllm_broadcast_group
+            self.vllm_broadcast_group = (
+                self.model_update_group if self.vllm_broadcast_group is None else self.vllm_broadcast_group
+            )
 
     def broadcast_to_vllm(self):
         # avoid OOM

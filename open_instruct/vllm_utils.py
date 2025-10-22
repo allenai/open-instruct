@@ -730,9 +730,7 @@ class LLMRayActor:
     def describe_update_worker(self) -> dict:
         """Return placement metadata for hierarchical weight broadcasts."""
         ctx = ray.get_runtime_context()
-        return {
-            "node_id": ctx.get_node_id(),
-        }
+        return {"node_id": ctx.get_node_id()}
 
     def check_background_threads(self) -> None:
         if self._prefetch_future.done():
