@@ -225,10 +225,13 @@ class CodeResponse(BaseModel):
 EXPECTED_API_KEY = os.getenv("OPEN_INSTRUCT_TOOL_API_KEY")
 
 
-async def verify_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
+async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
     if not EXPECTED_API_KEY:
         logger.warning("OPEN_INSTRUCT_TOOL_API_KEY not set - API key validation disabled")
         return
+    if not x_api_key:
+        logger.warning("Missing API key in request")
+        raise HTTPException(status_code=401, detail="Missing API key")
     if x_api_key != EXPECTED_API_KEY:
         logger.warning("Invalid API key attempt")
         raise HTTPException(status_code=401, detail="Invalid API key")
