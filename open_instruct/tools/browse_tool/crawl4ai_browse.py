@@ -1,4 +1,7 @@
 import os
+import asyncio
+import time
+import random
 from dataclasses import dataclass, field
 from typing import Optional, List
 from urllib.parse import urlparse
@@ -28,6 +31,51 @@ class Crawl4aiApiClient(Crawl4aiDockerClient):
     def _request(self, method: str, endpoint: str, **kwargs):
         """Override request to add path prefix."""
         return super()._request(method, self._path_url + endpoint, **kwargs)
+
+
+class DomainRateLimiter:
+    """Simple async per-domain rate limiter enforcing a minimum interval between requests.
+
+    Uses a per-domain lock and next-allowed timestamp to serialize requests to the same domain
+    and ensure a max requests-per-second rate.
+    """
+
+    def __init__(self, requests_per_second: float) -> None:
+        # Avoid division by zero; clamp to a very small positive value
+        self._rps = max(float(requests_per_second), 0.0001)
+        self._min_interval = 1.0 / self._rps
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._next_allowed: dict[str, float] = {}
+        self._global_lock = asyncio.Lock()
+
+    async def acquire(self, domain: str) -> None:
+        # Lazily initialize per-domain structures
+        async with self._global_lock:
+            if domain not in self._locks:
+                self._locks[domain] = asyncio.Lock()
+                self._next_allowed[domain] = 0.0
+
+        async with self._locks[domain]:
+            now = time.monotonic()
+            wait_time = self._next_allowed.get(domain, 0.0) - now
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
+                now = time.monotonic()
+            self._next_allowed[domain] = now + self._min_interval
+
+
+def _get_domain_rps() -> float:
+    value = os.environ.get("CRAWL4AI_DOMAIN_RPS")
+    # Default to 1.0 requests per second per domain
+    if not value:
+        return 1.0
+    try:
+        return float(value)
+    except Exception:
+        return 1.0
+
+
+_DOMAIN_RATE_LIMITER = DomainRateLimiter(_get_domain_rps())
 
 
 @dataclass(frozen=True)
@@ -138,7 +186,15 @@ def _load_blocklist_from_env() -> Optional[List[str]]:
     return None
 
 
-async def crawl_url(url: str, api_endpoint: str = None, timeout: int = 60000) -> Optional[str]:
+async def crawl_url(
+    url: str,
+    api_endpoint: str = None,
+    timeout: int = 60000,
+    max_retries: int = 3,
+    backoff_base_seconds: float = 0.5,
+    backoff_cap_seconds: float = 8.0,
+    backoff_jitter: float = 0.2,
+) -> Optional[str]:
     """
     Crawl a single URL and return its markdown content (or None on failure).
 
@@ -166,20 +222,40 @@ async def crawl_url(url: str, api_endpoint: str = None, timeout: int = 60000) ->
         if api_key:
             await client.authenticate(api_key)
 
-        # Crawl the URL
-        results = await client.crawl([url], browser_config=browser_config, crawler_config=crawler_config)
+        # Domain-level rate limiting with retries and exponential backoff
+        domain = urlparse(url).netloc
+        last_error: Optional[Exception] = None
 
-        if not results:
-            return None
+        for attempt in range(max_retries + 1):
+            # Enforce per-domain rate limit for each attempt
+            await _DOMAIN_RATE_LIMITER.acquire(domain)
 
-        # Handle single result
-        result = results[0] if isinstance(results, list) else results
+            try:
+                results = await client.crawl([url], browser_config=browser_config, crawler_config=crawler_config)
+            except Exception as e:
+                last_error = e
+                results = None
 
-        if not result.success:
-            return None
+            if results:
+                result = results[0] if isinstance(results, list) else results
+                if getattr(result, "success", False):
+                    final_output = (
+                        result.markdown.fit_markdown
+                        or result.markdown.raw_markdown
+                        or result.html
+                    )
+                    if final_output:
+                        return final_output
 
-        final_output = result.markdown.fit_markdown or result.markdown.raw_markdown or result.html
-        return final_output or None
+            # Retry if attempts remain
+            if attempt < max_retries:
+                # Exponential backoff with jitter
+                delay = min(backoff_cap_seconds, backoff_base_seconds * (2 ** attempt))
+                jitter_multiplier = random.uniform(1.0 - backoff_jitter, 1.0 + backoff_jitter)
+                await asyncio.sleep(delay * jitter_multiplier)
+
+        # Exhausted retries
+        return None
 
 
 if __name__ == "__main__":
