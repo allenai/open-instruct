@@ -935,6 +935,6 @@ def create_vllm_engines(
             )
         )
 
-    ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300)
+    ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=600)
 
     return vllm_engines
