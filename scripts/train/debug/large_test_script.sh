@@ -17,7 +17,7 @@ uv run python mason.py \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
 	--env NCCL_DEBUG=INFO \
-	--env NCCL_DEBUG_SUBSYS=ALL \
+	--env NCCL_DEBUG_SUBSYS=COLL \
         --budget ai2/oe-adapt \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
