@@ -46,28 +46,31 @@ class WorkerWrap:
         self._hierarchical_broadcast_enabled = False
         self._is_node_leader = False
         if not use_ray and group_specs:
-            from torch.distributed.distributed_c10d import ProcessGroup
-
             for spec in group_specs:
-                ranks = spec.get("ranks", [])
-                is_member = self._global_rank in ranks
-                pg = torch.distributed.new_group(ranks=ranks, backend=backend)
+                members = spec.get("members", [])
+                if self._global_rank not in members:
+                    continue
+                subgroup_rank = members.index(self._global_rank)
+                subgroup_world_size = len(members)
+                subgroup = init_process_group(
+                    backend=backend,
+                    init_method=f"tcp://{master_address}:{master_port}",
+                    world_size=subgroup_world_size,
+                    rank=subgroup_rank,
+                    group_name=spec.get("group_name"),
+                    timeout=timedelta(minutes=timeout_minutes),
+                )
+                self._hierarchical_broadcast_enabled = True
                 if spec.get("tag") == "inter_node":
-                    if is_member and isinstance(pg, ProcessGroup):
-                        self._inter_node_group = pg
-                        self._hierarchical_broadcast_enabled = True
-                        if self._global_rank != 0:
-                            self._is_node_leader = True
-                    elif self._global_rank in ranks and self._global_rank != 0:
-                        self._hierarchical_broadcast_enabled = True
+                    self._inter_node_group = subgroup
+                    if self._global_rank != 0:
                         self._is_node_leader = True
                 elif spec.get("tag") == "intra_node":
-                    if is_member and isinstance(pg, ProcessGroup):
-                        self._intra_node_group = pg
-                        self._intra_group_root = ranks[0] if ranks else None
-                        self._hierarchical_broadcast_enabled = True
-                        if self._global_rank == self._intra_group_root:
-                            self._is_node_leader = True
+                    self._intra_node_group = subgroup
+                    leader_rank = spec.get("leader_rank", members[0] if members else None)
+                    self._intra_group_root = members.index(leader_rank) if leader_rank in members else 0
+                    if leader_rank == self._global_rank:
+                        self._is_node_leader = True
         print(
             f"init_process_group: master_address={master_address}, master_port={master_port}, ",
             f"rank={rank}, world_size={world_size}, group_name={group_name}",

@@ -853,14 +853,30 @@ class PolicyTrainerRayProcess(RayProcess):
             node_leader_ranks = {node_id: min(ranks) for node_id, ranks in node_to_ranks.items()}
             inter_node_ranks = [0] + sorted(node_leader_ranks.values())
             group_specs: list[dict[str, Any]] = []
+            inter_group_name = f"openrlhf_inter_node_{master_port}"
             if len(inter_node_ranks) > 1:
-                group_specs.append({"tag": "inter_node", "ranks": inter_node_ranks})
+                group_specs.append(
+                    {
+                        "tag": "inter_node",
+                        "members": inter_node_ranks,
+                        "group_name": inter_group_name,
+                        "leader_rank": 0,
+                    }
+                )
             for node_id in sorted(node_to_ranks.keys()):
                 ranks = sorted(node_to_ranks[node_id])
                 leader_rank = node_leader_ranks[node_id]
                 ordered_ranks = [leader_rank] + [r for r in ranks if r != leader_rank]
                 if len(ordered_ranks) > 1:
-                    group_specs.append({"tag": "intra_node", "node_id": node_id, "ranks": ordered_ranks})
+                    group_specs.append(
+                        {
+                            "tag": "intra_node",
+                            "node_id": node_id,
+                            "members": ordered_ranks,
+                            "group_name": f"openrlhf_intra_node_{node_id}_{master_port}",
+                            "leader_rank": leader_rank,
+                        }
+                    )
             self.vllm_group_specs = group_specs
             refs = [
                 engine.init_process_group.remote(
@@ -883,16 +899,29 @@ class PolicyTrainerRayProcess(RayProcess):
                 group_name="openrlhf",
                 timeout=timedelta(minutes=self.args.backend_timeout),
             )
-            from torch.distributed.distributed_c10d import GroupMember, ProcessGroup
+            from torch.distributed.distributed_c10d import ProcessGroup
+
+            def _maybe_join_subgroup(spec: dict[str, Any]) -> Optional[torch.distributed.ProcessGroup]:
+                members = spec.get("members", [])
+                if self.rank not in members:
+                    return None
+                rank_index = members.index(self.rank)
+                group_world_size = len(members)
+                return vllm_utils.init_process_group(
+                    backend=backend,
+                    init_method=f"tcp://{master_address}:{master_port}",
+                    world_size=group_world_size,
+                    rank=rank_index,
+                    group_name=spec.get("group_name"),
+                    timeout=timedelta(minutes=self.args.backend_timeout),
+                )
 
             for spec in group_specs:
-                group = torch.distributed.new_group(ranks=spec["ranks"], backend=backend)
-                if isinstance(group, ProcessGroup):
+                subgroup = _maybe_join_subgroup(spec)
+                if isinstance(subgroup, ProcessGroup):
                     if spec.get("tag") == "inter_node":
-                        self.vllm_inter_node_group = group
+                        self.vllm_inter_node_group = subgroup
                         self.vllm_hierarchical_enabled = True
-                elif group == GroupMember.NON_GROUP_MEMBER:
-                    continue
             self.vllm_broadcast_group = self.vllm_inter_node_group or self.model_update_group
             ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=60)
         torch.distributed.barrier()
