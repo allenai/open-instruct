@@ -20,9 +20,6 @@ fi
 echo "Building Docker image for ghcr.io..."
 docker build -t ghcr.io/allenai/open-instruct/python-code-executor -f open_instruct/tool_utils/Dockerfile .
 
-echo "Pushing Docker image to ghcr.io..."
-docker push ghcr.io/allenai/open-instruct/python-code-executor
-
 echo "Starting server locally on port 1212..."
 docker run -p 1212:8080 tool-server &
 SERVER_PID=$!
@@ -55,6 +52,9 @@ echo ""
 read -p "Do you want to deploy to Google Cloud Run? (y/n) " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo "Pushing Docker image to ghcr.io..."
+    docker push ghcr.io/allenai/open-instruct/python-code-executor
+
     echo "Deploying to Google Cloud Run..."
     gcloud run deploy open-instruct-tool-server --project ai2-allennlp --region us-central1 --source .
 fi
