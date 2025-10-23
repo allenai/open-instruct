@@ -47,7 +47,6 @@ def main(args: Args, beaker_runtime_config: BeakerRuntimeConfig):
                 --use_hf_tokenizer_template \
                 --beaker_image nathanl/open_instruct_auto \
                 --skip_oi_evals \
-                --run_safety_evaluations \
                 --run_oe_eval_experiments \
                 --upload_to_hf {args.upload_to_hf}"""
             if args.run_id:
@@ -59,6 +58,29 @@ def main(args: Args, beaker_runtime_config: BeakerRuntimeConfig):
             print(f"Beaker evaluation jobs: Stdout:\n{stdout.decode()}")
             print(f"Beaker evaluation jobs: Stderr:\n{stderr.decode()}")
             print(f"Beaker evaluation jobs: process return code: {process.returncode}")
+
+            safety_command = f"""
+            python scripts/submit_eval_jobs.py \
+                --model_name {args.model_name} \
+                --location {beaker_dataset_ids[-1]} \
+                --is_tuned \
+                --workspace tulu-3-results \
+                --preemptible \
+                --use_hf_tokenizer_template \
+                --beaker_image nathanl/open_instruct_auto \
+                --skip_oi_evals \
+                --run_oe_eval_experiments \
+                --oe_eval_task_suite "SAFETY_EVAL" \
+                --upload_to_hf {args.upload_to_hf}"""
+            if args.run_id:
+                safety_command += f" --run_id {args.run_id}"
+
+            safety_process = subprocess.Popen(["bash", "-c", safety_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            safety_stdout, safety_stderr = safety_process.communicate()
+
+            print(f"Beaker safety evaluation jobs: Stdout:\n{safety_stdout.decode()}")
+            print(f"Beaker safety evaluation jobs: Stderr:\n{safety_stderr.decode()}")
+            print(f"Beaker safety evaluation jobs: process return code: {safety_process.returncode}")
 
 
             return

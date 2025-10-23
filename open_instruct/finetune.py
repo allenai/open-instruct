@@ -231,7 +231,6 @@ class FlatArguments:
         },
     )
     weight_decay: float = field(default=0.0, metadata={"help": "Weight decay for AdamW if we apply some."})
-    weight_decay: float = field(default=0.0, metadata={"help": "Weight decay for AdamW if we apply some."})
     timeout: int = field(
         default=1800,
         metadata={
@@ -266,7 +265,7 @@ class FlatArguments:
     checkpointing_steps: Optional[str] = field(
         default=None,
         metadata={
-            "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
+            "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."
         },
     )
     keep_last_n_checkpoints: int = field(

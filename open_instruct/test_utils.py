@@ -22,6 +22,7 @@ from dateutil import parser
 from parameterized import parameterized
 
 from open_instruct import utils
+from open_instruct.finetune import FlatArguments
 
 
 class GetDatasetsTest(unittest.TestCase):
@@ -85,16 +86,22 @@ def _setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, initial_descri
     mock_client = mock.MagicMock()
     mock_beaker_from_env.return_value = mock_client
 
+    # Mock the workload object
+    mock_workload = mock.MagicMock()
+    mock_client.workload.get.return_value = mock_workload
+
+    # Mock the spec object returned by experiment.get_spec
     mock_spec = mock.MagicMock()
     mock_spec.description = initial_description
-    mock_client.experiment.get.return_value = mock_spec
+    mock_client.experiment.get_spec.return_value = mock_spec
 
     description_history = []
 
-    def track_description(exp_id, desc):
-        description_history.append(desc)
+    def track_description(workload, description=None):
+        if description is not None:
+            description_history.append(description)
 
-    mock_client.experiment.set_description.side_effect = track_description
+    mock_client.workload.update.side_effect = track_description
 
     return mock_client, mock_spec, description_history
 
@@ -245,6 +252,57 @@ class TestUtilityFunctions(unittest.TestCase):
     )
     def test_wandb_url_to_run_path(self, url: str, expected_run_path: str):
         self.assertEqual(utils.wandb_url_to_run_path(url), expected_run_path)
+
+    @parameterized.expand(
+        [
+            ("NVIDIA H100 80GB HBM3", "h100"),
+            ("NVIDIA L40S", "l40s"),
+            ("NVIDIA RTX A6000", "a6000"),
+            ("NVIDIA A100-SXM4-80GB", "a100"),
+            ("NVIDIA RTX PRO 6000 Blackwell Server Edition", "pro 6000"),
+            ("NVIDIA RTX 6000 Ada Generation", "6000"),
+        ]
+    )
+    def test_get_device_name(self, device_name: str, expected_name: str):
+        result = utils.get_device_name(device_name)
+        self.assertEqual(result, expected_name)
+
+    @parameterized.expand(
+        [
+            ("NVIDIA H100 80GB HBM3", {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12}),
+            ("NVIDIA RTX A6000", {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9}),
+            (
+                "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+                {"flops": 503.8e12, "memory_size": 96e9, "memory_bandwidth": 1792e9},
+            ),
+            ("NVIDIA RTX 6000 Ada Generation", {"flops": 728.5e12, "memory_size": 48e9, "memory_bandwidth": 960e9}),
+        ]
+    )
+    def test_get_device_name_returns_correct_specs(self, device_name: str, expected_specs: dict):
+        device_key = utils.get_device_name(device_name)
+        specs = utils.GPU_SPECS[device_key]
+        self.assertEqual(specs["flops"], expected_specs["flops"])
+        self.assertEqual(specs["memory_size"], expected_specs["memory_size"])
+        self.assertEqual(specs["memory_bandwidth"], expected_specs["memory_bandwidth"])
+
+
+class TestFlatArguments(unittest.TestCase):
+    def test_additional_model_args(self) -> None:
+        parser = utils.ArgumentParserPlus(FlatArguments)
+        (args,) = parser.parse_args_into_dataclasses(
+            ["--additional_model_arguments", '{"int": 1, "bool": true, "float": 0.0, "float2": 5e-7}']
+        )
+        self.assertIsInstance(args.additional_model_arguments, dict)
+        self.assertIsInstance(args.additional_model_arguments["int"], int)
+        self.assertIsInstance(args.additional_model_arguments["bool"], bool)
+        self.assertIsInstance(args.additional_model_arguments["float"], float)
+        self.assertIsInstance(args.additional_model_arguments["float2"], float)
+
+    def test_no_additional_model_args(self) -> None:
+        parser = utils.ArgumentParserPlus(FlatArguments)
+        (args,) = parser.parse_args_into_dataclasses(["--exp_name", "test"])
+        self.assertIsInstance(args.additional_model_arguments, dict)
+        self.assertFalse(args.additional_model_arguments)
 
 
 # useful for checking if public datasets are still available

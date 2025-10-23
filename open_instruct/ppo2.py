@@ -127,7 +127,7 @@ from open_instruct.utils import (
     setup_logger,
     upload_metadata_to_hf,
 )
-from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
+from open_instruct.vllm_utils import create_vllm_engines, init_process_group
 
 api = HfApi()
 INVALID_LOGPROB = 1.0

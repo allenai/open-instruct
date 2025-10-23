@@ -21,6 +21,7 @@ uv run python mason.py \
        --preemptible \
        --num_nodes 1 \
        --max_retries 0 \
+       --timeout 2700 \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --budget ai2/oe-adapt \
@@ -31,7 +32,6 @@ uv run python mason.py \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 32 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 512 \
     --max_prompt_token_length 512 \
     --response_length 512 \
     --pack_length 1024 \
@@ -47,7 +47,7 @@ uv run python mason.py \
     --sft_messages_key messages \
     --exp_name 0605_general_tool_use_without_good_outputs \
     --learning_rate 5e-7 \
-    --total_episodes 3_200 \
+    --total_episodes $((20 * 8 * 4)) \
     --deepspeed_stage 2 \
     --with_tracking \
     --num_epochs 1 \
@@ -74,5 +74,5 @@ uv run python mason.py \
     --max_tool_calls 5 \
     --vllm_enable_prefix_caching \
     --tools code search \
-    --search_api_endpoint "http://neptune-cs-aus-258.reviz.ai2.in:43189/search" \
+    --search_api_endpoint "http://saturn-cs-aus-248.reviz.ai2.in:47479/search" \
     --code_tool_api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute

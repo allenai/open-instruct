@@ -10,7 +10,7 @@ This repo serves as an open effort on instruction-tuning and post-training popul
 
 We also support some evaluations natively in the codebase, but these are now unmaintained and instead we suggest using [OLMES](https://github.com/allenai/olmes), which we used for TÜLU 3.
 
-The lastest details on open post-training are found in [TÜLU 3: Pushing Frontiers in Open Language Model Post-Training](https://arxiv.org/abs/2411.15124).
+The latest details on open post-training are found in [TÜLU 3: Pushing Frontiers in Open Language Model Post-Training](https://arxiv.org/abs/2411.15124).
 
 Please see our first paper [How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources](https://arxiv.org/abs/2306.04751) for more thoughts behind this project and our initial findings.
 Please see our second paper [Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2](https://arxiv.org/abs/2311.10702) for results using Llama-2 models and direct preference optimization. We are still working on more models.
@@ -145,7 +145,7 @@ V2 models are licensed under the [low-risk AI2 ImpACT license](https://allenai.o
 
 ## Acknowledgements
 
-Open Instruct is a project that benefitd from many open-source projects and libraries. We would like to particularly thank the folloiwng projects:
+Open Instruct is a project that benefited from many open-source projects and libraries. We would like to particularly thank the following projects:
 
 * [HuggingFace Transformers](https://github.com/huggingface/transformers): We adapted Hugging Face's Trainer for our finetuning scripts.
 * [HuggingFace TRL](https://github.com/huggingface/trl) and [eric-mitchell/direct-preference-optimization](https://github.com/eric-mitchell/direct-preference-optimization): our preference tuning code is adapted from TRL and from Eric Mitchell's DPO code.
