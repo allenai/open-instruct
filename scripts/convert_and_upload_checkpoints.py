@@ -227,7 +227,8 @@ def _load_state_dict_from_file(weights_path: str) -> dict:
 def _load_state_dict_from_zero2_pt(zero2_path: str) -> dict:
     """
     Load model parameters from a DeepSpeed ZeRO-2 single-rank checkpoint file
-    located at 'pytorch_model/mp_rank_00_model_states.pt'. Extracts the model
+    (commonly named 'mp_rank_00_model_states.pt'), which may be located either
+    under 'pytorch_model/' or at the checkpoint folder root. Extracts the model
     state dict and normalizes parameter keys.
     """
     ckpt = torch.load(zero2_path, map_location="cpu", weights_only=False)
@@ -249,10 +250,16 @@ def _load_state_dict_from_zero2_pt(zero2_path: str) -> dict:
 def _find_zero2_model_states(checkpoint_path: str) -> str | None:
     """
     Detect DeepSpeed ZeRO-2 single-rank checkpoint file location.
-    Returns the path to 'pytorch_model/mp_rank_00_model_states.pt' if present.
+    Returns the path to 'mp_rank_00_model_states.pt' if present either under
+    'pytorch_model/' or at the checkpoint root.
     """
-    candidate = os.path.join(checkpoint_path, "pytorch_model", "mp_rank_00_model_states.pt")
-    return candidate if os.path.exists(candidate) else None
+    candidate_subdir = os.path.join(checkpoint_path, "pytorch_model", "mp_rank_00_model_states.pt")
+    if os.path.exists(candidate_subdir):
+        return candidate_subdir
+    candidate_root = os.path.join(checkpoint_path, "mp_rank_00_model_states.pt")
+    if os.path.exists(candidate_root):
+        return candidate_root
+    return None
 
 
 def main():
@@ -265,17 +272,31 @@ def main():
         required=True,
         help="The name or path of the base model used for training (e.g., 'Qwen/Qwen3-8B').",
     )
-    parser.add_argument(
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
         "--checkpoints_dir",
         type=str,
-        required=True,
-        help="The local directory containing the raw training checkpoint folders (e.g., 'output/my_run/').",
+        help="Directory containing multiple checkpoint subfolders (e.g., 'step_500', 'epoch_1').",
+    )
+    group.add_argument(
+        "--checkpoint_path",
+        type=str,
+        help="Path to a single checkpoint folder to convert and upload.",
     )
     parser.add_argument(
         "--hf_repo_id",
         type=str,
         required=True,
         help="The Hugging Face repository ID to upload to (e.g., 'username/my-model').",
+    )
+    parser.add_argument(
+        "--revision",
+        type=str,
+        default=None,
+        help=(
+            "Revision name to use when --checkpoint_path is provided. If omitted, the folder "
+            "name of the checkpoint path is used."
+        ),
     )
     parser.add_argument(
         "--trust_remote_code",
@@ -305,18 +326,31 @@ def main():
 
     args = parser.parse_args()
 
-    # --- 1. Find checkpoint folders ---
-    if not os.path.isdir(args.checkpoints_dir):
-        print(f"Error: The specified checkpoints directory does not exist: {args.checkpoints_dir}")
-        return
-
-    checkpoint_folders = [f for f in os.listdir(args.checkpoints_dir) if is_checkpoint_folder(args.checkpoints_dir, f)]
-
-    if not checkpoint_folders:
-        print(f"No checkpoint folders (e.g., 'step_500', 'epoch_1') found in {args.checkpoints_dir}.")
-        return
-
-    print(f"Found {len(checkpoint_folders)} checkpoints to convert and upload from {args.checkpoints_dir}.")
+    # --- 1. Determine checkpoints to process ---
+    items_to_process = []  # list of tuples: (folder_name, checkpoint_path, revision_name)
+    if args.checkpoint_path:
+        if not os.path.isdir(args.checkpoint_path):
+            print(f"Error: The specified checkpoint path does not exist or is not a directory: {args.checkpoint_path}")
+            return
+        folder_name = os.path.basename(os.path.normpath(args.checkpoint_path))
+        revision_name = args.revision or folder_name
+        items_to_process.append((folder_name, args.checkpoint_path, revision_name))
+    else:
+        if not os.path.isdir(args.checkpoints_dir):
+            print(f"Error: The specified checkpoints directory does not exist: {args.checkpoints_dir}")
+            return
+        checkpoint_folders = [
+            f for f in os.listdir(args.checkpoints_dir) if is_checkpoint_folder(args.checkpoints_dir, f)
+        ]
+        if not checkpoint_folders:
+            print(f"No checkpoint folders (e.g., 'step_500', 'epoch_1') found in {args.checkpoints_dir}.")
+            return
+        print(f"Found {len(checkpoint_folders)} checkpoints to convert and upload from {args.checkpoints_dir}.")
+        # Sort by numeric suffix for stable ordering
+        sorted_folders = sorted(checkpoint_folders, key=lambda x: int(x.split("_")[-1]))
+        for folder in sorted_folders:
+            cp_path = os.path.join(args.checkpoints_dir, folder)
+            items_to_process.append((folder, cp_path, folder))
 
     # --- 2. Load base model and tokenizer ---
     print(f"\nLoading base model '{args.model_name_or_path}' to use as the architecture...")
@@ -328,7 +362,7 @@ def main():
         torch_dtype=torch.bfloat16,  # Assuming bf16, adjust if necessary
     )
     tokenizer = AutoTokenizer.from_pretrained(
-        args.model_name_or_path, trust_remote_code=args.trust_remote_code, use_fast=False
+        args.model_name_or_path, trust_remote_code=args.trust_remote_code, use_fast=True
     )
 
     # --- 3. Initialize Accelerator ---
@@ -337,12 +371,8 @@ def main():
     print("Model prepared with Accelerate.")
 
     # --- 4. Iterate, Convert, and Upload ---
-    sorted_checkpoints = sorted(checkpoint_folders, key=lambda x: int(x.split("_")[-1]))
-
-    for folder in sorted_checkpoints:
-        checkpoint_path = os.path.join(args.checkpoints_dir, folder)
-        temp_save_dir = Path(args.checkpoints_dir) / f"{folder}_converted_for_upload"
-        revision_name = folder
+    for folder, checkpoint_path, revision_name in items_to_process:
+        temp_save_dir = Path(checkpoint_path).parent / f"{folder}_converted_for_upload"
 
         print(f"\nProcessing checkpoint: {checkpoint_path}")
 
