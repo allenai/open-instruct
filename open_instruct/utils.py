@@ -1739,6 +1739,22 @@ class ModelDims:
             f"num_sliding_window_layers ({self.num_sliding_window_layers}) cannot exceed num_layers ({self.num_layers})"
         )
 
+    def __repr__(self):
+        return (
+            f"ModelDims(\n"
+            f"  num_layers={self.num_layers},\n"
+            f"  hidden_size={self.hidden_size},\n"
+            f"  intermediate_size={self.intermediate_size},\n"
+            f"  vocab_size={self.vocab_size},\n"
+            f"  num_attn_heads={self.num_attn_heads},\n"
+            f"  head_dim={self.head_dim},\n"
+            f"  num_kv_heads={self.num_kv_heads},\n"
+            f"  device_name={self.device_name!r},\n"
+            f"  sliding_window={self.sliding_window},\n"
+            f"  num_sliding_window_layers={self.num_sliding_window_layers}\n"
+            f")"
+        )
+
     def _calculate_num_params(self) -> int:
         embedding_params = self.vocab_size * self.hidden_size
 
@@ -1961,3 +1977,41 @@ def get_device_name(device_name: str) -> str:
         f"Unknown device name: {device_name}. Expected one of: {list(GPU_SPECS.keys())}. "
         f"Please raise an issue at https://github.com/allenai/open-instruct/issues with the device you need. In the interim, you can add the specs for your device using the name {normalized_device_name} to the GPU_SPECS dictionary in utils.py."
     )
+
+
+def check_calculation(
+    percentage: float,
+    metric_name: str,
+    model_dims: ModelDims,
+    timing: float,
+    prompt_lengths: list[int],
+    response_lengths: Optional[list[int]],
+    samples_per_prompt: int,
+    num_gpus: int,
+) -> None:
+    if percentage <= 100:
+        return
+
+    full_device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
+
+    warning_message = (
+        f"{metric_name} exceeded 100%: {percentage:.2f}%\n"
+        f"\n"
+        f"{model_dims}\n"
+        f"\n"
+        f"Timing and GPU info:\n"
+        f"  timing: {timing:.6f}s\n"
+        f"  num_gpus: {num_gpus}\n"
+        f"  full_device_name: {full_device_name}\n"
+        f"\n"
+        f"Batch/sequence info:\n"
+        f"  num_prompts: {len(prompt_lengths)}\n"
+        f"  samples_per_prompt: {samples_per_prompt}\n"
+        f"  avg_prompt_length: {sum(prompt_lengths) / len(prompt_lengths):.1f}\n"
+        f"  avg_response_length: {sum(response_lengths) / len(response_lengths):.1f if response_lengths else 'N/A'}\n"
+        f"\n"
+        f"This may indicate an issue with the MFU/MBU calculation logic or GPU specifications.\n"
+        f"Please raise an issue at https://github.com/allenai/open-instruct/issues with the above information."
+    )
+
+    logger.warning(warning_message)
