@@ -6,8 +6,8 @@ JUDGE_BASE_URL=http://saturn-cs-aus-244.reviz.ai2.in:8001/v1
 
 python mason.py \
     --cluster ai2/jupiter \
-    --task_name grpo_qwen3-8b-inst_v3_ratio_10k_with_stop \
-    --description "GRPO Qwen3-8B, ratio 10k, with stop" \
+    --task_name grpo_qwen3-8b-inst_v3_ratio_10k \
+    --description "GRPO Qwen3-8B, ratio 10k" \
     --workspace ai2/oe-data \
     --priority high \
     --image nathanl/open_instruct_auto \
@@ -18,7 +18,7 @@ python mason.py \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --secret HF_TOKEN=yapeic_HF_TOKEN \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --exp_name grpo_qwen3-8b-inst_v3_ratio_10k_with_stop \
+    --exp_name grpo_qwen3-8b-inst_v3_ratio_10k \
     --beta 0.0 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 16 \
@@ -50,12 +50,12 @@ python mason.py \
     --seed 1 \
     --local_eval_every 40 \
     --checkpoint_state_freq 20 \
-    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen3-8b-inst_v3_ratio_10k_with_stop_checkpoint_states \
+    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen3-8b-inst_v3_ratio_10k_checkpoint_states \
     --save_freq 200 \
     --keep_last_n_checkpoints 10 \
     --gradient_checkpointing \
     --with_tracking \
     --hf_entity yapeichang \
-    --hf_repo_id grpo_qwen3-8b-inst_v3_ratio_10k_with_stop \
+    --hf_repo_id grpo_qwen3-8b-inst_v3_ratio_10k \
     --wandb_project_name yapeic-exp \
     --wandb_entity ai2-llm
