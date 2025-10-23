@@ -233,7 +233,7 @@ def setup_vllm_engines(
     # Initialize Ray
     if ray.is_initialized():
         ray.shutdown()
-    ray.init(num_cpus=4, num_gpus=1, ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"]})
+    ray.init(ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"]})
 
     bundles = [{"GPU": 1, "CPU": 1} for _ in range(args.vllm_num_engines)]
     pg = ray.util.placement_group(bundles, strategy="PACK")
