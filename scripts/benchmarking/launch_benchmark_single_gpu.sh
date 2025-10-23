@@ -41,7 +41,8 @@ for model_name_or_path in "$@"; do
     echo "Launching benchmark for model: $model_name_or_path"
 
     tokenizer_name_or_path="$model_name_or_path"
-    if [[ "${model_name_or_path,,}" == *"olmo3"* ]]; then
+    model_name_lower=$(printf '%s' "$model_name_or_path" | tr '[:upper:]' '[:lower:]')
+    if [[ "$model_name_lower" == *"olmo3"* ]]; then
         tokenizer_name_or_path="allenai/OLMo-2-1124-7B"
     fi
 
