@@ -225,8 +225,11 @@ def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation
 
 
 def setup_vllm_engines(
-    args: grpo_fast.Args, model_config: model_utils.ModelConfig, max_model_len: int = 20480
-) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue]:
+    args: grpo_fast.Args,
+    tokenizer_config: dataset_transformation.TokenizerConfig,
+    model_config: model_utils.ModelConfig,
+    max_model_len: int = 20480,
+) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue, ray.actor.ActorHandle]:
     """Set up vLLM engines and queues."""
     logger.info("Setting up vLLM engines...")
 
@@ -241,29 +244,40 @@ def setup_vllm_engines(
 
     param_prompt_Q = ray_queue.Queue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
+    evaluation_results_Q = ray_queue.Queue(maxsize=10)
 
-    queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
+    queues_to_monitor = {
+        "Param Prompt Queue": param_prompt_Q,
+        "Inference Results Queue": inference_results_Q,
+        "Evaluation Results Queue": evaluation_results_Q,
+    }
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
+
+    tokenizer_name_or_path = (
+        tokenizer_config.tokenizer_name_or_path or model_config.model_name_or_path
+    )
 
     vllm_engines = vllm_utils.create_vllm_engines(
         num_engines=args.vllm_num_engines,
         tensor_parallel_size=args.vllm_tensor_parallel_size,
-        enforce_eager=True,
-        tokenizer_name_or_path=model_config.model_name_or_path,
+        enforce_eager=args.vllm_enforce_eager,
+        tokenizer_name_or_path=tokenizer_name_or_path,
         pretrain=model_config.model_name_or_path,
         revision=model_config.model_revision,
         seed=args.seed,
-        enable_prefix_caching=False,
+        enable_prefix_caching=args.vllm_enable_prefix_caching,
         max_model_len=max_model_len,
         vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
         single_gpu_mode=args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
         tools={},
-        max_tool_calls=[0],
+        max_tool_calls=args.max_tool_calls,
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
+        eval_results_queue=evaluation_results_Q,
         actor_manager=actor_manager,
         inference_batch_size=args.inference_batch_size,
+        use_fp8_kv_cache=args.use_fp8_kv_cache,
         inflight_updates=args.inflight_updates,
     )
 
@@ -699,7 +713,9 @@ def main() -> None:
     free_all_gpu_memory()
 
     dataset = setup_dataset(args, tokenizer_config)
-    vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(args, model_config)
+    vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(
+        args, tokenizer_config, model_config
+    )
 
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
