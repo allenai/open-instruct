@@ -9,6 +9,7 @@ uv run python mason.py \
         --image "$BEAKER_IMAGE" \
 	--pure_docker_mode \
         --workspace ai2/open-instruct-dev \
+        --gs_model_name "stego32" \
         --priority urgent \
 	--preemptible \
         --num_nodes 2 \
@@ -35,7 +36,6 @@ uv run python mason.py \
         --response_length 4096 \
         --pack_length 20480 \
         --model_name_or_path "/weka/oe-adapt-default/finbarrt/stego32/step358000-hf" \
-        --gs_model_name "stego32" \
 	--tokenizer_name_or_path "allenai/OLMo-2-1124-7B" \
         --chat_template_name tulu_thinker \
 	--inflight_updates True \
