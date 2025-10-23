@@ -619,6 +619,16 @@ class LLMRayActor:
         init_complete = threading.Event()
         self.loop = None
         self.llm_engine = None
+        self._init_exception: Optional[BaseException] = None
+
+        logger.info(
+            "LLMRayActor(%s): initializing AsyncLLMEngine (model=%s, tensor_parallel=%s, num_gpus=%s, bundle_indices=%s)",
+            getattr(self, "__ray_actor_id__", "unknown"),
+            getattr(engine_args, "model", "unknown"),
+            getattr(engine_args, "tensor_parallel_size", "unknown"),
+            num_gpus,
+            bundle_indices,
+        )
 
         async def _init_engine():
             running_loop = asyncio.get_running_loop()
@@ -628,13 +638,28 @@ class LLMRayActor:
         def _run_loop():
             self.loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self.loop)
-            self.llm_engine = self.loop.run_until_complete(_init_engine())
-            init_complete.set()
-            self.loop.run_forever()
+            try:
+                logger.info("LLMRayActor(%s): async event loop starting engine startup", getattr(self, "__ray_actor_id__", "unknown"))
+                self.llm_engine = self.loop.run_until_complete(_init_engine())
+                logger.info("LLMRayActor(%s): AsyncLLMEngine initialized", getattr(self, "__ray_actor_id__", "unknown"))
+            except Exception as exc:  # pragma: no cover - best-effort logging for remote actors
+                self._init_exception = exc
+                logger.exception("AsyncLLMEngine initialization failed")
+            finally:
+                init_complete.set()
+
+            if self._init_exception is None:
+                logger.info("LLMRayActor(%s): entering engine event loop", getattr(self, "__ray_actor_id__", "unknown"))
+                self.loop.run_forever()
 
         self.loop_thread = threading.Thread(target=_run_loop, daemon=True)
         self.loop_thread.start()
         init_complete.wait()
+
+        if self._init_exception is not None:
+            raise RuntimeError("Failed to initialize AsyncLLMEngine") from self._init_exception
+
+        logger.info("LLMRayActor(%s): AsyncLLMEngine ready", getattr(self, "__ray_actor_id__", "unknown"))
 
     def get_model_dims(self):
         """Get only the model dimensions without loading weights."""
@@ -935,6 +960,8 @@ def create_vllm_engines(
             )
         )
 
+    logger.info("Waiting for %d vLLM engines to report ready", len(vllm_engines))
     ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=600)
+    logger.info("All %d vLLM engines reported ready", len(vllm_engines))
 
     return vllm_engines
