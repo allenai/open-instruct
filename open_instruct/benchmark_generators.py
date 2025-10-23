@@ -252,11 +252,11 @@ def setup_vllm_engines(
         "Evaluation Results Queue": evaluation_results_Q,
     }
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
+    logger.info("ActorManager created successfully")
 
-    tokenizer_name_or_path = (
-        tokenizer_config.tokenizer_name_or_path or model_config.model_name_or_path
-    )
+    tokenizer_name_or_path = tokenizer_config.tokenizer_name_or_path or model_config.model_name_or_path
 
+    logger.info("Starting vLLM engine creation...")
     vllm_engines = vllm_utils.create_vllm_engines(
         num_engines=args.vllm_num_engines,
         tensor_parallel_size=args.vllm_tensor_parallel_size,
@@ -280,6 +280,7 @@ def setup_vllm_engines(
         use_fp8_kv_cache=args.use_fp8_kv_cache,
         inflight_updates=args.inflight_updates,
     )
+    logger.info("create_vllm_engines returned successfully")
 
     logger.info("vLLM engines ready")
 

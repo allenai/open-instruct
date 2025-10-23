@@ -550,15 +550,23 @@ class LLMRayActor:
         inflight_updates: bool,
         **kwargs,
     ):
+        logger.info(f"LLMRayActor.__init__ started (bundle_indices={bundle_indices})")
         assert_threaded_actor(self)
+        logger.info("LLMRayActor: assert_threaded_actor passed")
         self._init_config(tools, max_tool_calls, inference_batch_size, inflight_updates)
+        logger.info("LLMRayActor: _init_config completed")
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
+        logger.info("LLMRayActor: _init_queues completed")
         self._init_executor()
+        logger.info("LLMRayActor: _init_executor completed")
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
+        logger.info("LLMRayActor: _setup_gpu_visibility completed")
+        logger.info("LLMRayActor: Starting _setup_and_start_async_engine...")
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
+        logger.info("LLMRayActor: __init__ completed successfully")
 
     def _init_config(
         self,
@@ -606,15 +614,19 @@ class LLMRayActor:
             os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
 
     def _setup_and_start_async_engine(self, args, bundle_indices, kwargs) -> None:
+        logger.info("_setup_and_start_async_engine: Starting setup...")
         num_gpus = kwargs.pop("num_gpus")
+        logger.info(f"_setup_and_start_async_engine: num_gpus={num_gpus}")
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             logger.debug(f"creating LLM with bundle_indices={bundle_indices}")
 
+        logger.info("_setup_and_start_async_engine: Creating AsyncEngineArgs...")
         engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
         engine_args.disable_log_stats = True
         engine_args.disable_cascade_attn = True
+        logger.info("_setup_and_start_async_engine: AsyncEngineArgs created")
 
         init_complete = threading.Event()
         self.loop = None
@@ -639,9 +651,14 @@ class LLMRayActor:
             self.loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self.loop)
             try:
-                logger.info("LLMRayActor(%s): async event loop starting engine startup", getattr(self, "__ray_actor_id__", "unknown"))
+                logger.info(
+                    "LLMRayActor(%s): async event loop starting engine startup",
+                    getattr(self, "__ray_actor_id__", "unknown"),
+                )
                 self.llm_engine = self.loop.run_until_complete(_init_engine())
-                logger.info("LLMRayActor(%s): AsyncLLMEngine initialized", getattr(self, "__ray_actor_id__", "unknown"))
+                logger.info(
+                    "LLMRayActor(%s): AsyncLLMEngine initialized", getattr(self, "__ray_actor_id__", "unknown")
+                )
             except Exception as exc:  # pragma: no cover - best-effort logging for remote actors
                 self._init_exception = exc
                 logger.exception("AsyncLLMEngine initialization failed")
@@ -649,12 +666,18 @@ class LLMRayActor:
                 init_complete.set()
 
             if self._init_exception is None:
-                logger.info("LLMRayActor(%s): entering engine event loop", getattr(self, "__ray_actor_id__", "unknown"))
+                logger.info(
+                    "LLMRayActor(%s): entering engine event loop", getattr(self, "__ray_actor_id__", "unknown")
+                )
                 self.loop.run_forever()
 
+        logger.info("_setup_and_start_async_engine: Creating loop thread...")
         self.loop_thread = threading.Thread(target=_run_loop, daemon=True)
+        logger.info("_setup_and_start_async_engine: Starting loop thread...")
         self.loop_thread.start()
+        logger.info("_setup_and_start_async_engine: Waiting for init_complete event...")
         init_complete.wait()
+        logger.info("_setup_and_start_async_engine: init_complete event received")
 
         if self._init_exception is not None:
             raise RuntimeError("Failed to initialize AsyncLLMEngine") from self._init_exception
@@ -874,6 +897,10 @@ def create_vllm_engines(
     use_fp8_kv_cache=False,
     inflight_updates: bool = False,
 ) -> list[LLMRayActor]:
+    logger.info(
+        f"create_vllm_engines called with num_engines={num_engines}, tensor_parallel_size={tensor_parallel_size}"
+    )
+
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
         assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
@@ -900,6 +927,7 @@ def create_vllm_engines(
         num_gpus = 0.5
 
     logger.info(f"num_gpus: {num_gpus}")
+    logger.info(f"use_hybrid_engine: {use_hybrid_engine}, single_gpu_mode: {single_gpu_mode}")
 
     if not use_hybrid_engine:
         # Create a big placement group to ensure that all engines are packed
@@ -910,9 +938,12 @@ def create_vllm_engines(
     # ensure we use bundles on the same node where possible if tp>1.
     bundle_indices_list = get_bundle_indices_list(pg)
 
+    logger.info(f"Starting loop to create {num_engines} vLLM engines...")
     for i in range(num_engines):
+        logger.info(f"Creating engine {i + 1}/{num_engines}...")
         bundle_indices = None
         bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
+        logger.info(f"Engine {i + 1}: bundle_indices={bundle_indices}")
 
         scheduling_strategy = PlacementGroupSchedulingStrategy(
             placement_group=pg,
@@ -920,6 +951,7 @@ def create_vllm_engines(
             placement_group_bundle_index=bundle_indices[0],
         )
 
+        logger.info(f"Engine {i + 1}: Creating Ray remote actor...")
         vllm_engines.append(
             ray.remote(LLMRayActor)
             .options(
@@ -959,7 +991,9 @@ def create_vllm_engines(
                 calculate_kv_scales=use_fp8_kv_cache,
             )
         )
+        logger.info(f"Engine {i + 1}: Ray remote actor created successfully")
 
+    logger.info("All %d vLLM engine actors created, now waiting for them to report ready", len(vllm_engines))
     logger.info("Waiting for %d vLLM engines to report ready", len(vllm_engines))
     ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=600)
     logger.info("All %d vLLM engines reported ready", len(vllm_engines))
