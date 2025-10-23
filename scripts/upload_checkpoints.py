@@ -94,12 +94,19 @@ def main():
             "as separate revisions to a single HF repo."
         )
     )
-    parser.add_argument(
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
         "--checkpoints_dir",
         type=str,
-        required=True,
         help=(
-            "Path to the directory containing checkpoint subfolders like epoch_0_hf, step_500_hf, etc."
+            "Path to a directory containing multiple checkpoint subfolders like epoch_0_hf, step_500_hf, etc."
+        ),
+    )
+    group.add_argument(
+        "--checkpoint_path",
+        type=str,
+        help=(
+            "Path to a single HF checkpoint folder to upload (e.g., epoch_3_hf)."
         ),
     )
     parser.add_argument(
@@ -113,37 +120,75 @@ def main():
         action="store_true",
         help="Create the HF repo as private if it doesn't exist (default public).",
     )
+    parser.add_argument(
+        "--revision",
+        type=str,
+        default=None,
+        help=(
+            "Revision (branch/tag) to use when uploading a single checkpoint via --checkpoint_path. "
+            "If omitted, it is derived from the folder name by stripping a trailing '_hf'."
+        ),
+    )
 
     args = parser.parse_args()
 
-    if not os.path.isdir(args.checkpoints_dir):
-        print(f"Error: The specified checkpoints directory does not exist: {args.checkpoints_dir}")
-        return
+    if args.checkpoints_dir:
+        if not os.path.isdir(args.checkpoints_dir):
+            print(f"Error: The specified checkpoints directory does not exist: {args.checkpoints_dir}")
+            return
 
-    # Find *_hf folders
-    entries = os.listdir(args.checkpoints_dir)
-    hf_folders = [name for name in entries if is_hf_checkpoint_folder(args.checkpoints_dir, name)]
+        # Find *_hf folders
+        entries = os.listdir(args.checkpoints_dir)
+        hf_folders = [name for name in entries if is_hf_checkpoint_folder(args.checkpoints_dir, name)]
 
-    if not hf_folders:
+        if not hf_folders:
+            print(
+                f"No '*_hf' checkpoint folders found in {args.checkpoints_dir}. Nothing to upload."
+            )
+            return
+
+        # Derive revisions and sort them
+        revisions_and_paths = []
+        for name in hf_folders:
+            revision = folder_to_revision(name)
+            full_path = os.path.join(args.checkpoints_dir, name)
+            revisions_and_paths.append((revision, full_path))
+
+        revisions_and_paths.sort(key=lambda x: sort_key_for_revision(x[0]))
+
         print(
-            f"No '*_hf' checkpoint folders found in {args.checkpoints_dir}. Nothing to upload."
+            f"Found {len(revisions_and_paths)} HF checkpoints to upload from {args.checkpoints_dir}."
         )
-        return
 
-    # Derive revisions and sort them
-    revisions_and_paths = []
-    for name in hf_folders:
-        revision = folder_to_revision(name)
-        full_path = os.path.join(args.checkpoints_dir, name)
-        revisions_and_paths.append((revision, full_path))
+        for revision, folder_path in revisions_and_paths:
+            print(f"\nUploading folder: {folder_path}")
+            print(f" -> Using revision: {revision}")
+            try:
+                push_folder_to_hub(
+                    folder_path=folder_path,
+                    hf_repo_id=args.hf_repo_id,
+                    hf_repo_revision=revision,
+                    private=args.private,
+                )
+            except Exception as e:
+                print(f"ERROR: Failed to upload {folder_path} as revision '{revision}': {e}")
 
-    revisions_and_paths.sort(key=lambda x: sort_key_for_revision(x[0]))
+        print("\nAll *_hf checkpoints processed.")
+    else:
+        # Single checkpoint upload path
+        folder_path = args.checkpoint_path
+        if not os.path.isdir(folder_path):
+            print(f"Error: The specified checkpoint path does not exist or is not a directory: {folder_path}")
+            return
 
-    print(
-        f"Found {len(revisions_and_paths)} HF checkpoints to upload from {args.checkpoints_dir}."
-    )
+        # Determine revision: use --revision if provided, else derive from folder name
+        if args.revision is not None:
+            revision = args.revision
+        else:
+            # Derive from leaf folder name, stripping trailing _hf if present
+            folder_name = os.path.basename(os.path.normpath(folder_path))
+            revision = folder_to_revision(folder_name)
 
-    for revision, folder_path in revisions_and_paths:
         print(f"\nUploading folder: {folder_path}")
         print(f" -> Using revision: {revision}")
         try:
@@ -155,8 +200,8 @@ def main():
             )
         except Exception as e:
             print(f"ERROR: Failed to upload {folder_path} as revision '{revision}': {e}")
-
-    print("\nAll *_hf checkpoints processed.")
+            return
+        print("\nSingle checkpoint processed.")
 
 
 if __name__ == "__main__":

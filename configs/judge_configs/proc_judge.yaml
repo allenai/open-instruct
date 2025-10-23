@@ -17,7 +17,7 @@ tasks:
             --revision epoch_4 \
             --tensor-parallel-size 1 \
             --max-model-len 32768 \
-            --override-generation-config '{"temperature": 0.0, "max_new_tokens": 2048}' \
+            --override-generation-config \"{\\\"temperature\\\": 0.0, \\\"max_new_tokens\\\": 2048}\" \
             --trust-remote-code \
             --port 8001 \
             --enforce-eager \
