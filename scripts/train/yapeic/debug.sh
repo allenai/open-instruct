@@ -1,35 +1,20 @@
-beaker experiment create configs/judge_configs/proc_judge.yaml \
-    --name proc_judge \
-    --workspace ai2/oe-data
+# note: judge may not be alive, internal ai2 host.
+export HOSTED_VLLM_API_BASE=http://saturn-cs-aus-233.reviz.ai2.in:8001/v1
 
-JUDGE_BASE_URL=http://saturn-cs-aus-236.reviz.ai2.in:8001/v1
-
-python mason.py \
-    --cluster ai2/jupiter \
-    --task_name grpo_qwen25-7b-inst_v3_10k \
-    --description "GRPO Qwen3-8B, test on 10k" \
-    --workspace ai2/oe-data \
-    --priority high \
-    --image nathanl/open_instruct_auto \
-    --preemptible \
-    --num_nodes 1 \
-    --budget ai2/oe-base \
-    --env HOSTED_VLLM_API_BASE=${JUDGE_BASE_URL} \
-    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --exp_name grpo_qwen25-7b-inst_v3_10k \
+uv run python open_instruct/grpo_fast.py \
     --beta 0.0 \
-    --num_unique_prompts_rollout 8 \
-    --num_samples_per_prompt_rollout 16 \
+    --num_unique_prompts_rollout 1 \
+    --num_samples_per_prompt_rollout 1 \
     --kl_estimator kl3 \
     --learning_rate 5e-7 \
     --dataset_mixer_list /weka/oe-training-default/yapeic/proc-data/data/dclm/tutorial_subset/grpo_data/v3_goal_resource_steps_low_variation_simple_template_binary_with_format_10k.jsonl 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list /weka/oe-training-default/yapeic/proc-data/data/dclm/tutorial_subset/grpo_data/v3_goal_resource_steps_low_variation_simple_template_binary_with_format_10k_test.jsonl 1.0 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 8192 \
-    --max_prompt_token_length 4096 \
+    --max_token_length 4096 \
+    --max_prompt_token_length 2048 \
     --response_length 2048 \
-    --pack_length 6144 \
+    --pack_length 4096 \
     --model_name_or_path Qwen/Qwen2.5-7B-Instruct \
     --apply_verifiable_reward True \
     --llm_judge_model "hosted_vllm/yapeichang/distill_judge_qwen3-8b_sft_v2_fixed_data" \
@@ -43,15 +28,10 @@ python mason.py \
     --num_learners_per_node 1 \
     --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
-    --vllm_num_engines 2 \
+    --vllm_num_engines 1 \
     --lr_scheduler_type linear \
     --seed 1 \
     --local_eval_every 80 \
     --save_freq 250 \
     --keep_last_n_checkpoints 10 \
     --gradient_checkpointing \
-    --with_tracking \
-    --hf_entity yapeichang \
-    --hf_repo_id grpo_qwen25-7b-inst_v3_10k \
-    --wandb_project_name yapeic-exp \
-    --wandb_entity ai2-llm

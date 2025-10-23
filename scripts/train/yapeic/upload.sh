@@ -44,5 +44,6 @@
 #     --hf_repo_id yapeichang/sft_olmo7b-base_v1
 
 python scripts/upload_checkpoints.py \
-    --checkpoints_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/sft_qwen25-7b_v1__8__1760374734 \
-    --hf_repo_id yapeichang/sft_qwen25-7b_v1
+    --checkpoint_path /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen25-7b-inst_v3_ratio_10k_with_stop_checkpoint_states/global_step100 \
+    --hf_repo_id yapeichang/grpo_qwen25-7b-inst_v3_ratio_10k_with_stop \
+    --revision step100

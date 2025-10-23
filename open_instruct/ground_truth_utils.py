@@ -1153,7 +1153,9 @@ class ProcedureStepFormatVerifier(VerifierFunction):
             if expected_k is None:
                 expected_k = self._infer_k_from_query(query)
 
-            steps = self._extract_steps_from_prediction(prediction)
+            # Extract only the final answer portion (exclude chain-of-thought and other scaffolding)
+            final_answer = extract_final_answer(prediction)
+            steps = self._extract_steps_from_prediction(final_answer)
             if not steps:
                 return VerificationResult(score=0.0)
 
