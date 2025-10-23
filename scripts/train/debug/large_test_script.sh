@@ -5,7 +5,7 @@ num_prompts=25376
 exp_name=rlvr_ace_fn_and_og_ocr_stdio_from_base_with_perf_penalty
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 uv run python mason.py \
-        --cluster ai2/jupiter \
+        --cluster ai2/augusta \
         --image "$BEAKER_IMAGE" \
 	--pure_docker_mode \
         --workspace ai2/open-instruct-dev \
@@ -34,7 +34,7 @@ uv run python mason.py \
         --max_prompt_token_length 2048 \
         --response_length 4096 \
         --pack_length 20480 \
-        --model_name_or_path /weka/oe-adapt-default/finbarrt/stego32/step358000-hf \
+        --model_name_or_path "gs://ai2-llm/checkpoints/stego32-highlr-filter3/step358000-hf/" \
 	--tokenizer_name_or_path "allenai/OLMo-2-1124-7B" \
         --chat_template_name tulu_thinker \
 	--inflight_updates True \
