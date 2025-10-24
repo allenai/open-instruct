@@ -1,5 +1,5 @@
 # dataset_mix="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_template_filtered 1.0 saurabh5/MATH_3000_Filtered_olmo_completions_new_template_filtered 1.0"
-dataset_mix="hamishivi/rlvr_acecoder_filtered_filtered 33333 hamishivi/IF_multi_constraints_upto5_filtered 33333 hamishivi/rlvr_orz_math_57k_collected_filtered 33334"
+dataset_mix="jacobmorrison/rlvr_code_id 33333 jacobmorrison/rlvr_if_id 33333 jacobmorrison/rlvr_math_id 33334"
 # HF_CACHE_ROOT=${HF_CACHE_ROOT:-/filestore/.cache/huggingface/math_and_code}
 # mkdir -p "${HF_CACHE_ROOT}/datasets" "${HF_CACHE_ROOT}/hub" "${HF_CACHE_ROOT}/transformers" 2>/dev/null || true
 evals="gsm8k::zs_cot_latex_deepseek,minerva_math::hamish_zs_reasoning_deepseek,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,ifeval::hamish_zs_reasoning_deepseek"
@@ -28,8 +28,8 @@ evals="gsm8k::zs_cot_latex_deepseek,minerva_math::hamish_zs_reasoning_deepseek,c
 # hamishivi/virtuoussy_multi_subject_rlvr_filtered 20000 # 572,431
 # hamishivi/tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2_filtered 22000 # 43,382
 
-# model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/tylerr/long-context/olmo25_7b_lc_64k_6T_M100B_round5-sparkle_6634-pre_s2pdf_gzip2080_cweN-yake-all-olmo_packing_yarn-fullonly_50B-fb13a737/step11921-hf"
-# gs_model_name="olmo2.5-final-long-context"
+model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/tylerr/long-context/olmo25_7b_lc_64k_6T_M100B_round5-sparkle_6634-pre_s2pdf_gzip2080_cweN-yake-all-olmo_packing_yarn-fullonly_50B-fb13a737/step11921-hf"
+gs_model_name="olmo2.5-final-long-context"
 
 exp_name="test_exp"
 EXP_NAME=${EXP_NAME:-${exp_name}}
@@ -45,7 +45,7 @@ python mason.py \
     --num_nodes 3 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
-    --gs_model_name allenai/Olmo-3-1025-7B \
+    --gs_model_name $gs_model_name \
     --no_auto_dataset_cache \
     --pure_docker_mode \
     --gpus 8 \
@@ -66,7 +66,7 @@ python mason.py \
     --max_prompt_token_length 2048 \
     --response_length 16384 \
     --pack_length 18432 \
-    --model_name_or_path ${model_name_or_path} \
+    --model_name_or_path allenai/Olmo-3-1025-7B \
     --chat_template_name olmo \
     --non_stop_penalty False \
     --temperature 1.0 \
@@ -78,7 +78,6 @@ python mason.py \
     --lr_scheduler_type constant \
     --random_rewards true \
     --seed 1 \
-    --local_eval_every 50 \
     --save_freq 50 \
     --checkpoint_state_freq 50 \
     --gradient_checkpointing \
@@ -91,11 +90,10 @@ python mason.py \
     --inflight_updates \
     --oe_eval_max_length 16384 \
     --code_api_url https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program\
-    --try_launch_beaker_eval_jobs_on_weka True \
-    --oe_eval_tasks ${evals} \
+    --try_launch_beaker_eval_jobs_on_weka False \
     --eval_on_step_0 False \
-    --output_dir /weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline \
-    --checkpoint_state_dir /weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_states \
+    --output_dir /weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all \
+    --checkpoint_state_dir /weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all_states \
     --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto $@
 
     # --truncated_importance_sampling_ratio_cap 2.0 \
