@@ -2706,7 +2706,7 @@ def make_reward_fn(args: Args) -> Callable:
     """Create a reward function based on the provided arguments."""
     # Build verifiers only if we will use them (saves time when random rewards are on).
     reward_fn_mapping = None
-    if args.apply_verifiable_reward and not args.random_rewards:
+    if args.apply_verifiable_reward:
         reward_fn_mapping = build_all_verifiers(args)
 
     # Deterministic RNG for random rewards (advances each call)
