@@ -53,7 +53,7 @@ import numpy as np
 import ray
 import requests
 import torch
-# import vllm.config
+import vllm.config
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
@@ -1714,7 +1714,6 @@ class ModelDims:
     intermediate_size: int
     vocab_size: int
     num_attn_heads: int
-    head_dim: int
     num_kv_heads: Optional[int] = None
     device_name: Optional[str] = None
 
@@ -1730,24 +1729,27 @@ class ModelDims:
             "num_attn_heads must be divisible by num_kv_heads (GQA/MQA)"
         )
 
-    # @classmethod
-    # def from_vllm_config(cls, vllm_config: vllm.config.VllmConfig) -> "ModelDims":
-    #     """Create ModelDims from a vLLM config object."""
-    #     model_config = vllm_config.model_config
-    #     hidden_size = model_config.get_hidden_size()
+    @classmethod
+    def from_vllm_config(cls, vllm_config: vllm.config.VllmConfig) -> "ModelDims":
+        """Create ModelDims from a vLLM config object."""
+        model_config = vllm_config.model_config
+        hidden_size = model_config.get_hidden_size()
 
-    #     # Try to get intermediate_size, default to 4x hidden_size if not present
-    #     intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
+        # Try to get intermediate_size, default to 4x hidden_size if not present
+        intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
 
-    #     return cls(
-    #         num_layers=model_config.get_num_layers(vllm_config.parallel_config),
-    #         hidden_size=hidden_size,
-    #         intermediate_size=intermediate_size,
-    #         vocab_size=model_config.get_vocab_size(),
-    #         num_attn_heads=model_config.get_num_attention_heads(vllm_config.parallel_config),
-    #         head_dim=model_config.get_head_size(),
-    #         num_kv_heads=model_config.get_num_kv_heads(vllm_config.parallel_config),
-    #     )
+        return cls(
+            num_layers=model_config.get_num_layers(vllm_config.parallel_config),
+            hidden_size=hidden_size,
+            intermediate_size=intermediate_size,
+            vocab_size=model_config.get_vocab_size(),
+            num_attn_heads=model_config.get_num_attention_heads(vllm_config.parallel_config),
+            num_kv_heads=model_config.get_num_kv_heads(vllm_config.parallel_config),
+        )
+
+    @property
+    def head_dim(self) -> int:
+        return self.hidden_size // self.num_attn_heads
 
     @property
     def device_flops(self) -> float:
@@ -1773,12 +1775,9 @@ class ModelDims:
         d = self.head_dim
         mul = FLOP_PER_MAC
 
-        q_dim = self.num_attn_heads * d
-        kv_dim = self.num_kv_heads * d
-
         # Projections for the query_len new tokens
-        q_proj = mul * query_len * self.hidden_size * q_dim
-        kv_proj = mul * 2 * query_len * self.hidden_size * kv_dim  # GQA/MQA
+        q_proj = mul * query_len * self.hidden_size * self.hidden_size
+        kv_proj = mul * 2 * query_len * self.hidden_size * (self.num_kv_heads * d)  # GQA/MQA
 
         # Scores and attention-weighted values
         qk = mul * self.num_attn_heads * query_len * kv_len * d
@@ -1786,14 +1785,14 @@ class ModelDims:
         av = mul * self.num_attn_heads * query_len * kv_len * d
 
         # Output projection
-        out_proj = mul * query_len * q_dim * self.hidden_size
+        out_proj = mul * query_len * self.hidden_size * self.hidden_size
 
         return q_proj + kv_proj + qk + softmax + av + out_proj
 
     def mlp_flops(self, seq_len: int) -> int:
         """Two matmuls dominate; activation cost under-counted on purpose."""
         mul = FLOP_PER_MAC
-        first = mul * seq_len * self.hidden_size * (self.intermediate_size * 2)  # times 2 due to SwiGLU
+        first = mul * seq_len * self.hidden_size * self.intermediate_size
         act = seq_len * self.intermediate_size  # under-counted on purpose
         second = mul * seq_len * self.intermediate_size * self.hidden_size
         return first + act + second
@@ -1869,15 +1868,15 @@ class ModelDims:
             Total bytes for weight reads across all layers
         """
         num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
-        hidden_q = self.num_attn_heads * self.head_dim
-        hidden_kv = num_kv * self.head_dim
+        head_dim = self.hidden_size // self.num_attn_heads
+        hidden_kv = num_kv * head_dim
 
         # Per-layer weight params (Q, K, V, O, MLP up, MLP down)
-        w_q = self.hidden_size * hidden_q
+        w_q = self.hidden_size * self.hidden_size
         w_k = self.hidden_size * hidden_kv
         w_v = self.hidden_size * hidden_kv
-        w_o = hidden_q * self.hidden_size
-        w_up = self.hidden_size * (self.intermediate_size * 2)  # times 2 due to SwiGLU
+        w_o = self.hidden_size * self.hidden_size
+        w_up = self.hidden_size * self.intermediate_size
         w_dn = self.intermediate_size * self.hidden_size
 
         per_layer_weight_bytes = (w_q + w_k + w_v + w_o + w_up + w_dn) * dtype_bytes
@@ -1894,9 +1893,10 @@ class ModelDims:
             Total bytes for KV cache writes across all layers
         """
         num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
+        head_dim = self.hidden_size // self.num_attn_heads
 
         # 2x for K and V
-        kv_write_bytes_per_token = 2 * num_kv * self.head_dim * dtype_bytes
+        kv_write_bytes_per_token = 2 * num_kv * head_dim * dtype_bytes
         return self.num_layers * num_tokens * kv_write_bytes_per_token
 
     def kv_cache_read_bytes(
@@ -1921,6 +1921,7 @@ class ModelDims:
         )
 
         num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
+        head_dim = self.hidden_size // self.num_attn_heads
 
         # For batched sampling with shared prompt KV cache:
         # - Prompt KV is read once per new token position across ALL samples (not per sample)
@@ -1950,7 +1951,7 @@ class ModelDims:
                 kv_read_terms += R * (R - 1) // 2
 
         # 2x for K and V
-        kv_bytes_per_token = 2 * num_kv * self.head_dim * dtype_bytes
+        kv_bytes_per_token = 2 * num_kv * head_dim * dtype_bytes
         return self.num_layers * kv_bytes_per_token * kv_read_terms
 
     def prefill_memory_bytes(self, prompt_lengths: list[int], dtype_bytes: int = 2) -> int:
