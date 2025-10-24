@@ -290,6 +290,10 @@ class Args:
     """the reward value for R1 style format reward"""
     additive_format_reward: bool = False
     """whether to add the format reward to the final reward"""
+    # -- random reward (debug/ablation)
+    random_rewards: bool = False
+    """If True, ignore verifiers and assign each sequence a random reward in [0, 1]."""
+
 
     # -- verifiable reward
     apply_verifiable_reward: bool = True
@@ -454,9 +458,12 @@ class Args:
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
-        assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
-            "At least one reward must be applied!"
-        )
+        assert (
+            self.apply_verifiable_reward
+            or self.apply_r1_style_format_reward
+            or self.non_stop_penalty
+            or self.random_rewards
+        ), "At least one reward must be applied!"
         # Ensure we have enough prompts for all VLLM engines
         if self.num_unique_prompts_rollout < self.vllm_num_engines:
             logger.warning(
@@ -2686,7 +2693,13 @@ def make_tokenizer(tc: TokenizerConfig, model_config: ModelConfig):
 
 def make_reward_fn(args: Args) -> Callable:
     """Create a reward function based on the provided arguments."""
-    reward_fn_mapping = build_all_verifiers(args)
+    # Build verifiers only if we will use them (saves time when random rewards are on).
+    reward_fn_mapping = None
+    if args.apply_verifiable_reward and not args.random_rewards:
+        reward_fn_mapping = build_all_verifiers(args)
+
+    # Deterministic RNG for random rewards (advances each call)
+    rng = np.random.default_rng(args.seed)
 
     async def reward_fn(
         responses: List[torch.Tensor],
@@ -2716,19 +2729,27 @@ def make_reward_fn(args: Args) -> Callable:
                     scores[i] = format_scores[i] + scores[i]
                 metrics["val/format_scores"] = np.array(format_scores).mean()
 
-        if args.apply_verifiable_reward:
+        # Either use verifiers, or replace that component with random rewards
+        if args.apply_verifiable_reward or args.random_rewards:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
-                verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
-                    reward_fn_mapping,
-                    responses,
-                    decoded_responses,
-                    batch,
-                    reward_mult=args.verification_reward,
-                    queries=queries,
-                )
+                if args.random_rewards:
+                    # Replace verifiable reward with a random reward in [0, 1]
+                    verifiable_rewards = rng.random(len(decoded_responses)).tolist()
+                    per_func_rewards = []  # no per-function breakdown when random
+                else:
+                    verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
+                        reward_fn_mapping,
+                        responses,
+                        decoded_responses,
+                        batch,
+                        reward_mult=args.verification_reward,
+                        queries=queries,
+                    )
+
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
-                # slightly complex combo of good outputs and additive format reward
+
+                # Combine with (optional) format reward & tool gating in the same way as before
                 for i in range(len(verifiable_rewards)):
                     if not args.only_reward_good_outputs or (good_outputs[i] and args.only_reward_good_outputs):
                         if args.apply_r1_style_format_reward and args.additive_format_reward:
@@ -2737,19 +2758,24 @@ def make_reward_fn(args: Args) -> Callable:
                             scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
                         else:
                             scores[i] = verifiable_rewards[i]
+
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
-                metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
-                # reshuffle around per_func rewards
-                per_func_lists = defaultdict(list)
-                for reward_dict in per_func_rewards:
-                    for key, value in reward_dict.items():
-                        per_func_lists[key].append(value)
-                # log per function rewards
-                for key, value in per_func_lists.items():
-                    np_value = np.array(value)
-                    metrics[f"objective/{key}_reward"] = np_value.mean()
-                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
+                # Only meaningful with real verifiers; record NaN when random
+                metrics["objective/verifiable_correct_rate"] = (
+                    (np_verifiable_rewards > 0.0).mean() if not args.random_rewards else float("nan")
+                )
+
+                # Per-function metrics only when real verifiers are used
+                if not args.random_rewards:
+                    per_func_lists = defaultdict(list)
+                    for reward_dict in per_func_rewards:
+                        for key, value in reward_dict.items():
+                            per_func_lists[key].append(value)
+                    for key, value in per_func_lists.items():
+                        np_value = np.array(value)
+                        metrics[f"objective/{key}_reward"] = np_value.mean()
+                        metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
 
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
         if args.non_stop_penalty:
