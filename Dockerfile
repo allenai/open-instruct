@@ -65,6 +65,7 @@ ENV UV_CACHE_DIR=/root/.cache/uv
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
 
+# install vllm olmo retrofit
 RUN git clone -b shanea/olmo2-retrofit https://github.com/2015aroras/vllm.git vllm_olmo2.5
 
 # Install dependencies
