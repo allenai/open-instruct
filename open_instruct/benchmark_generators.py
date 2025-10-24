@@ -170,11 +170,11 @@ def simulate_weight_sync(actor_manager: ray.actor.ActorHandle, vllm_engines: lis
     sync_start = time.perf_counter()
     ray.get(actor_manager.set_should_stop.remote(True))
     logger.debug('Set should_stop to True for weight sync simulation')
-    stopped_refs = [engine.process_from_queue.remote(timeout=1) for engine in vllm_engines]
-    results = utils.ray_get_with_progress(stopped_refs, desc='Waiting for engines to stop for weight sync', enable=args.verbose)
-    for i, result in enumerate(results):
-        if result != 0:
-            logger.warning(f'Engine {i} processed {result} requests while stopping')
+    # Previously we called process_from_queue with a timeout to ensure actors drained.
+    # That method no longer accepts a timeout argument, so instead just sanity-check
+    # background threads to surface any latent failures.
+    for engine in vllm_engines:
+        ray.get(engine.check_background_threads.remote())
     time.sleep(1.0)
     ray.get(actor_manager.set_should_stop.remote(False))
     logger.debug('Set should_stop to False after weight sync simulation')
