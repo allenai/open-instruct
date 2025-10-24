@@ -40,9 +40,9 @@ python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/olmo-instruct \
     --priority urgent \
-    --image hamishivi/olmo_25_image_latest3 \
+    --image jacobm/open_instruct_dev_random_rewards \
     --preemptible \
-    --num_nodes 2 \
+    --num_nodes 3 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gs_model_name $gs_model_name \
@@ -63,7 +63,6 @@ python mason.py \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/rlvr_acecoder_filtered_filtered 4 hamishivi/IF_multi_constraints_upto5_filtered 4 hamishivi/rlvr_orz_math_57k_collected_filtered 4 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 10240 \
     --max_prompt_token_length 2048 \
     --response_length 16384 \
     --pack_length 18432 \
@@ -74,10 +73,10 @@ python mason.py \
     --total_episodes 10000000 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 \
-    --vllm_num_engines 8 \
+    --vllm_num_engines 16 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
-    --apply_verifiable_reward true \
+    --random_rewards true \
     --seed 1 \
     --local_eval_every 50 \
     --save_freq 50 \
