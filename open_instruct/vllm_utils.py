@@ -596,9 +596,13 @@ class LLMRayActor:
 
     def _init_executor(self) -> None:
         max_workers = NUM_PREFETCH_WORKERS + (NUM_TOOL_WORKERS if self.tools else 0)
+        logger.info(f"_init_executor: Creating ThreadPoolExecutor with max_workers={max_workers}")
         self.executor = futures.ThreadPoolExecutor(max_workers=max_workers)
+        logger.info("_init_executor: Submitting _prefetch_worker to executor...")
         self._prefetch_future = self.executor.submit(_prefetch_worker, self)
+        logger.info("_init_executor: Submitting process_from_queue to executor...")
         self._process_future = self.executor.submit(self.process_from_queue)
+        logger.info("_init_executor: Both background threads submitted")
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
         # a hack to make the script work.
@@ -643,18 +647,27 @@ class LLMRayActor:
         )
 
         async def _init_engine():
+            logger.info("_init_engine: Getting running loop...")
             running_loop = asyncio.get_running_loop()
+            logger.info(f"_init_engine: Running loop={running_loop}, self.loop={self.loop}")
             assert running_loop == self.loop, f"Loop mismatch! running={running_loop}, actor.loop={self.loop}"
-            return vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
+            logger.info("_init_engine: About to call vllm.AsyncLLMEngine.from_engine_args...")
+            engine = vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
+            logger.info("_init_engine: vllm.AsyncLLMEngine.from_engine_args returned successfully")
+            return engine
 
         def _run_loop():
+            logger.info("_run_loop: Creating new event loop...")
             self.loop = asyncio.new_event_loop()
+            logger.info("_run_loop: Setting event loop...")
             asyncio.set_event_loop(self.loop)
+            logger.info("_run_loop: Event loop set, entering try block...")
             try:
                 logger.info(
                     "LLMRayActor(%s): async event loop starting engine startup",
                     getattr(self, "__ray_actor_id__", "unknown"),
                 )
+                logger.info("_run_loop: About to call loop.run_until_complete(_init_engine())...")
                 self.llm_engine = self.loop.run_until_complete(_init_engine())
                 logger.info(
                     "LLMRayActor(%s): AsyncLLMEngine initialized", getattr(self, "__ray_actor_id__", "unknown")
@@ -663,7 +676,9 @@ class LLMRayActor:
                 self._init_exception = exc
                 logger.exception("AsyncLLMEngine initialization failed")
             finally:
+                logger.info("_run_loop: Setting init_complete event...")
                 init_complete.set()
+                logger.info("_run_loop: init_complete event set")
 
             if self._init_exception is None:
                 logger.info(
@@ -673,13 +688,18 @@ class LLMRayActor:
 
         logger.info("_setup_and_start_async_engine: Creating loop thread...")
         self.loop_thread = threading.Thread(target=_run_loop, daemon=True)
-        logger.info("_setup_and_start_async_engine: Starting loop thread...")
+        logger.info("_setup_and_start_async_engine: Loop thread created, starting...")
         self.loop_thread.start()
-        logger.info("_setup_and_start_async_engine: Waiting for init_complete event...")
+        logger.info(
+            "_setup_and_start_async_engine: Loop thread started, waiting for init_complete event (this will block until engine initializes)..."
+        )
         init_complete.wait()
-        logger.info("_setup_and_start_async_engine: init_complete event received")
+        logger.info("_setup_and_start_async_engine: init_complete event received!")
 
         if self._init_exception is not None:
+            logger.error(
+                f"_setup_and_start_async_engine: Engine initialization failed with exception: {self._init_exception}"
+            )
             raise RuntimeError("Failed to initialize AsyncLLMEngine") from self._init_exception
 
         logger.info("LLMRayActor(%s): AsyncLLMEngine ready", getattr(self, "__ray_actor_id__", "unknown"))
@@ -749,15 +769,22 @@ class LLMRayActor:
         logger.info(f"_finalize_completed_request: Result sent to queue for {base_request_id}")
 
     def process_from_queue(self) -> None:
-        logger.info("process_from_queue thread started")
-        iteration = 0
-        while True:
-            if iteration < 5 or iteration % 10 == 0:
-                logger.info(f"process_from_queue iteration {iteration}: waiting for completion_queue")
-            sub_request = self.completion_queue.get()
-            logger.info(f"process_from_queue: Got sub_request for base_request_id={sub_request['base_request_id']}")
-            self._accumulate_sub_request(sub_request)
-            iteration += 1
+        try:
+            logger.info("process_from_queue thread started")
+            logger.info(f"process_from_queue: completion_queue is {self.completion_queue}")
+            iteration = 0
+            while True:
+                if iteration < 5 or iteration % 10 == 0:
+                    logger.info(f"process_from_queue iteration {iteration}: waiting for completion_queue")
+                sub_request = self.completion_queue.get()
+                logger.info(
+                    f"process_from_queue: Got sub_request for base_request_id={sub_request['base_request_id']}"
+                )
+                self._accumulate_sub_request(sub_request)
+                iteration += 1
+        except Exception as e:
+            logger.exception(f"process_from_queue thread crashed with exception: {e}")
+            raise
 
     def init_process_group(
         self,
@@ -928,15 +955,23 @@ def create_vllm_engines(
 
     logger.info(f"num_gpus: {num_gpus}")
     logger.info(f"use_hybrid_engine: {use_hybrid_engine}, single_gpu_mode: {single_gpu_mode}")
+    logger.info(f"About to check use_hybrid_engine={use_hybrid_engine}")
 
     if not use_hybrid_engine:
+        logger.info("Creating placement group for non-hybrid engine mode")
         # Create a big placement group to ensure that all engines are packed
         bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size)]
         pg = placement_group(bundles, strategy="PACK")
+        logger.info("Waiting for placement group to be ready...")
         ray.get(pg.ready())
+        logger.info("Placement group is ready")
+    else:
+        logger.info("Using hybrid engine mode with provided placement group")
 
     # ensure we use bundles on the same node where possible if tp>1.
+    logger.info("Getting bundle indices list...")
     bundle_indices_list = get_bundle_indices_list(pg)
+    logger.info(f"Bundle indices list: {bundle_indices_list}")
 
     logger.info(f"Starting loop to create {num_engines} vLLM engines...")
     for i in range(num_engines):
@@ -951,46 +986,48 @@ def create_vllm_engines(
             placement_group_bundle_index=bundle_indices[0],
         )
 
-        logger.info(f"Engine {i + 1}: Creating Ray remote actor...")
-        vllm_engines.append(
-            ray.remote(LLMRayActor)
-            .options(
-                num_cpus=num_gpus,
-                num_gpus=num_gpus,
-                scheduling_strategy=scheduling_strategy,
-                runtime_env=ray.runtime_env.RuntimeEnv(
-                    env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
-                ),
-            )
-            .remote(
-                model=pretrain,
-                revision=revision,
-                tokenizer=tokenizer_name_or_path,
-                tokenizer_revision=revision,
-                worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
-                tensor_parallel_size=tensor_parallel_size,
-                enforce_eager=enforce_eager,
-                dtype="bfloat16",
-                seed=seed + i,
-                distributed_executor_backend=distributed_executor_backend,
-                enable_prefix_caching=enable_prefix_caching,
-                max_model_len=max_model_len,
-                gpu_memory_utilization=vllm_gpu_memory_utilization,
-                bundle_indices=bundle_indices,
-                num_gpus=0.2 if use_hybrid_engine else 1,
-                noset_visible_devices=ray_noset_visible_devices(),
-                prompt_queue=prompt_queue,
-                results_queue=results_queue,
-                eval_results_queue=eval_results_queue,
-                actor_manager=actor_manager,
-                tools=tools,
-                max_tool_calls=max_tool_calls_dict,
-                inference_batch_size=inference_batch_size,
-                inflight_updates=inflight_updates,
-                kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
-                calculate_kv_scales=use_fp8_kv_cache,
-            )
+        logger.info(f"Engine {i + 1}: Creating Ray remote actor class...")
+        remote_class = ray.remote(LLMRayActor)
+        logger.info(f"Engine {i + 1}: Setting Ray actor options...")
+        remote_class_with_options = remote_class.options(
+            num_cpus=num_gpus,
+            num_gpus=num_gpus,
+            scheduling_strategy=scheduling_strategy,
+            runtime_env=ray.runtime_env.RuntimeEnv(
+                env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
+            ),
         )
+        logger.info(f"Engine {i + 1}: Calling .remote() to instantiate actor...")
+        actor_handle = remote_class_with_options.remote(
+            model=pretrain,
+            revision=revision,
+            tokenizer=tokenizer_name_or_path,
+            tokenizer_revision=revision,
+            worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
+            tensor_parallel_size=tensor_parallel_size,
+            enforce_eager=enforce_eager,
+            dtype="bfloat16",
+            seed=seed + i,
+            distributed_executor_backend=distributed_executor_backend,
+            enable_prefix_caching=enable_prefix_caching,
+            max_model_len=max_model_len,
+            gpu_memory_utilization=vllm_gpu_memory_utilization,
+            bundle_indices=bundle_indices,
+            num_gpus=0.2 if use_hybrid_engine else 1,
+            noset_visible_devices=ray_noset_visible_devices(),
+            prompt_queue=prompt_queue,
+            results_queue=results_queue,
+            eval_results_queue=eval_results_queue,
+            actor_manager=actor_manager,
+            tools=tools,
+            max_tool_calls=max_tool_calls_dict,
+            inference_batch_size=inference_batch_size,
+            inflight_updates=inflight_updates,
+            kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
+            calculate_kv_scales=use_fp8_kv_cache,
+        )
+        logger.info(f"Engine {i + 1}: .remote() call returned, appending to vllm_engines list")
+        vllm_engines.append(actor_handle)
         logger.info(f"Engine {i + 1}: Ray remote actor created successfully")
 
     logger.info("All %d vLLM engine actors created, now waiting for them to report ready", len(vllm_engines))
