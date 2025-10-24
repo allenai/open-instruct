@@ -267,10 +267,17 @@ class Args:
     """
     ref_policy_update_freq: Optional[int] = None
     """How many training steps to take before updating the reference policy."""
-    advantage_normalization_type: Literal["standard", "centered"] = "standard"
-    """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
-    divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
-    DR.GRPO https://arxiv.org/pdf/2503.20783)."""
+    advantage_normalization_type: Literal["standard", "centered", "none", "constant"] = "standard"
+    """How to compute advantages:
+    - 'standard': (reward - group_mean) / (group_std + 1e-8)
+    - 'centered': reward - group_mean
+    - 'none':     reward (no per-group normalization)
+    - 'constant': reward - global_baseline
+    """
+
+    global_baseline: float = 0.5
+    """Used when advantage_normalization_type='constant': advantages = reward - global_baseline."""
+
     mask_truncated_completions: bool = False
     """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
 
@@ -1785,6 +1792,10 @@ def data_preparation_thread(
                 advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
             elif args.advantage_normalization_type == "centered":
                 advantages = scores - mean_grouped_rewards
+            elif args.advantage_normalization_type == "none":
+                advantages = scores  # keep rewards as-is (U[0,1] -> mean ≈ 0.5)
+            elif args.advantage_normalization_type == "constant":
+                advantages = scores - args.global_baseline  # e.g., 0.5
             else:
                 raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 

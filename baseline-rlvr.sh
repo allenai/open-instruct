@@ -77,6 +77,7 @@ python mason.py \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --random_rewards true \
+    --advantage_normalization_type none \
     --seed 1 \
     --save_freq 50 \
     --checkpoint_state_freq 50 \
