@@ -28,8 +28,8 @@ evals="gsm8k::zs_cot_latex_deepseek,minerva_math::hamish_zs_reasoning_deepseek,c
 # hamishivi/virtuoussy_multi_subject_rlvr_filtered 20000 # 572,431
 # hamishivi/tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2_filtered 22000 # 43,382
 
-model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/tylerr/long-context/olmo25_7b_lc_64k_6T_M100B_round5-sparkle_6634-pre_s2pdf_gzip2080_cweN-yake-all-olmo_packing_yarn-fullonly_50B-fb13a737/step11921-hf"
-gs_model_name="olmo2.5-final-long-context"
+# model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/tylerr/long-context/olmo25_7b_lc_64k_6T_M100B_round5-sparkle_6634-pre_s2pdf_gzip2080_cweN-yake-all-olmo_packing_yarn-fullonly_50B-fb13a737/step11921-hf"
+# gs_model_name="olmo2.5-final-long-context"
 
 exp_name="test_exp"
 EXP_NAME=${EXP_NAME:-${exp_name}}
@@ -40,12 +40,12 @@ python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/olmo-instruct \
     --priority urgent \
-    --image jacobm/open_instruct_dev_random_rewards2 \
+    --image jacobm/open_instruct_dev_random_rewards \
     --preemptible \
     --num_nodes 3 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
-    --gs_model_name $gs_model_name \
+    --gs_model_name allenai/Olmo-3-1025-7B \
     --no_auto_dataset_cache \
     --pure_docker_mode \
     --gpus 8 \
@@ -53,7 +53,7 @@ python mason.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
     --num_samples_per_prompt_rollout 8 \
-    --num_unique_prompts_rollout 32 \
+    --num_unique_prompts_rollout 16 \
     --num_mini_batches 1 \
     --num_epochs 1 \
     --learning_rate 1e-6 \
@@ -87,7 +87,7 @@ python mason.py \
     --clip_higher 0.272 \
     --keep_last_n_checkpoints -1 \
     --mask_truncated_completions True \
-    --async_steps 4 \
+    --async_steps 0 \
     --inflight_updates \
     --oe_eval_max_length 16384 \
     --code_api_url https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program\
