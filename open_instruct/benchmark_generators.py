@@ -203,7 +203,18 @@ def submission_thread(param_prompt_Q: ray_queue.Queue, dataset: datasets.Dataset
 def run_benchmark(dataset: datasets.Dataset, vllm_engines: list[ray.actor.ActorHandle], param_prompt_Q: ray_queue.Queue, inference_results_Q: ray_queue.Queue, actor_manager: ray.actor.ActorHandle, args: grpo_fast.Args, model_config: model_utils.ModelConfig, timestamp: int, num_batches: int=5) -> list[dict[str, Any]]:
     """Run the full benchmark."""
     logger.info(f'Starting benchmark with 1 warmup batch + {num_batches - 1} main batches of size {args.num_unique_prompts_rollout}')
-    generation_config = vllm.SamplingParams(temperature=args.temperature, max_tokens=args.response_length, top_p=args.vllm_top_p, n=args.num_samples_per_prompt_rollout, seed=args.seed, include_stop_str_in_output=True, skip_special_tokens=False, stop=args.stop_strings, output_kind=vllm.sampling_params.RequestOutputKind.FINAL_ONLY)
+    generation_config = vllm.SamplingParams(
+        temperature=args.temperature,
+        max_tokens=args.response_length,
+        top_p=args.vllm_top_p,
+        n=args.num_samples_per_prompt_rollout,
+        seed=args.seed,
+        include_stop_str_in_output=True,
+        skip_special_tokens=False,
+        stop=args.stop_strings,
+        logprobs=1,
+        output_kind=vllm.sampling_params.RequestOutputKind.FINAL_ONLY,
+    )
     stop_event = threading.Event()
     executor = futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix='benchmark')
     results = []
@@ -234,12 +245,8 @@ def run_benchmark(dataset: datasets.Dataset, vllm_engines: list[ray.actor.ActorH
         for i in range(warmup_batch_size):
             logger.info(f'Warmup: Waiting for result {i + 1}/{warmup_batch_size}...')
             logger.info(f'Inference results queue size: {inference_results_Q.qsize()}')
-            for engine_idx, engine in enumerate(vllm_engines):
-                try:
-                    ray.get(engine.check_background_threads.remote())
-                except Exception as e:
-                    logger.exception(f'Warmup: engine {engine_idx} background thread check failed: {e}')
-                    raise
+            for engine in vllm_engines:
+                ray.get(engine.check_background_threads.remote())
             result = inference_results_Q.get()
             warmup_results.append(result)
             logger.info(f'Warmup: Received result {i + 1}/{warmup_batch_size}')
@@ -252,6 +259,8 @@ def run_benchmark(dataset: datasets.Dataset, vllm_engines: list[ray.actor.ActorH
             logger.info(f'Batch {batch_idx}/{num_batches - 1}: Waiting for {args.num_unique_prompts_rollout} results...')
             batch_results = []
             for i in range(args.num_unique_prompts_rollout):
+                for engine in vllm_engines:
+                    ray.get(engine.check_background_threads.remote())
                 result = inference_results_Q.get()
                 batch_results.append(result)
                 if (i + 1) % max(1, args.num_unique_prompts_rollout // 4) == 0 or i == args.num_unique_prompts_rollout - 1:
