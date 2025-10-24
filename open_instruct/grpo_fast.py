@@ -2773,6 +2773,7 @@ def make_reward_fn(args: Args) -> Callable:
                     # Replace verifiable reward with a random reward in [0, 1]
                     verifiable_rewards = rng.random(len(decoded_responses)).tolist()
                     per_func_rewards = []  # no per-function breakdown when random
+                    np_verifiable_rewards = np.array(verifiable_rewards)
                     metrics["objective/random_rewards"] = np_verifiable_rewards.mean() if args.random_rewards else float("nan")
 
                 if len(verifiable_rewards) != len(scores):

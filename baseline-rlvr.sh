@@ -40,7 +40,7 @@ python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/olmo-instruct \
     --priority urgent \
-    --image jacobm/open_instruct_dev_random_rewards7 \
+    --image jacobm/open_instruct_dev_random_rewards9 \
     --preemptible \
     --num_nodes 3 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
@@ -67,7 +67,7 @@ python mason.py \
     --response_length 16384 \
     --pack_length 18432 \
     --model_name_or_path allenai/Olmo-3-1025-7B \
-    --chat_template_name olmo \
+    --chat_template_name olmo_no_system_prompt \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 10000000 \
