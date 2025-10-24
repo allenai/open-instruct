@@ -2139,7 +2139,6 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
 
 
 def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer):
-    # load system prompt override if provided
     """Set up training and evaluation datasets."""
     system_prompt_override = None
     if args.system_prompt_override_file is not None:
@@ -2175,9 +2174,9 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
             tc=tc,
             dataset_transform_fn=args.dataset_transform_fn,
             transform_fn_args=transform_fn_args,
+            hf_entity=args.hf_entity,
             dataset_cache_mode=args.dataset_cache_mode,
             dataset_config_hash=args.dataset_config_eval_hash,
-            hf_entity=args.hf_entity,
             dataset_local_cache_dir=args.dataset_local_cache_dir,
             dataset_skip_cache=args.dataset_skip_cache,
             system_prompt_override=system_prompt_override,
