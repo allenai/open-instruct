@@ -114,132 +114,141 @@ async def process_request_async(
     sampling_params: vllm.SamplingParams,
 ):
     """Process a single async request with tool support, awaiting tools inline."""
-    accumulated_tokens = []
-    accumulated_logprobs = []
-    masks = []
-    num_calls = 0
-    timeout = False
-    tool_error = ""
-    tool_output = ""
-    tool_runtime = 0.0
-    tool_called = False
+    logger.info(f"process_request_async: {sub_request_id} entering")
+    try:
+        accumulated_tokens = []
+        accumulated_logprobs = []
+        masks = []
+        num_calls = 0
+        timeout = False
+        tool_error = ""
+        tool_output = ""
+        tool_runtime = 0.0
+        tool_called = False
 
-    current_prompt = prompt
-    current_prompt_token_ids = actor.request_metadata[base_request_id]["prompt_token_ids"]
-    current_sampling_params = sampling_params.clone()
-    final_prompt_token_ids = None
-    iteration = 0
-
-    while True:
-        logger.info(f"process_request_async: {sub_request_id} iteration {iteration} starting generate")
-        iteration_request_id = f"{sub_request_id}_iter{iteration}"
-        outputs = [
-            o
-            async for o in actor.llm_engine.generate(current_prompt, current_sampling_params, iteration_request_id)
-            if o.finished
-        ]
-        logger.info(f"process_request_async: {sub_request_id} iteration {iteration} received {len(outputs)} outputs")
-        assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {iteration_request_id}"
-        request_output = outputs[0]
-        iteration += 1
-        output = request_output.outputs[0]
-
-        if final_prompt_token_ids is None:
-            final_prompt_token_ids = request_output.prompt_token_ids
-
-        accumulated_tokens.extend(output.token_ids)
-        accumulated_logprobs.extend(output.logprobs)
-        masks.extend([1] * len(output.token_ids))
-
-        if not actor.tools or not actor.max_tool_calls:
-            break
-
-        triggered_tool, stop_str = get_triggered_tool(
-            output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
-        )
-        if triggered_tool is None:
-            break
-
-        assert actor.executor is not None, f"executor is None for request {sub_request_id}"
-
-        loop = asyncio.get_running_loop()
-        tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
-
-        tool_called = True
-        num_calls += 1
-        timeout = timeout or tool_result.timeout
-        tool_error += "" if tool_result.error is None else tool_result.error
-        tool_output += tool_result.output
-        tool_runtime += tool_result.runtime
-
-        tool_output_token_ids = actor.llm_engine.tokenizer.encode(
-            "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
-        )
-
-        tool_output_token_ids, excess, prompt_and_tool_output = _truncate_tool_output_tokens(
-            tool_output_token_ids,
-            current_prompt_token_ids,
-            accumulated_tokens,
-            actor.llm_engine.model_config.max_model_len,
-            sampling_params.max_tokens,
-            len(masks),
-        )
-
-        accumulated_tokens.extend(tool_output_token_ids)
-        accumulated_logprobs.extend(
-            [{token_id: types.SimpleNamespace(logprob=0.0)} for token_id in tool_output_token_ids]
-        )
-        masks.extend([0] * len(tool_output_token_ids))
-
-        new_sample_tokens = sampling_params.max_tokens - len(masks)
-        if excess > 0 or new_sample_tokens <= 0:
-            break
-
-        current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output, cache_salt=base_request_id)
-        current_prompt_token_ids = prompt_and_tool_output
-        final_prompt_token_ids = prompt_and_tool_output
+        current_prompt = prompt
+        current_prompt_token_ids = actor.request_metadata[base_request_id]["prompt_token_ids"]
         current_sampling_params = sampling_params.clone()
-        current_sampling_params.max_tokens = new_sample_tokens
+        final_prompt_token_ids = None
+        iteration = 0
 
-    complete_output = vllm.CompletionOutput(
-        index=split_request_id(sub_request_id)["request_index"],
-        text="",
-        token_ids=accumulated_tokens,
-        cumulative_logprob=output.cumulative_logprob,
-        logprobs=accumulated_logprobs,
-        finish_reason=output.finish_reason,
-        stop_reason=output.stop_reason,
-    )
+        while True:
+            logger.info(f"process_request_async: {sub_request_id} iteration {iteration} starting generate")
+            iteration_request_id = f"{sub_request_id}_iter{iteration}"
+            outputs = [
+                o
+                async for o in actor.llm_engine.generate(current_prompt, current_sampling_params, iteration_request_id)
+                if o.finished
+            ]
+            logger.info(
+                f"process_request_async: {sub_request_id} iteration {iteration} received {len(outputs)} outputs"
+            )
+            assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {iteration_request_id}"
+            request_output = outputs[0]
+            iteration += 1
+            output = request_output.outputs[0]
 
-    if actor.tools:
-        setattr(complete_output, "mask", masks)
-        setattr(complete_output, "num_calls", num_calls)
-        setattr(complete_output, "timeout", timeout)
-        setattr(complete_output, "tool_error", tool_error)
-        setattr(complete_output, "tool_output", tool_output)
-        setattr(complete_output, "tool_runtime", tool_runtime)
-        setattr(complete_output, "tool_called", tool_called)
+            if final_prompt_token_ids is None:
+                final_prompt_token_ids = request_output.prompt_token_ids
 
-    actor.active_tasks.pop(sub_request_id, None)
+            accumulated_tokens.extend(output.token_ids)
+            accumulated_logprobs.extend(output.logprobs)
+            masks.extend([1] * len(output.token_ids))
 
-    logger.info(
-        f"process_request_async: {sub_request_id} enqueuing result for base_request_id={base_request_id}"
-    )
-    actor.completion_queue.put(
-        {
-            "base_request_id": base_request_id,
-            "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
-            "request_output": vllm.RequestOutput(
-                request_id=sub_request_id,
-                prompt=request_output.prompt,
-                prompt_token_ids=final_prompt_token_ids,
-                prompt_logprobs=request_output.prompt_logprobs,
-                outputs=[complete_output],
-                finished=True,
-            ),
-            "tools": actor.tools,
-        }
-    )
+            if not actor.tools or not actor.max_tool_calls:
+                break
+
+            triggered_tool, stop_str = get_triggered_tool(
+                output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
+            )
+            if triggered_tool is None:
+                break
+
+            assert actor.executor is not None, f"executor is None for request {sub_request_id}"
+
+            loop = asyncio.get_running_loop()
+            tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
+
+            tool_called = True
+            num_calls += 1
+            timeout = timeout or tool_result.timeout
+            tool_error += "" if tool_result.error is None else tool_result.error
+            tool_output += tool_result.output
+            tool_runtime += tool_result.runtime
+
+            tool_output_token_ids = actor.llm_engine.tokenizer.encode(
+                "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+            )
+
+            tool_output_token_ids, excess, prompt_and_tool_output = _truncate_tool_output_tokens(
+                tool_output_token_ids,
+                current_prompt_token_ids,
+                accumulated_tokens,
+                actor.llm_engine.model_config.max_model_len,
+                sampling_params.max_tokens,
+                len(masks),
+            )
+
+            accumulated_tokens.extend(tool_output_token_ids)
+            accumulated_logprobs.extend(
+                [{token_id: types.SimpleNamespace(logprob=0.0)} for token_id in tool_output_token_ids]
+            )
+            masks.extend([0] * len(tool_output_token_ids))
+
+            new_sample_tokens = sampling_params.max_tokens - len(masks)
+            if excess > 0 or new_sample_tokens <= 0:
+                break
+
+            current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output, cache_salt=base_request_id)
+            current_prompt_token_ids = prompt_and_tool_output
+            final_prompt_token_ids = prompt_and_tool_output
+            current_sampling_params = sampling_params.clone()
+            current_sampling_params.max_tokens = new_sample_tokens
+
+        complete_output = vllm.CompletionOutput(
+            index=split_request_id(sub_request_id)["request_index"],
+            text="",
+            token_ids=accumulated_tokens,
+            cumulative_logprob=output.cumulative_logprob,
+            logprobs=accumulated_logprobs,
+            finish_reason=output.finish_reason,
+            stop_reason=output.stop_reason,
+        )
+
+        if actor.tools:
+            setattr(complete_output, "mask", masks)
+            setattr(complete_output, "num_calls", num_calls)
+            setattr(complete_output, "timeout", timeout)
+            setattr(complete_output, "tool_error", tool_error)
+            setattr(complete_output, "tool_output", tool_output)
+            setattr(complete_output, "tool_runtime", tool_runtime)
+            setattr(complete_output, "tool_called", tool_called)
+
+        actor.active_tasks.pop(sub_request_id, None)
+
+        logger.info(
+            f"process_request_async: {sub_request_id} enqueuing result for base_request_id={base_request_id}"
+        )
+        actor.completion_queue.put(
+            {
+                "base_request_id": base_request_id,
+                "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
+                "request_output": vllm.RequestOutput(
+                    request_id=sub_request_id,
+                    prompt=request_output.prompt,
+                    prompt_token_ids=final_prompt_token_ids,
+                    prompt_logprobs=request_output.prompt_logprobs,
+                    outputs=[complete_output],
+                    finished=True,
+                ),
+                "tools": actor.tools,
+            }
+        )
+    except Exception as exc:
+        logger.exception(f"process_request_async: {sub_request_id} crashed with exception: {exc}")
+        raise
+    finally:
+        logger.info(f"process_request_async: {sub_request_id} exiting")
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
