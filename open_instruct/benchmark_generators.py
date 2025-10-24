@@ -269,7 +269,7 @@ def setup_vllm_engines(
         max_model_len=max_model_len,
         vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
         single_gpu_mode=args.single_gpu_mode,
-        pg=pg,
+        pg=pg if args.single_gpu_mode else None,
         tools={},
         max_tool_calls=args.max_tool_calls,
         prompt_queue=param_prompt_Q,
