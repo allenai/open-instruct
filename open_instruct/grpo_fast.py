@@ -2140,13 +2140,6 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
 
 def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer):
     # load system prompt override if provided
-    system_prompt_override = None
-    if args.system_prompt_override_file is not None:
-        logger.info(f"Loading system prompt override from {args.system_prompt_override_file}")
-        with open(args.system_prompt_override_file, "r") as f:
-            system_prompt_override = f.read().strip()
-        logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
-
     """Set up training and evaluation datasets."""
     system_prompt_override = None
     if args.system_prompt_override_file is not None:
