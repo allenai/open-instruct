@@ -22,7 +22,7 @@ uv run python mason.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 16 \
-        --num_unique_prompts_rollout 128 \
+        --num_unique_prompts_rollout 64 \
         --num_mini_batches 1 \
         --num_epochs 1 \
         --learning_rate 5e-7 \
