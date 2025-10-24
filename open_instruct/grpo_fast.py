@@ -776,13 +776,20 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # Load reference policy checkpoint if available
         if hasattr(self, "ref_policy_checkpoint_path") and self.ref_policy_checkpoint_path:
-            state_dict = torch.load(self.ref_policy_checkpoint_path, map_location=self.device)
-            if hasattr(self.ref_policy, "module"):
-                # If wrapped by DeepSpeed
-                self.ref_policy.module.load_state_dict(state_dict)
+            try:
+                state_dict = torch.load(self.ref_policy_checkpoint_path, map_location=self.device)
+                if hasattr(self.ref_policy, "module"):
+                    # If wrapped by DeepSpeed
+                    self.ref_policy.module.load_state_dict(state_dict)
+                else:
+                    self.ref_policy.load_state_dict(state_dict)
+            except (OSError, RuntimeError) as err:
+                logger.warning(
+                    f"{self.rank=}: Failed to load reference policy from "
+                    f"{self.ref_policy_checkpoint_path}: {err}. Proceeding with base weights."
+                )
             else:
-                self.ref_policy.load_state_dict(state_dict)
-            logger.info(f"{self.rank=}: Loaded reference policy checkpoint from {self.ref_policy_checkpoint_path}")
+                logger.info(f"{self.rank=}: Loaded reference policy checkpoint from {self.ref_policy_checkpoint_path}")
         self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
         return optimization_steps_done
 
