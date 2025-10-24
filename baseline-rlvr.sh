@@ -1,5 +1,5 @@
 # dataset_mix="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_template_filtered 1.0 saurabh5/MATH_3000_Filtered_olmo_completions_new_template_filtered 1.0"
-dataset_mix="jacobmorrison/rlvr_code_id 33333 jacobmorrison/rlvr_if_id 33333 jacobmorrison/rlvr_math_id 33334"
+dataset_mix="jacobmorrison/rlvr_code_id 3333 jacobmorrison/rlvr_if_id 3333 jacobmorrison/rlvr_math_id 3334"
 # HF_CACHE_ROOT=${HF_CACHE_ROOT:-/filestore/.cache/huggingface/math_and_code}
 # mkdir -p "${HF_CACHE_ROOT}/datasets" "${HF_CACHE_ROOT}/hub" "${HF_CACHE_ROOT}/transformers" 2>/dev/null || true
 evals="gsm8k::zs_cot_latex_deepseek,minerva_math::hamish_zs_reasoning_deepseek,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,ifeval::hamish_zs_reasoning_deepseek"
@@ -40,7 +40,7 @@ python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/olmo-instruct \
     --priority urgent \
-    --image jacobm/open_instruct_dev_random_rewards6 \
+    --image jacobm/open_instruct_dev_random_rewards7 \
     --preemptible \
     --num_nodes 3 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \

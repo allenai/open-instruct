@@ -2743,19 +2743,37 @@ def make_reward_fn(args: Args) -> Callable:
         # Either use verifiers, or replace that component with random rewards
         if args.apply_verifiable_reward or args.random_rewards:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
+                verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
+                    reward_fn_mapping,
+                    responses,
+                    decoded_responses,
+                    batch,
+                    reward_mult=args.verification_reward,
+                    queries=queries,
+                )
+
+                np_verifiable_rewards = np.array(verifiable_rewards)
+                metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
+                # Only meaningful with real verifiers; record NaN when random
+                metrics["objective/verifiable_correct_rate"] = (
+                    (np_verifiable_rewards > 0.0).mean() if not args.random_rewards else float("nan")
+                )
+                # Per-function metrics only when real verifiers are used
+                # if not args.random_rewards:
+                per_func_lists = defaultdict(list)
+                for reward_dict in per_func_rewards:
+                    for key, value in reward_dict.items():
+                        per_func_lists[key].append(value)
+                for key, value in per_func_lists.items():
+                    np_value = np.array(value)
+                    metrics[f"objective/{key}_reward"] = np_value.mean()
+                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
+
                 if args.random_rewards:
                     # Replace verifiable reward with a random reward in [0, 1]
                     verifiable_rewards = rng.random(len(decoded_responses)).tolist()
                     per_func_rewards = []  # no per-function breakdown when random
-                else:
-                    verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
-                        reward_fn_mapping,
-                        responses,
-                        decoded_responses,
-                        batch,
-                        reward_mult=args.verification_reward,
-                        queries=queries,
-                    )
+                    metrics["objective/random_rewards"] = np_verifiable_rewards.mean() if args.random_rewards else float("nan")
 
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
@@ -2769,25 +2787,6 @@ def make_reward_fn(args: Args) -> Callable:
                             scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
                         else:
                             scores[i] = verifiable_rewards[i]
-
-                np_verifiable_rewards = np.array(verifiable_rewards)
-                metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
-                # Only meaningful with real verifiers; record NaN when random
-                metrics["objective/verifiable_correct_rate"] = (
-                    (np_verifiable_rewards > 0.0).mean() if not args.random_rewards else float("nan")
-                )
-                metrics["objective/random_rewards"] = np_verifiable_rewards.mean() if args.random_rewards else float("nan")
-
-                # Per-function metrics only when real verifiers are used
-                if not args.random_rewards:
-                    per_func_lists = defaultdict(list)
-                    for reward_dict in per_func_rewards:
-                        for key, value in reward_dict.items():
-                            per_func_lists[key].append(value)
-                    for key, value in per_func_lists.items():
-                        np_value = np.array(value)
-                        metrics[f"objective/{key}_reward"] = np_value.mean()
-                        metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
 
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
         if args.non_stop_penalty:
