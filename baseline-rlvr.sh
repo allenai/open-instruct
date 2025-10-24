@@ -40,7 +40,7 @@ python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/olmo-instruct \
     --priority urgent \
-    --image jacobm/open_instruct_dev_random_rewards5 \
+    --image jacobm/open_instruct_dev_random_rewards6 \
     --preemptible \
     --num_nodes 3 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \

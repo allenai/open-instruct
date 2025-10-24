@@ -2776,7 +2776,7 @@ def make_reward_fn(args: Args) -> Callable:
                 metrics["objective/verifiable_correct_rate"] = (
                     (np_verifiable_rewards > 0.0).mean() if not args.random_rewards else float("nan")
                 )
-                metrics["objective/random_rewards"] = verifiable_rewards.mean() if args.random_rewards else float("nan")
+                metrics["objective/random_rewards"] = np_verifiable_rewards.mean() if args.random_rewards else float("nan")
 
                 # Per-function metrics only when real verifiers are used
                 if not args.random_rewards:
