@@ -110,7 +110,7 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct.rl_utils2 import Timer, calculate_advantages_packed, pack_sequences
+from open_instruct.rl_utils import Timer, calculate_advantages_packed, pack_sequences
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,

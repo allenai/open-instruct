@@ -112,9 +112,9 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
-from open_instruct.rl_utils2 import Timer, pack_sequences
 from open_instruct.tools.tool_actor import TOOL_CLASS_REGISTRY, ToolActor
 from open_instruct.tools.utils.tool_proxy import ToolProxy
+from open_instruct.rl_utils import Timer, pack_sequences
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -1056,7 +1056,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     mb_local_logprobs = torch.masked_fill(mb_local_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
                     mb_vllm_logprobs = collated_vllm_logprobs[i][:, 1:]
                     mb_vllm_logprobs = torch.masked_fill(mb_vllm_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
-                    # Replace any remaining NaN values (query tokens in packed sequences are set to NaN by pack_sequences in rl_utils2.py)
+                    # Replace any remaining NaN values (query tokens in packed sequences are set to NaN by pack_sequences in rl_utils.py)
                     mb_vllm_logprobs = torch.nan_to_num(mb_vllm_logprobs, nan=INVALID_LOGPROB)
 
                     # Compare vLLM logprobs with local logprobs
@@ -3109,8 +3109,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     )
 
     # Get the model dimensions from one of the engines without loading weights
-    model_dims_dict = ray.get(vllm_engines[0].get_model_dims_dict.remote())
-    model_dims = utils.ModelDims(**model_dims_dict)
+    model_dims = ray.get(vllm_engines[0].get_model_dims.remote())
 
     generation_configs = create_generation_configs(args)
 

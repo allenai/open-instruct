@@ -404,8 +404,7 @@ def run_benchmark(
 
     results = []
     # Get the model dimensions from one of the engines without loading weights
-    model_dims_dict = ray.get(vllm_engines[0].get_model_dims_dict.remote())
-    model_dims = utils.ModelDims(**model_dims_dict)
+    model_dims = ray.get(vllm_engines[0].get_model_dims.remote())
 
     # Submit warmup batch first
     logger.info("Submitting warmup batch...")
