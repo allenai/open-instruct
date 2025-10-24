@@ -119,7 +119,6 @@ from open_instruct.utils import (
     RayProcess,
     _z3_params_to_fetch,
     calibrate_checkpoint_state_dir,
-    check_calculation,
     clean_last_n_checkpoints_deepspeed,
     download_latest_checkpoint_from_gs,
     get_beaker_whoami,
@@ -1512,68 +1511,27 @@ def calculate_utilization_metrics(
         f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
     )
 
-    # Calculate FLOPs and memory bytes for inference
-    actor_total_flops = model_dims.flops(prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt)
-    actor_total_memory_bytes = model_dims.memory_bytes(
-        prompt_lengths, num_engines, response_lengths=response_lengths, samples_per_prompt=samples_per_prompt
+    actor_metrics = model_dims.calculate_actor_utilization(
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        total_generation_time=total_generation_time,
+        samples_per_prompt=samples_per_prompt,
+        num_inference_gpus=num_inference_gpus,
+        num_engines=num_engines,
     )
 
-    # Calculate MFU and MBU accounting for multiple GPUs
-    flops_per_second = actor_total_flops / total_generation_time
-    bytes_per_second = actor_total_memory_bytes / total_generation_time
-    # Scale device capabilities by number of GPUs
-    total_device_flops = model_dims.device_flops * num_inference_gpus
-    total_device_bandwidth = model_dims.device_memory_bandwidth * num_inference_gpus
-    actor_mfu = 100 * flops_per_second / total_device_flops
-    actor_mbu = 100 * bytes_per_second / total_device_bandwidth
-
-    check_calculation(
-        actor_mfu,
-        "Actor MFU",
-        model_dims,
-        total_generation_time,
-        prompt_lengths,
-        response_lengths,
-        samples_per_prompt,
-        num_inference_gpus,
+    learner_metrics = model_dims.calculate_learner_utilization(
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        training_time=training_time,
+        samples_per_prompt=samples_per_prompt,
+        num_training_gpus=num_training_gpus,
     )
 
-    check_calculation(
-        actor_mbu,
-        "Actor MBU",
-        model_dims,
-        total_generation_time,
-        prompt_lengths,
-        response_lengths,
-        samples_per_prompt,
-        num_inference_gpus,
-    )
+    utilization_metrics = {f"actor_{k}": v for k, v in actor_metrics.items()}
+    utilization_metrics["learner_mfu"] = learner_metrics["mfu"]
 
-    # Calculate learner/training metrics
-    # For training, we need to use total sequence lengths (prompt + response) since training
-    # processes the full sequences, not separate prefill/decode operations
-    total_sequence_lengths = [
-        prompt_lengths[i // samples_per_prompt] + response_len for i, response_len in enumerate(response_lengths)
-    ]
-
-    # For training FLOPs, pass total sequence lengths as prompt_lengths with response_lengths=None
-    training_flops = model_dims.flops(
-        prompt_lengths=total_sequence_lengths,
-        response_lengths=None,
-        samples_per_prompt=1,  # Already expanded in total_sequence_lengths
-        is_training=True,
-    )
-
-    # Calculate training MFU
-    training_flops_per_second = training_flops / training_time
-    total_training_device_flops = model_dims.device_flops * num_training_gpus
-    learner_mfu = 100 * training_flops_per_second / total_training_device_flops
-
-    check_calculation(
-        learner_mfu, "Learner MFU", model_dims, training_time, total_sequence_lengths, None, 1, num_training_gpus
-    )
-
-    return {"actor_mfu": actor_mfu, "actor_mbu": actor_mbu, "learner_mfu": learner_mfu}
+    return utilization_metrics
 
 
 def accumulate_inference_batches(

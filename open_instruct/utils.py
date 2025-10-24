@@ -1945,6 +1945,79 @@ class ModelDims:
 
         return int(total_bytes)
 
+    def calculate_actor_utilization(
+        self,
+        prompt_lengths: list[int],
+        response_lengths: list[int],
+        total_generation_time: float,
+        samples_per_prompt: int,
+        num_inference_gpus: int,
+        num_engines: int,
+    ) -> dict[str, float]:
+        actor_total_flops = self.flops(prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt)
+        actor_total_memory_bytes = self.memory_bytes(
+            prompt_lengths, num_engines, response_lengths=response_lengths, samples_per_prompt=samples_per_prompt
+        )
+
+        flops_per_second = actor_total_flops / total_generation_time
+        bytes_per_second = actor_total_memory_bytes / total_generation_time
+
+        total_device_flops = self.device_flops * num_inference_gpus
+        total_device_bandwidth = self.device_memory_bandwidth * num_inference_gpus
+
+        actor_mfu = 100 * flops_per_second / total_device_flops
+        actor_mbu = 100 * bytes_per_second / total_device_bandwidth
+
+        check_calculation(
+            actor_mfu,
+            "Actor MFU",
+            self,
+            total_generation_time,
+            prompt_lengths,
+            response_lengths,
+            samples_per_prompt,
+            num_inference_gpus,
+        )
+
+        check_calculation(
+            actor_mbu,
+            "Actor MBU",
+            self,
+            total_generation_time,
+            prompt_lengths,
+            response_lengths,
+            samples_per_prompt,
+            num_inference_gpus,
+        )
+
+        return {"mfu": actor_mfu, "mbu": actor_mbu}
+
+    def calculate_learner_utilization(
+        self,
+        prompt_lengths: list[int],
+        response_lengths: list[int],
+        training_time: float,
+        samples_per_prompt: int,
+        num_training_gpus: int,
+    ) -> dict[str, float]:
+        total_sequence_lengths = [
+            prompt_lengths[i // samples_per_prompt] + response_len for i, response_len in enumerate(response_lengths)
+        ]
+
+        training_flops = self.flops(
+            prompt_lengths=total_sequence_lengths, response_lengths=None, samples_per_prompt=1, is_training=True
+        )
+
+        training_flops_per_second = training_flops / training_time
+        total_training_device_flops = self.device_flops * num_training_gpus
+        learner_mfu = 100 * training_flops_per_second / total_training_device_flops
+
+        check_calculation(
+            learner_mfu, "Learner MFU", self, training_time, total_sequence_lengths, None, 1, num_training_gpus
+        )
+
+        return {"mfu": learner_mfu}
+
 
 def get_device_name(device_name: str) -> str:
     """Normalize a GPU device name to a standard key used in GPU_SPECS.
