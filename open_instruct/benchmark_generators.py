@@ -445,6 +445,12 @@ def run_benchmark(
         for i in range(warmup_batch_size):
             logger.info(f"Warmup: Waiting for result {i + 1}/{warmup_batch_size}...")
             logger.info(f"Inference results queue size: {inference_results_Q.qsize()}")
+            for engine_idx, engine in enumerate(vllm_engines):
+                try:
+                    ray.get(engine.check_background_threads.remote())
+                except Exception as e:
+                    logger.exception(f"Warmup: engine {engine_idx} background thread check failed: {e}")
+                    raise
             result = inference_results_Q.get()
             warmup_results.append(result)
             logger.info(f"Warmup: Received result {i + 1}/{warmup_batch_size}")
