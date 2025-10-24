@@ -21,8 +21,41 @@ import pytest
 from dateutil import parser
 from parameterized import parameterized
 
-from open_instruct import utils
+from open_instruct import grpo_fast, utils
 from open_instruct.finetune import FlatArguments
+
+MODEL_DIMS: dict[str, utils.ModelDims] = {
+    "Qwen/Qwen2.5-7B": utils.ModelDims(
+        num_layers=28,
+        hidden_size=3584,
+        intermediate_size=18944,
+        vocab_size=152064,
+        num_attn_heads=28,
+        head_dim=128,
+        num_kv_heads=4,
+        device_name="h100",
+    ),
+    "Qwen/Qwen2.5-1.5B": utils.ModelDims(
+        num_layers=28,
+        hidden_size=1536,
+        intermediate_size=8960,
+        vocab_size=151936,
+        num_attn_heads=12,
+        head_dim=128,
+        num_kv_heads=2,
+        device_name="h100",
+    ),
+    "Qwen/Qwen3-1.7B": utils.ModelDims(
+        num_layers=28,
+        hidden_size=2048,
+        intermediate_size=6144,
+        vocab_size=151936,
+        num_attn_heads=16,
+        head_dim=128,
+        num_kv_heads=8,
+        device_name="h100",
+    ),
+}
 
 
 class GetDatasetsTest(unittest.TestCase):
@@ -303,6 +336,78 @@ class TestFlatArguments(unittest.TestCase):
         (args,) = parser.parse_args_into_dataclasses(["--exp_name", "test"])
         self.assertIsInstance(args.additional_model_arguments, dict)
         self.assertFalse(args.additional_model_arguments)
+
+
+class TestModelDimsQwen25(unittest.TestCase):
+    def test_qwen25_7b_flops_calculation(self):
+        sequence_length = 34048
+        model_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
+        total_flops = model_dims.flops([sequence_length], [1])
+        prefill_flops = model_dims.flops([sequence_length], None)
+        decode_flops = total_flops - prefill_flops
+        decode_flops_in_gflops = decode_flops / 1e9
+        self.assertAlmostEqual(decode_flops_in_gflops, 27.81, delta=0.01)
+
+    def test_qwen25_7b_memory_calculation(self):
+        sequence_length = 34048
+        batch_size = 16
+        model_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
+
+        embedding_params = model_dims.vocab_size * model_dims.hidden_size
+        weight_params = model_dims.num_params - embedding_params
+        lm_head_bytes = model_dims.vocab_size * model_dims.hidden_size
+        embedding_bytes = model_dims.hidden_size
+
+        total_bytes = weight_params / batch_size
+        total_bytes += lm_head_bytes + embedding_bytes
+        total_bytes += 2 * model_dims.num_kv_heads * model_dims.head_dim * model_dims.num_layers * sequence_length
+        total_bytes += 2 * model_dims.num_layers * model_dims.num_kv_heads * model_dims.head_dim
+        total_bytes *= 2
+
+        memory_in_gb = total_bytes / 1e9
+        self.assertAlmostEqual(memory_in_gb, 3.926, delta=0.01)
+
+    @parameterized.expand(
+        [
+            ("beaker_212_percent_bug", "Qwen/Qwen3-1.7B", 8, 4, 145, 274.7, 1, 1, 2.048383, 5.0),
+            ("small_batch", "Qwen/Qwen2.5-7B", 2, 2, 512, 512, 1, 1, 5.0, 3.0),
+            ("large_batch", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 2, 4, 8.0, 4.0),
+        ]
+    )
+    def test_mfu_mbu_under_100_percent(
+        self,
+        name,
+        model_name,
+        num_prompts,
+        samples_per_prompt,
+        prompt_len,
+        response_len,
+        num_inference_gpus,
+        num_training_gpus,
+        total_generation_time,
+        training_time,
+    ):
+        prompt_lengths = [prompt_len] * num_prompts
+        if name == "beaker_212_percent_bug":
+            response_lengths = [275] * 22 + [274] * 10
+        else:
+            response_lengths = [int(response_len)] * (num_prompts * samples_per_prompt)
+
+        metrics = grpo_fast.calculate_utilization_metrics(
+            model_dims=MODEL_DIMS[model_name],
+            prompt_lengths=prompt_lengths,
+            response_lengths=response_lengths,
+            total_generation_time=total_generation_time,
+            samples_per_prompt=samples_per_prompt,
+            num_inference_gpus=num_inference_gpus,
+            num_engines=1,
+            training_time=training_time,
+            num_training_gpus=num_training_gpus,
+        )
+
+        self.assertLessEqual(metrics["actor_mfu"], 100)
+        self.assertLessEqual(metrics["actor_mbu"], 100)
+        self.assertLessEqual(metrics["learner_mfu"], 100)
 
 
 # useful for checking if public datasets are still available
