@@ -2763,12 +2763,30 @@ if __name__ == "__main__":
                         if query not in rewards_by_query:
                             rewards_by_query[query] = []
                         
+                        # Extract rubrics list from ground truth
+                        rubrics_list = ground_truth.get("rubrics", [])
+                        
                         # Get the rewards for this specific response
                         if i < len(per_rubric_rewards):
-                            rewards_by_query[query].append(per_rubric_rewards[i])
+                            response_rewards = per_rubric_rewards[i]
+                            
+                            # Check if using overall score mode (general_rubric or likert_rubric)
+                            # If so, expand the single score to all actual rubric keys
+                            if "general_rubric" in response_rewards or "likert_rubric" in response_rewards:
+                                overall_key = "general_rubric" if "general_rubric" in response_rewards else "likert_rubric"
+                                overall_score = response_rewards[overall_key]
+                                
+                                # Expand to all actual rubric keys in ground truth
+                                expanded_rewards = {}
+                                for rubric in rubrics_list:
+                                    rubric_key = create_rubric_key(query, rubric)
+                                    expanded_rewards[rubric_key] = overall_score  # Same score for all rubrics
+                                
+                                rewards_by_query[query].append(expanded_rewards)
+                            else:
+                                rewards_by_query[query].append(response_rewards)
                         
-                        # Extract rubrics list and build rubric_key->weight mapping
-                        rubrics_list = ground_truth.get("rubrics", [])
+                        # Build rubric_key->weight mapping
                         for rubric in rubrics_list:
                             rubric_key = create_rubric_key(query, rubric)
                             if rubric_key not in rubric_key_weights:
