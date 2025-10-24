@@ -196,7 +196,7 @@ def submission_thread(param_prompt_Q: ray_queue.Queue, dataset: datasets.Dataset
         prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
         for i, prompt in enumerate(prompts):
             dataset_index = start_idx + i
-            param_prompt_Q.put(PromptRequest(prompt=prompt, dataset_index=dataset_index, epoch_number=batch_idx, generation_config=generation_config, start_time=time.perf_counter()))
+            param_prompt_Q.put(PromptRequest(prompt=prompt, dataset_index=dataset_index, training_step=batch_idx, epoch_number=batch_idx, generation_config=generation_config, start_time=time.perf_counter()))
         logger.info(f'[Submission Thread] Batch {batch_idx - start_batch_idx + 1}/{num_batches} submitted ({len(prompts)} prompts)')
     logger.info(f'[Submission Thread] All {num_batches} batches submitted')
 
@@ -216,7 +216,7 @@ def run_benchmark(dataset: datasets.Dataset, vllm_engines: list[ray.actor.ActorH
     logger.info(f'Warmup batch size: {len(warmup_prompts)} prompts')
     for i, prompt in enumerate(warmup_prompts):
         dataset_index = warmup_start_idx + i
-        param_prompt_Q.put(PromptRequest(prompt=prompt, dataset_index=dataset_index, epoch_number=0, generation_config=generation_config, start_time=time.perf_counter()))
+        param_prompt_Q.put(PromptRequest(prompt=prompt, dataset_index=dataset_index, training_step=0, epoch_number=0, generation_config=generation_config, start_time=time.perf_counter()))
         logger.info(f'Submitted warmup prompt {i + 1}/{len(warmup_prompts)} (dataset_index={dataset_index})')
     logger.info(f'All warmup prompts submitted. Param queue size: {param_prompt_Q.qsize()}')
     should_stop = ray.get(actor_manager.should_stop.remote())
