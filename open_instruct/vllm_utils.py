@@ -222,6 +222,9 @@ async def process_request_async(
 
     actor.active_tasks.pop(sub_request_id, None)
 
+    logger.info(
+        f"process_request_async: {sub_request_id} enqueuing result for base_request_id={base_request_id}"
+    )
     actor.completion_queue.put(
         {
             "base_request_id": base_request_id,
@@ -779,6 +782,10 @@ class LLMRayActor:
                 if iteration < 5 or iteration % 10 == 0:
                     logger.info(f"process_from_queue iteration {iteration}: waiting for completion_queue")
                 sub_request = self.completion_queue.get()
+                logger.info(
+                    f"process_from_queue: dequeued sub_request base_request_id={sub_request['base_request_id']} "
+                    f"sub_request_id={sub_request['request_output'].request_id}"
+                )
                 logger.info(
                     f"process_from_queue: Got sub_request for base_request_id={sub_request['base_request_id']}"
                 )
