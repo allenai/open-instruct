@@ -1618,9 +1618,7 @@ def data_preparation_thread(
             adaptive_rubrics_data = {
                 "training_step": training_step,
                 "decoded_responses": decoded_responses,
-                "queries": decoded_queries,
                 "ground_truths": ground_truths,
-                "datasets": datasets,
                 "adaptive_rubric_scores": adaptive_rubric_scores_for_saving,
             }
             os.makedirs(args.output_dir, exist_ok=True)
@@ -2169,8 +2167,34 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             df = pd.DataFrame(table)
             if args.with_tracking:
                 wandb.log({"step_0_sample_completions": wandb.Table(dataframe=df)}, step=0)
-            else:
-                print_rich_table(df.iloc[:1])
+            
+            # Always print 1 sample in the log
+            print("\n" + "=" * 100)
+            print("[Main Thread] 📊 Step 0 Evaluation Sample:")
+            print("=" * 100)
+            print_rich_table(df.iloc[:1])
+            print("=" * 100 + "\n")
+            
+            # Save raw evaluation data to JSON file
+            eval_data = {
+                "step": 0,
+                "samples": [
+                    {
+                        "prompt": table["prompt"][i],
+                        "response": table["response"][i],
+                        "score": float(table["scores"][i]),
+                        "ground_truth": table["ground_truth"][i],
+                        "dataset": table["dataset"][i] if eval_dataset_names is not None else None
+                    }
+                    for i in range(len(table["prompt"]))
+                ]
+            }
+            eval_output_path = os.path.join(args.output_dir, "eval_step_0.json")
+            os.makedirs(args.output_dir, exist_ok=True)
+            with open(eval_output_path, "w") as f:
+                json.dump(eval_data, f, indent=2)
+            print(f"[Main Thread] 💾 Saved step 0 evaluation data to {eval_output_path}")
+            
             del table
             
             print("=" * 100)
@@ -2413,8 +2437,35 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 df = pd.DataFrame(table)
                 if args.with_tracking:
                     wandb.log({"sample_completions": wandb.Table(dataframe=df)})
-                else:
-                    print_rich_table(df.iloc[:1])
+                
+                # Always print 1 sample in the log
+                print("\n" + "=" * 100)
+                print(f"[Main Thread] 📊 Evaluation Sample (Step {training_step}):")
+                print("=" * 100)
+                print_rich_table(df.iloc[:1])
+                print("=" * 100 + "\n")
+                
+                # Save raw evaluation data to JSON file
+                eval_data = {
+                    "step": training_step,
+                    "episode": episode,
+                    "samples": [
+                        {
+                            "prompt": table["prompt"][i],
+                            "response": table["response"][i],
+                            "score": float(table["scores"][i]),
+                            "ground_truth": table["ground_truth"][i],
+                            "dataset": table["dataset"][i] if eval_dataset_names is not None else None
+                        }
+                        for i in range(len(table["prompt"]))
+                    ]
+                }
+                eval_output_path = os.path.join(args.output_dir, f"eval_step_{training_step}.json")
+                os.makedirs(args.output_dir, exist_ok=True)
+                with open(eval_output_path, "w") as f:
+                    json.dump(eval_data, f, indent=2)
+                print(f"[Main Thread] 💾 Saved evaluation data to {eval_output_path}")
+                
                 del table
             except Empty:
                 print("[Main Thread] 🙈 Evaluation responses not received")
@@ -2580,14 +2631,14 @@ if __name__ == "__main__":
 
         if args.apply_adaptive_rubric_reward and is_training:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating adaptive rubric reward"):
-                adaptive_rubric_scores = await _generate_instance_wise_adaptive_rubrics(decoded_responses, ground_truths, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer)
+                all_adaptive_rubrics = await _generate_instance_wise_adaptive_rubrics(decoded_responses, ground_truths, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer)
                 
                 # Store adaptive rubric scores for saving if requested
                 if args.save_adaptive_rubrics:
-                    adaptive_rubric_scores_data = adaptive_rubric_scores
+                    adaptive_rubric_scores_data = all_adaptive_rubrics
                 
                 # Update ground truths with adaptive rubrics and incorporate rubric buffer
-                ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, avg_num_active_buffer_rubrics, rubric_buffer = update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubric_scores, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer)
+                ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, avg_num_active_buffer_rubrics, rubric_buffer = update_ground_truths_with_adaptive_rubrics(ground_truths, all_adaptive_rubrics, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer)
                 metrics["objective/valid_adaptive_rubric_rate"] = valid_adaptive_rubric_rate
                 metrics["objective/avg_num_ground_truths"] = avg_num_ground_truths
                 metrics["objective/avg_num_adaptive_rubrics"] = avg_num_adaptive_rubrics
@@ -2828,6 +2879,32 @@ if __name__ == "__main__":
                     
                     if moved_count > 0 or capped_count > 0:
                         print(f"[Adaptive Rubric Filtering] Moved {moved_count} zero-std rubrics and {capped_count} low-std rubrics to inactive")
+                        
+                else:
+                    print("No statistics to filter rubrics based on, randomly select some rubrics to deactivate")
+                    
+                    # When no statistics available, randomly deactivate excess rubrics
+                    random_deactivated_count = 0
+                    for query, buffer_data in rubric_buffer.items():
+                        active_rubrics = buffer_data.get("active_rubrics", [])
+                        
+                        if len(active_rubrics) > args.max_active_rubrics:
+                            # Randomly select rubrics to keep
+                            num_to_keep = args.max_active_rubrics
+                            num_to_deactivate = len(active_rubrics) - num_to_keep
+                            
+                            # Randomly shuffle and split
+                            shuffled_rubrics = list(active_rubrics)
+                            np.random.shuffle(shuffled_rubrics)
+                            
+                            # Keep first max_active_rubrics, move rest to inactive
+                            buffer_data["active_rubrics"] = shuffled_rubrics[:num_to_keep]
+                            buffer_data["inactive_rubrics"].extend(shuffled_rubrics[num_to_keep:])
+                            random_deactivated_count += num_to_deactivate
+                    
+                    if random_deactivated_count > 0:
+                        print(f"[Adaptive Rubric Filtering] Randomly deactivated {random_deactivated_count} rubrics to maintain max_active_rubrics limit")
+                    
 
         # Return adaptive rubric scores if they were generated and saving is requested
         if adaptive_rubric_scores_data is not None:
