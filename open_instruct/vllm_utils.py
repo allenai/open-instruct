@@ -131,12 +131,14 @@ async def process_request_async(
     iteration = 0
 
     while True:
+        logger.info(f"process_request_async: {sub_request_id} iteration {iteration} starting generate")
         iteration_request_id = f"{sub_request_id}_iter{iteration}"
         outputs = [
             o
             async for o in actor.llm_engine.generate(current_prompt, current_sampling_params, iteration_request_id)
             if o.finished
         ]
+        logger.info(f"process_request_async: {sub_request_id} iteration {iteration} received {len(outputs)} outputs")
         assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {iteration_request_id}"
         request_output = outputs[0]
         iteration += 1
