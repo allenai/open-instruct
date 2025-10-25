@@ -329,7 +329,6 @@ def run_benchmark(
         seed=args.seed,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
-        stop=args.stop_strings,
         logprobs=1,
         output_kind=vllm.sampling_params.RequestOutputKind.FINAL_ONLY,
     )
