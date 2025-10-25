@@ -143,7 +143,9 @@ async def process_request_async(
             logger.info(
                 f"process_request_async: {sub_request_id} iteration {iteration} received {len(outputs)} outputs"
             )
-            assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {iteration_request_id}"
+            assert len(outputs) == 1, (
+                f"Expected exactly 1 output, got {len(outputs)} for request {iteration_request_id}"
+            )
             request_output = outputs[0]
             iteration += 1
             output = request_output.outputs[0]
@@ -226,9 +228,7 @@ async def process_request_async(
 
         actor.active_tasks.pop(sub_request_id, None)
 
-        logger.info(
-            f"process_request_async: {sub_request_id} enqueuing result for base_request_id={base_request_id}"
-        )
+        logger.info(f"process_request_async: {sub_request_id} enqueuing result for base_request_id={base_request_id}")
         actor.completion_queue.put(
             {
                 "base_request_id": base_request_id,
