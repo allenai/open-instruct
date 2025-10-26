@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# OLMo 2.5 model
-MODEL_NAME_OR_PATH="/weka/oe-training-default/ai2-llm/checkpoints/tylerr/long-context/olmo25_7b_lc_64k_6T_M100B_round5-sparkle_6634-pre_s2pdf_gzip2080_cweN-yake-all-olmo_packing_yarn-fullonly_50B-fb13a737/step11921-hf"
-GS_MODEL_NAME="olmo25_7b_lc_final_fb13a737"
+# OLMo 3 model
+MODEL_NAME_OR_PATH="/weka/oe-adapt-default/michaeln/checkpoints/olmo3-7b-base"
+GS_MODEL_NAME="olmo3_7b_base"
 
 # english only DAPO
 # DATASETS="mnoukhov/DAPO-Math-14k-Processed-RLVR 1.0 TTTXXX01/MATH_3000_Filtered 1.0"
@@ -21,7 +21,7 @@ LOCAL_EVAL_SPLITS="test_2024 test_2024 test_2025 test_2025"
 # EXP_NAME="grpo_deepscaler20k_k8_${GS_MODEL_NAME}"
 EXP_NAME="grpo_17kfilter_${GS_MODEL_NAME}"
 
-cluster=ai2/augusta
+cluster=ai2/jupiter
 
 python mason.py \
     --task_name ${EXP_NAME} \
@@ -29,7 +29,7 @@ python mason.py \
     --workspace ai2/olmo-instruct \
     --priority urgent \
     --pure_docker_mode \
-    --image michaeln/open_instruct_2.5-rl0 \
+    --image michaeln/open_instruct_rl0 \
     --preemptible \
     --num_nodes 9 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
@@ -46,9 +46,10 @@ python open_instruct/grpo_fast.py \
     --async_steps 4 \
     --inflight_updates \
     --truncated_importance_sampling_ratio_cap 2.0 \
+    --advantage_normalization_type centered \
     --active_fill_completions \
-    --num_samples_per_prompt_rollout 8 \
-    --num_unique_prompts_rollout 32 \
+    --num_samples_per_prompt_rollout 16 \
+    --num_unique_prompts_rollout 16 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
@@ -86,4 +87,4 @@ python open_instruct/grpo_fast.py \
     --eval_priority high \
     --oe_eval_tasks $EVALS \
     --oe_eval_gpu_multiplier 4 \
-    --oe_eval_beaker_image michaeln/oe_eval_olmo2_retrofit
+    --oe_eval_beaker_image michaeln/oe_eval_rlzero
