@@ -30,7 +30,6 @@ dependencies = [
     "immutabledict==1.2.0",
     "flash-attn>=2.8.3; platform_system != 'Darwin'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
-    "vllm" # installed locally with git clone because otherwise errors
 ]
 
 [build-system]
@@ -45,14 +44,12 @@ flash-attn = [{ requirement = "torch", match-runtime = true }]
 
 [tool.uv.extra-build-variables]
 flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
-vllm = { VLLM_USE_PRECOMPILED = "1" }
 
 # pytorch related setups
 [tool.uv.sources]
 torch = [
   { index = "pytorch-cu128", marker = "platform_system != 'Darwin'"},
 ]
-vllm = { path = "vllm_olmo2.5", editable = true }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
