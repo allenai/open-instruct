@@ -291,15 +291,19 @@ async def score_with_citation_recall_async(question: str, claim: str, concatenat
     user_prompt = citation_recall_has_citation_prompt.format(
         question=question, statement=claim, concatenated_cited_snippets=concatenated_citations
     )
-    response = await run_litellm_async(
-        model_name=os.environ.get("CITATION_JUDGE_MODEL", "gpt-4o-mini"),
-        system_prompt=None,
-        user_prompt=user_prompt,
-        max_tokens=800,
-        top_p=1.0,
-        frequency_penalty=0.0,
-        presence_penalty=0.0,
-    )
+    try:
+        response = await run_litellm_async(
+            model_name=os.environ.get("CITATION_JUDGE_MODEL", "gpt-4o-mini"),
+            system_prompt=None,
+            user_prompt=user_prompt,
+            max_tokens=800,
+            top_p=1.0,
+            frequency_penalty=0.0,
+            presence_penalty=0.0,
+        )
+    except Exception as e:
+        print(f"Error scoring citation recall: {e}")
+        return 0.0
     if "[[Fully supported]]" in response:
         return 1.0
     elif "[[Partially supported]]" in response:
@@ -312,15 +316,19 @@ async def score_no_citation_recall_async(question: str, claim: str, full_respons
     user_prompt = citation_recall_no_citation_prompt.format(
         question=question, statement=claim, full_response=full_response
     )
-    response = await run_litellm_async(
-        model_name=os.environ.get("CITATION_JUDGE_MODEL", "gpt-4o-mini"),
-        system_prompt=None,
-        user_prompt=user_prompt,
-        max_tokens=800,
-        top_p=1.0,
-        frequency_penalty=0.0,
-        presence_penalty=0.0,
-    )
+    try:
+        response = await run_litellm_async(
+            model_name=os.environ.get("CITATION_JUDGE_MODEL", "gpt-4o-mini"),
+            system_prompt=None,
+            user_prompt=user_prompt,
+            max_tokens=800,
+            top_p=1.0,
+            frequency_penalty=0.0,
+            presence_penalty=0.0,
+        )
+    except Exception as e:
+        print(f"Error scoring no citation recall: {e}")
+        return 0.0
     if "[[Fully supported]]" in response:
         return 1.0
     elif "[[Partially supported]]" in response:
@@ -340,15 +348,19 @@ async def score_citation_precision_async(question: str, claim: str, concatenated
     user_prompt = citation_precision_prompt.format(
         question=question, statement=claim, concatenated_cited_snippets=concatenated_citations
     )
-    response = await run_litellm_async(
-        model_name=os.environ.get("CITATION_JUDGE_MODEL", "gpt-4o-mini"),
-        system_prompt=None,
-        user_prompt=user_prompt,
-        max_tokens=800,
-        top_p=1.0,
-        frequency_penalty=0.0,
-        presence_penalty=0.0,
-    )
+    try:
+        response = await run_litellm_async(
+            model_name=os.environ.get("CITATION_JUDGE_MODEL", "gpt-4o-mini"),
+            system_prompt=None,
+            user_prompt=user_prompt,
+            max_tokens=800,
+            top_p=1.0,
+            frequency_penalty=0.0,
+            presence_penalty=0.0,
+        )
+    except Exception as e:
+        print(f"Error scoring citation precision: {e}")
+        return 0.0
     if "[[Fully supported]]" in response:
         return 1.0
     elif "[[Partially supported]]" in response:
