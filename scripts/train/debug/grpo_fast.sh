@@ -1,17 +1,17 @@
 #!/bin/bash
 
 python mason.py \
-    --task_name grpo_debug_small \
-    --cluster ai2/augusta \
-    --workspace ai2/oe-adapt-code \
-    --priority high \
+    --task_name grpo_debug_small_active \
+    --cluster ai2/jupiter \
+    --workspace ai2/olmo-instruct \
+    --priority urgent \
     --pure_docker_mode \
     --image michaeln/open_instruct_2.5-rl0 \
     --preemptible \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
-    --gpus 1 \
+    --gpus 2 \
     --budget ai2/oe-adapt \
     -- \
 uv run python open_instruct/grpo_fast.py \
@@ -21,8 +21,12 @@ uv run python open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 512 \
     --max_prompt_token_length 512 \
-    --response_length 512 \
-    --pack_length 1024 \
+    --response_length 2048 \
+    --pack_length 4096 \
+    --async_steps 4 \
+    --inflight_updates \
+    --active_fill_completions \
+    --truncated_importance_sampling_ratio_cap 2.0 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
@@ -38,21 +42,11 @@ uv run python open_instruct/grpo_fast.py \
     --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
+    --vllm_num_engines 1 \
     --vllm_tensor_parallel_size 1 \
     --beta 0. \
     --seed 3 \
-    --local_eval_every 25 \
-    --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.3 \
-    --vllm_enforce_eager \
+    --local_eval_every 100 \
     --gradient_checkpointing \
-    --single_gpu_mode \
     --push_to_hub false \
-    --with_tracking \
-    --save_freq 25 \
-    --eval_on_step_0 \
-    --oe_eval_max_length 512 \
-    --try_launch_beaker_eval_jobs_on_weka True \
-    --oe_eval_tasks gsm8k \
-    --oe_eval_beaker_image michaeln/oe_eval_olmo2_retrofit \
-    --eval_priority high
+    --with_tracking
