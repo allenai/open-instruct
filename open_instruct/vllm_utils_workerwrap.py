@@ -15,7 +15,7 @@ class WorkerWrap:
 
         import torch
 
-        from open_instruct.vllm_utils3 import init_process_group
+        from open_instruct.vllm_utils import init_process_group
 
         print("init_process_group")
         assert torch.distributed.is_initialized(), "default torch process group must be initialized"
@@ -67,7 +67,7 @@ class WorkerWrap:
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles=None, empty_cache=False):
         import torch
 
-        from open_instruct.vllm_utils3 import get_physical_gpu_id
+        from open_instruct.vllm_utils import get_physical_gpu_id
 
         assert str(dtype) == str(self.model_config.dtype), (
             f"mismatch dtype: src {dtype}, dst {str(self.model_config.dtype)}"

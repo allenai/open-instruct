@@ -21,7 +21,7 @@ uv run python mason.py \
        --preemptible \
        --num_nodes 1 \
        --max_retries 0 \
-       --timeout "45m" \
+       --timeout 2700 \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --budget ai2/oe-adapt \
@@ -32,7 +32,6 @@ uv run python mason.py \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 32 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 512 \
     --max_prompt_token_length 512 \
     --response_length 512 \
     --pack_length 1024 \

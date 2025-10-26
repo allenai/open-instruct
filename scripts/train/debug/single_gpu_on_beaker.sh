@@ -17,7 +17,7 @@ uv run python mason.py \
        --priority urgent \
        --num_nodes 1 \
        --max_retries 0 \
-       --timeout "15m" \
+       --timeout 900 \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --budget ai2/oe-adapt \
        --gpus 1 \
@@ -26,7 +26,6 @@ uv run python mason.py \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 512 \
     --max_prompt_token_length 512 \
     --response_length 512 \
     --pack_length 1024 \

@@ -19,7 +19,6 @@ uv run python open_instruct/grpo_fast.py \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 512 \
     --max_prompt_token_length 512 \
     --response_length 2048 \
     --pack_length 4096 \
@@ -49,4 +48,5 @@ uv run python open_instruct/grpo_fast.py \
     --local_eval_every 100 \
     --gradient_checkpointing \
     --push_to_hub false \
-    --with_tracking
+    --system_prompt_override_file scripts/train/debug/cute_debug_system_prompt.txt \
+    # --with_tracking

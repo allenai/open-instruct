@@ -978,13 +978,16 @@ def maybe_update_beaker_description(
 
     try:
         client = beaker.Beaker.from_env()
-    except beaker.exceptions.ConfigurationError as e:
+    except beaker.exceptions.BeakerConfigurationError as e:
         logger.warning(f"Failed to initialize Beaker client: {e}")
         return
 
     try:
-        spec = client.experiment.get(experiment_id)
-    except beaker.exceptions.ExperimentNotFound:
+        # Get the workload first (experiment_id is actually BEAKER_WORKLOAD_ID)
+        workload = client.workload.get(experiment_id)
+        # Then get the experiment spec from the workload
+        spec = client.experiment.get_spec(workload)
+    except (beaker.exceptions.BeakerExperimentNotFound, ValueError):
         logger.warning(
             f"Failed to get Beaker experiment with ID: {experiment_id}"
             "This might be fine if you are e.g. running in an interactive job."
@@ -1025,7 +1028,8 @@ def maybe_update_beaker_description(
         description_components.append(progress_bar)
     new_description = " ".join(description_components)
     try:
-        client.experiment.set_description(experiment_id, new_description)
+        # Update the workload description using the workload object we got earlier
+        client.workload.update(workload, description=new_description)
     except requests.exceptions.HTTPError as e:
         logger.warning(
             f"Failed to update Beaker description due to HTTP error: {e}"
@@ -1694,6 +1698,8 @@ GPU_SPECS = {
     "h100": {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12},  # 3.35 TB/s HBM3
     "a6000": {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9},  # 768 GB/s GDDR6
     "l40s": {"flops": 362e12, "memory_size": 48e9, "memory_bandwidth": 864e9},  # 864 GB/s GDDR6
+    "pro 6000": {"flops": 503.8e12, "memory_size": 96e9, "memory_bandwidth": 1792e9},  # 1792 GB/s GDDR7
+    "6000": {"flops": 728.5e12, "memory_size": 48e9, "memory_bandwidth": 960e9},  # 960 GB/s GDDR6
 }
 
 # Conventions for FLOPs calculations (fixed; not switches)
@@ -1710,6 +1716,7 @@ class ModelDims:
     intermediate_size: int
     vocab_size: int
     num_attn_heads: int
+    head_dim: int
     num_kv_heads: Optional[int] = None
     device_name: Optional[str] = None
 
@@ -1740,12 +1747,9 @@ class ModelDims:
             intermediate_size=intermediate_size,
             vocab_size=model_config.get_vocab_size(),
             num_attn_heads=model_config.get_num_attention_heads(vllm_config.parallel_config),
+            head_dim=model_config.get_head_size(),
             num_kv_heads=model_config.get_num_kv_heads(vllm_config.parallel_config),
         )
-
-    @property
-    def head_dim(self) -> int:
-        return self.hidden_size // self.num_attn_heads
 
     @property
     def device_flops(self) -> float:
@@ -1771,9 +1775,12 @@ class ModelDims:
         d = self.head_dim
         mul = FLOP_PER_MAC
 
+        q_dim = self.num_attn_heads * d
+        kv_dim = self.num_kv_heads * d
+
         # Projections for the query_len new tokens
-        q_proj = mul * query_len * self.hidden_size * self.hidden_size
-        kv_proj = mul * 2 * query_len * self.hidden_size * (self.num_kv_heads * d)  # GQA/MQA
+        q_proj = mul * query_len * self.hidden_size * q_dim
+        kv_proj = mul * 2 * query_len * self.hidden_size * kv_dim  # GQA/MQA
 
         # Scores and attention-weighted values
         qk = mul * self.num_attn_heads * query_len * kv_len * d
@@ -1781,14 +1788,14 @@ class ModelDims:
         av = mul * self.num_attn_heads * query_len * kv_len * d
 
         # Output projection
-        out_proj = mul * query_len * self.hidden_size * self.hidden_size
+        out_proj = mul * query_len * q_dim * self.hidden_size
 
         return q_proj + kv_proj + qk + softmax + av + out_proj
 
     def mlp_flops(self, seq_len: int) -> int:
         """Two matmuls dominate; activation cost under-counted on purpose."""
         mul = FLOP_PER_MAC
-        first = mul * seq_len * self.hidden_size * self.intermediate_size
+        first = mul * seq_len * self.hidden_size * (self.intermediate_size * 2)  # times 2 due to SwiGLU
         act = seq_len * self.intermediate_size  # under-counted on purpose
         second = mul * seq_len * self.intermediate_size * self.hidden_size
         return first + act + second
@@ -1864,15 +1871,15 @@ class ModelDims:
             Total bytes for weight reads across all layers
         """
         num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
-        head_dim = self.hidden_size // self.num_attn_heads
-        hidden_kv = num_kv * head_dim
+        hidden_q = self.num_attn_heads * self.head_dim
+        hidden_kv = num_kv * self.head_dim
 
         # Per-layer weight params (Q, K, V, O, MLP up, MLP down)
-        w_q = self.hidden_size * self.hidden_size
+        w_q = self.hidden_size * hidden_q
         w_k = self.hidden_size * hidden_kv
         w_v = self.hidden_size * hidden_kv
-        w_o = self.hidden_size * self.hidden_size
-        w_up = self.hidden_size * self.intermediate_size
+        w_o = hidden_q * self.hidden_size
+        w_up = self.hidden_size * (self.intermediate_size * 2)  # times 2 due to SwiGLU
         w_dn = self.intermediate_size * self.hidden_size
 
         per_layer_weight_bytes = (w_q + w_k + w_v + w_o + w_up + w_dn) * dtype_bytes
@@ -1889,10 +1896,9 @@ class ModelDims:
             Total bytes for KV cache writes across all layers
         """
         num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
-        head_dim = self.hidden_size // self.num_attn_heads
 
         # 2x for K and V
-        kv_write_bytes_per_token = 2 * num_kv * head_dim * dtype_bytes
+        kv_write_bytes_per_token = 2 * num_kv * self.head_dim * dtype_bytes
         return self.num_layers * num_tokens * kv_write_bytes_per_token
 
     def kv_cache_read_bytes(
@@ -1917,7 +1923,6 @@ class ModelDims:
         )
 
         num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
-        head_dim = self.hidden_size // self.num_attn_heads
 
         # For batched sampling with shared prompt KV cache:
         # - Prompt KV is read once per new token position across ALL samples (not per sample)
@@ -1947,7 +1952,7 @@ class ModelDims:
                 kv_read_terms += R * (R - 1) // 2
 
         # 2x for K and V
-        kv_bytes_per_token = 2 * num_kv * head_dim * dtype_bytes
+        kv_bytes_per_token = 2 * num_kv * self.head_dim * dtype_bytes
         return self.num_layers * kv_bytes_per_token * kv_read_terms
 
     def prefill_memory_bytes(self, prompt_lengths: list[int], dtype_bytes: int = 2) -> int:
@@ -2056,12 +2061,33 @@ class ModelDims:
 
 
 def get_device_name(device_name: str) -> str:
-    tokens = device_name.lower().replace("-", " ").split()
+    """Normalize a GPU device name to a standard key used in GPU_SPECS.
 
-    filtered = [val for val in tokens if val not in ["nvidia", "80gb", "40gb", "48gb", "hbm3", "rtx", "sxm4", "pcie"]]
+    The function converts device names from torch.cuda.get_device_name() format
+    to a standardized key that can be used to look up GPU specifications.
 
-    for token in filtered:
-        if token in GPU_SPECS:
-            return token
+    Args:
+        device_name: Raw device name string (e.g., "NVIDIA H100 80GB HBM3")
 
-    raise ValueError(f"Unsupported device name: {device_name}. Expected one of: {list(GPU_SPECS.keys())}")
+    Returns:
+        Standardized GPU key (e.g., "h100")
+
+    Raises:
+        ValueError: If the device name is not recognized
+
+    Examples:
+        >>> get_device_name("NVIDIA H100 80GB HBM3")
+        'h100'
+
+        >>> get_device_name("NVIDIA RTX PRO 6000 Blackwell Server Edition")
+        'pro 6000'
+    """
+    normalized_device_name = device_name.lower().replace("-", " ")
+
+    for key in GPU_SPECS.keys():
+        if key in normalized_device_name:
+            return key
+    raise ValueError(
+        f"Unknown device name: {device_name}. Expected one of: {list(GPU_SPECS.keys())}. "
+        f"Please raise an issue at https://github.com/allenai/open-instruct/issues with the device you need. In the interim, you can add the specs for your device using the name {normalized_device_name} to the GPU_SPECS dictionary in utils.py."
+    )
