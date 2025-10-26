@@ -2242,7 +2242,18 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             # Get the packed sequences with advantages from the packing thread
             skip_batch = False
             with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
-                packed_data = packed_sequences_Q.get()
+                while True:
+                    try:
+                        packed_data = packed_sequences_Q.get(timeout=30)
+                        if packed_data is not None:
+                            break
+                    except Empty:
+                        pass
+                    finally:
+                        if not packing_thread.is_alive():
+                            raise RuntimeError("[Main Thread] ❌ Data preparation thread died unexpectedly; no packed data will arrive.")
+                        print("[Main Thread] ⏳ No packed data received from thread. Waiting for 30 seconds.")
+
                 data_thread_metrics = packed_data["metrics"]
                 B = packed_data["B"]
                 collated_data = packed_data["collated_data"]
