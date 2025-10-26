@@ -218,11 +218,15 @@ def run_litellm(
     )
 
     # Create chat completion
-    response = litellm.completion(
-        messages=msgs,
-        model=model_name,
-        **chat_kwargs,
-    )
+    try:
+        response = litellm.completion(
+            messages=msgs,
+            model=model_name,
+            **chat_kwargs,
+        )
+    except:
+        # if we get an error, return an empty string
+        return ""
 
     return response.choices[0].message.content
 
@@ -279,14 +283,18 @@ async def run_litellm_async(
     )
 
     # Guard concurrent calls with a global semaphore
-    semaphore = _get_litellm_semaphore()
-    async with semaphore:
-        # Create chat completion
-        response = await litellm.acompletion(
-            messages=msgs,
-            model=model_name,
-            **chat_kwargs,
-        )
+    try:
+        semaphore = _get_litellm_semaphore()
+        async with semaphore:
+            # Create chat completion
+            response = await litellm.acompletion(
+                messages=msgs,
+                model=model_name,
+                **chat_kwargs,
+            )
+    except:
+        # if we get an error, return an empty string
+        return ""
 
     return response.choices[0].message.content
 
