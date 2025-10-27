@@ -1240,7 +1240,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 if args.record_entropy:
                     self.local_metrics.add("policy/entropy_avg", entropy_stats.mean())
                 self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
-                return self.local_metrics.get_metrics_list()
+
+        torch._dynamo.reset()
+        torch.cuda.empty_cache()
+        return self.local_metrics.get_metrics_list()
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: Dict[str, Any]) -> None:
         args = self.args
