@@ -73,7 +73,9 @@ from open_instruct.dpo_utils import (
     DataCollatorForSeq2SeqDPO,
     concatenated_forward,
     dpo_loss,
+    dpo_norm_chosen_loss,
     separate_forward,
+    simpo_chosen_loss,
     simpo_loss,
     wpo_loss,
 )
@@ -134,7 +136,7 @@ class FlatArguments:
     )
     dpo_beta: float = field(default=0.1, metadata={"help": "Beta parameter for DPO loss. Default is 0.1."})
     dpo_loss_type: str = field(
-        default="dpo", metadata={"help": "Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'simpo', 'wpo'."}
+        default="dpo", metadata={"help": "Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'dpo_norm_chosen', 'simpo', 'simpo_chosen', 'wpo'."}
     )
     dpo_gamma_beta_ratio: float = field(
         default=0.3, metadata={"help": "Gamma to beta ratio for SimPO loss. Default is 0.3. Not used for DPO loss."}
@@ -812,14 +814,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     print_gpu_stats(init_gpu_memory)
 
     # Cache the logprobs
-    average_log_prob_loss_types = ["simpo", "dpo_norm"]
+    average_log_prob_loss_types = ["simpo", "dpo_norm", "simpo_chosen"]
     average_log_prob = args.dpo_loss_type in average_log_prob_loss_types
     forward_fn = concatenated_forward if args.concatenated_forward else separate_forward
     if args.packing:
         if not args.concatenated_forward:
             raise NotImplementedError("seperate forward not implemented for packing/padding-free")
         forward_fn = partial(forward_fn, packing=True)
-    if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
+    if args.dpo_loss_type in ["dpo", "dpo_norm", "dpo_norm_chosen"]:
         epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = get_cache_ref_logprobs(
             model,
             train_dataloader,
@@ -871,10 +873,26 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         beta=args.dpo_beta,
                         label_smoothing=args.dpo_label_smoothing,
                     )
+                elif args.dpo_loss_type == "dpo_norm_chosen":
+                    p_device = policy_chosen_logps.device
+                    reference_chosen_logps = epoch_cached_reference_chosen_logps[epoch][step].to(p_device)
+                    losses, _, _ = dpo_norm_chosen_loss(
+                        policy_chosen_logps,
+                        reference_chosen_logps,
+                        beta=args.dpo_beta,
+                        label_smoothing=args.dpo_label_smoothing,
+                    )
                 elif args.dpo_loss_type == "simpo":
                     losses, _, _ = simpo_loss(
                         policy_chosen_logps,
                         policy_rejected_logps,
+                        beta=args.dpo_beta,
+                        gamma_beta_ratio=args.dpo_gamma_beta_ratio,
+                        label_smoothing=args.dpo_label_smoothing,
+                    )
+                elif args.dpo_loss_type == "simpo_chosen":
+                    losses, _, _ = simpo_chosen_loss(
+                        policy_chosen_logps,
                         beta=args.dpo_beta,
                         gamma_beta_ratio=args.dpo_gamma_beta_ratio,
                         label_smoothing=args.dpo_label_smoothing,
@@ -908,17 +926,28 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 # We keep track of the loss at each logged step
                 with torch.no_grad():
                     local_metrics[0] += loss
-                    if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
+                    if args.dpo_loss_type in ["dpo", "dpo_norm", "dpo_norm_chosen"]:
                         chosen_rewards = (args.dpo_beta * (policy_chosen_logps - reference_chosen_logps)).mean()
-                        rejected_rewards = (args.dpo_beta * (policy_rejected_logps - reference_rejected_logps)).mean()
-                        average_rewards = (chosen_rewards + rejected_rewards) / 2
-                        accuracy = (chosen_rewards > rejected_rewards).float().mean()
-                        margin = (chosen_rewards - rejected_rewards).mean()
+                        if args.dpo_loss_type in ["dpo", "dpo_norm"]:
+                            rejected_rewards = (args.dpo_beta * (policy_rejected_logps - reference_rejected_logps)).mean()
+                            average_rewards = (chosen_rewards + rejected_rewards) / 2
+                            accuracy = (chosen_rewards > rejected_rewards).float().mean()
+                            margin = (chosen_rewards - rejected_rewards).mean()
+                            local_metrics[2] += rejected_rewards
+                            local_metrics[3] += average_rewards
+                            local_metrics[4] += accuracy
+                            local_metrics[5] += margin
+                        else:  # dpo_norm_chosen
+                            # For chosen-only losses, set rejected rewards to 0 and adjust other metrics
+                            rejected_rewards = torch.tensor(0.0, device=chosen_rewards.device)
+                            average_rewards = chosen_rewards  # Only chosen rewards
+                            accuracy = torch.tensor(1.0, device=chosen_rewards.device)  # Always "correct" since no comparison
+                            margin = chosen_rewards  # Margin is just the chosen reward
+                            local_metrics[2] += rejected_rewards
+                            local_metrics[3] += average_rewards
+                            local_metrics[4] += accuracy
+                            local_metrics[5] += margin
                         local_metrics[1] += chosen_rewards
-                        local_metrics[2] += rejected_rewards
-                        local_metrics[3] += average_rewards
-                        local_metrics[4] += accuracy
-                        local_metrics[5] += margin
                     local_metrics[6] += policy_chosen_logps.mean()
                     local_metrics[7] += policy_rejected_logps.mean()
                     if args.load_balancing_loss:
@@ -941,7 +970,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         "logps/chosen": global_metrics[6],
                         "logps/rejected": global_metrics[7],
                     }
-                    if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
+                    if args.dpo_loss_type in ["dpo", "dpo_norm", "dpo_norm_chosen"]:
                         metrics_to_log.update(
                             {
                                 "rewards/chosen": global_metrics[1],

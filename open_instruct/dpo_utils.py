@@ -140,6 +140,78 @@ def simpo_loss(
     return losses, chosen_rewards, rejected_rewards
 
 
+def dpo_norm_chosen_loss(
+    policy_chosen_logps: torch.FloatTensor,
+    reference_chosen_logps: torch.FloatTensor,
+    beta: float,
+    reference_free: bool = False,
+    label_smoothing: float = 0.0,
+) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+    """Compute the DPO loss using only chosen responses (normalized version).
+
+    Args:
+        policy_chosen_logps: Log probabilities of the policy model
+            for the chosen responses. Shape: (batch_size,)
+        reference_chosen_logps: Log probabilities of the reference model
+            for the chosen responses. Shape: (batch_size,)
+        beta: Temperature parameter for the DPO loss, typically something
+            in the range of 0.1 to 0.5. We ignore the reference model as beta -> 0.
+        reference_free: If True, we ignore the _provided_ reference model
+            and implicitly use a reference model that assigns equal probability to all responses.
+        label_smoothing: Label smoothing parameter.
+
+    Returns:
+        A tuple of three tensors: (losses, chosen_rewards, rejected_rewards).
+        The losses tensor contains the DPO loss for each example in the batch.
+        The chosen_rewards and rejected_rewards tensors contain the rewards
+            for the chosen and rejected responses, respectively.
+    """
+    pi_logratios = policy_chosen_logps
+    ref_logratios = reference_chosen_logps
+
+    if reference_free:
+        ref_logratios = 0
+
+    logits = pi_logratios - ref_logratios
+
+    losses = -F.logsigmoid(beta * logits) * (1 - label_smoothing) - F.logsigmoid(-beta * logits) * label_smoothing
+    chosen_rewards = beta * (policy_chosen_logps - reference_chosen_logps).detach()
+    rejected_rewards = torch.zeros_like(chosen_rewards)  # No rejected rewards for chosen-only loss
+
+    return losses, chosen_rewards, rejected_rewards
+
+
+def simpo_chosen_loss(
+    policy_chosen_logps: torch.FloatTensor,
+    beta: float,
+    gamma_beta_ratio: float,
+    label_smoothing: float = 0.0,
+) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+    """Compute the SimPO loss using only chosen responses.
+
+    Args:
+        policy_chosen_logps: Log probabilities of the policy model for the chosen responses. Shape: (batch_size,)
+        beta: Temperature parameter for the loss.
+        gamma_beta_ratio: Gamma to beta ratio parameter.
+        label_smoothing: Label smoothing parameter.
+
+    Returns:
+        A tuple of three tensors: (losses, chosen_rewards, rejected_rewards).
+        The losses tensor contains the SimPO loss for each example in the batch.
+        The chosen_rewards and rejected_rewards tensors contain the rewards for the chosen and rejected responses, respectively.
+    """
+    pi_logratios = policy_chosen_logps
+    logits = pi_logratios - gamma_beta_ratio
+
+    # sigmoid loss type from SimPO.
+    losses = -F.logsigmoid(beta * logits) * (1 - label_smoothing) - F.logsigmoid(-beta * logits) * label_smoothing
+
+    chosen_rewards = beta * policy_chosen_logps.detach()
+    rejected_rewards = torch.zeros_like(chosen_rewards)  # No rejected rewards for chosen-only loss
+
+    return losses, chosen_rewards, rejected_rewards
+
+
 def _get_batch_logps(
     logits: torch.FloatTensor, labels: torch.LongTensor, average_log_prob: bool = False
 ) -> torch.FloatTensor:
