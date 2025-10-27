@@ -485,7 +485,7 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, all_adaptive_rubri
         ground_truth_obj = json.loads(ground_truth_str)
         query = ground_truth_obj["query"]
         
-        print(f"Ground truth: {ground_truth_obj}\nAdaptive rubrics: {adaptive_rubrics}")
+        # print(f"Ground truth: {ground_truth_obj}\nAdaptive rubrics: {adaptive_rubrics}")
         positive_rubrics = adaptive_rubrics["positive_rubrics"] if "positive_rubrics" in adaptive_rubrics else []
         negative_rubrics = adaptive_rubrics["negative_rubrics"] if "negative_rubrics" in adaptive_rubrics else []
         
