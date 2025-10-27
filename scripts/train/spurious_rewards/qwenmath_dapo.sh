@@ -33,7 +33,7 @@ python mason.py \
     --workspace ai2/tulu-thinker \
     --priority high \
     --pure_docker_mode \
-    --image stellal/open_instruct_dev_2 \
+    --image stellal/open_instruct_dev \
     --preemptible \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
@@ -58,10 +58,10 @@ python open_instruct/grpo_fast.py \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k 32 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 8192 \
-    --max_prompt_token_length 2048 \
-    --response_length 6144 \
-    --pack_length 8192 \
+    --max_token_length 4096 \
+    --max_prompt_token_length 1024 \
+    --response_length 3072 \
+    --pack_length 4096 \
     --model_name_or_path ${model_name_or_path} \
     --stop_strings "</answer>" \
     --non_stop_penalty False \
@@ -81,7 +81,7 @@ python open_instruct/grpo_fast.py \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
     --mask_truncated_completions False \
-    --oe_eval_max_length 8192 \
+    --oe_eval_max_length 4096 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --oe_eval_tasks ${evals} \
     --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto $@ \
