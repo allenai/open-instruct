@@ -58,6 +58,7 @@ uv run python mason.py \
         --seed 1 \
         --local_eval_every 1 \
 	--add_bos \
+        --activation_checkpointing True \
         --gradient_checkpointing \
         --try_launch_beaker_eval_jobs_on_weka True \
         --with_tracking \
