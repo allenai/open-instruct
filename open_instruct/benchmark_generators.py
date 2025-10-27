@@ -590,8 +590,9 @@ def main() -> None:
     logger.info("Freeing GPU memory before starting vLLM...")
     free_all_gpu_memory()
     dataset = setup_dataset(args, tokenizer_config)
+    max_model_len = args.max_prompt_token_length + args.response_length
     vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(
-        args, tokenizer_config, model_config
+        args, tokenizer_config, model_config, max_model_len=max_model_len
     )
     timestamp = int(time.time())
     save_config(args, tokenizer_config, model_config, timestamp)
