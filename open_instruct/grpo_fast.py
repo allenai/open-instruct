@@ -3203,6 +3203,7 @@ def run_training(
             # putting both batches in the same training step might also break if we accidentally sample the same dataset index twice
             split_and_insert_batch(
                 another_batch,
+                iter_dataloader.epoch_number,
                 training_step + i,
                 pending_queries_map,
                 param_prompt_Q,

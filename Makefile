@@ -21,8 +21,8 @@ setup:
 	git clone -b shanea/olmo2-retrofit https://github.com/2015aroras/vllm.git vllm_olmo2.5
 
 docker:
-	DOCKER_BUILDKIT=1 docker build -f Dockerfile --build-arg UV_CACHE_DIR=$(UV_CACHE_DIR) -t open_instruct_rl0 .
+	DOCKER_BUILDKIT=1 docker build -f Dockerfile --build-arg UV_CACHE_DIR=$(UV_CACHE_DIR) -t open_instruct_rlzero .
 	# if you are internally at AI2, you can create an image like this:
 	$(eval beaker_user := $(shell beaker account whoami --format json | jq -r '.[0].name'))
-	beaker image delete $(beaker_user)/open_instruct_rl0
-	beaker image create open_instruct_rl0 -n open_instruct_rl0 -w ai2/$(beaker_user)
+	# beaker image delete $(beaker_user)/open_instruct_rlzero
+	beaker image create open_instruct_rlzero -n open_instruct_rlzero -w ai2/$(beaker_user)
