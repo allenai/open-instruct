@@ -1950,6 +1950,8 @@ def data_preparation_thread(
                     dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
                     dummy_response_mask = torch.zeros_like(dummy_qr)
                     dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
+                    # vLLM logprobs are NaN for query tokens; for dummy padding we set all to NaN
+                    dummy_vllm_logprobs = torch.full((len(dummy_qr),), float("nan"), dtype=torch.float)
                     # pad out the world size
                     for _ in range(shortfall):
                         packed_sequences.query_responses.append(dummy_qr)
@@ -1958,6 +1960,7 @@ def data_preparation_thread(
                         packed_sequences.position_ids.append(dummy_position_ids)
                         packed_sequences.response_masks.append(dummy_response_mask)
                         packed_sequences.advantages.append(dummy_advantage)
+                        packed_sequences.vllm_logprobs.append(dummy_vllm_logprobs)
 
         with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
             B = (
