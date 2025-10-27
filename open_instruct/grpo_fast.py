@@ -413,8 +413,6 @@ class Args:
     """the max generation length for evaluation for oe-eval"""
     oe_eval_beaker_image: Optional[str] = None
     """the docker image for evaluation for oe-eval"""
-    oe_eval_gpu_multiplier: Optional[int] = 1
-    """gpu mulitplier for eval jobs"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
 
@@ -578,7 +576,6 @@ class ShufflingIterator:
         self.epoch_number = 0
         self.rng = np.random.default_rng(seed)
         self.rng.shuffle(self.data)
-        self.exclude_list = []
 
         # Ensure the effective dataset size is divisible by batch_size
         self._update_effective_size()
@@ -602,10 +599,6 @@ class ShufflingIterator:
 
         return batch
 
-    def exclude_indices(self, exclude_list: List) -> None:
-        """Exclude provided data points from future sampling."""
-        self.exclude_list.extend(exclude_list)
-
     def get_state(self) -> Dict[str, Any]:
         """Get the current state of the iterator for checkpointing."""
         return {
@@ -624,13 +617,6 @@ class ShufflingIterator:
         self._update_effective_size()
 
     def _update_effective_size(self) -> None:
-        if self.exclude_list:
-            mask = ~np.isin(self.data, self.exclude_list)
-            if mask.all():
-                return
-
-            self.data = self.data[mask]
-            self.exclude_list = []
         self.effective_size = len(self.data) - (len(self.data) % self.batch_size)
 
 
@@ -1380,7 +1366,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 args.gs_bucket_path,
                 args.eval_priority,
                 args.oe_eval_beaker_image,
-                args.oe_eval_gpu_multiplier,
             )
 
 
@@ -1604,7 +1589,6 @@ def accumulate_inference_batches(
     all_ground_truths = []
     all_datasets = []
     all_raw_queries = []
-    all_indices = []
     for i in tqdm(
         range(num_prompts),
         total=num_prompts,
@@ -1631,7 +1615,6 @@ def accumulate_inference_batches(
         all_ground_truths.append(ground_truth)
         all_datasets.append(dataset)
         all_raw_queries.append(raw_query)
-        all_indices.append(result.dataset_index)
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1713,15 +1696,47 @@ def accumulate_inference_batches(
     if actor_manager is not None:
         ray.get(actor_manager.report_token_statistics.remote(accumulated_stats))
 
-    # Preserve dataset indices so downstream filtering keeps track of original prompts
     batch = Batch(
         queries=all_queries,
         ground_truths=all_ground_truths,
         datasets=all_datasets,
         raw_queries=all_raw_queries,
-        indices=all_indices,
+        indices=None,
     )
     return combined_result, batch, prompt_lengths, response_lengths
+
+
+def _combine_reward_metrics(metric_records: list[tuple[Dict[str, Any], int]]) -> Dict[str, Any]:
+    if not metric_records:
+        return {}
+
+    buckets: Dict[str, list[tuple[Any, int]]] = {}
+    for metrics, weight in metric_records:
+        if not metrics:
+            continue
+        for key, value in metrics.items():
+            buckets.setdefault(key, []).append((value, weight))
+
+    combined: Dict[str, Any] = {}
+    for key, records in buckets.items():
+        sample_value = records[0][0]
+        if isinstance(sample_value, np.ndarray):
+            combined[key] = np.concatenate([np.asarray(value) for value, _ in records])
+        elif isinstance(sample_value, (list, tuple)):
+            concatenated: list[Any] = []
+            for value, _ in records:
+                concatenated.extend(list(value))
+            combined[key] = concatenated
+        elif isinstance(sample_value, (int, float, bool, np.integer, np.floating)):
+            total_weight = sum(weight for _, weight in records)
+            if total_weight == 0:
+                combined[key] = float(sample_value)
+            else:
+                combined[key] = sum(float(value) * weight for value, weight in records) / total_weight
+        else:
+            # Fallback: keep the latest value if aggregation strategy is unclear.
+            combined[key] = records[-1][0]
+    return combined
 
 
 def data_preparation_thread(
@@ -1736,40 +1751,7 @@ def data_preparation_thread(
     resume_training_step: int,
     actor_manager=None,
     model_dims: utils.ModelDims = None,
-    train_iterator: ShufflingIterator = None,
 ):
-    def combine_reward_metrics(metric_records: list[tuple[Dict[str, Any], int]]) -> Dict[str, Any]:
-        if not metric_records:
-            return {}
-
-        buckets: Dict[str, list[tuple[Any, int]]] = {}
-        for metrics, weight in metric_records:
-            if not metrics:
-                continue
-            for key, value in metrics.items():
-                buckets.setdefault(key, []).append((value, weight))
-
-        combined: Dict[str, Any] = {}
-        for key, records in buckets.items():
-            sample_value = records[0][0]
-            if isinstance(sample_value, np.ndarray):
-                combined[key] = np.concatenate([np.asarray(value) for value, _ in records])
-            elif isinstance(sample_value, (list, tuple)):
-                concatenated: list[Any] = []
-                for value, _ in records:
-                    concatenated.extend(list(value))
-                combined[key] = concatenated
-            elif isinstance(sample_value, (int, float, bool, np.integer, np.floating)):
-                total_weight = sum(weight for _, weight in records)
-                if total_weight == 0:
-                    combined[key] = float(sample_value)
-                else:
-                    combined[key] = sum(float(value) * weight for value, weight in records) / total_weight
-            else:
-                # Fallback: keep the latest value if aggregation strategy is unclear.
-                combined[key] = records[-1][0]
-        return combined
-
     for training_step in range(resume_training_step, num_training_steps + 1):
         per_prompt_rollout = args.num_samples_per_prompt_rollout
         target_prompt_count = args.num_unique_prompts_rollout
@@ -2045,7 +2027,7 @@ def data_preparation_thread(
 
         scores = np.concatenate(aggregated_scores) if aggregated_scores else np.array([])
         advantages = np.concatenate(aggregated_advantages) if aggregated_advantages else np.array([])
-        reward_metrics = combine_reward_metrics(aggregated_reward_metrics)
+        reward_metrics = _combine_reward_metrics(aggregated_reward_metrics)
 
         if len(scores) == 0:
             logger.warning(f"No responses with non-zero advantages in batch {training_step}.")
