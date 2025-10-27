@@ -1007,13 +1007,15 @@ def create_vllm_engines(
         logger.info(f"Engine {i + 1}: Creating Ray remote actor class...")
         remote_class = ray.remote(LLMRayActor)
         logger.info(f"Engine {i + 1}: Setting Ray actor options...")
+        env_vars = dict(os.environ)
+        env_vars.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
+        if "TORCH_CUDA_ARCH_LIST" not in env_vars:
+            env_vars["TORCH_CUDA_ARCH_LIST"] = get_cuda_arch_list()
         remote_class_with_options = remote_class.options(
             num_cpus=num_gpus,
             num_gpus=num_gpus,
             scheduling_strategy=scheduling_strategy,
-            runtime_env=ray.runtime_env.RuntimeEnv(
-                env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
-            ),
+            runtime_env=ray.runtime_env.RuntimeEnv(env_vars=env_vars),
         )
         logger.info(f"Engine {i + 1}: Calling .remote() to instantiate actor...")
         actor_handle = remote_class_with_options.remote(
