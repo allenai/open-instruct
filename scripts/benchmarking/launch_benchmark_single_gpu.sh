@@ -60,7 +60,6 @@ for model_name_or_path in "$@"; do
         --num_nodes 1 \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-	--env VLLM_BATCH_INVARIANT=1 \
         --budget ai2/oe-adapt \
         --gpus 1 \
         --secret HF_TOKEN=finbarrt_HF_TOKEN \
