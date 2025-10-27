@@ -29,7 +29,7 @@ python mason.py \
     --workspace ai2/olmo-instruct \
     --priority urgent \
     --pure_docker_mode \
-    --image michaeln/open_instruct_rl0 \
+    --image michaeln/open_instruct_rlzero \
     --preemptible \
     --num_nodes 9 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
