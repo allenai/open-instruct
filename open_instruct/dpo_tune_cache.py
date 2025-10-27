@@ -73,7 +73,7 @@ from open_instruct.dpo_utils import (
     DataCollatorForSeq2SeqDPO,
     concatenated_forward,
     dpo_loss,
-    dpo_norm_chosen_loss,
+    dpo_chosen_loss,
     separate_forward,
     simpo_chosen_loss,
     simpo_loss,
@@ -876,7 +876,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 elif args.dpo_loss_type == "dpo_norm_chosen":
                     p_device = policy_chosen_logps.device
                     reference_chosen_logps = epoch_cached_reference_chosen_logps[epoch][step].to(p_device)
-                    losses, _, _ = dpo_norm_chosen_loss(
+                    losses, _, _ = dpo_chosen_loss(
                         policy_chosen_logps,
                         reference_chosen_logps,
                         beta=args.dpo_beta,

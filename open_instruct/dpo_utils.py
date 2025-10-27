@@ -140,7 +140,7 @@ def simpo_loss(
     return losses, chosen_rewards, rejected_rewards
 
 
-def dpo_norm_chosen_loss(
+def dpo_chosen_loss(
     policy_chosen_logps: torch.FloatTensor,
     reference_chosen_logps: torch.FloatTensor,
     beta: float,
