@@ -279,7 +279,7 @@ async def run_litellm_async(
 
     # Apply default timeout if not provided
     chat_kwargs["timeout"] = chat_kwargs.get(
-        "timeout", float(os.environ.get("LITELLM_DEFAULT_TIMEOUT", "120"))
+        "timeout", float(os.environ.get("LITELLM_DEFAULT_TIMEOUT", "600"))
     )
 
     # Guard concurrent calls with a global semaphore
