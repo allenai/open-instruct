@@ -242,12 +242,6 @@ def setup_vllm_engines(
         ray.shutdown()
     ray.init(ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"], "env_vars": dict(os.environ)})
 
-    pg = None
-    if args.single_gpu_mode:
-        bundles = [{"GPU": args.vllm_tensor_parallel_size, "CPU": 1} for _ in range(args.vllm_num_engines)]
-        pg = ray.util.placement_group(bundles, strategy="PACK")
-        ray.get(pg.ready())
-
     param_prompt_Q = ray_queue.Queue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
 
@@ -270,7 +264,7 @@ def setup_vllm_engines(
         max_model_len=max_model_len,
         vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
         single_gpu_mode=args.single_gpu_mode,
-        pg=pg if args.single_gpu_mode else None,
+        pg=None,
         tools={},
         max_tool_calls=args.max_tool_calls,
         prompt_queue=param_prompt_Q,
