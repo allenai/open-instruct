@@ -1062,9 +1062,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         valid_mask = mb_response_masks_bool & ~torch.isnan(mb_vllm_logprobs)
                         logprob_diff = (mb_local_logprobs - mb_vllm_logprobs).abs()
                         masked_diff = torch.masked_fill(logprob_diff, ~valid_mask, 0.0)
-                        mean_diff = masked_diff.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
+                        mean_diff = masked_diff.sum() / valid_mask.sum() if valid_mask.sum() > 0 else torch.zeros(1)
                         max_diff = masked_diff.max()
-                        std_diff = masked_diff[valid_mask].std() if valid_mask.sum() > 1 else 0.0
+                        std_diff = masked_diff[valid_mask].std() if valid_mask.sum() > 1 else torch.zeros(1)
 
                         self.local_metrics.add("debug/vllm_vs_local_logprob_diff_mean", mean_diff.item())
                         self.local_metrics.add("debug/vllm_vs_local_logprob_diff_max", max_diff.item())
@@ -1072,7 +1072,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
                         reverse_kl = torch.exp(mb_vllm_logprobs) * (mb_vllm_logprobs - mb_local_logprobs)
                         masked_reverse_kl = torch.masked_fill(reverse_kl, ~valid_mask, 0.0)
-                        mean_reverse_kl = masked_reverse_kl.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
+                        mean_reverse_kl = masked_reverse_kl.sum() / valid_mask.sum() if valid_mask.sum() > 0 else torch.zeros(1)
                         self.local_metrics.add("debug/vllm_local_reverse_kl", mean_reverse_kl.item())
 
                     mb_new_logprobs = mb_local_logprobs
@@ -1950,8 +1950,7 @@ def data_preparation_thread(
                     dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
                     dummy_response_mask = torch.zeros_like(dummy_qr)
                     dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
-                    # vLLM logprobs are NaN for query tokens; for dummy padding we set all to NaN
-                    dummy_vllm_logprobs = torch.full((len(dummy_qr),), float("nan"), dtype=torch.float)
+                    dummy_vllm_logprobs = torch.full_like(dummy_qr, float("nan"), dtype=torch.float)
                     # pad out the world size
                     for _ in range(shortfall):
                         packed_sequences.query_responses.append(dummy_qr)
