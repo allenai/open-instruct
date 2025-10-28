@@ -45,11 +45,8 @@ PATTERNS = [
     # Pattern: "I am called [provider]"
     r"(?i)i\s+am\s+called\s+\b(" + "|".join(PROVIDERS) + r")\b[^.!?]*?[.!?]",
 
-    # Pattern: "I'm [provider]"
-    r"(?i)i'?m\s+\b(" + "|".join(PROVIDERS) + r")\b[^.!?]*?[.!?]",
-
-    # Pattern: "I am [provider]"
-    r"(?i)i\s+am\s+\b(" + "|".join(PROVIDERS) + r")\b[^.!?]*?[.!?]",
+    # Pattern: "I'm [provider]" or "I am [provider]"
+    r"(?i)(?:i'?m|i\s+am)\s+\b(" + "|".join(PROVIDERS) + r")\b[^.!?]*?[.!?]",
 
     # Pattern: "trained by ... {provider}" within one sentence  
     r"(?i)trained\s+by\s+[^.!?]*?\b(" + "|".join(PROVIDERS) + r")\b[^.!?]*?[.!?]",
