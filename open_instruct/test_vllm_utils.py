@@ -82,7 +82,6 @@ class TestVllmUtils3(unittest.TestCase):
         result, is_eval = process_completed_request(
             request_id=request_id,
             outs=[mock_request_output],
-            tracking={},
             current_time=1001.0,
             tools=tools,
             request_metadata=request_metadata,
@@ -152,7 +151,6 @@ class TestVllmUtils3(unittest.TestCase):
         result, is_eval = process_completed_request(
             request_id=request_id,
             outs=[mock_request_output],
-            tracking={},
             current_time=2000.5,
             tools=None,
             request_metadata=request_metadata,
