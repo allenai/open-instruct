@@ -1149,6 +1149,7 @@ def launch_ai2_evals_on_weka(
     gs_bucket_path: Optional[str] = None,
     eval_priority: Optional[str] = "normal",
     beaker_image: Optional[str] = None,
+    oe_eval_gpu_multiplier: Optional[int] = 1,
 ) -> None:
     weka_cluster = "ai2/saturn ai2/neptune"
     gcp_cluster = "ai2/augusta"
@@ -1178,6 +1179,7 @@ def launch_ai2_evals_on_weka(
 
     command = f"""\
 python scripts/submit_eval_jobs.py \
+--gpu_multiplier {oe_eval_gpu_multiplier} \
 --model_name {leaderboard_name} \
 --location {path} \
 --cluster {cluster} \

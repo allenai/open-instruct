@@ -95,6 +95,7 @@ target-version = ['py310']
 
 [tool.isort]
 known_first_party = ["open_instruct"]
+known-third-party = ["wandb"]
 profile = "black"
 src_paths = ["open_instruct"]
 

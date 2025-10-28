@@ -1,11 +1,31 @@
+#!/bin/bash
+
+python mason.py \
+    --task_name grpo_debug_small_active \
+    --cluster ai2/jupiter \
+    --workspace ai2/olmo-instruct \
+    --priority urgent \
+    --pure_docker_mode \
+    --image michaeln/open_instruct_2.5-rl0 \
+    --preemptible \
+    --num_nodes 1 \
+    --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+    --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
+    --gpus 2 \
+    --budget ai2/oe-adapt \
+    -- \
 uv run python open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 512 \
-    --response_length 512 \
-    --pack_length 1024 \
+    --response_length 2048 \
+    --pack_length 4096 \
+    --async_steps 4 \
+    --inflight_updates \
+    --active_fill_completions \
+    --truncated_importance_sampling_ratio_cap 2.0 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
@@ -17,20 +37,16 @@ uv run python open_instruct/grpo_fast.py \
     --ground_truths_key ground_truth \
     --chat_template_name r1_simple_chat_postpend_think \
     --learning_rate 3e-7 \
-    --total_episodes 200 \
+    --total_episodes 1600 \
     --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
+    --vllm_num_engines 1 \
     --vllm_tensor_parallel_size 1 \
-    --beta 0.01 \
+    --beta 0. \
     --seed 3 \
-    --local_eval_every 1 \
-    --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.3 \
-    --save_traces \
-    --vllm_enforce_eager \
+    --local_eval_every 100 \
     --gradient_checkpointing \
-    --single_gpu_mode \
     --push_to_hub false \
     --system_prompt_override_file scripts/train/debug/cute_debug_system_prompt.txt \
     # --with_tracking
