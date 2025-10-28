@@ -358,6 +358,8 @@ def submission_thread(
                     prompt=prompt,
                     dataset_index=dataset_index,
                     generation_config=generation_config,
+                    epoch_number=0,
+                    training_step=0,
                     start_time=time.perf_counter(),
                 )
             )
@@ -420,6 +422,8 @@ def run_benchmark(
                 prompt=prompt,
                 dataset_index=dataset_index,
                 generation_config=generation_config,
+                epoch_number=0,
+                training_step=0,
                 start_time=time.perf_counter(),
             )
         )

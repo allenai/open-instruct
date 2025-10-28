@@ -267,7 +267,13 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
 
         # Put the test prompt in the queue using PromptRequest
         param_prompt_Q.put(
-            PromptRequest(prompt=prompt_token_ids, dataset_index=0, generation_config=generation_config)
+            PromptRequest(
+                prompt=prompt_token_ids,
+                dataset_index=0,
+                generation_config=generation_config,
+                epoch_number=0,
+                training_step=0,
+            )
         )
 
         # Get the result

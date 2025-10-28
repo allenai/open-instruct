@@ -1,5 +1,7 @@
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import List, Optional
+
+import vllm
 
 
 @dataclass
@@ -41,17 +43,12 @@ class GenerationResult:
 
 @dataclass
 class PromptRequest:
-    """Container for prompt requests sent via Ray queues.
-
-    Note: We intentionally type `generation_config` as `Any` to avoid importing
-    heavy dependencies (e.g., vLLM) at import time in deserializers like Ray's
-    `_QueueActor`.
-    """
+    """Container for prompt requests sent via Ray queues."""
 
     prompt: List[int]
-    generation_config: Any
-    epoch_number: Optional[int] = None
-    training_step: Optional[int] = None
-    dataset_index: Optional[int] = None
+    generation_config: vllm.SamplingParams
+    epoch_number: int
+    training_step: int
+    dataset_index: int
     is_eval: bool = False
     start_time: Optional[float] = None
