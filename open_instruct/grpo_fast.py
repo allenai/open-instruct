@@ -1947,7 +1947,7 @@ def data_preparation_thread(
             if prompts_kept_this_iter == 0 and fill_iteration > args.active_sampling_max_attempts:
                 logger.warning(
                     "[Active fill completions] Unable to collect non-zero advantage prompts in iteration %d; "
-                    "set as max by args.active_fill_max_attempts, proceeding with existing batch of size %d.",
+                    "set as max by args.active_sampling_max_attempts, proceeding with existing batch of size %d.",
                     fill_iteration,
                     len(aggregated_responses),
                 )
@@ -2040,7 +2040,7 @@ def data_preparation_thread(
         if args.apply_r1_style_format_reward and args.additive_format_reward:
             max_possible_score += args.r1_style_format_reward
 
-        unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
+        unsolved_batch_size_ratio = 0 if len(scores) == 0 else ((scores != max_possible_score) > 0).sum() / len(scores)
         original_batch_size = target_prompt_count * per_prompt_rollout
         real_batch_size_ratio = len(scores) / original_batch_size if original_batch_size > 0 else 0
 
