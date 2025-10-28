@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Benchmark script for testing vLLM generator performance.
 
@@ -30,6 +31,9 @@ from open_instruct.actor_manager import ActorManager
 from open_instruct.queue_types import PromptRequest
 
 logger = logger_utils.setup_logger(__name__)
+
+
+# Determine data directory
 if pathlib.Path("/weka").exists():
     DATA_DIR = pathlib.Path("/weka") / "finbarrt" / "open_instruct_generators_benchmark"
 elif pathlib.Path("/root").exists():
@@ -47,10 +51,12 @@ def save_completion_lengths(batch_results: list[dict], timestamp: int, batch_idx
         timestamp: Unix timestamp
     """
     csv_path = DATA_DIR / f"completion_lengths_{timestamp}.csv"
+
     with open(csv_path, "a", newline="") as csvfile:
         fieldnames = ["batch_num", "prompt_num", "completion_length"]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
+
         for batch_result in batch_results:
             response_lengths = batch_result["response_lengths"]
             for i, length in enumerate(response_lengths):
@@ -69,14 +75,18 @@ def save_config(args, tokenizer_config, model_config, timestamp: int):
         timestamp: Unix timestamp
     """
     config_path = DATA_DIR / f"config_{timestamp}.json"
+
+    # Convert dataclasses to dicts
     config_dict = {
         "args": dataclasses.asdict(args),
         "tokenizer_config": dataclasses.asdict(tokenizer_config),
         "model_config": dataclasses.asdict(model_config),
         "timestamp": timestamp,
     }
+
     with open(config_path, "w") as f:
         json.dump(config_dict, f, indent=2, default=str)
+
     logger.info(f"Saved config to {config_path}")
 
 
@@ -85,16 +95,23 @@ def get_git_commit() -> str:
     git_dir = pathlib.Path(".git")
     if not git_dir.exists():
         return "unknown"
+
     head_file = git_dir / "HEAD"
     if not head_file.exists():
         return "unknown"
+
     with head_file.open() as f:
         content = f.read().strip()
+
     if not content.startswith("ref:"):
+        # Detached HEAD
         return content[:8]
+
+    # HEAD points to a branch
     ref_path = git_dir / content[5:]
+
     with ref_path.open() as ref_f:
-        return ref_f.read().strip()[:8]
+        return ref_f.read().strip()[:8]  # First 8 chars
 
 
 def save_benchmark_results_to_csv(
@@ -104,6 +121,7 @@ def save_benchmark_results_to_csv(
     git_commit = get_git_commit()
     agg_results = aggregate_results(results)
     csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
+
     row_data = {
         "git_commit": git_commit,
         "model": model_config.model_name_or_path,
@@ -128,9 +146,11 @@ def save_benchmark_results_to_csv(
         "avg_new_tokens_per_sample": agg_results["total_num_new_tokens"]
         / (len(results) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout),
     }
+
     csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
     csv_dir = csv_path.parent
     csv_dir.mkdir(parents=True, exist_ok=True)
+
     with csv_path.open("a", newline="") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=list(row_data.keys()))
         if not csv_path.exists():
@@ -159,10 +179,20 @@ def free_all_gpu_memory(device: int | str = 0) -> None:
         GPU index or explicit device string like "cuda:1".
     """
     dev = torch.device(device if isinstance(device, str) else f"cuda:{device}")
+
+    # 1. Clear Python references & collect garbage
     gc.collect()
+
+    # 2. Synchronize to make sure all kernels are done
     torch.cuda.synchronize(dev)
+
+    # 3. Release cached blocks held by the CUDA caching allocator
     torch.cuda.empty_cache()
+
+    # 4. Destroy any lingering CUDA IPC shared-memory handles
     torch.cuda.ipc_collect()
+
+    # Optional: print the end result
     free, total = torch.cuda.mem_get_info(dev)
     gib = 1024**3
     logger.info(f"[GPU {dev.index}] {free / gib:.2f} GiB free of {total / gib:.2f} GiB after cleanup")
@@ -171,7 +201,17 @@ def free_all_gpu_memory(device: int | str = 0) -> None:
 def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation.TokenizerConfig) -> datasets.Dataset:
     """Set up the dataset using the same pipeline as grpo_fast.py."""
     logger.info("Loading and processing dataset...")
-    transform_fn_args = [{}, {"max_prompt_token_length": args.max_prompt_token_length}]
+
+    # Transform function arguments
+    transform_fn_args = [
+        {},  # For rlvr_tokenize_v1
+        {
+            "max_token_length": args.max_token_length,
+            "max_prompt_token_length": args.max_prompt_token_length,
+        },  # For rlvr_filter_v1
+    ]
+
+    # Load dataset
     dataset = dataset_transformation.get_cached_dataset_tulu(
         dataset_mixer_list=args.dataset_mixer_list,
         dataset_mixer_list_splits=args.dataset_mixer_list_splits,
@@ -182,8 +222,11 @@ def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation
         dataset_local_cache_dir=args.dataset_local_cache_dir,
         dataset_skip_cache=args.dataset_skip_cache,
     )
+
+    # Shuffle dataset
     dataset = dataset.shuffle(seed=args.seed)
     logger.info(f"Dataset loaded with {len(dataset)} samples")
+
     return dataset
 
 
@@ -195,17 +238,22 @@ def setup_vllm_engines(
 ) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue, ray.actor.ActorHandle]:
     """Set up vLLM engines and queues."""
     logger.info("Setting up vLLM engines...")
+
+    # Initialize Ray
     if ray.is_initialized():
         ray.shutdown()
     ray.init(ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"]})
+
     pg = None
     if args.single_gpu_mode:
         bundles = [{"GPU": 1, "CPU": 1} for _ in range(args.vllm_num_engines)]
         pg = ray.util.placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
+
     param_prompt_Q = ray_queue.Queue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
     evaluation_results_Q = ray_queue.Queue(maxsize=10)
+
     queues_to_monitor = {
         "Param Prompt Queue": param_prompt_Q,
         "Inference Results Queue": inference_results_Q,
@@ -213,8 +261,10 @@ def setup_vllm_engines(
     }
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
     logger.info("ActorManager created successfully")
+
     tokenizer_name_or_path = tokenizer_config.tokenizer_name_or_path or model_config.model_name_or_path
     logger.info("Starting vLLM engine creation...")
+
     vllm_engines = vllm_utils.create_vllm_engines(
         num_engines=args.vllm_num_engines,
         tensor_parallel_size=args.vllm_tensor_parallel_size,
@@ -238,8 +288,10 @@ def setup_vllm_engines(
         use_fp8_kv_cache=args.use_fp8_kv_cache,
         inflight_updates=args.inflight_updates,
     )
+
     logger.info("create_vllm_engines returned successfully")
     logger.info("vLLM engines ready")
+
     return (vllm_engines, param_prompt_Q, inference_results_Q, actor_manager)
 
 
@@ -252,18 +304,27 @@ def simulate_weight_sync(
         float: Time taken for the weight sync simulation in seconds
     """
     sync_start = time.perf_counter()
+
+    # Set actors to stop
     ray.get(actor_manager.set_should_stop.remote(True))
     logger.debug("Set should_stop to True for weight sync simulation")
+
     # Previously we called process_from_queue with a timeout to ensure actors drained.
     # That method no longer accepts a timeout argument, so instead just sanity-check
     # background threads to surface any latent failures.
     for engine in vllm_engines:
         ray.get(engine.check_background_threads.remote())
+
+    # Sleep for 1 second to simulate weight sync time (from wandb metrics)
     time.sleep(1.0)
+
+    # Resume actors
     ray.get(actor_manager.set_should_stop.remote(False))
     logger.debug("Set should_stop to False after weight sync simulation")
+
     sync_time = time.perf_counter() - sync_start
     logger.info(f"Weight sync simulation took {sync_time:.2f}s")
+
     return sync_time
 
 
@@ -282,11 +343,16 @@ def submission_thread(
         if stop_event.is_set():
             logger.info("[Submission Thread] Stopped due to stop event")
             break
+
         logger.info(f"[Submission Thread] Submitting batch {batch_idx - start_batch_idx + 1}/{num_batches}...")
+
+        # Get batch data from dataset
         start_idx = batch_idx * batch_size
         end_idx = min(start_idx + batch_size, len(dataset))
         batch_data = dataset[start_idx:end_idx]
         prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+
+        # Create individual PromptRequest for each prompt in the batch
         for i, prompt in enumerate(prompts):
             dataset_index = start_idx + i
             param_prompt_Q.put(
@@ -302,6 +368,7 @@ def submission_thread(
         logger.info(
             f"[Submission Thread] Batch {batch_idx - start_batch_idx + 1}/{num_batches} submitted ({len(prompts)} prompts)"
         )
+
     logger.info(f"[Submission Thread] All {num_batches} batches submitted")
 
 
@@ -320,6 +387,8 @@ def run_benchmark(
     logger.info(
         f"Starting benchmark with 1 warmup batch + {num_batches - 1} main batches of size {args.num_unique_prompts_rollout}"
     )
+
+    # Create sampling parameters with 'n' for multiple samples per prompt
     generation_config = vllm.SamplingParams(
         temperature=args.temperature,
         max_tokens=args.response_length,
@@ -330,18 +399,30 @@ def run_benchmark(
         include_stop_str_in_output=True,
         skip_special_tokens=False,
         logprobs=1,
+        # IMPORTANT: Set output_kind to FINAL_ONLY to ensure vLLM V1 properly handles n>1
+        # With the default CUMULATIVE mode, vLLM V1 returns separate outputs for each
+        # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode
+        # ensures all n completions are returned together in a single output.
         output_kind=vllm.sampling_params.RequestOutputKind.FINAL_ONLY,
     )
+
     stop_event = threading.Event()
     executor = futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="benchmark")
+
     results = []
+
+    # Get the model dimensions from one of the engines without loading weights
     model_dims = ray.get(vllm_engines[0].get_model_dims.remote())
+
+    # Submit warmup batch first
     logger.info("Submitting warmup batch...")
     warmup_start_idx = 0
     warmup_end_idx = min(args.num_unique_prompts_rollout, len(dataset))
     warmup_data = dataset[warmup_start_idx:warmup_end_idx]
     warmup_prompts = warmup_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
     logger.info(f"Warmup batch size: {len(warmup_prompts)} prompts")
+
+    # Create individual PromptRequest for each warmup prompt
     for i, prompt in enumerate(warmup_prompts):
         dataset_index = warmup_start_idx + i
         param_prompt_Q.put(
@@ -355,6 +436,7 @@ def run_benchmark(
             )
         )
         logger.info(f"Submitted warmup prompt {i + 1}/{len(warmup_prompts)} (dataset_index={dataset_index})")
+
     logger.info(f"All warmup prompts submitted. Param queue size: {param_prompt_Q.qsize()}")
     should_stop = ray.get(actor_manager.should_stop.remote())
     logger.info(f"Actor manager should_stop status: {should_stop}")
@@ -364,8 +446,11 @@ def run_benchmark(
             logger.info(f"Engine {i} ready status: {engine_ready}")
         except Exception as e:
             logger.warning(f"Error checking engine {i} ready status: {e}")
+
     try:
         logger.info("Running warmup batch...")
+
+        # Collect all warmup results (one per prompt)
         warmup_batch_size = warmup_end_idx - warmup_start_idx
         warmup_results = []
         for i in range(warmup_batch_size):
@@ -376,10 +461,12 @@ def run_benchmark(
             result = inference_results_Q.get()
             warmup_results.append(result)
             logger.info(f"Warmup: Received result {i + 1}/{warmup_batch_size}")
+
         total_warmup_responses = sum((len(result.responses) for result in warmup_results))
         logger.info(
             f"Warmup batch completed with {total_warmup_responses} total responses from {len(warmup_results)} prompts"
         )
+
         logger.info(f"Submitting {num_batches - 1} batches for main benchmark...")
         submission_future = executor.submit(
             submission_thread,
@@ -391,11 +478,17 @@ def run_benchmark(
             1,
             num_batches - 1,
         )
+
+        # Process remaining batches with timing
         for batch_idx in range(1, num_batches):
+            # Quick health check!
             [future.result() for future in [submission_future] if future.done()]
+
             logger.info(
                 f"Batch {batch_idx}/{num_batches - 1}: Waiting for {args.num_unique_prompts_rollout} results..."
             )
+
+            # Collect all results for this batch (one per prompt)
             batch_results = []
             for i in range(args.num_unique_prompts_rollout):
                 for engine in vllm_engines:
@@ -406,23 +499,35 @@ def run_benchmark(
                     1, args.num_unique_prompts_rollout // 4
                 ) == 0 or i == args.num_unique_prompts_rollout - 1:
                     logger.info(f"Batch {batch_idx}: Received {i + 1}/{args.num_unique_prompts_rollout} results")
+
+            # Simulate weight sync between batches
             weight_sync_time = simulate_weight_sync(actor_manager, vllm_engines, args)
             completion_time = time.perf_counter()
+
+            # Calculate generation time from the earliest request start time (inclusive of sync)
             earliest_start_time = min((result.start_time for result in batch_results if result.start_time))
             batch_generation_time = completion_time - earliest_start_time if earliest_start_time else 0
+
+            # Aggregate metrics across all results in the batch
             total_new_tokens = sum((len(response) for result in batch_results for response in result.responses))
             tokens_per_second = total_new_tokens / batch_generation_time if batch_generation_time > 0 else 0
+
+            # Collect all finish reasons and response lengths
             all_finish_reasons = []
             all_response_lengths = []
             all_dataset_indices = []
             all_prompt_lengths = []
+
             for result in batch_results:
                 all_finish_reasons.extend(result.finish_reasons)
                 all_response_lengths.extend([len(response) for response in result.responses])
                 all_dataset_indices.append(result.dataset_index)
+
+                # Get prompt length for this result
                 prompt_data = dataset[result.dataset_index]
                 prompt = prompt_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
                 all_prompt_lengths.append(len(prompt))
+
             result_dict = {
                 "tokens_per_second": tokens_per_second,
                 "generation_time": batch_generation_time,
@@ -432,24 +537,44 @@ def run_benchmark(
                 "response_lengths": all_response_lengths,
                 "dataset_indices": all_dataset_indices,
             }
+
+            # Calculate total FLOPs for all prompts and responses in the batch
+            # No need to expand prompt_lengths - the flops method now handles samples_per_prompt
             model_flops = model_dims.flops(
                 all_prompt_lengths, all_response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
             )
+
+            # MFU = (FLOPs / time) / peak_FLOPS * 100
             model_flops_per_second = model_flops / batch_generation_time if batch_generation_time > 0 else 0
             result_dict["mfu"] = 100 * model_flops_per_second / model_dims.device_flops
+
+            # Calculate total memory bytes for all prompts and responses in the batch
             model_memory_bytes = model_dims.memory_bytes(
                 all_prompt_lengths, all_response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
             )
+
+            # MBU = (Memory bytes / time) / peak_bandwidth * 100
             model_bytes_per_second = model_memory_bytes / batch_generation_time if batch_generation_time > 0 else 0
             result_dict["mbu"] = 100 * model_bytes_per_second / model_dims.device_memory_bandwidth
+
             save_completion_lengths([result_dict], timestamp, batch_idx)
             results.append(result_dict)
             logger.info(
-                f"Batch {batch_idx}/{num_batches - 1}: {result_dict['tokens_per_second']:.2f} new tokens/sec, MFU: {result_dict['mfu']:.2f}%, MBU: {result_dict['mbu']:.2f}%, generation time: {batch_generation_time:.2f}s, weight sync time: {weight_sync_time:.2f}s, total new tokens: {total_new_tokens}"
+                f"Batch {batch_idx}/{num_batches - 1}: "
+                f"{result_dict['tokens_per_second']:.2f} new tokens/sec, "
+                f"MFU: {result_dict['mfu']:.2f}%, "
+                f"MBU: {result_dict['mbu']:.2f}%, "
+                f"generation time: {batch_generation_time:.2f}s, "
+                f"weight sync time: {weight_sync_time:.2f}s, "
+                f"total new tokens: {total_new_tokens}"
             )
+
+        # Calculate total time for main benchmark only
         main_benchmark_time = sum((r["generation_time"] for r in results))
+
         print_summary(results, main_benchmark_time, args, model_config, model_dims)
         save_benchmark_results_to_csv(results, main_benchmark_time, args, model_config)
+
     finally:
         stop_event.set()
         executor.shutdown(wait=True)
@@ -488,6 +613,7 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
                     aggregated_results["finish_reasons"][reason] += count
             elif key in ["response_lengths", "prompt_lengths"]:
                 aggregated_results[key].extend(value)
+
     num_results = len(results)
     aggregated_results["avg_tokens_per_second"] = (
         aggregated_results["total_num_new_tokens"] / aggregated_results["total_generation_time"]
@@ -509,9 +635,11 @@ def print_summary(
     model_dims: utils.ModelDims,
 ) -> None:
     """Print benchmark summary statistics."""
+
     agg_results = aggregate_results(results)
     total_samples = len(results) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     avg_new_tokens_per_sample = agg_results["total_num_new_tokens"] / total_samples
+
     print("\n" + "=" * 60)
     print("BENCHMARK SUMMARY")
     print("=" * 60)
@@ -533,17 +661,20 @@ def print_summary(
     print(f"Average generation time per batch: {agg_results['avg_generation_time']:.2f}s")
     print(f"Average weight sync time per batch: {agg_results['avg_weight_sync_time']:.2f}s")
     print(f"Average new tokens per sample: {avg_new_tokens_per_sample:.2f} tokens")
+
     max_length = np.max(agg_results["response_lengths"])
     mean_length = np.mean(agg_results["response_lengths"])
     wasted_compute = (max_length - mean_length) / max_length
     print(f"Wasted compute % (variable response length): {wasted_compute:.2%}")
+
     print("-" * 60)
     print("HARDWARE SPECIFICATIONS:")
     print(f"GPU device: {torch.cuda.get_device_name(0)}")
-    print(f"GPU peak FLOPs: {model_dims.device_flops / 1000000000000.0:.0f} TFLOPs")
+    print(f"GPU peak FLOPs: {model_dims.device_flops / 1e12:.0f} TFLOPs")
     gpu_specs = utils.GPU_SPECS[model_dims.device_name]
-    print(f"GPU memory size: {gpu_specs['memory_size'] / 1000000000.0:.0f} GB")
-    print(f"GPU memory bandwidth: {model_dims.device_memory_bandwidth / 1000000000000.0:.2f} TB/s")
+    print(f"GPU memory size: {gpu_specs['memory_size'] / 1e9:.0f} GB")
+    print(f"GPU memory bandwidth: {model_dims.device_memory_bandwidth / 1e12:.2f} TB/s")
+
     print("-" * 60)
     print("COMPLETION LENGTH STATISTICS:")
     print(f"Total completions: {len(agg_results['response_lengths'])}")
@@ -552,6 +683,8 @@ def print_summary(
     print(f"- Max: {max(agg_results['response_lengths'])} tokens")
     print(f"- Mean: {np.mean(agg_results['response_lengths']):.2f} tokens")
     print(f"- Median: {np.median(agg_results['response_lengths']):.2f} tokens")
+
+    # Calculate percentiles for valid tokens
     print("\nResponse length percentiles:")
     print(f"- 25th percentile: {np.percentile(agg_results['response_lengths'], 25):.2f} tokens")
     print(f"- 50th percentile: {np.percentile(agg_results['response_lengths'], 50):.2f} tokens")
@@ -559,6 +692,7 @@ def print_summary(
     print(f"- 90th percentile: {np.percentile(agg_results['response_lengths'], 90):.2f} tokens")
     print(f"- 95th percentile: {np.percentile(agg_results['response_lengths'], 95):.2f} tokens")
     print(f"- 99th percentile: {np.percentile(agg_results['response_lengths'], 99):.2f} tokens")
+
     print("=" * 60)
 
 
@@ -570,35 +704,49 @@ def cleanup(vllm_engines: list[ray.actor.ActorHandle], actor_manager: Optional[r
             logger.info("Signaled all engines to stop via actor manager")
         except Exception as e:
             logger.warning(f"Error signaling actor manager: {e}")
+
     for engine in vllm_engines:
         try:
             ray.kill(engine)
         except Exception as e:
             logger.warning(f"Error killing engine: {e}")
+
     if ray.is_initialized():
         ray.shutdown()
 
 
 def main() -> None:
     """Main benchmark function."""
+    # Parse arguments using ArgumentParserPlus
     parser = utils.ArgumentParserPlus(
         (grpo_fast.Args, dataset_transformation.TokenizerConfig, model_utils.ModelConfig)
     )
+
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
+
+    # Ensure data directory exists
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Calculate flops per token before starting vLLM
     logger.info("Calculating model FLOPs per token...")
+
+    # Free GPU memory after calculating FLOPs and before starting vLLM
     logger.info("Freeing GPU memory before starting vLLM...")
     free_all_gpu_memory()
+
     dataset = setup_dataset(args, tokenizer_config)
     max_model_len = args.max_prompt_token_length + args.response_length
     vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(
         args, tokenizer_config, model_config, max_model_len=max_model_len
     )
+
+    # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
     save_config(args, tokenizer_config, model_config, timestamp)
     run_benchmark(
         dataset, vllm_engines, param_prompt_Q, inference_results_Q, actor_manager, args, model_config, timestamp
     )
+
     cleanup(vllm_engines, actor_manager)
 
 
