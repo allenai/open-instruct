@@ -69,7 +69,7 @@ PATTERNS = [
     # Pattern: Any sentence containing "DeepSeek-R1" or "DeepSeek R1" (case-insensitive)
     r"(?i)[^.!?]*\bDeepSeek[\s-]?R1\b[^.!?]*?[.!?]",
 
-    # Pattern: Anything with the word "Qwen" (case-sensitive)
+    # Pattern: Anything with the word "Qwen" (case-insensitive)
     r"(?i)[^.!?]*\bQwen\b[^.!?]*?[.!?]",
     
     # Pattern: Any sentence containing "Alibaba Qwen" (case-insensitive) or Alibaba Cloud
