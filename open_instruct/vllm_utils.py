@@ -258,16 +258,16 @@ def get_bundle_indices_list(placement_group: ray.util.placement_group) -> List[i
 def make_request_id(request: PromptRequest) -> str:
     """Generate a unique tracking key for a request."""
     prefix = "eval" if request.is_eval else "train"
-    return f"{prefix}_{request.training_step}_{request.dataset_index}"
+    return f"{prefix}_{request.epoch_number}_{request.training_step}_{request.dataset_index}"
 
 
 def split_request_id(full_request_id: str) -> dict:
     """Split request ID into base ID and request index.
 
-    >>> split_request_id("train_1_43039_0")
-    {'base_id': 'train_1_43039', 'request_index': 0}
-    >>> split_request_id("eval_5_12345_2")
-    {'base_id': 'eval_5_12345', 'request_index': 2}
+    >>> split_request_id("train_0_1_43039_0")
+    {'base_id': 'train_0_1_43039', 'request_index': 0}
+    >>> split_request_id("eval_0_5_12345_2")
+    {'base_id': 'eval_0_5_12345', 'request_index': 2}
     """
     parts = full_request_id.split("_")
     return {"base_id": "_".join(parts[:-1]), "request_index": int(parts[-1])}
