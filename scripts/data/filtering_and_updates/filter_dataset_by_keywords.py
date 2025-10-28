@@ -15,13 +15,13 @@ Script to remove phrases identifying the model as a certain entity in our datase
 Motivated by: realizing the SFT mix has lots of "I am DeepSeek" snippets. 
 
 Run with:
-python scripts/data/sft/filter_dataset_by_keywords.py --input-dataset allenai/tulu-3-sft-mixture --column messages
+python scripts/data/filtering_and_updates/filter_dataset_by_keywords.py --input-dataset allenai/tulu-3-sft-mixture --column messages
 """
 
 
 # Popular model providers
 PROVIDERS = [
-    "OpenAI", "Open AI", "Claude", "Gemini", "Qwen", "DeepSeek", "Anthropic", "Meta AI", "Meta's", 
+    "OpenAI", "Open AI", "Claude", "Gemini", "Qwen", "DeepSeek", "Qwen", "Anthropic", "Meta AI", "Meta's", "ChatGPT"
     "Cohere", "Mistral AI", "Mistral's", "xAI", "Perplexity" # "Google AI", "Google's",  "Microsoft", "HuggingFace", "Hugging Face"
 ]
 
@@ -42,6 +42,15 @@ PATTERNS = [
     # Pattern: "I am [model type] ... {provider}"
     r"(?i)i\s+am\s+(?:a\s+)?(?:language\s+model|ai\s+model|assistant|chatbot|model)[^.!?]*?\b(" + "|".join(PROVIDERS) + r")\b[^.!?]*?[.!?]",
     
+    # Pattern: "I am called [provider]"
+    r"(?i)i\s+am\s+called\s+\b(" + "|".join(PROVIDERS) + r")\b[^.!?]*?[.!?]",
+
+    # Pattern: "I'm [provider]"
+    r"(?i)i'?m\s+\b(" + "|".join(PROVIDERS) + r")\b[^.!?]*?[.!?]",
+
+    # Pattern: "I am [provider]"
+    r"(?i)i\s+am\s+\b(" + "|".join(PROVIDERS) + r")\b[^.!?]*?[.!?]",
+
     # Pattern: "trained by ... {provider}" within one sentence  
     r"(?i)trained\s+by\s+[^.!?]*?\b(" + "|".join(PROVIDERS) + r")\b[^.!?]*?[.!?]",
     
@@ -59,13 +68,23 @@ PATTERNS = [
     
     # Pattern: "{provider}'s policy" or "{provider}'s guidelines"
     r"(?i)\b(" + "|".join(PROVIDERS) + r")(?:'s|'s)\s+(?:policy|policies|guidelines|terms|use-case)[^.!?]*?[.!?]",
+    
+    # Pattern: Any sentence containing "DeepSeek-R1" or "DeepSeek R1" (case-insensitive)
+    r"(?i)[^.!?]*\bDeepSeek[\s-]?R1\b[^.!?]*?[.!?]",
+
+    # Pattern: Anything with the word "Qwen" (case-sensitive)
+    r"(?i)[^.!?]*\bQwen\b[^.!?]*?[.!?]",
+    
+    # Pattern: Any sentence containing "Alibaba Qwen" (case-insensitive) or Alibaba Cloud
+    r"(?i)[^.!?]*\bAlibaba\s+Qwen\b[^.!?]*?[.!?]",
+    r"(?i)[^.!?]*\bAlibaba\s+Cloud\b[^.!?]*?[.!?]",
 ]
 
 
-def should_be_filtered_by_advanced_patterns(example, verbose=False, filter_user_turns=False):
+def should_be_filtered_by_advanced_patterns(example, column="messages", verbose=False, filter_user_turns=False):
     """Filter by more sophisticated patterns like 'as a ... OpenAI' or 'trained by ... Google'"""
     
-    for message in example["messages"]:
+    for message in example[column]:
         # Skip user messages unless explicitly enabled
         if message["role"] == "user" and not filter_user_turns:
             continue
@@ -73,7 +92,9 @@ def should_be_filtered_by_advanced_patterns(example, verbose=False, filter_user_
             continue
         
         content = message["content"]  # Keep original case
-        
+        # empty content check
+        if content is None:
+            return True
         for pattern in PATTERNS:
             if re.search(pattern, content):
                 if verbose:
@@ -86,9 +107,9 @@ def should_be_filtered_by_advanced_patterns(example, verbose=False, filter_user_
     return False
 
 
-def should_be_filtered_combined(example, verbose=False, filter_user_turns=False):
+def should_be_filtered_combined(example, column="messages", verbose=False, filter_user_turns=False):
     """Combined filtering function"""
-    return should_be_filtered_by_advanced_patterns(example, verbose, filter_user_turns)
+    return should_be_filtered_by_advanced_patterns(example, column=column, verbose=verbose, filter_user_turns=filter_user_turns)
 
 def load_dataset_from_parquet(dataset_name):
     """Load dataset directly from parquet files."""
@@ -123,7 +144,9 @@ def main():
     parser.add_argument("--filter-user-turns", action="store_true", 
                        help="Also filter based on user messages (default: only filter assistant messages)")
     parser.add_argument("--output-entity", type=str, help="Output entity (org/user) for the filtered dataset. If not provided, uses the same entity as the input dataset.")
-    
+    parser.add_argument("--column", type=str, default="messages", 
+                   help="Column name containing the messages (default: messages)")
+
     args = parser.parse_args()
     
     input_dataset = args.input_dataset
@@ -166,10 +189,10 @@ def main():
     
     # Filter function
     def filter_fn(example):
-        should_filter = should_be_filtered_combined(example, verbose=True, filter_user_turns=filter_user_turns)
+        should_filter = should_be_filtered_combined(example, column=args.column, verbose=True, filter_user_turns=filter_user_turns)
         if should_filter and len(filtered_examples) < 3:
             # Find which pattern matched and extract the matching text
-            for message in example["messages"]:
+            for message in example[args.column]:
                 # Apply same filtering logic for finding matched text
                 if message["role"] == "user" and not filter_user_turns:
                     continue
@@ -191,7 +214,7 @@ def main():
         return not should_filter
     
     print("Filtering dataset...")
-    filtered_dataset = dataset.filter(filter_fn)
+    filtered_dataset = dataset.filter(filter_fn, num_proc=32)
     print(f"Filtered size: {len(filtered_dataset)}")
     print(f"Removed {len(dataset) - len(filtered_dataset)} examples")
     
@@ -204,7 +227,7 @@ def main():
             if "_matched_text" in example:
                 role = example.get("_matched_role", "unknown")
                 print(f"  Matched text ({role}): '{example['_matched_text']}'")
-            messages = example.get("messages", [])
+            messages = example.get("args.column", [])
             for msg in messages:
                 if msg.get("role") == "user":
                     content = msg.get("content", "")
