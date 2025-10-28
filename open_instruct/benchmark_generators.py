@@ -493,7 +493,9 @@ def run_benchmark(
 
             # MBU = (Memory bytes / time) / peak_bandwidth * 100
             model_bytes_per_second = model_memory_bytes / batch_generation_time if batch_generation_time > 0 else 0
-            result_dict["mbu"] = 100 * model_bytes_per_second / model_dims.device_memory_bandwidth
+            result_dict["mbu"] = (
+                100 * model_bytes_per_second / (model_dims.device_memory_bandwidth * args.vllm_num_engines)
+            )
 
             save_completion_lengths([result_dict], timestamp, batch_idx)
             results.append(result_dict)

@@ -408,6 +408,31 @@ class TestModelDimsQwen25(unittest.TestCase):
         self.assertLessEqual(metrics["actor_mbu"], 100)
         self.assertLessEqual(metrics["learner_mfu"], 100)
 
+    def test_model_dims_match_vllm_config(self):
+        import unittest.mock
+
+        import vllm
+
+        model_name = "Qwen/Qwen2.5-7B"
+        expected_dims = MODEL_DIMS[model_name]
+
+        engine_args = vllm.EngineArgs(model=model_name, load_format="dummy", max_model_len=512)
+        vllm_config = engine_args.create_engine_config()
+
+        with unittest.mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"):
+            vllm_dims = utils.ModelDims.from_vllm_config(vllm_config)
+        vllm_dims.device_name = "h100"
+
+        self.assertEqual(vllm_dims.num_layers, expected_dims.num_layers)
+        self.assertEqual(vllm_dims.hidden_size, expected_dims.hidden_size)
+        self.assertEqual(vllm_dims.intermediate_size, expected_dims.intermediate_size)
+        self.assertEqual(vllm_dims.vocab_size, expected_dims.vocab_size)
+        self.assertEqual(vllm_dims.num_attn_heads, expected_dims.num_attn_heads)
+        self.assertEqual(vllm_dims.head_dim, expected_dims.head_dim)
+        self.assertEqual(vllm_dims.num_kv_heads, expected_dims.num_kv_heads)
+        self.assertEqual(vllm_dims.sliding_window, expected_dims.sliding_window)
+        self.assertEqual(vllm_dims.num_sliding_window_layers, expected_dims.num_sliding_window_layers)
+
 
 # useful for checking if public datasets are still available
 # class CheckTuluDatasetsTest(unittest.TestCase):
