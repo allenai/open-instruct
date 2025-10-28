@@ -21,7 +21,7 @@ python scripts/data/filtering_and_updates/filter_dataset_by_keywords.py --input-
 
 # Popular model providers
 PROVIDERS = [
-    "OpenAI", "Open AI", "Claude", "Gemini", "Qwen", "DeepSeek", "Qwen", "Anthropic", "Meta AI", "Meta's", "ChatGPT"
+    "OpenAI", "Open AI", "Claude", "Gemini", "Qwen", "DeepSeek", "Anthropic", "Meta AI", "Meta's", "ChatGPT"
     "Cohere", "Mistral AI", "Mistral's", "xAI", "Perplexity" # "Google AI", "Google's",  "Microsoft", "HuggingFace", "Hugging Face"
 ]
 
