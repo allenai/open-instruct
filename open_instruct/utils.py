@@ -1945,6 +1945,34 @@ class ModelDims:
 
         return int(total_bytes)
 
+    def calculate_mfu(
+        self,
+        prompt_lengths: list[int],
+        generation_time: float,
+        response_lengths: Optional[list[int]] = None,
+        samples_per_prompt: int = 1,
+        num_gpus: int = 1,
+    ) -> float:
+        total_flops = self.flops(prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt)
+        flops_per_second = total_flops / generation_time if generation_time > 0 else 0
+        total_device_flops = self.device_flops * num_gpus
+        return 100 * flops_per_second / total_device_flops
+
+    def calculate_mbu(
+        self,
+        prompt_lengths: list[int],
+        generation_time: float,
+        response_lengths: Optional[list[int]] = None,
+        samples_per_prompt: int = 1,
+        num_gpus: int = 1,
+    ) -> float:
+        total_memory_bytes = self.memory_bytes(
+            prompt_lengths, num_gpus, response_lengths=response_lengths, samples_per_prompt=samples_per_prompt
+        )
+        bytes_per_second = total_memory_bytes / generation_time if generation_time > 0 else 0
+        total_device_bandwidth = self.device_memory_bandwidth * num_gpus
+        return 100 * bytes_per_second / total_device_bandwidth
+
     def calculate_actor_utilization(
         self,
         prompt_lengths: list[int],
@@ -1954,19 +1982,20 @@ class ModelDims:
         num_inference_gpus: int,
         num_engines: int,
     ) -> dict[str, float]:
-        actor_total_flops = self.flops(prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt)
-        actor_total_memory_bytes = self.memory_bytes(
-            prompt_lengths, num_engines, response_lengths=response_lengths, samples_per_prompt=samples_per_prompt
+        actor_mfu = self.calculate_mfu(
+            prompt_lengths,
+            total_generation_time,
+            response_lengths=response_lengths,
+            samples_per_prompt=samples_per_prompt,
+            num_gpus=num_inference_gpus,
         )
-
-        flops_per_second = actor_total_flops / total_generation_time
-        bytes_per_second = actor_total_memory_bytes / total_generation_time
-
-        total_device_flops = self.device_flops * num_inference_gpus
-        total_device_bandwidth = self.device_memory_bandwidth * num_inference_gpus
-
-        actor_mfu = 100 * flops_per_second / total_device_flops
-        actor_mbu = 100 * bytes_per_second / total_device_bandwidth
+        actor_mbu = self.calculate_mbu(
+            prompt_lengths,
+            total_generation_time,
+            response_lengths=response_lengths,
+            samples_per_prompt=samples_per_prompt,
+            num_gpus=num_inference_gpus,
+        )
 
         check_calculation(
             actor_mfu,

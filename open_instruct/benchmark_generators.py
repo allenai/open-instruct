@@ -495,28 +495,18 @@ def run_benchmark(
                 "dataset_indices": all_dataset_indices,
             }
 
-            # Calculate total FLOPs for all prompts and responses in the batch
-            # No need to expand prompt_lengths - the flops method now handles samples_per_prompt
-            model_flops = model_dims.flops(
-                all_prompt_lengths, all_response_lengths, samples_per_prompt=args.num_samples_per_prompt_rollout
-            )
-
-            # MFU = (FLOPs / time) / peak_FLOPS * 100
-            model_flops_per_second = model_flops / batch_generation_time if batch_generation_time > 0 else 0
-            result_dict["mfu"] = 100 * model_flops_per_second / model_dims.device_flops
-
-            # Calculate total memory bytes for all prompts and responses in the batch
-            model_memory_bytes = model_dims.memory_bytes(
+            result_dict["mfu"] = model_dims.calculate_mfu(
                 all_prompt_lengths,
-                args.vllm_num_engines,
+                batch_generation_time,
                 response_lengths=all_response_lengths,
                 samples_per_prompt=args.num_samples_per_prompt_rollout,
             )
 
-            # MBU = (Memory bytes / time) / peak_bandwidth * 100
-            model_bytes_per_second = model_memory_bytes / batch_generation_time if batch_generation_time > 0 else 0
-            result_dict["mbu"] = (
-                100 * model_bytes_per_second / (model_dims.device_memory_bandwidth * args.vllm_num_engines)
+            result_dict["mbu"] = model_dims.calculate_mbu(
+                all_prompt_lengths,
+                batch_generation_time,
+                response_lengths=all_response_lengths,
+                samples_per_prompt=args.num_samples_per_prompt_rollout,
             )
 
             save_completion_lengths([result_dict], timestamp, batch_idx)
