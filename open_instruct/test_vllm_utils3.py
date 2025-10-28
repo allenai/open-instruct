@@ -82,10 +82,7 @@ class TestVllmUtils3(unittest.TestCase):
         result, is_eval = process_completed_request(
             request_id=request_id,
             outs=[mock_request_output],
-<<<<<<< HEAD
-=======
             tracking={},
->>>>>>> 85b56b51 (updated code)
             current_time=1001.0,
             tools=tools,
             request_metadata=request_metadata,
