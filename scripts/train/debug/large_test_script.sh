@@ -12,7 +12,7 @@ uv run python mason.py \
         --gs_model_name "stego32" \
         --priority urgent \
 	--preemptible \
-        --num_nodes 4 \
+        --num_nodes 3 \
 	--description "Large (multi-node) test script." \
         --timeout 3600 \
         --max_retries 0 \
@@ -49,7 +49,7 @@ uv run python mason.py \
         --total_episodes 200_000 \
 	--gather_whole_model False \
         --deepspeed_stage 3 \
-        --num_learners_per_node 8 8 8 \
+        --num_learners_per_node 8 8 \
         --vllm_num_engines 2 \
         --vllm_tensor_parallel_size 4 \
         --lr_scheduler_type constant \
