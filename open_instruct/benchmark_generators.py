@@ -272,7 +272,6 @@ def setup_vllm_engines(
         max_tool_calls=args.max_tool_calls,
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
-        eval_results_queue=evaluation_results_Q,
         actor_manager=actor_manager,
         inference_batch_size=args.inference_batch_size,
         use_fp8_kv_cache=args.use_fp8_kv_cache,
