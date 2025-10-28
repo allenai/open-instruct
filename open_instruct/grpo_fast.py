@@ -527,6 +527,8 @@ def masked_mean(
     """Compute mean of tensor with a masked values."""
     numerator = (values * mask).sum(axis=axis)
     denom = mask.sum(axis=axis) if denominator is None else denominator
+    # avoid division by zero
+    denom = torch.clamp(denom, min=1e-8) if isinstance(denom, torch.Tensor) else max(denom, 1e-8)
     return (numerator / denom).mean()
 
 
