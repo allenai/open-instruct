@@ -12,7 +12,7 @@ uv run python mason.py \
         --gs_model_name "stego32" \
         --priority urgent \
 	--preemptible \
-        --num_nodes 5 \
+        --num_nodes 4 \
 	--description "Large (multi-node) test script." \
         --timeout 3600 \
         --max_retries 0 \
@@ -22,9 +22,9 @@ uv run python mason.py \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
-        --num_samples_per_prompt_rollout 32 \
+        --num_samples_per_prompt_rollout 16 \
         --num_unique_prompts_rollout 64 \
-        --num_mini_batches 2 \
+        --num_mini_batches 1 \
         --num_epochs 1 \
         --learning_rate 5e-7 \
         --per_device_train_batch_size 1 \
@@ -49,7 +49,7 @@ uv run python mason.py \
         --total_episodes 200_000 \
 	--gather_whole_model False \
         --deepspeed_stage 3 \
-        --num_learners_per_node 8 8 8 8 \
+        --num_learners_per_node 8 8 8 \
         --vllm_num_engines 2 \
         --vllm_tensor_parallel_size 4 \
         --lr_scheduler_type constant \
@@ -58,7 +58,6 @@ uv run python mason.py \
         --seed 1 \
         --local_eval_every 1 \
 	--add_bos \
-        --activation_checkpointing True \
         --gradient_checkpointing \
         --try_launch_beaker_eval_jobs_on_weka True \
         --with_tracking \
