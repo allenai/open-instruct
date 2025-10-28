@@ -224,7 +224,7 @@ def main():
             if "_matched_text" in example:
                 role = example.get("_matched_role", "unknown")
                 print(f"  Matched text ({role}): '{example['_matched_text']}'")
-            messages = example.get("args.column", [])
+            messages = example.get(args.column, [])
             for msg in messages:
                 if msg.get("role") == "user":
                     content = msg.get("content", "")
