@@ -133,8 +133,8 @@ def save_benchmark_results_to_csv(
         "total_time": total_time,
         "total_generation_time": agg_results["total_generation_time"],
         "total_weight_sync_time": agg_results["total_weight_sync_time"],
-        "generation_time_percentage": agg_results["total_generation_time"] / total_time * 100,
-        "weight_sync_time_percentage": agg_results["total_weight_sync_time"] / total_time * 100
+        "generation_time_percentage": (agg_results["total_generation_time"] / total_time) * 100,
+        "weight_sync_time_percentage": (agg_results["total_weight_sync_time"] / total_time) * 100
         if total_time > 0
         else 0,
         "total_tokens": agg_results["total_num_new_tokens"],
@@ -241,21 +241,14 @@ def setup_vllm_engines(
         ray.shutdown()
     ray.init(ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"]})
 
-    pg = None
-    if args.single_gpu_mode:
-        bundles = [{"GPU": 1, "CPU": 1} for _ in range(args.vllm_num_engines)]
-        pg = ray.util.placement_group(bundles, strategy="PACK")
-        ray.get(pg.ready())
+    bundles = [{"GPU": args.vllm_tensor_parallel_size, "CPU": 1} for _ in range(args.vllm_num_engines)]
+    pg = ray.util.placement_group(bundles, strategy="PACK")
+    ray.get(pg.ready())
 
     param_prompt_Q = ray_queue.Queue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
-    evaluation_results_Q = ray_queue.Queue(maxsize=10)
 
-    queues_to_monitor = {
-        "Param Prompt Queue": param_prompt_Q,
-        "Inference Results Queue": inference_results_Q,
-        "Evaluation Results Queue": evaluation_results_Q,
-    }
+    queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
     logger.info("ActorManager created successfully")
 
@@ -306,11 +299,7 @@ def simulate_weight_sync(
     ray.get(actor_manager.set_should_stop.remote(True))
     logger.debug("Set should_stop to True for weight sync simulation")
 
-    # Previously we called process_from_queue with a timeout to ensure actors drained.
-    # That method no longer accepts a timeout argument, so instead just sanity-check
-    # background threads to surface any latent failures.
-    for engine in vllm_engines:
-        ray.get(engine.check_background_threads.remote())
+    ray.get([engine.check_background_threads.remote() for engine in vllm_engines])
 
     # Sleep for 1 second to simulate weight sync time (from wandb metrics)
     time.sleep(1.0)
