@@ -12,6 +12,7 @@ import csv
 import dataclasses
 import gc
 import json
+import os
 import pathlib
 import threading
 import time
@@ -239,7 +240,7 @@ def setup_vllm_engines(
     # Initialize Ray
     if ray.is_initialized():
         ray.shutdown()
-    ray.init(ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"]})
+    ray.init(ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"], "env_vars": dict(os.environ)})
 
     bundles = [{"GPU": args.vllm_tensor_parallel_size, "CPU": 1} for _ in range(args.vllm_num_engines)]
     pg = ray.util.placement_group(bundles, strategy="PACK")
