@@ -286,6 +286,8 @@ class Args:
     """Whether to refill the batch with *new prompts/completions* after filtering."""
     active_fill_max_attempts: int = 3
     """How many times to attempt to fill"""
+    no_resample_solve_rate: float = None
+    """If a prompt is solved at more than this rate across K completions, don't resample it for next epoch"""
 
     # Reward
     # -- r1 style format reward
@@ -1878,6 +1880,14 @@ def data_preparation_thread(
                 if args.apply_r1_style_format_reward and args.additive_format_reward:
                     max_possible_score += args.r1_style_format_reward
 
+                if args.no_resample_solve_rate is not None:
+                    percent_solved_prompt = scores_per_prompt_step.mean(axis=-1) / max_possible_score
+                    solved_mask = percent_solved_prompt >= args.no_resample_solve_rate
+                    solved_expanded_mask = np.repeat(solved_mask, per_prompt_rollout)
+                    solved_indices = np.where(solved_expanded_mask)[0]
+                    solved_prompt_indices = batch_step[solved_indices.tolist()].indices
+                    train_iterator.exclude_indices(list(set(solved_prompt_indices)))
+
                 non_zero_std_mask = scores_per_prompt_step.std(axis=-1) != 0
                 expanded_mask = np.repeat(non_zero_std_mask, per_prompt_rollout)
                 non_zero_indices = np.where(expanded_mask)[0]
@@ -2069,54 +2079,6 @@ def data_preparation_thread(
         masks = aggregated_masks
         finish_reasons = aggregated_finish_reasons
         vllm_logprobs = aggregated_vllm_logprobs
-
-        # if args.fill_completions:
-        #     with Timer("⏱ [Data Preparation Thread] Refill completions"):
-        #         current_batch_size = len(scores)
-        #         original_prompt_cnt = original_batch_size // args.num_samples_per_prompt_rollout
-        #         current_prompt_cnt = current_batch_size // args.num_samples_per_prompt_rollout
-        #         need_to_fill_prompt = original_prompt_cnt - current_prompt_cnt
-        #         k = args.num_samples_per_prompt_rollout
-        #
-        #         if need_to_fill_prompt > 0 and current_prompt_cnt > 0:
-        #             scores_matrix = scores.reshape(current_prompt_cnt, k)
-        #             stds = scores_matrix.std(axis=1) + 1e-8
-        #             probs = stds / stds.sum()
-        #
-        #             logger.info(
-        #                 f"[Refill completions] Need to fill {need_to_fill_prompt} prompts to maintain batch size. "
-        #                 f"Original: {original_prompt_cnt}, Current: {current_prompt_cnt}"
-        #             )
-        #
-        #             sampled_prompt_ids = np.random.choice(
-        #                 current_prompt_cnt, size=need_to_fill_prompt, replace=True, p=probs
-        #             )
-        #
-        #             sampled_indices = []
-        #             for pid in sampled_prompt_ids:
-        #                 start = pid * k
-        #                 sampled_indices.extend(range(start, start + k))
-        #
-        #             advantages = np.concatenate([advantages, advantages[sampled_indices]])
-        #             scores = np.concatenate([scores, scores[sampled_indices]])
-        #             responses += [responses[i] for i in sampled_indices]
-        #             masks += [masks[i] for i in sampled_indices]
-        #
-        #             sampled_batch = batch[sampled_indices]
-        #
-        #             batch = Batch(
-        #                 queries=batch.queries + sampled_batch.queries,
-        #                 ground_truths=batch.ground_truths + sampled_batch.ground_truths,
-        #                 datasets=batch.datasets + sampled_batch.datasets,
-        #                 indices=batch.indices + sampled_batch.indices if batch.indices is not None else None,
-        #             )
-        #
-        #             finish_reasons += [finish_reasons[i] for i in sampled_indices]
-        #             vllm_logprobs += [vllm_logprobs[i] for i in sampled_indices]
-        #
-        #             logger.info(
-        #                 f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses"
-        #             )
 
         # Count groups with all zero rewards
         all_zero_groups = (scores_per_prompt == 0).all(axis=-1).sum()
