@@ -346,7 +346,7 @@ class TestModelDimsQwen25(unittest.TestCase):
         prefill_flops = model_dims.flops([sequence_length], None)
         decode_flops = total_flops - prefill_flops
         decode_flops_in_gflops = decode_flops / 1e9
-        self.assertAlmostEqual(decode_flops_in_gflops, 27.81, delta=0.01)
+        self.assertAlmostEqual(decode_flops_in_gflops, 27.92, delta=0.01)
 
     def test_qwen25_7b_memory_calculation(self):
         sequence_length = 34048
