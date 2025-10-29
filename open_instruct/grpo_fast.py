@@ -893,7 +893,7 @@ class PolicyTrainerRayProcess(RayProcess):
         return all_refs
 
     def update_ref_policy(self):
-        for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
+        for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters(), strict=False):
             if self.args.deepspeed_stage == 3:
                 with deepspeed.zero.GatheredParameters([param, ref_param], modifier_rank=0):
                     if deepspeed.comm.get_rank() == 0:
@@ -2309,7 +2309,7 @@ def split_and_insert_batch(
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
     for idx, query, ground_truth, dataset, raw_query in zip(
-        batch.indices, batch.queries, batch.ground_truths, batch.datasets, batch.raw_queries
+        batch.indices, batch.queries, batch.ground_truths, batch.datasets, batch.raw_queries, strict=False
     ):
         pending_queries_map.insert(idx, query, ground_truth, dataset, raw_query)
         param_prompt_Q.put(

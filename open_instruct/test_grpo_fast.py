@@ -436,7 +436,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         # The first reference is already added by setup_and_split_batch
         for _ in range(num_samples_per_prompt - 1):
             for idx, query, ground_truth, dataset, raw_query in zip(
-                dataset_indices, queries_next, ground_truths_next, datasets_next, raw_queries_next
+                dataset_indices, queries_next, ground_truths_next, datasets_next, raw_queries_next, strict=False
             ):
                 pending_queries_map.insert(idx, query, ground_truth, dataset, raw_query)
 

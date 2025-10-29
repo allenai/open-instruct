@@ -749,7 +749,7 @@ class PolicyTrainerRayProcess(RayProcess):
             ray.get(refss)
 
     def update_ref_policy(self):
-        for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
+        for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters(), strict=False):
             if self.args.deepspeed_stage == 3:
                 with deepspeed.zero.GatheredParameters([param, ref_param], modifier_rank=0):
                     if deepspeed.comm.get_rank() == 0:
@@ -1206,7 +1206,7 @@ def vllm_generate_thread(
         # Generate responses in parallel across engines
         futures = [
             vllm_engine.generate.remote(sampling_params=sampling_params, prompt_token_ids=queries, use_tqdm=False)
-            for vllm_engine, queries in zip(vllm_engines, split_queries)
+            for vllm_engine, queries in zip(vllm_engines, split_queries, strict=False)
         ]
         # Gather all responses
         all_outputs = ray.get(futures)

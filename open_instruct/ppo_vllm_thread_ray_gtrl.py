@@ -995,7 +995,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     vllm_engine.generate.remote(
                         sampling_params=sampling_params, prompt_token_ids=queries, use_tqdm=False
                     )
-                    for vllm_engine, queries in zip(vllm_engines, split_queries)
+                    for vllm_engine, queries in zip(vllm_engines, split_queries, strict=False)
                 ]
                 # Gather all responses
                 all_outputs = ray.get(futures)
