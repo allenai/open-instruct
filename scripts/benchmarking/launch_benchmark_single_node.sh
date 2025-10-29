@@ -46,7 +46,7 @@ for model_name_or_path in "$@"; do
         --cluster ai2/saturn \
 	      --non_resumable \
         --image "$image_name" \
-        --description "Running benchmark with response length of $response_length at commit $git_hash on branch $git_branch with model $model_name_or_path." \
+        --description "Running single node benchmark with response length of $response_length at commit $git_hash on branch $git_branch with model $model_name_or_path." \
         --pure_docker_mode \
         --workspace ai2/open-instruct-dev \
       	--preemptible \
