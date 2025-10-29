@@ -1566,7 +1566,7 @@ def accumulate_inference_batches(
     model_dims: utils.ModelDims,
     actor_manager=None,
     timeout: Optional[float] = None,
-) -> tuple[GenerationResult, Batch]:
+) -> tuple[GenerationResult, Batch, list[int], list[int]]:
     """Accumulate multiple inference results into a single training batch.
 
     Args:
@@ -1792,7 +1792,7 @@ def data_preparation_thread(
             fill_iteration += 1
             # Streaming accumulation: collect results as they arrive
             with Timer(f"🚀 [Data Preparation Thread] Getting {prompts_to_request} response ids") as timer:
-                result_step, batch_step, prompt_lengths_step, response_lengths_step = accumulate_inference_batches(
+                result, batch, prompt_lengths, response_lengths = accumulate_inference_batches(
                     inference_results_Q,
                     pending_queries_map,
                     args,
@@ -1801,52 +1801,52 @@ def data_preparation_thread(
                     model_dims=model_dims,
                     actor_manager=actor_manager,
                 )
-                if isinstance(result_step, ShutdownSentinel):
+                if isinstance(result, ShutdownSentinel):
                     logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
                     return
 
             getting_response_time += timer.duration
 
             if args.num_samples_per_prompt_rollout > 1:
-                batch_step = Batch(
-                    queries=repeat_each(batch_step.queries, per_prompt_rollout),
-                    ground_truths=repeat_each(batch_step.ground_truths, per_prompt_rollout),
-                    datasets=repeat_each(batch_step.datasets, per_prompt_rollout),
-                    raw_queries=repeat_each(batch_step.raw_queries, per_prompt_rollout),
-                    indices=repeat_each(batch_step.indices, per_prompt_rollout) if batch_step.indices else None,
+                batch = Batch(
+                    queries=repeat_each(batch.queries, per_prompt_rollout),
+                    ground_truths=repeat_each(batch.ground_truths, per_prompt_rollout),
+                    datasets=repeat_each(batch.datasets, per_prompt_rollout),
+                    raw_queries=repeat_each(batch.raw_queries, per_prompt_rollout),
+                    indices=repeat_each(batch.indices, per_prompt_rollout) if batch.indices else None,
                 )
 
-            for i in range(len(result_step.finish_reasons)):
-                if result_step.finish_reasons[i] == "stop" and len(result_step.responses[i]) == 0:
-                    result_step.responses[i].append(tokenizer.eos_token_id)
-                    result_step.masks[i].append(1)
-                    result_step.logprobs[i].append(float("nan"))
+            for i in range(len(result.finish_reasons)):
+                if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
+                    result.responses[i].append(tokenizer.eos_token_id)
+                    result.masks[i].append(1)
+                    result.logprobs[i].append(float("nan"))
 
             with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
-                decoded_responses_step = tokenizer.batch_decode(result_step.responses, skip_special_tokens=True)
-                decoded_queries_step = batch_step.raw_queries
+                decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
+                decoded_queries = batch.raw_queries
 
             with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
-                scores_step, reward_metrics_step = asyncio.run(
+                scores, reward_metrics = asyncio.run(
                     reward_fn(
-                        result_step.responses,
-                        decoded_responses_step,
-                        batch_step,
-                        result_step.finish_reasons,
-                        result_step.request_info,
-                        decoded_queries_step,
+                        result.responses,
+                        decoded_responses,
+                        batch,
+                        result.finish_reasons,
+                        result.request_info,
+                        decoded_queries,
                     )
                 )
-                scores_step = np.array(scores_step)
-                scores_per_prompt_step = scores_step.reshape(-1, per_prompt_rollout)
-                mean_grouped_rewards = scores_per_prompt_step.mean(axis=-1)
+                scores = np.array(scores)
+                scores_per_prompt = scores.reshape(-1, per_prompt_rollout)
+                mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
                 mean_grouped_rewards = np.repeat(mean_grouped_rewards, per_prompt_rollout, axis=0)
-                std_grouped_rewards = scores_per_prompt_step.std(axis=-1)
+                std_grouped_rewards = scores_per_prompt.std(axis=-1)
                 std_grouped_rewards = np.repeat(std_grouped_rewards, per_prompt_rollout, axis=0)
                 if args.advantage_normalization_type == "standard":
-                    advantages_step = (scores_step - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
+                    advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
                 elif args.advantage_normalization_type == "centered":
-                    advantages_step = scores_step - mean_grouped_rewards
+                    advantages = scores - mean_grouped_rewards
                 else:
                     raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
@@ -1858,42 +1858,42 @@ def data_preparation_thread(
                 if args.apply_r1_style_format_reward and args.additive_format_reward:
                     max_possible_score += args.r1_style_format_reward
 
-                non_zero_std_mask = scores_per_prompt_step.std(axis=-1) != 0
+                non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
                 expanded_mask = np.repeat(non_zero_std_mask, per_prompt_rollout)
                 non_zero_indices = np.where(expanded_mask)[0]
 
                 num_zero_std_prompts = (~non_zero_std_mask).sum()
-                num_filtered_responses = len(scores_step) - len(non_zero_indices)
+                num_filtered_responses = len(scores) - len(non_zero_indices)
                 if num_filtered_responses > 0:
                     logger.info(
                         f"[Zero-gradient filtering] Filtered {num_zero_std_prompts} prompts with zero std "
-                        f"({num_filtered_responses} responses). Retention rate: {len(non_zero_indices) / len(scores_step):.2%}"
+                        f"({num_filtered_responses} responses). Retention rate: {len(non_zero_indices) / len(scores):.2%}"
                     )
 
-                advantages_step = advantages_step[non_zero_indices]
-                scores_step = scores_step[non_zero_indices]
+                advantages = advantages[non_zero_indices]
+                scores = scores[non_zero_indices]
                 kept_indices = non_zero_indices.tolist()
-                batch_step = batch_step[kept_indices]
+                batch = batch[kept_indices]
 
                 prompt_indices_kept = np.where(non_zero_std_mask)[0].tolist()
-                prompt_lengths_kept = [prompt_lengths_step[i] for i in prompt_indices_kept]
-                response_lengths_kept = [response_lengths_step[i] for i in kept_indices]
+                prompt_lengths_kept = [prompt_lengths[i] for i in prompt_indices_kept]
+                response_lengths_kept = [response_lengths[i] for i in kept_indices]
 
             chunk = FilteredChunk(
-                result=result_step,
-                batch=batch_step,
+                result=result,
+                batch=batch,
                 kept_indices=kept_indices,
                 prompt_lengths=prompt_lengths_kept,
                 response_lengths=response_lengths_kept,
-                scores=scores_step,
-                advantages=advantages_step,
-                reward_metrics=(reward_metrics_step, len(scores_step)),
+                scores=scores,
+                advantages=advantages,
+                reward_metrics=(reward_metrics, len(scores)),
             )
             aggregation.add_chunk(
-                chunk=chunk, token_statistics=result_step.token_statistics, prompts_filtered=int(num_zero_std_prompts)
+                chunk=chunk, token_statistics=result.token_statistics, prompts_filtered=int(num_zero_std_prompts)
             )
 
-            prompts_kept_this_iter = len(scores_step) // per_prompt_rollout if per_prompt_rollout > 0 else 0
+            prompts_kept_this_iter = len(scores) // per_prompt_rollout if per_prompt_rollout > 0 else 0
 
             if not args.active_fill_completions:
                 break
@@ -1932,16 +1932,16 @@ def data_preparation_thread(
                 indices_list = []
 
             for chunk in aggregation.chunks:
-                batch_step = chunk.batch
-                queries.extend(batch_step.queries)
-                ground_truths.extend(batch_step.ground_truths)
-                datasets.extend(batch_step.datasets)
+                chunk_batch = chunk.batch
+                queries.extend(chunk_batch.queries)
+                ground_truths.extend(chunk_batch.ground_truths)
+                datasets.extend(chunk_batch.datasets)
                 if raw_queries_present:
-                    assert batch_step.raw_queries is not None
-                    raw_queries_list.extend(batch_step.raw_queries)
+                    assert chunk_batch.raw_queries is not None
+                    raw_queries_list.extend(chunk_batch.raw_queries)
                 if indices_present:
-                    assert batch_step.indices is not None
-                    indices_list.extend(batch_step.indices)
+                    assert chunk_batch.indices is not None
+                    indices_list.extend(chunk_batch.indices)
 
             batch = Batch(
                 queries=queries,
