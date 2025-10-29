@@ -232,14 +232,9 @@ def setup_vllm_engines(
     args: grpo_fast.Args,
     tokenizer_config: dataset_transformation.TokenizerConfig,
     model_config: model_utils.ModelConfig,
-    max_model_len: int = 20480,
+    max_model_len: int,
 ) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue, ray.actor.ActorHandle]:
     """Set up vLLM engines and queues."""
-    logger.info("Setting up vLLM engines...")
-
-    # Initialize Ray
-    if ray.is_initialized():
-        ray.shutdown()
     ray.init(ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"], "env_vars": dict(os.environ)})
 
     param_prompt_Q = ray_queue.Queue(maxsize=10)
@@ -638,21 +633,10 @@ def print_summary(
 
 def cleanup(vllm_engines: list[ray.actor.ActorHandle], actor_manager: Optional[ray.actor.ActorHandle] = None) -> None:
     """Clean up resources."""
-    if actor_manager:
-        try:
-            ray.get(actor_manager.set_should_stop.remote(True))
-            logger.info("Signaled all engines to stop via actor manager")
-        except Exception as e:
-            logger.warning(f"Error signaling actor manager: {e}")
-
     for engine in vllm_engines:
-        try:
-            ray.kill(engine)
-        except Exception as e:
-            logger.warning(f"Error killing engine: {e}")
+        ray.kill(engine)
 
-    if ray.is_initialized():
-        ray.shutdown()
+    ray.shutdown()
 
 
 def main() -> None:
@@ -677,7 +661,7 @@ def main() -> None:
     dataset = setup_dataset(args, tokenizer_config)
     max_model_len = args.max_prompt_token_length + args.response_length
     vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(
-        args, tokenizer_config, model_config, max_model_len=max_model_len
+        args, tokenizer_config, model_config, max_model_len
     )
 
     # Create the timestamp here so we use it for both filenames.
