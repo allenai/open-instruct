@@ -68,384 +68,61 @@ class TestRLUtils(unittest.TestCase):
                 [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3],
             ]
         )
-        rewards = np.array(
-            [
-                [0, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30],
-            ]
-        )
+        rewards = np.zeros((3, 13))
+        rewards[0, 5] = 10
+        rewards[1, 6] = 20
+        rewards[2, 12] = 30
         adv, ret = open_instruct.rl_utils.calculate_advantages(values, rewards, gamma, lam)
 
-        packed_response_masks = np.array(
-            [
-                [
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                ]
-            ]
-        )
-        packed_values = np.array(
-            [
-                [
-                    5,
-                    5,
-                    5,
-                    5,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    5,
-                    5,
-                    5,
-                    5,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    5,
-                    5,
-                    5,
-                    5,
-                    5,
-                    5,
-                    5,
-                    3,
-                    3,
-                    3,
-                    3,
-                    3,
-                    3,
-                    3,
-                    3,
-                    3,
-                    3,
-                    3,
-                    3,
-                    3,
-                ]
-            ]
-        )
+        packed_response_masks = np.zeros((1, 42), dtype=int)
+        packed_response_masks[0, 5:11] = 1
+        packed_response_masks[0, 15:22] = 1
+        packed_response_masks[0, 29:42] = 1
+
+        packed_values = np.full((1, 41), 5)
+        packed_values[0, 4:10] = 1
+        packed_values[0, 14:21] = 2
+        packed_values[0, 28:41] = 3
+
         packed_values_masked = np.where(packed_response_masks[:, 1:] == 0, 0, packed_values)
-        packed_rewards = np.array(
-            [
-                [
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    10,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    20,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    30,
-                ]
-            ]
-        )
-        packed_dones = np.array(
-            [
-                [
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    2,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    3,
-                ]
-            ]
-        )
+
+        packed_rewards = np.zeros((1, 42))
+        packed_rewards[0, 10] = 10
+        packed_rewards[0, 21] = 20
+        packed_rewards[0, 41] = 30
+
+        packed_dones = np.zeros((1, 42))
+        packed_dones[0, 10] = 1
+        packed_dones[0, 21] = 2
+        packed_dones[0, 41] = 3
+
         packed_adv, packed_ret = open_instruct.rl_utils.calculate_advantages_packed(
             packed_values_masked, packed_rewards[:, 1:], gamma, lam, packed_dones[:, 1:], packed_response_masks[:, 1:]
         )
 
-        packed_values = np.array(
-            [
-                [
-                    -1,
-                    -1,
-                    -1,
-                    -1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    -1,
-                    -1,
-                    -1,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    -1,
-                    -1,
-                    -1,
-                    -1,
-                    -1,
-                    -1,
-                    3,
-                    3,
-                    3,
-                    3,
-                    3,
-                    3,
-                    3,
-                    3,
-                    3,
-                    3,
-                    3,
-                    3,
-                    50256,
-                ]
-            ]
-        )
-        packed_rewards = np.array(
-            [
-                [
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    10,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    20,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    30,
-                    50256,
-                ]
-            ]
-        )
-        packed_dones = np.array(
-            [
-                [
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    50256,
-                ]
-            ]
-        )
-        packed_response_masks = np.array(
-            [
-                [
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    1,
-                    1,
-                    1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    1,
-                    50256,
-                ]
-            ]
-        )
+        packed_values = np.full((1, 37), -1)
+        packed_values[0, 4:9] = 1
+        packed_values[0, 12:18] = 2
+        packed_values[0, 24:36] = 3
+        packed_values[0, 36] = 50256
+
+        packed_rewards = np.zeros((1, 38))
+        packed_rewards[0, 8] = 10
+        packed_rewards[0, 17] = 20
+        packed_rewards[0, 35] = 30
+        packed_rewards[0, 37] = 50256
+
+        packed_dones = np.zeros((1, 37))
+        packed_dones[0, 8] = 1
+        packed_dones[0, 17] = 1
+        packed_dones[0, 35] = 1
+        packed_dones[0, 36] = 50256
+
+        packed_response_masks = np.zeros((1, 37), dtype=int)
+        packed_response_masks[0, 4:9] = 1
+        packed_response_masks[0, 12:18] = 1
+        packed_response_masks[0, 24:36] = 1
+        packed_response_masks[0, 36] = 50256
         packed_adv, packed_ret = open_instruct.rl_utils.calculate_advantages_packed(
             packed_values, packed_rewards, gamma, lam, packed_dones, packed_response_masks
         )
