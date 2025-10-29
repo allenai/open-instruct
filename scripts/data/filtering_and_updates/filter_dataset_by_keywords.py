@@ -211,7 +211,7 @@ def main():
         print("\nCollecting example filtered instances...")
         examples_found = 0
         print_within = min(10000, len(dataset))
-        for example in dataset[:print_within]:
+        for example in dataset.select(range(print_within)):
             if should_be_filtered_combined(example, column=args.column, verbose=True, filter_user_turns=filter_user_turns):
                 # Show the example
                 examples_found += 1
