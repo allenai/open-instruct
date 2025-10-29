@@ -275,7 +275,7 @@ def setup_vllm_engines(
 
     logger.info("vLLM engines ready")
 
-    return (vllm_engines, param_prompt_Q, inference_results_Q, actor_manager)
+    return vllm_engines, param_prompt_Q, inference_results_Q, actor_manager
 
 
 def simulate_weight_sync(
@@ -344,7 +344,6 @@ def submission_thread(
                     start_time=time.perf_counter(),
                 )
             )
-
     logger.info(f"[Submission Thread] All {num_batches} batches submitted")
 
 
@@ -395,7 +394,6 @@ def run_benchmark(
     warmup_end_idx = min(args.num_unique_prompts_rollout, len(dataset))
     warmup_data = dataset[warmup_start_idx:warmup_end_idx]
     warmup_prompts = warmup_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
-
     # Create individual PromptRequest for each warmup prompt
     for i, prompt in enumerate(warmup_prompts):
         dataset_index = warmup_start_idx + i
@@ -416,16 +414,9 @@ def run_benchmark(
 
         # Collect all warmup results (one per prompt)
         warmup_batch_size = warmup_end_idx - warmup_start_idx
-        warmup_results = []
-        for i in range(warmup_batch_size):
-            utils.ray_get_with_progress(
-                [engine.check_background_threads.remote() for engine in vllm_engines],
-                "Health check on background threads.",
-            )
-            result = inference_results_Q.get()
-            warmup_results.append(result)
+        warmup_results = [inference_results_Q.get() for _ in range(warmup_batch_size)]
 
-        total_warmup_responses = sum((len(result.responses) for result in warmup_results))
+        total_warmup_responses = sum(len(result.responses) for result in warmup_results)
         logger.info(
             f"Warmup batch completed with {total_warmup_responses} total responses from {len(warmup_results)} prompts"
         )
@@ -447,23 +438,18 @@ def run_benchmark(
                 submission_future.result()
 
             # Collect all results for this batch (one per prompt)
-            batch_results = []
-            for i in range(args.num_unique_prompts_rollout):
-                for engine in vllm_engines:
-                    ray.get(engine.check_background_threads.remote())
-                result = inference_results_Q.get()
-                batch_results.append(result)
+            batch_results = [inference_results_Q.get() for _ in range(args.num_unique_prompts_rollout)]
 
             # Simulate weight sync between batches
             weight_sync_time = simulate_weight_sync(actor_manager, vllm_engines, args)
             completion_time = time.perf_counter()
 
             # Calculate generation time from the earliest request start time (inclusive of sync)
-            earliest_start_time = min((result.start_time for result in batch_results if result.start_time))
+            earliest_start_time = min(result.start_time for result in batch_results if result.start_time)
             batch_generation_time = completion_time - earliest_start_time if earliest_start_time else 0
 
             # Aggregate metrics across all results in the batch
-            total_new_tokens = sum((len(response) for result in batch_results for response in result.responses))
+            total_new_tokens = sum(len(response) for result in batch_results for response in result.responses)
             tokens_per_second = total_new_tokens / batch_generation_time if batch_generation_time > 0 else 0
 
             # Collect all finish reasons and response lengths
@@ -524,7 +510,7 @@ def run_benchmark(
             )
 
         # Calculate total time for main benchmark only
-        main_benchmark_time = sum((r["generation_time"] for r in results))
+        main_benchmark_time = sum(r["generation_time"] for r in results)
 
         print_summary(results, main_benchmark_time, args, model_config, model_dims)
         save_benchmark_results_to_csv(results, main_benchmark_time, args, model_config)
