@@ -605,7 +605,7 @@ class ShufflingIterator:
     def set_state(self, state: Dict[str, Any]) -> None:
         """Restore the iterator state from a checkpoint."""
         self.index = state["index"]
-        self.epoch_number = state["epoch_number"]
+        self.epoch_number = state.get("epoch_number", 0)
         self.data = state["data"].copy()
         self.rng.bit_generator.state = state["rng_state"]
 
@@ -3071,7 +3071,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     pprint([args, model_config])
 
     # Initialize Ray before creating Ray objects
-    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"]})
+    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
     # Create Ray queues.
     # Since we now send/receive individual prompts, queue size should accommodate
