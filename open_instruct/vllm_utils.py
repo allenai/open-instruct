@@ -33,7 +33,7 @@ import torch
 import torch.distributed
 import vllm
 from ray.util import queue as ray_queue
-from ray.util.placement_group import placement_group
+from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed.distributed_c10d import (
     Backend,
@@ -791,7 +791,7 @@ def create_vllm_engines(
     max_model_len: int,
     vllm_gpu_memory_utilization: float = 0.9,
     single_gpu_mode: bool = False,
-    pg: ray.util.placement_group | None = None,
+    pg: PlacementGroup | None = None,
     tools: dict[str, Tool] | None = None,
     max_tool_calls: list[int] = [5],
     prompt_queue=None,
