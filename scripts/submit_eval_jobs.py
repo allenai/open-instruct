@@ -122,7 +122,7 @@ args = parser.parse_args()
 
 workspace = args.workspace
 # Do not silently alter the workspace; require fully-qualified form.
-if "/" not in workspace:
+if len(workspace.split('/')) != 2 or not all(workspace.split('/')):
     raise ValueError(
         f"--workspace must be fully qualified as '<org>/<workspace>' (e.g., 'ai2/oe-adapt-general'). Received: '{workspace}'"
     )
