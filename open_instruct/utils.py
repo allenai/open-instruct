@@ -1874,6 +1874,7 @@ class ModelDims:
         self,
         prompt_lengths: list[int],
         num_engines: int,
+        num_gpus_per_engine: int,
         response_lengths: Optional[list[int]] = None,
         samples_per_prompt: int = 1,
         dtype_bytes: int = 2,
@@ -1896,11 +1897,20 @@ class ModelDims:
         num_sliding_layers = self.num_sliding_window_layers
         kv_bytes_per_token = 2 * self.num_kv_heads * self.head_dim * dtype_bytes
 
+        if num_engines < 1:
+            raise ValueError(f"num_engines must be >= 1, got {num_engines}")
+        if num_gpus_per_engine < 1:
+            raise ValueError(f"num_gpus_per_engine must be >= 1, got {num_gpus_per_engine}")
+        # Tensor-parallel shards weights/KV cache within an engine, so total bytes are unchanged
+        # compared to a single-GPU engine; the value is still validated for clarity.
+
         total_bytes = 0
         batch_size = len(prompt_lengths)
+        active_prefill_engines = min(num_engines, batch_size)
+        prefill_scale = active_prefill_engines / batch_size
 
         for P in prompt_lengths:
-            total_bytes += self.num_layers * P * per_layer_weight_bytes / batch_size
+            total_bytes += self.num_layers * P * per_layer_weight_bytes * prefill_scale
             total_bytes += P * embedding_bytes
             total_bytes += lm_head_bytes
             total_bytes += self.num_layers * P * kv_bytes_per_token
@@ -1909,14 +1919,19 @@ class ModelDims:
             assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt
 
             total_sequences = len(prompt_lengths) * samples_per_prompt
+            active_decode_engines = min(num_engines, len(prompt_lengths))
             global_max_response_len = max(response_lengths)
             total_response_tokens = sum(response_lengths)
 
             total_bytes += (
-                self.num_layers * global_max_response_len * per_layer_weight_bytes * num_engines / total_sequences
+                self.num_layers
+                * global_max_response_len
+                * per_layer_weight_bytes
+                * active_decode_engines
+                / total_sequences
             )
             total_bytes += total_response_tokens * embedding_bytes
-            total_bytes += global_max_response_len * num_engines * lm_head_bytes
+            total_bytes += global_max_response_len * active_decode_engines * lm_head_bytes
             total_bytes += self.num_layers * total_response_tokens * kv_bytes_per_token
 
             response_idx = 0
@@ -1964,13 +1979,18 @@ class ModelDims:
         generation_time: float,
         response_lengths: Optional[list[int]] = None,
         samples_per_prompt: int = 1,
-        num_gpus: int = 1,
+        num_engines: int = 1,
+        num_gpus_per_engine: int = 1,
     ) -> float:
         total_memory_bytes = self.memory_bytes(
-            prompt_lengths, num_gpus, response_lengths=response_lengths, samples_per_prompt=samples_per_prompt
+            prompt_lengths,
+            num_engines,
+            num_gpus_per_engine,
+            response_lengths=response_lengths,
+            samples_per_prompt=samples_per_prompt,
         )
         bytes_per_second = total_memory_bytes / generation_time if generation_time > 0 else 0
-        total_device_bandwidth = self.device_memory_bandwidth * num_gpus
+        total_device_bandwidth = self.device_memory_bandwidth * num_engines * num_gpus_per_engine
         return 100 * bytes_per_second / total_device_bandwidth
 
     def calculate_actor_utilization(
@@ -1981,6 +2001,7 @@ class ModelDims:
         samples_per_prompt: int,
         num_inference_gpus: int,
         num_engines: int,
+        num_gpus_per_engine: int,
     ) -> dict[str, float]:
         actor_mfu = self.calculate_mfu(
             prompt_lengths,
@@ -1994,7 +2015,8 @@ class ModelDims:
             total_generation_time,
             response_lengths=response_lengths,
             samples_per_prompt=samples_per_prompt,
-            num_gpus=num_inference_gpus,
+            num_engines=num_engines,
+            num_gpus_per_engine=num_gpus_per_engine,
         )
 
         check_calculation(

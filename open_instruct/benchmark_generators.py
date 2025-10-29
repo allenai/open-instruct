@@ -495,11 +495,16 @@ def run_benchmark(
                 "dataset_indices": all_dataset_indices,
             }
 
+            num_engines = args.vllm_num_engines
+            num_gpus_per_engine = args.vllm_tensor_parallel_size
+            num_inference_gpus = num_engines * num_gpus_per_engine
+
             result_dict["mfu"] = model_dims.calculate_mfu(
                 all_prompt_lengths,
                 batch_generation_time,
                 response_lengths=all_response_lengths,
                 samples_per_prompt=args.num_samples_per_prompt_rollout,
+                num_gpus=num_inference_gpus,
             )
 
             result_dict["mbu"] = model_dims.calculate_mbu(
@@ -507,6 +512,8 @@ def run_benchmark(
                 batch_generation_time,
                 response_lengths=all_response_lengths,
                 samples_per_prompt=args.num_samples_per_prompt_rollout,
+                num_engines=num_engines,
+                num_gpus_per_engine=num_gpus_per_engine,
             )
 
             save_completion_lengths([result_dict], timestamp, batch_idx)
