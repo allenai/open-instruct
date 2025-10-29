@@ -226,9 +226,16 @@ def get_test_data():
 def test_pack_sequences():
     queries, responses, pad_token_id = get_test_data()
     pack_length = 40
+    masks = [[1] * len(response) for response in responses]
+    vllm_logprobs = [[0.0] * len(response) for response in responses]
     with Timer("pack_sequences"):
         packed_sequences = pack_sequences(
-            queries=queries, responses=responses, pack_length=pack_length, pad_token_id=pad_token_id
+            queries=queries,
+            responses=responses,
+            masks=masks,
+            pack_length=pack_length,
+            pad_token_id=pad_token_id,
+            vllm_logprobs=vllm_logprobs,
         )
 
     # uncomment to debug
@@ -434,9 +441,16 @@ def test_pack_sequences_logits():
     queries, responses, pad_token_id = get_test_data()
     query_responses = [q + r for q, r in zip(queries, responses)]
     pack_length = 40
+    masks = [[1] * len(response) for response in responses]
+    vllm_logprobs = [[0.0] * len(response) for response in responses]
     with Timer("pack_sequences"):
         packed_sequences = pack_sequences(
-            queries=queries, responses=responses, pack_length=pack_length, pad_token_id=pad_token_id
+            queries=queries,
+            responses=responses,
+            masks=masks,
+            pack_length=pack_length,
+            pad_token_id=pad_token_id,
+            vllm_logprobs=vllm_logprobs,
         )
     # NOTE: it's very important to use [:, :-1] here, because the produced tokens's index is shifted by 1
     lm_backbone = getattr(value_model, value_model.base_model_prefix)
