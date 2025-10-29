@@ -12,6 +12,7 @@ import csv
 import dataclasses
 import gc
 import json
+import os
 import pathlib
 import threading
 import time
@@ -205,10 +206,7 @@ def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation
     # Transform function arguments
     transform_fn_args = [
         {},  # For rlvr_tokenize_v1
-        {
-            "max_token_length": args.max_token_length,
-            "max_prompt_token_length": args.max_prompt_token_length,
-        },  # For rlvr_filter_v1
+        {"max_prompt_token_length": args.max_prompt_token_length},  # For rlvr_filter_v1
     ]
 
     # Load dataset
@@ -231,19 +229,13 @@ def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation
 
 
 def setup_vllm_engines(
-    args: grpo_fast.Args, model_config: model_utils.ModelConfig, max_model_len: int = 20480
-) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue]:
+    args: grpo_fast.Args,
+    tokenizer_config: dataset_transformation.TokenizerConfig,
+    model_config: model_utils.ModelConfig,
+    max_model_len: int,
+) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue, ray.actor.ActorHandle]:
     """Set up vLLM engines and queues."""
-    logger.info("Setting up vLLM engines...")
-
-    # Initialize Ray
-    if ray.is_initialized():
-        ray.shutdown()
-    ray.init(num_cpus=4, num_gpus=1, ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"]})
-
-    bundles = [{"GPU": 1, "CPU": 1} for _ in range(args.vllm_num_engines)]
-    pg = ray.util.placement_group(bundles, strategy="PACK")
-    ray.get(pg.ready())
+    ray.init(ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"], "env_vars": dict(os.environ)})
 
     param_prompt_Q = ray_queue.Queue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
@@ -251,25 +243,28 @@ def setup_vllm_engines(
     queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
 
+    tokenizer_name_or_path = tokenizer_config.tokenizer_name_or_path or model_config.model_name_or_path
+
     vllm_engines = vllm_utils.create_vllm_engines(
         num_engines=args.vllm_num_engines,
         tensor_parallel_size=args.vllm_tensor_parallel_size,
-        enforce_eager=True,
-        tokenizer_name_or_path=model_config.model_name_or_path,
+        enforce_eager=args.vllm_enforce_eager,
+        tokenizer_name_or_path=tokenizer_name_or_path,
         pretrain=model_config.model_name_or_path,
         revision=model_config.model_revision,
         seed=args.seed,
-        enable_prefix_caching=False,
+        enable_prefix_caching=args.vllm_enable_prefix_caching,
         max_model_len=max_model_len,
         vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
-        single_gpu_mode=False,
-        pg=pg,
+        single_gpu_mode=args.single_gpu_mode,
+        pg=None,
         tools={},
-        max_tool_calls=[0],
+        max_tool_calls=args.max_tool_calls,
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         actor_manager=actor_manager,
         inference_batch_size=args.inference_batch_size,
+        use_fp8_kv_cache=args.use_fp8_kv_cache,
         inflight_updates=args.inflight_updates,
     )
 
@@ -292,17 +287,9 @@ def simulate_weight_sync(
     ray.get(actor_manager.set_should_stop.remote(True))
     logger.debug("Set should_stop to True for weight sync simulation")
 
-    # Wait for all engines to acknowledge stop by calling process_from_queue
-    # which will return 0 when stopped
-    stopped_refs = [engine.process_from_queue.remote(timeout=1) for engine in vllm_engines]
-    results = utils.ray_get_with_progress(
-        stopped_refs, desc="Waiting for engines to stop for weight sync", enable=args.verbose
+    utils.ray_get_with_progress(
+        [engine.check_background_threads.remote() for engine in vllm_engines], "Health check on background threads."
     )
-
-    # Verify all engines stopped (returned 0)
-    for i, result in enumerate(results):
-        if result != 0:
-            logger.warning(f"Engine {i} processed {result} requests while stopping")
 
     # Sleep for 1 second to simulate weight sync time (from wandb metrics)
     time.sleep(1.0)
@@ -313,19 +300,8 @@ def simulate_weight_sync(
 
     sync_time = time.perf_counter() - sync_start
     logger.info(f"Weight sync simulation took {sync_time:.2f}s")
+
     return sync_time
-
-
-def generate_thread(vllm_engines: list[ray.actor.ActorHandle], stop_event: threading.Event) -> None:
-    """Thread that repeatedly calls process_from_queue on vllm engines."""
-    logger.info("[Generate Thread] Starting generation thread")
-    while not stop_event.is_set():
-        processed_results = ray.get([engine.process_from_queue.remote(timeout=20) for engine in vllm_engines])
-        num_processed = sum(int(result) for result in processed_results)
-        if num_processed == 0:
-            time.sleep(1)
-        else:
-            logger.debug(f"[Generate Thread] Processed {num_processed} requests")
 
 
 def submission_thread(
@@ -357,6 +333,8 @@ def submission_thread(
                 PromptRequest(
                     prompt=prompt,
                     dataset_index=dataset_index,
+                    training_step=batch_idx,
+                    epoch_number=batch_idx,
                     generation_config=generation_config,
                     start_time=time.perf_counter(),
                 )
@@ -384,12 +362,13 @@ def run_benchmark(
     generation_config = vllm.SamplingParams(
         temperature=args.temperature,
         max_tokens=args.response_length,
+        min_tokens=args.response_length,
         top_p=args.vllm_top_p,
         n=args.num_samples_per_prompt_rollout,
         seed=args.seed,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
-        stop=args.stop_strings,
+        logprobs=1,
         # IMPORTANT: Set output_kind to FINAL_ONLY to ensure vLLM V1 properly handles n>1
         # With the default CUMULATIVE mode, vLLM V1 returns separate outputs for each
         # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode
@@ -398,9 +377,7 @@ def run_benchmark(
     )
 
     stop_event = threading.Event()
-    executor = futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="benchmark")
-
-    generation_future = executor.submit(generate_thread, vllm_engines, stop_event)
+    executor = futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="benchmark")
 
     results = []
     # Get the model dimensions from one of the engines without loading weights
@@ -419,20 +396,20 @@ def run_benchmark(
             PromptRequest(
                 prompt=prompt,
                 dataset_index=dataset_index,
+                training_step=0,
+                epoch_number=0,
                 generation_config=generation_config,
                 start_time=time.perf_counter(),
             )
         )
 
+    utils.ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Checking if engines are ready.")
     try:
         logger.info("Running warmup batch...")
 
         # Collect all warmup results (one per prompt)
         warmup_batch_size = warmup_end_idx - warmup_start_idx
-        warmup_results = []
-        for i in range(warmup_batch_size):
-            result = inference_results_Q.get()
-            warmup_results.append(result)
+        warmup_results = [inference_results_Q.get() for _ in range(warmup_batch_size)]
 
         total_warmup_responses = sum(len(result.responses) for result in warmup_results)
         logger.info(
@@ -452,7 +429,8 @@ def run_benchmark(
         # Process remaining batches with timing
         for batch_idx in range(1, num_batches):
             # Quick health check!
-            [future.result() for future in [submission_future, generation_future] if future.done()]
+            if submission_future.done():
+                submission_future.result()
 
             # Collect all results for this batch (one per prompt)
             batch_results = [inference_results_Q.get() for _ in range(args.num_unique_prompts_rollout)]
@@ -655,21 +633,10 @@ def print_summary(
 
 def cleanup(vllm_engines: list[ray.actor.ActorHandle], actor_manager: Optional[ray.actor.ActorHandle] = None) -> None:
     """Clean up resources."""
-    if actor_manager:
-        try:
-            ray.get(actor_manager.set_should_stop.remote(True))
-            logger.info("Signaled all engines to stop via actor manager")
-        except Exception as e:
-            logger.warning(f"Error signaling actor manager: {e}")
-
     for engine in vllm_engines:
-        try:
-            ray.kill(engine)
-        except Exception as e:
-            logger.warning(f"Error killing engine: {e}")
+        ray.kill(engine)
 
-    if ray.is_initialized():
-        ray.shutdown()
+    ray.shutdown()
 
 
 def main() -> None:
@@ -692,7 +659,10 @@ def main() -> None:
     free_all_gpu_memory()
 
     dataset = setup_dataset(args, tokenizer_config)
-    vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(args, model_config)
+    max_model_len = args.max_prompt_token_length + args.response_length
+    vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(
+        args, tokenizer_config, model_config, max_model_len
+    )
 
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
