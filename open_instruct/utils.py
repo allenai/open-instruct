@@ -1725,8 +1725,7 @@ class ModelDims:
         if self.num_kv_heads is None:
             self.num_kv_heads = self.num_attn_heads
 
-        if self.num_params is None:
-            self.num_params = self._calculate_num_params()
+        self.num_params = self.num_params or self._calculate_num_params()
 
         if self.device_name is None:
             self.device_name = get_device_name(torch.cuda.get_device_name(0))
@@ -1737,22 +1736,6 @@ class ModelDims:
         )
         assert self.num_sliding_window_layers <= self.num_layers, (
             f"num_sliding_window_layers ({self.num_sliding_window_layers}) cannot exceed num_layers ({self.num_layers})"
-        )
-
-    def __repr__(self):
-        return (
-            f"ModelDims(\n"
-            f"  num_layers={self.num_layers},\n"
-            f"  hidden_size={self.hidden_size},\n"
-            f"  intermediate_size={self.intermediate_size},\n"
-            f"  vocab_size={self.vocab_size},\n"
-            f"  num_attn_heads={self.num_attn_heads},\n"
-            f"  head_dim={self.head_dim},\n"
-            f"  num_kv_heads={self.num_kv_heads},\n"
-            f"  device_name={self.device_name!r},\n"
-            f"  sliding_window={self.sliding_window},\n"
-            f"  num_sliding_window_layers={self.num_sliding_window_layers}\n"
-            f")"
         )
 
     def _calculate_num_params(self) -> int:
@@ -1777,6 +1760,7 @@ class ModelDims:
         model_config = vllm_config.model_config
         hidden_size = model_config.get_hidden_size()
 
+        # Try to get intermediate_size, default to 4x hidden_size if not present
         intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
 
         sliding_window = getattr(model_config.hf_text_config, "sliding_window", None)
