@@ -509,22 +509,26 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                     console.log("✅✅✅ Finished running the caching command")
 
                 if file in OPEN_INSTRUCT_RESUMABLES and idx != -1 and len(args.auto_checkpoint_state_dir) > 0:
-                    need_checkpoint_state_dir_fix = True
-                    has_checkpoint_state_dir = False
-                    for jdx, cmd in enumerate(command):
+                    need_to_override_checkpoint_state_dir = True
+                    default_checkpoint_state_freq = 200
+                    for idx, cmd in enumerate(command):
                         if cmd == "--checkpoint_state_dir":
-                            has_checkpoint_state_dir = True
-                            if jdx + 1 < len(command) and "/weka/" in command[jdx + 1]:
-                                need_checkpoint_state_dir_fix = False
-                            break
+                            if idx + 1 < len(command):
+                                if "/weka/" in command[idx + 1]:
+                                    need_to_override_checkpoint_state_dir = False
+                        if cmd == "--checkpoint_state_freq":
+                            if idx + 1 < len(command):
+                                default_checkpoint_state_freq = command[idx + 1]
 
-                    if need_checkpoint_state_dir_fix and is_open_instruct_training and not is_external_user:
-                        raise ValueError(
-                            "Resumable training detected but --checkpoint_state_dir is missing or not a /weka/ path. "
-                            "Mason will not override your command. Please explicitly set "
-                            "`--checkpoint_state_dir /weka/...` (and, if needed, `--checkpoint_state_freq <int>`), "
-                            "or pass `--non_resumable` to disable resumable mode."
+                    if need_to_override_checkpoint_state_dir and is_open_instruct_training and not is_external_user:
+                        new_checkpoint_state_dir = f"{args.auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
+                        console.log(
+                            f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`"
                         )
+                        command.append("--checkpoint_state_dir")
+                        command.append(new_checkpoint_state_dir)
+                        command.append("--checkpoint_state_freq")
+                        command.append(str(default_checkpoint_state_freq))
 
         # For Weka clusters, we need to override the output_dir parameter to make auto-evaluation work
         # If the output_dir is already set to a path in /weka/, we'll keep that path
