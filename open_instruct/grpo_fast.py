@@ -279,9 +279,9 @@ class Args:
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
 
-    active_sampling: bool = False
+    active_fill_completions: bool = False
     """Whether to refill the batch with *new prompts/completions* after filtering."""
-    active_sampling_max_attempts: int = 3
+    active_fill_max_attempts: int = 3
     """How many times to attempt to fill"""
 
     # Reward
@@ -1706,7 +1706,7 @@ def accumulate_inference_batches(
     return combined_result, batch, prompt_lengths, response_lengths
 
 
-def _combine_reward_metrics(metric_records: list[tuple[Dict[str, Any], int]]) -> Dict[str, Any]:
+def combine_reward_metrics(metric_records: list[tuple[Dict[str, Any], int]]) -> Dict[str, Any]:
     if not metric_records:
         return {}
 
@@ -1739,6 +1739,33 @@ def _combine_reward_metrics(metric_records: list[tuple[Dict[str, Any], int]]) ->
     return combined
 
 
+@dataclass
+class FilteredChunk:
+    result: GenerationResult
+    batch: Batch
+    kept_indices: list[int]
+    prompt_lengths: list[int]
+    response_lengths: list[int]
+    scores: np.ndarray
+    advantages: np.ndarray
+    reward_metrics: tuple[Dict[str, Any], int]
+
+
+@dataclass
+class AggregationState:
+    chunks: list[FilteredChunk] = field(default_factory=list)
+    token_stats: list[TokenStatistics] = field(default_factory=list)
+    prompts_filtered_counts: list[int] = field(default_factory=list)
+
+    def add_chunk(
+        self, *, chunk: FilteredChunk, token_statistics: Optional[TokenStatistics], prompts_filtered: int
+    ) -> None:
+        self.chunks.append(chunk)
+        if token_statistics is not None:
+            self.token_stats.append(token_statistics)
+        self.prompts_filtered_counts.append(prompts_filtered)
+
+
 def data_preparation_thread(
     reward_fn: Callable,
     inference_results_Q: ray_queue.Queue,  # Ray queue
@@ -1756,33 +1783,7 @@ def data_preparation_thread(
         per_prompt_rollout = args.num_samples_per_prompt_rollout
         target_prompt_count = args.num_unique_prompts_rollout
 
-        aggregated_scores: list[np.ndarray] = []
-        aggregated_advantages: list[np.ndarray] = []
-        aggregated_reward_metrics: list[tuple[Dict[str, Any], int]] = []
-        aggregated_responses: list[List[int]] = []
-        aggregated_masks: list[List[int]] = []
-        aggregated_finish_reasons: list[str] = []
-        aggregated_vllm_logprobs: list[List[float]] = []
-        aggregated_batches: list[Batch] = []
-        aggregated_prompt_lengths: list[int] = []
-        aggregated_response_lengths: list[int] = []
-        aggregated_num_calls: list[int] = []
-        aggregated_timeouts: list[int] = []
-        aggregated_tool_errors: list[str] = []
-        aggregated_tool_outputs: list[str] = []
-        aggregated_tool_runtimes: list[float] = []
-        aggregated_tool_calleds: list[bool] = []
-
-        total_prompt_tokens = 0
-        total_response_tokens = 0
-        total_generation_time = 0.0
-        earliest_start_time: Optional[float] = None
-
-        total_stop_completions = 0
-        total_completions = 0
-
-        total_prompts_kept = 0
-        total_prompts_filtered = 0
+        aggregation = AggregationState()
         prompts_to_request = target_prompt_count
         getting_response_time = 0.0
 
@@ -1863,7 +1864,6 @@ def data_preparation_thread(
 
                 num_zero_std_prompts = (~non_zero_std_mask).sum()
                 num_filtered_responses = len(scores_step) - len(non_zero_indices)
-                total_prompts_filtered += num_zero_std_prompts
                 if num_filtered_responses > 0:
                     logger.info(
                         f"[Zero-gradient filtering] Filtered {num_zero_std_prompts} prompts with zero std "
@@ -1872,105 +1872,67 @@ def data_preparation_thread(
 
                 advantages_step = advantages_step[non_zero_indices]
                 scores_step = scores_step[non_zero_indices]
-                responses_step = [result_step.responses[i] for i in non_zero_indices]
-                masks_step = [result_step.masks[i] for i in non_zero_indices]
-                batch_step = batch_step[non_zero_indices.tolist()]
-                finish_reasons_step = [result_step.finish_reasons[i] for i in non_zero_indices]
-                vllm_logprobs_step = [result_step.logprobs[i] for i in non_zero_indices]
+                kept_indices = non_zero_indices.tolist()
+                batch_step = batch_step[kept_indices]
 
-                prompt_indices_kept = np.where(non_zero_std_mask)[0]
+                prompt_indices_kept = np.where(non_zero_std_mask)[0].tolist()
                 prompt_lengths_kept = [prompt_lengths_step[i] for i in prompt_indices_kept]
-                response_lengths_kept = [response_lengths_step[i] for i in non_zero_indices]
+                response_lengths_kept = [response_lengths_step[i] for i in kept_indices]
 
-                num_calls_kept = [result_step.request_info.num_calls[i] for i in non_zero_indices]
-                timeouts_kept = [result_step.request_info.timeouts[i] for i in non_zero_indices]
-                tool_errors_kept = [result_step.request_info.tool_errors[i] for i in non_zero_indices]
-                tool_outputs_kept = [result_step.request_info.tool_outputs[i] for i in non_zero_indices]
-                tool_runtimes_kept = [result_step.request_info.tool_runtimes[i] for i in non_zero_indices]
-                tool_calleds_kept = [result_step.request_info.tool_calleds[i] for i in non_zero_indices]
-
-                if args.mask_truncated_completions:
-                    truncated_mask = np.array([reason != "stop" for reason in finish_reasons_step], dtype=bool)
-                    num_truncated = int(truncated_mask.sum())
-                    if num_truncated > 0:
-                        scores_step = scores_step.copy()
-                        scores_step[truncated_mask] = 0.0
-                        advantages_step = advantages_step.copy()
-                        advantages_step[truncated_mask] = 0.0
-                        for idx in np.where(truncated_mask)[0]:
-                            masks_step[idx] = [0 for _ in masks_step[idx]]
-                        logger.info(
-                            f"[Truncated completions masking] Zeroed scores/advantages and response masks for {num_truncated} responses that didn't finish with 'stop'."
-                        )
-            aggregated_scores.append(scores_step)
-            aggregated_advantages.append(advantages_step)
-            aggregated_reward_metrics.append((reward_metrics_step, len(scores_step)))
-            aggregated_responses.extend(responses_step)
-            aggregated_masks.extend(masks_step)
-            aggregated_finish_reasons.extend(finish_reasons_step)
-            aggregated_vllm_logprobs.extend(vllm_logprobs_step)
-            aggregated_batches.append(batch_step)
-            aggregated_prompt_lengths.extend(prompt_lengths_kept)
-            aggregated_response_lengths.extend(response_lengths_kept)
-            aggregated_num_calls.extend(num_calls_kept)
-            aggregated_timeouts.extend(timeouts_kept)
-            aggregated_tool_errors.extend(tool_errors_kept)
-            aggregated_tool_outputs.extend(tool_outputs_kept)
-            aggregated_tool_runtimes.extend(tool_runtimes_kept)
-            aggregated_tool_calleds.extend(tool_calleds_kept)
-
-            total_stop_completions += sum(int(reason == "stop") for reason in finish_reasons_step)
-            total_completions += len(finish_reasons_step)
-
-            if result_step.token_statistics is not None:
-                total_prompt_tokens += result_step.token_statistics.num_prompt_tokens
-                total_response_tokens += result_step.token_statistics.num_response_tokens
-                total_generation_time += result_step.token_statistics.generation_time
-                if result_step.token_statistics.earliest_start_time is not None:
-                    if earliest_start_time is None:
-                        earliest_start_time = result_step.token_statistics.earliest_start_time
-                    else:
-                        earliest_start_time = min(
-                            earliest_start_time, result_step.token_statistics.earliest_start_time
-                        )
+            chunk = FilteredChunk(
+                result=result_step,
+                batch=batch_step,
+                kept_indices=kept_indices,
+                prompt_lengths=prompt_lengths_kept,
+                response_lengths=response_lengths_kept,
+                scores=scores_step,
+                advantages=advantages_step,
+                reward_metrics=(reward_metrics_step, len(scores_step)),
+            )
+            aggregation.add_chunk(
+                chunk=chunk, token_statistics=result_step.token_statistics, prompts_filtered=int(num_zero_std_prompts)
+            )
 
             prompts_kept_this_iter = len(scores_step) // per_prompt_rollout if per_prompt_rollout > 0 else 0
-            total_prompts_kept += prompts_kept_this_iter
 
-            if not args.active_sampling:
+            if not args.active_fill_completions:
                 break
 
-            prompts_remaining = target_prompt_count - total_prompts_kept
+            collected_samples = sum(len(chunk.scores) for chunk in aggregation.chunks)
+            collected_prompts = collected_samples // per_prompt_rollout if per_prompt_rollout > 0 else 0
+            prompts_remaining = target_prompt_count - collected_prompts
             if prompts_remaining <= 0:
                 break
 
-            if prompts_kept_this_iter == 0 and fill_iteration > args.active_sampling_max_attempts:
+            if prompts_kept_this_iter == 0 and fill_iteration > args.active_fill_max_attempts:
+                total_responses = sum(len(chunk.kept_indices) for chunk in aggregation.chunks)
                 logger.warning(
                     "[Active fill completions] Unable to collect non-zero advantage prompts in iteration %d; "
-                    "set as max by args.active_sampling_max_attempts, proceeding with existing batch of size %d.",
+                    "set as max by args.active_fill_max_attempts, proceeding with existing batch of size %d.",
                     fill_iteration,
-                    len(aggregated_responses),
+                    total_responses,
                 )
                 break
 
             prompts_to_request = prompts_remaining
 
         # Build aggregated containers from collected data
-        if aggregated_batches:
+        if aggregation.chunks:
             queries: list[List[int]] = []
             ground_truths: list[List[int]] = []
             datasets: list[str] = []
             raw_queries_list: Optional[list[str]] = None
             indices_list: Optional[list[int]] = None
 
-            raw_queries_present = aggregated_batches[0].raw_queries is not None
-            indices_present = aggregated_batches[0].indices is not None
+            raw_queries_present = aggregation.chunks[0].batch.raw_queries is not None
+            indices_present = aggregation.chunks[0].batch.indices is not None
             if raw_queries_present:
                 raw_queries_list = []
             if indices_present:
                 indices_list = []
 
-            for batch_step in aggregated_batches:
+            for chunk in aggregation.chunks:
+                batch_step = chunk.batch
                 queries.extend(batch_step.queries)
                 ground_truths.extend(batch_step.ground_truths)
                 datasets.extend(batch_step.datasets)
@@ -1991,8 +1953,48 @@ def data_preparation_thread(
         else:
             batch = Batch(queries=[], ground_truths=[], datasets=[], raw_queries=[], indices=[])
 
-        prompt_lengths = aggregated_prompt_lengths
-        response_lengths = aggregated_response_lengths
+        prompt_lengths = [length for chunk in aggregation.chunks for length in chunk.prompt_lengths]
+        response_lengths = [length for chunk in aggregation.chunks for length in chunk.response_lengths]
+
+        responses: list[List[int]] = []
+        masks: list[List[int]] = []
+        finish_reasons: list[str] = []
+        vllm_logprobs: list[List[float]] = []
+        num_calls: list[int] = []
+        timeouts: list[int] = []
+        tool_errors: list[str] = []
+        tool_outputs: list[str] = []
+        tool_runtimes: list[float] = []
+        tool_calleds: list[bool] = []
+
+        for chunk in aggregation.chunks:
+            result_chunk = chunk.result
+            indices = chunk.kept_indices
+
+            responses.extend([result_chunk.responses[i] for i in indices])
+            masks.extend([result_chunk.masks[i] for i in indices])
+            finish_reasons.extend([result_chunk.finish_reasons[i] for i in indices])
+            if result_chunk.logprobs is not None:
+                vllm_logprobs.extend([result_chunk.logprobs[i] for i in indices])
+            else:
+                vllm_logprobs.extend([[] for _ in indices])
+
+            request_info = result_chunk.request_info
+            num_calls.extend([request_info.num_calls[i] for i in indices])
+            timeouts.extend([request_info.timeouts[i] for i in indices])
+            tool_errors.extend([request_info.tool_errors[i] for i in indices])
+            tool_outputs.extend([request_info.tool_outputs[i] for i in indices])
+            tool_runtimes.extend([request_info.tool_runtimes[i] for i in indices])
+            tool_calleds.extend([request_info.tool_calleds[i] for i in indices])
+
+        token_stats = aggregation.token_stats
+        total_prompt_tokens = sum(stat.num_prompt_tokens for stat in token_stats)
+        total_response_tokens = sum(stat.num_response_tokens for stat in token_stats)
+        total_generation_time = sum(stat.generation_time for stat in token_stats)
+        earliest_start_candidates = [
+            stat.earliest_start_time for stat in token_stats if stat.earliest_start_time is not None
+        ]
+        earliest_start_time = min(earliest_start_candidates) if earliest_start_candidates else None
 
         token_statistics = TokenStatistics(
             num_prompt_tokens=total_prompt_tokens,
@@ -2001,19 +2003,19 @@ def data_preparation_thread(
             earliest_start_time=earliest_start_time,
         )
         result = GenerationResult(
-            responses=aggregated_responses,
-            finish_reasons=aggregated_finish_reasons,
-            masks=aggregated_masks,
+            responses=responses,
+            finish_reasons=finish_reasons,
+            masks=masks,
             request_info=RequestInfo(
-                num_calls=aggregated_num_calls,
-                timeouts=aggregated_timeouts,
-                tool_errors=aggregated_tool_errors,
-                tool_outputs=aggregated_tool_outputs,
-                tool_runtimes=aggregated_tool_runtimes,
-                tool_calleds=aggregated_tool_calleds,
+                num_calls=num_calls,
+                timeouts=timeouts,
+                tool_errors=tool_errors,
+                tool_outputs=tool_outputs,
+                tool_runtimes=tool_runtimes,
+                tool_calleds=tool_calleds,
             ),
             token_statistics=token_statistics,
-            logprobs=aggregated_vllm_logprobs,
+            logprobs=vllm_logprobs,
         )
 
         good_outputs = [
@@ -2023,50 +2025,83 @@ def data_preparation_thread(
             and not result.request_info.tool_errors[i]
             for i in range(len(result.request_info.tool_outputs))
         ]
+        total_completions = len(finish_reasons)
+        total_stop_completions = sum(int(reason == "stop") for reason in finish_reasons)
         stop_rate = (total_stop_completions / total_completions) if total_completions > 0 else 0
+        total_prompts_filtered = sum(aggregation.prompts_filtered_counts)
 
-        scores = np.concatenate(aggregated_scores) if aggregated_scores else np.array([])
-        advantages = np.concatenate(aggregated_advantages) if aggregated_advantages else np.array([])
-        reward_metrics = _combine_reward_metrics(aggregated_reward_metrics)
+        scores = np.concatenate([chunk.scores for chunk in aggregation.chunks]) if aggregation.chunks else np.array([])
+        advantages = (
+            np.concatenate([chunk.advantages for chunk in aggregation.chunks]) if aggregation.chunks else np.array([])
+        )
+        reward_metrics = combine_reward_metrics([chunk.reward_metrics for chunk in aggregation.chunks])
+
+        if args.mask_truncated_completions and len(finish_reasons) > 0:
+            truncated_mask = np.array([reason != "stop" for reason in finish_reasons], dtype=bool)
+            num_truncated = int(truncated_mask.sum())
+            if num_truncated > 0:
+                if len(scores) > 0:
+                    scores = scores.copy()
+                    scores[truncated_mask] = 0.0
+                if len(advantages) > 0:
+                    advantages = advantages.copy()
+                    advantages[truncated_mask] = 0.0
+                for idx in np.where(truncated_mask)[0]:
+                    masks[idx] = [0 for _ in masks[idx]]
+                logger.info(
+                    f"[Truncated completions masking] Zeroed scores/advantages and response masks for {num_truncated} responses that didn't finish with 'stop'."
+                )
 
         if len(scores) == 0:
             logger.warning(f"No responses with non-zero advantages in batch {training_step}.")
 
-        scores_per_prompt = scores.reshape(-1, per_prompt_rollout)
+        if len(scores) == 0 or per_prompt_rollout == 0:
+            scores_per_prompt = np.zeros((0, per_prompt_rollout))
+            unsolved_batch_size_ratio = 0.0
+            real_batch_size_ratio = 0.0
+        else:
+            scores_per_prompt = scores.reshape(-1, per_prompt_rollout)
 
+            max_possible_score = 0
+            if args.apply_verifiable_reward:
+                max_possible_score += args.verification_reward
+            if args.apply_r1_style_format_reward and args.additive_format_reward:
+                max_possible_score += args.r1_style_format_reward
+
+            unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
+            original_batch_size = target_prompt_count * per_prompt_rollout
+            real_batch_size_ratio = len(scores) / original_batch_size if original_batch_size > 0 else 0
+
+        responses_list = responses
+        masks_list = masks
+        finish_reasons_list = finish_reasons
+        vllm_logprobs_list = vllm_logprobs
+
+        # Count groups with all zero rewards
+        all_zero_groups = (scores_per_prompt == 0).all(axis=-1).sum()
         max_possible_score = 0
         if args.apply_verifiable_reward:
             max_possible_score += args.verification_reward
         if args.apply_r1_style_format_reward and args.additive_format_reward:
             max_possible_score += args.r1_style_format_reward
-
-        unsolved_batch_size_ratio = 0 if len(scores) == 0 else ((scores != max_possible_score) > 0).sum() / len(scores)
-        original_batch_size = target_prompt_count * per_prompt_rollout
-        real_batch_size_ratio = len(scores) / original_batch_size if original_batch_size > 0 else 0
-
-        responses = aggregated_responses
-        masks = aggregated_masks
-        finish_reasons = aggregated_finish_reasons
-        vllm_logprobs = aggregated_vllm_logprobs
-
-        # Count groups with all zero rewards
-        all_zero_groups = (scores_per_prompt == 0).all(axis=-1).sum()
         all_solved_groups = (scores_per_prompt == max_possible_score).all(axis=-1).sum()
         total_groups = len(scores_per_prompt)
+        zero_groups_ratio = all_zero_groups / total_groups if total_groups > 0 else 0.0
+        solved_groups_ratio = all_solved_groups / total_groups if total_groups > 0 else 0.0
         logger.info(
             f"[Reward Summary] Groups with all zero rewards: {all_zero_groups}/{total_groups} "
             f" Groups with all solved rewards: {all_solved_groups}/{total_groups} "
-            f"({all_zero_groups / total_groups:.1%})"
+            f"({zero_groups_ratio:.1%})"
         )
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
                 queries=batch.queries,
-                responses=responses,
-                masks=masks,
+                responses=responses_list,
+                masks=masks_list,
                 pack_length=args.pack_length,
                 pad_token_id=tokenizer.pad_token_id,
-                vllm_logprobs=vllm_logprobs,
+                vllm_logprobs=vllm_logprobs_list,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
             # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
@@ -2165,12 +2200,12 @@ def data_preparation_thread(
                 )
 
         # Create a result package with metrics and data
-        if len(responses) == 0:
+        if len(responses_list) == 0:
             # Handle empty responses case
             # in this case, we won't log metrics, so it should be fine.
             metrics = {}
         else:
-            sequence_lengths = np.array([len(response) for response in responses])
+            sequence_lengths = np.array([len(response) for response in responses_list])
             sequence_length_solved = (
                 np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == max_possible_score])
             )
@@ -2178,19 +2213,17 @@ def data_preparation_thread(
                 np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
             )
 
-            # Use the already calculated reward summary metrics for wandb
-            all_zero_groups_ratio = all_zero_groups / total_groups if total_groups > 0 else 0
-            all_solved_groups_ratio = all_solved_groups / total_groups if total_groups > 0 else 0
-
             metrics = {
                 "scores": np.array(scores).mean(),
                 "real_batch_size_ratio": real_batch_size_ratio,
                 "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
-                "packed_ratio": len(packed_sequences.query_responses) / len(responses) if len(responses) > 0 else 0,
+                "packed_ratio": len(packed_sequences.query_responses) / len(responses_list)
+                if len(responses_list) > 0
+                else 0,
                 "val/all_zero_reward_groups": all_zero_groups,
-                "val/all_zero_reward_groups_ratio": all_zero_groups_ratio,
+                "val/all_zero_reward_groups_ratio": zero_groups_ratio,
                 "val/all_solved_reward_groups": all_solved_groups,
-                "val/all_solved_reward_groups_ratio": all_solved_groups_ratio,
+                "val/all_solved_reward_groups_ratio": solved_groups_ratio,
                 "val/total_filtered_groups": total_prompts_filtered,
                 "val/total_reward_groups": total_groups,
                 "val/sequence_lengths": sequence_lengths.mean(),
@@ -2220,13 +2253,14 @@ def data_preparation_thread(
             }
 
             total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
-            metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
+            if result.token_statistics.generation_time > 0:
+                metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
 
         if args.save_traces:
             traces = {
                 "scores": scores.tolist(),
-                "finish_reasons": finish_reasons,
-                "responses": responses,
+                "finish_reasons": finish_reasons_list,
+                "responses": responses_list,
                 "training_step": training_step,
                 **asdict(batch),  # Unpack all batch fields
                 **reward_metrics,
@@ -2245,7 +2279,7 @@ def data_preparation_thread(
                 "packed_sequences": packed_sequences,  # for debugging purposes
                 "collated_data": collated_data,
                 "metrics": metrics,
-                "responses_count": len(responses),
+                "responses_count": len(responses_list),
                 "num_new_tokens": num_new_tokens,
                 "B": B,
                 "prompt_lengths": prompt_lengths,
@@ -3061,7 +3095,6 @@ def run_training(
         resume_training_step,
         actor_manager,
         model_dims,
-        iter_dataloader,
     )
 
     def health_check_fn():
