@@ -567,12 +567,6 @@ class LLMRayActor:
         logger.info(f"LLMRayActor.__init__ started (bundle_indices={bundle_indices})")
         assert_threaded_actor(self)
         logger.info("LLMRayActor: assert_threaded_actor passed")
-        batch_invariant = os.environ.get("VLLM_BATCH_INVARIANT", "0")
-        assert batch_invariant == "1", (
-            f"VLLM_BATCH_INVARIANT must be set to '1', got '{batch_invariant}'. "
-            "This flag is required for correct batch processing behavior."
-        )
-        logger.info("LLMRayActor: VLLM_BATCH_INVARIANT check passed")
         self._init_config(tools, max_tool_calls, inference_batch_size, inflight_updates)
         logger.info("LLMRayActor: _init_config completed")
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
