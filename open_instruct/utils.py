@@ -1998,16 +1998,13 @@ class ModelDims:
 
             max_response_length = max(prompt_responses) if prompt_responses else 0
 
+            # Each of the samples_per_prompt samples reads prompt KV at each position
             kv_read_terms += max_response_length * samples_per_prompt * P * num_full_attn_layers
 
             # Per-sample generated KV reads: Each sample reads its own previously generated tokens
             for R in prompt_responses:
-                if num_full_attn_layers > 0:
-                    kv_read_terms += num_full_attn_layers * R * (R - 1) // 2
-
-                if num_sliding_layers > 0 and self.sliding_window is not None:
-                    kv_read_terms += num_sliding_layers * sum(min(P + t, self.sliding_window) for t in range(R))
-
+                kv_read_terms += num_full_attn_layers * R * (R - 1) // 2
+                kv_read_terms += num_sliding_layers * sum(min(P + t, self.sliding_window) for t in range(R))
         return kv_bytes_per_token * kv_read_terms
 
     def prefill_memory_bytes(self, prompt_lengths: list[int], dtype_bytes: int = 2) -> int:
@@ -2117,6 +2114,7 @@ class ModelDims:
             assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
                 f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
             )
+            # Pass original prompt_lengths with samples_per_prompt to correctly handle shared KV cache
             total += self.decode_memory_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
 
         return total
