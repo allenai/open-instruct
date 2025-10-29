@@ -274,7 +274,7 @@ async def apply_verifiable_reward(
     task_metadata = []
 
     for i, (tok_prediction, prediction, ground_truth, dataset, query) in enumerate(
-        zip(responses, decoded_responses, batch.ground_truths, batch.datasets, queries, strict=False)
+        zip(responses, decoded_responses, batch.ground_truths, batch.datasets, queries)
     ):
         # allow multiple ground truths and datasets for a single response
 
@@ -284,7 +284,7 @@ async def apply_verifiable_reward(
         assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
 
         # Create async tasks for each ground truth/dataset pair
-        for gt, ds in zip(ground_truth_list, dataset_list, strict=False):
+        for gt, ds in zip(ground_truth_list, dataset_list):
             reward_func = reward_fn_mapping.get(ds.lower())
             if reward_func is None:
                 logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
@@ -317,7 +317,7 @@ async def apply_verifiable_reward(
     response_per_func_rewards = [{} for _ in range(len(responses))]
 
     # Process results
-    for result, metadata in zip(reward_results, task_metadata, strict=False):
+    for result, metadata in zip(reward_results, task_metadata):
         response_idx = metadata["response_idx"]
         dataset = metadata["dataset"]
         reward_weight = metadata["reward_weight"]

@@ -232,7 +232,7 @@ def grade_stdio(code: str, all_inputs: list, all_outputs: list, timeout: int):
     all_runtimes = []
     total_execution_time = 0
     first_failure_info = None
-    for idx, (gt_inp, gt_out) in enumerate(zip(all_inputs, all_outputs, strict=False)):
+    for idx, (gt_inp, gt_out) in enumerate(zip(all_inputs, all_outputs)):
         signal.alarm(timeout)
         faulthandler.enable()
 

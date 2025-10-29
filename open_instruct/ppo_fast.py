@@ -1206,7 +1206,7 @@ def vllm_generate_thread(
         # Generate responses in parallel across engines
         futures = [
             vllm_engine.generate.remote(sampling_params=sampling_params, prompt_token_ids=queries, use_tqdm=False)
-            for vllm_engine, queries in zip(vllm_engines, split_queries, strict=False)
+            for vllm_engine, queries in zip(vllm_engines, split_queries)
         ]
         # Gather all responses
         all_outputs = ray.get(futures)
