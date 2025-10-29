@@ -1,26 +1,19 @@
 import unittest
 
+import parameterized
+
 import open_instruct.dataset_processor
 
 
 class TestDatasetProcessor(unittest.TestCase):
-    def test_get_num_proc_too_little_data(self):
+    @parameterized.parameterized.expand(
+        [("too_little_data", 296, 120, 1), ("optimal", 1500, 120, 3), ("too_much_data", 1000000, 120, 120)]
+    )
+    def test_get_num_proc(self, name, num_examples, max_workers, expected):
         result = open_instruct.dataset_processor.get_num_proc(
-            296, 120, open_instruct.dataset_processor.APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU
+            num_examples, max_workers, open_instruct.dataset_processor.APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU
         )
-        self.assertEqual(result, 1)
-
-    def test_get_num_proc_optimal(self):
-        result = open_instruct.dataset_processor.get_num_proc(
-            1500, 120, open_instruct.dataset_processor.APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU
-        )
-        self.assertEqual(result, 3)
-
-    def test_get_num_proc_too_much_data(self):
-        result = open_instruct.dataset_processor.get_num_proc(
-            1000000, 120, open_instruct.dataset_processor.APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU
-        )
-        self.assertEqual(result, 120)
+        self.assertEqual(result, expected)
 
 
 if __name__ == "__main__":
