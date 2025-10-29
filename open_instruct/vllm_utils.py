@@ -479,7 +479,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     request_id = make_request_id(request)
 
     sampling_params = request.generation_config.clone()
-    sampling_params.n = 1
+    sampling_params.n = 1  # Use n=1 for tool processing
 
     actor.request_metadata[request_id] = {
         "is_eval": request.is_eval,
@@ -847,47 +847,46 @@ def create_vllm_engines(
             placement_group_bundle_index=bundle_indices[0],
         )
 
-        remote_class = ray.remote(LLMRayActor)
-        env_vars = dict(os.environ)
-        env_vars.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
-        if "TORCH_CUDA_ARCH_LIST" not in env_vars:
-            env_vars["TORCH_CUDA_ARCH_LIST"] = get_cuda_arch_list()
-        remote_class_with_options = remote_class.options(
-            num_cpus=num_gpus,
-            num_gpus=num_gpus,
-            scheduling_strategy=scheduling_strategy,
-            runtime_env=ray.runtime_env.RuntimeEnv(env_vars=env_vars),
+        vllm_engines.append(
+            ray.remote(LLMRayActor)
+            .options(
+                num_cpus=num_gpus,
+                num_gpus=num_gpus,
+                scheduling_strategy=scheduling_strategy,
+                runtime_env=ray.runtime_env.RuntimeEnv(
+                    env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
+                ),
+            )
+            .remote(
+                model=pretrain,
+                revision=revision,
+                tokenizer=tokenizer_name_or_path,
+                tokenizer_revision=revision,
+                worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
+                tensor_parallel_size=tensor_parallel_size,
+                enforce_eager=enforce_eager,
+                dtype="bfloat16",
+                seed=seed + i,
+                distributed_executor_backend=distributed_executor_backend,
+                enable_prefix_caching=enable_prefix_caching,
+                max_model_len=max_model_len,
+                gpu_memory_utilization=vllm_gpu_memory_utilization,
+                bundle_indices=bundle_indices,
+                num_gpus=0.2 if use_hybrid_engine else 1,
+                noset_visible_devices=ray_noset_visible_devices(),
+                prompt_queue=prompt_queue,
+                results_queue=results_queue,
+                eval_results_queue=eval_results_queue,
+                actor_manager=actor_manager,
+                tools=tools,
+                max_tool_calls=max_tool_calls_dict,
+                inference_batch_size=inference_batch_size,
+                inflight_updates=inflight_updates,
+                kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
+                calculate_kv_scales=use_fp8_kv_cache,
+            )
         )
-        actor_handle = remote_class_with_options.remote(
-            model=pretrain,
-            revision=revision,
-            tokenizer=tokenizer_name_or_path,
-            tokenizer_revision=revision,
-            worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
-            tensor_parallel_size=tensor_parallel_size,
-            enforce_eager=enforce_eager,
-            dtype="bfloat16",
-            seed=seed + i,
-            distributed_executor_backend=distributed_executor_backend,
-            enable_prefix_caching=enable_prefix_caching,
-            max_model_len=max_model_len,
-            gpu_memory_utilization=vllm_gpu_memory_utilization,
-            bundle_indices=bundle_indices,
-            num_gpus=0.2 if use_hybrid_engine else 1,
-            noset_visible_devices=ray_noset_visible_devices(),
-            prompt_queue=prompt_queue,
-            results_queue=results_queue,
-            eval_results_queue=eval_results_queue,
-            actor_manager=actor_manager,
-            tools=tools,
-            max_tool_calls=max_tool_calls_dict,
-            inference_batch_size=inference_batch_size,
-            inflight_updates=inflight_updates,
-            kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
-            calculate_kv_scales=use_fp8_kv_cache,
-        )
-        vllm_engines.append(actor_handle)
 
-    ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=600)
+    ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300)
 
     return vllm_engines
