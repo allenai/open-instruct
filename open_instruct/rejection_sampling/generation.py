@@ -170,7 +170,7 @@ def main(args: Args, dataset_config: DatasetConfig, gen_args: GenerationArgs):
     # ...
     table = defaultdict(list)
     num_prompt_with_identical_completions = 0
-    for output, messages in zip(outputs, dataset["messages"], strict=False):
+    for output, messages in zip(outputs, dataset["messages"]):
         # if the model completions are exactly the same across all completions per prompt, we can skip this
         if len(set(tuple(item["text"]) for item in output["outputs"])) == 1:
             num_prompt_with_identical_completions += 1

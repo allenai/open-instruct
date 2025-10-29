@@ -339,10 +339,7 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
             f"!= logprobs length ({len(out.logprobs)})"
         )
         logprobs.append(
-            [
-                logprob_dict[token_id].logprob
-                for token_id, logprob_dict in zip(out.token_ids, out.logprobs, strict=False)
-            ]
+            [logprob_dict[token_id].logprob for token_id, logprob_dict in zip(out.token_ids, out.logprobs)]
         )
 
     # Extract attributes based on whether tools are used
