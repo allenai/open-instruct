@@ -1795,6 +1795,83 @@ class ModelDims:
         assert self.device_name in GPU_SPECS, f"Unknown device: {self.device_name}"
         return GPU_SPECS[self.device_name]["memory_bandwidth"]
 
+    def attn_flops(self, query_len: int, kv_len: int, use_sliding_window: bool = False) -> int:
+        d = self.head_dim
+        mul = FLOP_PER_MAC
+
+        q_dim = self.num_attn_heads * d
+        kv_dim = self.num_kv_heads * d
+
+        if use_sliding_window and self.sliding_window is not None:
+            kv_len = min(kv_len, self.sliding_window)
+
+        q_proj = mul * query_len * self.hidden_size * q_dim
+        kv_proj = mul * 2 * query_len * self.hidden_size * kv_dim
+
+        qk = mul * self.num_attn_heads * query_len * kv_len * d
+        softmax = SOFTMAX_FLOPS_PER_SCORE * self.num_attn_heads * query_len * kv_len
+        av = mul * self.num_attn_heads * query_len * kv_len * d
+
+        out_proj = mul * query_len * q_dim * self.hidden_size
+
+        return q_proj + kv_proj + qk + softmax + av + out_proj
+
+    def mlp_flops(self, seq_len: int) -> int:
+        mul = FLOP_PER_MAC
+        first = mul * seq_len * self.hidden_size * (self.intermediate_size * 2)
+        act = seq_len * self.intermediate_size
+        second = mul * seq_len * self.intermediate_size * self.hidden_size
+        return first + act + second
+
+    def prefill_flops(self, prompt_lengths: list[int]) -> int:
+        num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
+        num_sliding_layers = self.num_sliding_window_layers
+
+        total = 0
+        for L in prompt_lengths:
+            if num_full_attn_layers > 0:
+                total += num_full_attn_layers * (self.attn_flops(L, L, use_sliding_window=False) + self.mlp_flops(L))
+
+            if num_sliding_layers > 0:
+                total += num_sliding_layers * (self.attn_flops(L, L, use_sliding_window=True) + self.mlp_flops(L))
+
+            total += FLOP_PER_MAC * self.hidden_size * self.vocab_size
+
+        return total
+
+    def decode_flops(self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int = 1) -> int:
+        assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+            f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+        )
+
+        num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
+        num_sliding_layers = self.num_sliding_window_layers
+
+        total = 0
+        response_idx = 0
+        for P in prompt_lengths:
+            for _ in range(samples_per_prompt):
+                R = response_lengths[response_idx]
+                total += R * self.num_layers * self.mlp_flops(seq_len=1)
+
+                for t in range(R):
+                    kv_len = P + t + 1
+
+                    if num_full_attn_layers > 0:
+                        total += num_full_attn_layers * self.attn_flops(
+                            query_len=1, kv_len=kv_len, use_sliding_window=False
+                        )
+
+                    if num_sliding_layers > 0:
+                        total += num_sliding_layers * self.attn_flops(
+                            query_len=1, kv_len=kv_len, use_sliding_window=True
+                        )
+
+                total += R * FLOP_PER_MAC * self.hidden_size * self.vocab_size
+                response_idx += 1
+
+        return total
+
     def flops(
         self,
         prompt_lengths: list[int],
@@ -1802,65 +1879,14 @@ class ModelDims:
         samples_per_prompt: int = 1,
         is_training: bool = False,
     ) -> int:
-        embedding_params = self.vocab_size * self.hidden_size
-        flops_params = 2 * (self.num_params - embedding_params)
-
-        num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
-        num_sliding_layers = self.num_sliding_window_layers
-
-        total_flops = 0
-
-        for P in prompt_lengths:
-            total_flops += P * flops_params
-
-            if num_full_attn_layers > 0:
-                total_flops += 2 * num_full_attn_layers * self.hidden_size * P * (P + 1)
-
-            if num_sliding_layers > 0 and self.sliding_window is not None:
-                W = self.sliding_window
-                if P <= W:
-                    total_flops += 2 * num_sliding_layers * self.hidden_size * P * (P + 1)
-                else:
-                    full_attn_tokens = W * (W + 1) // 2
-                    sliding_tokens = (P - W) * W
-                    total_flops += 2 * num_sliding_layers * self.hidden_size * (full_attn_tokens + sliding_tokens)
-
+        total = self.prefill_flops(prompt_lengths)
         if response_lengths is not None:
-            assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt
-
-            response_idx = 0
-            for P in prompt_lengths:
-                for _ in range(samples_per_prompt):
-                    R = response_lengths[response_idx]
-                    total_flops += R * flops_params
-
-                    if num_full_attn_layers > 0:
-                        total_flops += 4 * num_full_attn_layers * self.hidden_size * R * P
-                        total_flops += 2 * num_full_attn_layers * self.hidden_size * R * (R + 1)
-
-                    if num_sliding_layers > 0 and self.sliding_window is not None:
-                        W = self.sliding_window
-                        for t in range(R):
-                            context_len = P + t
-                            attended_tokens = min(context_len + 1, W)
-                            total_flops += 4 * num_sliding_layers * self.hidden_size * attended_tokens
-
-                    response_idx += 1
-
+            total += self.decode_flops(prompt_lengths, response_lengths, samples_per_prompt)
         if is_training:
-            total_flops *= 3
+            total *= 3
+        return total
 
-        return total_flops
-
-    def memory_bytes(
-        self,
-        prompt_lengths: list[int],
-        num_engines: int,
-        num_gpus_per_engine: int,
-        response_lengths: Optional[list[int]] = None,
-        samples_per_prompt: int = 1,
-        dtype_bytes: int = 2,
-    ) -> int:
+    def weight_memory_bytes(self, num_tokens: int, dtype_bytes: int = 2) -> int:
         hidden_q = self.num_attn_heads * self.head_dim
         hidden_kv = self.num_kv_heads * self.head_dim
 
@@ -1872,65 +1898,95 @@ class ModelDims:
         w_dn = self.intermediate_size * self.hidden_size
 
         per_layer_weight_bytes = (w_q + w_k + w_v + w_o + w_up + w_dn) * dtype_bytes
-        lm_head_bytes = self.vocab_size * self.hidden_size * dtype_bytes
-        embedding_bytes = self.hidden_size * dtype_bytes
+        return self.num_layers * num_tokens * per_layer_weight_bytes
+
+    def kv_cache_write_bytes(self, num_tokens: int, dtype_bytes: int = 2) -> int:
+        kv_write_bytes_per_token = 2 * self.num_kv_heads * self.head_dim * dtype_bytes
+        return self.num_layers * num_tokens * kv_write_bytes_per_token
+
+    def kv_cache_read_bytes(
+        self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int = 1, dtype_bytes: int = 2
+    ) -> int:
+        assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+            f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+        )
 
         num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
         num_sliding_layers = self.num_sliding_window_layers
         kv_bytes_per_token = 2 * self.num_kv_heads * self.head_dim * dtype_bytes
 
+        kv_read_terms = 0
+        response_idx = 0
+
+        for P in prompt_lengths:
+            prompt_responses = []
+            for _ in range(samples_per_prompt):
+                prompt_responses.append(response_lengths[response_idx])
+                response_idx += 1
+
+            max_response_length = max(prompt_responses) if prompt_responses else 0
+
+            if num_full_attn_layers > 0:
+                kv_read_terms += max_response_length * samples_per_prompt * P * num_full_attn_layers
+
+            for R in prompt_responses:
+                if num_full_attn_layers > 0:
+                    kv_read_terms += num_full_attn_layers * R * (R - 1) // 2
+
+                if num_sliding_layers > 0 and self.sliding_window is not None:
+                    kv_read_terms += num_sliding_layers * sum(min(P + t, self.sliding_window) for t in range(R))
+
+        return kv_bytes_per_token * kv_read_terms
+
+    def prefill_memory_bytes(self, prompt_lengths: list[int], dtype_bytes: int = 2) -> int:
+        num_prefill_batches = len(prompt_lengths)
+        weight_bytes = self.weight_memory_bytes(num_prefill_batches, dtype_bytes)
+
+        total_prefill_tokens = sum(prompt_lengths)
+        kv_write_bytes = self.kv_cache_write_bytes(total_prefill_tokens, dtype_bytes)
+        return weight_bytes + kv_write_bytes
+
+    def decode_memory_bytes(
+        self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int = 1, dtype_bytes: int = 2
+    ) -> int:
+        unique_positions = 0
+        response_idx = 0
+        for _ in prompt_lengths:
+            prompt_responses = response_lengths[response_idx : response_idx + samples_per_prompt]
+            response_idx += samples_per_prompt
+            unique_positions += max(prompt_responses) if prompt_responses else 0
+
+        weight_bytes = self.weight_memory_bytes(unique_positions, dtype_bytes)
+
+        total_decode_tokens = sum(response_lengths)
+        kv_write_bytes = self.kv_cache_write_bytes(total_decode_tokens, dtype_bytes)
+
+        kv_read_bytes = self.kv_cache_read_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
+        return weight_bytes + kv_write_bytes + kv_read_bytes
+
+    def memory_bytes(
+        self,
+        prompt_lengths: list[int],
+        num_engines: int,
+        num_gpus_per_engine: int,
+        response_lengths: Optional[list[int]] = None,
+        samples_per_prompt: int = 1,
+        dtype_bytes: int = 2,
+    ) -> int:
         if num_engines < 1:
             raise ValueError(f"num_engines must be >= 1, got {num_engines}")
         if num_gpus_per_engine < 1:
             raise ValueError(f"num_gpus_per_engine must be >= 1, got {num_gpus_per_engine}")
-        # Tensor-parallel shards weights/KV cache within an engine, so total bytes are unchanged
-        # compared to a single-GPU engine; the value is still validated for clarity.
 
-        total_bytes = 0
-
-        for P in prompt_lengths:
-            total_bytes += self.num_layers * P * per_layer_weight_bytes
-            total_bytes += P * embedding_bytes
-            total_bytes += lm_head_bytes
-            total_bytes += self.num_layers * P * kv_bytes_per_token
+        total = self.prefill_memory_bytes(prompt_lengths, dtype_bytes)
 
         if response_lengths is not None:
-            assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt
+            assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+                f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+            )
+            total += self.decode_memory_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
 
-            active_decode_engines = min(num_engines, len(prompt_lengths))
-            global_max_response_len = max(response_lengths)
-            total_response_tokens = sum(response_lengths)
-
-            total_bytes += self.num_layers * global_max_response_len * per_layer_weight_bytes * active_decode_engines
-            total_bytes += total_response_tokens * embedding_bytes
-            total_bytes += global_max_response_len * active_decode_engines * lm_head_bytes
-            total_bytes += self.num_layers * total_response_tokens * kv_bytes_per_token
-
-            response_idx = 0
-            for P in prompt_lengths:
-                prompt_responses = response_lengths[response_idx : response_idx + samples_per_prompt]
-
-                if num_full_attn_layers > 0:
-                    max_response_len_for_prompt = max(prompt_responses)
-                    total_bytes += (
-                        kv_bytes_per_token
-                        * num_full_attn_layers
-                        * max_response_len_for_prompt
-                        * samples_per_prompt
-                        * P
-                    )
-
-                for R in prompt_responses:
-                    if num_full_attn_layers > 0:
-                        total_bytes += kv_bytes_per_token * num_full_attn_layers * R * (R - 1) // 2
-
-                    if num_sliding_layers > 0 and self.sliding_window is not None:
-                        kv_read_sum = sum(min(P + t, self.sliding_window) for t in range(R))
-                        total_bytes += kv_bytes_per_token * num_sliding_layers * kv_read_sum
-
-                response_idx += samples_per_prompt
-
-        return int(total_bytes)
+        return total
 
     def calculate_mfu(
         self,
