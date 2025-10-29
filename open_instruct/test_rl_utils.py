@@ -3,7 +3,6 @@ import unittest
 import numpy as np
 import torch
 import transformers
-from rich.pretty import pprint
 
 import open_instruct.rl_utils
 
@@ -43,10 +42,6 @@ class TestRLUtils(unittest.TestCase):
                 vllm_logprobs=vllm_logprobs,
             )
 
-        for q, r in zip(queries, responses):
-            pprint([q, r])
-        pprint(packed_sequences)
-
         offset = 0
         np.testing.assert_allclose(
             packed_sequences.query_responses[0][offset : offset + len(queries[0]) + len(responses[0])],
@@ -82,8 +77,6 @@ class TestRLUtils(unittest.TestCase):
         )
         adv, ret = open_instruct.rl_utils.calculate_advantages(values, rewards, gamma, lam)
 
-        pprint({"adv": adv})
-        pprint({"ret": ret})
         packed_response_masks = np.array(
             [
                 [
@@ -180,7 +173,6 @@ class TestRLUtils(unittest.TestCase):
             ]
         )
         packed_values_masked = np.where(packed_response_masks[:, 1:] == 0, 0, packed_values)
-        pprint({"packed_values_masked": packed_values_masked})
         packed_rewards = np.array(
             [
                 [
@@ -280,8 +272,6 @@ class TestRLUtils(unittest.TestCase):
         packed_adv, packed_ret = open_instruct.rl_utils.calculate_advantages_packed(
             packed_values_masked, packed_rewards[:, 1:], gamma, lam, packed_dones[:, 1:], packed_response_masks[:, 1:]
         )
-        pprint({"packed_adv": packed_adv})
-        pprint({"packed_ret": packed_ret})
 
         packed_values = np.array(
             [
@@ -503,8 +493,6 @@ class TestRLUtils(unittest.TestCase):
         )
         values = value_head(v.last_hidden_state).squeeze(-1)
         values = torch.where(packed_sequences.response_masks[0].unsqueeze(0) == 0, 0, values)
-        pprint("values")
-        pprint(values)
         s = model.forward(
             input_ids=packed_sequences.query_responses[0].unsqueeze(0)[:, :-1],
             attention_mask=packed_sequences.attention_masks[0].unsqueeze(0)[:, :-1],
@@ -515,7 +503,6 @@ class TestRLUtils(unittest.TestCase):
             all_logprobs, 2, packed_sequences.query_responses[0].unsqueeze(0).unsqueeze(-1)[:, 1:]
         ).squeeze(-1)
         logprobs = torch.where(packed_sequences.response_masks[0].unsqueeze(0)[:, 1:] == 0, 1.0, logprobs)
-        pprint({"logprobs": logprobs})
 
         logprobs = []
         for i in range(len(query_responses)):
@@ -528,7 +515,6 @@ class TestRLUtils(unittest.TestCase):
             all_logprobs = torch.nn.functional.log_softmax(s2.logits, dim=-1)
             logprob = torch.gather(all_logprobs, 2, torch.tensor([query_response]).unsqueeze(-1)[:, 1:]).squeeze(-1)
             logprobs.append(logprob[:, len(query) - 1 :])
-        pprint(logprobs)
 
         rewards = np.zeros_like(values.detach().float().numpy())
         rewards[:, 21] = 0.1
@@ -541,10 +527,6 @@ class TestRLUtils(unittest.TestCase):
             dones=packed_sequences.dones[0].unsqueeze(0).numpy(),
             response_masks=packed_sequences.response_masks[0].unsqueeze(0).numpy(),
         )
-
-        pprint({"adv": adv})
-        pprint({"ret": ret})
-        print("hah")
 
 
 if __name__ == "__main__":
