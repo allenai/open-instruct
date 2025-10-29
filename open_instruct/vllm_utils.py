@@ -114,141 +114,127 @@ async def process_request_async(
     sampling_params: vllm.SamplingParams,
 ):
     """Process a single async request with tool support, awaiting tools inline."""
-    logger.info(f"process_request_async: {sub_request_id} entering")
-    try:
-        accumulated_tokens = []
-        accumulated_logprobs = []
-        masks = []
-        num_calls = 0
-        timeout = False
-        tool_error = ""
-        tool_output = ""
-        tool_runtime = 0.0
-        tool_called = False
+    accumulated_tokens = []
+    accumulated_logprobs = []
+    masks = []
+    num_calls = 0
+    timeout = False
+    tool_error = ""
+    tool_output = ""
+    tool_runtime = 0.0
+    tool_called = False
 
-        current_prompt = prompt
-        current_prompt_token_ids = actor.request_metadata[base_request_id]["prompt_token_ids"]
+    current_prompt = prompt
+    current_prompt_token_ids = actor.request_metadata[base_request_id]["prompt_token_ids"]
+    current_sampling_params = sampling_params.clone()
+    final_prompt_token_ids = None
+    iteration = 0
+
+    while True:
+        iteration_request_id = f"{sub_request_id}_iter{iteration}"
+        outputs = [
+            o
+            async for o in actor.llm_engine.generate(current_prompt, current_sampling_params, iteration_request_id)
+            if o.finished
+        ]
+        assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {iteration_request_id}"
+        request_output = outputs[0]
+        iteration += 1
+        output = request_output.outputs[0]
+
+        if final_prompt_token_ids is None:
+            final_prompt_token_ids = request_output.prompt_token_ids
+
+        accumulated_tokens.extend(output.token_ids)
+        accumulated_logprobs.extend(output.logprobs)
+        masks.extend([1] * len(output.token_ids))
+
+        if not actor.tools or not actor.max_tool_calls:
+            break
+
+        triggered_tool, stop_str = get_triggered_tool(
+            output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
+        )
+        if triggered_tool is None:
+            break
+
+        assert actor.executor is not None, f"executor is None for request {sub_request_id}"
+
+        loop = asyncio.get_running_loop()
+        tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
+
+        tool_called = True
+        num_calls += 1
+        timeout = timeout or tool_result.timeout
+        tool_error += "" if tool_result.error is None else tool_result.error
+        tool_output += tool_result.output
+        tool_runtime += tool_result.runtime
+
+        tool_output_token_ids = actor.llm_engine.tokenizer.encode(
+            "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+        )
+
+        tool_output_token_ids, excess, prompt_and_tool_output = _truncate_tool_output_tokens(
+            tool_output_token_ids,
+            current_prompt_token_ids,
+            accumulated_tokens,
+            actor.llm_engine.model_config.max_model_len,
+            sampling_params.max_tokens,
+            len(masks),
+        )
+
+        accumulated_tokens.extend(tool_output_token_ids)
+        accumulated_logprobs.extend(
+            [{token_id: types.SimpleNamespace(logprob=0.0)} for token_id in tool_output_token_ids]
+        )
+        masks.extend([0] * len(tool_output_token_ids))
+
+        new_sample_tokens = sampling_params.max_tokens - len(masks)
+        if excess > 0 or new_sample_tokens <= 0:
+            break
+
+        current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output, cache_salt=base_request_id)
+        current_prompt_token_ids = prompt_and_tool_output
+        final_prompt_token_ids = prompt_and_tool_output
         current_sampling_params = sampling_params.clone()
-        final_prompt_token_ids = None
-        iteration = 0
+        current_sampling_params.max_tokens = new_sample_tokens
 
-        while True:
-            logger.info(f"process_request_async: {sub_request_id} iteration {iteration} starting generate")
-            iteration_request_id = f"{sub_request_id}_iter{iteration}"
-            outputs = [
-                o
-                async for o in actor.llm_engine.generate(current_prompt, current_sampling_params, iteration_request_id)
-                if o.finished
-            ]
-            logger.info(
-                f"process_request_async: {sub_request_id} iteration {iteration} received {len(outputs)} outputs"
-            )
-            assert len(outputs) == 1, (
-                f"Expected exactly 1 output, got {len(outputs)} for request {iteration_request_id}"
-            )
-            request_output = outputs[0]
-            iteration += 1
-            output = request_output.outputs[0]
+    complete_output = vllm.CompletionOutput(
+        index=split_request_id(sub_request_id)["request_index"],
+        text="",
+        token_ids=accumulated_tokens,
+        cumulative_logprob=output.cumulative_logprob,
+        logprobs=accumulated_logprobs,
+        finish_reason=output.finish_reason,
+        stop_reason=output.stop_reason,
+    )
 
-            if final_prompt_token_ids is None:
-                final_prompt_token_ids = request_output.prompt_token_ids
+    if actor.tools:
+        setattr(complete_output, "mask", masks)
+        setattr(complete_output, "num_calls", num_calls)
+        setattr(complete_output, "timeout", timeout)
+        setattr(complete_output, "tool_error", tool_error)
+        setattr(complete_output, "tool_output", tool_output)
+        setattr(complete_output, "tool_runtime", tool_runtime)
+        setattr(complete_output, "tool_called", tool_called)
 
-            accumulated_tokens.extend(output.token_ids)
-            accumulated_logprobs.extend(output.logprobs)
-            masks.extend([1] * len(output.token_ids))
+    actor.active_tasks.pop(sub_request_id, None)
 
-            if not actor.tools or not actor.max_tool_calls:
-                break
-
-            triggered_tool, stop_str = get_triggered_tool(
-                output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
-            )
-            if triggered_tool is None:
-                break
-
-            assert actor.executor is not None, f"executor is None for request {sub_request_id}"
-
-            loop = asyncio.get_running_loop()
-            tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
-
-            tool_called = True
-            num_calls += 1
-            timeout = timeout or tool_result.timeout
-            tool_error += "" if tool_result.error is None else tool_result.error
-            tool_output += tool_result.output
-            tool_runtime += tool_result.runtime
-
-            tool_output_token_ids = actor.llm_engine.tokenizer.encode(
-                "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
-            )
-
-            tool_output_token_ids, excess, prompt_and_tool_output = _truncate_tool_output_tokens(
-                tool_output_token_ids,
-                current_prompt_token_ids,
-                accumulated_tokens,
-                actor.llm_engine.model_config.max_model_len,
-                sampling_params.max_tokens,
-                len(masks),
-            )
-
-            accumulated_tokens.extend(tool_output_token_ids)
-            accumulated_logprobs.extend(
-                [{token_id: types.SimpleNamespace(logprob=0.0)} for token_id in tool_output_token_ids]
-            )
-            masks.extend([0] * len(tool_output_token_ids))
-
-            new_sample_tokens = sampling_params.max_tokens - len(masks)
-            if excess > 0 or new_sample_tokens <= 0:
-                break
-
-            current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output, cache_salt=base_request_id)
-            current_prompt_token_ids = prompt_and_tool_output
-            final_prompt_token_ids = prompt_and_tool_output
-            current_sampling_params = sampling_params.clone()
-            current_sampling_params.max_tokens = new_sample_tokens
-
-        complete_output = vllm.CompletionOutput(
-            index=split_request_id(sub_request_id)["request_index"],
-            text="",
-            token_ids=accumulated_tokens,
-            cumulative_logprob=output.cumulative_logprob,
-            logprobs=accumulated_logprobs,
-            finish_reason=output.finish_reason,
-            stop_reason=output.stop_reason,
-        )
-
-        if actor.tools:
-            setattr(complete_output, "mask", masks)
-            setattr(complete_output, "num_calls", num_calls)
-            setattr(complete_output, "timeout", timeout)
-            setattr(complete_output, "tool_error", tool_error)
-            setattr(complete_output, "tool_output", tool_output)
-            setattr(complete_output, "tool_runtime", tool_runtime)
-            setattr(complete_output, "tool_called", tool_called)
-
-        actor.active_tasks.pop(sub_request_id, None)
-
-        logger.info(f"process_request_async: {sub_request_id} enqueuing result for base_request_id={base_request_id}")
-        actor.completion_queue.put(
-            {
-                "base_request_id": base_request_id,
-                "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
-                "request_output": vllm.RequestOutput(
-                    request_id=sub_request_id,
-                    prompt=request_output.prompt,
-                    prompt_token_ids=final_prompt_token_ids,
-                    prompt_logprobs=request_output.prompt_logprobs,
-                    outputs=[complete_output],
-                    finished=True,
-                ),
-                "tools": actor.tools,
-            }
-        )
-    except Exception as exc:
-        logger.exception(f"process_request_async: {sub_request_id} crashed with exception: {exc}")
-        raise
-    finally:
-        logger.info(f"process_request_async: {sub_request_id} exiting")
+    actor.completion_queue.put(
+        {
+            "base_request_id": base_request_id,
+            "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
+            "request_output": vllm.RequestOutput(
+                request_id=sub_request_id,
+                prompt=request_output.prompt,
+                prompt_token_ids=final_prompt_token_ids,
+                prompt_logprobs=request_output.prompt_logprobs,
+                outputs=[complete_output],
+                finished=True,
+            ),
+            "tools": actor.tools,
+        }
+    )
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -480,33 +466,13 @@ def init_process_group(
 
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
-    logger.info("_prefetch_worker started")
-    iteration = 0
     while True:
-        should_stop = actor._should_stop()
-        active_tasks_count = len(actor.active_tasks)
-
-        if iteration < 5 or iteration % 10 == 0:
-            logger.info(
-                f"_prefetch_worker iteration {iteration}: should_stop={should_stop}, "
-                f"active_tasks={active_tasks_count}/{actor.inference_batch_size}"
-            )
-
-        if should_stop or active_tasks_count >= actor.inference_batch_size:
-            if iteration < 5:
-                logger.info(
-                    f"_prefetch_worker sleeping: should_stop={should_stop}, "
-                    f"active_tasks_full={active_tasks_count >= actor.inference_batch_size}"
-                )
+        if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-            iteration += 1
             continue
 
-        logger.info(f"_prefetch_worker waiting for request from queue (qsize={actor.prompt_queue.qsize()})")
         request = actor.prompt_queue.get()
-        logger.info(f"_prefetch_worker got request, adding to actor (dataset_index={request.dataset_index})")
         add_request(actor, request)
-        iteration += 1
 
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
@@ -528,23 +494,14 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
 
     tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
 
-    num_samples = request.generation_config.n
-    logger.info(
-        f"add_request: request_id={request_id}, dataset_index={request.dataset_index}, "
-        f"num_samples={num_samples}, prompt_length={len(request.prompt)}"
-    )
-
-    for j in range(num_samples):
+    for j in range(request.generation_config.n):
         sub_sampling_params = sampling_params.clone()
         if request.generation_config.seed is not None:
             sub_sampling_params.seed = request.generation_config.seed + j
         sub_request_id = f"{request_id}_{j}"
-        logger.info(f"add_request: Creating async task for sub_request_id={sub_request_id}")
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
             process_request_async(actor, sub_request_id, request_id, tokens_prompt, sub_sampling_params), actor.loop
         )
-
-    logger.info(f"add_request: Created {num_samples} async tasks for request_id={request_id}")
 
 
 class LLMRayActor:
@@ -564,23 +521,15 @@ class LLMRayActor:
         inflight_updates: bool,
         **kwargs,
     ):
-        logger.info(f"LLMRayActor.__init__ started (bundle_indices={bundle_indices})")
         assert_threaded_actor(self)
-        logger.info("LLMRayActor: assert_threaded_actor passed")
         self._init_config(tools, max_tool_calls, inference_batch_size, inflight_updates)
-        logger.info("LLMRayActor: _init_config completed")
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
-        logger.info("LLMRayActor: _init_queues completed")
         self._init_executor()
-        logger.info("LLMRayActor: _init_executor completed")
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
-        logger.info("LLMRayActor: _setup_gpu_visibility completed")
-        logger.info("LLMRayActor: Starting _setup_and_start_async_engine...")
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
-        logger.info("LLMRayActor: __init__ completed successfully")
 
     def _init_config(
         self,
@@ -610,13 +559,9 @@ class LLMRayActor:
 
     def _init_executor(self) -> None:
         max_workers = NUM_PREFETCH_WORKERS + (NUM_TOOL_WORKERS if self.tools else 0)
-        logger.info(f"_init_executor: Creating ThreadPoolExecutor with max_workers={max_workers}")
         self.executor = futures.ThreadPoolExecutor(max_workers=max_workers)
-        logger.info("_init_executor: Submitting _prefetch_worker to executor...")
         self._prefetch_future = self.executor.submit(_prefetch_worker, self)
-        logger.info("_init_executor: Submitting process_from_queue to executor...")
         self._process_future = self.executor.submit(self.process_from_queue)
-        logger.info("_init_executor: Both background threads submitted")
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
         # a hack to make the script work.
@@ -632,91 +577,35 @@ class LLMRayActor:
             os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
 
     def _setup_and_start_async_engine(self, args, bundle_indices, kwargs) -> None:
-        logger.info("_setup_and_start_async_engine: Starting setup...")
         num_gpus = kwargs.pop("num_gpus")
-        logger.info(f"_setup_and_start_async_engine: num_gpus={num_gpus}")
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             logger.debug(f"creating LLM with bundle_indices={bundle_indices}")
 
-        logger.info("_setup_and_start_async_engine: Creating AsyncEngineArgs...")
         engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
         engine_args.disable_log_stats = True
         engine_args.disable_cascade_attn = True
-        logger.info("_setup_and_start_async_engine: AsyncEngineArgs created")
 
         init_complete = threading.Event()
         self.loop = None
         self.llm_engine = None
-        self._init_exception: Optional[BaseException] = None
-
-        logger.info(
-            "LLMRayActor(%s): initializing AsyncLLMEngine (model=%s, tensor_parallel=%s, num_gpus=%s, bundle_indices=%s)",
-            getattr(self, "__ray_actor_id__", "unknown"),
-            getattr(engine_args, "model", "unknown"),
-            getattr(engine_args, "tensor_parallel_size", "unknown"),
-            num_gpus,
-            bundle_indices,
-        )
 
         async def _init_engine():
-            logger.info("_init_engine: Getting running loop...")
             running_loop = asyncio.get_running_loop()
-            logger.info(f"_init_engine: Running loop={running_loop}, self.loop={self.loop}")
             assert running_loop == self.loop, f"Loop mismatch! running={running_loop}, actor.loop={self.loop}"
-            logger.info("_init_engine: About to call vllm.AsyncLLMEngine.from_engine_args...")
-            engine = vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
-            logger.info("_init_engine: vllm.AsyncLLMEngine.from_engine_args returned successfully")
-            return engine
+            return vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
 
         def _run_loop():
-            logger.info("_run_loop: Creating new event loop...")
             self.loop = asyncio.new_event_loop()
-            logger.info("_run_loop: Setting event loop...")
             asyncio.set_event_loop(self.loop)
-            logger.info("_run_loop: Event loop set, entering try block...")
-            try:
-                logger.info(
-                    "LLMRayActor(%s): async event loop starting engine startup",
-                    getattr(self, "__ray_actor_id__", "unknown"),
-                )
-                logger.info("_run_loop: About to call loop.run_until_complete(_init_engine())...")
-                self.llm_engine = self.loop.run_until_complete(_init_engine())
-                logger.info(
-                    "LLMRayActor(%s): AsyncLLMEngine initialized", getattr(self, "__ray_actor_id__", "unknown")
-                )
-            except Exception as exc:  # pragma: no cover - best-effort logging for remote actors
-                self._init_exception = exc
-                logger.exception("AsyncLLMEngine initialization failed")
-            finally:
-                logger.info("_run_loop: Setting init_complete event...")
-                init_complete.set()
-                logger.info("_run_loop: init_complete event set")
+            self.llm_engine = self.loop.run_until_complete(_init_engine())
+            init_complete.set()
+            self.loop.run_forever()
 
-            if self._init_exception is None:
-                logger.info(
-                    "LLMRayActor(%s): entering engine event loop", getattr(self, "__ray_actor_id__", "unknown")
-                )
-                self.loop.run_forever()
-
-        logger.info("_setup_and_start_async_engine: Creating loop thread...")
         self.loop_thread = threading.Thread(target=_run_loop, daemon=True)
-        logger.info("_setup_and_start_async_engine: Loop thread created, starting...")
         self.loop_thread.start()
-        logger.info(
-            "_setup_and_start_async_engine: Loop thread started, waiting for init_complete event (this will block until engine initializes)..."
-        )
         init_complete.wait()
-        logger.info("_setup_and_start_async_engine: init_complete event received!")
-
-        if self._init_exception is not None:
-            logger.error(
-                f"_setup_and_start_async_engine: Engine initialization failed with exception: {self._init_exception}"
-            )
-            raise RuntimeError("Failed to initialize AsyncLLMEngine") from self._init_exception
-
-        logger.info("LLMRayActor(%s): AsyncLLMEngine ready", getattr(self, "__ray_actor_id__", "unknown"))
 
     def get_model_dims(self):
         """Get only the model dimensions without loading weights."""
@@ -746,14 +635,8 @@ class LLMRayActor:
 
         self.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
 
-        current_count = len(self.request_outputs[base_request_id]["outputs"])
-        logger.info(
-            f"_accumulate_sub_request: base_request_id={base_request_id}, outputs={current_count}/{expected_n}"
-        )
-
-        is_complete = current_count == expected_n
+        is_complete = len(self.request_outputs[base_request_id]["outputs"]) == expected_n
         if is_complete:
-            logger.info(f"_accumulate_sub_request: Request complete, finalizing {base_request_id}")
             self._finalize_completed_request(base_request_id)
 
     def _finalize_completed_request(self, base_request_id: str) -> None:
@@ -761,7 +644,6 @@ class LLMRayActor:
         ordered_outs = sorted(outputs, key=lambda x: split_request_id(x.request_id)["request_index"])
 
         current_time = time.perf_counter()
-        logger.info(f"_finalize_completed_request: Processing {base_request_id} with {len(ordered_outs)} outputs")
         result, is_eval = process_completed_request(
             base_request_id,
             ordered_outs,
@@ -774,35 +656,12 @@ class LLMRayActor:
         self.request_metadata.pop(base_request_id, None)
 
         results_queue = self.eval_results_queue if is_eval else self.results_queue
-        queue_type = "eval_results_queue" if is_eval else "results_queue"
-        logger.info(
-            f"_finalize_completed_request: Putting result for {base_request_id} "
-            f"(dataset_index={result.dataset_index}) into {queue_type}"
-        )
         results_queue.put(result)
-        logger.info(f"_finalize_completed_request: Result sent to queue for {base_request_id}")
 
     def process_from_queue(self) -> None:
-        try:
-            logger.info("process_from_queue thread started")
-            logger.info(f"process_from_queue: completion_queue is {self.completion_queue}")
-            iteration = 0
-            while True:
-                if iteration < 5 or iteration % 10 == 0:
-                    logger.info(f"process_from_queue iteration {iteration}: waiting for completion_queue")
-                sub_request = self.completion_queue.get()
-                logger.info(
-                    f"process_from_queue: dequeued sub_request base_request_id={sub_request['base_request_id']} "
-                    f"sub_request_id={sub_request['request_output'].request_id}"
-                )
-                logger.info(
-                    f"process_from_queue: Got sub_request for base_request_id={sub_request['base_request_id']}"
-                )
-                self._accumulate_sub_request(sub_request)
-                iteration += 1
-        except Exception as e:
-            logger.exception(f"process_from_queue thread crashed with exception: {e}")
-            raise
+        while True:
+            sub_request = self.completion_queue.get()
+            self._accumulate_sub_request(sub_request)
 
     def init_process_group(
         self,
@@ -942,10 +801,6 @@ def create_vllm_engines(
     use_fp8_kv_cache=False,
     inflight_updates: bool = False,
 ) -> list[LLMRayActor]:
-    logger.info(
-        f"create_vllm_engines called with num_engines={num_engines}, tensor_parallel_size={tensor_parallel_size}"
-    )
-
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
         assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
@@ -972,31 +827,19 @@ def create_vllm_engines(
         num_gpus = 0.5
 
     logger.info(f"num_gpus: {num_gpus}")
-    logger.info(f"use_hybrid_engine: {use_hybrid_engine}, single_gpu_mode: {single_gpu_mode}")
-    logger.info(f"About to check use_hybrid_engine={use_hybrid_engine}")
 
     if not use_hybrid_engine:
-        logger.info("Creating placement group for non-hybrid engine mode")
         # Create a big placement group to ensure that all engines are packed
         bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size)]
         pg = placement_group(bundles, strategy="PACK")
-        logger.info("Waiting for placement group to be ready...")
         ray.get(pg.ready())
-        logger.info("Placement group is ready")
-    else:
-        logger.info("Using hybrid engine mode with provided placement group")
 
     # ensure we use bundles on the same node where possible if tp>1.
-    logger.info("Getting bundle indices list...")
     bundle_indices_list = get_bundle_indices_list(pg)
-    logger.info(f"Bundle indices list: {bundle_indices_list}")
 
-    logger.info(f"Starting loop to create {num_engines} vLLM engines...")
     for i in range(num_engines):
-        logger.info(f"Creating engine {i + 1}/{num_engines}...")
         bundle_indices = None
         bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
-        logger.info(f"Engine {i + 1}: bundle_indices={bundle_indices}")
 
         scheduling_strategy = PlacementGroupSchedulingStrategy(
             placement_group=pg,
@@ -1004,9 +847,7 @@ def create_vllm_engines(
             placement_group_bundle_index=bundle_indices[0],
         )
 
-        logger.info(f"Engine {i + 1}: Creating Ray remote actor class...")
         remote_class = ray.remote(LLMRayActor)
-        logger.info(f"Engine {i + 1}: Setting Ray actor options...")
         env_vars = dict(os.environ)
         env_vars.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
         if "TORCH_CUDA_ARCH_LIST" not in env_vars:
@@ -1017,7 +858,6 @@ def create_vllm_engines(
             scheduling_strategy=scheduling_strategy,
             runtime_env=ray.runtime_env.RuntimeEnv(env_vars=env_vars),
         )
-        logger.info(f"Engine {i + 1}: Calling .remote() to instantiate actor...")
         actor_handle = remote_class_with_options.remote(
             model=pretrain,
             revision=revision,
@@ -1046,13 +886,8 @@ def create_vllm_engines(
             kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
             calculate_kv_scales=use_fp8_kv_cache,
         )
-        logger.info(f"Engine {i + 1}: .remote() call returned, appending to vllm_engines list")
         vllm_engines.append(actor_handle)
-        logger.info(f"Engine {i + 1}: Ray remote actor created successfully")
 
-    logger.info("All %d vLLM engine actors created, now waiting for them to report ready", len(vllm_engines))
-    logger.info("Waiting for %d vLLM engines to report ready", len(vllm_engines))
     ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=600)
-    logger.info("All %d vLLM engines reported ready", len(vllm_engines))
 
     return vllm_engines

@@ -279,8 +279,6 @@ class Args:
 
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
-    activation_checkpointing: bool = False
-    """Enable DeepSpeed activation checkpointing (partitions activations during backward)."""
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
 
@@ -655,21 +653,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
-        ds_config = get_train_ds_config(
-            offload=False,
-            adam_offload=False,
-            stage=args.deepspeed_stage,
-            bf16=True,
-            disable_trace_cache=args.activation_checkpointing,
-        )
-        if args.activation_checkpointing:
-            ds_config["activation_checkpointing"] = {
-                "partition_activations": True,
-                "contiguous_memory_optimization": True,
-                "cpu_checkpointing": False,
-                "synchronize_checkpoint_boundary": False,
-                "number_checkpoints": 1,
-            }
+        ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
         # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
@@ -691,7 +675,7 @@ class PolicyTrainerRayProcess(RayProcess):
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
         disable_dropout_in_model(self.policy)
-        self.policy.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        self.policy.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
@@ -1240,10 +1224,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 if args.record_entropy:
                     self.local_metrics.add("policy/entropy_avg", entropy_stats.mean())
                 self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
-
-        torch._dynamo.reset()
-        torch.cuda.empty_cache()
-        return self.local_metrics.get_metrics_list()
+                return self.local_metrics.get_metrics_list()
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: Dict[str, Any]) -> None:
         args = self.args
