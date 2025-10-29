@@ -2004,7 +2004,8 @@ class ModelDims:
             # Per-sample generated KV reads: Each sample reads its own previously generated tokens
             for R in prompt_responses:
                 kv_read_terms += num_full_attn_layers * R * (R - 1) // 2
-                kv_read_terms += num_sliding_layers * sum(min(P + t, self.sliding_window) for t in range(R))
+                if num_sliding_layers > 0:
+                    kv_read_terms += num_sliding_layers * sum(min(P + t, self.sliding_window) for t in range(R))
         return kv_bytes_per_token * kv_read_terms
 
     def prefill_memory_bytes(self, prompt_lengths: list[int], dtype_bytes: int = 2) -> int:
