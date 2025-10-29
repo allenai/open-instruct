@@ -83,7 +83,7 @@ done
 
 # Default beaker workspace if not provided; does not override user input.
 BEAKER_WORKSPACE="${BEAKER_WORKSPACE:-ai2/tulu-3-results}"
-if [[ "$BEAKER_WORKSPACE" != */* ]]; then
+if ! [[ "$BEAKER_WORKSPACE" =~ ^[^/]+/[^/]+$ ]]; then
     echo "Error: --beaker-workspace must be fully qualified as '<org>/<workspace>' (e.g., 'ai2/tulu-3-results'). Received: '$BEAKER_WORKSPACE'"
     exit 1
 fi
