@@ -48,6 +48,7 @@ python open_instruct/grpo_fast.py \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --active_fill_completions \
+    --no_resample_solve_rate 0.9 \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 16 \
     --num_mini_batches 1 \

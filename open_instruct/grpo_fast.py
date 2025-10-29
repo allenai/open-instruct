@@ -618,6 +618,7 @@ class ShufflingIterator:
             "epoch_number": self.epoch_number,
             "data": self.data.copy(),
             "rng_state": self.rng.bit_generator.state,
+            "exclude_list": self.exclude_list.copy(),
         }
 
     def set_state(self, state: Dict[str, Any]) -> None:
