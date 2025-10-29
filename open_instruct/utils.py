@@ -1795,7 +1795,7 @@ class ModelDims:
         assert self.device_name in GPU_SPECS, f"Unknown device: {self.device_name}"
         return GPU_SPECS[self.device_name]["memory_bandwidth"]
 
-    def attn_flops(self, query_len: int, kv_len: int, use_sliding_window: bool = False) -> int:
+    def attn_flops(self, query_len: int, kv_len: int, sliding_window: Optional[int] = None) -> int:
         """FLOPs for one layer of self-attention given query_len and kv_len.
 
         Assumptions:
@@ -1810,8 +1810,7 @@ class ModelDims:
         q_dim = self.num_attn_heads * d
         kv_dim = self.num_kv_heads * d
 
-        if use_sliding_window and self.sliding_window is not None:
-            kv_len = min(kv_len, self.sliding_window)
+        kv_len = min(kv_len, sliding_window or float("inf"))
 
         # Projections for the query_len new tokens
         q_proj = mul * query_len * self.hidden_size * q_dim
@@ -1843,10 +1842,12 @@ class ModelDims:
         total = 0
         for L in prompt_lengths:
             if num_full_attn_layers > 0:
-                total += num_full_attn_layers * (self.attn_flops(L, L, use_sliding_window=False) + self.mlp_flops(L))
+                total += num_full_attn_layers * (self.attn_flops(L, L, sliding_window=None) + self.mlp_flops(L))
 
             if num_sliding_layers > 0:
-                total += num_sliding_layers * (self.attn_flops(L, L, use_sliding_window=True) + self.mlp_flops(L))
+                total += num_sliding_layers * (
+                    self.attn_flops(L, L, sliding_window=self.sliding_window) + self.mlp_flops(L)
+                )
 
             # Always include a single LM head after prefill (next-token logits)
             total += FLOP_PER_MAC * self.hidden_size * self.vocab_size
@@ -1883,12 +1884,12 @@ class ModelDims:
 
                     if num_full_attn_layers > 0:
                         total += num_full_attn_layers * self.attn_flops(
-                            query_len=1, kv_len=kv_len, use_sliding_window=False
+                            query_len=1, kv_len=kv_len, sliding_window=None
                         )
 
                     if num_sliding_layers > 0:
                         total += num_sliding_layers * self.attn_flops(
-                            query_len=1, kv_len=kv_len, use_sliding_window=True
+                            query_len=1, kv_len=kv_len, sliding_window=self.sliding_window
                         )
 
                 total += R * FLOP_PER_MAC * self.hidden_size * self.vocab_size
@@ -1997,8 +1998,7 @@ class ModelDims:
 
             max_response_length = max(prompt_responses) if prompt_responses else 0
 
-            if num_full_attn_layers > 0:
-                kv_read_terms += max_response_length * samples_per_prompt * P * num_full_attn_layers
+            kv_read_terms += max_response_length * samples_per_prompt * P * num_full_attn_layers
 
             # Per-sample generated KV reads: Each sample reads its own previously generated tokens
             for R in prompt_responses:
