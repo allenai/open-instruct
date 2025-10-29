@@ -141,11 +141,11 @@ class TestRLUtils(unittest.TestCase):
         packed_values[0, 24:36] = 3
         packed_values[0, 36] = pad_token_id
 
-        packed_rewards = np.zeros((1, 38))
+        packed_rewards = np.zeros((1, 37))
         packed_rewards[0, 8] = 10
         packed_rewards[0, 17] = 20
         packed_rewards[0, 35] = 30
-        packed_rewards[0, 37] = pad_token_id
+        packed_rewards[0, 36] = pad_token_id
 
         packed_dones = np.zeros((1, 37))
         packed_dones[0, 8] = 1
