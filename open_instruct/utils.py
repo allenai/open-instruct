@@ -1786,8 +1786,6 @@ class ModelDims:
             layer_types = getattr(model_config.hf_text_config, "layer_types", None)
             if layer_types is not None:
                 num_sliding_window_layers = sum(1 for lt in layer_types if lt == "sliding_attention")
-            else:
-                num_sliding_window_layers = model_config.get_num_layers(vllm_config.parallel_config)
 
         return cls(
             num_layers=model_config.get_num_layers(vllm_config.parallel_config),
@@ -1940,7 +1938,7 @@ class ModelDims:
 
                 for R in prompt_responses:
                     if num_full_attn_layers > 0:
-                        total_bytes += kv_bytes_per_token * num_full_attn_layers * R * (R - 1) / 2
+                        total_bytes += kv_bytes_per_token * num_full_attn_layers * R * (R - 1) // 2
 
                     if num_sliding_layers > 0 and self.sliding_window is not None:
                         kv_read_sum = sum(min(P + t, self.sliding_window) for t in range(R))
