@@ -75,7 +75,8 @@ WEKA_CLUSTERS = [
 today = date.today().strftime("%m%d%Y")
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--workspace", type=str, default="oe-adapt-general")
+# Require fully-qualified workspace or use a fully-qualified default.
+parser.add_argument("--workspace", type=str, default="ai2/oe-adapt-general")
 parser.add_argument("--model_name", type=str, default="hf-opt-7B")
 parser.add_argument("--hf_revision", type=str, default=None)
 parser.add_argument("--location", type=str, default=None)
@@ -120,6 +121,11 @@ args = parser.parse_args()
 
 
 workspace = args.workspace
+# Do not silently alter the workspace; require fully-qualified form.
+if "/" not in workspace:
+    raise ValueError(
+        f"--workspace must be fully qualified as '<org>/<workspace>' (e.g., 'ai2/oe-adapt-general'). Received: '{workspace}'"
+    )
 model_type = "vanilla_lm" if not args.is_tuned else "tuned_lm"
 
 with open("configs/beaker_configs/default_eval.yaml", 'r') as f:
@@ -601,7 +607,8 @@ if not args.skip_oi_evals:
     with open(fn, "w") as file:
         yaml.dump(d, file, default_flow_style=True)
 
-    cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
+    # Do not prefix or rewrite the workspace; use exactly what the user provided.
+    cmd = "beaker experiment create {} --workspace {}".format(fn, workspace)
     subprocess.Popen(cmd, shell=True)
 
 if args.run_oe_eval_experiments:
@@ -620,6 +627,9 @@ if args.run_oe_eval_experiments:
         oe_eval_cmd += f" --model-location beaker://{model_info[1]}"
     if args.hf_revision:
         oe_eval_cmd += f" --revision {args.hf_revision}"
+    # Pass through the beaker workspace explicitly to avoid any hardcoded defaults.
+    if workspace:
+        oe_eval_cmd += f" --beaker-workspace {workspace}"
     if args.evaluate_on_weka:
         oe_eval_cmd += " --evaluate_on_weka"
     if args.oe_eval_tasks:
