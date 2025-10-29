@@ -1905,12 +1905,9 @@ class ModelDims:
         # compared to a single-GPU engine; the value is still validated for clarity.
 
         total_bytes = 0
-        batch_size = len(prompt_lengths)
-        active_prefill_engines = min(num_engines, batch_size)
-        prefill_scale = active_prefill_engines / batch_size
 
         for P in prompt_lengths:
-            total_bytes += self.num_layers * P * per_layer_weight_bytes * prefill_scale
+            total_bytes += self.num_layers * P * per_layer_weight_bytes
             total_bytes += P * embedding_bytes
             total_bytes += lm_head_bytes
             total_bytes += self.num_layers * P * kv_bytes_per_token
@@ -1918,18 +1915,11 @@ class ModelDims:
         if response_lengths is not None:
             assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt
 
-            total_sequences = len(prompt_lengths) * samples_per_prompt
             active_decode_engines = min(num_engines, len(prompt_lengths))
             global_max_response_len = max(response_lengths)
             total_response_tokens = sum(response_lengths)
 
-            total_bytes += (
-                self.num_layers
-                * global_max_response_len
-                * per_layer_weight_bytes
-                * active_decode_engines
-                / total_sequences
-            )
+            total_bytes += self.num_layers * global_max_response_len * per_layer_weight_bytes * active_decode_engines
             total_bytes += total_response_tokens * embedding_bytes
             total_bytes += global_max_response_len * active_decode_engines * lm_head_bytes
             total_bytes += self.num_layers * total_response_tokens * kv_bytes_per_token
@@ -2118,6 +2108,7 @@ def check_calculation(
 
     full_device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
 
+    avg_response_length = f"{sum(response_lengths) / len(response_lengths):.1f}" if response_lengths else "N/A"
     warning_message = (
         f"{metric_name} exceeded 100%: {percentage:.2f}%\n"
         f"\n"
@@ -2132,7 +2123,7 @@ def check_calculation(
         f"  num_prompts: {len(prompt_lengths)}\n"
         f"  samples_per_prompt: {samples_per_prompt}\n"
         f"  avg_prompt_length: {sum(prompt_lengths) / len(prompt_lengths):.1f}\n"
-        f"  avg_response_length: {sum(response_lengths) / len(response_lengths):.1f if response_lengths else 'N/A'}\n"
+        f"  avg_response_length: {avg_response_length}\n"
         f"\n"
         f"This may indicate an issue with the MFU/MBU calculation logic or GPU specifications.\n"
         f"Please raise an issue at https://github.com/allenai/open-instruct/issues with the above information."

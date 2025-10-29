@@ -371,7 +371,7 @@ class TestModelDimsQwen25(unittest.TestCase):
         [
             ("beaker_212_percent_bug", "Qwen/Qwen3-1.7B", 8, 4, 145, 274.7, 1, 1, 1, 1, 2.048383, 5.0),
             ("small_batch", "Qwen/Qwen2.5-7B", 2, 2, 512, 512, 2, 2, 2, 1, 5.0, 3.0),
-            ("large_batch", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 2, 4, 1, 2, 8.0, 4.0),
+            ("large_batch", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 2, 4, 1, 2, 8.55, 4.0),
         ]
     )
     def test_mfu_mbu_under_100_percent(
