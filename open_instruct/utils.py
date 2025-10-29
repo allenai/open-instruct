@@ -1878,23 +1878,18 @@ class ModelDims:
             for _ in range(samples_per_prompt):
                 R = response_lengths[response_idx]
                 total += R * self.num_layers * self.mlp_flops(seq_len=1)
-
                 for t in range(R):
                     kv_len = P + t + 1  # prompt + generated so far + current
-
                     if num_full_attn_layers > 0:
                         total += num_full_attn_layers * self.attn_flops(
                             query_len=1, kv_len=kv_len, sliding_window=None
                         )
-
                     if num_sliding_layers > 0:
                         total += num_sliding_layers * self.attn_flops(
                             query_len=1, kv_len=kv_len, sliding_window=self.sliding_window
                         )
-
                 total += R * FLOP_PER_MAC * self.hidden_size * self.vocab_size
                 response_idx += 1
-
         return total
 
     def flops(
@@ -1981,7 +1976,6 @@ class ModelDims:
 
         num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
         num_sliding_layers = self.num_sliding_window_layers
-        kv_bytes_per_token = 2 * self.num_kv_heads * self.head_dim * dtype_bytes
 
         # For batched sampling with shared prompt KV cache:
         # - Prompt KV is read once per new token position across ALL samples (not per sample)
@@ -1996,16 +1990,24 @@ class ModelDims:
                 prompt_responses.append(response_lengths[response_idx])
                 response_idx += 1
 
+            # Prompt KV reads: In synchronized batch generation with vLLM n>1,
+            # the prompt KV cache is stored once but each sample reads it independently.
+            # At each decoding position, each sample reads the prompt KV cache.
+            # Number of positions = max response length (all generate synchronously).
             max_response_length = max(prompt_responses) if prompt_responses else 0
-
             # Each of the samples_per_prompt samples reads prompt KV at each position
             kv_read_terms += max_response_length * samples_per_prompt * P * num_full_attn_layers
 
             # Per-sample generated KV reads: Each sample reads its own previously generated tokens
             for R in prompt_responses:
+                # Each token in this sample reads its previously generated tokens
                 kv_read_terms += num_full_attn_layers * R * (R - 1) // 2
                 if num_sliding_layers > 0:
+                    # ... unless we have a sliding window, at which point we cap the max tokens to read.
+                    # Note that we also account for the prompt KV values here as well.
                     kv_read_terms += num_sliding_layers * sum(min(P + t, self.sliding_window) for t in range(R))
+        # 2x for K and V
+        kv_bytes_per_token = 2 * self.num_kv_heads * self.head_dim * dtype_bytes
         return kv_bytes_per_token * kv_read_terms
 
     def prefill_memory_bytes(self, prompt_lengths: list[int], dtype_bytes: int = 2) -> int:
@@ -2115,6 +2117,7 @@ class ModelDims:
             assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
                 f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
             )
+
             # Pass original prompt_lengths with samples_per_prompt to correctly handle shared KV cache
             total += self.decode_memory_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
 
