@@ -282,9 +282,7 @@ def grade_stdio(code: str, all_inputs: list, all_outputs: list, timeout: int):
             continue
 
         test_case_failed = False
-        for stripped_prediction_line, stripped_gt_out_line in zip(
-            stripped_prediction_lines, stripped_gt_out_lines, strict=False
-        ):
+        for stripped_prediction_line, stripped_gt_out_line in zip(stripped_prediction_lines, stripped_gt_out_lines):
             if stripped_prediction_line == stripped_gt_out_line:
                 continue
 
