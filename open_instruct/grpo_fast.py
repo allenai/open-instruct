@@ -1472,6 +1472,7 @@ def calculate_utilization_metrics(
     samples_per_prompt: int,
     num_inference_gpus: int,
     num_engines: int,
+    num_gpus_per_engine: int,
     training_time: float,
     num_training_gpus: int,
 ) -> dict:
@@ -1483,8 +1484,9 @@ def calculate_utilization_metrics(
         response_lengths: List of response lengths
         total_generation_time: Total time taken for generation (for actor metrics)
         samples_per_prompt: Number of samples generated per prompt
-        num_inference_gpus: Number of GPUs used for inference
+        num_inference_gpus: Total number of GPUs used for inference across all engines
         num_engines: Number of vLLM engines for inference
+        num_gpus_per_engine: Number of GPUs assigned to each vLLM engine (tensor parallel size)
         training_time: Time taken for training step (for learner metrics)
         num_training_gpus: Number of GPUs used for training (for learner metrics)
 
@@ -1505,6 +1507,7 @@ def calculate_utilization_metrics(
         samples_per_prompt=samples_per_prompt,
         num_inference_gpus=num_inference_gpus,
         num_engines=num_engines,
+        num_gpus_per_engine=num_gpus_per_engine,
     )
 
     learner_metrics = model_dims.calculate_learner_utilization(
@@ -2490,6 +2493,7 @@ def one_training_step(
         samples_per_prompt=args.num_samples_per_prompt_rollout,
         num_inference_gpus=num_actor_gpus,
         num_engines=args.vllm_num_engines,
+        num_gpus_per_engine=args.vllm_tensor_parallel_size,
         training_time=train_timer.duration,
         num_training_gpus=args.world_size,
     )

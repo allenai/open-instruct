@@ -368,9 +368,9 @@ class TestModelDimsQwen25(unittest.TestCase):
 
     @parameterized.expand(
         [
-            ("beaker_212_percent_bug", "Qwen/Qwen3-1.7B", 8, 4, 145, 274.7, 1, 1, 2.048383, 5.0),
-            ("small_batch", "Qwen/Qwen2.5-7B", 2, 2, 512, 512, 1, 1, 5.0, 3.0),
-            ("large_batch", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 2, 4, 8.0, 4.0),
+            ("beaker_212_percent_bug", "Qwen/Qwen3-1.7B", 8, 4, 145, 274.7, 1, 1, 1, 1, 2.048383, 5.0),
+            ("small_batch", "Qwen/Qwen2.5-7B", 2, 2, 512, 512, 2, 2, 2, 1, 5.0, 3.0),
+            ("large_batch", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 2, 4, 1, 2, 8.0, 4.0),
         ]
     )
     def test_mfu_mbu_under_100_percent(
@@ -383,6 +383,8 @@ class TestModelDimsQwen25(unittest.TestCase):
         response_len,
         num_inference_gpus,
         num_training_gpus,
+        num_engines,
+        num_gpus_per_engine,
         total_generation_time,
         training_time,
     ):
@@ -399,7 +401,8 @@ class TestModelDimsQwen25(unittest.TestCase):
             total_generation_time=total_generation_time,
             samples_per_prompt=samples_per_prompt,
             num_inference_gpus=num_inference_gpus,
-            num_engines=1,
+            num_engines=num_engines,
+            num_gpus_per_engine=num_gpus_per_engine,
             training_time=training_time,
             num_training_gpus=num_training_gpus,
         )
@@ -407,6 +410,126 @@ class TestModelDimsQwen25(unittest.TestCase):
         self.assertLessEqual(metrics["actor_mfu"], 100)
         self.assertLessEqual(metrics["actor_mbu"], 100)
         self.assertLessEqual(metrics["learner_mfu"], 100)
+
+    @parameterized.expand(
+        [
+            ("two_engines_four_gpus_each", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 8, 2, 4, 4, 8.0, 4.0),
+            ("four_engines_two_gpus_each", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 8, 4, 2, 4, 8.0, 4.0),
+            ("single_engine_eight_gpus", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 8, 1, 8, 4, 8.0, 4.0),
+        ]
+    )
+    def test_multi_engine_utilization(
+        self,
+        name,
+        model_name,
+        num_prompts,
+        samples_per_prompt,
+        prompt_len,
+        response_len,
+        num_inference_gpus,
+        num_engines,
+        num_gpus_per_engine,
+        num_training_gpus,
+        total_generation_time,
+        training_time,
+    ):
+        prompt_lengths = [prompt_len] * num_prompts
+        response_lengths = [int(response_len)] * (num_prompts * samples_per_prompt)
+
+        metrics = grpo_fast.calculate_utilization_metrics(
+            model_dims=MODEL_DIMS[model_name],
+            prompt_lengths=prompt_lengths,
+            response_lengths=response_lengths,
+            total_generation_time=total_generation_time,
+            samples_per_prompt=samples_per_prompt,
+            num_inference_gpus=num_inference_gpus,
+            num_engines=num_engines,
+            num_gpus_per_engine=num_gpus_per_engine,
+            training_time=training_time,
+            num_training_gpus=num_training_gpus,
+        )
+
+        self.assertLessEqual(
+            metrics["actor_mfu"],
+            100,
+            f"{name}: Actor MFU {metrics['actor_mfu']:.2f}% exceeded 100% "
+            f"(num_engines={num_engines}, num_gpus_per_engine={num_gpus_per_engine})",
+        )
+        self.assertLessEqual(
+            metrics["actor_mbu"],
+            100,
+            f"{name}: Actor MBU {metrics['actor_mbu']:.2f}% exceeded 100% "
+            f"(num_engines={num_engines}, num_gpus_per_engine={num_gpus_per_engine})",
+        )
+        self.assertLessEqual(metrics["learner_mfu"], 100)
+
+    def test_memory_bytes_scales_with_engines(self):
+        model_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
+        prompt_lengths = [256] * 8
+        response_lengths = [256] * 16
+
+        memory_1_engine = model_dims.memory_bytes(
+            prompt_lengths=prompt_lengths,
+            num_engines=1,
+            num_gpus_per_engine=8,
+            response_lengths=response_lengths,
+            samples_per_prompt=2,
+        )
+
+        memory_2_engines = model_dims.memory_bytes(
+            prompt_lengths=prompt_lengths,
+            num_engines=2,
+            num_gpus_per_engine=4,
+            response_lengths=response_lengths,
+            samples_per_prompt=2,
+        )
+
+        memory_4_engines = model_dims.memory_bytes(
+            prompt_lengths=prompt_lengths,
+            num_engines=4,
+            num_gpus_per_engine=2,
+            response_lengths=response_lengths,
+            samples_per_prompt=2,
+        )
+
+        self.assertGreater(
+            memory_2_engines,
+            memory_1_engine,
+            "Memory with 2 engines should be more than 1 engine (more parallel decoding overhead)",
+        )
+        self.assertGreater(
+            memory_4_engines,
+            memory_2_engines,
+            "Memory with 4 engines should be more than 2 engines (more parallel decoding overhead)",
+        )
+
+    def test_idle_engines_do_not_add_memory(self):
+        model_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
+        prompt_lengths = [256, 256]
+        samples_per_prompt = 2
+        response_lengths = [256] * (len(prompt_lengths) * samples_per_prompt)
+
+        memory_active = model_dims.memory_bytes(
+            prompt_lengths=prompt_lengths,
+            num_engines=2,
+            num_gpus_per_engine=1,
+            response_lengths=response_lengths,
+            samples_per_prompt=samples_per_prompt,
+        )
+
+        memory_with_idle = model_dims.memory_bytes(
+            prompt_lengths=prompt_lengths,
+            num_engines=4,
+            num_gpus_per_engine=1,
+            response_lengths=response_lengths,
+            samples_per_prompt=samples_per_prompt,
+        )
+
+        self.assertEqual(
+            memory_with_idle,
+            memory_active,
+            "Idle engines should not increase memory accounting when they receive no prompts.",
+        )
 
     def test_model_dims_match_vllm_config(self):
         import unittest.mock
