@@ -2,7 +2,7 @@ import os
 import random
 import time
 from dataclasses import asdict, dataclass, field
-from typing import List, Literal, Optional
+from typing import Literal
 
 import deepspeed
 import numpy as np
@@ -53,27 +53,27 @@ api = HfApi()
 @dataclass
 class Args:
     # Dataset
-    dataset_mixer_list: List[str] = field(
+    dataset_mixer_list: list[str] = field(
         default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"]
     )
     """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_eval_list: List[str] = field(default_factory=lambda: [])
+    dataset_mixer_eval_list: list[str] = field(default_factory=lambda: [])
     """A list of datasets (local or HF) to sample from for evaluation."""
-    dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
+    dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
     """The dataset splits to use for training"""
-    dataset_mixer_eval_list_splits: List[str] = field(default_factory=lambda: [])
+    dataset_mixer_eval_list_splits: list[str] = field(default_factory=lambda: [])
     """The dataset splits to use for evaluation"""
     dataset_transform_fn: list[str] = field(default_factory=lambda: ["preference_tokenize_v1", "preference_filter_v1"])
     """The list of transform functions to apply to the dataset."""
-    dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
+    dataset_target_columns: list[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
     """The columns to use for the dataset."""
     dataset_cache_mode: Literal["hf", "local"] = "local"
     """The mode to use for caching the dataset."""
     dataset_local_cache_dir: str = "local_dataset_cache"
     """The directory to save the local dataset cache to."""
-    dataset_config_hash: Optional[str] = None
+    dataset_config_hash: str | None = None
     """The hash of the dataset configuration."""
-    dataset_config_eval_hash: Optional[str] = None
+    dataset_config_eval_hash: str | None = None
     """The hash of the dataset configuration for evaluation."""
     dataset_skip_cache: bool = False
     """Whether to skip the cache."""
@@ -89,7 +89,7 @@ class Args:
     """The name of this experiment"""
     seed: int = 1
     """Seed of the experiment"""
-    run_name: Optional[str] = None
+    run_name: str | None = None
     """A unique name of this run"""
 
     # Optimizer
@@ -109,25 +109,25 @@ class Args:
     """Number of epochs to train"""
     gradient_accumulation_steps: int = 8
     """The number of gradient accumulation steps"""
-    per_device_train_batch_size: Optional[int] = 1
+    per_device_train_batch_size: int | None = 1
     """The forward batch size per device (local_micro_batch_size)"""
-    per_device_eval_batch_size: Optional[int] = 1
+    per_device_eval_batch_size: int | None = 1
     """The forward batch size per device for evaluation (local_micro_batch_size)"""
-    total_episodes: Optional[int] = None
+    total_episodes: int | None = None
     """The total number of episodes in the dataset"""
-    world_size: Optional[int] = None
+    world_size: int | None = None
     """The number of processes (GPUs) to use"""
-    micro_batch_size: Optional[int] = None
+    micro_batch_size: int | None = None
     """The micro batch size across devices (HF's `per_device_train_batch_size` * `world_size`)"""
-    local_batch_size: Optional[int] = None
+    local_batch_size: int | None = None
     """The batch size per GPU (HF's `per_device_train_batch_size` * `gradient_accumulation_steps`)"""
-    batch_size: Optional[int] = None
+    batch_size: int | None = None
     """The batch size across devices (HF's `per_device_train_batch_size` * `world_size` * `gradient_accumulation_steps`)"""
-    num_training_steps: Optional[int] = None
+    num_training_steps: int | None = None
     """The number of training_steps to train"""
     num_evals: int = 1
     """The number of evaluations to run throughout training"""
-    eval_freq: Optional[int] = None
+    eval_freq: int | None = None
     """The frequency of evaluation steps"""
 
     # Experiment tracking
@@ -135,23 +135,23 @@ class Args:
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
     """The wandb's project name"""
-    wandb_entity: Optional[str] = None
+    wandb_entity: str | None = None
     """The entity (team) of wandb's project"""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
-    hf_entity: Optional[str] = None
+    hf_entity: str | None = None
     """The user or org name of the model repository from the Hugging Face Hub"""
-    hf_repo_id: Optional[str] = None
+    hf_repo_id: str | None = None
     """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_revision: Optional[str] = None
+    hf_repo_revision: str | None = None
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_url: Optional[str] = None
+    hf_repo_url: str | None = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     output_dir: str = "output"
     """Where to save the model"""
 
     # Ai2 specific settings
-    gs_bucket_path: Optional[str] = None
+    gs_bucket_path: str | None = None
     """The path to the gs bucket to save the model to"""
 
 
@@ -213,9 +213,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             args.hf_repo_revision = args.run_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
 
-    if args.with_tracking and accelerator.is_main_process:
-        if args.wandb_entity is None:
-            args.wandb_entity = maybe_use_ai2_wandb_entity()
+    if args.with_tracking and accelerator.is_main_process and args.wandb_entity is None:
+        args.wandb_entity = maybe_use_ai2_wandb_entity()
     local_seed = args.seed + accelerator.process_index
 
     # ------------------------------------------------------------

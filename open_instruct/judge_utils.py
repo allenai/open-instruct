@@ -1,6 +1,5 @@
 import json
 import re
-from typing import Optional
 
 from open_instruct import logger_utils
 
@@ -155,7 +154,7 @@ Respond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}
 """
 
 
-def build_messages(user_prompt: str, system_prompt: Optional[str] = None):
+def build_messages(user_prompt: str, system_prompt: str | None = None):
     """
     Build the message payload for the model evaluation.
     """
