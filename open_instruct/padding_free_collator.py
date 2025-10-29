@@ -160,8 +160,6 @@ def get_batch_logps(
     return torch.concat(
         [
             ((ps * mask).sum(-1) / mask.sum(-1) if average_log_prob else (ps * mask).sum(-1))
-            for ps, mask in zip(
-                torch.split(per_token_logps, splits, dim=-1), torch.split(loss_mask, splits, dim=-1), strict=False
-            )
+            for ps, mask in zip(torch.split(per_token_logps, splits, dim=-1), torch.split(loss_mask, splits, dim=-1))
         ]
     )

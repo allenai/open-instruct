@@ -749,7 +749,7 @@ class PolicyTrainerRayProcess(RayProcess):
             ray.get(refss)
 
     def update_ref_policy(self):
-        for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters(), strict=False):
+        for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
             if self.args.deepspeed_stage == 3:
                 with deepspeed.zero.GatheredParameters([param, ref_param], modifier_rank=0):
                     if deepspeed.comm.get_rank() == 0:

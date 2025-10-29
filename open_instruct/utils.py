@@ -310,7 +310,7 @@ def get_datasets(
     raw_train_datasets = []
     raw_val_datasets = []
     frac_or_sample_list = []
-    for (ds, frac_or_samples), ds_config in zip(dataset_mixer.items(), configs, strict=False):
+    for (ds, frac_or_samples), ds_config in zip(dataset_mixer.items(), configs):
         frac_or_sample_list.append(frac_or_samples)
         for split in splits:
             # if dataset ends with .json or .jsonl, load from file
@@ -526,7 +526,7 @@ def combine_dataset(
         print(f"Saving mixed dataset to {save_data_dir}")
 
     datasets = []
-    for (ds, frac_or_samples), ds_config, split in zip(dataset_mixer.items(), configs, splits, strict=False):
+    for (ds, frac_or_samples), ds_config, split in zip(dataset_mixer.items(), configs, splits):
         # if dataset ends with .json or .jsonl, load from file
         if ds.endswith(".json") or ds.endswith(".jsonl"):
             dataset = load_dataset("json", data_files=ds, split=split)

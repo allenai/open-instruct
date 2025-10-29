@@ -808,9 +808,7 @@ def create_vllm_engines(
         if len(max_tool_calls) == 1:
             max_tool_calls_dict = {end_str: max_tool_calls[0] for end_str in tools}
         else:
-            max_tool_calls_dict = {
-                end_str: limit for end_str, limit in zip(tools.keys(), max_tool_calls, strict=False)
-            }
+            max_tool_calls_dict = {end_str: limit for end_str, limit in zip(tools.keys(), max_tool_calls)}
     else:
         max_tool_calls_dict = {}
 
