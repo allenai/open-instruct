@@ -23,9 +23,10 @@ import threading
 import time
 import types
 from collections import defaultdict
+from collections.abc import Awaitable
 from concurrent import futures
 from datetime import timedelta
-from typing import Any, Awaitable, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import ray
 import torch
@@ -85,13 +86,13 @@ def assert_threaded_actor(instance):
 
 
 def _truncate_tool_output_tokens(
-    tool_output_token_ids: List[int],
-    current_prompt_token_ids: List[int],
-    accumulated_tokens: List[int],
+    tool_output_token_ids: list[int],
+    current_prompt_token_ids: list[int],
+    accumulated_tokens: list[int],
     max_model_len: int,
     max_tokens: int,
     current_mask_len: int,
-) -> Tuple[List[int], int, List[int]]:
+) -> tuple[list[int], int, list[int]]:
     prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens + tool_output_token_ids
     excess = len(prompt_and_tool_output) - max_model_len
     if excess > 0:
@@ -210,13 +211,13 @@ async def process_request_async(
     )
 
     if actor.tools:
-        setattr(complete_output, "mask", masks)
-        setattr(complete_output, "num_calls", num_calls)
-        setattr(complete_output, "timeout", timeout)
-        setattr(complete_output, "tool_error", tool_error)
-        setattr(complete_output, "tool_output", tool_output)
-        setattr(complete_output, "tool_runtime", tool_runtime)
-        setattr(complete_output, "tool_called", tool_called)
+        complete_output.mask = masks
+        complete_output.num_calls = num_calls
+        complete_output.timeout = timeout
+        complete_output.tool_error = tool_error
+        complete_output.tool_output = tool_output
+        complete_output.tool_runtime = tool_runtime
+        complete_output.tool_called = tool_called
 
     actor.active_tasks.pop(sub_request_id, None)
 
@@ -242,7 +243,7 @@ async def process_request_async(
 # so this function is used to get the bundle indices of a placement group
 # and ensure that the bundles placed on the same node are grouped together.
 # avoids unnecessary communication for TP>1 with vllm.
-def get_bundle_indices_list(placement_group: ray.util.placement_group) -> List[int]:
+def get_bundle_indices_list(placement_group: ray.util.placement_group) -> list[int]:
     pg_infos = ray.util.placement_group_table(placement_group)
 
     node_id_to_bundles = defaultdict(list)
@@ -275,11 +276,11 @@ def split_request_id(full_request_id: str) -> dict:
 
 def get_triggered_tool(
     output_text: str,
-    tools: Dict[str, Tool],
-    max_tool_calls: Dict[str, int],
+    tools: dict[str, Tool],
+    max_tool_calls: dict[str, int],
     num_calls: int,
     sampling_params: vllm.SamplingParams,
-) -> Tuple[Optional[Tool], Optional[str]]:
+) -> tuple[Tool | None, str | None]:
     """Check if any tool was triggered and return the tool and stop_str if found.
 
     Args:
@@ -338,7 +339,10 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
             f"!= logprobs length ({len(out.logprobs)})"
         )
         logprobs.append(
-            [logprob_dict[token_id].logprob for token_id, logprob_dict in zip(out.token_ids, out.logprobs)]
+            [
+                logprob_dict[token_id].logprob
+                for token_id, logprob_dict in zip(out.token_ids, out.logprobs, strict=False)
+            ]
         )
 
     # Extract attributes based on whether tools are used
@@ -410,14 +414,14 @@ def ray_noset_visible_devices(env_vars=os.environ):
 # Copy from pytorch to allow creating multiple main groups.
 # https://github.com/pytorch/pytorch/blob/main/torch/distributed/distributed_c10d.py
 def init_process_group(
-    backend: Union[str, Backend] = None,
-    init_method: Optional[str] = None,
-    timeout: Optional[timedelta] = None,
+    backend: str | Backend = None,
+    init_method: str | None = None,
+    timeout: timedelta | None = None,
     world_size: int = -1,
     rank: int = -1,
-    store: Optional[Store] = None,
-    group_name: Optional[str] = None,
-    pg_options: Optional[Any] = None,
+    store: Store | None = None,
+    group_name: str | None = None,
+    pg_options: Any | None = None,
 ) -> ProcessGroup:
     assert (store is None) or (init_method is None), "Cannot specify both init_method and store."
 
@@ -427,10 +431,7 @@ def init_process_group(
     elif init_method is None:
         init_method = "env://"
 
-    if backend:
-        backend = Backend(backend)
-    else:
-        backend = Backend("undefined")
+    backend = Backend(backend) if backend else Backend("undefined")
 
     if timeout is None:
         timeout = default_pg_timeout
@@ -510,14 +511,14 @@ class LLMRayActor:
     def __init__(
         self,
         *args,
-        tools: Optional[Dict[str, Tool]] = None,
-        max_tool_calls: Optional[Dict[str, int]] = None,
-        bundle_indices: Optional[List[int]] = None,
+        tools: dict[str, Tool] | None = None,
+        max_tool_calls: dict[str, int] | None = None,
+        bundle_indices: list[int] | None = None,
         prompt_queue: ray_queue.Queue,
         results_queue: ray_queue.Queue,
         eval_results_queue: ray_queue.Queue,
         actor_manager: ray.actor.ActorHandle,
-        inference_batch_size: Optional[int],
+        inference_batch_size: int | None,
         inflight_updates: bool,
         **kwargs,
     ):
@@ -533,9 +534,9 @@ class LLMRayActor:
 
     def _init_config(
         self,
-        tools: Optional[Dict[str, Tool]],
-        max_tool_calls: Optional[Dict[str, int]],
-        inference_batch_size: Optional[int],
+        tools: dict[str, Tool] | None,
+        max_tool_calls: dict[str, int] | None,
+        inference_batch_size: int | None,
         inflight_updates: bool,
     ) -> None:
         self.tools = tools or {}
@@ -705,12 +706,12 @@ class LLMRayActor:
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
 
-    def update_weight(self, name: str, dtype: str, shape: Tuple[int, ...], empty_cache: bool = False) -> None:
+    def update_weight(self, name: str, dtype: str, shape: tuple[int, ...], empty_cache: bool = False) -> None:
         self._prepare_weight_update(name, dtype)
         return self._run_async(self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache)))
 
     def update_weight_cuda_ipc(
-        self, name: str, dtype: str, shape: Tuple[int, ...], ipc_handles: List[Any], empty_cache: bool = False
+        self, name: str, dtype: str, shape: tuple[int, ...], ipc_handles: list[Any], empty_cache: bool = False
     ) -> None:
         self._prepare_weight_update(name, dtype)
         return self._run_async(
@@ -790,14 +791,14 @@ def create_vllm_engines(
     max_model_len: int,
     vllm_gpu_memory_utilization: float = 0.9,
     single_gpu_mode: bool = False,
-    pg: Optional[ray.util.placement_group] = None,
-    tools: Optional[Dict[str, Tool]] = None,
-    max_tool_calls: List[int] = [5],
+    pg: ray.util.placement_group | None = None,
+    tools: dict[str, Tool] | None = None,
+    max_tool_calls: list[int] = [5],
     prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
     actor_manager=None,
-    inference_batch_size: Optional[int] = None,
+    inference_batch_size: int | None = None,
     use_fp8_kv_cache=False,
     inflight_updates: bool = False,
 ) -> list[LLMRayActor]:
@@ -808,17 +809,16 @@ def create_vllm_engines(
         )
         # tool key is the end_str
         if len(max_tool_calls) == 1:
-            max_tool_calls_dict = {end_str: max_tool_calls[0] for end_str in tools.keys()}
+            max_tool_calls_dict = {end_str: max_tool_calls[0] for end_str in tools}
         else:
-            max_tool_calls_dict = {end_str: limit for end_str, limit in zip(tools.keys(), max_tool_calls)}
+            max_tool_calls_dict = {
+                end_str: limit for end_str, limit in zip(tools.keys(), max_tool_calls, strict=False)
+            }
     else:
         max_tool_calls_dict = {}
 
     vllm_engines = []
-    if tensor_parallel_size == 1:
-        distributed_executor_backend = "uni"
-    else:
-        distributed_executor_backend = "ray"
+    distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "ray"
     use_hybrid_engine = pg is not None
     num_gpus = int(tensor_parallel_size == 1)
     if use_hybrid_engine and tensor_parallel_size == 1 and single_gpu_mode:

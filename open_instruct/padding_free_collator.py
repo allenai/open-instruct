@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Dict, List, Union
 
 import torch
 from transformers import DefaultDataCollator
@@ -92,8 +91,8 @@ class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
 
 # - dpo concatenation  for padding free
 def concatenated_inputs(
-    batch: Dict[str, Union[List, torch.LongTensor]], tag: str = "concatenated_"
-) -> Dict[str, torch.LongTensor]:
+    batch: dict[str, list | torch.LongTensor], tag: str = "concatenated_"
+) -> dict[str, torch.LongTensor]:
     chosen_features, rejected_features = {}, {}
     for k in batch:
         if k.startswith("chosen_"):
@@ -161,6 +160,8 @@ def get_batch_logps(
     return torch.concat(
         [
             ((ps * mask).sum(-1) / mask.sum(-1) if average_log_prob else (ps * mask).sum(-1))
-            for ps, mask in zip(torch.split(per_token_logps, splits, dim=-1), torch.split(loss_mask, splits, dim=-1))
+            for ps, mask in zip(
+                torch.split(per_token_logps, splits, dim=-1), torch.split(loss_mask, splits, dim=-1), strict=False
+            )
         ]
     )

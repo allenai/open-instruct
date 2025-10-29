@@ -1,6 +1,5 @@
 import re
 import signal
-from typing import Optional
 
 import sympy
 from sympy.parsing.latex import parse_latex
@@ -11,7 +10,7 @@ eval_logger = logger_utils.setup_logger("math_utils")
 
 
 # from https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/minerva_math/utils.py#L187
-def last_boxed_only_string(string: str) -> Optional[str]:
+def last_boxed_only_string(string: str) -> str | None:
     idx = string.rfind("\\boxed")
     if "\\boxed " in string:
         return "\\boxed " + string.split("\\boxed ")[-1].split("$")[0]
@@ -33,10 +32,7 @@ def last_boxed_only_string(string: str) -> Optional[str]:
                 break
         i += 1
 
-    if right_brace_idx is None:
-        retval = None
-    else:
-        retval = string[idx : right_brace_idx + 1]
+    retval = None if right_brace_idx is None else string[idx : right_brace_idx + 1]
 
     return retval
 
@@ -198,10 +194,7 @@ def is_equiv(x1: str, x2: str) -> bool:
                 return False
 
             try:
-                if sympy.simplify(diff) == 0:
-                    return True
-                else:
-                    return False
+                return sympy.simplify(diff) == 0
             except ValueError:
                 eval_logger.debug(f"Had some trouble simplifying when comparing {x1} and {x2}")
     except TimeoutError:
@@ -255,7 +248,7 @@ def fix_a_slash_b(string):
     try:
         a = int(a)
         b = int(b)
-        assert string == "{}/{}".format(a, b)
+        assert string == f"{a}/{b}"
         new_string = "\\frac{" + str(a) + "}{" + str(b) + "}"
         return new_string
     except AssertionError:
@@ -328,9 +321,8 @@ def strip_string(string):
         string = "0" + string
 
     # to consider: get rid of e.g. "k = " or "q = " at beginning
-    if len(string.split("=")) == 2:
-        if len(string.split("=")[0]) <= 2:
-            string = string.split("=")[1]
+    if len(string.split("=")) == 2 and len(string.split("=")[0]) <= 2:
+        string = string.split("=")[1]
 
     # fix sqrt3 --> sqrt{3}
     string = fix_sqrt(string)

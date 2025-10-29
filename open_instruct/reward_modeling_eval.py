@@ -1,5 +1,4 @@
 from collections import defaultdict
-from typing import Tuple
 
 import pandas as pd
 import torch
@@ -32,7 +31,7 @@ def find_shared_text(chosen_text: str, rejected_text: str):
 
 def evaluate(
     model: PreTrainedModel, dataloader: DataLoader, tokenizer: PreTrainedTokenizer, max_sampled_texts: int = 0
-) -> Tuple[dict, dict]:
+) -> tuple[dict, dict]:
     model.eval()
     total_loss = 0
     total_accuracy = 0
@@ -66,21 +65,22 @@ def evaluate(
                 rejected_texts = [item.replace(tokenizer.pad_token, "") for item in rejected_texts]
                 rewards_rounded = [
                     [round(chosen.item(), 4), round(rejected.item(), 4)]
-                    for chosen, rejected in zip(chosen_rewards, rejected_rewards)
+                    for chosen, rejected in zip(chosen_rewards, rejected_rewards, strict=False)
                 ]
                 correct_prediction = [
-                    bool((chosen > rejected)) for chosen, rejected in zip(chosen_rewards, rejected_rewards)
+                    bool(chosen > rejected) for chosen, rejected in zip(chosen_rewards, rejected_rewards, strict=False)
                 ]
                 shared_texts = [
                     find_shared_text(chosen_text, rejected_text)
-                    for chosen_text, rejected_text in zip(chosen_texts, rejected_texts)
+                    for chosen_text, rejected_text in zip(chosen_texts, rejected_texts, strict=False)
                 ]
                 chosen_response_texts = [
-                    chosen_text[len(shared_text) :] for chosen_text, shared_text in zip(chosen_texts, shared_texts)
+                    chosen_text[len(shared_text) :]
+                    for chosen_text, shared_text in zip(chosen_texts, shared_texts, strict=False)
                 ]
                 rejected_response_texts = [
                     rejected_text[len(shared_text) :]
-                    for rejected_text, shared_text in zip(rejected_texts, shared_texts)
+                    for rejected_text, shared_text in zip(rejected_texts, shared_texts, strict=False)
                 ]
                 table["shared prompt text"].extend(shared_texts)
                 table["chosen response text"].extend(chosen_response_texts)

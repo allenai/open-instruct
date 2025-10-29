@@ -187,15 +187,7 @@ def compile_code(code: str, timeout: int):
     try:
         tmp_sol = ModuleType("tmp_sol", "")
         exec(code, tmp_sol.__dict__)
-        if "class Solution" in code:
-            # leetcode wraps solutions in `Solution`
-            # this is a hack to check if it is leetcode solution or not
-            # currently livecodebench only supports LeetCode but
-            # else condition allows future extensibility to other platforms
-            compiled_sol = tmp_sol.Solution()
-        else:
-            # do nothing in the other case since function is accesible
-            compiled_sol = tmp_sol
+        compiled_sol = tmp_sol.Solution() if "class Solution" in code else tmp_sol
 
         assert compiled_sol is not None
     except Exception:
@@ -240,7 +232,7 @@ def grade_stdio(code: str, all_inputs: list, all_outputs: list, timeout: int):
     all_runtimes = []
     total_execution_time = 0
     first_failure_info = None
-    for idx, (gt_inp, gt_out) in enumerate(zip(all_inputs, all_outputs)):
+    for idx, (gt_inp, gt_out) in enumerate(zip(all_inputs, all_outputs, strict=False)):
         signal.alarm(timeout)
         faulthandler.enable()
 
@@ -290,7 +282,9 @@ def grade_stdio(code: str, all_inputs: list, all_outputs: list, timeout: int):
             continue
 
         test_case_failed = False
-        for stripped_prediction_line, stripped_gt_out_line in zip(stripped_prediction_lines, stripped_gt_out_lines):
+        for stripped_prediction_line, stripped_gt_out_line in zip(
+            stripped_prediction_lines, stripped_gt_out_lines, strict=False
+        ):
             if stripped_prediction_line == stripped_gt_out_line:
                 continue
 

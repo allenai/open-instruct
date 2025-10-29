@@ -42,11 +42,12 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Iterable
 from concurrent import futures
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from dataclasses import dataclass
 from multiprocessing import resource_tracker as _rt
-from typing import Any, Iterable, List, NewType, Optional, Tuple, Union
+from typing import Any, NewType
 
 import beaker
 import numpy as np
@@ -80,7 +81,7 @@ def repeat_each(seq, k):
 
 
 def ray_get_with_progress(
-    ray_refs: List[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: Optional[float] = None
+    ray_refs: list[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: float | None = None
 ):
     """Execute ray.get() with a progress bar using futures and collect timings.
 
@@ -244,13 +245,13 @@ def convert_rejection_samples_to_messages(example):
 
 
 def get_datasets(
-    dataset_mixer: Union[dict, list],
-    splits: Optional[List[str]] = None,
-    configs: Optional[List[str]] = None,
-    columns_to_keep: Optional[List[str]] = None,
+    dataset_mixer: dict | list,
+    splits: list[str] | None = None,
+    configs: list[str] | None = None,
+    columns_to_keep: list[str] | None = None,
     shuffle: bool = True,
-    save_data_dir: Optional[str] = None,
-    need_columns: Optional[List[str]] = None,
+    save_data_dir: str | None = None,
+    need_columns: list[str] | None = None,
     keep_ids: bool = False,
     add_source_col: bool = False,
 ) -> DatasetDict:
@@ -289,16 +290,13 @@ def get_datasets(
         i = 0
         while i < len(dataset_mixer) - 1:
             assert isinstance(dataset_mixer[i], str), f"Invalid type in data mixer: {dataset_mixer}"
-            if "." in dataset_mixer[i + 1]:
-                value = float(dataset_mixer[i + 1])
-            else:
-                value = int(dataset_mixer[i + 1])
+            value = float(dataset_mixer[i + 1]) if "." in dataset_mixer[i + 1] else int(dataset_mixer[i + 1])
             mixer_dict[dataset_mixer[i]] = value
             i += 2
         dataset_mixer = mixer_dict
 
     splits = ["train", "test"] if splits is None else splits
-    configs = [None] * len(dataset_mixer) if not configs else configs
+    configs = configs if configs else [None] * len(dataset_mixer)
     columns_to_keep = [] if columns_to_keep is None else columns_to_keep
 
     if configs is not None and len(configs) != len(dataset_mixer):
@@ -312,7 +310,7 @@ def get_datasets(
     raw_train_datasets = []
     raw_val_datasets = []
     frac_or_sample_list = []
-    for (ds, frac_or_samples), ds_config in zip(dataset_mixer.items(), configs):
+    for (ds, frac_or_samples), ds_config in zip(dataset_mixer.items(), configs, strict=False):
         frac_or_sample_list.append(frac_or_samples)
         for split in splits:
             # if dataset ends with .json or .jsonl, load from file
@@ -333,9 +331,8 @@ def get_datasets(
                 dataset = dataset.shuffle(seed=42)
 
             # assert that needed columns are present
-            if need_columns:
-                if not all(col in dataset.column_names for col in need_columns):
-                    raise ValueError(f"Needed column {need_columns} not found in dataset {dataset.column_names}.")
+            if need_columns and not all(col in dataset.column_names for col in need_columns):
+                raise ValueError(f"Needed column {need_columns} not found in dataset {dataset.column_names}.")
 
             # handle per-case conversions
             # if "instruction" and "output" columns are present and "messages" is not, convert to messages
@@ -431,7 +428,7 @@ def get_datasets(
     if len(raw_train_datasets) > 0:
         train_subsets = []
         # Manage proportions
-        for dataset, frac_or_samples in zip(raw_train_datasets, frac_or_sample_list):
+        for dataset, frac_or_samples in zip(raw_train_datasets, frac_or_sample_list, strict=False):
             # cast features (TODO, add more feature regularization)
             dataset = dataset.cast(target_features)
             # TODO selection can be randomized.
@@ -464,23 +461,21 @@ def get_datasets(
 
     if not keep_ids:
         # remove id column
-        if len(raw_train_datasets) > 0:
-            if "id" in raw_datasets["train"].column_names:
-                raw_datasets["train"] = raw_datasets["train"].remove_columns("id")
-        if len(raw_val_datasets) > 0:
-            if "id" in raw_datasets["test"].column_names:
-                raw_datasets["test"] = raw_datasets["test"].remove_columns("id")
+        if len(raw_train_datasets) > 0 and "id" in raw_datasets["train"].column_names:
+            raw_datasets["train"] = raw_datasets["train"].remove_columns("id")
+        if len(raw_val_datasets) > 0 and "id" in raw_datasets["test"].column_names:
+            raw_datasets["test"] = raw_datasets["test"].remove_columns("id")
 
     return raw_datasets
 
 
 def combine_dataset(
-    dataset_mixer: Union[dict, list],
-    splits: List[str],
-    configs: Optional[List[str]] = None,
-    columns_to_keep: Optional[List[str]] = None,
+    dataset_mixer: dict | list,
+    splits: list[str],
+    configs: list[str] | None = None,
+    columns_to_keep: list[str] | None = None,
     shuffle: bool = False,
-    save_data_dir: Optional[str] = None,
+    save_data_dir: str | None = None,
     keep_ids: bool = False,
 ) -> DatasetDict:
     """
@@ -512,10 +507,7 @@ def combine_dataset(
         i = 0
         while i < len(dataset_mixer) - 1:
             assert isinstance(dataset_mixer[i], str), f"Invalid type in data mixer: {dataset_mixer}"
-            if "." in dataset_mixer[i + 1]:
-                value = float(dataset_mixer[i + 1])
-            else:
-                value = int(dataset_mixer[i + 1])
+            value = float(dataset_mixer[i + 1]) if "." in dataset_mixer[i + 1] else int(dataset_mixer[i + 1])
             mixer_dict[dataset_mixer[i]] = value
             i += 2
         dataset_mixer = mixer_dict
@@ -523,7 +515,7 @@ def combine_dataset(
     if any(frac_or_samples < 0 for frac_or_samples in dataset_mixer.values()):
         raise ValueError("Dataset fractions / lengths cannot be negative.")
 
-    configs = [None] * len(dataset_mixer) if not configs else configs
+    configs = configs if configs else [None] * len(dataset_mixer)
     columns_to_keep = [] if columns_to_keep is None else columns_to_keep
 
     if configs is not None and len(configs) != len(dataset_mixer):
@@ -534,7 +526,7 @@ def combine_dataset(
         print(f"Saving mixed dataset to {save_data_dir}")
 
     datasets = []
-    for (ds, frac_or_samples), ds_config, split in zip(dataset_mixer.items(), configs, splits):
+    for (ds, frac_or_samples), ds_config, split in zip(dataset_mixer.items(), configs, splits, strict=False):
         # if dataset ends with .json or .jsonl, load from file
         if ds.endswith(".json") or ds.endswith(".jsonl"):
             dataset = load_dataset("json", data_files=ds, split=split)
@@ -551,10 +543,7 @@ def combine_dataset(
             dataset = dataset.shuffle(seed=42)
 
         # select a fraction of the dataset
-        if frac_or_samples > 1.0:
-            samples = int(frac_or_samples)
-        else:
-            samples = int(frac_or_samples * len(dataset))
+        samples = int(frac_or_samples) if frac_or_samples > 1.0 else int(frac_or_samples * len(dataset))
         dataset = dataset.select(range(samples))
 
         # if id not in dataset, create it as ds-{index}
@@ -574,10 +563,8 @@ def combine_dataset(
     if save_data_dir:
         datasets.to_json(save_data_dir + "mixed_ds.json")
 
-    if not keep_ids:
-        # remove id column
-        if "id" in datasets.column_names:
-            datasets = datasets.remove_columns("id")
+    if not keep_ids and "id" in datasets.column_names:
+        datasets = datasets.remove_columns("id")
 
     return datasets
 
@@ -585,7 +572,7 @@ def combine_dataset(
 # ----------------------------------------------------------------------------
 # Arguments utilities
 class ArgumentParserPlus(HfArgumentParser):
-    def parse_yaml_and_args(self, yaml_arg: str, other_args: Optional[List[str]] = None) -> List[dataclass]:
+    def parse_yaml_and_args(self, yaml_arg: str, other_args: list[str] | None = None) -> list[dataclass]:
         """
         Parse a YAML file and overwrite the default/loaded values with the values provided to the command line.
 
@@ -607,7 +594,7 @@ class ArgumentParserPlus(HfArgumentParser):
 
         # overwrite the default/loaded value with the value provided to the command line
         # noqa adapted from https://github.com/huggingface/transformers/blob/d0b5002378daabf62769159add3e7d66d3f83c3b/src/transformers/hf_argparser.py#L327
-        for data_yaml, data_class in zip(arg_list, self.dataclass_types):
+        for data_yaml, data_class in zip(arg_list, self.dataclass_types, strict=False):
             keys = {f.name for f in dataclasses.fields(data_yaml) if f.init}
             inputs = {k: v for k, v in vars(data_yaml).items() if k in keys}
             for arg, val in other_args.items():
@@ -621,7 +608,7 @@ class ArgumentParserPlus(HfArgumentParser):
                     if base_type in [int, float]:
                         inputs[arg] = base_type(val)
 
-                    if base_type == List[str]:
+                    if base_type == list[str]:
                         inputs[arg] = [str(v) for v in val.split(",")]
 
                     # bool of a non-empty string is True, so we manually check for bools
@@ -642,7 +629,7 @@ class ArgumentParserPlus(HfArgumentParser):
 
         return outputs
 
-    def parse(self) -> Union[DataClassType, Tuple[DataClassType]]:
+    def parse(self) -> DataClassType | tuple[DataClassType]:
         if len(sys.argv) == 2 and sys.argv[1].endswith(".yaml"):
             # If we pass only one argument to the script and it's the path to a YAML file,
             # let's parse it to get our arguments.
@@ -661,7 +648,7 @@ class ArgumentParserPlus(HfArgumentParser):
 
 # ----------------------------------------------------------------------------
 # Experiment tracking utilities
-def get_wandb_tags() -> List[str]:
+def get_wandb_tags() -> list[str]:
     """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123,branch-main`)"""
     tags = [t for t in os.environ.get("WANDB_TAGS", "").split(",") if t != ""]
     if "GIT_COMMIT" in os.environ:
@@ -682,7 +669,7 @@ def get_wandb_tags() -> List[str]:
 
 # ----------------------------------------------------------------------------
 # Check pointing utilities
-def get_last_checkpoint(folder: str, incomplete: bool = False) -> Optional[str]:
+def get_last_checkpoint(folder: str, incomplete: bool = False) -> str | None:
     content = os.listdir(folder)
     checkpoint_steps = [path for path in content if path.startswith("step_")]
     checkpoint_epochs = [path for path in content if path.startswith("epoch_")]
@@ -827,17 +814,17 @@ def calibrate_checkpoint_state_dir(checkpoint_state_dir: str) -> None:
 @dataclass
 class BeakerRuntimeConfig:
     beaker_workload_id: str
-    beaker_node_hostname: Optional[List[str]] = None
-    beaker_experiment_url: Optional[List[str]] = None
-    beaker_dataset_ids: Optional[List[str]] = None
-    beaker_dataset_id_urls: Optional[List[str]] = None
+    beaker_node_hostname: list[str] | None = None
+    beaker_experiment_url: list[str] | None = None
+    beaker_dataset_ids: list[str] | None = None
+    beaker_dataset_id_urls: list[str] | None = None
 
 
 def is_beaker_job() -> bool:
     return "BEAKER_JOB_ID" in os.environ
 
 
-def get_beaker_experiment_info(experiment_id: str) -> Optional[dict]:
+def get_beaker_experiment_info(experiment_id: str) -> dict | None:
     get_experiment_command = f"beaker experiment get {experiment_id} --format json"
     process = subprocess.Popen(["bash", "-c", get_experiment_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
@@ -871,7 +858,7 @@ class DatasetInfo:
     non_empty: bool
 
 
-def get_beaker_dataset_ids(experiment_id: str, sort=False) -> Optional[List[str]]:
+def get_beaker_dataset_ids(experiment_id: str, sort=False) -> list[str] | None:
     """if sort is True, the non-empty latest dataset will be availble at the end of the list"""
     experiment = get_beaker_experiment_info(experiment_id)
     if not experiment:
@@ -906,7 +893,7 @@ def get_beaker_dataset_ids(experiment_id: str, sort=False) -> Optional[List[str]
 
 
 @functools.lru_cache(maxsize=1)
-def get_beaker_whoami() -> Optional[str]:
+def get_beaker_whoami() -> str | None:
     get_beaker_whoami_command = "beaker account whoami --format json"
     process = subprocess.Popen(
         ["bash", "-c", get_beaker_whoami_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE
@@ -951,10 +938,10 @@ def format_eta(seconds: float) -> str:
 
 
 def maybe_update_beaker_description(
-    current_step: Optional[int] = None,
-    total_steps: Optional[int] = None,
-    start_time: Optional[float] = None,
-    wandb_url: Optional[str] = None,
+    current_step: int | None = None,
+    total_steps: int | None = None,
+    start_time: float | None = None,
+    wandb_url: str | None = None,
     original_descriptions: dict[str, str] = {},
 ) -> None:
     """Update Beaker experiment description with training progress and/or wandb URL.
@@ -972,7 +959,7 @@ def maybe_update_beaker_description(
     experiment_id = os.environ.get("BEAKER_WORKLOAD_ID")
     if not experiment_id:
         logger.warning(
-            f"BEAKER_WORKLOAD_ID not found in environment. Available env vars: {', '.join(sorted([k for k in os.environ.keys() if 'BEAKER' in k]))}"
+            f"BEAKER_WORKLOAD_ID not found in environment. Available env vars: {', '.join(sorted([k for k in os.environ if 'BEAKER' in k]))}"
         )
         return
 
@@ -1037,7 +1024,7 @@ def maybe_update_beaker_description(
         )
 
 
-def live_subprocess_output(cmd: List[str]) -> str:
+def live_subprocess_output(cmd: list[str]) -> str:
     output_lines = []
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
     # Display output in real-time and collect it
@@ -1102,10 +1089,7 @@ def gs_folder_exists(path: str) -> bool:
     # print(f"GS stat command: {cmd}")
     # print(f"GS stat stdout: {stdout}")
     # print(f"GS stat stderr: {stderr}")
-    if process.returncode == 0:
-        return True
-    else:
-        return False
+    return process.returncode == 0
 
 
 def upload_to_gs_bucket(src_path: str, dest_path: str) -> None:
@@ -1141,14 +1125,14 @@ def download_latest_checkpoint_from_gs(gs_checkpoint_state_dir: str, checkpoint_
 def launch_ai2_evals_on_weka(
     path: str,
     leaderboard_name: str,
-    oe_eval_max_length: Optional[int] = None,
-    wandb_url: Optional[str] = None,
-    training_step: Optional[int] = None,
-    oe_eval_tasks: Optional[List[str]] = None,
-    stop_strings: Optional[List[str]] = None,
-    gs_bucket_path: Optional[str] = None,
-    eval_priority: Optional[str] = "normal",
-    beaker_image: Optional[str] = None,
+    oe_eval_max_length: int | None = None,
+    wandb_url: str | None = None,
+    training_step: int | None = None,
+    oe_eval_tasks: list[str] | None = None,
+    stop_strings: list[str] | None = None,
+    gs_bucket_path: str | None = None,
+    eval_priority: str | None = "normal",
+    beaker_image: str | None = None,
 ) -> None:
     weka_cluster = "ai2/saturn ai2/neptune"
     gcp_cluster = "ai2/augusta"
@@ -1281,7 +1265,7 @@ def retry_on_exception(max_attempts=4, delay=1, backoff=2):
 
 @retry_on_exception()
 @functools.lru_cache(maxsize=1)
-def maybe_use_ai2_wandb_entity() -> Optional[str]:
+def maybe_use_ai2_wandb_entity() -> str | None:
     """Ai2 internal logic: try use the ai2-llm team if possible. Should not affect external users."""
     import wandb
 
@@ -1297,12 +1281,12 @@ def maybe_use_ai2_wandb_entity() -> Optional[str]:
 
 @retry_on_exception()
 @functools.lru_cache(maxsize=1)
-def hf_whoami() -> List[str]:
+def hf_whoami() -> list[str]:
     return HfApi().whoami()
 
 
 @functools.lru_cache(maxsize=1)
-def maybe_use_ai2_hf_entity() -> Optional[str]:
+def maybe_use_ai2_hf_entity() -> str | None:
     """Ai2 internal logic: try use the allenai entity if possible. Should not affect external users."""
     orgs = hf_whoami()
     orgs = [item["name"] for item in orgs["orgs"]]
@@ -1418,7 +1402,7 @@ def _z3_params_to_fetch(param_list):
     return [p for p in param_list if hasattr(p, "ds_id") and p.ds_status == ZeroParamStatus.NOT_AVAILABLE]
 
 
-def get_ray_address() -> Optional[str]:
+def get_ray_address() -> str | None:
     """Get the Ray address from the environment variable."""
     return os.environ.get("RAY_ADDRESS")
 
@@ -1715,8 +1699,8 @@ class ModelDims:
     vocab_size: int
     num_attn_heads: int
     head_dim: int
-    num_kv_heads: Optional[int] = None
-    device_name: Optional[str] = None
+    num_kv_heads: int | None = None
+    device_name: str | None = None
 
     def __post_init__(self):
         if self.num_kv_heads is None:
@@ -1838,7 +1822,7 @@ class ModelDims:
     def flops(
         self,
         prompt_lengths: list[int],
-        response_lengths: Optional[list[int]] = None,
+        response_lengths: list[int] | None = None,
         samples_per_prompt: int = 1,
         is_training: bool = False,
     ) -> int:
@@ -2021,7 +2005,7 @@ class ModelDims:
     def memory_bytes(
         self,
         prompt_lengths: list[int],
-        response_lengths: Optional[list[int]] = None,
+        response_lengths: list[int] | None = None,
         samples_per_prompt: int = 1,
         dtype_bytes: int = 2,
     ) -> int:
@@ -2082,7 +2066,7 @@ def get_device_name(device_name: str) -> str:
     """
     normalized_device_name = device_name.lower().replace("-", " ")
 
-    for key in GPU_SPECS.keys():
+    for key in GPU_SPECS:
         if key in normalized_device_name:
             return key
     raise ValueError(

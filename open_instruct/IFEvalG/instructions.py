@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2024 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,14 +19,15 @@ import json
 import random
 import re
 import string
-from typing import Dict, Optional, Sequence, Union
+from collections.abc import Sequence
+from typing import Optional
 
 import langdetect
 from absl import logging
 
 from open_instruct.IFEvalG import instructions_util
 
-_InstructionArgsDtype = Optional[Dict[str, Union[int, str, Sequence[str]]]]
+_InstructionArgsDtype = Optional[dict[str, int | str | Sequence[str]]]
 
 _LANGUAGES = instructions_util.LANGUAGE_CODES
 
@@ -374,10 +374,7 @@ class ConstrainedResponseChecker(Instruction):
           responses; otherwise False.
         """
         value = value.strip()
-        for constrained_response in self._constrained_responses:
-            if constrained_response in value:
-                return True
-        return False
+        return any(constrained_response in value for constrained_response in self._constrained_responses)
 
 
 class ConstrainedStartChecker(Instruction):
@@ -421,7 +418,7 @@ class ConstrainedStartChecker(Instruction):
         """
         response_pattern = r"^\s*" + self._starter + r".*$"
         response_with_constrained_start = re.search(response_pattern, value, flags=re.MULTILINE)
-        return True if response_with_constrained_start else False
+        return bool(response_with_constrained_start)
 
 
 class HighlightSectionChecker(Instruction):
@@ -646,7 +643,7 @@ class PostscriptChecker(Instruction):
         else:
             postscript_pattern = r"\s*" + self._postscript_marker.lower() + r".*$"
         postscript = re.findall(postscript_pattern, value, flags=re.MULTILINE)
-        return True if postscript else False
+        return bool(postscript)
 
 
 class RephraseChecker(Instruction):
@@ -746,10 +743,7 @@ class KeywordChecker(Instruction):
 
     def check_following(self, value):
         """Check if the response contain the expected keywords."""
-        for keyword in self._keywords:
-            if not re.search(keyword, value, flags=re.IGNORECASE):
-                return False
-        return True
+        return all(re.search(keyword, value, flags=re.IGNORECASE) for keyword in self._keywords)
 
 
 class KeywordFrequencyChecker(Instruction):
@@ -1085,10 +1079,7 @@ class ForbiddenWords(Instruction):
 
     def check_following(self, value):
         """Check if the response does not contain the expected keywords."""
-        for word in self._forbidden_words:
-            if re.search(r"\b" + word + r"\b", value, flags=re.IGNORECASE):
-                return False
-        return True
+        return all(not re.search(r"\b" + word + r"\b", value, flags=re.IGNORECASE) for word in self._forbidden_words)
 
 
 class RephraseParagraph(Instruction):
@@ -1216,9 +1207,7 @@ class RepeatPromptThenAnswer(Instruction):
         return ["prompt_to_repeat"]
 
     def check_following(self, value):
-        if value.strip().lower().startswith(self._prompt_to_repeat.strip().lower()):
-            return True
-        return False
+        return bool(value.strip().lower().startswith(self._prompt_to_repeat.strip().lower()))
 
 
 class EndChecker(Instruction):
@@ -1278,10 +1267,7 @@ class TitleChecker(Instruction):
         re_pattern = re.compile(pattern)
         titles = re.findall(re_pattern, value)
 
-        for title in titles:
-            if title.lstrip("<").rstrip(">").strip():
-                return True
-        return False
+        return any(title.lstrip("<").rstrip(">").strip() for title in titles)
 
 
 class LetterFrequencyChecker(Instruction):
@@ -1594,9 +1580,7 @@ class CopyChecker(Instruction):
         return ["prompt_to_repeat"]
 
     def check_following(self, value):
-        if value.strip().lower() == self._prompt_to_repeat.strip().lower():
-            return True
-        return False
+        return value.strip().lower() == self._prompt_to_repeat.strip().lower()
 
 
 class CopySpanIdxChecker(Instruction):
@@ -1639,9 +1623,7 @@ class CopySpanIdxChecker(Instruction):
 
     def check_following(self, value):
         """Checks if the response contains the expected number of phrases with the correct modifications."""
-        if value.strip().lower() == self._prompt_to_repeat[self._n_start : self._n_end].strip().lower():
-            return True
-        return False
+        return value.strip().lower() == self._prompt_to_repeat[self._n_start : self._n_end].strip().lower()
 
 
 class SentenceHyphenChecker(Instruction):
@@ -1665,10 +1647,8 @@ class SentenceHyphenChecker(Instruction):
         sentences_gold = instructions_util.split_into_sentences(sentences_gold)
         sentences = value.split("-")
         # Check if there are any spaces between sentences
-        for sentence, gold in zip(sentences, sentences_gold):
-            if sentence.strip() != sentence:
-                return False
-            elif sentence != gold:
+        for sentence, gold in zip(sentences, sentences_gold, strict=False):
+            if sentence.strip() != sentence or sentence != gold:
                 return False
         return True
 
@@ -1719,10 +1699,7 @@ class SquareBracketChecker(Instruction):
     def check_following(self, value):
         """Checks if every word in the response is enclosed within square brackets."""
         words = value.split()
-        for word in words:
-            if not (word.startswith("[") and word.endswith("]")):
-                return False
-        return True
+        return all(word.startswith("[") and word.endswith("]") for word in words)
 
 
 class KeywordFrequencyOnceChecker(Instruction):
@@ -1767,10 +1744,7 @@ class KeywordFrequencyOnceChecker(Instruction):
         """Checks if the response contain the keyword with required frequency."""
         actual_occurrences = len(re.findall(self._keyword, value, flags=re.IGNORECASE))
 
-        if actual_occurrences == 1:
-            return True
-        else:
-            return False
+        return actual_occurrences == 1
 
 
 class KeywordFrequencyCheckerDifferent(Instruction):
@@ -1866,9 +1840,7 @@ class ExcludeWordHarderChecker(Instruction):
 
     def check_following(self, value):
         """Check if the response does not contain the expected keywords."""
-        if " " + self._keyword + " " in value:
-            return False
-        return True
+        return " " + self._keyword + " " not in value
 
 
 class ParagraphBasicChecker(Instruction):
@@ -2065,9 +2037,7 @@ class FirstWordAnswerChecker(Instruction):
         if not value.strip() or len(value.split()) == 0:
             return False
         first_word = value.split()[0].strip()
-        if first_word.lower() != self._first_word.lower():
-            return False
-        return True
+        return first_word.lower() == self._first_word.lower()
 
 
 class LastWordSentChecker(Instruction):
@@ -2170,9 +2140,7 @@ class LastWordAnswerChecker(Instruction):
         last_word = value.split()[-1].strip()
         # remove any punctuation from last_word
         last_word = re.sub(r"[^\w\s]", "", last_word)
-        if last_word.lower() != self._last_word.lower():
-            return False
-        return True
+        return last_word.lower() == self._last_word.lower()
 
 
 class BiGramWrappingChecker(Instruction):
@@ -2196,9 +2164,8 @@ class BiGramWrappingChecker(Instruction):
         """Checks if every word bigram is enclosed within double angular brackets."""
         words = value.split()
         for i in range(0, len(words) - 1, 2):
-            if i + 1 < len(words):
-                if not (words[i].startswith("<<") and words[i + 1].endswith(">>")):
-                    return False
+            if i + 1 < len(words) and not (words[i].startswith("<<") and words[i + 1].endswith(">>")):
+                return False
         return True
 
 
@@ -2229,9 +2196,7 @@ class CopyingSimpleChecker(Instruction):
         return ["prompt_to_repeat"]
 
     def check_following(self, value):
-        if value.strip().lower() == self._prompt_to_repeat.strip().lower():
-            return True
-        return False
+        return value.strip().lower() == self._prompt_to_repeat.strip().lower()
 
 
 class CopyingMultipleChecker(Instruction):
@@ -2269,10 +2234,7 @@ class CopyingMultipleChecker(Instruction):
         prompts = value.split("******")
         if len(prompts) != self._N:
             return False
-        for prompt in prompts:
-            if prompt.strip().lower() != self._prompt_to_repeat.strip().lower():
-                return False
-        return True
+        return all(prompt.strip().lower() == self._prompt_to_repeat.strip().lower() for prompt in prompts)
 
 
 class PunctuationDotChecker(Instruction):
@@ -2346,10 +2308,7 @@ class LowercaseCountingChecker(Instruction):
     def check_following(self, value):
         """Checks that the response does not contain lowercase words more than N times."""
         lowercase_words = re.findall(r"\b[a-z]+\b", value)
-        if len(lowercase_words) <= self._N:
-            return True
-        else:
-            return False
+        return len(lowercase_words) <= self._N
 
 
 class LetterCountingChecker(Instruction):
@@ -2386,15 +2345,9 @@ class LetterCountingChecker(Instruction):
         """Checks that the response does not contain lowercase words more than N times."""
         letters = re.findall(r"[a-zA-Z]", value)
         if self._relation == "at least":
-            if len(letters) >= self._N:
-                return True
-            else:
-                return False
+            return len(letters) >= self._N
         elif self._relation == "less than":
-            if len(letters) < self._N:
-                return True
-            else:
-                return False
+            return len(letters) < self._N
 
 
 class CountingCompositionChecker(Instruction):
@@ -2534,10 +2487,7 @@ class CountIncrementWordChecker(Instruction):
         actual_occurrences1 = len(re.findall(self._keyword1, value, flags=re.IGNORECASE))
         actual_occurrences2 = len(re.findall(self._keyword2, value, flags=re.IGNORECASE))
 
-        if actual_occurrences1 == 1 and actual_occurrences2 == 2:
-            return True
-        else:
-            return False
+        return bool(actual_occurrences1 == 1 and actual_occurrences2 == 2)
 
 
 class PalindromeBasicChecker(Instruction):
@@ -2628,10 +2578,7 @@ class KeywordSpecificPositionChecker(Instruction):
         words = instructions_util.nltk.word_tokenize(sentences[self._n - 1])
         if len(words) < self._m:
             return False
-        if words[self._m - 1] == self._keyword:
-            return True
-        else:
-            return False
+        return words[self._m - 1] == self._keyword
 
 
 class StartEndChecker(Instruction):
@@ -2662,7 +2609,4 @@ class StartEndChecker(Instruction):
         words = instructions_util.nltk.word_tokenize(value)
         if len(words) < 2:
             return False
-        if words[0].lower() == words[-1].lower():
-            return True
-        else:
-            return False
+        return words[0].lower() == words[-1].lower()
