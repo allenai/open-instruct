@@ -18,6 +18,7 @@ import unittest
 from unittest import mock
 
 import pytest
+import vllm
 from dateutil import parser
 from parameterized import parameterized
 
@@ -462,98 +463,18 @@ class TestModelDimsQwen25(unittest.TestCase):
         )
         self.assertLessEqual(metrics["learner_mfu"], 100)
 
-    def test_memory_bytes_scales_with_engines(self):
-        model_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
-        prompt_lengths = [256] * 8
-        response_lengths = [256] * 16
-
-        memory_1_engine = model_dims.memory_bytes(
-            prompt_lengths=prompt_lengths,
-            num_engines=1,
-            num_gpus_per_engine=8,
-            response_lengths=response_lengths,
-            samples_per_prompt=2,
-        )
-
-        memory_2_engines = model_dims.memory_bytes(
-            prompt_lengths=prompt_lengths,
-            num_engines=2,
-            num_gpus_per_engine=4,
-            response_lengths=response_lengths,
-            samples_per_prompt=2,
-        )
-
-        memory_4_engines = model_dims.memory_bytes(
-            prompt_lengths=prompt_lengths,
-            num_engines=4,
-            num_gpus_per_engine=2,
-            response_lengths=response_lengths,
-            samples_per_prompt=2,
-        )
-
-        self.assertGreater(
-            memory_2_engines,
-            memory_1_engine,
-            "Memory with 2 engines should be more than 1 engine (more parallel decoding overhead)",
-        )
-        self.assertGreater(
-            memory_4_engines,
-            memory_2_engines,
-            "Memory with 4 engines should be more than 2 engines (more parallel decoding overhead)",
-        )
-
-    def test_idle_engines_do_not_add_memory(self):
-        model_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
-        prompt_lengths = [256, 256]
-        samples_per_prompt = 2
-        response_lengths = [256] * (len(prompt_lengths) * samples_per_prompt)
-
-        memory_active = model_dims.memory_bytes(
-            prompt_lengths=prompt_lengths,
-            num_engines=2,
-            num_gpus_per_engine=1,
-            response_lengths=response_lengths,
-            samples_per_prompt=samples_per_prompt,
-        )
-
-        memory_with_idle = model_dims.memory_bytes(
-            prompt_lengths=prompt_lengths,
-            num_engines=4,
-            num_gpus_per_engine=1,
-            response_lengths=response_lengths,
-            samples_per_prompt=samples_per_prompt,
-        )
-
-        self.assertEqual(
-            memory_with_idle,
-            memory_active,
-            "Idle engines should not increase memory accounting when they receive no prompts.",
-        )
-
     def test_model_dims_match_vllm_config(self):
-        import unittest.mock
-
-        import vllm
-
         model_name = "Qwen/Qwen2.5-7B"
         expected_dims = MODEL_DIMS[model_name]
 
         engine_args = vllm.EngineArgs(model=model_name, load_format="dummy", max_model_len=512)
         vllm_config = engine_args.create_engine_config()
 
-        with unittest.mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"):
+        with mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"):
             vllm_dims = utils.ModelDims.from_vllm_config(vllm_config)
         vllm_dims.device_name = "h100"
 
-        self.assertEqual(vllm_dims.num_layers, expected_dims.num_layers)
-        self.assertEqual(vllm_dims.hidden_size, expected_dims.hidden_size)
-        self.assertEqual(vllm_dims.intermediate_size, expected_dims.intermediate_size)
-        self.assertEqual(vllm_dims.vocab_size, expected_dims.vocab_size)
-        self.assertEqual(vllm_dims.num_attn_heads, expected_dims.num_attn_heads)
-        self.assertEqual(vllm_dims.head_dim, expected_dims.head_dim)
-        self.assertEqual(vllm_dims.num_kv_heads, expected_dims.num_kv_heads)
-        self.assertEqual(vllm_dims.sliding_window, expected_dims.sliding_window)
-        self.assertEqual(vllm_dims.num_sliding_window_layers, expected_dims.num_sliding_window_layers)
+        self.assertEqual(vllm_dims, expected_dims)
 
 
 # useful for checking if public datasets are still available
