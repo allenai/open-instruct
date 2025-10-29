@@ -491,9 +491,3 @@ def test_pack_sequences_logits():
     pprint({"adv": adv})
     pprint({"ret": ret})
     print("hah")
-
-
-if __name__ == "__main__":
-    test_pack_sequences()
-    test_calculate_advantages_packed()
-    test_pack_sequences_logits()
