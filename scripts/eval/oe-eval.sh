@@ -222,7 +222,7 @@ NEXT_MODEL_DEV=(
     # Coding
     "codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek"
     "mbppplus:0-shot-chat::tulu-thinker_deepseek"
-    "livecodebench_codegeneration::tulu-thinker_deepseek"
+    "livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags"
     # [TODO not merged] codeeditorbench - requires separate server
     # [TODO, maybe] cruxeval
     
@@ -244,7 +244,7 @@ NEXT_MODEL_UNSEEN=(
     # [TODO, not implemented] Humanity's Last Exam
     # [TODO, not implemented] SuperGPQA
     # [TODO, not implemented] BigBenchExtraHard
-    "livecodebench_codegeneration::tulu-thinker-hidden"
+    "livecodebench_codegeneration::tulu-thinker-hidden_no_think_tags"
     "ifbench::tulu"
 )
 

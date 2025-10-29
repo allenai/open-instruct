@@ -121,7 +121,8 @@ docstring-code-format = false
 # E = pycodestyle errors (flake8)
 # W = pycodestyle warnings (flake8)
 # I = isort
-select = ["F", "E", "W", "I"]
+# SIM = flake8-simplify
+select = ["F", "E", "W", "I", "SIM"]
 ignore = [
     "C408", # dict() calls (stylistic)
     "C901", # function complexity
