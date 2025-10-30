@@ -189,9 +189,9 @@ def batch_processing_scores(
                 # score = (batch_size, )
                 scores.extend(score.cpu().tolist())  # convert the tensor score to a list
                 i += current_batch_size
-            except torch.cuda.OutOfMemoryError:
+            except torch.cuda.OutOfMemoryError as e:
                 if current_batch_size == 1:
-                    raise ValueError("Out of memory even with batch size 1")
+                    raise ValueError("Out of memory even with batch size 1") from e
                 current_batch_size //= 2
                 print(f"Reducing batch size to {current_batch_size}")
                 continue

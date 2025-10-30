@@ -440,7 +440,7 @@ def get_eval_ds_config(offload, stage=0, bf16=True):
 def get_optimizer_grouped_parameters(
     model,
     weight_decay,
-    no_decay_name_list=["bias", "layer_norm.weight", "layernorm.weight", "norm.weight", "ln_f.weight"],
+    no_decay_name_list=("bias", "layer_norm.weight", "layernorm.weight", "norm.weight", "ln_f.weight"),
 ):
     optimizer_grouped_parameters = [
         {
@@ -511,7 +511,7 @@ class MetricsTracker:
     """A simple class to prellocate all metrics in an array
     so we can do only one allreduce operation to get the metrics mean"""
 
-    def __init__(self, max_metrics: int = 32, device: torch.device = torch.device("cuda")):
+    def __init__(self, max_metrics: int = 32, device: str = "cuda"):
         self.metrics = torch.zeros(max_metrics, device=device)
         self.names2idx = {}
         self.current_idx = 0
@@ -1730,10 +1730,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             tags=[args.exp_name] + get_wandb_tags(),
         )
     writer = SummaryWriter(f"runs/{args.run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
+    hyperparams_table = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
+    writer.add_text("hyperparameters", f"|param|value|\n|-|-|\n{hyperparams_table}")
 
     # ------------------------------------------------------------
     # Set up datasets
@@ -1812,7 +1810,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     print("======== all models initialized =========")
 
     refs = []
-    for i, policy_model in enumerate(policy_group.models):
+    for policy_model in policy_group.models:
         refs.append(
             policy_model.train.remote(
                 train_dataset=train_dataset,

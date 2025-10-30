@@ -373,7 +373,7 @@ def remove_padding(sequences, pad_token_id):
 class MetricsTracker:
     """A simple class to prellocate all metrics in an array"""
 
-    def __init__(self, max_metrics: int = 32, device: torch.device = torch.device("cuda")):
+    def __init__(self, max_metrics: int = 32, device: str = "cuda"):
         self.metrics = torch.zeros(max_metrics, device=device)
         self.names2idx = {}
         self.current_idx = 0
@@ -1443,10 +1443,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             tags=[args.exp_name] + get_wandb_tags(),
         )
     writer = SummaryWriter(f"runs/{args.run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
+    hyperparams_table = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
+    writer.add_text("hyperparameters", f"|param|value|\n|-|-|\n{hyperparams_table}")
 
     # Set up datasets
     transform_fn_args = [
@@ -1523,7 +1521,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     print("======== all models initialized =========")
 
     refs = []
-    for i, policy_model in enumerate(policy_group.models):
+    for policy_model in policy_group.models:
         refs.append(
             policy_model.train.remote(
                 train_dataset=train_dataset,
@@ -1540,7 +1538,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
     # train and gather metrics
     resume_training_step = 1
-    for training_step in range(resume_training_step, args.num_training_steps + 1):
+    for _ in range(resume_training_step, args.num_training_steps + 1):
         result = metrics_queue.get()
         metrics, episode, df = result
         for key, value in metrics.items():

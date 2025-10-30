@@ -20,14 +20,13 @@ import random
 import re
 import string
 from collections.abc import Sequence
-from typing import Optional
 
 import langdetect
 from absl import logging
 
 from open_instruct.IFEvalG import instructions_util
 
-_InstructionArgsDtype = Optional[dict[str, int | str | Sequence[str]]]
+_InstructionArgsDtype = dict[str, int | str | Sequence[str]] | None
 
 _LANGUAGES = instructions_util.LANGUAGE_CODES
 
@@ -1957,7 +1956,7 @@ class FirstWordSentChecker(Instruction):
             self._first_word = instructions_util.generate_keywords(num_keywords=1)[0]
         else:
             if not isinstance(first_word, str):
-                self._first_word == first_word[0].strip()
+                self._first_word = first_word[0].strip()
             else:
                 self._first_word = first_word.strip()
 

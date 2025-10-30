@@ -228,15 +228,13 @@ def extract_json_score_with_fallback(score_str: str) -> "tuple[str, float]":
             data = json.loads(cleaned_str)
             reasoning = data.get("REASONING", "")
             score = float(data.get("SCORE", 0.0))
-        except json.JSONDecodeError:
-            # try just getting the score with some regex
+        except json.JSONDecodeError as e:
             score_match = re.search(r'"SCORE"\s*:\s*"?([0-9]+(?:\.[0-9]+)?)"?', cleaned_str)
             if score_match:
                 score = float(score_match.group(1))
                 reasoning = cleaned_str
             else:
-                # bubble up the error
-                raise ValueError()
+                raise ValueError() from e
         return reasoning, score
     except (json.JSONDecodeError, TypeError, ValueError):
         logger.warning(f"Could not parse score from due to invalid json: {score_str}, defaulting to 0.0")
