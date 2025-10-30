@@ -1,4 +1,6 @@
+import gc
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -72,7 +74,7 @@ class TestConfigHash(unittest.TestCase):
                 dataset_split="train",
                 dataset_revision="main",
                 transform_fn=["sft_tokenize_v1"],
-                transform_fn_args={},
+                transform_fn_args=[{}],
             )
         ]
 
@@ -82,7 +84,7 @@ class TestConfigHash(unittest.TestCase):
                 dataset_split="train",
                 dataset_revision="main",
                 transform_fn=["sft_tokenize_mask_out_prompt_v1"],
-                transform_fn_args={},
+                transform_fn_args=[{}],
             )
         ]
         hash1 = open_instruct.dataset_transformation.compute_config_hash(dcs1, tc)
@@ -94,6 +96,35 @@ class TestCachedDataset(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
+
+        self.original_hf_home = os.environ.get("HF_HOME")
+        self.original_hf_datasets_cache = os.environ.get("HF_DATASETS_CACHE")
+        self.original_transformers_cache = os.environ.get("TRANSFORMERS_CACHE")
+
+        os.environ["HF_HOME"] = self.temp_dir.name
+        os.environ["HF_DATASETS_CACHE"] = os.path.join(self.temp_dir.name, "datasets")
+        os.environ["TRANSFORMERS_CACHE"] = os.path.join(self.temp_dir.name, "transformers")
+
+    def tearDown(self):
+        if self.original_hf_home is not None:
+            os.environ["HF_HOME"] = self.original_hf_home
+        else:
+            os.environ.pop("HF_HOME", None)
+
+        if self.original_hf_datasets_cache is not None:
+            os.environ["HF_DATASETS_CACHE"] = self.original_hf_datasets_cache
+        else:
+            os.environ.pop("HF_DATASETS_CACHE", None)
+
+        if self.original_transformers_cache is not None:
+            os.environ["TRANSFORMERS_CACHE"] = self.original_transformers_cache
+        else:
+            os.environ.pop("TRANSFORMERS_CACHE", None)
+
+        self.temp_dir.cleanup()
+        if os.path.exists(self.temp_dir.name):
+            shutil.rmtree(self.temp_dir.name, ignore_errors=True)
+        gc.collect()
 
     def test_get_cached_dataset_tulu_sft(self):
         tc = open_instruct.dataset_transformation.TokenizerConfig(
