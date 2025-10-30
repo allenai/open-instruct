@@ -507,18 +507,19 @@ def save_with_accelerate(
     # customize model card (TODO (Costa): this can be prettier)
 
 
-@torch.compile(dynamic=True)
 def log_softmax_and_gather(logits: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
     """
-    torch compiled version of the common `log_softmax -> gather` operation.
+    A more memory efficient version of the common `log_softmax -> gather` operation used in
+    post-training algorithms.
 
-    The compiled version of this opration avoids the (significant) memory overhead of
-    allocating a new (batch_size, seq_len, vocab_size) tensor to store the logprobs.
+    Using the negative cross entropy loss is equivalent to the log_softmax -> gather operation,
+    but is more memory efficient since it doesn't require allocating a new
+    (batch_size, seq_len, vocab_size) tensor to store the logprobs.
 
     See https://github.com/allenai/open-instruct/pull/584
     """
-    logprobs = logits.log_softmax(dim=-1)
-    return torch.gather(logprobs, dim=-1, index=index.unsqueeze(-1)).squeeze(-1)
+    B, T, V = logits.shape
+    return -torch.nn.functional.cross_entropy(logits.view(-1, V), index.view(-1), reduction="none").view(B, T)
 
 
 @retry_on_exception()
