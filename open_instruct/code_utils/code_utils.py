@@ -39,15 +39,6 @@ logger = logger_utils.setup_logger(__name__)
 original_builtins = __builtins__
 
 
-def encode_tests(tests: list) -> str:
-    if not tests:
-        return ""
-    pickled_data = pickle.dumps(tests)
-    compressed_data = zlib.compress(pickled_data)
-    b64_encoded_data = base64.b64encode(compressed_data)
-    return b64_encoded_data.decode("utf-8")
-
-
 def decode_tests(tests: Any) -> list:
     if not tests:
         return []

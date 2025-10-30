@@ -134,18 +134,6 @@ Commented out Args not currently used
 
 # ----------------------------------------------------------------------------
 # Dataset utilities
-def is_openai_format(messages: Any) -> bool:
-    """
-    Check if the input messages are in OpenAI format.
-    Args:
-        messages (`Any`):
-            Messages to check.
-    Returns:
-        `bool`: Whether the messages are in OpenAI format.
-    """
-    if isinstance(messages, list) and all(isinstance(message, dict) for message in messages):
-        return all("role" in message and "content" in message for message in messages)
-    return False
 
 
 # functions for handling different formats of messages
@@ -1043,17 +1031,6 @@ def live_subprocess_output(cmd: list[str]) -> str:
     return "\n".join(output_lines)
 
 
-def download_from_hf(model_name_or_path: str, revision: str) -> None:
-    cmd = ["huggingface-cli", "download", model_name_or_path, "--revision", revision]
-    print(f"Downloading from HF with command: {cmd}")
-    output = live_subprocess_output(cmd)
-    # for some reason, sometimes the output includes the line including some loading message.
-    # so do some minor cleaning.
-    if "\n" in output:
-        output = output.split("\n")[-1].strip()
-    return output
-
-
 [
     "gsutil",
     "-o",
@@ -1065,23 +1042,6 @@ def download_from_hf(model_name_or_path: str, revision: str) -> None:
 ]
 
 
-def download_from_gs_bucket(src_path: str, dest_path: str) -> None:
-    cmd = [
-        "gsutil",
-        "-o",
-        "GSUtil:parallel_thread_count=1",
-        "-o",
-        "GSUtil:sliced_object_download_threshold=150",
-        "-m",
-        "cp",
-        "-r",
-        src_path,
-        dest_path,
-    ]
-    print(f"Downloading from GS bucket with command: {cmd}")
-    live_subprocess_output(cmd)
-
-
 def gs_folder_exists(path: str) -> bool:
     cmd = ["gsutil", "ls", path]
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -1090,12 +1050,6 @@ def gs_folder_exists(path: str) -> bool:
     # print(f"GS stat stdout: {stdout}")
     # print(f"GS stat stderr: {stderr}")
     return process.returncode == 0
-
-
-def upload_to_gs_bucket(src_path: str, dest_path: str) -> None:
-    cmd = ["gsutil", "-o", "GSUtil:parallel_composite_upload_threshold=150M", "cp", "-r", src_path, dest_path]
-    print(f"Copying model to GS bucket with command: {cmd}")
-    live_subprocess_output(cmd)
 
 
 def sync_gs_bucket(src_path: str, dest_path: str) -> None:
@@ -1400,11 +1354,6 @@ def get_optimizer_grouped_parameters(
 
 def _z3_params_to_fetch(param_list):
     return [p for p in param_list if hasattr(p, "ds_id") and p.ds_status == ZeroParamStatus.NOT_AVAILABLE]
-
-
-def get_ray_address() -> str | None:
-    """Get the Ray address from the environment variable."""
-    return os.environ.get("RAY_ADDRESS")
 
 
 _SET_AFFINITY = False

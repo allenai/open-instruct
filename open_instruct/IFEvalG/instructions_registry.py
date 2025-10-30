@@ -292,21 +292,3 @@ INSTRUCTION_CONFLICTS = {
     _KEYWORD + "keyword_specific_position": {_KEYWORD + "keyword_specific_position"},
     _KEYWORD + "start_end": {_KEYWORD + "start_end"},
 }
-
-
-def conflict_make(conflicts):
-    """Makes sure if A conflicts with B, B will conflict with A.
-
-    Args:
-      conflicts: Dictionary of potential conflicts where key is instruction id
-        and value is set of instruction ids that it conflicts with.
-
-    Returns:
-      Revised version of the dictionary. All instructions conflict with
-      themselves. If A conflicts with B, B will conflict with A.
-    """
-    for key in conflicts:
-        for k in conflicts[key]:
-            conflicts[k].add(key)
-        conflicts[key].add(key)
-    return conflicts

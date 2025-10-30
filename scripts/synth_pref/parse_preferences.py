@@ -70,8 +70,6 @@ def parse_openai(
     }
     aspects = list(aspects_map.values())
 
-    def find_key(d: dict[str, list[str]], value: str) -> Optional[str]:
-        return next((k for k, v in d.items() if value in v), None)
 
     def get_resp(resp: dict[str, Any]) -> str:
         message = resp["body"]["choices"][0]["message"]

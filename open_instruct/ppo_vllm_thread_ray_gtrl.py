@@ -47,7 +47,6 @@ except Exception:
 
 import asyncio
 import gc
-import json
 import math
 import random
 import shutil
@@ -367,17 +366,6 @@ class Args:
     """the pass rate reward threshold for the code verifier. If pass rate is less than this threshold, reward is 0.0, otherwise reward is pass rate"""
     code_apply_perf_penalty: bool = False
     """whether to apply a performance penalty to the code verifier"""
-
-
-def process_dataset_mixer(value) -> tuple[dict | None, str | None]:
-    # if passed through cli: convert the dataset mixers to dictionaries
-    if isinstance(value, str):
-        return json.loads(value), value
-    # if passed through yaml: convert the dataset mixers to strings
-    elif isinstance(value, dict):
-        return value, json.dumps(value)
-    else:
-        raise ValueError("Input must be either a string or a dictionary")
 
 
 def get_train_ds_config(

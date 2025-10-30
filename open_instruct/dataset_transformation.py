@@ -144,19 +144,6 @@ def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
     console.print(rich_text)
 
 
-def visualize_token_role(tokens: list[int], masks: list[int], tokenizer: PreTrainedTokenizer):
-    i = 0
-    console = Console()
-    rich_text = Text()
-    # for i, token in enumerate():
-    for i in range(min(len(tokens), len(masks))):
-        token = tokens[i]
-        color = COLORS[masks[i] % len(COLORS)]
-        decoded_token = tokenizer.decode(token)
-        rich_text.append(f"{decoded_token}", style=color)
-    console.print(rich_text)
-
-
 # ----------------------------------------------------------------------------
 # Tokenization
 # Chat templates
@@ -1274,25 +1261,6 @@ def rlvr_tokenize_v3(
     return row
 
 
-def rlvr_filter_v1(
-    row: Dict[str, Any],
-    tokenizer: PreTrainedTokenizer,
-    need_contain_labels: bool = True,
-    max_prompt_token_length: Optional[int] = None,
-    max_token_length: Optional[int] = None,
-):
-    max_prompt_token_length_ok = True
-    if max_prompt_token_length is not None:
-        max_prompt_token_length_ok = len(row[INPUT_IDS_PROMPT_KEY]) <= max_prompt_token_length
-
-    max_token_length_ok = True
-    if max_token_length is not None:
-        max_token_length_ok = len(row[INPUT_IDS_KEY]) <= max_token_length
-
-    contain_some_labels = any(x != -100 for x in row[LABELS_KEY])
-    return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
-
-
 def rlvr_max_length_filter_v2(
     row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_prompt_token_length: Optional[int] = None
 ):
@@ -1684,20 +1652,6 @@ class LocalDatasetTransformationCache:
 
         loaded_dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
         return loaded_dataset, all_statistics
-
-
-def get_cached_dataset(
-    dcs: List[DatasetConfig],
-    tc: TokenizerConfig,
-    hf_entity: Optional[str] = None,
-    dataset_local_cache_dir: Optional[str] = None,
-    dataset_skip_cache: bool = False,
-) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
-    if dataset_local_cache_dir is not None:
-        cache = LocalDatasetTransformationCache(dataset_local_cache_dir=dataset_local_cache_dir)
-    else:
-        cache = DatasetTransformationCache(hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
 
 
 def get_cached_dataset_tulu_with_statistics(

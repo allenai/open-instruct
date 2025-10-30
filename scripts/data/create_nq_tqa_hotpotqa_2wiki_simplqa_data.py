@@ -91,11 +91,6 @@ def convert_nq_to_rlvr_format_with_context(no_prompt: bool):
     dataset.push_to_hub("hamishivi/nq_rlvr" + ("_no_prompt" if no_prompt else ""), split="test")
 
 
-def check_nq_rlvr_dataset():
-    # Load the NQ dataset
-    nq_dataset = datasets.load_dataset("hamishivi/nq_rlvr")
-    nq_data = nq_dataset["train"]
-    import pdb; pdb.set_trace()
 
 
 def convert_tqa_to_rlvr_format(no_prompt: bool):
