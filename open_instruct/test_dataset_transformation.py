@@ -107,7 +107,7 @@ class TestCachedDataset(unittest.TestCase):
         )
 
         gold_tokenized_dataset = datasets.load_dataset(
-            "allenai/dataset-mix-cached", split="train", revision="61ac38e052"
+            "allenai/dataset-mix-cached", split="train", revision="191a76c17f1ea2062f977a4ca5cabcdb5ba2eafe"
         )
         self.assertEqual(len(dataset), len(gold_tokenized_dataset))
         for i in range(len(dataset)):
