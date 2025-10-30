@@ -1755,7 +1755,7 @@ class ModelDims:
             head_dim=model_config.get_head_size(),
             sliding_window=sliding_window,
             num_sliding_window_layers=num_sliding_window_layers,
-            device=get_device_name(torch.cuda.get_device_name(0)),
+            device_name=get_device_name(torch.cuda.get_device_name(0)),
         )
 
     @property
