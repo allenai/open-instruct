@@ -339,10 +339,7 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
             f"!= logprobs length ({len(out.logprobs)})"
         )
         logprobs.append(
-            [
-                logprob_dict[token_id].logprob
-                for token_id, logprob_dict in zip(out.token_ids, out.logprobs, strict=False)
-            ]
+            [logprob_dict[token_id].logprob for token_id, logprob_dict in zip(out.token_ids, out.logprobs)]
         )
 
     # Extract attributes based on whether tools are used
@@ -810,9 +807,7 @@ def create_vllm_engines(
         if len(max_tool_calls) == 1:
             max_tool_calls_dict = {end_str: max_tool_calls[0] for end_str in tools}
         else:
-            max_tool_calls_dict = {
-                end_str: limit for end_str, limit in zip(tools.keys(), max_tool_calls, strict=False)
-            }
+            max_tool_calls_dict = {end_str: limit for end_str, limit in zip(tools.keys(), max_tool_calls)}
     else:
         max_tool_calls_dict = {}
 

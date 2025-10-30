@@ -1646,7 +1646,7 @@ class SentenceHyphenChecker(Instruction):
         sentences_gold = instructions_util.split_into_sentences(sentences_gold)
         sentences = value.split("-")
         # Check if there are any spaces between sentences
-        for sentence, gold in zip(sentences, sentences_gold, strict=False):
+        for sentence, gold in zip(sentences, sentences_gold):
             if sentence.strip() != sentence or sentence != gold:
                 return False
         return True

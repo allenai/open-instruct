@@ -302,7 +302,7 @@ class IFEvalVerifier(VerifierFunction):
         if len(prediction) == 0 or len(answer) == 0:
             logger.warning("Empty prediction received for IFEvalVerifier.")
             return VerificationResult(score=0.0)
-        for instruction_key, args in zip(instruction_keys, args_list, strict=False):
+        for instruction_key, args in zip(instruction_keys, args_list):
             if args is None:
                 args = {}
             args = {k: v for k, v in args.items() if v is not None}

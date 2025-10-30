@@ -126,6 +126,7 @@ docstring-code-format = false
 # B = flake8-bugbear
 select = ["F", "E", "W", "I", "SIM", "UP", "B"]
 ignore = [
+    "B905", # zip() without explicit strict= parameter
     "C408", # dict() calls (stylistic)
     "C901", # function complexity
     "E501", # Line too long (handled by line-length setting)

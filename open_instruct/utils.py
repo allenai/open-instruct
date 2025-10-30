@@ -310,7 +310,7 @@ def get_datasets(
     raw_train_datasets = []
     raw_val_datasets = []
     frac_or_sample_list = []
-    for (ds, frac_or_samples), ds_config in zip(dataset_mixer.items(), configs, strict=False):
+    for (ds, frac_or_samples), ds_config in zip(dataset_mixer.items(), configs):
         frac_or_sample_list.append(frac_or_samples)
         for split in splits:
             # if dataset ends with .json or .jsonl, load from file
@@ -428,7 +428,7 @@ def get_datasets(
     if len(raw_train_datasets) > 0:
         train_subsets = []
         # Manage proportions
-        for dataset, frac_or_samples in zip(raw_train_datasets, frac_or_sample_list, strict=False):
+        for dataset, frac_or_samples in zip(raw_train_datasets, frac_or_sample_list):
             # cast features (TODO, add more feature regularization)
             dataset = dataset.cast(target_features)
             # TODO selection can be randomized.
@@ -526,7 +526,7 @@ def combine_dataset(
         print(f"Saving mixed dataset to {save_data_dir}")
 
     datasets = []
-    for (ds, frac_or_samples), ds_config, split in zip(dataset_mixer.items(), configs, splits, strict=False):
+    for (ds, frac_or_samples), ds_config, split in zip(dataset_mixer.items(), configs, splits):
         # if dataset ends with .json or .jsonl, load from file
         if ds.endswith(".json") or ds.endswith(".jsonl"):
             dataset = load_dataset("json", data_files=ds, split=split)
@@ -594,7 +594,7 @@ class ArgumentParserPlus(HfArgumentParser):
 
         # overwrite the default/loaded value with the value provided to the command line
         # noqa adapted from https://github.com/huggingface/transformers/blob/d0b5002378daabf62769159add3e7d66d3f83c3b/src/transformers/hf_argparser.py#L327
-        for data_yaml, data_class in zip(arg_list, self.dataclass_types, strict=False):
+        for data_yaml, data_class in zip(arg_list, self.dataclass_types):
             keys = {f.name for f in dataclasses.fields(data_yaml) if f.init}
             inputs = {k: v for k, v in vars(data_yaml).items() if k in keys}
             for arg, val in other_args.items():

@@ -65,22 +65,21 @@ def evaluate(
                 rejected_texts = [item.replace(tokenizer.pad_token, "") for item in rejected_texts]
                 rewards_rounded = [
                     [round(chosen.item(), 4), round(rejected.item(), 4)]
-                    for chosen, rejected in zip(chosen_rewards, rejected_rewards, strict=False)
+                    for chosen, rejected in zip(chosen_rewards, rejected_rewards)
                 ]
                 correct_prediction = [
-                    bool(chosen > rejected) for chosen, rejected in zip(chosen_rewards, rejected_rewards, strict=False)
+                    bool(chosen > rejected) for chosen, rejected in zip(chosen_rewards, rejected_rewards)
                 ]
                 shared_texts = [
                     find_shared_text(chosen_text, rejected_text)
-                    for chosen_text, rejected_text in zip(chosen_texts, rejected_texts, strict=False)
+                    for chosen_text, rejected_text in zip(chosen_texts, rejected_texts)
                 ]
                 chosen_response_texts = [
-                    chosen_text[len(shared_text) :]
-                    for chosen_text, shared_text in zip(chosen_texts, shared_texts, strict=False)
+                    chosen_text[len(shared_text) :] for chosen_text, shared_text in zip(chosen_texts, shared_texts)
                 ]
                 rejected_response_texts = [
                     rejected_text[len(shared_text) :]
-                    for rejected_text, shared_text in zip(rejected_texts, shared_texts, strict=False)
+                    for rejected_text, shared_text in zip(rejected_texts, shared_texts)
                 ]
                 table["shared prompt text"].extend(shared_texts)
                 table["chosen response text"].extend(chosen_response_texts)

@@ -232,7 +232,7 @@ def grade_stdio(code: str, all_inputs: list, all_outputs: list, timeout: int):
     all_runtimes = []
     total_execution_time = 0
     first_failure_info = None
-    for gt_inp, gt_out in zip(all_inputs, all_outputs, strict=False):
+    for gt_inp, gt_out in zip(all_inputs, all_outputs):
         signal.alarm(timeout)
         faulthandler.enable()
 
@@ -282,9 +282,7 @@ def grade_stdio(code: str, all_inputs: list, all_outputs: list, timeout: int):
             continue
 
         test_case_failed = False
-        for stripped_prediction_line, stripped_gt_out_line in zip(
-            stripped_prediction_lines, stripped_gt_out_lines, strict=False
-        ):
+        for stripped_prediction_line, stripped_gt_out_line in zip(stripped_prediction_lines, stripped_gt_out_lines):
             if stripped_prediction_line == stripped_gt_out_line:
                 continue
 
