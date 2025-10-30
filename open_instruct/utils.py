@@ -2159,6 +2159,8 @@ class ModelDims:
             samples_per_prompt=samples_per_prompt,
         )
         bytes_per_second = total_memory_bytes / generation_time if generation_time > 0 else 0
+        # Normalize against total system bandwidth. This is correct because prompt_lengths and
+        # generation_time represent aggregated data from all engines already.
         total_device_bandwidth = self.device_memory_bandwidth * num_engines * num_gpus_per_engine
         return 100 * bytes_per_second / total_device_bandwidth
 
