@@ -22,7 +22,6 @@ import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pprint import pformat
-from typing import Dict, List, Optional
 
 from huggingface_hub import HfApi
 from huggingface_hub.repocard import RepoCard
@@ -42,10 +41,10 @@ NUM_CPUS_FOR_DATASET_MAP = 4
 
 @dataclass
 class Args:
-    dataset_mixer_list: List[str]
-    dataset_splits: List[str] = None
+    dataset_mixer_list: list[str]
+    dataset_splits: list[str] = None
     dataset_start_idx: int = 0
-    dataset_end_idx: Optional[int] = None
+    dataset_end_idx: int | None = None
 
     model_name_or_path: str = "cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr"
     revision: str = "main"
@@ -56,7 +55,7 @@ class Args:
     # upload config
     hf_repo_id: str = os.path.basename(__file__)[: -len(".py")]
     push_to_hub: bool = False
-    hf_entity: Optional[str] = None
+    hf_entity: str | None = None
     add_timestamp: bool = True
 
 
@@ -69,7 +68,7 @@ class GenerationArgs:
     tensor_parallel_size: int = 1
 
 
-def save_jsonl(save_filename: str, table: Dict[str, List]):
+def save_jsonl(save_filename: str, table: dict[str, list]):
     first_key = list(table.keys())[0]
     os.makedirs(os.path.dirname(save_filename), exist_ok=True)
     with open(save_filename, "w") as outfile:
@@ -85,7 +84,7 @@ async def generate_with_openai(model_name: str, data_list: list, args: Args, gen
     return results
 
 
-def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
+def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: list[int], gen_args: GenerationArgs):
     llm = LLM(
         model=model_name_or_path,
         revision=revision,

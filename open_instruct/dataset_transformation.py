@@ -1976,7 +1976,7 @@ def test_get_cached_dataset_tulu_rlvr():
     )
     dataset_mixer_list = ["allenai/RLVR-GSM-MATH-IF-Mixed-Constraints", "1.0"]
     dataset_mixer_list_splits = ["train"]
-    dataset_transform_fn = ["rlvr_tokenize_v1", "rlvr_filter_v1"]
+    dataset_transform_fn = ["rlvr_tokenize_v1", "rlvr_max_length_filter_v1"]
     transform_fn_args = [{}, {"max_token_length": 2048, "max_prompt_token_length": 2048}]
     # allenai/dataset-mix-cached/tree/0ff0043e56
     dataset = get_cached_dataset_tulu(
