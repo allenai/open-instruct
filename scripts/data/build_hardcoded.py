@@ -1,5 +1,4 @@
 import argparse
-import logging
 from functools import partial
 
 from datasets import DatasetDict, load_dataset

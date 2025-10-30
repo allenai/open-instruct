@@ -2,8 +2,6 @@
 Source: https://gist.github.com/neubig/80de662fb3e225c18172ec218be4917a
 """
 
-import logging
-import sys
 from typing import Optional
 
 import pandas as pd

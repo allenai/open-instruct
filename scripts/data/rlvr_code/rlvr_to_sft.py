@@ -1,4 +1,3 @@
-import logging
 
 import datasets
 from tqdm import tqdm

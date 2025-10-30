@@ -7,7 +7,7 @@ python filter_cots.py --input_dataset_name allenai/oasst1-r1 --output_dataset_na
 """
 import argparse
 import re
-from datasets import load_dataset, Features, Sequence, Value
+from datasets import load_dataset
 
 # ----------------------- filter functions ----------------------- #
 def is_think_answer(elem):

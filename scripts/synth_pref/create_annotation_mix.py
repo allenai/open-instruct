@@ -1,8 +1,6 @@
 import argparse
 import hashlib
-import logging
 import random
-import sys
 from pathlib import Path
 from typing import Optional
 

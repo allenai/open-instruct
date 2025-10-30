@@ -21,7 +21,6 @@ import asyncio
 import aiohttp
 import time
 from tqdm.asyncio import tqdm_asyncio
-import logging
 
 from open_instruct import logger_utils
 

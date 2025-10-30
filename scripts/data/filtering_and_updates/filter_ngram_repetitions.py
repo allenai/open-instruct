@@ -3,14 +3,11 @@
 import argparse
 import re
 from collections import defaultdict
-from typing import Dict, List, Tuple, Set
+from typing import Dict, List, Tuple
 import multiprocessing as mp
 
-from datasets import Sequence, Value, load_dataset
-from huggingface_hub import hf_hub_download, list_repo_files
-import pyarrow.parquet as pq
-import pandas as pd
-from datasets import Dataset, DatasetDict, Features, DatasetInfo, Split, load_dataset
+from datasets import load_dataset
+from datasets import Dataset, load_dataset
 
 """
 Script to remove examples with repetitive reasoning/text patterns in post-training datasets.
@@ -643,7 +640,7 @@ def main():
             sample = detect_repetitive_patterns(dataset[0], column=args.column, sentence_level=args.sentence_level)
             
             # Define explicit features for the new columns to avoid type inference issues
-            from datasets import Features, Value, Sequence
+            from datasets import Value, Sequence
             
             # Create new features for the additional columns
             new_features = {
