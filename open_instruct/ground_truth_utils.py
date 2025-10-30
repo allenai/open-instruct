@@ -17,7 +17,7 @@ import weakref
 from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import requests
 from litellm import acompletion
@@ -94,7 +94,7 @@ class CodeVerifierConfig(VerifierConfig):
 class VerificationResult:
     score: float
     cost: float = 0.0
-    reasoning: Optional[str] = None
+    reasoning: str | None = None
 
 
 @dataclass
@@ -110,7 +110,7 @@ class VerifierFunction(ABC):
     returning a VerificationResult with a score between 0.0 and 1.0.
     """
 
-    def __init__(self, name: str, weight: float = 1.0, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, name: str, weight: float = 1.0, verifier_config: VerifierConfig | None = None) -> None:
         self.name = name
         self.weight = weight
         self.verifier_config = verifier_config
@@ -127,7 +127,7 @@ class VerifierFunction(ABC):
 
     @abstractmethod
     def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
     ) -> VerificationResult:
         """
         Evaluate the given prediction against the ground truth (or constraint).
@@ -143,7 +143,7 @@ class VerifierFunction(ABC):
         """
 
     async def async_call(
-        self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
     ) -> VerificationResult:
         """
         Asynchronous version of __call__. By default, it runs the synchronous __call__ in a thread pool.
@@ -185,11 +185,11 @@ class GSM8KVerifier(VerifierFunction):
     and compares it (case-insensitively) to the ground truth.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("gsm8k", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
     ) -> VerificationResult:
         response = re.sub(r"(\d),(\d)", r"\1\2", prediction)
         numbers = re.findall(r"[-+]?\d*\.\d+|\d+", response)
@@ -206,11 +206,11 @@ class MathVerifier(VerifierFunction):
     last LaTeX answer) and compares the extracted answers to the ground truth.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("math", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
     ) -> VerificationResult:
         raw_answer = prediction
         all_answers = []
@@ -255,11 +255,11 @@ class StrictMathVerifier(VerifierFunction):
     Strict verifier for math problems using only the Minerva format extraction.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("strict_math", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
     ) -> VerificationResult:
         raw_answer = prediction
         all_answers = []
@@ -284,11 +284,11 @@ class IFEvalVerifier(VerifierFunction):
 
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("ifeval", weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict], query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: str | dict, query: str | None = None
     ) -> VerificationResult:
         instruction_dict = instructions_registry.INSTRUCTION_DICT
         constraint_dict = ast.literal_eval(label)
@@ -325,11 +325,11 @@ class IFEvalVerifierOld(VerifierFunction):
     'func_name' used to lookup the evaluation function.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("ifeval_old", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict], query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: str | dict, query: str | None = None
     ) -> VerificationResult:
         constraint = label
         answer = remove_thinking_section(prediction)
@@ -386,11 +386,11 @@ class FlanVerifier(VerifierFunction):
     and compares it to the ground truth after normalization.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("flan", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
     ) -> VerificationResult:
         answer_string = prediction.split("The answer is: ")[-1].strip()
         score = float(normalize_answer(answer_string) == normalize_answer(label))
@@ -404,11 +404,11 @@ class StringMatcherVerifier(VerifierFunction):
     It checks if the model output matches the ground truth answer.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("string_matcher", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
     ) -> VerificationResult:
         if "<answer>" not in prediction or "</answer>" not in prediction:
             return VerificationResult(score=0.0)
@@ -424,11 +424,11 @@ class F1Verifier(VerifierFunction):
     Verifier that computes the string F1 score between the prediction and the label.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("string_f1", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
     ) -> VerificationResult:
         # remove thinking section from the prediction
         prediction = prediction.split("</think>")[-1]
@@ -446,11 +446,11 @@ class PuzzleMatcherVerifier(VerifierFunction):
     It checks if the model output matches the ground truth answer.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("puzzle", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
     ) -> VerificationResult:
         # remove answer tags from the prediction
         prediction = remove_thinking_section(prediction)
@@ -464,13 +464,13 @@ class ReSearchVerifierF1(VerifierFunction):
     Uses F1 score + format. If format is achieved but f1 is 0, returns 0.1. Otherwise returns F1.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         self.answer_start_tag = "<finish>"
         self.answer_end_tag = "</finish>"
         super().__init__("re_search_f1", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
     ) -> VerificationResult:
         try:
             label = json.loads(label)
@@ -506,27 +506,20 @@ class R1SearchVerifier(VerifierFunction):
     # Precompile a case-insensitive regex to extract answer text
     TAG_PATTERN = re.compile(r"<finish>(.*?)</finish>", re.IGNORECASE | re.DOTALL)
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__(name="re_search", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self,
-        tokenized_prediction: List[int],
-        prediction: str,
-        label: Union[str, List[str]],
-        query: Optional[str] = None,
+        self, tokenized_prediction: list[int], prediction: str, label: str | list[str], query: str | None = None
     ) -> VerificationResult:
         # 1. Parse JSON label safely
-        parsed_labels: Union[List, str]
+        parsed_labels: list | str
         try:
             parsed = json.loads(label)
             parsed_labels = parsed if isinstance(parsed, list) else [parsed]
         except (json.JSONDecodeError, TypeError):
             # Fallback: treat label as raw string or list-of-strings
-            if isinstance(label, list):
-                parsed_labels = label
-            else:
-                parsed_labels = [str(label).strip()]
+            parsed_labels = label if isinstance(label, list) else [str(label).strip()]
 
         # 2. Extract answer between tags
         match = self.TAG_PATTERN.search(prediction)
@@ -562,11 +555,11 @@ class MaxLenVerifier(VerifierFunction):
     The ground truth (label) is interpreted as the maximum length.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("max_length", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
     ) -> VerificationResult:
         desired_length = float(label)
         # return absolute difference between the length of the prediction and the max length
@@ -592,11 +585,11 @@ class UpToMaxLenVerifier(VerifierFunction):
     The ground truth (label) is interpreted as the maximum length.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("up_to_max_length", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
     ) -> VerificationResult:
         desired_length = float(label)
         length_diff = len(tokenized_prediction) - desired_length
@@ -675,7 +668,7 @@ class LMJudgeVerifier(VerifierFunction):
         )
 
     async def async_call(
-        self, tokenized_prediction: List[int], prediction: str, label: str, query: str
+        self, tokenized_prediction: list[int], prediction: str, label: str, query: str
     ) -> VerificationResult:
         """
         Asynchronous version of __call__ that properly handles the async OpenAI client.
@@ -706,33 +699,32 @@ class LMJudgeVerifier(VerifierFunction):
                     context_check_available = False
 
                 # Check if the request would exceed context window
-                if context_check_available:
+                if context_check_available and not check_context_window_limit(
+                    messages=messages,
+                    max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
+                    model_name=self.verifier_config.llm_judge_model,
+                    max_context_length=self.verifier_config.llm_judge_max_context_length,  # Adjust based on your model
+                    safety_margin=150,
+                ):
+                    # Try to truncate messages to fit
+                    messages = truncate_messages_to_fit_context(
+                        messages=messages,
+                        max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
+                        model_name=self.verifier_config.llm_judge_model,
+                        max_context_length=self.verifier_config.llm_judge_max_context_length,
+                        safety_margin=200,
+                    )
+
+                    # Check again after truncation
                     if not check_context_window_limit(
                         messages=messages,
                         max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                         model_name=self.verifier_config.llm_judge_model,
-                        max_context_length=self.verifier_config.llm_judge_max_context_length,  # Adjust based on your model
+                        max_context_length=self.verifier_config.llm_judge_max_context_length,
                         safety_margin=150,
                     ):
-                        # Try to truncate messages to fit
-                        messages = truncate_messages_to_fit_context(
-                            messages=messages,
-                            max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
-                            model_name=self.verifier_config.llm_judge_model,
-                            max_context_length=self.verifier_config.llm_judge_max_context_length,
-                            safety_margin=200,
-                        )
-
-                        # Check again after truncation
-                        if not check_context_window_limit(
-                            messages=messages,
-                            max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
-                            model_name=self.verifier_config.llm_judge_model,
-                            max_context_length=self.verifier_config.llm_judge_max_context_length,
-                            safety_margin=150,
-                        ):
-                            logger.error("Cannot fit request within context window even after truncation.")
-                            return VerificationResult(score=0.0, cost=0.0, reasoning="Error: Context window exceeded")
+                        logger.error("Cannot fit request within context window even after truncation.")
+                        return VerificationResult(score=0.0, cost=0.0, reasoning="Error: Context window exceeded")
                 # end of Faeze's context window check
                 response = await acompletion(
                     model=self.verifier_config.llm_judge_model,
@@ -756,7 +748,7 @@ class LMJudgeVerifier(VerifierFunction):
                     await asyncio.sleep(retry_delay * (2**attempt))  # Exponential backoff
         return VerificationResult(score=0.0, cost=0.0, reasoning="Unknown error after all retries.")
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: str) -> VerificationResult:
+    def __call__(self, tokenized_prediction: list[int], prediction: str, label: str, query: str) -> VerificationResult:
         """
         Evaluates the prediction based on an LLM's judgement.
 
@@ -852,7 +844,7 @@ class CodeVerifier(VerifierFunction):
         return cls._session_pool
 
     async def async_call(
-        self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
     ) -> VerificationResult:
         """
         Asynchronously verify code execution against test cases.
@@ -914,7 +906,7 @@ class CodeVerifier(VerifierFunction):
             return VerificationResult(score=0.0)
 
     def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
     ) -> VerificationResult:
         """
         Synchronously verify code execution against test cases.
@@ -941,11 +933,11 @@ class CodeVerifier(VerifierFunction):
         return CodeVerifierConfig
 
 
-def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
+def build_all_verifiers(args) -> dict[str, VerifierFunction]:
     """
     Build all verifiers with the given judge config.
     """
-    verifiers: Dict[str, VerifierFunction] = {}
+    verifiers: dict[str, VerifierFunction] = {}
     for subclass in VerifierFunction.__subclasses__():
         if subclass == LMJudgeVerifier:
             continue
@@ -962,7 +954,7 @@ def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
             instance.name = "code_stdio"
             verifiers["code_stdio"] = instance
 
-    for judge_type in JUDGE_PROMPT_MAP.keys():
+    for judge_type in JUDGE_PROMPT_MAP:
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args))
         verifiers[instance.name.lower()] = instance
 
@@ -979,7 +971,7 @@ def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
 
 
 # special case, we use this outside our general verifier loop.
-def soft_format_reward_func(responses: List[str], reward_scale: float = 1.0) -> List[float]:
+def soft_format_reward_func(responses: list[str], reward_scale: float = 1.0) -> list[float]:
     """
     Check if the completion has a specific format defined by a pattern.
 

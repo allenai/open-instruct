@@ -17,7 +17,7 @@ import pathlib
 import threading
 import time
 from concurrent import futures
-from typing import Any, Optional
+from typing import Any
 
 import datasets
 import numpy as np
@@ -633,7 +633,7 @@ def print_summary(
     print("=" * 60)
 
 
-def cleanup(vllm_engines: list[ray.actor.ActorHandle], actor_manager: Optional[ray.actor.ActorHandle] = None) -> None:
+def cleanup(vllm_engines: list[ray.actor.ActorHandle], actor_manager: ray.actor.ActorHandle | None = None) -> None:
     """Clean up resources."""
     for engine in vllm_engines:
         ray.kill(engine)

@@ -568,14 +568,3 @@ class SimpleGenerateCollatorWithGroundTruth:
             GROUND_TRUTHS_KEY: ground_truths,
             VERIFIER_SOURCE_KEY: datasets,
         }
-
-
-if __name__ == "__main__":
-    # too little data; it should just use 1 CPU despite the number of available CPUs
-    assert get_num_proc(296, 120, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU) == 1
-
-    # try to determine the number of CPUs to use
-    assert get_num_proc(1500, 120, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU) == 3
-
-    # too much data; it should use all available CPUs
-    assert get_num_proc(1000000, 120, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU) == 120

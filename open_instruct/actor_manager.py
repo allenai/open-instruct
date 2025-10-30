@@ -93,7 +93,7 @@ class ActorManager:
         async def dashboard():
             """Serve the HTML dashboard."""
             html_path = Path(__file__).parent / "static" / "dashboard.html"
-            with open(html_path, "r") as f:
+            with open(html_path) as f:
                 return f.read()
 
         @app.get("/api/status")

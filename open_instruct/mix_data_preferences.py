@@ -1,5 +1,4 @@
 # !/usr/bin/env python
-# coding=utf-8
 # Copyright 2024 AllenAI. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -26,7 +25,7 @@ from open_instruct.utils import ArgumentParserPlus, get_datasets
 
 
 def main():
-    parser = ArgumentParserPlus((FlatArguments))
+    parser = ArgumentParserPlus(FlatArguments)
     args = parser.parse()
 
     # assert that data_mixer is not none in config

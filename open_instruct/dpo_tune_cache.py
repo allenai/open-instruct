@@ -1,5 +1,4 @@
 # !/usr/bin/env python
-# coding=utf-8
 # Copyright 2024 AllenAI. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,20 +17,12 @@ DPO tuning script. Adapted from our finetuning script.
 """
 
 # isort: off
+import contextlib
 import os
 
-# We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
-# https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
-try:
+with contextlib.suppress(Exception):
     import deepspeed
-
-    # @vwxyzjn: when importing on CPU-only machines, we get the following error:
-    # RuntimeError: 0 active drivers ([]). There should only be one.
-    # so we need to catch the exception and do nothing
-    # https://github.com/deepspeedai/DeepSpeed/issues/7028
-except Exception:
-    pass
 # isort: on
 import json
 import math
@@ -39,10 +30,11 @@ import os
 import random
 import shutil
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
-from typing import Callable, List, Literal, Optional, Union
+from typing import Literal
 
 import datasets
 import torch
@@ -108,13 +100,13 @@ class FlatArguments:
 
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
-    run_name: Optional[str] = None
+    run_name: str | None = None
     """A unique name of this run"""
     add_seed_and_date_to_exp_name: bool = True
     """Append the seed and date to exp_name"""
     do_not_randomize_output_dir: bool = False
     """By default the output directory will be randomized"""
-    model_name_or_path: Optional[str] = field(
+    model_name_or_path: str | None = field(
         default=None,
         metadata={
             "help": (
@@ -122,7 +114,7 @@ class FlatArguments:
             )
         },
     )
-    config_name: Optional[str] = field(
+    config_name: str | None = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
     dpo_use_paged_optimizer: bool = field(
@@ -145,11 +137,11 @@ class FlatArguments:
     use_flash_attn: bool = field(
         default=True, metadata={"help": "Whether to use flash attention in the model training"}
     )
-    model_revision: Optional[str] = field(
+    model_revision: str | None = field(
         default=None,
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
-    additional_model_arguments: Optional[Union[dict, str]] = field(
+    additional_model_arguments: dict | str | None = field(
         default_factory=dict, metadata={"help": "A dictionary of additional model args used to construct the model."}
     )
     sync_each_batch: bool = False
@@ -164,39 +156,39 @@ class FlatArguments:
             )
         },
     )
-    dataset_name: Optional[str] = field(
+    dataset_name: str | None = field(
         default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
     )
-    dataset_mixer: Optional[dict] = field(
+    dataset_mixer: dict | None = field(
         default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
     )
-    dataset_mixer_list: List[str] = field(
+    dataset_mixer_list: list[str] = field(
         default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"]
     )
     """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
+    dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
     """The dataset splits to use for training"""
     dataset_transform_fn: list[str] = field(
         default_factory=lambda: ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
     )
     """The list of transform functions to apply to the dataset."""
-    dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
+    dataset_target_columns: list[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
     """The columns to use for the dataset."""
     dataset_cache_mode: Literal["hf", "local"] = "local"
     """The mode to use for caching the dataset."""
     dataset_local_cache_dir: str = "local_dataset_cache"
     """The directory to save the local dataset cache to."""
-    dataset_config_hash: Optional[str] = None
+    dataset_config_hash: str | None = None
     """The hash of the dataset configuration."""
     dataset_skip_cache: bool = False
     """Whether to skip the cache."""
-    dataset_mix_dir: Optional[str] = field(
+    dataset_mix_dir: str | None = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
     )
-    dataset_config_name: Optional[str] = field(
+    dataset_config_name: str | None = field(
         default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
     )
-    max_train_samples: Optional[int] = field(
+    max_train_samples: int | None = field(
         default=None,
         metadata={
             "help": (
@@ -205,10 +197,10 @@ class FlatArguments:
             )
         },
     )
-    preprocessing_num_workers: Optional[int] = field(
+    preprocessing_num_workers: int | None = field(
         default=None, metadata={"help": "The number of processes to use for the preprocessing."}
     )
-    max_seq_length: Optional[int] = field(
+    max_seq_length: int | None = field(
         default=None,
         metadata={
             "help": (
@@ -228,7 +220,7 @@ class FlatArguments:
         default=1, metadata={"help": "Number of updates steps to accumulate before performing a backward/update pass."}
     )
     learning_rate: float = field(default=2e-5, metadata={"help": "The initial learning rate for AdamW optimizer."})
-    logging_steps: Optional[int] = field(
+    logging_steps: int | None = field(
         default=None, metadata={"help": "Log the training loss and learning rate every logging_steps steps."}
     )
     lora_rank: int = field(default=64, metadata={"help": "The rank of lora."})
@@ -271,10 +263,10 @@ class FlatArguments:
             "Useful if tokenization process is long. Default is 1800 seconds (30 minutes)."
         },
     )
-    resume_from_checkpoint: Optional[str] = field(
+    resume_from_checkpoint: str | None = field(
         default=None, metadata={"help": "If the training should continue from a checkpoint folder."}
     )
-    report_to: Union[str, List[str]] = field(
+    report_to: str | list[str] = field(
         default="all",
         metadata={
             "help": "The integration(s) to report results and logs to. "
@@ -283,19 +275,19 @@ class FlatArguments:
             "Specify multiple by listing them: e.g., ['tensorboard', 'wandb']"
         },
     )
-    save_to_hub: Optional[str] = field(
+    save_to_hub: str | None = field(
         default=None, metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"}
     )
     gradient_checkpointing: bool = field(
         default=False, metadata={"help": "Turn on gradient checkpointing. Saves memory but slows training."}
     )
     use_liger_kernel: bool = field(default=False, metadata={"help": "Whether to use LigerKernel for training."})
-    max_train_steps: Optional[int] = field(
+    max_train_steps: int | None = field(
         default=None,
         metadata={"help": "If set, overrides the number of training steps. Otherwise, num_train_epochs is used."},
     )
     seed: int = field(default=42, metadata={"help": "Random seed for initialization and dataset shuffling."})
-    checkpointing_steps: Optional[str] = field(
+    checkpointing_steps: str | None = field(
         default=None,
         metadata={
             "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
@@ -319,21 +311,21 @@ class FlatArguments:
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
     """The wandb's project name"""
-    wandb_entity: Optional[str] = None
+    wandb_entity: str | None = None
     """The entity (team) of wandb's project"""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
-    hf_entity: Optional[str] = None
+    hf_entity: str | None = None
     """The user or org name of the model repository from the Hugging Face Hub"""
-    hf_repo_id: Optional[str] = None
+    hf_repo_id: str | None = None
     """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_revision: Optional[str] = None
+    hf_repo_revision: str | None = None
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_url: Optional[str] = None
+    hf_repo_url: str | None = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     try_launch_beaker_eval_jobs: bool = True
     """Whether to launch beaker evaluation jobs after training"""
-    hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
+    hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
@@ -346,9 +338,9 @@ class FlatArguments:
     # Ai2 specific settings
     try_auto_save_to_beaker: bool = True
     """Whether to try to save the model to Beaker dataset `/output` after training"""
-    gs_bucket_path: Optional[str] = None
+    gs_bucket_path: str | None = None
     """The path to the gs bucket to save the model to"""
-    oe_eval_tasks: Optional[List[str]] = None
+    oe_eval_tasks: list[str] | None = None
     """The beaker evaluation tasks to launch"""
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
@@ -382,7 +374,7 @@ def get_cache_ref_logprobs(
     active_dataloader: torch.utils.data.DataLoader,
     accelerator: Accelerator,
     average_log_prob: bool,
-    last_checkpoint_path: Optional[str],
+    last_checkpoint_path: str | None,
     resume_step: int,
     epoch_range: range,
     forward_fn: Callable,
@@ -528,9 +520,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.seed is not None:
         set_seed(args.seed)
 
-    if accelerator.is_main_process:
-        if args.output_dir is not None:
-            os.makedirs(args.output_dir, exist_ok=True)
+    if accelerator.is_main_process and args.output_dir is not None:
+        os.makedirs(args.output_dir, exist_ok=True)
 
     accelerator.wait_for_everyone()
 
@@ -948,20 +939,17 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     # Reset the local metrics
                     local_metrics.zero_()
 
-                if isinstance(checkpointing_steps, int):
-                    if completed_steps % checkpointing_steps == 0:
-                        output_dir = f"step_{completed_steps}"
-                        if args.output_dir is not None:
-                            output_dir = os.path.join(args.output_dir, output_dir)
-                        accelerator.save_state(output_dir)
-                        # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
-                        with open(
-                            os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w"
-                        ) as f:
-                            f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-                        if accelerator.is_local_main_process:
-                            clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
-                        accelerator.wait_for_everyone()
+                if isinstance(checkpointing_steps, int) and completed_steps % checkpointing_steps == 0:
+                    output_dir = f"step_{completed_steps}"
+                    if args.output_dir is not None:
+                        output_dir = os.path.join(args.output_dir, output_dir)
+                    accelerator.save_state(output_dir)
+                    # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
+                    with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
+                        f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
+                    if accelerator.is_local_main_process:
+                        clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
+                    accelerator.wait_for_everyone()
 
                 if completed_steps >= args.max_train_steps:
                     break
@@ -1012,7 +1000,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         accelerator.end_training()
 
 
-def print_gpu_stats(init_gpu_memory: Optional[int]):
+def print_gpu_stats(init_gpu_memory: int | None):
     if torch.cuda.is_available():
         free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
         peak_memory = init_gpu_memory - free_gpu_memory

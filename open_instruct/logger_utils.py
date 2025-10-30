@@ -13,10 +13,9 @@
 # limitations under the License.
 
 import logging
-from typing import Optional
 
 
-def setup_logger(name: Optional[str] = None) -> logging.Logger:
+def setup_logger(name: str | None = None) -> logging.Logger:
     """Set up a logger with consistent formatting across the project.
 
     This function configures logging.basicConfig with a standard format

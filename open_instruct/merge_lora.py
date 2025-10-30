@@ -16,7 +16,6 @@ import argparse
 import copy
 import os
 import time
-from typing import Optional
 
 import bitsandbytes as bnb
 import torch
@@ -65,7 +64,7 @@ def dequantize_model(model, dtype=torch.bfloat16, device="cuda"):
 
 @retry_on_exception()
 def push_folder_to_hub(
-    output_dir: str, hf_repo_id: Optional[str] = None, hf_repo_revision: Optional[str] = None, private: bool = True
+    output_dir: str, hf_repo_id: str | None = None, hf_repo_revision: str | None = None, private: bool = True
 ):
     hf_repo_url = f"https://huggingface.co/{hf_repo_id}/tree/{hf_repo_revision}"
     api = HfApi()
@@ -103,7 +102,7 @@ if __name__ == "__main__":
     args = parse_args()
     configs = dict()
     if args.config_file:
-        with open(args.config_file, "r") as f:
+        with open(args.config_file) as f:
             configs = yaml.safe_load(f)
         # If the config file is provided, reuse settings which are same in the training scripts
         args.base_model_name_or_path = configs["model_name_or_path"]

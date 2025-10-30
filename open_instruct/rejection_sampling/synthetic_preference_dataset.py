@@ -23,7 +23,6 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pprint import pformat
-from typing import Dict, List, Optional
 
 from huggingface_hub import HfApi
 from huggingface_hub.repocard import RepoCard
@@ -39,7 +38,7 @@ NUM_CPUS_FOR_DATASET_MAP = 4
 
 @dataclass
 class Args:
-    model_names_or_paths: List[str] = field(default_factory=lambda: ["gpt-4"])
+    model_names_or_paths: list[str] = field(default_factory=lambda: ["gpt-4"])
     input_filename: str = "completions.jsonl"
     save_filename: str = "rejected_sampling_completions.jsonl"
     num_completions: int = 1
@@ -48,24 +47,22 @@ class Args:
     hf_repo_id: str = os.path.basename(__file__)[: -len(".py")]
     hf_repo_id_scores: str = os.path.basename(__file__)[: -len(".py")] + "_scores"
     push_to_hub: bool = False
-    hf_entity: Optional[str] = None
+    hf_entity: str | None = None
     add_timestamp: bool = True
 
     # judgement config
     model: str = "gpt-4o-2024-08-06"
-    max_parallel_requests: Optional[int] = None
+    max_parallel_requests: int | None = None
 
     def __post_init__(self):
         # these are just experience numbers to avoid rate limits, but feel free to adjust
-        if "gpt-3.5" in self.model:
-            self.max_parallel_requests = 100
-        elif "gpt-4o" in self.model:
+        if "gpt-3.5" in self.model or "gpt-4o" in self.model:
             self.max_parallel_requests = 100
         elif "gpt-4" in self.model:
             self.max_parallel_requests = 13
 
 
-def save_jsonl(save_filename: str, table: Dict[str, List]):
+def save_jsonl(save_filename: str, table: dict[str, list]):
     first_key = list(table.keys())[0]
     dirname = os.path.dirname(save_filename)
     if dirname:
@@ -114,7 +111,7 @@ Preferred: <"0" or "1">
 
 def main(args: Args):
     # Load the completions from a file
-    with open(args.input_filename, "r") as infile:
+    with open(args.input_filename) as infile:
         completions = [json.loads(line) for line in infile]
 
     all_comparison_pairs = []
@@ -130,7 +127,7 @@ def main(args: Args):
         comparison_pairs = itertools.combinations(prompt_completions, 2)
         all_comparison_pairs.extend(comparison_pairs)
 
-    async def get_judgement(model: str, comparison_pair: List[Dict[str, str]], limiter: asyncio.Semaphore):
+    async def get_judgement(model: str, comparison_pair: list[dict[str, str]], limiter: asyncio.Semaphore):
         task = comparison_pair[0]["messages"][:-1]
         # shuffle the order of the responses
         shuffled_index = random.randint(0, 1)
@@ -165,7 +162,7 @@ def main(args: Args):
 
     print(f"{len(all_comparison_pairs)=}")
 
-    async def get_judgement_all(model: str, all_comparison_pairs: List[List[Dict[str, str]]]):
+    async def get_judgement_all(model: str, all_comparison_pairs: list[list[dict[str, str]]]):
         limiter = asyncio.Semaphore(args.max_parallel_requests)
         tasks = []
         for comparison_pair in all_comparison_pairs:

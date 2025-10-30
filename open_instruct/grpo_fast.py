@@ -28,21 +28,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # isort: off
+import contextlib
 import os
 from concurrent import futures
 
-# We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
-# https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
-try:
+with contextlib.suppress(Exception):
     import deepspeed
-
-    # @vwxyzjn: when importing on CPU-only machines, we get the following error:
-    # RuntimeError: 0 active drivers ([]). There should only be one.
-    # so we need to catch the exception and do nothing
-    # https://github.com/deepspeedai/DeepSpeed/issues/7028
-except Exception:
-    pass
 
 from open_instruct import utils
 
@@ -58,10 +50,11 @@ import threading
 import time
 from argparse import Namespace
 from collections import defaultdict
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from queue import Empty, Full, Queue
-from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
+from typing import Any, Literal
 
 import datasets
 import numpy as np
@@ -149,13 +142,13 @@ class ShutdownSentinel:
 @dataclass
 class Args:
     # Dataset
-    dataset_mixer_list: List[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
+    dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_eval_list: List[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
+    dataset_mixer_eval_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     """A list of datasets (local or HF) to sample from for evaluation."""
-    dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
+    dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
     """The dataset splits to use for training"""
-    dataset_mixer_eval_list_splits: List[str] = field(default_factory=lambda: ["test"])
+    dataset_mixer_eval_list_splits: list[str] = field(default_factory=lambda: ["test"])
     """The dataset splits to use for evaluation"""
     dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_max_length_filter_v1"])
     """The list of transform functions to apply to the dataset."""
@@ -163,9 +156,9 @@ class Args:
     """The mode to use for caching the dataset."""
     dataset_local_cache_dir: str = "local_dataset_cache"
     """The directory to save the local dataset cache to."""
-    dataset_config_hash: Optional[str] = None
+    dataset_config_hash: str | None = None
     """The hash of the dataset configuration."""
-    dataset_config_eval_hash: Optional[str] = None
+    dataset_config_eval_hash: str | None = None
     """The hash of the dataset configuration for evaluation."""
     dataset_skip_cache: bool = False
     """Whether to skip the cache."""
@@ -173,7 +166,7 @@ class Args:
     """Whether to shuffle the evaluation dataset."""
     max_prompt_token_length: int = 256
     """The maximum prompt token length to use for the dataset"""
-    system_prompt_override_file: Optional[str] = None
+    system_prompt_override_file: str | None = None
     """Path to a text file containing a system prompt to override the dataset's system prompts"""
 
     # Experiment
@@ -181,7 +174,7 @@ class Args:
     """The name of this experiment"""
     seed: int = 1
     """Seed of the experiment"""
-    run_name: Optional[str] = None
+    run_name: str | None = None
     """RUNTIME VALUE: A unique name of this run"""
 
     # Optimizer
@@ -207,9 +200,9 @@ class Args:
     """The forward batch size per device (local_micro_batch_size)"""
     total_episodes: int = 100000
     """The total number of episodes in the dataset"""
-    world_size: Optional[int] = None
+    world_size: int | None = None
     """RUNTIME VALUE: The number of processes (GPUs) to use"""
-    num_training_steps: Optional[int] = None
+    num_training_steps: int | None = None
     """RUNTIME VALUE: The number of training_steps to train"""
     local_eval_every: int = 100
     """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup. Set to -1 to disable."""
@@ -229,7 +222,7 @@ class Args:
     """The number of unique prompts during rollout"""
     num_samples_per_prompt_rollout: int = 4
     """the number of samples to generate per prompt during rollout, useful for easy-star"""
-    stop_strings: Optional[List[str]] = None
+    stop_strings: list[str] | None = None
     """List of strings that stop the generation when they are generated.
     The returned output will not contain the stop strings."""
     use_fp8_kv_cache: bool = False
@@ -256,16 +249,16 @@ class Args:
     """the KL estimator to use"""
     pack_length: int = 512
     """the length of the pack (you should prob set to the max length of the model)"""
-    masked_mean_axis: Optional[int] = None
+    masked_mean_axis: int | None = None
     """the axis to compute the mean of the masked values"""
-    masked_mean_denominator: Optional[float] = None
+    masked_mean_denominator: float | None = None
     """Optional constant denominator for masked_mean; if set, divides by this instead of mask.sum"""
     alpha: float = 0.6
     """The alpha value for doing polyak updates (ref_param = alpha * param + (1 - alpha) * ref_param)
     reference: [TR-DPO](https://huggingface.co/papers/2404.09656), but it's actually pretty commonly
     used. E.g., [TD3](https://arxiv.org/abs/1802.09477) uses https://github.com/vwxyzjn/cleanrl/blob/dcc289fc6f0bda492fa7360a155262cf826b12a5/cleanrl/td3_continuous_action.py#L269
     """
-    ref_policy_update_freq: Optional[int] = None
+    ref_policy_update_freq: int | None = None
     """How many training steps to take before updating the reference policy."""
     advantage_normalization_type: Literal["standard", "centered"] = "standard"
     """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
@@ -334,12 +327,12 @@ class Args:
     # Ray
     single_gpu_mode: bool = False
     """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
-    num_learners_per_node: List[int] = field(default_factory=lambda: [1])
+    num_learners_per_node: list[int] = field(default_factory=lambda: [1])
     """number of GPU deepspeed learners per node (e.g., --num_learners_per_node 2 4 means 2 learner processes
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
     vllm_num_engines: int = 1
     """number of vLLM Engines, set to 0 to disable vLLM"""
-    inference_batch_size: Optional[int] = None
+    inference_batch_size: int | None = None
     """inference batch size per vLLM engine. If None, calculated as ceil(num_unique_prompts_rollout / vllm_num_engines) * num_samples_per_prompt_rollout"""
     vllm_tensor_parallel_size: int = 1
     """tensor parallel size of vLLM Engine for multi-GPU inference"""
@@ -359,7 +352,7 @@ class Args:
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
     enable_queue_dashboard: bool = True
     """whether to enable the ActorManager queue monitoring dashboard"""
-    queue_dashboard_port: Optional[int] = None
+    queue_dashboard_port: int | None = None
     """optional port for the dashboard server (if None, finds a free port automatically)"""
 
     # Experiment tracking
@@ -371,17 +364,17 @@ class Args:
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
     """The wandb's project name"""
-    wandb_entity: Optional[str] = None
+    wandb_entity: str | None = None
     """The entity (team) of wandb's project"""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
-    hf_entity: Optional[str] = None
+    hf_entity: str | None = None
     """The user or org name of the model repository from the Hugging Face Hub"""
-    hf_repo_id: Optional[str] = None
+    hf_repo_id: str | None = None
     """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_revision: Optional[str] = None
+    hf_repo_revision: str | None = None
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_url: Optional[str] = None
+    hf_repo_url: str | None = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     output_dir: str = "output"
     """Where to save the model"""
@@ -393,9 +386,9 @@ class Args:
     """How many checkpoints to keep in the output directory. -1 for all."""
     checkpoint_state_freq: int = -1
     """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
-    checkpoint_state_dir: Optional[str] = None
+    checkpoint_state_dir: str | None = None
     """Where to save the model checkpoint (if applicable)"""
-    gs_checkpoint_state_dir: Optional[str] = None
+    gs_checkpoint_state_dir: str | None = None
     """The actual `checkpoint_state_dir` to use (handling the case where gs_bucket_path is provided)"""
 
     # Ai2 specific settings
@@ -403,13 +396,13 @@ class Args:
     """Whether to launch beaker evaluation jobs after training on weka"""
     try_auto_save_to_beaker: bool = True
     """Whether to try to save the model to Beaker dataset `/output` after training"""
-    gs_bucket_path: Optional[str] = None
+    gs_bucket_path: str | None = None
     """The path to the gs bucket to save the model to"""
-    oe_eval_tasks: Optional[List[str]] = None
+    oe_eval_tasks: list[str] | None = None
     """The beaker evaluation tasks to launch"""
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
-    oe_eval_beaker_image: Optional[str] = None
+    oe_eval_beaker_image: str | None = None
     """the docker image for evaluation for oe-eval"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
@@ -419,9 +412,9 @@ class Args:
     """Whether to run local evaluation at training step 0. Defaults to False."""
 
     # Tool settings
-    tools: Optional[List[str]] = None
+    tools: list[str] | None = None
     """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
-    max_tool_calls: List[int] = field(default_factory=lambda: [5])
+    max_tool_calls: list[int] = field(default_factory=lambda: [5])
     """Maximum number of tool calls allowed. If a list is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
     mask_tool_use: bool = True
     """Whether to mask the tool output. By default on."""
@@ -431,11 +424,11 @@ class Args:
     # rl-rag specific settngs
     number_documents_to_search: int = 3
     """The maximum number of documents to retrieve for each query."""
-    search_api_endpoint: Optional[str] = None
+    search_api_endpoint: str | None = None
     """The API endpoint for the search engine."""
 
     # code-tool specific settings
-    code_tool_api_endpoint: Optional[str] = None
+    code_tool_api_endpoint: str | None = None
 
     def __post_init__(self):
         if os.environ.get("VLLM_USE_V1") == "0":
@@ -508,7 +501,7 @@ class Args:
                 )
 
 
-def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
+def next_batch(dataset_indices: list[int], dataset: datasets.Dataset) -> Batch:
     """Extract next batch of data based on indices."""
     data_next = dataset[dataset_indices]
     return Batch(
@@ -521,7 +514,7 @@ def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
 
 
 def masked_mean(
-    values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None, denominator: Optional[float] = None
+    values: torch.Tensor, mask: torch.Tensor, axis: int | None = None, denominator: float | None = None
 ) -> torch.Tensor:
     """Compute mean of tensor with a masked values."""
     numerator = (values * mask).sum(axis=axis)
@@ -554,20 +547,20 @@ class MetricsTracker:
         return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
 
 
-def collate_fn(tensors_list: List[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
+def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
     padded_tensor = torch.nn.utils.rnn.pad_sequence(tensors_list, batch_first=True, padding_value=pad_token_id)
     if pin_memory:
         padded_tensor = padded_tensor.pin_memory()
     return padded_tensor
 
 
-def to_device_inplace(tensors_list: List[torch.Tensor], device: torch.device):
+def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
     for i in range(len(tensors_list)):
         tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
 
 
 class ShufflingIterator:
-    def __init__(self, data: np.ndarray, batch_size: int, seed: Optional[int] = None):
+    def __init__(self, data: np.ndarray, batch_size: int, seed: int | None = None):
         self.data = data.copy()
         self.batch_size = batch_size
         self.index = 0
@@ -578,10 +571,10 @@ class ShufflingIterator:
         # Ensure the effective dataset size is divisible by batch_size
         self.effective_size = len(self.data) - (len(self.data) % batch_size)
 
-    def __iter__(self) -> Iterator[List[int]]:
+    def __iter__(self) -> Iterator[list[int]]:
         return self
 
-    def __next__(self) -> List[int]:
+    def __next__(self) -> list[int]:
         if self.index >= self.effective_size:
             self.index = 0
             self.epoch_number += 1
@@ -593,7 +586,7 @@ class ShufflingIterator:
 
         return batch
 
-    def get_state(self) -> Dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         """Get the current state of the iterator for checkpointing."""
         return {
             "index": self.index,
@@ -602,7 +595,7 @@ class ShufflingIterator:
             "rng_state": self.rng.bit_generator.state,
         }
 
-    def set_state(self, state: Dict[str, Any]) -> None:
+    def set_state(self, state: dict[str, Any]) -> None:
         """Restore the iterator state from a checkpoint."""
         self.index = state["index"]
         self.epoch_number = state.get("epoch_number", 0)
@@ -946,70 +939,68 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
-        with Timer("Inference Calculation", noop=self.rank != 0):
-            with torch.no_grad():
+        with Timer("Inference Calculation", noop=self.rank != 0), torch.no_grad():
+            for i in range(len(collated_query_responses)):
+                query_response = collated_query_responses[i]
+                tool_mask = collated_tool_masks[i]
+                attention_mask = collated_attention_masks[i]
+                position_id = collated_position_ids[i]
+                response_mask = collated_response_masks[i]
+                ref_logprob, _ = self.forward(
+                    self.ref_policy,
+                    query_response,
+                    attention_mask,
+                    position_id,
+                    pad_token_id,
+                    args.temperature,
+                    return_entropy=False,
+                )
+                if args.mask_tool_use and args.tool_use:
+                    # mask logprobs for tool tokens
+                    response_mask = response_mask.bool() & tool_mask.bool()
+                else:
+                    response_mask = response_mask.bool()
+                ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
+                collated_ref_logprobs.append(ref_logprob)
+                torch.cuda.empty_cache()
+        # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
+        # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
+        # from the generator (note that async mode means these are a bit diff!)
+        old_logprobs = [None for _ in range(len(collated_query_responses))]
+        if num_mini_batches > 1:
+            with Timer("Old logprobs Calculation", noop=self.rank != 0), torch.no_grad():
                 for i in range(len(collated_query_responses)):
                     query_response = collated_query_responses[i]
                     tool_mask = collated_tool_masks[i]
                     attention_mask = collated_attention_masks[i]
                     position_id = collated_position_ids[i]
                     response_mask = collated_response_masks[i]
-                    ref_logprob, _ = self.forward(
-                        self.ref_policy,
-                        query_response,
-                        attention_mask,
-                        position_id,
-                        pad_token_id,
-                        args.temperature,
-                        return_entropy=False,
-                    )
+                    if not args.use_vllm_logprobs:
+                        local_old_logprob, _ = self.forward(
+                            self.model,
+                            query_response,
+                            attention_mask,
+                            position_id,
+                            pad_token_id,
+                            args.temperature,
+                            return_entropy=False,
+                        )
+                    vllm_old_logprob = collated_vllm_logprobs[i][:, 1:]
                     if args.mask_tool_use and args.tool_use:
-                        # mask logprobs for tool tokens
                         response_mask = response_mask.bool() & tool_mask.bool()
                     else:
                         response_mask = response_mask.bool()
-                    ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
-                    collated_ref_logprobs.append(ref_logprob)
+                    if not args.use_vllm_logprobs:
+                        local_old_logprob = torch.masked_fill(
+                            local_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB
+                        )
+                    vllm_old_logprob = torch.masked_fill(vllm_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
+                    vllm_old_logprob = torch.nan_to_num(vllm_old_logprob, nan=INVALID_LOGPROB)
+                    if args.use_vllm_logprobs:
+                        old_logprobs[i] = vllm_old_logprob
+                    else:
+                        old_logprobs[i] = local_old_logprob
                     torch.cuda.empty_cache()
-        # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
-        # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
-        # from the generator (note that async mode means these are a bit diff!)
-        old_logprobs = [None for _ in range(len(collated_query_responses))]
-        if num_mini_batches > 1:
-            with Timer("Old logprobs Calculation", noop=self.rank != 0):
-                with torch.no_grad():
-                    for i in range(len(collated_query_responses)):
-                        query_response = collated_query_responses[i]
-                        tool_mask = collated_tool_masks[i]
-                        attention_mask = collated_attention_masks[i]
-                        position_id = collated_position_ids[i]
-                        response_mask = collated_response_masks[i]
-                        if not args.use_vllm_logprobs:
-                            local_old_logprob, _ = self.forward(
-                                self.model,
-                                query_response,
-                                attention_mask,
-                                position_id,
-                                pad_token_id,
-                                args.temperature,
-                                return_entropy=False,
-                            )
-                        vllm_old_logprob = collated_vllm_logprobs[i][:, 1:]
-                        if args.mask_tool_use and args.tool_use:
-                            response_mask = response_mask.bool() & tool_mask.bool()
-                        else:
-                            response_mask = response_mask.bool()
-                        if not args.use_vllm_logprobs:
-                            local_old_logprob = torch.masked_fill(
-                                local_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB
-                            )
-                        vllm_old_logprob = torch.masked_fill(vllm_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
-                        vllm_old_logprob = torch.nan_to_num(vllm_old_logprob, nan=INVALID_LOGPROB)
-                        if args.use_vllm_logprobs:
-                            old_logprobs[i] = vllm_old_logprob
-                        else:
-                            old_logprobs[i] = local_old_logprob
-                        torch.cuda.empty_cache()
 
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
@@ -1226,7 +1217,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
                 return self.local_metrics.get_metrics_list()
 
-    def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: Dict[str, Any]) -> None:
+    def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
         args = self.args
 
         # Save comprehensive RNG states for each rank
@@ -1257,11 +1248,7 @@ class PolicyTrainerRayProcess(RayProcess):
             # which doesn't have state_dict
             if self.rank == 0:
                 # Only rank 0 saves the model state
-                if hasattr(self.ref_policy, "module"):
-                    # If wrapped by DeepSpeed, get the underlying module
-                    model_to_save = self.ref_policy.module
-                else:
-                    model_to_save = self.ref_policy
+                model_to_save = self.ref_policy.module if hasattr(self.ref_policy, "module") else self.ref_policy
 
                 # Save the state dict
                 torch.save(model_to_save.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
@@ -1361,7 +1348,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
 class ModelGroup:
     def __init__(
-        self, pg: PlacementGroup, ray_process_cls: RayProcess, num_gpus_per_node: List[int], single_gpu_mode: bool
+        self, pg: PlacementGroup, ray_process_cls: RayProcess, num_gpus_per_node: list[int], single_gpu_mode: bool
     ):
         self.pg = pg
         self.ray_process_cls = ray_process_cls
@@ -1545,7 +1532,7 @@ def accumulate_inference_batches(
     num_prompts: int,
     model_dims: utils.ModelDims,
     actor_manager=None,
-    timeout: Optional[float] = None,
+    timeout: float | None = None,
 ) -> tuple[GenerationResult, Batch]:
     """Accumulate multiple inference results into a single training batch.
 
@@ -2089,9 +2076,8 @@ def setup_runtime_variables(args: Args) -> Args:
         if args.hf_repo_revision is None:  # auto-generate one
             args.hf_repo_revision = args.run_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-    if args.with_tracking:
-        if args.wandb_entity is None:
-            args.wandb_entity = maybe_use_ai2_wandb_entity()
+    if args.with_tracking and args.wandb_entity is None:
+        args.wandb_entity = maybe_use_ai2_wandb_entity()
     args.tool_use = args.tools is not None and len(args.tools) > 0
     return args
 
@@ -2126,7 +2112,7 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
     system_prompt_override = None
     if args.system_prompt_override_file is not None:
         logger.info(f"Loading system prompt override from {args.system_prompt_override_file}")
-        with open(args.system_prompt_override_file, "r") as f:
+        with open(args.system_prompt_override_file) as f:
             system_prompt_override = f.read().strip()
         logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
 
@@ -2390,7 +2376,7 @@ def weight_sync_thread(
 
             # Broadcast weights to vLLM engines
             # First get the futures
-            weight_broadcast_futures: List[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+            weight_broadcast_futures: list[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
 
             # Wait for all weight updates to complete and collect individual timings
             _, actor_sync_times = ray_get_with_progress(
@@ -2530,9 +2516,8 @@ def one_training_step(
     if args.with_tracking:
         # Convert array/list metrics to wandb histograms for logging
         for key, value in metrics.items():
-            if isinstance(value, np.ndarray) or isinstance(value, list):
-                if len(value) > 0:
-                    metrics[key] = wandb.Histogram(value)
+            if (isinstance(value, (np.ndarray, list))) and len(value) > 0:
+                metrics[key] = wandb.Histogram(value)
         wandb.log(metrics, step=episode)
 
 
@@ -2679,13 +2664,13 @@ def make_reward_fn(args: Args) -> Callable:
     reward_fn_mapping = build_all_verifiers(args)
 
     async def reward_fn(
-        responses: List[torch.Tensor],
-        decoded_responses: List[str],
+        responses: list[torch.Tensor],
+        decoded_responses: list[str],
         batch: Batch,
-        finish_reasons: List[str],
-        infos: List[List[int]],
-        queries: Optional[List[str]] = None,
-    ) -> List[float]:
+        finish_reasons: list[str],
+        infos: list[list[int]],
+        queries: list[str] | None = None,
+    ) -> list[float]:
         timeouts = infos.timeouts
         tool_errors = infos.tool_errors
         tool_outputs = infos.tool_outputs
