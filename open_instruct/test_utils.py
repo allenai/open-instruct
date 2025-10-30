@@ -450,10 +450,9 @@ class TestModelDims(unittest.TestCase):
         model_name = "Qwen/Qwen2.5-7B"
         expected_dims = MODEL_DIMS[model_name]
 
-        engine_args = vllm.EngineArgs(model=model_name, load_format="dummy", max_model_len=512)
-        vllm_config = engine_args.create_engine_config()
-
         with mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"):
+            engine_args = vllm.EngineArgs(model=model_name, load_format="dummy", max_model_len=512)
+            vllm_config = engine_args.create_engine_config()
             vllm_dims = utils.ModelDims.from_vllm_config(vllm_config)
         vllm_dims.device_name = "h100"
 
