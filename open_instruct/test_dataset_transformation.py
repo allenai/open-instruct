@@ -1,4 +1,5 @@
 import os
+import tempfile
 import unittest
 
 import datasets
@@ -11,12 +12,6 @@ HAS_CACHE = (
     or "HF_DATASETS_CACHE" in os.environ
     or os.path.exists(os.path.expanduser("~/.cache/huggingface/datasets"))
 )
-
-
-def get_test_split(split: str = "train") -> str:
-    if not HAS_CACHE:
-        return f"{split}[:1%]"
-    return split
 
 
 class TestTokenizerEquality(unittest.TestCase):
@@ -96,6 +91,10 @@ class TestConfigHash(unittest.TestCase):
 
 
 class TestCachedDataset(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+
     def test_get_cached_dataset_tulu_sft(self):
         tc = open_instruct.dataset_transformation.TokenizerConfig(
             tokenizer_name_or_path="meta-llama/Llama-3.1-8B",
@@ -105,7 +104,7 @@ class TestCachedDataset(unittest.TestCase):
             add_bos=False,
         )
         dataset_mixer_list = ["allenai/tulu-3-sft-mixture", "1.0"]
-        dataset_mixer_list_splits = [get_test_split("train")]
+        dataset_mixer_list_splits = ["train[:1%]"]
         dataset_transform_fn = ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
 
         transform_fn_args = [{"max_seq_length": 4096}, {}]
@@ -117,9 +116,10 @@ class TestCachedDataset(unittest.TestCase):
             transform_fn_args,
             open_instruct.dataset_transformation.TOKENIZED_SFT_DATASET_KEYS,
             dataset_skip_cache=True,
+            dataset_local_cache_dir=self.temp_dir.name,
         )
         gold_tokenized_dataset = datasets.load_dataset(
-            "allenai/dataset-mix-cached", split="train", revision="648406a353"
+            "allenai/dataset-mix-cached", split="train", revision="4c47c491c0"
         )
         self.assertEqual(len(dataset), len(gold_tokenized_dataset))
         for i in range(len(dataset)):
@@ -134,7 +134,7 @@ class TestCachedDataset(unittest.TestCase):
             add_bos=False,
         )
         dataset_mixer_list = ["allenai/llama-3.1-tulu-3-8b-preference-mixture", "1.0"]
-        dataset_mixer_list_splits = [get_test_split("train")]
+        dataset_mixer_list_splits = ["train[:1%]"]
         dataset_transform_fn = ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
         transform_fn_args = [{"max_seq_length": 2048}, {}]
         dataset = open_instruct.dataset_transformation.get_cached_dataset_tulu(
@@ -145,9 +145,10 @@ class TestCachedDataset(unittest.TestCase):
             transform_fn_args,
             open_instruct.dataset_transformation.TOKENIZED_PREFERENCE_DATASET_KEYS,
             dataset_skip_cache=True,
+            dataset_local_cache_dir=self.temp_dir.name,
         )
         gold_tokenized_dataset = datasets.load_dataset(
-            "allenai/dataset-mix-cached", split="train", revision="9415479293"
+            "allenai/dataset-mix-cached", split="train", revision="7c4f2bb6cf"
         )
         self.assertEqual(len(dataset), len(gold_tokenized_dataset))
         for i in range(len(dataset)):
@@ -162,7 +163,7 @@ class TestCachedDataset(unittest.TestCase):
             add_bos=False,
         )
         dataset_mixer_list = ["allenai/RLVR-GSM-MATH-IF-Mixed-Constraints", "1.0"]
-        dataset_mixer_list_splits = [get_test_split("train")]
+        dataset_mixer_list_splits = ["train[:1%]"]
         dataset_transform_fn = ["rlvr_tokenize_v1", "rlvr_max_length_filter_v1"]
         transform_fn_args = [{}, {"max_prompt_token_length": 2048}]
         dataset = open_instruct.dataset_transformation.get_cached_dataset_tulu(
@@ -172,9 +173,10 @@ class TestCachedDataset(unittest.TestCase):
             dataset_transform_fn,
             transform_fn_args,
             dataset_skip_cache=True,
+            dataset_local_cache_dir=self.temp_dir.name,
         )
         gold_tokenized_dataset = datasets.load_dataset(
-            "allenai/dataset-mix-cached", split="train", revision="c995931d85"
+            "allenai/dataset-mix-cached", split="train", revision="1f2adb3bb9"
         )
         self.assertEqual(len(dataset), len(gold_tokenized_dataset))
         for i in range(len(dataset)):
