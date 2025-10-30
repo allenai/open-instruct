@@ -19,6 +19,7 @@ import unittest
 from unittest import mock
 
 import pytest
+import torch
 import vllm
 from dateutil import parser
 from parameterized import parameterized
@@ -450,7 +451,21 @@ class TestModelDims(unittest.TestCase):
         model_name = "Qwen/Qwen2.5-7B"
         expected_dims = MODEL_DIMS[model_name]
 
-        with mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"):
+        mock_platform = mock.Mock()
+        mock_platform.device_type = "cuda"
+        mock_platform.is_cuda_alike.return_value = True
+        mock_platform.supported_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+        mock_platform.get_device_total_memory.return_value = 80 * 1024**3
+        mock_platform.get_device_name.return_value = "NVIDIA H100 80GB HBM3"
+
+        with (
+            mock.patch.multiple(
+                "torch.cuda",
+                get_device_name=mock.Mock(return_value="NVIDIA H100 80GB HBM3"),
+                is_available=mock.Mock(return_value=True),
+            ),
+            mock.patch("vllm.platforms.current_platform", mock_platform),
+        ):
             engine_args = vllm.EngineArgs(model=model_name, load_format="dummy", max_model_len=512)
             vllm_config = engine_args.create_engine_config()
             vllm_dims = utils.ModelDims.from_vllm_config(vllm_config)
