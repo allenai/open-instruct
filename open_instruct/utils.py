@@ -1699,10 +1699,10 @@ class ModelDims:
     vocab_size: int
     num_attn_heads: int
     head_dim: int
-    num_kv_heads: Optional[int] = None
-    num_params: Optional[int] = None
-    device_name: Optional[str] = None
-    sliding_window: Optional[int] = None
+    num_kv_heads: int | None = None
+    num_params: int | None = None
+    device_name: str | None = None
+    sliding_window: int | None = None
     num_sliding_window_layers: int = 0
 
     def __post_init__(self):
@@ -1779,7 +1779,7 @@ class ModelDims:
         assert self.device_name in GPU_SPECS, f"Unknown device: {self.device_name}"
         return GPU_SPECS[self.device_name]["memory_bandwidth"]
 
-    def attn_flops(self, query_len: int, kv_len: int, sliding_window: Optional[int] = None) -> int:
+    def attn_flops(self, query_len: int, kv_len: int, sliding_window: int | None = None) -> int:
         """FLOPs for one layer of self-attention given query_len and kv_len.
 
         Assumptions:
@@ -2064,7 +2064,7 @@ class ModelDims:
         prompt_lengths: list[int],
         num_engines: int,
         num_gpus_per_engine: int,
-        response_lengths: Optional[list[int]] = None,
+        response_lengths: list[int] | None = None,
         samples_per_prompt: int = 1,
         dtype_bytes: int = 2,
     ) -> int:
@@ -2111,7 +2111,7 @@ class ModelDims:
         self,
         prompt_lengths: list[int],
         generation_time: float,
-        response_lengths: Optional[list[int]] = None,
+        response_lengths: list[int] | None = None,
         samples_per_prompt: int = 1,
         num_gpus: int = 1,
     ) -> float:
@@ -2124,7 +2124,7 @@ class ModelDims:
         self,
         prompt_lengths: list[int],
         generation_time: float,
-        response_lengths: Optional[list[int]] = None,
+        response_lengths: list[int] | None = None,
         samples_per_prompt: int = 1,
         num_engines: int = 1,
         num_gpus_per_engine: int = 1,
@@ -2256,7 +2256,7 @@ def check_calculation(
     model_dims: ModelDims,
     timing: float,
     prompt_lengths: list[int],
-    response_lengths: Optional[list[int]],
+    response_lengths: list[int] | None,
     samples_per_prompt: int,
     num_gpus: int,
 ) -> None:
