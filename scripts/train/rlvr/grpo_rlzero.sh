@@ -60,7 +60,7 @@ python open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list $LOCAL_EVALS \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 2048 \
-    --response_length 16384 \
+    --response_length 12000 \
     --pack_length 32768 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --chat_template_name olmo_thinker_dapo \
