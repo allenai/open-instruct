@@ -399,7 +399,7 @@ class MetricsTracker:
     """A simple class to prellocate all metrics in an array
     so we can do only one allreduce operation to get the metrics mean"""
 
-    def __init__(self, max_metrics: int = 32, device: torch.device = torch.device("cuda")):
+    def __init__(self, max_metrics: int = 32, device: str = "cuda"):
         self.metrics = torch.zeros(max_metrics, device=device)
         self.names2idx = {}
         self.current_idx = 0
@@ -890,7 +890,7 @@ class PolicyTrainerRayProcess(RayProcess):
             value_losses = torch.zeros(len(collated_query_responses))
             local_step = 0
             value_optimizer_step = 0
-            for epoch_idx in range(args.num_epochs):
+            for _ in range(args.num_epochs):
                 for i in range(len(collated_query_responses)):
                     mb_query_responses = collated_query_responses[i]
                     mb_response_masks = collated_response_masks[i]

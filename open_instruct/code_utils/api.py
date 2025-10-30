@@ -58,7 +58,7 @@ async def test_program(request: TestRequest):
         return {"results": results, "runtimes": runtimes}
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/test_program_stdio")
@@ -72,4 +72,4 @@ async def test_program_stdio(request: TestRequest):
         return {"results": results, "runtimes": runtimes}
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
