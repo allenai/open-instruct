@@ -1700,6 +1700,56 @@ def get_cached_dataset(
     return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
 
 
+def load_datasetconfigs(
+    dataset_mixer_list: List[str],
+    dataset_mixer_list_splits: List[str],
+    dataset_transform_fn: List[str],
+    transform_fn_args: List[Dict[str, Any]],
+    target_columns: Optional[List[str]] = None,
+    dataset_config_seed: int = 42,
+) -> List[DatasetConfig]:
+    dcs = []
+    if len(dataset_mixer_list_splits) == 1:
+        print("by default, we will use the same split for all datasets")
+        dataset_mixer_list_splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
+    else:
+        if len(dataset_mixer_list_splits) != len(dataset_mixer_list):
+            raise ValueError(
+                f"dataset_mixer_list_splits length must be the same as dataset_mixer_list: {len(dataset_mixer_list_splits)=} != {len(dataset_mixer_list)=}"
+            )
+    assert len(dataset_mixer_list) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer_list}"
+    for i in range(0, len(dataset_mixer_list), 2):
+        dataset_name = dataset_mixer_list[i]
+        frac_or_num_samples = dataset_mixer_list[i + 1]
+        if "." in frac_or_num_samples:
+            frac_or_num_samples = float(frac_or_num_samples)
+        else:
+            frac_or_num_samples = int(frac_or_num_samples)
+        dataset_config = DatasetConfig(
+            dataset_name=dataset_name,
+            dataset_split=dataset_mixer_list_splits[i],
+            dataset_revision="main",
+            transform_fn=dataset_transform_fn,
+            transform_fn_args=transform_fn_args,
+            target_columns=target_columns,
+            frac_or_num_samples=frac_or_num_samples,
+            dataset_config_seed=dataset_config_seed,
+        )
+
+        original_size = len(dataset_config.dataset)
+        if isinstance(frac_or_num_samples, int) and frac_or_num_samples > original_size:
+            new_range = frac_or_num_samples
+        elif isinstance(frac_or_num_samples, float):
+            new_range = int(frac_or_num_samples * original_size)
+        else:
+            new_range = int(frac_or_num_samples)
+
+        print(f"Dataset {dataset_name}: {original_size} -> {new_range} samples (factor: {frac_or_num_samples})")
+        dataset_config.update_range(new_range)
+        dcs.append(dataset_config)
+    return dcs
+
+
 def get_cached_dataset_tulu_with_statistics(
     dataset_mixer_list: List[str],
     dataset_mixer_list_splits: List[str],
@@ -1716,51 +1766,18 @@ def get_cached_dataset_tulu_with_statistics(
     dataset_config_seed: int = 42,
     system_prompt_override: Optional[str] = None,
 ) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
-    dcs = []
     if dataset_config_hash is None:
-        if len(dataset_mixer_list_splits) == 1:
-            print("by default, we will use the same split for all datasets")
-            dataset_mixer_list_splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
-        else:
-            if len(dataset_mixer_list_splits) != len(dataset_mixer_list):
-                raise ValueError(
-                    f"dataset_mixer_list_splits length must be the same as dataset_mixer_list: {len(dataset_mixer_list_splits)=} != {len(dataset_mixer_list)=}"
-                )
-        assert len(dataset_mixer_list) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer_list}"
-        for i in range(0, len(dataset_mixer_list), 2):
-            dataset_name = dataset_mixer_list[i]
-            frac_or_num_samples = dataset_mixer_list[i + 1]
-            if "." in frac_or_num_samples:
-                frac_or_num_samples = float(frac_or_num_samples)
-            else:
-                frac_or_num_samples = int(frac_or_num_samples)
-            dataset_config = DatasetConfig(
-                dataset_name=dataset_name,
-                dataset_split=dataset_mixer_list_splits[i],
-                dataset_revision="main",
-                transform_fn=dataset_transform_fn,
-                transform_fn_args=transform_fn_args,
-                target_columns=target_columns,
-                frac_or_num_samples=frac_or_num_samples,
-                dataset_config_seed=dataset_config_seed,
-            )
-
-            # Calculate target size properly handling fractional upsampling
-            original_size = len(dataset_config.dataset)
-            if isinstance(frac_or_num_samples, int) and frac_or_num_samples > original_size:
-                # Absolute number larger than dataset size - use as-is for upsampling
-                new_range = frac_or_num_samples
-            elif isinstance(frac_or_num_samples, float):
-                # Fractional sampling (can be > 1.0 for upsampling)
-                new_range = int(frac_or_num_samples * original_size)
-            else:
-                # Integer <= dataset size, use as absolute count
-                new_range = int(frac_or_num_samples)
-
-            print(f"Dataset {dataset_name}: {original_size} -> {new_range} samples (factor: {frac_or_num_samples})")
-            dataset_config.update_range(new_range)
-            dcs.append(dataset_config)
+        dcs = load_datasetconfigs(
+            dataset_mixer_list,
+            dataset_mixer_list_splits,
+            dataset_transform_fn,
+            transform_fn_args,
+            target_columns,
+            dataset_config_seed,
+        )
         dataset_config_hash = compute_config_hash(dcs, tc)
+    else:
+        dcs = []
     if dataset_cache_mode == "local":
         cache = LocalDatasetTransformationCache(
             config_hash=dataset_config_hash, dataset_local_cache_dir=dataset_local_cache_dir
