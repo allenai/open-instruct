@@ -26,7 +26,6 @@ from absl import logging
 
 from open_instruct.IFEvalG import instructions_util
 
-
 _InstructionArgsDtype = dict[str, int | str | Sequence[str]] | None
 
 _LANGUAGES = instructions_util.LANGUAGE_CODES
