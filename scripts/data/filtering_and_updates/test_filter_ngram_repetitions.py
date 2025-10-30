@@ -17,6 +17,10 @@ from filter_ngram_repetitions import (
     is_math_or_code,
     is_code_import_or_return,
     is_short_phrase,
+    is_complex_math_expression,
+    is_structured_list,
+    is_multi_line_paragraph,
+    is_common_transition_word,
     find_consecutive_repetitions,
     find_all_repetitions,
     find_ngram_repetitions

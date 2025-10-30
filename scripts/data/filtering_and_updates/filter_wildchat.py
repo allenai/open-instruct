@@ -15,6 +15,7 @@ Usage:
 python filter_wildchat.py --input-dataset <input_dataset> --output-dataset <output_dataset>
 """
 import argparse
+import logging
 import os
 from datasets import load_dataset
 

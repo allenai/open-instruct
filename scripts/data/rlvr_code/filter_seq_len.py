@@ -78,6 +78,7 @@ Note:
 
 import argparse
 import json  # For saving streaming data
+import logging
 import os
 import sys
 import tempfile  # For streaming upload
