@@ -2140,7 +2140,6 @@ class ModelDims:
         avg_bytes_per_engine = math.ceil(sum(per_engine_totals) / num_engines)
         return avg_bytes_per_engine
 
-
     def calculate_mfu(
         self,
         prompt_lengths: list[int],
@@ -2312,10 +2311,24 @@ def check_calculation(
     if percentage <= 100:
         return
 
+    import json
+
     full_device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
 
     avg_prompt_length = sum(prompt_lengths) / len(prompt_lengths)
     avg_response_length = sum(response_lengths) / len(response_lengths) if response_lengths else 0
+
+    test_case_json = {
+        "model_name": "REPLACE_WITH_MODEL_NAME",
+        "total_generation_time": timing,
+        "samples_per_prompt": samples_per_prompt,
+        "num_engines": num_engines,
+        "num_gpus_per_engine": num_gpus_per_engine,
+        "training_time": "REPLACE_WITH_TRAINING_TIME",
+        "num_training_gpus": "REPLACE_WITH_NUM_TRAINING_GPUS",
+        "prompt_lengths": prompt_lengths,
+        "response_lengths": response_lengths,
+    }
 
     warning_message = (
         f"{metric_name} exceeded 100%: {percentage:.2f}%\n"
@@ -2342,6 +2355,9 @@ def check_calculation(
         f"  samples_per_prompt = {samples_per_prompt}\n"
         f"  num_engines = {num_engines}\n"
         f"  num_gpus_per_engine = {num_gpus_per_engine}\n"
+        f"\n"
+        f"JSON format for test case (copy this to mbu_reproduction_cases.json):\n"
+        f"{json.dumps(test_case_json, indent=2)}\n"
         f"\n"
         f"This may indicate an issue with the MFU/MBU calculation logic or GPU specifications.\n"
         f"Please raise an issue at https://github.com/allenai/open-instruct/issues with the above information."
