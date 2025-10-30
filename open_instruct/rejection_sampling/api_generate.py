@@ -3,7 +3,6 @@
 import asyncio
 import re
 from dataclasses import dataclass
-from typing import List, Optional
 
 import numpy as np
 from openai import AsyncOpenAI
@@ -16,7 +15,7 @@ from open_instruct.rejection_sampling.prompt_templates import get_generation_tem
 class LLMGenerationConfig:
     num_completions: int = 64
     model: str = "gpt-3.5-turbo-0125"
-    max_parallel_requests: Optional[int] = None
+    max_parallel_requests: int | None = None
 
     def __post_init__(self):
         if "gpt-3.5" in self.model:
@@ -27,7 +26,7 @@ class LLMGenerationConfig:
 
 @dataclass
 class Args:
-    output_path: Optional[str] = None
+    output_path: str | None = None
     num_trials: int = 1
 
 
@@ -70,10 +69,7 @@ class LLMProcessor:
                         scores = []
                         for completion in completions:
                             match = re.search(r"Total score:\s*(\d+)", completion)
-                            if match:
-                                score = int(match.group(1))
-                            else:
-                                score = -1
+                            score = int(match.group(1)) if match else -1
                             scores.append(score)
                         response = np.mean(scores)
                     else:
@@ -85,7 +81,7 @@ class LLMProcessor:
 
         return response
 
-    async def process_batch(self, data_list: List[dict], args: Args, gen_args: Args):
+    async def process_batch(self, data_list: list[dict], args: Args, gen_args: Args):
         limiter = asyncio.Semaphore(self.config.max_parallel_requests)
         tasks = [self.process_text(data, i, limiter, args, gen_args) for i, data in enumerate(data_list)]
         # Use tqdm to track progress

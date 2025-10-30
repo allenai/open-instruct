@@ -19,8 +19,6 @@ Usage:
         pass
 """
 
-from typing import Dict, List
-
 import tiktoken
 from transformers import AutoTokenizer
 
@@ -42,11 +40,7 @@ def get_encoding_for_model(model_name: str):
     model_name_lower = model_name.lower()
 
     # GPT models use cl100k_base
-    if "gpt-4" in model_name_lower or "gpt-3.5" in model_name_lower:
-        return tiktoken.get_encoding("cl100k_base")
-
-    # Claude models use cl100k_base
-    elif "claude" in model_name_lower:
+    if "gpt-4" in model_name_lower or "gpt-3.5" in model_name_lower or "claude" in model_name_lower:
         return tiktoken.get_encoding("cl100k_base")
 
     # Models that use gpt2 encoding (including OLMo and other AI2 models)
@@ -74,7 +68,7 @@ def get_encoding_for_model(model_name: str):
 
 
 def check_context_window_limit(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     max_completion_tokens: int,
     model_name: str,
     max_context_length: int = 8192,
@@ -109,10 +103,7 @@ def check_context_window_limit(
 
             # Add tokens for role formatting (approximate)
             # System messages typically add ~4 tokens, user/assistant messages add ~3 tokens
-            if role == "system":
-                role_tokens = 4
-            else:
-                role_tokens = 3
+            role_tokens = 4 if role == "system" else 3
 
             total_message_tokens += content_tokens + role_tokens
 
@@ -149,10 +140,7 @@ def check_context_window_limit(
 
                 # Add tokens for role formatting (approximate)
                 # System messages typically add ~4 tokens, user/assistant messages add ~3 tokens
-                if role == "system":
-                    role_tokens = 4
-                else:
-                    role_tokens = 3
+                role_tokens = 4 if role == "system" else 3
 
                 total_message_tokens += content_tokens + role_tokens
 
@@ -176,12 +164,12 @@ def check_context_window_limit(
 
 
 def truncate_messages_to_fit_context(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     max_completion_tokens: int,
     model_name: str,
     max_context_length: int = 8192,
     safety_margin: int = 100,
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     """
     Truncate messages to fit within the context window while preserving system messages.
 
@@ -336,7 +324,7 @@ def truncate_messages_to_fit_context(
 
 async def safe_acompletion_with_context_check(
     model: str,
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     max_completion_tokens: int = 2048,
     max_context_length: int = 8192,
     safety_margin: int = 100,
@@ -398,7 +386,7 @@ async def safe_acompletion_with_context_check(
 
 # Convenience function for quick context checking
 def will_exceed_context_window(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     max_completion_tokens: int,
     model_name: str,
     max_context_length: int = 8192,

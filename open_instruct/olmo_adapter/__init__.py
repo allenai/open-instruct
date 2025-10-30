@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple, Union
+from typing import Union
 
 import torch
 from torch import nn
@@ -26,17 +26,17 @@ class Olmo2ForSequenceClassification(Olmo2PreTrainedModel):
 
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[Union[List[torch.FloatTensor]]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[Tuple, "SequenceClassifierOutputWithPast"]:
+        input_ids: torch.LongTensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        position_ids: torch.LongTensor | None = None,
+        past_key_values: list[torch.FloatTensor] | None = None,
+        inputs_embeds: torch.FloatTensor | None = None,
+        labels: torch.LongTensor | None = None,
+        use_cache: bool | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        return_dict: bool | None = None,
+    ) -> Union[tuple, "SequenceClassifierOutputWithPast"]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
             Labels for computing the sequence classification/regression loss. Indices should be in `[0, ...,
@@ -59,10 +59,7 @@ class Olmo2ForSequenceClassification(Olmo2PreTrainedModel):
         hidden_states = transformer_outputs[0]
         logits = self.score(hidden_states)
 
-        if input_ids is not None:
-            batch_size = input_ids.shape[0]
-        else:
-            batch_size = inputs_embeds.shape[0]
+        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]
 
         if self.config.pad_token_id is None and batch_size != 1:
             raise ValueError("Cannot handle batch sizes > 1 if no padding token is defined.")
@@ -133,19 +130,19 @@ class OlmoeForSequenceClassification(OlmoePreTrainedModel):
 
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[Union[List[torch.FloatTensor]]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-        output_router_logits: Optional[bool] = None,
-        cache_position: Optional[torch.LongTensor] = None,
-    ) -> Union[Tuple, SequenceClassifierOutputWithPast]:
+        input_ids: torch.LongTensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        position_ids: torch.LongTensor | None = None,
+        past_key_values: list[torch.FloatTensor] | None = None,
+        inputs_embeds: torch.FloatTensor | None = None,
+        labels: torch.LongTensor | None = None,
+        use_cache: bool | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        return_dict: bool | None = None,
+        output_router_logits: bool | None = None,
+        cache_position: torch.LongTensor | None = None,
+    ) -> tuple | SequenceClassifierOutputWithPast:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
             Labels for computing the sequence classification/regression loss. Indices should be in `[0, ...,
@@ -170,10 +167,7 @@ class OlmoeForSequenceClassification(OlmoePreTrainedModel):
         hidden_states = transformer_outputs[0]
         logits = self.score(hidden_states)
 
-        if input_ids is not None:
-            batch_size = input_ids.shape[0]
-        else:
-            batch_size = inputs_embeds.shape[0]
+        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]
 
         if self.config.pad_token_id is None and batch_size != 1:
             raise ValueError("Cannot handle batch sizes > 1 if no padding token is defined.")
