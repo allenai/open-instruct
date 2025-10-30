@@ -1,7 +1,5 @@
 import argparse
-import logging
-from datasets import Dataset, load_dataset
-from huggingface_hub import HfApi
+from datasets import load_dataset
 
 from open_instruct import logger_utils
 

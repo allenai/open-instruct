@@ -32,6 +32,7 @@ import dataclasses
 import functools
 import json
 import logging
+import math
 import multiprocessing as mp
 import os
 import random
@@ -1998,7 +1999,7 @@ class ModelDims:
         """Memory bytes for prefill phase.
 
         During prefill:
-        - Read weights once for the entire batch (batched matmul)
+        - Read weights once per prefill operation
         - Write KV cache for each token
 
         Args:
@@ -2008,12 +2009,8 @@ class ModelDims:
         Returns:
             Total memory bytes for prefill
         """
-        # In batched prefill, weights are read once for the entire operation,
-        # not once per token. We process all prompts in a single batch.
-        num_prefill_batches = len(prompt_lengths)  # Each prompt is a "batch"
-        weight_bytes = self.weight_memory_bytes(num_prefill_batches, dtype_bytes)
-
-        # KV cache is written for every token
+        num_prefill_ops = 1
+        weight_bytes = self.weight_memory_bytes(num_prefill_ops, dtype_bytes)
         total_prefill_tokens = sum(prompt_lengths)
         kv_write_bytes = self.kv_cache_write_bytes(total_prefill_tokens, dtype_bytes)
         return weight_bytes + kv_write_bytes
@@ -2068,23 +2065,25 @@ class ModelDims:
         samples_per_prompt: int = 1,
         dtype_bytes: int = 2,
     ) -> int:
-        """Approximate total HBM bytes moved for prefill + decode.
+        """Approximate total HBM bytes moved per engine for prefill + decode.
 
-        Returns an integer number of bytes. Divide by elapsed seconds to get B/s;
-        compare against peak bandwidth to get utilization.
+        When multiple engines process work in parallel, this calculates the bytes
+        moved by ONE engine processing its fraction of the prompts.
 
         Args:
-            prompt_lengths: List of prompt lengths (one per unique prompt)
-            num_engines: Number of vLLM engines
-            num_gpus_per_engine: Number of GPUs per engine
+            prompt_lengths: List of ALL prompt lengths across all engines
+            num_engines: Number of vLLM engines working in parallel
+            num_gpus_per_engine: Number of GPUs per engine (tensor parallelism)
             response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
             samples_per_prompt: Number of samples generated per prompt
             dtype_bytes: Bytes per element (2 for FP16/BF16)
 
         Returns:
-            Total memory bytes moved
+            Memory bytes moved by ONE engine (not total across all engines)
 
         Assumptions:
+          - Prompts are evenly distributed across engines
+          - Each engine processes its subset independently
           - Weights are read once per token per layer (Q,K,V,O + MLP up/down)
           - KV cache: write K/V for every token; during decode, read all past K/V per new token
           - When batching samples, prompt KV cache is shared across samples
@@ -2095,17 +2094,52 @@ class ModelDims:
         if num_gpus_per_engine < 1:
             raise ValueError(f"num_gpus_per_engine must be >= 1, got {num_gpus_per_engine}")
 
-        total = self.prefill_memory_bytes(prompt_lengths, dtype_bytes)
+        if not prompt_lengths:
+            return 0
 
+        def _split_evenly(seq: list[int], parts: int) -> list[list[int]]:
+            base, extra = divmod(len(seq), parts)
+            result: list[list[int]] = []
+            start = 0
+            for i in range(parts):
+                size = base + (1 if i < extra else 0)
+                result.append(seq[start : start + size])
+                start += size
+            return result
+
+        prompt_chunks = _split_evenly(prompt_lengths, num_engines)
+
+        response_chunks: list[list[int] | None]
         if response_lengths is not None:
             assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
                 f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
             )
+            response_chunks = []
+            response_idx = 0
+            for chunk in prompt_chunks:
+                num_responses = len(chunk) * samples_per_prompt
+                response_chunks.append(response_lengths[response_idx : response_idx + num_responses])
+                response_idx += num_responses
+        else:
+            response_chunks = [None] * num_engines
 
-            # Pass original prompt_lengths with samples_per_prompt to correctly handle shared KV cache
-            total += self.decode_memory_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
+        per_engine_totals: list[int] = []
+        for chunk_prompts, chunk_responses in zip(prompt_chunks, response_chunks):
+            if not chunk_prompts:
+                per_engine_totals.append(0)
+                continue
 
-        return total
+            total = self.prefill_memory_bytes(chunk_prompts, dtype_bytes)
+            if chunk_responses is not None:
+                total += self.decode_memory_bytes(chunk_prompts, chunk_responses, samples_per_prompt, dtype_bytes)
+            per_engine_totals.append(total)
+
+        if len(per_engine_totals) < num_engines:
+            per_engine_totals.extend([0] * (num_engines - len(per_engine_totals)))
+
+        avg_bytes_per_engine = math.ceil(sum(per_engine_totals) / num_engines)
+        return avg_bytes_per_engine
+
 
     def calculate_mfu(
         self,
