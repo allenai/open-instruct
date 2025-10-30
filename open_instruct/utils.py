@@ -2175,6 +2175,8 @@ class ModelDims:
             response_lengths,
             samples_per_prompt,
             num_inference_gpus,
+            num_engines,
+            num_gpus_per_engine,
         )
 
         check_calculation(
@@ -2186,6 +2188,8 @@ class ModelDims:
             response_lengths,
             samples_per_prompt,
             num_inference_gpus,
+            num_engines,
+            num_gpus_per_engine,
         )
 
         return {"mfu": actor_mfu, "mbu": actor_mbu}
@@ -2211,7 +2215,16 @@ class ModelDims:
         learner_mfu = 100 * training_flops_per_second / total_training_device_flops
 
         check_calculation(
-            learner_mfu, "Learner MFU", self, training_time, total_sequence_lengths, None, 1, num_training_gpus
+            learner_mfu,
+            "Learner MFU",
+            self,
+            training_time,
+            total_sequence_lengths,
+            None,
+            1,
+            num_training_gpus,
+            1,
+            num_training_gpus,
         )
 
         return {"mfu": learner_mfu}
@@ -2259,13 +2272,17 @@ def check_calculation(
     response_lengths: list[int] | None,
     samples_per_prompt: int,
     num_gpus: int,
+    num_engines: int,
+    num_gpus_per_engine: int,
 ) -> None:
     if percentage <= 100:
         return
 
     full_device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
 
-    avg_response_length = f"{sum(response_lengths) / len(response_lengths):.1f}" if response_lengths else "N/A"
+    avg_prompt_length = sum(prompt_lengths) / len(prompt_lengths)
+    avg_response_length = sum(response_lengths) / len(response_lengths) if response_lengths else 0
+
     warning_message = (
         f"{metric_name} exceeded 100%: {percentage:.2f}%\n"
         f"\n"
@@ -2274,13 +2291,23 @@ def check_calculation(
         f"Timing and GPU info:\n"
         f"  timing: {timing:.6f}s\n"
         f"  num_gpus: {num_gpus}\n"
+        f"  num_engines: {num_engines}\n"
+        f"  num_gpus_per_engine: {num_gpus_per_engine}\n"
         f"  full_device_name: {full_device_name}\n"
         f"\n"
         f"Batch/sequence info:\n"
         f"  num_prompts: {len(prompt_lengths)}\n"
         f"  samples_per_prompt: {samples_per_prompt}\n"
-        f"  avg_prompt_length: {sum(prompt_lengths) / len(prompt_lengths):.1f}\n"
-        f"  avg_response_length: {avg_response_length}\n"
+        f"  avg_prompt_length: {avg_prompt_length:.1f}\n"
+        f"  avg_response_length: {avg_response_length:.1f}\n"
+        f"\n"
+        f"To reproduce this calculation, use these exact parameters:\n"
+        f"  prompt_lengths = {prompt_lengths}\n"
+        f"  response_lengths = {response_lengths}\n"
+        f"  timing = {timing}\n"
+        f"  samples_per_prompt = {samples_per_prompt}\n"
+        f"  num_engines = {num_engines}\n"
+        f"  num_gpus_per_engine = {num_gpus_per_engine}\n"
         f"\n"
         f"This may indicate an issue with the MFU/MBU calculation logic or GPU specifications.\n"
         f"Please raise an issue at https://github.com/allenai/open-instruct/issues with the above information."
