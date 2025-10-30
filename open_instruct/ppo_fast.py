@@ -399,7 +399,7 @@ class MetricsTracker:
     """A simple class to prellocate all metrics in an array
     so we can do only one allreduce operation to get the metrics mean"""
 
-    def __init__(self, max_metrics: int = 32, device: torch.device = torch.device("cuda")):
+    def __init__(self, max_metrics: int = 32, device: str = "cuda"):
         self.metrics = torch.zeros(max_metrics, device=device)
         self.names2idx = {}
         self.current_idx = 0
@@ -890,7 +890,7 @@ class PolicyTrainerRayProcess(RayProcess):
             value_losses = torch.zeros(len(collated_query_responses))
             local_step = 0
             value_optimizer_step = 0
-            for epoch_idx in range(args.num_epochs):
+            for _ in range(args.num_epochs):
                 for i in range(len(collated_query_responses)):
                     mb_query_responses = collated_query_responses[i]
                     mb_response_masks = collated_response_masks[i]
@@ -1521,10 +1521,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             tags=[args.exp_name] + get_wandb_tags(),
         )
     writer = SummaryWriter(f"runs/{args.run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
+    hyperparams_table = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
+    writer.add_text("hyperparameters", f"|param|value|\n|-|-|\n{hyperparams_table}")
 
     # ------------------------------------------------------------
     # Set up datasets
