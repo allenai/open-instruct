@@ -148,7 +148,7 @@ def process_shard_api(model_name_or_path: str, args: Args, shard: list[str]) -> 
     model_responses = ds["model_completion"]
 
     data_list_model_responses = [
-        {"prompt": prompt, "response": response} for prompt, response in zip(prompts, model_responses)
+        {"prompt": prompt, "response": response} for prompt, response in zip(prompts, model_responses, strict=False)
     ]
     model_responses_scores = asyncio.run(
         generate_with_openai(model_name_or_path, data_list_model_responses, args, gen_args)
@@ -189,9 +189,9 @@ def batch_processing_scores(
                 # score = (batch_size, )
                 scores.extend(score.cpu().tolist())  # convert the tensor score to a list
                 i += current_batch_size
-            except torch.cuda.OutOfMemoryError:
+            except torch.cuda.OutOfMemoryError as e:
                 if current_batch_size == 1:
-                    raise ValueError("Out of memory even with batch size 1")
+                    raise ValueError("Out of memory even with batch size 1") from e
                 current_batch_size //= 2
                 print(f"Reducing batch size to {current_batch_size}")
                 continue

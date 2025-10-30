@@ -399,7 +399,7 @@ class MetricsTracker:
     """A simple class to prellocate all metrics in an array
     so we can do only one allreduce operation to get the metrics mean"""
 
-    def __init__(self, max_metrics: int = 32, device: torch.device = torch.device("cuda")):
+    def __init__(self, max_metrics: int = 32, device: str = "cuda"):
         self.metrics = torch.zeros(max_metrics, device=device)
         self.names2idx = {}
         self.current_idx = 0
@@ -749,7 +749,7 @@ class PolicyTrainerRayProcess(RayProcess):
             ray.get(refss)
 
     def update_ref_policy(self):
-        for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
+        for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters(), strict=False):
             if self.args.deepspeed_stage == 3:
                 with deepspeed.zero.GatheredParameters([param, ref_param], modifier_rank=0):
                     if deepspeed.comm.get_rank() == 0:
@@ -890,7 +890,7 @@ class PolicyTrainerRayProcess(RayProcess):
             value_losses = torch.zeros(len(collated_query_responses))
             local_step = 0
             value_optimizer_step = 0
-            for epoch_idx in range(args.num_epochs):
+            for _ in range(args.num_epochs):
                 for i in range(len(collated_query_responses)):
                     mb_query_responses = collated_query_responses[i]
                     mb_response_masks = collated_response_masks[i]
@@ -1206,7 +1206,7 @@ def vllm_generate_thread(
         # Generate responses in parallel across engines
         futures = [
             vllm_engine.generate.remote(sampling_params=sampling_params, prompt_token_ids=queries, use_tqdm=False)
-            for vllm_engine, queries in zip(vllm_engines, split_queries)
+            for vllm_engine, queries in zip(vllm_engines, split_queries, strict=False)
         ]
         # Gather all responses
         all_outputs = ray.get(futures)

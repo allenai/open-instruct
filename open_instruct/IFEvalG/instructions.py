@@ -1647,7 +1647,7 @@ class SentenceHyphenChecker(Instruction):
         sentences_gold = instructions_util.split_into_sentences(sentences_gold)
         sentences = value.split("-")
         # Check if there are any spaces between sentences
-        for sentence, gold in zip(sentences, sentences_gold):
+        for sentence, gold in zip(sentences, sentences_gold, strict=False):
             if sentence.strip() != sentence or sentence != gold:
                 return False
         return True
@@ -1957,7 +1957,7 @@ class FirstWordSentChecker(Instruction):
             self._first_word = instructions_util.generate_keywords(num_keywords=1)[0]
         else:
             if not isinstance(first_word, str):
-                self._first_word == first_word[0].strip()
+                self._first_word = first_word[0].strip()
             else:
                 self._first_word = first_word.strip()
 

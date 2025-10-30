@@ -123,7 +123,8 @@ docstring-code-format = false
 # I = isort
 # SIM = flake8-simplify
 # UP = pyupgrade
-select = ["F", "E", "W", "I", "SIM", "UP"]
+# B = flake8-bugbear
+select = ["F", "E", "W", "I", "SIM", "UP", "B"]
 ignore = [
     "C408", # dict() calls (stylistic)
     "C901", # function complexity

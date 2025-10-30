@@ -251,7 +251,7 @@ def get_bundle_indices_list(placement_group: ray.util.placement_group) -> list[i
         node_id_to_bundles[node_id].append(bundle)
 
     flattened_bundle_indices = []
-    for node_id, bundles in node_id_to_bundles.items():
+    for bundles in node_id_to_bundles.values():
         flattened_bundle_indices.extend(bundles)
     return flattened_bundle_indices
 
@@ -339,7 +339,10 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
             f"!= logprobs length ({len(out.logprobs)})"
         )
         logprobs.append(
-            [logprob_dict[token_id].logprob for token_id, logprob_dict in zip(out.token_ids, out.logprobs)]
+            [
+                logprob_dict[token_id].logprob
+                for token_id, logprob_dict in zip(out.token_ids, out.logprobs, strict=False)
+            ]
         )
 
     # Extract attributes based on whether tools are used
@@ -728,8 +731,7 @@ class LLMRayActor:
             self._prefetch_future.result()
         if self._process_future.done():
             self._process_future.result()
-        active_tasks = list(self.active_tasks.items())
-        for task_id, task in active_tasks:
+        for task in self.active_tasks.values():
             if task.done():
                 task.result()
         if not self.loop_thread.is_alive():
@@ -790,7 +792,7 @@ def create_vllm_engines(
     single_gpu_mode: bool = False,
     pg: PlacementGroup | None = None,
     tools: dict[str, Tool] | None = None,
-    max_tool_calls: list[int] = [5],
+    max_tool_calls: tuple[int, ...] = (5,),
     prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
@@ -808,7 +810,9 @@ def create_vllm_engines(
         if len(max_tool_calls) == 1:
             max_tool_calls_dict = {end_str: max_tool_calls[0] for end_str in tools}
         else:
-            max_tool_calls_dict = {end_str: limit for end_str, limit in zip(tools.keys(), max_tool_calls)}
+            max_tool_calls_dict = {
+                end_str: limit for end_str, limit in zip(tools.keys(), max_tool_calls, strict=False)
+            }
     else:
         max_tool_calls_dict = {}
 

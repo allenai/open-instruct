@@ -310,7 +310,7 @@ def get_datasets(
     raw_train_datasets = []
     raw_val_datasets = []
     frac_or_sample_list = []
-    for (ds, frac_or_samples), ds_config in zip(dataset_mixer.items(), configs):
+    for (ds, frac_or_samples), ds_config in zip(dataset_mixer.items(), configs, strict=False):
         frac_or_sample_list.append(frac_or_samples)
         for split in splits:
             # if dataset ends with .json or .jsonl, load from file
@@ -428,7 +428,7 @@ def get_datasets(
     if len(raw_train_datasets) > 0:
         train_subsets = []
         # Manage proportions
-        for dataset, frac_or_samples in zip(raw_train_datasets, frac_or_sample_list):
+        for dataset, frac_or_samples in zip(raw_train_datasets, frac_or_sample_list, strict=False):
             # cast features (TODO, add more feature regularization)
             dataset = dataset.cast(target_features)
             # TODO selection can be randomized.
@@ -526,7 +526,7 @@ def combine_dataset(
         print(f"Saving mixed dataset to {save_data_dir}")
 
     datasets = []
-    for (ds, frac_or_samples), ds_config, split in zip(dataset_mixer.items(), configs, splits):
+    for (ds, frac_or_samples), ds_config, split in zip(dataset_mixer.items(), configs, splits, strict=False):
         # if dataset ends with .json or .jsonl, load from file
         if ds.endswith(".json") or ds.endswith(".jsonl"):
             dataset = load_dataset("json", data_files=ds, split=split)
@@ -594,7 +594,7 @@ class ArgumentParserPlus(HfArgumentParser):
 
         # overwrite the default/loaded value with the value provided to the command line
         # noqa adapted from https://github.com/huggingface/transformers/blob/d0b5002378daabf62769159add3e7d66d3f83c3b/src/transformers/hf_argparser.py#L327
-        for data_yaml, data_class in zip(arg_list, self.dataclass_types):
+        for data_yaml, data_class in zip(arg_list, self.dataclass_types, strict=False):
             keys = {f.name for f in dataclasses.fields(data_yaml) if f.init}
             inputs = {k: v for k, v in vars(data_yaml).items() if k in keys}
             for arg, val in other_args.items():
@@ -942,7 +942,7 @@ def maybe_update_beaker_description(
     total_steps: int | None = None,
     start_time: float | None = None,
     wandb_url: str | None = None,
-    original_descriptions: dict[str, str] = {},
+    original_descriptions: dict[str, str] = {},  # noqa: B006
 ) -> None:
     """Update Beaker experiment description with training progress and/or wandb URL.
 
@@ -1052,17 +1052,6 @@ def download_from_hf(model_name_or_path: str, revision: str) -> None:
     if "\n" in output:
         output = output.split("\n")[-1].strip()
     return output
-
-
-[
-    "gsutil",
-    "-o",
-    "GSUtil:parallel_composite_upload_threshold=150M",
-    "cp",
-    "-r",
-    "/root/.cache/huggingface/hub/models--Qwen--Qwen3-8B/snapshots/9c925d64d72725edaf899c6cb9c377fd0709d9c5",
-    "gs://ai2-llm/post-training/deletable_cache_models/Qwen/Qwen3-8B/9c925d64d72725edaf899c6cb9c377fd0709d9c5",
-]
 
 
 def download_from_gs_bucket(src_path: str, dest_path: str) -> None:
@@ -1375,7 +1364,7 @@ def get_eval_ds_config(offload, stage=0, bf16=True):
 def get_optimizer_grouped_parameters(
     model: torch.nn.Module,
     weight_decay: float,
-    no_decay_name_list=["bias", "layer_norm.weight", "layernorm.weight", "norm.weight", "ln_f.weight"],
+    no_decay_name_list=("bias", "layer_norm.weight", "layernorm.weight", "norm.weight", "ln_f.weight"),
 ):
     optimizer_grouped_parameters = [
         {
@@ -1646,7 +1635,7 @@ def check_runtime_leaks(
 
     if _rt and hasattr(_rt, "_resource_tracker"):
         cache = getattr(_rt._resource_tracker, "_cache", {})
-        for name, (count, rtype) in cache.items():
+        for count, rtype in cache.values():
             if count > 0:
                 leak_logger.warning(f"Leaked {rtype} resources: {count}")
 

@@ -741,7 +741,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             skipped_batches = True
         else:
             active_dataloader = train_dataloader
-        for step, batch in enumerate(active_dataloader):
+        for batch in active_dataloader:
             pred_tokens_in_batch = (batch["labels"] != -100).sum()
             if "attention_mask" in batch:
                 tokens_in_batch = batch["attention_mask"].sum()
