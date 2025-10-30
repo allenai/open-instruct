@@ -1,9 +1,22 @@
+import os
 import unittest
 
 import datasets
 from parameterized import parameterized
 
 import open_instruct.dataset_transformation
+
+HAS_CACHE = (
+    "HF_HOME" in os.environ
+    or "HF_DATASETS_CACHE" in os.environ
+    or os.path.exists(os.path.expanduser("~/.cache/huggingface/datasets"))
+)
+
+
+def get_test_split(split: str = "train") -> str:
+    if not HAS_CACHE:
+        return f"{split}[:1%]"
+    return split
 
 
 class TestTokenizerEquality(unittest.TestCase):
@@ -92,7 +105,7 @@ class TestCachedDataset(unittest.TestCase):
             add_bos=False,
         )
         dataset_mixer_list = ["allenai/tulu-3-sft-mixture", "1.0"]
-        dataset_mixer_list_splits = ["train"]
+        dataset_mixer_list_splits = [get_test_split("train")]
         dataset_transform_fn = ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
 
         transform_fn_args = [{"max_seq_length": 4096}, {}]
@@ -129,7 +142,7 @@ class TestCachedDataset(unittest.TestCase):
             add_bos=False,
         )
         dataset_mixer_list = ["allenai/llama-3.1-tulu-3-8b-preference-mixture", "1.0"]
-        dataset_mixer_list_splits = ["train"]
+        dataset_mixer_list_splits = [get_test_split("train")]
         dataset_transform_fn = ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
         transform_fn_args = [{"max_seq_length": 2048}, {}]
         dataset = open_instruct.dataset_transformation.get_cached_dataset_tulu(
@@ -157,7 +170,7 @@ class TestCachedDataset(unittest.TestCase):
             add_bos=False,
         )
         dataset_mixer_list = ["allenai/RLVR-GSM-MATH-IF-Mixed-Constraints", "1.0"]
-        dataset_mixer_list_splits = ["train"]
+        dataset_mixer_list_splits = [get_test_split("train")]
         dataset_transform_fn = ["rlvr_tokenize_v1", "rlvr_max_length_filter_v1"]
         transform_fn_args = [{}, {"max_prompt_token_length": 2048}]
         dataset = open_instruct.dataset_transformation.get_cached_dataset_tulu(
