@@ -627,6 +627,7 @@ class ShufflingIterator:
         self.epoch_number = state["epoch_number"]
         self.data = state["data"].copy()
         self.rng.bit_generator.state = state["rng_state"]
+        self.exclude_list = state.get("exclude_list", [])
         self._update_effective_size()
 
     def _update_effective_size(self) -> None:
