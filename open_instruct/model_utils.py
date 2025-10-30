@@ -14,30 +14,23 @@
 # limitations under the License.
 
 
+import asyncio
 import itertools
 from collections import OrderedDict, defaultdict
-from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Literal, Union
-
-try:
-    import deepspeed
-    from deepspeed.runtime.engine import DeepSpeedEngine
-except ImportError:
-    pass
-import asyncio
+from typing import Literal
 
 import pandas as pd
 import torch
 import transformers
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
+from deepspeed.runtime.engine import DeepSpeedEngine
 from huggingface_hub import HfApi
 from rich import print as rprint
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from open_instruct import logger_utils
@@ -419,24 +412,6 @@ def generate(
     return torch.cat((queries, output.sequences[:, context_length:]), dim=1), logits
 
 
-@torch.no_grad()
-def batch_generation(
-    model: torch.nn.Module,
-    queries: torch.Tensor,
-    local_rollout_forward_batch_size: int,
-    pad_token_id: int,
-    generation_config: dict,
-):
-    query_responses = []
-    logitss = []
-    for i in range(0, queries.shape[0], local_rollout_forward_batch_size):
-        query = queries[i : i + local_rollout_forward_batch_size]
-        query_response, logits = generate(model, query, pad_token_id, generation_config)
-        query_responses.append(query_response)
-        logitss.append(logits)
-    return torch.cat(query_responses, 0), torch.cat(logitss, 0)
-
-
 def get_olmo3_generation_config(tokenizer):
     return transformers.GenerationConfig(
         temperature=None,
@@ -556,7 +531,7 @@ def iter_params(module, recurse=False):
     return [param for _, param in get_all_parameters(module, recurse)]
 
 
-def remove_hooks(model: "DeepSpeedEngine") -> None:
+def remove_hooks(model: DeepSpeedEngine) -> None:
     """Removes the optimizer hooks from a DeepSpeed ZeRO-3 model."""
     if model.optimizer is not None and hasattr(model.optimizer, "parameter_offload"):
         optimizer_offload = model.optimizer.parameter_offload
@@ -575,32 +550,13 @@ def remove_hooks(model: "DeepSpeedEngine") -> None:
     optimizer_offload.backward_hooks = []
 
 
-def add_hooks(model: "DeepSpeedEngine") -> None:
+def add_hooks(model: DeepSpeedEngine) -> None:
     """Adds the optimizer hooks from a DeepSpeed ZeRO-3 model."""
     if model.optimizer is not None and hasattr(model.optimizer, "parameter_offload"):
         optimizer_offload = model.optimizer.parameter_offload
     elif model.optimizer is not None:
         optimizer_offload = model.optimizer
     optimizer_offload._register_hooks_recursively(optimizer_offload.module)
-
-
-@contextmanager
-def unwrap_model_for_generation(
-    model: Union["DistributedDataParallel", "DeepSpeedEngine"], accelerator: "Accelerator", is_peft_model: bool = False
-) -> Union["transformers.PreTrainedModel", "DeepSpeedEngine"]:
-    """Context manager to unwrap a model for generation.
-    For ZeRO-3 models, we gather the weights once to speed up generation.
-    """
-    unwrapped_model = accelerator.unwrap_model(model)
-    if is_peft_model:
-        unwrapped_model.pretrained_model.disable_adapter()
-    if accelerator.state.deepspeed_plugin is not None and accelerator.state.deepspeed_plugin.zero_stage == 3:
-        with deepspeed.zero.GatheredParameters(model.parameters()):
-            remove_hooks(model)
-            yield accelerator.unwrap_model(model)
-            add_hooks(model)
-    else:
-        yield unwrapped_model
 
 
 def prepare_deepspeed(model: torch.nn.Module, per_device_train_batch_size: int, mixed_precision: str):

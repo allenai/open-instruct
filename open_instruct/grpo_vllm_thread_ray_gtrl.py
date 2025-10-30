@@ -47,7 +47,6 @@ except Exception:
 
 import asyncio
 import gc
-import json
 import math
 import random
 import shutil
@@ -365,17 +364,6 @@ class Args:
         assert self.number_samples_per_prompt > 0, "Number of samples per prompt must be greater than 0!"
         if self.number_samples_per_prompt == 1:
             print("WARNING: number_samples_per_prompt is 1. This reduces GRPO to REINFORCE. ")
-
-
-def process_dataset_mixer(value) -> tuple[dict | None, str | None]:
-    # if passed through cli: convert the dataset mixers to dictionaries
-    if isinstance(value, str):
-        return json.loads(value), value
-    # if passed through yaml: convert the dataset mixers to strings
-    elif isinstance(value, dict):
-        return value, json.dumps(value)
-    else:
-        raise ValueError("Input must be either a string or a dictionary")
 
 
 def get_train_ds_config(

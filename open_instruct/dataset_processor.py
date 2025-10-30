@@ -229,11 +229,6 @@ def get_num_proc(dataset_len: int, num_available_cpus: int, example_per_second_p
     return min(num_required_cpus, num_available_cpus, dataset_len)
 
 
-def select_nested(dataset: DatasetDict, max_examples_per_split: int):
-    """select the dataset nested in a DatasetDict"""
-    return {key: dataset[key].select(range(min(max_examples_per_split, len(dataset[key])))) for key in dataset}
-
-
 class DatasetProcessor:
     def __init__(self, tokenizer: PreTrainedTokenizer, config: DatasetConfig) -> None:
         self.tokenizer = tokenizer
@@ -473,16 +468,6 @@ class SFTGroundTruthDatasetProcessor(DatasetProcessor):
         return super().get_token_length_visualization(
             features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY], dataset=dataset, save_path=save_path, bins=bins
         )
-
-
-def convert_preference_dataset_to_binary_dataset(ds: Dataset):
-    binary_ds = defaultdict(list)
-    for i in tqdm(range(len(ds))):
-        binary_ds[SFT_MESSAGE_KEY].append(ds[i]["chosen"])
-        binary_ds[BINARY_LABEL_KEY].append(True)
-        binary_ds[SFT_MESSAGE_KEY].append(ds[i]["rejected"])
-        binary_ds[BINARY_LABEL_KEY].append(False)
-    return Dataset.from_dict(binary_ds)
 
 
 def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):

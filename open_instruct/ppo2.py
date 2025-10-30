@@ -52,7 +52,6 @@ except Exception:
 # isort: on
 
 import gc
-import json
 import math
 import random
 import shutil
@@ -350,17 +349,6 @@ class Args:
     """the priority of auto-launched evaluation jobs"""
     hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
-
-
-def process_dataset_mixer(value) -> tuple[dict | None, str | None]:
-    # if passed through cli: convert the dataset mixers to dictionaries
-    if isinstance(value, str):
-        return json.loads(value), value
-    # if passed through yaml: convert the dataset mixers to strings
-    elif isinstance(value, dict):
-        return value, json.dumps(value)
-    else:
-        raise ValueError("Input must be either a string or a dictionary")
 
 
 def get_train_ds_config(

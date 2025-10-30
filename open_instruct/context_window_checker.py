@@ -385,22 +385,6 @@ async def safe_acompletion_with_context_check(
 
 
 # Convenience function for quick context checking
-def will_exceed_context_window(
-    messages: list[dict[str, str]],
-    max_completion_tokens: int,
-    model_name: str,
-    max_context_length: int = 8192,
-    safety_margin: int = 100,
-) -> bool:
-    """
-    Quick check to see if a request would exceed the context window.
-
-    Returns:
-        bool: True if the request would exceed context window, False otherwise
-    """
-    return not check_context_window_limit(
-        messages, max_completion_tokens, model_name, max_context_length, safety_margin
-    )
 
 
 def truncate_str_for_prompt_template(
