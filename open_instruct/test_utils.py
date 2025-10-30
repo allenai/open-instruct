@@ -458,13 +458,20 @@ class TestModelDims(unittest.TestCase):
         mock_platform.get_device_total_memory.return_value = 80 * 1024**3
         mock_platform.get_device_name.return_value = "NVIDIA H100 80GB HBM3"
 
+        mock_model_cls = mock.Mock()
+        mock_model_cls.supports_multimodal.return_value = False
+        mock_model_cls.is_attention_free.return_value = False
+        mock_model_cls.is_attention_free = False
+
+        def mock_inspect_return(*args, **kwargs):
+            return mock_model_cls, "Qwen2ForCausalLM"
+
         with (
-            mock.patch.multiple(
-                "torch.cuda",
-                get_device_name=mock.Mock(return_value="NVIDIA H100 80GB HBM3"),
-                is_available=mock.Mock(return_value=True),
-            ),
             mock.patch("vllm.platforms.current_platform", mock_platform),
+            mock.patch(
+                "vllm.model_executor.models.registry.ModelRegistry.inspect_model_cls", side_effect=mock_inspect_return
+            ),
+            mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
         ):
             engine_args = vllm.EngineArgs(model=model_name, load_format="dummy", max_model_len=512)
             vllm_config = engine_args.create_engine_config()
