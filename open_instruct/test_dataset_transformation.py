@@ -118,17 +118,9 @@ class TestCachedDataset(unittest.TestCase):
             open_instruct.dataset_transformation.TOKENIZED_SFT_DATASET_KEYS,
             dataset_skip_cache=True,
         )
-        dcs = open_instruct.dataset_transformation.load_datasetconfigs(
-            dataset_mixer_list,
-            dataset_mixer_list_splits,
-            dataset_transform_fn,
-            transform_fn_args,
-            open_instruct.dataset_transformation.TOKENIZED_SFT_DATASET_KEYS,
-        )
-        config_hash = open_instruct.dataset_transformation.compute_config_hash(dcs, tc)
-
         gold_tokenized_dataset = datasets.load_dataset(
-            "allenai/dataset-mix-cached", split="train", revision="648406a353")
+            "allenai/dataset-mix-cached", split="train", revision="648406a353"
+        )
         self.assertEqual(len(dataset), len(gold_tokenized_dataset))
         for i in range(len(dataset)):
             self.assertEqual(dataset[i]["input_ids"], gold_tokenized_dataset[i]["input_ids"])
@@ -180,13 +172,6 @@ class TestCachedDataset(unittest.TestCase):
             dataset_transform_fn,
             transform_fn_args,
             dataset_skip_cache=True,
-        )
-        dcs = open_instruct.dataset_transformation.load_datasetconfigs(
-            dataset_mixer_list,
-            dataset_mixer_list_splits,
-            dataset_transform_fn,
-            transform_fn_args,
-            open_instruct.dataset_transformation.TOKENIZED_SFT_DATASET_KEYS,
         )
         gold_tokenized_dataset = datasets.load_dataset(
             "allenai/dataset-mix-cached", split="train", revision="c995931d85"
