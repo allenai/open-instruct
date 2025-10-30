@@ -348,7 +348,7 @@ class TestFlatArguments(unittest.TestCase):
         self.assertFalse(args.additional_model_arguments)
 
 
-class TestModelDimsQwen25(unittest.TestCase):
+class TestModelDims(unittest.TestCase):
     def test_qwen25_7b_flops_calculation(self):
         sequence_length = 34048
         model_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
@@ -379,24 +379,10 @@ class TestModelDimsQwen25(unittest.TestCase):
 
     @parameterized.expand(_load_mbu_test_cases())
     def test_mbu_reproduction(self, name, case_data):
-        if "prompt_lengths" in case_data:
-            prompt_lengths = case_data["prompt_lengths"]
-            response_lengths = case_data["response_lengths"]
-        else:
-            num_prompts = case_data["num_prompts"]
-            prompt_len = case_data["prompt_len"]
-            samples_per_prompt = case_data["samples_per_prompt"]
-            prompt_lengths = [prompt_len] * num_prompts
-            if "response_lengths" in case_data:
-                response_lengths = case_data["response_lengths"]
-            else:
-                response_len = int(case_data["response_len"])
-                response_lengths = [response_len] * (num_prompts * samples_per_prompt)
-
         metrics = grpo_fast.calculate_utilization_metrics(
             model_dims=MODEL_DIMS[case_data["model_name"]],
-            prompt_lengths=prompt_lengths,
-            response_lengths=response_lengths,
+            prompt_lengths=case_data["prompt_lengths"],
+            response_lengths=case_data["response_lengths"],
             total_generation_time=case_data["total_generation_time"],
             samples_per_prompt=case_data["samples_per_prompt"],
             num_engines=case_data["num_engines"],

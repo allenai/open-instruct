@@ -40,8 +40,7 @@
     "num_gpus_per_engine": 1,
     "training_time": 5.0,
     "num_training_gpus": 1,
-    "num_prompts": 8,
-    "prompt_len": 145,
+    "prompt_lengths": [145, 145, 145, 145, 145, 145, 145, 145],
     "response_lengths": [275, 275, 275, 275, 275, 275, 275, 275, 275, 275, 275, 275, 275, 275, 275, 275, 275, 275, 275, 275, 275, 275, 274, 274, 274, 274, 274, 274, 274, 274, 274, 274]
   },
   "small_batch": {
@@ -52,9 +51,8 @@
     "num_gpus_per_engine": 1,
     "training_time": 3.0,
     "num_training_gpus": 2,
-    "num_prompts": 2,
-    "prompt_len": 512,
-    "response_len": 512
+    "prompt_lengths": [512, 512],
+    "response_lengths": [512, 512, 512, 512]
   },
   "large_batch": {
     "model_name": "Qwen/Qwen2.5-7B",
@@ -64,8 +62,7 @@
     "num_gpus_per_engine": 2,
     "training_time": 4.0,
     "num_training_gpus": 4,
-    "num_prompts": 16,
-    "prompt_len": 256,
-    "response_len": 256
+    "prompt_lengths": [256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256],
+    "response_lengths": [256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256]
   }
 }
