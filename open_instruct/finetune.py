@@ -729,7 +729,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     local_total_tokens_this_log_period = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
     local_pred_tokens_this_log_period = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
     total_token_including_padding = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
-    start_time = time.time()
+    start_time = time.perf_counter()
     skipped_batches = False
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
