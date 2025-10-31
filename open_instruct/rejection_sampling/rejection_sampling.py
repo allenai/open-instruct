@@ -21,7 +21,6 @@ import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pprint import pformat
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -48,7 +47,7 @@ NUM_CPUS_FOR_DATASET_MAP = 4
 
 @dataclass
 class Args:
-    model_names_or_paths: List[str] = field(default_factory=lambda: ["gpt-4"])
+    model_names_or_paths: list[str] = field(default_factory=lambda: ["gpt-4"])
     input_filename: str = "completions.jsonl"
     save_filename: str = "rejected_sampling_completions.jsonl"
     save_filename_scores: str = "completion_scores.jsonl"
@@ -63,11 +62,11 @@ class Args:
     hf_repo_id: str = os.path.basename(__file__)[: -len(".py")]
     hf_repo_id_scores: str = os.path.basename(__file__)[: -len(".py")] + "_scores"
     push_to_hub: bool = False
-    hf_entity: Optional[str] = None
+    hf_entity: str | None = None
     add_timestamp: bool = True
 
 
-def save_jsonl(save_filename: str, table: Dict[str, List]):
+def save_jsonl(save_filename: str, table: dict[str, list]):
     first_key = list(table.keys())[0]
     dirname = os.path.dirname(save_filename)
     if dirname:
@@ -79,8 +78,8 @@ def save_jsonl(save_filename: str, table: Dict[str, List]):
 
 
 def process_shard(
-    rank: int, model_name_or_path: str, args: Args, shard: List[str]
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    rank: int, model_name_or_path: str, args: Args, shard: list[str]
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     This function processes a shard (subset) of data using a specified model. It tokenizes the data,
     runs it through the model to get reward scores, and handles out-of-memory errors by adjusting the batch size.
@@ -122,7 +121,7 @@ def process_shard(
     return scores
 
 
-def process_shard_api(model_name_or_path: str, args: Args, shard: List[str]) -> Tuple[torch.Tensor, torch.Tensor]:
+def process_shard_api(model_name_or_path: str, args: Args, shard: list[str]) -> tuple[torch.Tensor, torch.Tensor]:
     """
     This function processes a shard (subset) of data using api-based models.
     It feeds data through the model to get reward scores, and handles out-of-memory errors by adjusting the batch size.
@@ -190,9 +189,9 @@ def batch_processing_scores(
                 # score = (batch_size, )
                 scores.extend(score.cpu().tolist())  # convert the tensor score to a list
                 i += current_batch_size
-            except torch.cuda.OutOfMemoryError:
+            except torch.cuda.OutOfMemoryError as e:
                 if current_batch_size == 1:
-                    raise ValueError("Out of memory even with batch size 1")
+                    raise ValueError("Out of memory even with batch size 1") from e
                 current_batch_size //= 2
                 print(f"Reducing batch size to {current_batch_size}")
                 continue
@@ -232,7 +231,7 @@ def main(args: Args):
     mp.set_start_method("spawn", force=True)
 
     # Load the completions from a file
-    with open(args.input_filename, "r") as infile:
+    with open(args.input_filename) as infile:
         completions = [json.loads(line) for line in infile]
 
     # include the reference completion in the completions for efficient rejection sampling

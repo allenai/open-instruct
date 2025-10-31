@@ -1,12 +1,11 @@
 import os
-from typing import List
 
 import requests
 
 from open_instruct.tools.search_tool.s2 import create_session_with_retries
 
 
-def get_snippets_for_query(query: str, number_of_results=10) -> List[str]:
+def get_snippets_for_query(query: str, number_of_results=10) -> list[str]:
     """
     Retrieves the first snippet from a web search API for the given query.
     Raises a ValueError if the API key is missing.

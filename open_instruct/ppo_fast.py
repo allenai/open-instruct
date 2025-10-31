@@ -28,23 +28,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # isort: off
-# ---------------------------------------------------------------------
-# The file referenced a lot of code from the ORZ project:
-# https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero
+import contextlib
 import os
 
-# We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
-# https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
-try:
+with contextlib.suppress(Exception):
     import deepspeed
-
-    # @vwxyzjn: when importing on CPU-only machines, we get the following error:
-    # RuntimeError: 0 active drivers ([]). There should only be one.
-    # so we need to catch the exception and do nothing
-    # https://github.com/deepspeedai/DeepSpeed/issues/7028
-except Exception:
-    pass
 # isort: on
 
 import asyncio
@@ -57,9 +46,10 @@ import time
 import traceback
 from argparse import Namespace
 from collections import defaultdict
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
-from typing import Callable, Iterator, List, Literal, Optional, Union
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -139,13 +129,13 @@ INVALID_VALUE = 0.0  # to play nicely with debugging output
 @dataclass
 class Args:
     # Dataset
-    dataset_mixer_list: List[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
+    dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_eval_list: List[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
+    dataset_mixer_eval_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     """A list of datasets (local or HF) to sample from for evaluation."""
-    dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
+    dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
     """The dataset splits to use for training"""
-    dataset_mixer_eval_list_splits: List[str] = field(default_factory=lambda: ["test"])
+    dataset_mixer_eval_list_splits: list[str] = field(default_factory=lambda: ["test"])
     """The dataset splits to use for evaluation"""
     dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_filter_v1"])
     """The list of transform functions to apply to the dataset."""
@@ -153,9 +143,9 @@ class Args:
     """The mode to use for caching the dataset."""
     dataset_local_cache_dir: str = "local_dataset_cache"
     """The directory to save the local dataset cache to."""
-    dataset_config_hash: Optional[str] = None
+    dataset_config_hash: str | None = None
     """The hash of the dataset configuration."""
-    dataset_config_eval_hash: Optional[str] = None
+    dataset_config_eval_hash: str | None = None
     """The hash of the dataset configuration for evaluation."""
     dataset_skip_cache: bool = False
     """Whether to skip the cache."""
@@ -171,7 +161,7 @@ class Args:
     """The name of this experiment"""
     seed: int = 1
     """Seed of the experiment"""
-    run_name: Optional[str] = None
+    run_name: str | None = None
     """RUNTIME VALUE: A unique name of this run"""
 
     # Optimizer
@@ -199,13 +189,13 @@ class Args:
     """The forward batch size per device (local_micro_batch_size)"""
     total_episodes: int = 100000
     """The total number of episodes in the dataset"""
-    world_size: Optional[int] = None
+    world_size: int | None = None
     """RUNTIME VALUE: The number of processes (GPUs) to use"""
-    num_training_steps: Optional[int] = None
+    num_training_steps: int | None = None
     """RUNTIME VALUE: The number of training_steps to train"""
     num_evals: int = 10
     """this sets how many in-loop evals we do during training. in-loop evals reuse the generation/reward verifier setup."""
-    local_eval_freq: Optional[int] = None
+    local_eval_freq: int | None = None
     """this controls the number of in-loop evals, which reuses the generation/reward verifier setup. don't set this directly, but set via num_evals."""
     save_freq: int = 200
     """How many train steps to save the model"""
@@ -219,7 +209,7 @@ class Args:
     """The number of unique prompts during rollout"""
     num_samples_per_prompt_rollout: int = 4
     """the number of samples to generate per prompt during rollout, useful for easy-star"""
-    stop_strings: Optional[List[str]] = None
+    stop_strings: list[str] | None = None
     """List of strings that stop the generation when they are generated.
     The returned output will not contain the stop strings."""
 
@@ -248,18 +238,18 @@ class Args:
     """the KL estimator to use"""
     pack_length: int = 512
     """the length of the pack (you should prob set to the max length of the model)"""
-    masked_mean_axis: Optional[int] = None
+    masked_mean_axis: int | None = None
     """the axis to compute the mean of the masked values"""
     alpha: float = 0.6
     """The alpha value for doing polyak updates (ref_param = alpha * param + (1 - alpha) * ref_param)
     reference: [TR-DPO](https://huggingface.co/papers/2404.09656), but it's actually pretty commonly
     used. E.g., [TD3](https://arxiv.org/abs/1802.09477) uses https://github.com/vwxyzjn/cleanrl/blob/dcc289fc6f0bda492fa7360a155262cf826b12a5/cleanrl/td3_continuous_action.py#L269
     """
-    ref_policy_update_freq: Optional[int] = None
+    ref_policy_update_freq: int | None = None
     """How many training steps to take before updating the reference policy."""
     value_model_name_or_path: str = "EleutherAI/pythia-160m"
     """the name or path to the value model"""
-    value_model_revision: Optional[str] = None
+    value_model_revision: str | None = None
     """the revision of the value model"""
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
@@ -310,7 +300,7 @@ class Args:
     # Ray
     single_gpu_mode: bool = False
     """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
-    num_learners_per_node: List[int] = field(default_factory=lambda: [1])
+    num_learners_per_node: list[int] = field(default_factory=lambda: [1])
     """number of GPU deepspeed learners per node (e.g., --num_learners_per_node 2 4 means 2 learner processes
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
     vllm_num_engines: int = 1
@@ -335,17 +325,17 @@ class Args:
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
     """The wandb's project name"""
-    wandb_entity: Optional[str] = None
+    wandb_entity: str | None = None
     """The entity (team) of wandb's project"""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
-    hf_entity: Optional[str] = None
+    hf_entity: str | None = None
     """The user or org name of the model repository from the Hugging Face Hub"""
-    hf_repo_id: Optional[str] = None
+    hf_repo_id: str | None = None
     """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_revision: Optional[str] = None
+    hf_repo_revision: str | None = None
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_url: Optional[str] = None
+    hf_repo_url: str | None = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     output_dir: str = "output"
     """Where to save the model"""
@@ -359,9 +349,9 @@ class Args:
     """Whether to launch beaker evaluation jobs after training on weka"""
     try_auto_save_to_beaker: bool = True
     """Whether to try to save the model to Beaker dataset `/output` after training"""
-    gs_bucket_path: Optional[str] = None
+    gs_bucket_path: str | None = None
     """The path to the gs bucket to save the model to"""
-    oe_eval_tasks: Optional[List[str]] = None
+    oe_eval_tasks: list[str] | None = None
     """The beaker evaluation tasks to launch"""
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
@@ -369,9 +359,9 @@ class Args:
     """the priority of auto-launched evaluation jobs"""
 
     # Tool settings
-    tools: Optional[List[str]] = None
+    tools: list[str] | None = None
     """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
-    max_tool_calls: List[int] = field(default_factory=lambda: [5])
+    max_tool_calls: list[int] = field(default_factory=lambda: [5])
     """Maximum number of tool calls allowed. Can be either a single integer (applies to all tools) or a list of integers
     with length 1 (applies to all tools) or matching the length of the tools list (per-tool limit)."""
     mask_tool_use: bool = True
@@ -382,11 +372,11 @@ class Args:
     # rl-rag specific settngs
     number_documents_to_search: int = 3
     """The maximum number of documents to retrieve for each query."""
-    search_api_endpoint: Optional[str] = None
+    search_api_endpoint: str | None = None
     """The API endpoint for the search engine."""
 
     # code-tool specific settings
-    code_tool_api_endpoint: Optional[str] = None
+    code_tool_api_endpoint: str | None = None
 
     def __post_init__(self):
         assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
@@ -397,7 +387,7 @@ class Args:
         )
 
 
-def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
+def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: int | None = None) -> torch.Tensor:
     """Compute mean of tensor with a masked values."""
     if axis is not None:
         return ((values * mask).sum(axis=axis) / mask.sum(axis=axis)).mean()
@@ -409,7 +399,7 @@ class MetricsTracker:
     """A simple class to prellocate all metrics in an array
     so we can do only one allreduce operation to get the metrics mean"""
 
-    def __init__(self, max_metrics: int = 32, device: torch.device = torch.device("cuda")):
+    def __init__(self, max_metrics: int = 32, device: str = "cuda"):
         self.metrics = torch.zeros(max_metrics, device=device)
         self.names2idx = {}
         self.current_idx = 0
@@ -430,20 +420,20 @@ class MetricsTracker:
         return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
 
 
-def collate_fn(tensors_list: List[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
+def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
     padded_tensor = torch.nn.utils.rnn.pad_sequence(tensors_list, batch_first=True, padding_value=pad_token_id)
     if pin_memory:
         padded_tensor = padded_tensor.pin_memory()
     return padded_tensor
 
 
-def to_device_inplace(tensors_list: List[torch.Tensor], device: torch.device):
+def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
     for i in range(len(tensors_list)):
         tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
 
 
 class ShufflingIterator:
-    def __init__(self, data: np.ndarray, batch_size: int, seed: Optional[int] = None):
+    def __init__(self, data: np.ndarray, batch_size: int, seed: int | None = None):
         self.data = data.copy()
         self.batch_size = batch_size
         self.index = 0
@@ -453,10 +443,10 @@ class ShufflingIterator:
         # Ensure the effective dataset size is divisible by batch_size
         self.effective_size = len(self.data) - (len(self.data) % batch_size)
 
-    def __iter__(self) -> Iterator[List[int]]:
+    def __iter__(self) -> Iterator[list[int]]:
         return self
 
-    def __next__(self) -> List[int]:
+    def __next__(self) -> list[int]:
         if self.index >= self.effective_size:
             self.index = 0
             self.rng.shuffle(self.data)
@@ -819,25 +809,24 @@ class PolicyTrainerRayProcess(RayProcess):
                     torch.cuda.empty_cache()
 
         old_logprobs = [None for _ in range(len(collated_query_responses))]
-        with Timer("Old Logprob Calculation", noop=self.rank != 0):
-            with torch.no_grad():
-                for i in range(len(collated_query_responses)):
-                    query_response = collated_query_responses[i]
-                    attention_mask = collated_attention_masks[i]
-                    position_id = collated_position_ids[i]
-                    response_mask = collated_response_masks[i]
-                    old_logprob, _ = self.forward(
-                        self.model,
-                        query_response,
-                        attention_mask,
-                        position_id,
-                        pad_token_id,
-                        args.temperature,
-                        return_entropy=False,
-                    )
-                    old_logprob = torch.masked_fill(old_logprob, ~response_mask[:, 1:].bool(), INVALID_LOGPROB)
-                    old_logprobs[i] = old_logprob
-                    torch.cuda.empty_cache()
+        with Timer("Old Logprob Calculation", noop=self.rank != 0), torch.no_grad():
+            for i in range(len(collated_query_responses)):
+                query_response = collated_query_responses[i]
+                attention_mask = collated_attention_masks[i]
+                position_id = collated_position_ids[i]
+                response_mask = collated_response_masks[i]
+                old_logprob, _ = self.forward(
+                    self.model,
+                    query_response,
+                    attention_mask,
+                    position_id,
+                    pad_token_id,
+                    args.temperature,
+                    return_entropy=False,
+                )
+                old_logprob = torch.masked_fill(old_logprob, ~response_mask[:, 1:].bool(), INVALID_LOGPROB)
+                old_logprobs[i] = old_logprob
+                torch.cuda.empty_cache()
         with Timer("Backload Value Model", noop=self.rank != 0):
             self.backload_to_gpu(self.value_model)
         with Timer("Value Calculation", noop=self.rank != 0):
@@ -854,63 +843,54 @@ class PolicyTrainerRayProcess(RayProcess):
                     value = torch.masked_fill(value, ~response_mask[:, 1:].bool(), INVALID_VALUE)
                     collated_values.append(value)
 
-        with Timer("Advantage Calculation", noop=self.rank != 0):
-            with torch.no_grad():
-                # Pad cpu lists to max_len; then do advantage calculation
-                cpu_collated_values = sum([item.cpu().tolist() for item in collated_values], [])
-                cpu_collated_dones = [item + [0] * (max_len - len(item)) for item in cpu_collated_dones]
-                cpu_collated_rewards = [item + [0] * (max_len - len(item)) for item in cpu_collated_rewards]
-                cpu_collated_response_masks = [
-                    item + [0] * (max_len - len(item)) for item in cpu_collated_response_masks
-                ]
-                # minus 1 in `cpu_collated_values` because we already did the calculation based on [:-1] and masking on [1:]
-                cpu_collated_values = [
-                    item + [INVALID_VALUE] * (max_len - 1 - len(item)) for item in cpu_collated_values
-                ]
-                adv, ret = calculate_advantages_packed(
-                    np.stack(cpu_collated_values),
-                    np.stack(cpu_collated_rewards)[:, 1:],
-                    gamma,
-                    lam,
-                    np.stack(cpu_collated_dones)[:, 1:],
-                    np.stack(cpu_collated_response_masks)[:, 1:],
-                )
+        with Timer("Advantage Calculation", noop=self.rank != 0), torch.no_grad():
+            cpu_collated_values = sum([item.cpu().tolist() for item in collated_values], [])
+            cpu_collated_dones = [item + [0] * (max_len - len(item)) for item in cpu_collated_dones]
+            cpu_collated_rewards = [item + [0] * (max_len - len(item)) for item in cpu_collated_rewards]
+            cpu_collated_response_masks = [item + [0] * (max_len - len(item)) for item in cpu_collated_response_masks]
+            cpu_collated_values = [item + [INVALID_VALUE] * (max_len - 1 - len(item)) for item in cpu_collated_values]
+            adv, ret = calculate_advantages_packed(
+                np.stack(cpu_collated_values),
+                np.stack(cpu_collated_rewards)[:, 1:],
+                gamma,
+                lam,
+                np.stack(cpu_collated_dones)[:, 1:],
+                np.stack(cpu_collated_response_masks)[:, 1:],
+            )
 
-                # Calculate the mean and std of the advantages
-                adv_gpu = torch.from_numpy(adv).to(self.device)
-                response_masks_gpu = torch.from_numpy(np.stack(cpu_collated_response_masks)[:, 1:]).to(self.device)
-                adv_sum = (adv_gpu * response_masks_gpu).sum()
-                adv_abs_sum = (torch.abs(adv_gpu) * response_masks_gpu).sum()
-                mask_sum = response_masks_gpu.sum()
-                dist.all_reduce(adv_sum, op=dist.ReduceOp.SUM)
-                dist.all_reduce(adv_abs_sum, op=dist.ReduceOp.SUM)
-                dist.all_reduce(mask_sum, op=dist.ReduceOp.SUM)
-                adv_mean = adv_sum / mask_sum
-                adv_abs_mean = adv_abs_sum / mask_sum
-                adv_variance = (torch.square(adv_gpu - adv_mean) * response_masks_gpu).sum()
-                dist.all_reduce(adv_variance, op=dist.ReduceOp.SUM)
-                adv_variance /= mask_sum
-                adv_std = torch.sqrt(adv_variance)
+            adv_gpu = torch.from_numpy(adv).to(self.device)
+            response_masks_gpu = torch.from_numpy(np.stack(cpu_collated_response_masks)[:, 1:]).to(self.device)
+            adv_sum = (adv_gpu * response_masks_gpu).sum()
+            adv_abs_sum = (torch.abs(adv_gpu) * response_masks_gpu).sum()
+            mask_sum = response_masks_gpu.sum()
+            dist.all_reduce(adv_sum, op=dist.ReduceOp.SUM)
+            dist.all_reduce(adv_abs_sum, op=dist.ReduceOp.SUM)
+            dist.all_reduce(mask_sum, op=dist.ReduceOp.SUM)
+            adv_mean = adv_sum / mask_sum
+            adv_abs_mean = adv_abs_sum / mask_sum
+            adv_variance = (torch.square(adv_gpu - adv_mean) * response_masks_gpu).sum()
+            dist.all_reduce(adv_variance, op=dist.ReduceOp.SUM)
+            adv_variance /= mask_sum
+            adv_std = torch.sqrt(adv_variance)
 
-                # Normalize the advantages
-                adv = (adv_gpu - adv_mean) / (adv_std + 1e-8)
-                collated_advantages = []
-                collated_returns = []
-                offset = 0
-                for i in range(len(collated_query_responses)):
-                    batch_size, seq_len = collated_query_responses[i].shape
-                    collated_advantages.append(adv[offset : offset + batch_size, : seq_len - 1])
-                    collated_returns.append(torch.from_numpy(ret[offset : offset + batch_size, : seq_len - 1]))
-                    offset += batch_size
-                to_device_inplace(collated_advantages, self.device)
-                to_device_inplace(collated_returns, self.device)
-                to_device_inplace(collated_values, self.device)
+            adv = (adv_gpu - adv_mean) / (adv_std + 1e-8)
+            collated_advantages = []
+            collated_returns = []
+            offset = 0
+            for i in range(len(collated_query_responses)):
+                batch_size, seq_len = collated_query_responses[i].shape
+                collated_advantages.append(adv[offset : offset + batch_size, : seq_len - 1])
+                collated_returns.append(torch.from_numpy(ret[offset : offset + batch_size, : seq_len - 1]))
+                offset += batch_size
+            to_device_inplace(collated_advantages, self.device)
+            to_device_inplace(collated_returns, self.device)
+            to_device_inplace(collated_values, self.device)
 
         with Timer("[Training Processes] Value Loss calculation", noop=self.rank != 0):
             value_losses = torch.zeros(len(collated_query_responses))
             local_step = 0
             value_optimizer_step = 0
-            for epoch_idx in range(args.num_epochs):
+            for _ in range(args.num_epochs):
                 for i in range(len(collated_query_responses)):
                     mb_query_responses = collated_query_responses[i]
                     mb_response_masks = collated_response_masks[i]
@@ -1158,7 +1138,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
 class ModelGroup:
     def __init__(
-        self, pg: PlacementGroup, ray_process_cls: RayProcess, num_gpus_per_node: List[int], single_gpu_mode: bool
+        self, pg: PlacementGroup, ray_process_cls: RayProcess, num_gpus_per_node: list[int], single_gpu_mode: bool
     ):
         self.pg = pg
         self.ray_process_cls = ray_process_cls
@@ -1208,18 +1188,18 @@ class ModelGroup:
 
 
 def vllm_generate_thread(
-    vllm_engines: List[ray.actor.ActorHandle],
+    vllm_engines: list[ray.actor.ActorHandle],
     generation_config: SamplingParams,
     eval_generation_config: SamplingParams,
     inference_results_Q: Queue,
     param_prompt_Q: Queue,
     num_training_steps: int,
-    eval_prompt_token_ids: Optional[List[int]],
+    eval_prompt_token_ids: list[int] | None,
     evaluation_inference_results_Q: Queue,
     local_eval_freq: int,
     resume_training_step: int = 1,
 ):
-    def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
+    def generate_with_engines(prompts: list[list[int]], sampling_params: SamplingParams):
         # Split queries between engines
         queries_per_engine = (len(prompts) + len(vllm_engines) - 1) // len(vllm_engines)
         split_queries = [prompts[i : i + queries_per_engine] for i in range(0, len(prompts), queries_per_engine)]
@@ -1516,9 +1496,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         if args.hf_repo_revision is None:  # auto-generate one
             args.hf_repo_revision = args.run_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-    if args.with_tracking:
-        if args.wandb_entity is None:
-            args.wandb_entity = maybe_use_ai2_wandb_entity()
+    if args.with_tracking and args.wandb_entity is None:
+        args.wandb_entity = maybe_use_ai2_wandb_entity()
     args.tool_use = args.tools is not None and len(args.tools) > 0
 
     # ------------------------------------------------------------
@@ -1542,10 +1521,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             tags=[args.exp_name] + get_wandb_tags(),
         )
     writer = SummaryWriter(f"runs/{args.run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
+    hyperparams_table = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
+    writer.add_text("hyperparameters", f"|param|value|\n|-|-|\n{hyperparams_table}")
 
     # ------------------------------------------------------------
     # Set up datasets
@@ -1798,7 +1775,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             # Train the model
             update_ref_policy_future = []
             with Timer("[Main Thread] 🗡️ Training"):
-                metrics_list: List[dict[str, float]] = ray.get(
+                metrics_list: list[dict[str, float]] = ray.get(
                     [
                         policy_group.models[i].train.remote(
                             **collated_data[i],
@@ -1832,12 +1809,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 }
                 scalar_metrics = {}
                 for key, value in metrics.items():
-                    if isinstance(value, float) or isinstance(value, int):
+                    if isinstance(value, (float, int)):
                         writer.add_scalar(key, value, episode)
                         scalar_metrics[key] = value
-                    if isinstance(value, np.ndarray) or isinstance(value, list):
-                        if len(value) > 0:
-                            writer.add_histogram(key, value, episode)
+                    if isinstance(value, (np.ndarray, list)) and len(value) > 0:
+                        writer.add_histogram(key, value, episode)
                 print_rich_single_line_metrics(scalar_metrics)
 
                 if args.save_freq > 0 and training_step % args.save_freq == 0:
@@ -1989,14 +1965,14 @@ if __name__ == "__main__":
     reward_fn_mapping = build_all_verifiers(args)
 
     async def reward_fn(
-        responses: List[torch.Tensor],
-        decoded_responses: List[str],
-        ground_truths: List[Union[str, List[str]]],
-        datasets: List[str],
-        finish_reasons: List[str],
-        infos: List[List[int]],
-        queries: Optional[List[str]] = None,
-    ) -> List[float]:
+        responses: list[torch.Tensor],
+        decoded_responses: list[str],
+        ground_truths: list[str | list[str]],
+        datasets: list[str],
+        finish_reasons: list[str],
+        infos: list[list[int]],
+        queries: list[str] | None = None,
+    ) -> list[float]:
         num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
         good_outputs = [
             len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]

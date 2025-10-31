@@ -77,8 +77,7 @@ import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
-from contextlib import redirect_stderr, redirect_stdout
-from typing import Optional
+from contextlib import redirect_stderr, redirect_stdout, suppress
 
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -111,10 +110,8 @@ for _pkg in PREIMPORT_PKGS:
 def _worker_init():  # noqa: D401
     """Run in every worker process to ensure packages are imported."""
     for _pkg in PREIMPORT_PKGS:
-        try:
+        with suppress(ModuleNotFoundError):
             importlib.import_module(_pkg)
-        except ModuleNotFoundError:
-            pass  # already warned in parent
 
 
 ###############################################################################
@@ -193,12 +190,12 @@ def _run_user_code(code: str, timeout: int = 5):
 ###############################################################################
 class CodeRequest(BaseModel):
     code: str
-    timeout: Optional[int] = 5
+    timeout: int | None = 5
 
 
 class CodeResponse(BaseModel):
     output: str
-    error: Optional[str] = None
+    error: str | None = None
     success: bool
 
 

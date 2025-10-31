@@ -18,7 +18,7 @@ import itertools
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import Literal, Union
 
 try:
     import deepspeed
@@ -51,13 +51,13 @@ logger = logger_utils.setup_logger(__name__)
 class Batch:
     """Container for batch data including queries, ground truths, and datasets."""
 
-    queries: List[List[int]]
-    ground_truths: List[List[int]]
-    datasets: List[str]
-    raw_queries: Optional[List[str]]
-    indices: Optional[List[int]]
+    queries: list[list[int]]
+    ground_truths: list[list[int]]
+    datasets: list[str]
+    raw_queries: list[str] | None
+    indices: list[int] | None
 
-    def __getitem__(self, key: Union[slice, int, List[int]]) -> "Batch":
+    def __getitem__(self, key: slice | int | list[int]) -> "Batch":
         """Enable indexing and slicing: batch[5], batch[start:end], or batch[[1,3,5]]."""
         if isinstance(key, slice):
             # Handle slice object: batch[start:end]
@@ -90,16 +90,16 @@ class Batch:
 
 @dataclass
 class ModelConfig:
-    model_name_or_path: Optional[str] = None
+    model_name_or_path: str | None = None
     """The model checkpoint for weights initialization."""
-    model_revision: Optional[str] = None
+    model_revision: str | None = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
-    torch_dtype: Optional[str] = None
+    torch_dtype: str | None = None
     """Override the default `torch.dtype` and load the model under this dtype."""
-    attn_implementation: Optional[Literal["flash_attention_2"]] = None
+    attn_implementation: Literal["flash_attention_2"] | None = None
     """Which attention implementation to use; you can run --attn_implementation=flash_attention_2, in which case
     you must install this manually by running `pip install flash-attn --no-build-isolation`"""
-    use_cache: Optional[bool] = None
+    use_cache: bool | None = None
     """Whether to use cache in the model."""
     gradient_checkpointing: bool = False
     """Whether to use gradient checkpointing in the model."""
@@ -107,15 +107,15 @@ class ModelConfig:
     # PEFT-related args
     use_peft: bool = False
     """Whether to use PEFT or not for training."""
-    lora_r: Optional[int] = 16
+    lora_r: int | None = 16
     """LoRA R value."""
-    lora_alpha: Optional[int] = 32
+    lora_alpha: int | None = 32
     """LoRA alpha."""
-    lora_dropout: Optional[float] = 0.05
+    lora_dropout: float | None = 0.05
     """LoRA dropout."""
-    lora_target_modules: Optional[List[str]] = None
+    lora_target_modules: list[str] | None = None
     """LoRA target modules."""
-    lora_modules_to_save: Optional[List[str]] = None
+    lora_modules_to_save: list[str] | None = None
     """Model layers to unfreeze & train"""
     lora_task_type: str = "CAUSAL_LM"
     """The task_type to pass for LoRA (use SEQ_CLS for reward modeling)"""
@@ -125,7 +125,7 @@ class ModelConfig:
     """use 8 bit precision for the base model - works only with LoRA"""
     load_in_4bit: bool = False
     """use 4 bit precision for the base model - works only with LoRA"""
-    bnb_4bit_quant_type: Optional[str] = "nf4"
+    bnb_4bit_quant_type: str | None = "nf4"
     """precise the quantization type (fp4 or nf4)"""
     use_bnb_nested_quant: bool = False
     """use nested quantization"""
@@ -193,7 +193,7 @@ def first_true_indices(bools: torch.Tensor, dtype=torch.long) -> torch.Tensor:
 
 def get_reward(
     model: torch.nn.Module, query_responses: torch.Tensor, pad_token_id: int, context_length: int
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     This function computes reward scores for a batch of query responses based on a pre-trained reward model.
 
@@ -259,12 +259,12 @@ def get_reward(
 
 
 async def apply_verifiable_reward(
-    reward_fn_mapping: Dict[str, VerifierFunction],
-    responses: List[torch.Tensor],
-    decoded_responses: List[str],
+    reward_fn_mapping: dict[str, VerifierFunction],
+    responses: list[torch.Tensor],
+    decoded_responses: list[str],
     batch: Batch,
     reward_mult: int = 10,
-    queries: Optional[List[str]] = None,
+    queries: list[str] | None = None,
 ):
     if queries is None:
         queries = [None] * len(responses)
@@ -279,14 +279,8 @@ async def apply_verifiable_reward(
         # allow multiple ground truths and datasets for a single response
 
         # TODO: both code and lm_judge might have list of ground_truth *per instance*
-        if isinstance(ground_truth, str):
-            ground_truth_list = [ground_truth]
-        else:
-            ground_truth_list = ground_truth
-        if isinstance(dataset, str):
-            dataset_list = [dataset]
-        else:
-            dataset_list = dataset
+        ground_truth_list = [ground_truth] if isinstance(ground_truth, str) else ground_truth
+        dataset_list = [dataset] if isinstance(dataset, str) else dataset
         assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
 
         # Create async tasks for each ground truth/dataset pair
@@ -390,7 +384,7 @@ def truncate_response(stop_token_id: int, pad_token_id: int, responses: torch.Te
 
 def generate(
     lm_backbone: torch.nn.Module, queries: torch.Tensor, pad_token_id: int, generation_config: dict
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Generates sequences from the language model backbone in a way that does not affect padding tokens.
     Args:
@@ -457,7 +451,7 @@ def save_with_accelerate(
     tokenizer: PreTrainedTokenizer,
     output_dir: str,
     use_lora: bool = False,
-    model_attribute_to_save: Optional[str] = None,
+    model_attribute_to_save: str | None = None,
     chat_template_name: str = "tulu",
 ) -> None:
     """`model_attribute_to_save` is for used to save PPO's policy instead of the full model"""
@@ -531,8 +525,8 @@ def log_softmax_and_gather(logits: torch.Tensor, index: torch.Tensor) -> torch.T
 def push_folder_to_hub(
     accelerator: Accelerator,
     output_dir: str,
-    hf_repo_id: Optional[str] = None,
-    hf_repo_revision: Optional[str] = None,
+    hf_repo_id: str | None = None,
+    hf_repo_revision: str | None = None,
     private: bool = True,
 ):
     if accelerator.is_main_process:

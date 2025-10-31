@@ -75,10 +75,18 @@ while [[ "$#" -gt 0 ]]; do
         --beaker-image) BEAKER_IMAGE="$2"; shift ;;
         --cluster) CLUSTER="$2"; shift ;;
         --process-output) PROCESS_OUTPUT="$2"; shift ;;
+        --beaker-workspace) BEAKER_WORKSPACE="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
 done
+
+# Default beaker workspace if not provided; does not override user input.
+BEAKER_WORKSPACE="${BEAKER_WORKSPACE:-ai2/tulu-3-results}"
+if ! [[ "$BEAKER_WORKSPACE" =~ ^[^/]+/[^/]+$ ]]; then
+    echo "Error: --beaker-workspace must be fully qualified as '<org>/<workspace>' (e.g., 'ai2/tulu-3-results'). Received: '$BEAKER_WORKSPACE'"
+    exit 1
+fi
 
 # cluster/weka mount logic: default true (to use non-augusta)
 # if model starts with gs://, set evaluate_on_weka to false.
@@ -129,8 +137,8 @@ WANDB_ARG=""
 if [[ -n "$WANDB_RUN_PATH" ]]; then
     beaker_user=$(beaker account whoami --format text | awk 'NR==2 {print $2}')
     echo "Using WANDB_API_KEY from ${beaker_user}"
-    if ! beaker secret list --workspace ai2/tulu-3-results | grep -q "${beaker_user}_WANDB_API_KEY"; then
-        echo "WARNING: No ${beaker_user}_WANDB_API_KEY secret found in workspace ai2/tulu-3-results."
+    if ! beaker secret list --workspace "$BEAKER_WORKSPACE" | grep -q "${beaker_user}_WANDB_API_KEY"; then
+        echo "WARNING: No ${beaker_user}_WANDB_API_KEY secret found in workspace $BEAKER_WORKSPACE."
         echo "add your WANDB_API_KEY as a secret to this workspace in order to log oe-eval results to wandb"
     else
         WANDB_ARG=" --wandb-run-path $WANDB_RUN_PATH --gantry-secret-wandb-api-key ${beaker_user}_WANDB_API_KEY"
@@ -214,7 +222,7 @@ NEXT_MODEL_DEV=(
     # Coding
     "codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek"
     "mbppplus:0-shot-chat::tulu-thinker_deepseek"
-    "livecodebench_codegeneration::tulu-thinker_deepseek"
+    "livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags"
     # [TODO not merged] codeeditorbench - requires separate server
     # [TODO, maybe] cruxeval
     
@@ -236,7 +244,7 @@ NEXT_MODEL_UNSEEN=(
     # [TODO, not implemented] Humanity's Last Exam
     # [TODO, not implemented] SuperGPQA
     # [TODO, not implemented] BigBenchExtraHard
-    "livecodebench_codegeneration::tulu-thinker-hidden"
+    "livecodebench_codegeneration::tulu-thinker-hidden_no_think_tags"
     "ifbench::tulu"
 )
 
@@ -352,7 +360,7 @@ for TASK in "${TASKS[@]}"; do
     if [ "$EVALUATE_ON_WEKA" == "true" ]; then
         python oe-eval-internal/oe_eval/launch.py \
             --model "$MODEL_NAME" \
-            --beaker-workspace "ai2/tulu-3-results" \
+            --beaker-workspace "$BEAKER_WORKSPACE" \
             --beaker-budget ai2/oe-adapt \
             --beaker-timeout 48h \
             --task "$TASK" \
@@ -374,7 +382,7 @@ for TASK in "${TASKS[@]}"; do
     else
         python oe-eval-internal/oe_eval/launch.py \
         --model "$MODEL_NAME" \
-        --beaker-workspace "ai2/tulu-3-results" \
+        --beaker-workspace "$BEAKER_WORKSPACE" \
         --beaker-budget ai2/oe-adapt \
         --beaker-timeout 48h \
         --task "$TASK" \
