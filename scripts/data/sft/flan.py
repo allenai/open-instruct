@@ -1,6 +1,7 @@
 import argparse
 
 from datasets import concatenate_datasets, load_dataset
+import open_instruct.utils as open_instruct_utils
 
 from scripts.data.sft.utils import convert_sft_dataset
 
@@ -80,7 +81,7 @@ if __name__ == "__main__":
 
     subsets = []
     for subset, sampling_size in sampling_sizes.items():
-        ds = load_dataset("Open-Orca/FLAN", data_files=f"{subset}/*")["train"]
+        ds = load_dataset("Open-Orca/FLAN", data_files=f"{subset}/*", num_proc=open_instruct_utils.max_num_processes())["train"]
         if len(ds) > sampling_size:
             ds = ds.shuffle(seed=42).select(range(sampling_size))
         subsets.append(ds)

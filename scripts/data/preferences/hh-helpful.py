@@ -57,7 +57,7 @@ def filter_fn(data):
 def main(push_to_hub: bool, hf_entity: str | None):
     api = HfApi()
 
-    ds = datasets.load_dataset("Anthropic/hh-rlhf", data_dir="helpful-base")
+    ds = datasets.load_dataset("Anthropic/hh-rlhf", data_dir="helpful-base", num_proc=max_num_processes())
 
     ds = ds.map(
         extract,

@@ -23,7 +23,7 @@ class Args:
     hf_entity: Optional[str] = None
 
 def main(args: Args):
-    dataset = datasets.load_dataset("gsm8k", "main")
+    dataset = datasets.load_dataset("gsm8k", "main", num_proc=max_num_processes())
 
     def process(example):
         # extract answer; it's after #### in the answer

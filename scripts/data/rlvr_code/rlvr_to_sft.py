@@ -53,7 +53,7 @@ def get_original_input(row):
 def main():
     try:
         logger.info(f"Loading dataset: {INPUT_HF_DATASET}")
-        input_ds = datasets.load_dataset(INPUT_HF_DATASET, split="train")
+        input_ds = datasets.load_dataset(INPUT_HF_DATASET, split="train", num_proc=max_num_processes())
         logger.info(f"Loaded {len(input_ds)} rows")
 
         stdin_rows = []

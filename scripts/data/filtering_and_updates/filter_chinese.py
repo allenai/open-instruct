@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from datasets import load_dataset
+import open_instruct.utils as open_instruct_utils
 from huggingface_hub import hf_hub_download, list_repo_files
 import pyarrow.parquet as pq
 import pandas as pd
@@ -189,7 +190,7 @@ def main():
     
     try:
         # Try standard loading first
-        dataset = load_dataset(input_dataset, split="train")
+        dataset = load_dataset(input_dataset, split="train", num_proc=open_instruct_utils.max_num_processes())
     except:
         try:
             # Fallback to direct parquet loading

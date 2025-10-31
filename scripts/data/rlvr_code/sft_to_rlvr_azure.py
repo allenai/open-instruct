@@ -80,6 +80,7 @@ import time
 import boto3  # Added for S3
 import requests
 from datasets import Dataset, load_dataset
+import open_instruct.utils as open_instruct_utils
 from openai import AsyncAzureOpenAI, RateLimitError  # Modified to import RateLimitError
 from tqdm.asyncio import tqdm_asyncio
 
@@ -290,7 +291,7 @@ async def main():
     if READ_FROM_CACHE: # Only initialize if cache is enabled
         initialize_cache_index()
 
-    dataset = load_dataset(INPUT_DATASET_NAME, split="train")
+    dataset = load_dataset(INPUT_DATASET_NAME, split="train", num_proc=open_instruct_utils.max_num_processes())
     dataset = dataset.filter(lambda x: x['solution'] != "NO SOLUTION" and x['generator'] == 'DeepSeek-R1')
     print(f"Samples after filtering: {len(dataset)}")
 

@@ -277,7 +277,7 @@ def process_batch_results(
     max_rows: Optional[int] = None,
 ):
     # Load the original dataset first so we can look up failed prompts
-    original_ds = datasets.load_dataset(input_dataset, split=split)
+    original_ds = datasets.load_dataset(input_dataset, split=split, num_proc=max_num_processes())
     id_lookup = {row["id"]: row for row in original_ds}
 
     all_batch_results = {}

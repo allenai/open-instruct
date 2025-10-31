@@ -133,7 +133,7 @@ def main(args):
 
     logger.info(f"Loading dataset: {args.dataset_name}, split: {args.split}, streaming={args.streaming}")
     try:
-        dataset = datasets.load_dataset(args.dataset_name, split=args.split, streaming=args.streaming)
+        dataset = datasets.load_dataset(args.dataset_name, split=args.split, streaming=args.streaming, num_proc=max_num_processes())
     except FileNotFoundError:
         logger.error(f"Dataset '{args.dataset_name}' not found.")
         sys.exit(1)

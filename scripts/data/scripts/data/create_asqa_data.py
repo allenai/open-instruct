@@ -1,5 +1,6 @@
 
 from datasets import Dataset, load_dataset
+import open_instruct.utils as open_instruct_utils
 
 """
 Example input:
@@ -19,7 +20,7 @@ def load_asqa_dataset():
     Returns the train, validation, and test splits.
     """
     # Load the dataset from Hugging Face
-    dataset = load_dataset("din0s/asqa")
+    dataset = load_dataset("din0s/asqa", num_proc=open_instruct_utils.max_num_processes())
 
     # Get the different splits
     train_data = dataset["train"]

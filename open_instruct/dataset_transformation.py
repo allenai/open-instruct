@@ -66,7 +66,7 @@ from transformers import (
 )
 from transformers.utils.hub import _CACHED_NO_EXIST, TRANSFORMERS_CACHE, extract_commit_hash, try_to_load_from_cache
 
-from open_instruct.utils import hf_whoami
+from open_instruct.utils import hf_whoami, max_num_processes
 
 
 # ----------------------------------------------------------------------------
@@ -1379,16 +1379,25 @@ class DatasetConfig:
         # if the file exists locally, use the local file
         if os.path.exists(self.dataset_name) and self.dataset_name.endswith(".jsonl"):
             assert self.dataset_split == "train", "Only train split is supported for local jsonl files."
-            self.dataset = load_dataset("json", data_files=self.dataset_name, split=self.dataset_split)
+            self.dataset = load_dataset(
+                "json", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
+            )
         elif os.path.exists(self.dataset_name) and self.dataset_name.endswith(".parquet"):
             assert self.dataset_split == "train", "Only train split is supported for local parquet files."
-            self.dataset = load_dataset("parquet", data_files=self.dataset_name, split=self.dataset_split)
+            self.dataset = load_dataset(
+                "parquet", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
+            )
         else:
             # commit hash only works for hf datasets
             self.dataset_commit_hash = get_commit_hash(
                 self.dataset_name, self.dataset_revision, "README.md", "dataset"
             )
-            self.dataset = load_dataset(self.dataset_name, split=self.dataset_split, revision=self.dataset_revision)
+            self.dataset = load_dataset(
+                self.dataset_name,
+                split=self.dataset_split,
+                revision=self.dataset_revision,
+                num_proc=max_num_processes(),
+            )
         if self.dataset_range is None:
             dataset_range = len(self.dataset)
             self.update_range(dataset_range)
@@ -1512,7 +1521,12 @@ class DatasetTransformationCache:
                 print("dataset_skip_cache is True, so we will not load the dataset from cache")
             else:
                 # Use the split from the first dataset config as default
-                return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash)
+                return load_dataset(
+                    repo_name,
+                    split=DEFAULT_SPLIT_FOR_CACHED_DATASET,
+                    revision=self.config_hash,
+                    num_proc=max_num_processes(),
+                )
 
         print(f"Cache not found, transforming datasets...")
 
@@ -1565,7 +1579,9 @@ This is a cached dataset produced by https://github.com/allenai/open-instruct
 
         # NOTE: Load the dataset again to make sure it's downloaded to the HF cache
         print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{self.config_hash}")
-        return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash)
+        return load_dataset(
+            repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash, num_proc=max_num_processes()
+        )
 
 
 class LocalDatasetTransformationCache:
@@ -1931,7 +1947,9 @@ def test_get_cached_dataset_tulu_sft():
         dataset_skip_cache=True,
     )
 
-    gold_tokenized_dataset = load_dataset("allenai/dataset-mix-cached", split="train", revision="61ac38e052")
+    gold_tokenized_dataset = load_dataset(
+        "allenai/dataset-mix-cached", split="train", revision="61ac38e052", num_proc=max_num_processes()
+    )
     assert len(dataset) == len(gold_tokenized_dataset)
     for i in range(len(dataset)):
         assert dataset[i]["input_ids"] == gold_tokenized_dataset[i]["input_ids"]
@@ -1959,7 +1977,9 @@ def test_get_cached_dataset_tulu_preference():
         TOKENIZED_PREFERENCE_DATASET_KEYS,
         dataset_skip_cache=True,
     )
-    gold_tokenized_dataset = load_dataset("allenai/dataset-mix-cached", split="train", revision="9415479293")
+    gold_tokenized_dataset = load_dataset(
+        "allenai/dataset-mix-cached", split="train", revision="9415479293", num_proc=max_num_processes()
+    )
     assert len(dataset) == len(gold_tokenized_dataset)
     for i in range(len(dataset)):
         assert dataset[i]["chosen_input_ids"] == gold_tokenized_dataset[i]["chosen_input_ids"]
@@ -1987,7 +2007,9 @@ def test_get_cached_dataset_tulu_rlvr():
         transform_fn_args,
         dataset_skip_cache=True,
     )
-    gold_tokenized_dataset = load_dataset("allenai/dataset-mix-cached", split="train", revision="0ff0043e56")
+    gold_tokenized_dataset = load_dataset(
+        "allenai/dataset-mix-cached", split="train", revision="0ff0043e56", num_proc=max_num_processes()
+    )
     assert len(dataset) == len(gold_tokenized_dataset)
     for i in range(len(dataset)):
         assert dataset[i][INPUT_IDS_PROMPT_KEY] == gold_tokenized_dataset[i][INPUT_IDS_PROMPT_KEY]

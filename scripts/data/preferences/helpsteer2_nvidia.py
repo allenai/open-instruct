@@ -60,7 +60,7 @@ def binarize_dataset(dataset, min_score: Optional[float]):
 
 def main(min_score: Optional[float], push_to_hub: bool, hf_entity: Optional[str]):
     # Load the HelpSteer 2 dataset
-    ds = datasets.load_dataset("nvidia/HelpSteer2")
+    ds = datasets.load_dataset("nvidia/HelpSteer2", num_proc=max_num_processes())
 
     # Binarize the dataset
     binarized_ds = binarize_dataset(ds["train"], min_score)

@@ -2,6 +2,7 @@ import argparse
 
 import numpy as np
 from datasets import Dataset, load_dataset
+import open_instruct.utils as open_instruct_utils
 
 from utils import convert_message_keys
 
@@ -35,7 +36,7 @@ def create_chosen_and_rejected(row):
 
 
 def process_and_upload(task, push_to_hub, hf_entity):
-    dataset = load_dataset("openbmb/UltraInteract_pair", split="train")
+    dataset = load_dataset("openbmb/UltraInteract_pair", split="train", num_proc=open_instruct_utils.max_num_processes())
     dataset_task = dataset.filter(lambda x: x["task"] == task)
 
     # convert to pandas dataframe

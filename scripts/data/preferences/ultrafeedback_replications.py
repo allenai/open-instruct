@@ -14,7 +14,7 @@ def main(push_to_hub: bool, hf_entity: str | None):
     for key in setups:
         json_path = f"setup_{key}"
         data_file = json_path + "/" + f"uf_setup_{key}_dpo_9000.jsonl"
-        dataset = datasets.load_dataset(load_repo, data_files=data_file)
+        dataset = datasets.load_dataset(load_repo, data_files=data_file, num_proc=max_num_processes())
 
         dataset_name = f"{dataset_name_base}{key}"
         if push_to_hub:

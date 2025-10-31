@@ -15,7 +15,7 @@ example_data = [
 
 def convert_hotpotqa_to_rlvr_format(no_prompt: bool):
     # Load the HotpotQA dataset
-    hotpotqa_dataset = datasets.load_dataset("hotpot_qa", "fullwiki")
+    hotpotqa_dataset = datasets.load_dataset("hotpot_qa", "fullwiki", num_proc=max_num_processes())
     hotpotqa_data = hotpotqa_dataset["train"]
 
     if no_prompt:
@@ -54,7 +54,7 @@ def convert_hotpotqa_to_rlvr_format(no_prompt: bool):
 
 def convert_nq_to_rlvr_format_with_context(no_prompt: bool):
     # Load the NQ dataset
-    nq_dataset = datasets.load_dataset("google-research-datasets/nq_open")
+    nq_dataset = datasets.load_dataset("google-research-datasets/nq_open", num_proc=max_num_processes())
     nq_data = nq_dataset["train"]
 
     if no_prompt:
@@ -93,14 +93,14 @@ def convert_nq_to_rlvr_format_with_context(no_prompt: bool):
 
 def check_nq_rlvr_dataset():
     # Load the NQ dataset
-    nq_dataset = datasets.load_dataset("hamishivi/nq_rlvr")
+    nq_dataset = datasets.load_dataset("hamishivi/nq_rlvr", num_proc=max_num_processes())
     nq_data = nq_dataset["train"]
     import pdb; pdb.set_trace()
 
 
 def convert_tqa_to_rlvr_format(no_prompt: bool):
     # Load the TQA dataset
-    tqa_dataset = datasets.load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")
+    tqa_dataset = datasets.load_dataset("mandarjoshi/trivia_qa", "rc.nocontext", num_proc=max_num_processes())
     tqa_data = tqa_dataset["train"]
 
     if no_prompt:
@@ -139,7 +139,7 @@ def convert_tqa_to_rlvr_format(no_prompt: bool):
 
 def convert_2wiki_to_rlvr_format(no_prompt: bool):
     # Load the 2Wiki dataset
-    two_wiki_dataset = datasets.load_dataset("hzy/kr1_2wiki")
+    two_wiki_dataset = datasets.load_dataset("hzy/kr1_2wiki", num_proc=max_num_processes())
     two_wiki_data = two_wiki_dataset["train"]
 
     if no_prompt:
@@ -177,7 +177,7 @@ def convert_2wiki_to_rlvr_format(no_prompt: bool):
 
 def convert_simple_qa_to_rlvr_format(no_prompt: bool):
     # Load the SimpleQA dataset
-    simple_qa_dataset = datasets.load_dataset("basicv8vc/SimpleQA", split="test")
+    simple_qa_dataset = datasets.load_dataset("basicv8vc/SimpleQA", split="test", num_proc=max_num_processes())
     simple_qa_dataset =  simple_qa_dataset.train_test_split(test_size=0.1, seed=42)
     simple_qa_data = simple_qa_dataset["train"]
     simple_qa_test_data = simple_qa_dataset["test"]

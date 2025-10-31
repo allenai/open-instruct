@@ -14,6 +14,7 @@ python mason.py \
 
 from tqdm import tqdm
 from datasets import load_dataset, Dataset
+import open_instruct.utils as open_instruct_utils
 import hashlib
 import os
 import re
@@ -38,7 +39,7 @@ def load_dataset_with_retries(dataset_name, split="train", max_retries=5, initia
     backoff = initial_backoff
     while retries < max_retries:
         try:
-            return load_dataset(dataset_name, split=split)
+            return load_dataset(dataset_name, split=split, num_proc=open_instruct_utils.max_num_processes())
         except Exception as e:
             if "429" in str(e):
                 logger.warning(f"Rate limit exceeded for {dataset_name}. Retrying in {backoff} seconds...")

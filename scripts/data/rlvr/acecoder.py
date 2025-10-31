@@ -20,7 +20,7 @@ class Args:
     hf_entity: Optional[str] = None
 
 def main(args: Args):
-    dataset = datasets.load_dataset("TIGER-Lab/AceCode-87K", split="train")
+    dataset = datasets.load_dataset("TIGER-Lab/AceCode-87K", split="train", num_proc=max_num_processes())
 
     def process(example):
         example["messages"] = [
