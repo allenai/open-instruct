@@ -23,4 +23,6 @@ jobs:
       - name: Set up Python
         run: uv sync --frozen
       - name: Run unit tests
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: uv run --frozen pytest
