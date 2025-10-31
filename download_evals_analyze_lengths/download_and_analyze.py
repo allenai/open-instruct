@@ -537,7 +537,12 @@ def fetch_latest_eval_rows(
 ) -> Tuple[Dict[str, RowDict], List[str]]:
     """Return the most recent datalake rows per alias along with lookup sources."""
 
-    conn = duckdb.connect(str(duckdb_path) if duckdb_path else ":memory:")
+    # Open DuckDB in read-only mode to allow concurrent access from multiple processes
+    if duckdb_path:
+        conn = duckdb.connect(str(duckdb_path), read_only=True)
+    else:
+        conn = duckdb.connect(":memory:")
+    
     sources: List[str] = []
     results: Dict[str, RowDict] = {}
     try:
@@ -758,6 +763,11 @@ def parse_args() -> argparse.Namespace:
         default="allenai/dolma2-tokenizer",
         help="Tokenizer identifier to use for response length computation (default: allenai/dolma2-tokenizer).",
     )
+    parser.add_argument(
+        "--no-refresh",
+        action="store_true",
+        help="Skip DuckDB cache refresh and use existing cache as-is (useful for parallel execution).",
+    )
     return parser.parse_args()
 
 
@@ -778,11 +788,15 @@ def main() -> None:
 
     duckdb_path = resolve_duckdb_path(args.duckdb_path)
     if duckdb_path:
-        try:
-            refresh_duckdb_cache(duckdb_path)
-        except Exception as exc:
-            raise SystemExit(f"Failed to refresh DuckDB cache at {duckdb_path}: {exc}") from exc
-        print(f"Using DuckDB cache at {duckdb_path} for initial lookup.")
+        if args.no_refresh:
+            print(f"Skipping DuckDB cache refresh (--no-refresh specified).")
+            print(f"Using existing DuckDB cache at {duckdb_path} for initial lookup.")
+        else:
+            try:
+                refresh_duckdb_cache(duckdb_path)
+            except Exception as exc:
+                raise SystemExit(f"Failed to refresh DuckDB cache at {duckdb_path}: {exc}") from exc
+            print(f"Using DuckDB cache at {duckdb_path} for initial lookup.")
     else:
         print("No DuckDB cache path detected; queries will run directly against BigQuery.")
 

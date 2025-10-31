@@ -63,7 +63,11 @@ def load_alias_metrics(stats_path: Path) -> Tuple[str, Dict[str, float], Dict[st
         if primary is None:
             continue
         try:
-            primary_scores[alias] = float(primary)
+            score_value = float(primary)
+            # Convert scores between 0 and 1 to percentages
+            if 0 < score_value < 1:
+                score_value *= 100
+            primary_scores[alias] = score_value
         except (TypeError, ValueError):
             continue
 
@@ -116,7 +120,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Directory where output TSV files will be written "
-            "(default: <current directory>/download_evals_analyze_lengths/data)."
+            "(default: the first input path, or its parent directory if it's a file)."
         ),
     )
     parser.add_argument(
@@ -153,7 +157,12 @@ def main() -> None:
     if args.output_dir:
         output_dir = Path(args.output_dir).expanduser().resolve()
     else:
-        output_dir = Path.cwd() / "download_evals_analyze_lengths" / "data"
+        # Default to the first input path (or its parent if it's a file)
+        first_path = Path(args.paths[0]).expanduser().resolve()
+        if first_path.is_file():
+            output_dir = first_path.parent
+        else:
+            output_dir = first_path
     output_dir.mkdir(parents=True, exist_ok=True)
 
     length_matrix: Dict[str, Dict[str, float]] = {}

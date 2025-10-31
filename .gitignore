@@ -159,3 +159,5 @@ dmypy.json
 cache/
 local_dataset_cache/
 scratch/
+datalake-read-service-account.json
+download_evals_analyze_lengths/data/*
