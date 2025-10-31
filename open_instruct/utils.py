@@ -2254,6 +2254,22 @@ class ModelDims:
 
         return {"mfu": learner_mfu}
 
+    def approximate_learner_utilization(
+        self, total_tokens: int, avg_sequence_length: float, training_time: float, num_training_gpus: int
+    ) -> dict[str, float]:
+        num_sequences = int(total_tokens / avg_sequence_length)
+        sequence_lengths = [int(avg_sequence_length)] * num_sequences
+
+        training_flops = self.flops(
+            prompt_lengths=sequence_lengths, response_lengths=None, samples_per_prompt=1, is_training=True
+        )
+
+        training_flops_per_second = training_flops / training_time
+        total_training_device_flops = self.device_flops * num_training_gpus
+        learner_mfu = 100 * training_flops_per_second / total_training_device_flops
+
+        return {"mfu": learner_mfu}
+
 
 def get_device_name(device_name: str) -> str:
     """Normalize a GPU device name to a standard key used in GPU_SPECS.
