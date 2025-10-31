@@ -1,7 +1,7 @@
 #!/bin/bash
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 
-python mason.py \
+uv run python mason.py \
     --cluster ai2/neptune \
     --workspace ai2/tulu-thinker \
     --priority high \
