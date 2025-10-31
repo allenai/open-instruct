@@ -38,9 +38,10 @@ import threading
 import time
 from argparse import Namespace
 from collections import deque
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
-from typing import Any, Callable, Iterator, List, Literal, Optional
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -107,13 +108,13 @@ INVALID_LOGPROB = 1.0
 @dataclass
 class Args:
     # required dataset args
-    dataset_mixer_list: List[str] = None
+    dataset_mixer_list: list[str] = None
     """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_eval_list: List[str] = None
+    dataset_mixer_eval_list: list[str] = None
     """A list of datasets (local or HF) to sample from for evaluation."""
-    dataset_mixer_list_splits: List[str] = None
+    dataset_mixer_list_splits: list[str] = None
     """The dataset splits to use for training"""
-    dataset_mixer_eval_list_splits: Optional[List[str]] = None
+    dataset_mixer_eval_list_splits: list[str] | None = None
     """The dataset splits to use for evaluation"""
     dataset_transform_fn: list[str] = field(default_factory=lambda: ["sft_tokenize_v1", "sft_filter_v1"])
     """The list of transform functions to apply to the dataset."""
@@ -121,9 +122,9 @@ class Args:
     """The mode to use for caching the dataset."""
     dataset_local_cache_dir: str = "local_dataset_cache"
     """The directory to save the local dataset cache to."""
-    dataset_config_hash: Optional[str] = None
+    dataset_config_hash: str | None = None
     """The hash of the dataset configuration."""
-    dataset_config_eval_hash: Optional[str] = None
+    dataset_config_eval_hash: str | None = None
     """The hash of the dataset configuration for evaluation."""
     dataset_skip_cache: bool = False
     """Whether to skip the cache."""
@@ -137,7 +138,7 @@ class Args:
     """The name of this experiment"""
     seed: int = 1
     """Seed of the experiment"""
-    run_name: Optional[str] = None
+    run_name: str | None = None
     """A unique name of this run"""
 
     # optimizer args
@@ -155,29 +156,29 @@ class Args:
     """Ratio of warmup steps to total steps (takes precedence over `warm_up_steps`)"""
 
     # various batch sizes
-    gradient_accumulation_steps: Optional[int] = None
+    gradient_accumulation_steps: int | None = None
     """The number of gradient accumulation steps"""
-    per_device_train_batch_size: Optional[int] = 1
+    per_device_train_batch_size: int | None = 1
     """The forward batch size per device (local_micro_batch_size)"""
-    per_device_eval_batch_size: Optional[int] = 1
+    per_device_eval_batch_size: int | None = 1
     """The forward batch size per device for evaluation (local_micro_batch_size)"""
-    total_episodes: Optional[int] = 100000
+    total_episodes: int | None = 100000
     """The total number of episodes in the dataset"""
-    world_size: Optional[int] = None
+    world_size: int | None = None
     """The number of processes (GPUs) to use"""
-    micro_batch_size: Optional[int] = None
+    micro_batch_size: int | None = None
     """The micro batch size across devices (HF's `per_device_train_batch_size` * `world_size`)"""
     local_rollout_batch_size: int = 64
     """The number of rollout episodes per iteration per device"""
-    rollout_batch_size: Optional[int] = None
+    rollout_batch_size: int | None = None
     """The number of rollout episodes per iteration"""
-    num_training_steps: Optional[int] = None
+    num_training_steps: int | None = None
     """The number of training_steps to train"""
     num_evals: int = 4
     """The number of evaluations to run throughout training"""
-    eval_freq: Optional[int] = None
+    eval_freq: int | None = None
     """The frequency of evaluation steps"""
-    local_dataloader_batch_size: Optional[int] = None
+    local_dataloader_batch_size: int | None = None
     """The batch size per GPU for the dataloader"""
     save_freq: int = -1
     """How many train steps to save the model"""
@@ -187,23 +188,23 @@ class Args:
     """the number of epochs to train"""
     num_mini_batches: int = 1
     """Number of minibatches to split a batch into"""
-    local_mini_batch_size: Optional[int] = None
+    local_mini_batch_size: int | None = None
     """the mini batch size per GPU"""
-    mini_batch_size: Optional[int] = None
+    mini_batch_size: int | None = None
     """the mini batch size across GPUs"""
     local_rollout_forward_batch_size: int = 64
     """per rank no grad forward pass in the rollout phase"""
     reward_model_path: str = "EleutherAI/pythia-160m"
     """the path to the reward model"""
-    reward_model_revision: Optional[str] = None
+    reward_model_revision: str | None = None
     """the revision of the reward model"""
 
     # generation config
     response_length: int = 53
     """the length of the response"""
-    stop_token: Optional[Literal["eos", "period"]] = None
+    stop_token: Literal["eos", "period"] | None = None
     """the stop token"""
-    stop_token_id: Optional[int] = None
+    stop_token_id: int | None = None
     """the truncation token id"""
     min_response_length: int = 0
     """stop only after this many tokens"""
@@ -213,7 +214,7 @@ class Args:
     """the reward value for responses that do not contain `stop_token_id`"""
     non_stop_penalty: bool = False
     """whether to penalize responses that do not contain `stop_token_id`"""
-    stop_strings: List[str] = None
+    stop_strings: list[str] = None
     """List of strings that stop the generation when they are generated."""
 
     # online DPO specific args
@@ -232,7 +233,7 @@ class Args:
     """Whether to run the generation in async mode which learns from the second latest policy like Cleanba"""
 
     # ray
-    actor_num_gpus_per_node: List[int] = field(default_factory=lambda: [1])
+    actor_num_gpus_per_node: list[int] = field(default_factory=lambda: [1])
     """number of gpus per node for actor"""
     single_gpu_mode: bool = False
     """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
@@ -258,17 +259,17 @@ class Args:
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
     """The wandb's project name"""
-    wandb_entity: Optional[str] = None
+    wandb_entity: str | None = None
     """The entity (team) of wandb's project"""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
-    hf_entity: Optional[str] = None
+    hf_entity: str | None = None
     """The user or org name of the model repository from the Hugging Face Hub"""
-    hf_repo_id: Optional[str] = None
+    hf_repo_id: str | None = None
     """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_revision: Optional[str] = None
+    hf_repo_revision: str | None = None
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_url: Optional[str] = None
+    hf_repo_url: str | None = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     output_dir: str = "output"
     """Where to save the model"""
@@ -282,11 +283,11 @@ class Args:
     """Whether to launch beaker evaluation jobs after training on weka"""
     try_auto_save_to_beaker: bool = True
     """Whether to try to save the model to Beaker dataset `/output` after training"""
-    gs_bucket_path: Optional[str] = None
+    gs_bucket_path: str | None = None
     """The path to the gs bucket to save the model to"""
-    oe_eval_tasks: Optional[List[str]] = None
+    oe_eval_tasks: list[str] | None = None
     """The beaker evaluation tasks to launch"""
-    hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
+    hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
@@ -357,7 +358,7 @@ def _z3_params_to_fetch(param_list):
     return [p for p in param_list if hasattr(p, "ds_id") and p.ds_status == ZeroParamStatus.NOT_AVAILABLE]
 
 
-def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[bool] = None) -> torch.Tensor:
+def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: bool | None = None) -> torch.Tensor:
     """Compute mean of tensor with a masked values."""
     if axis is not None:
         return (values * mask).sum(axis=axis) / mask.sum(axis=axis)
@@ -372,7 +373,7 @@ def remove_padding(sequences, pad_token_id):
 class MetricsTracker:
     """A simple class to prellocate all metrics in an array"""
 
-    def __init__(self, max_metrics: int = 32, device: torch.device = torch.device("cuda")):
+    def __init__(self, max_metrics: int = 32, device: str = "cuda"):
         self.metrics = torch.zeros(max_metrics, device=device)
         self.names2idx = {}
         self.current_idx = 0
@@ -444,7 +445,7 @@ class Timer:
 
 
 class ShufflingIterator:
-    def __init__(self, data: np.ndarray, batch_size: int, seed: Optional[int] = None):
+    def __init__(self, data: np.ndarray, batch_size: int, seed: int | None = None):
         self.data = data.copy()
         self.batch_size = batch_size
         self.index = 0
@@ -454,10 +455,10 @@ class ShufflingIterator:
         # Ensure the effective dataset size is divisible by batch_size
         self.effective_size = len(self.data) - (len(self.data) % batch_size)
 
-    def __iter__(self) -> Iterator[List[int]]:
+    def __iter__(self) -> Iterator[list[int]]:
         return self
 
-    def __next__(self) -> List[int]:
+    def __next__(self) -> list[int]:
         if self.index >= self.effective_size:
             self.index = 0
             self.rng.shuffle(self.data)
@@ -626,7 +627,7 @@ class PolicyTrainerRayProcess(RayProcess):
         train_dataset: Dataset,
         eval_dataset: Dataset,
         tokenizer: PreTrainedTokenizer,
-        vllm_engines: List[ray.actor.ActorHandle],
+        vllm_engines: list[ray.actor.ActorHandle],
         metrics_queue: RayQueue,
         data_collator: Callable,
     ):
@@ -763,12 +764,12 @@ class PolicyTrainerRayProcess(RayProcess):
             response_ids_Q: Queue,
             param_prompt_Q: Queue,
             num_training_steps: int,
-            sample_evaluation_prompt_token_ids: Optional[List[int]],
+            sample_evaluation_prompt_token_ids: list[int] | None,
             evaluation_Q: Queue,
             eval_freq: int,
             resume_training_step: int,
         ):
-            def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
+            def generate_with_engines(prompts: list[list[int]], sampling_params: SamplingParams):
                 queries_per_engine = math.ceil(len(prompts) / len(vllm_engines))
                 split_queries = [
                     prompts[i : i + queries_per_engine] for i in range(0, len(prompts), queries_per_engine)
@@ -1044,19 +1045,21 @@ class PolicyTrainerRayProcess(RayProcess):
             # Do multiple epochs of training on on-policy data (PPO-style)
             for epoch_idx in range(args.num_epochs):
                 b_inds = np.random.permutation(args.local_rollout_batch_size // args.num_generation_per_prompt)
-                minibatch_idx = 0
-                for mini_batch_start in range(
-                    0,
-                    args.local_rollout_batch_size // args.num_generation_per_prompt,
-                    args.local_mini_batch_size // args.num_generation_per_prompt,
+                for minibatch_idx, mini_batch_start in enumerate(
+                    range(
+                        0,
+                        args.local_rollout_batch_size // args.num_generation_per_prompt,
+                        args.local_mini_batch_size // args.num_generation_per_prompt,
+                    )
                 ):
                     mini_batch_end = mini_batch_start + args.local_mini_batch_size // args.num_generation_per_prompt
                     mini_batch_inds = b_inds[mini_batch_start:mini_batch_end]
-                    gradient_accumulation_idx = 0
-                    for micro_batch_start in range(
-                        0,
-                        args.local_mini_batch_size // args.num_generation_per_prompt,
-                        args.per_device_train_batch_size,
+                    for gradient_accumulation_idx, micro_batch_start in enumerate(
+                        range(
+                            0,
+                            args.local_mini_batch_size // args.num_generation_per_prompt,
+                            args.per_device_train_batch_size,
+                        )
                     ):
                         micro_batch_end = micro_batch_start + args.per_device_train_batch_size
                         micro_batch_inds = mini_batch_inds[micro_batch_start:micro_batch_end]
@@ -1132,8 +1135,6 @@ class PolicyTrainerRayProcess(RayProcess):
                             rejected_logprobs_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = (
                                 rejected_logprobs_sum.mean()
                             )
-                        gradient_accumulation_idx += 1
-                    minibatch_idx += 1
                     del (
                         loss,
                         logits,
@@ -1299,7 +1300,7 @@ class PolicyTrainerRayProcess(RayProcess):
             self.tokenizer.save_pretrained(output_dir)
 
 
-def kill_ray_cluster_if_a_worker_dies(object_refs: List[Any], stop_event: threading.Event):
+def kill_ray_cluster_if_a_worker_dies(object_refs: list[Any], stop_event: threading.Event):
     while True:
         if stop_event.is_set():
             break
@@ -1319,7 +1320,7 @@ def kill_ray_cluster_if_a_worker_dies(object_refs: List[Any], stop_event: thread
 
 class ModelGroup:
     def __init__(
-        self, pg: PlacementGroup, ray_process_cls: RayProcess, num_gpus_per_node: List[int], single_gpu_mode: bool
+        self, pg: PlacementGroup, ray_process_cls: RayProcess, num_gpus_per_node: list[int], single_gpu_mode: bool
     ):
         self.pg = pg
         self.ray_process_cls = ray_process_cls
@@ -1419,9 +1420,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         if args.hf_repo_revision is None:
             args.hf_repo_revision = args.run_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-    if args.with_tracking:
-        if args.wandb_entity is None:
-            args.wandb_entity = maybe_use_ai2_wandb_entity()
+    if args.with_tracking and args.wandb_entity is None:
+        args.wandb_entity = maybe_use_ai2_wandb_entity()
 
     # Setup experiment tracking and seeds
     all_configs = {}
@@ -1443,10 +1443,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             tags=[args.exp_name] + get_wandb_tags(),
         )
     writer = SummaryWriter(f"runs/{args.run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
+    hyperparams_table = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
+    writer.add_text("hyperparameters", f"|param|value|\n|-|-|\n{hyperparams_table}")
 
     # Set up datasets
     transform_fn_args = [
@@ -1523,7 +1521,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     print("======== all models initialized =========")
 
     refs = []
-    for i, policy_model in enumerate(policy_group.models):
+    for policy_model in policy_group.models:
         refs.append(
             policy_model.train.remote(
                 train_dataset=train_dataset,
@@ -1540,7 +1538,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
     # train and gather metrics
     resume_training_step = 1
-    for training_step in range(resume_training_step, args.num_training_steps + 1):
+    for _ in range(resume_training_step, args.num_training_steps + 1):
         result = metrics_queue.get()
         metrics, episode, df = result
         for key, value in metrics.items():

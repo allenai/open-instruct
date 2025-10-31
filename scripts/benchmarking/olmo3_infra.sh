@@ -48,7 +48,6 @@ for split_var in mixin_it_up; do
         --dataset_mixer_list_splits train \
         --dataset_mixer_eval_list hamishivi/omega-combined 8 allenai/IF_multi_constraints_upto5 8 saurabh5/rlvr_acecoder_filtered 8 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2 4 hamishivi/virtuoussy_multi_subject_rlvr 4 \
         --dataset_mixer_eval_list_splits train \
-        --max_token_length 10240 \
         --max_prompt_token_length 2048 \
         --response_length 32768 \
         --pack_length 35840 \

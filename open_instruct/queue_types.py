@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -9,34 +9,34 @@ class TokenStatistics:
     num_prompt_tokens: int
     num_response_tokens: int
     generation_time: float
-    earliest_start_time: Optional[float] = None
+    earliest_start_time: float | None = None
 
 
 @dataclass
 class RequestInfo:
     """Container for tool usage information used in queue payloads."""
 
-    num_calls: List[int]
-    timeouts: List[int]
-    tool_errors: List[str]
-    tool_outputs: List[str]
-    tool_runtimes: List[float]
-    tool_calleds: List[bool]
+    num_calls: list[int]
+    timeouts: list[int]
+    tool_errors: list[str]
+    tool_outputs: list[str]
+    tool_runtimes: list[float]
+    tool_calleds: list[bool]
 
 
 @dataclass
 class GenerationResult:
     """Container for generation results returned via Ray queues."""
 
-    responses: List[List[int]]
-    finish_reasons: List[str]
-    masks: List[List[int]]
+    responses: list[list[int]]
+    finish_reasons: list[str]
+    masks: list[list[int]]
     request_info: RequestInfo
-    dataset_index: Optional[int] = None
-    epoch_number: Optional[int] = None
-    token_statistics: Optional[TokenStatistics] = None
-    start_time: Optional[float] = None
-    logprobs: Optional[List[List[float]]] = None
+    dataset_index: int | None = None
+    epoch_number: int | None = None
+    token_statistics: TokenStatistics | None = None
+    start_time: float | None = None
+    logprobs: list[list[float]] | None = None
 
 
 @dataclass
@@ -48,10 +48,10 @@ class PromptRequest:
     `_QueueActor`.
     """
 
-    prompt: List[int]
+    prompt: list[int]
     generation_config: Any
-    epoch_number: Optional[int] = None
-    training_step: Optional[int] = None
-    dataset_index: Optional[int] = None
+    epoch_number: int | None = None
+    training_step: int | None = None
+    dataset_index: int | None = None
     is_eval: bool = False
-    start_time: Optional[float] = None
+    start_time: float | None = None
