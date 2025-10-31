@@ -5,6 +5,7 @@ from typing import Callable, Optional
 
 import datasets
 from datasets import Dataset, load_dataset
+from open_instruct.utils import max_num_processes
 from huggingface_hub import HfApi
 
 
@@ -92,7 +93,7 @@ def convert_sft_dataset(
         "Either ds or hf_dataset_id must be provided."
 
     if ds is None:
-        ds = load_dataset(hf_dataset_id)
+        ds = load_dataset(hf_dataset_id, num_proc=max_num_processes())
 
     if convert_fn:
         print("Converting dataset to messages format...")

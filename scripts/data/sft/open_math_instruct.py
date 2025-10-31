@@ -1,6 +1,7 @@
 import argparse
 
 from datasets import load_dataset
+from open_instruct.utils import max_num_processes
 
 from scripts.data.sft.utils import convert_sft_dataset
 
@@ -53,7 +54,7 @@ if __name__ == "__main__":
         ]
     }
 
-    ds = load_dataset("nvidia/OpenMathInstruct-2")["train"]
+    ds = load_dataset("nvidia/OpenMathInstruct-2", num_proc=max_num_processes())["train"]
 
     gsm_subset = ds.filter(lambda x: "gsm8k" in x["problem_source"])
     math_subset = ds.filter(lambda x: "math" in x["problem_source"])

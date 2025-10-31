@@ -16,6 +16,7 @@ import string
 
 import openai
 from datasets import load_dataset
+from open_instruct.utils import max_num_processes
 
 # from openai import OpenAI
 from prompt_templates import (
@@ -87,9 +88,9 @@ def main(args):
 
     # Load the dataset
     if args.dataset.endswith(".jsonl"):
-        persona_dataset = load_dataset("json", data_files=args.dataset)['train']
+        persona_dataset = load_dataset("json", data_files=args.dataset, num_proc=max_num_processes())['train']
     else:
-        persona_dataset = load_dataset(args.dataset)['train']
+        persona_dataset = load_dataset(args.dataset, num_proc=max_num_processes())['train']
 
     if args.sanity_check > 0:
         persona_dataset = persona_dataset.select(range(0, args.sanity_check))

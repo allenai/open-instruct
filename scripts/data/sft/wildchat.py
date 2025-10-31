@@ -1,6 +1,7 @@
 import argparse
 
 from datasets import load_dataset
+from open_instruct.utils import max_num_processes
 
 from scripts.data.sft.utils import convert_sft_dataset
 
@@ -46,7 +47,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    ds = load_dataset("allenai/WildChat-1M-Full")
+    ds = load_dataset("allenai/WildChat-1M-Full", num_proc=max_num_processes())
     gpt4_subset = ds.filter(lambda example: "gpt-4" in example["model"], num_proc=16)
     gpt35_subset = ds.filter(lambda example: "gpt-3.5" in example["model"], num_proc=16)
     assert len(gpt4_subset["train"]) + len(gpt35_subset["train"]) == len(ds["train"]), \

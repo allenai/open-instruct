@@ -7,6 +7,7 @@ import spacy
 import torch
 import yaml
 from datasets import Dataset, load_dataset
+from open_instruct.utils import max_num_processes
 from elasticsearch import Elasticsearch
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
@@ -286,14 +287,14 @@ def main():
         for dataset, subset, split, fields, limit in eval_sets:
             print(f"Querying {index_name} for {dataset}.")
             try:
-                query_dataset = list(load_dataset(dataset, subset, split=split))[:limit]
+                query_dataset = list(load_dataset(dataset, subset, split=split, num_proc=max_num_processes()))[:limit]
             except ValueError:
                 query_dataset = []
                 if args.subset is None:
                     # Dataset has multiple subsets. We want to concatenate all of them.
                     from datasets import get_dataset_config_names
                     for subset in get_dataset_config_names(dataset):
-                        query_dataset.extend(list(load_dataset(dataset, subset, split=split))[:limit])
+                        query_dataset.extend(list(load_dataset(dataset, subset, split=split, num_proc=max_num_processes()))[:limit])
                 else:
                     raise
 
@@ -337,7 +338,7 @@ def main():
         for dataset_name, contaminated_ids in zip(dataset_names, all_index_contaminated_ids):
             print(f"Decontaminating {dataset_name}")
             # Assuming dataset has no subsets and we want the train split.
-            train_dataset = load_dataset(dataset_name, split="train")
+            train_dataset = load_dataset(dataset_name, split="train", num_proc=max_num_processes())
             decontaminated_dataset = []
             num_kept = 0
             num_total = 0

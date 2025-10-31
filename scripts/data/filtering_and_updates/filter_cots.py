@@ -8,6 +8,7 @@ python filter_cots.py --input_dataset_name allenai/oasst1-r1 --output_dataset_na
 import argparse
 import re
 from datasets import load_dataset, Features, Sequence, Value
+from open_instruct.utils import max_num_processes
 
 # ----------------------- filter functions ----------------------- #
 def is_think_answer(elem):
@@ -87,7 +88,7 @@ def main() -> None:
     args = parser.parse_args()
 
     # Load dataset (Dataset or DatasetDict)
-    ds = load_dataset(args.input_dataset_name)
+    ds = load_dataset(args.input_dataset_name, num_proc=max_num_processes())
 
     # Helper: count rows across splits
     def count_rows(dset):

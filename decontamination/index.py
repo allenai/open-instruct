@@ -3,6 +3,7 @@ import os
 
 import yaml
 from datasets import load_dataset
+from open_instruct.utils import max_num_processes
 from elasticsearch import Elasticsearch, helpers
 from tqdm import tqdm
 
@@ -45,7 +46,7 @@ def create_vector_index(es, index_name):
 
 
 def read_dataset(dataset_name, split, messages_field, query_filter, query_field):
-    dataset = load_dataset(dataset_name, split=split)
+    dataset = load_dataset(dataset_name, split=split, num_proc=max_num_processes())
     data_to_index = []
 
     query_filter_key, query_filter_value = query_filter.split(":")

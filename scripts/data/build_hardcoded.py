@@ -3,6 +3,7 @@ import logging
 from functools import partial
 
 from datasets import DatasetDict, load_dataset
+from open_instruct.utils import max_num_processes
 from huggingface_hub import HfApi
 
 from open_instruct import logger_utils
@@ -281,7 +282,7 @@ def main():
     # --- Load Source Dataset ---
     try:
         logger.info(f"Loading source dataset '{args.source_repo}'...")
-        original_dataset = load_dataset(args.source_repo)
+        original_dataset = load_dataset(args.source_repo, num_proc=max_num_processes())
         logger.info(f"Dataset loaded successfully. Splits: {list(original_dataset.keys())}")
     except Exception as e:
         logger.error(f"Failed to load source dataset '{args.source_repo}': {e}")

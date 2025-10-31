@@ -188,7 +188,7 @@ def main(sample_limit: int | None = None,
     os.makedirs(f"{current_dir}/batch_files", exist_ok=True)
 
     print(f"Loading dataset {input_dataset_name} with split {split}")
-    input_dataset = datasets.load_dataset(input_dataset_name, split=split)
+    input_dataset = datasets.load_dataset(input_dataset_name, split=split, num_proc=max_num_processes())
 
     # First get all unique IDs
     print(f'Processing dataset with {len(input_dataset)} rows')

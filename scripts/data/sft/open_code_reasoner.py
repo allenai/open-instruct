@@ -2,6 +2,7 @@ import random
 from typing import List
 
 from datasets import Dataset, load_dataset
+from open_instruct.utils import max_num_processes
 from tqdm import tqdm
 
 NVIDIA_OCR = "nvidia/OpenCodeReasoning"
@@ -12,8 +13,8 @@ SFT_REPO = "saurabh5/open-code-reasoning-sft"
 
 
 def main():
-    ocr_split0 = load_dataset(NVIDIA_OCR, 'split_0', split="split_0")
-    my_ocr = load_dataset(MY_OCR, split="train")
+    ocr_split0 = load_dataset(NVIDIA_OCR, 'split_0', split="split_0", num_proc=max_num_processes())
+    my_ocr = load_dataset(MY_OCR, split="train", num_proc=max_num_processes())
 
     id_to_data = {}
     for row in ocr_split0:
@@ -43,7 +44,7 @@ def main():
 
 
 def create_sft_dataset_with_n_outputs(n_outputs: List[int]):
-    sft_base = load_dataset(SFT_REPO, split="train")
+    sft_base = load_dataset(SFT_REPO, split="train", num_proc=max_num_processes())
     # for each id, sample exactly n_outputs datapoints
     id_to_data = {}
     for row in tqdm(sft_base, desc="Mapping id's in SFT data"):

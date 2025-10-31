@@ -1,11 +1,12 @@
 import random
 
 from datasets import Dataset, load_dataset
+from open_instruct.utils import max_num_processes
 from tqdm import tqdm
 
 random_gen = random.Random(42)
 
-dataset = load_dataset("agentica-org/DeepScaleR-Preview-Dataset", split="train")
+dataset = load_dataset("agentica-org/DeepScaleR-Preview-Dataset", split="train", num_proc=max_num_processes())
 
 # reqular dataset
 new_data = []
@@ -19,7 +20,7 @@ random_gen.shuffle(new_data)
 dataset = Dataset.from_list(new_data)
 dataset.push_to_hub("ai2-adapt-dev/deepscaler-gt")
 
-dataset = load_dataset("agentica-org/DeepScaleR-Preview-Dataset", split="train")
+dataset = load_dataset("agentica-org/DeepScaleR-Preview-Dataset", split="train", num_proc=max_num_processes())
 # 4k length only
 new_data = []
 for sample in tqdm(dataset):
@@ -33,7 +34,7 @@ random_gen.shuffle(new_data)
 dataset = Dataset.from_list(new_data)
 dataset.push_to_hub("ai2-adapt-dev/deepscaler_gt_random_max_length_only")
 
-dataset = load_dataset("agentica-org/DeepScaleR-Preview-Dataset", split="train")
+dataset = load_dataset("agentica-org/DeepScaleR-Preview-Dataset", split="train", num_proc=max_num_processes())
 # 4k length and solution
 new_data = []
 for sample in tqdm(dataset):
@@ -47,7 +48,7 @@ random_gen.shuffle(new_data)
 dataset = Dataset.from_list(new_data)
 dataset.push_to_hub("ai2-adapt-dev/deepscaler_gt_with_random_max_length")
 
-dataset = load_dataset("agentica-org/DeepScaleR-Preview-Dataset", split="train")
+dataset = load_dataset("agentica-org/DeepScaleR-Preview-Dataset", split="train", num_proc=max_num_processes())
 # 8k length only
 new_data = []
 for sample in tqdm(dataset):
@@ -61,7 +62,7 @@ random_gen.shuffle(new_data)
 dataset = Dataset.from_list(new_data)
 dataset.push_to_hub("ai2-adapt-dev/deepscaler_gt_random_max_length_only_8192")
 
-dataset = load_dataset("agentica-org/DeepScaleR-Preview-Dataset", split="train")
+dataset = load_dataset("agentica-org/DeepScaleR-Preview-Dataset", split="train", num_proc=max_num_processes())
 # 8k length and solution
 new_data = []
 for sample in tqdm(dataset):

@@ -4,6 +4,7 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 import numpy as np
 from datasets import load_dataset
+from open_instruct.utils import max_num_processes
 from matplotlib.patches import Patch
 from transformers import AutoTokenizer
 
@@ -100,7 +101,7 @@ def plot_token_length_histogram(dataset_name,
 
     print("Running analytics...")
     # Load the dataset
-    dataset = load_dataset(dataset_name)
+    dataset = load_dataset(dataset_name, num_proc=max_num_processes())
 
     # Convert "from"/"value" format to "role"/"content" if needed
     def convert_to_messages(sample, column_name=column_name):

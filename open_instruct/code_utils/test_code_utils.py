@@ -8,6 +8,7 @@ import datasets
 import parameterized
 
 from open_instruct.code_utils import code_utils
+from open_instruct.utils import max_num_processes
 
 SIMPLE_PROGRAM = "a = 1"
 FAILING_TEST = "assert False"
@@ -45,7 +46,7 @@ class GetSuccessfulTestsFastTests(BaseCodeTestCase):
 
     def test_tiger_lab_acecode_sample(self):
         """Tests the script against an actual AceCode record."""
-        ds = datasets.load_dataset("TIGER-Lab/AceCode-87K", split="train")
+        ds = datasets.load_dataset("TIGER-Lab/AceCode-87K", split="train", num_proc=max_num_processes())
 
         # Choose the same sample index used in the original snippet.
         i = 1
