@@ -972,6 +972,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     logger.info(logger_str)
                     if args.with_tracking:
                         accelerator.log(metrics_to_log, step=completed_steps)
+                    # Reset the local metrics
                     local_metrics.zero_()
                     mfu_interval_start = mfu_interval_end
 
