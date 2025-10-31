@@ -33,4 +33,4 @@ uv run python mason.py \
     --add_bos \
     --chat_template_name olmo \
     --seed 123 \
-    --with_tracking
+    #--with_tracking
