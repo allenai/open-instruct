@@ -62,6 +62,7 @@ from open_instruct.utils import (
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
+    maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
 )
@@ -438,6 +439,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             },
         )
         wandb_tracker = accelerator.get_tracker("wandb")
+        maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url())
     else:
         wandb_tracker = None  # for later eval launching
 
@@ -880,6 +882,12 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         accelerator.print(f"{metrics_to_log=}")
                     if args.with_tracking:
                         accelerator.log(metrics_to_log, step=completed_steps)
+                    maybe_update_beaker_description(
+                        current_step=completed_steps,
+                        total_steps=args.max_train_steps,
+                        start_time=start_time,
+                        wandb_url=wandb_tracker.run.get_url() if wandb_tracker is not None else None,
+                    )
                     total_loss = 0
                     total_aux_loss = 0
 
