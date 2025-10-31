@@ -1,11 +1,11 @@
 import random
 
 from datasets import Dataset, load_dataset
-from open_instruct.utils import max_num_processes
+import open_instruct.utils as open_instruct_utils
 
 random_gen = random.Random(42)
 
-ds = load_dataset("jacobmorrison/tulu-3-sft-t3-70b-thoughts", split="train", num_proc=max_num_processes())
+ds = load_dataset("jacobmorrison/tulu-3-sft-t3-70b-thoughts", split="train", num_proc=open_instruct_utils.max_num_processes())
 new_data = []
 
 for sample in ds:

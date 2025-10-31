@@ -1,7 +1,7 @@
 import argparse
 
 from datasets import load_dataset
-from open_instruct.utils import max_num_processes
+import open_instruct.utils as open_instruct_utils
 
 from scripts.data.sft.utils import convert_sft_dataset
 
@@ -47,7 +47,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    ds = load_dataset("TIGER-Lab/WebInstructSub", num_proc=max_num_processes())
+    ds = load_dataset("TIGER-Lab/WebInstructSub", num_proc=open_instruct_utils.max_num_processes())
     stack_exchange_sub = ds.filter(lambda example: example["source"] in ["mathstackexchange", "stackexchange"])
     socratic_sub = ds.filter(lambda example: example["source"] == "socratic")
     assert len(stack_exchange_sub["train"]) + len(socratic_sub["train"]) == len(ds["train"]), \

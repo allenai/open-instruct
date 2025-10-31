@@ -3,7 +3,7 @@ import os
 from typing import Optional
 
 from datasets import Dataset, load_dataset
-from open_instruct.utils import max_num_processes
+import open_instruct.utils as open_instruct_utils
 
 from scripts.data.sft.utils import convert_sft_dataset
 
@@ -144,7 +144,7 @@ if __name__ == "__main__":
         "for more information about this dataset and the license."
     )
 
-    v1_ds = load_dataset("OpenAssistant/oasst1", num_proc=max_num_processes())["train"]
+    v1_ds = load_dataset("OpenAssistant/oasst1", num_proc=open_instruct_utils.max_num_processes())["train"]
     v1_sequences = convert_oasst_dataset(v1_ds, top_k=args.top_k)
     v1_instances = []
     for i, sequence in enumerate(v1_sequences):
@@ -189,7 +189,7 @@ if __name__ == "__main__":
         "for more information about this dataset and the license."
     )
 
-    v2_ds = load_dataset("OpenAssistant/oasst2", num_proc=max_num_processes())["train"]
+    v2_ds = load_dataset("OpenAssistant/oasst2", num_proc=open_instruct_utils.max_num_processes())["train"]
     v2_sequences = convert_oasst_dataset(v2_ds, top_k=args.top_k)
     v2_instances = []
     for i, sequence in enumerate(v2_sequences):

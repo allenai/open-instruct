@@ -1,8 +1,8 @@
 from datasets import Dataset, DatasetDict, load_dataset
-from open_instruct.utils import max_num_processes
+import open_instruct.utils as open_instruct_utils
 
 # load dataset
-dataset = load_dataset("rulins/gpqa_extended_decontamination", split="train", num_proc=max_num_processes())
+dataset = load_dataset("rulins/gpqa_extended_decontamination", split="train", num_proc=open_instruct_utils.max_num_processes())
 # construct rlvr-style dataset
 new_train_data = []
 for data in dataset:
@@ -35,7 +35,7 @@ for data in dataset:
     })
 
 # create eval set (gpqa diamond)
-dataset = load_dataset("Idavidrein/gpqa", "gpqa_diamond", split="train", num_proc=max_num_processes())
+dataset = load_dataset("Idavidrein/gpqa", "gpqa_diamond", split="train", num_proc=open_instruct_utils.max_num_processes())
 # construct rlvr-style dataset
 new_val_data = []
 for data in dataset:

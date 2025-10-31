@@ -1,7 +1,7 @@
 import argparse
 
 from datasets import load_dataset
-from open_instruct.utils import max_num_processes
+import open_instruct.utils as open_instruct_utils
 
 from scripts.data.sft.utils import convert_sft_dataset
 
@@ -47,7 +47,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    sciriff_data = load_dataset("allenai/SciRIFF-train-mix", num_proc=max_num_processes())
+    sciriff_data = load_dataset("allenai/SciRIFF-train-mix", num_proc=open_instruct_utils.max_num_processes())
 
     # filter the dataset to only include science conversations
     sciriff_data = sciriff_data.filter(lambda example: example["dataset"].startswith("science"), num_proc=16)

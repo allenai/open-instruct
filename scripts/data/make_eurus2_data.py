@@ -1,12 +1,12 @@
 import random
 
 from datasets import Dataset, load_dataset
-from open_instruct.utils import max_num_processes
+import open_instruct.utils as open_instruct_utils
 from tqdm import tqdm
 
 random_gen = random.Random(42)
 
-dataset = load_dataset("ai2-adapt-dev/eurus2_ground_truth", split="train", num_proc=max_num_processes())
+dataset = load_dataset("ai2-adapt-dev/eurus2_ground_truth", split="train", num_proc=open_instruct_utils.max_num_processes())
 
 new_data = []
 for sample in tqdm(dataset):

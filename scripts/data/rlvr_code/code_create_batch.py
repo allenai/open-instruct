@@ -97,7 +97,7 @@ import time
 from typing import List
 
 from datasets import load_dataset
-from open_instruct.utils import max_num_processes
+import open_instruct.utils as open_instruct_utils
 from openai import AzureOpenAI
 from pydantic import BaseModel
 
@@ -119,10 +119,10 @@ OUTPUT_HF_DATASET = "saurabh5/open-code-reasoning-rlvr-2"
 SPLIT = "python"
 
 hf_datasets = {
-    "taco": load_dataset("BAAI/TACO", trust_remote_code=True, num_proc=max_num_processes()),
-    "apps": load_dataset("codeparrot/apps", trust_remote_code=True, num_proc=max_num_processes()),
-    "code_contests": load_dataset("deepmind/code_contests", num_proc=max_num_processes()),
-    "open-r1/codeforces": load_dataset("open-r1/codeforces", num_proc=max_num_processes())
+    "taco": load_dataset("BAAI/TACO", trust_remote_code=True, num_proc=open_instruct_utils.max_num_processes()),
+    "apps": load_dataset("codeparrot/apps", trust_remote_code=True, num_proc=open_instruct_utils.max_num_processes()),
+    "code_contests": load_dataset("deepmind/code_contests", num_proc=open_instruct_utils.max_num_processes()),
+    "open-r1/codeforces": load_dataset("open-r1/codeforces", num_proc=open_instruct_utils.max_num_processes())
 }
 
 def extract_python_code(model_output: str) -> str:
@@ -259,7 +259,7 @@ def find_cached_results(id: str):
 
 def main():
     global SAMPLE_LIMIT
-    input_dataset = load_dataset(INPUT_HF_DATASET, "train", split=SPLIT, num_proc=max_num_processes())
+    input_dataset = load_dataset(INPUT_HF_DATASET, "train", split=SPLIT, num_proc=open_instruct_utils.max_num_processes())
 
     # First get all unique IDs
     unique_ids = set()

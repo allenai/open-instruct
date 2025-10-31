@@ -1,7 +1,7 @@
 import argparse
 
 from datasets import load_dataset
-from open_instruct.utils import max_num_processes
+import open_instruct.utils as open_instruct_utils
 
 from scripts.data.sft.utils import convert_sft_dataset
 
@@ -69,7 +69,7 @@ if __name__ == "__main__":
         "for more information about this dataset and the license."
     )
 
-    ds = load_dataset("LipengCS/Table-GPT", "All", num_proc=max_num_processes())
+    ds = load_dataset("LipengCS/Table-GPT", "All", num_proc=open_instruct_utils.max_num_processes())
     convert_sft_dataset(
         ds=ds,
         hf_dataset_id=None,

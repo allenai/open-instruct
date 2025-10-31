@@ -2,7 +2,7 @@ import argparse
 import re
 
 from datasets import load_dataset
-from open_instruct.utils import max_num_processes
+import open_instruct.utils as open_instruct_utils
 
 from scripts.data.sft.utils import convert_sft_dataset
 
@@ -70,7 +70,7 @@ if __name__ == "__main__":
         "for more information about this dataset and the license."
     )
 
-    ds = load_dataset("lmsys/lmsys-chat-1m", num_proc=max_num_processes())
+    ds = load_dataset("lmsys/lmsys-chat-1m", num_proc=open_instruct_utils.max_num_processes())
     if args.model_name_regex:
         ds = ds.filter(lambda example: re.search(args.model_name_regex, example["model"]))
         print(f"Dataset size after model name regex: {ds.num_rows}")

@@ -1,7 +1,7 @@
 import argparse
 import logging
 from datasets import Dataset, load_dataset
-from open_instruct.utils import max_num_processes
+import open_instruct.utils as open_instruct_utils
 from huggingface_hub import HfApi
 
 from open_instruct import logger_utils
@@ -125,9 +125,9 @@ def main():
     # Load dataset
     if args.debug:
         logger.info("Debug mode: Loading first 100 samples")
-        dataset = load_dataset(args.dataset_name, split="train[:100]", num_proc=max_num_processes())
+        dataset = load_dataset(args.dataset_name, split="train[:100]", num_proc=open_instruct_utils.max_num_processes())
     else:
-        dataset = load_dataset(args.dataset_name, split="train", num_proc=max_num_processes())
+        dataset = load_dataset(args.dataset_name, split="train", num_proc=open_instruct_utils.max_num_processes())
     
     logger.info(f"Original dataset size: {len(dataset)}")
     

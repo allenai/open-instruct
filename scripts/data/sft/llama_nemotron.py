@@ -2,7 +2,7 @@ import re
 import uuid
 
 from datasets import load_dataset
-from open_instruct.utils import max_num_processes
+import open_instruct.utils as open_instruct_utils
 
 LLAMA_NEMOTRON_REPO = "nvidia/Llama-Nemotron-Post-Training-Dataset"
 SFT_DEST_REPO = "saurabh5/llama-nemotron-sft"
@@ -22,7 +22,7 @@ def extract_python_code(model_output: str) -> str:
 
 def process_and_upload_dataset():
     print(f"Loading dataset {LLAMA_NEMOTRON_REPO}, subset SFT...")
-    dataset = load_dataset(LLAMA_NEMOTRON_REPO, "SFT", split="code", num_proc=max_num_processes())
+    dataset = load_dataset(LLAMA_NEMOTRON_REPO, "SFT", split="code", num_proc=open_instruct_utils.max_num_processes())
     print(f"Dataset loaded with {len(dataset)} examples, proceeed?")
     breakpoint()
 

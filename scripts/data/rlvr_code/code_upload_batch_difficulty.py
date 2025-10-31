@@ -33,7 +33,7 @@ import json
 import os
 
 from datasets import Dataset, load_dataset
-from open_instruct.utils import max_num_processes
+import open_instruct.utils as open_instruct_utils
 from openai import AzureOpenAI
 from pydantic import BaseModel, ConfigDict
 
@@ -115,7 +115,7 @@ def process_batch_results(dataset: str, batch_id: str):
         print("No results found in batch")
         return
 
-    ds = load_dataset(dataset, split='train', num_proc=max_num_processes())
+    ds = load_dataset(dataset, split='train', num_proc=open_instruct_utils.max_num_processes())
     print("building id to row")
     id_to_row = {get_id(row): row for row in ds}
     new_results = []

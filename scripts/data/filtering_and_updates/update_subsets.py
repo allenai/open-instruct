@@ -21,7 +21,7 @@ python scripts/data/filtering_and_updates/update_subsets.py \
 import argparse
 
 from datasets import Dataset, concatenate_datasets, load_dataset
-from open_instruct.utils import max_num_processes
+import open_instruct.utils as open_instruct_utils
 
 
 def remove_specified_columns(dataset: Dataset, columns_to_remove: list) -> Dataset:
@@ -88,7 +88,7 @@ def main():
 
     # 1. Load the base dataset
     print(f"Loading base dataset: {args.base_ds}")
-    base_ds = load_dataset(args.base_ds, split="train", num_proc=max_num_processes())
+    base_ds = load_dataset(args.base_ds, split="train", num_proc=open_instruct_utils.max_num_processes())
 
     # 2. Filter out unwanted sources, if any
     if len(args.remove_sources) > 0:
@@ -108,7 +108,7 @@ def main():
         combined_ds = filtered_ds
 
         for ds_name in args.add_ds:
-            add_ds = load_dataset(ds_name, split="train", num_proc=max_num_processes())
+            add_ds = load_dataset(ds_name, split="train", num_proc=open_instruct_utils.max_num_processes())
             # add column to add_ds where 'source' is the name of the column (it shouldnt be in it for subset)
             source = [ds_name] * len(add_ds)
             add_ds = add_ds.add_column("source", source)

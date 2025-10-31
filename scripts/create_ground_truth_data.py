@@ -4,7 +4,7 @@ My dumb script to create ground truth data for GTRL training.
 import random
 
 from datasets import Dataset, load_dataset
-from open_instruct.utils import max_num_processes
+import open_instruct.utils as open_instruct_utils
 from tqdm import tqdm
 
 from open_instruct.math_utils import last_boxed_only_string, remove_boxed
@@ -87,7 +87,7 @@ gsm8k_prompt = ""
 for sample in GSM8K_EXEMPLARS:
     gsm8k_prompt += f"Question: {sample['question'].strip()}\nAnswer:{sample['cot_answer'].strip()}\n\n"
 
-gsm8k_dataset = load_dataset("gsm8k", "main", split="train", num_proc=max_num_processes())
+gsm8k_dataset = load_dataset("gsm8k", "main", split="train", num_proc=open_instruct_utils.max_num_processes())
 new_data = []
 for sample in gsm8k_dataset:
     answer = sample["answer"].split("####")[-1].strip()
@@ -98,7 +98,7 @@ for sample in gsm8k_dataset:
     })
 
 # also make a test split for eval
-gsm8k_dataset = load_dataset("gsm8k", "main", split="test", num_proc=max_num_processes())
+gsm8k_dataset = load_dataset("gsm8k", "main", split="test", num_proc=open_instruct_utils.max_num_processes())
 test_data = []
 for sample in gsm8k_dataset:
     answer = sample["answer"].split("####")[-1].strip()
@@ -112,7 +112,7 @@ for sample in gsm8k_dataset:
 math_prompt = ""
 for sample in MATH_EXAMPLARS:
     math_prompt += f"Question: {sample['question'].strip()}\nAnswer:{sample['cot_answer'].strip()}\n\n"
-math_dataset = load_dataset("lighteval/MATH", "all", split="train", num_proc=max_num_processes())
+math_dataset = load_dataset("lighteval/MATH", "all", split="train", num_proc=open_instruct_utils.max_num_processes())
 for sample in math_dataset:
     # same code used to extract answer for eval
     answer = remove_boxed(last_boxed_only_string(sample["solution"]))
@@ -133,7 +133,7 @@ for sample in math_dataset:
 # dataset.push_to_hub("ai2-adapt-dev/gsm8k_math_ground_truth")
 
 # # alternate dataset: metamathqa!
-# metamathqa_dataset = load_dataset("meta-math/MetaMathQA", "main", split="train", num_proc=max_num_processes())
+# metamathqa_dataset = load_dataset("meta-math/MetaMathQA", "main", split="train", num_proc=open_instruct_utils.max_num_processes())
 # # let's re-use the MATH prompt.
 # new_data = []
 # def extract_answer(text):
@@ -159,7 +159,7 @@ for sample in math_dataset:
 # dataset.push_to_hub("ai2-adapt-dev/metamathqa_ground_truth")
 
 # alternate dataset: numina-tir
-metamathqa_dataset = load_dataset("AI-MO/NuminaMath-TIR", split="train", num_proc=max_num_processes())
+metamathqa_dataset = load_dataset("AI-MO/NuminaMath-TIR", split="train", num_proc=open_instruct_utils.max_num_processes())
 # let's re-use the MATH prompt.
 new_data = []
 def find_last_outermost_boxed(string):
@@ -210,7 +210,7 @@ dataset = Dataset.from_list(new_data)
 dataset.push_to_hub("ai2-adapt-dev/numinamath_tir_ground_truth_one_turn")
 
 # alternate dataset: numina-cot (much, much larger)
-metamathqa_dataset = load_dataset("AI-MO/NuminaMath-CoT", split="train", num_proc=max_num_processes())
+metamathqa_dataset = load_dataset("AI-MO/NuminaMath-CoT", split="train", num_proc=open_instruct_utils.max_num_processes())
 # let's re-use the MATH prompt.
 new_data = []
 for sample in tqdm(metamathqa_dataset):

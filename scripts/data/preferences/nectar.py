@@ -2,7 +2,7 @@ import argparse
 import random
 
 from datasets import Dataset, load_dataset
-from open_instruct.utils import max_num_processes
+import open_instruct.utils as open_instruct_utils
 from tqdm import tqdm
 
 
@@ -20,7 +20,7 @@ def is_valid_response(response):
 
 def load_nectar_dataset(subset="lmsys-chat-1m", deduplication=False):
     # Load the Nectar dataset
-    nectar_dataset = load_dataset("berkeley-nest/Nectar", split="train", num_proc=max_num_processes())
+    nectar_dataset = load_dataset("berkeley-nest/Nectar", split="train", num_proc=open_instruct_utils.max_num_processes())
     print(f"Original Nectar dataset size: {len(nectar_dataset)}")
 
     if deduplication:
@@ -28,7 +28,7 @@ def load_nectar_dataset(subset="lmsys-chat-1m", deduplication=False):
         # very popular and sourcing many of the same prompts (FLAN, ShareGPT, evol instruct, etc)
         # we handle LMSYS and Anthropic HH separately because UltraFeedback does not use these
         print("Deduplication enabled. Loading UltraFeedback dataset...")
-        ultra_feedback = load_dataset("openbmb/UltraFeedback", split="train", num_proc=max_num_processes())
+        ultra_feedback = load_dataset("openbmb/UltraFeedback", split="train", num_proc=open_instruct_utils.max_num_processes())
         print(f"UltraFeedback dataset size: {len(ultra_feedback)}")
 
         # Create a set of UltraFeedback instructions for faster lookup

@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple, Set
 import multiprocessing as mp
 
 from datasets import Sequence, Value, load_dataset
-from open_instruct.utils import max_num_processes
+import open_instruct.utils as open_instruct_utils
 from huggingface_hub import hf_hub_download, list_repo_files
 import pyarrow.parquet as pq
 import pandas as pd
@@ -623,7 +623,7 @@ def main():
         parser.error("Either dataset_name positional argument or --input-dataset must be provided")
     
     print(f"Loading dataset: {dataset_name}")
-    dataset = load_dataset(dataset_name, split=args.split, num_proc=max_num_processes())
+    dataset = load_dataset(dataset_name, split=args.split, num_proc=open_instruct_utils.max_num_processes())
     print(f"Dataset loaded with {len(dataset)} examples")
     
     if args.verbose:

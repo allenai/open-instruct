@@ -57,7 +57,7 @@ from typing import List
 
 import requests
 from datasets import Dataset
-from open_instruct.utils import max_num_processes
+import open_instruct.utils as open_instruct_utils
 from openai import AzureOpenAI
 from pydantic import BaseModel
 
@@ -165,7 +165,7 @@ def process_batch_results(batch_ids: List[str]):
     # Filter and validate results
     url = "http://localhost:1234/test_program_stdio"
     new_results = []
-    #original_dataset = load_dataset(INPUT_HF_DATASET, "SFT", split=SPLIT, num_proc=max_num_processes())
+    #original_dataset = load_dataset(INPUT_HF_DATASET, "SFT", split=SPLIT, num_proc=open_instruct_utils.max_num_processes())
 
     # Create a lookup dictionary for O(1) access
     print('here')
