@@ -912,7 +912,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     global_metrics = accelerator.reduce(local_metrics, reduction="mean")
                     global_metrics /= args.gradient_accumulation_steps * args.logging_steps
                     global_metrics = global_metrics.tolist()
-
                     metrics_to_log = {
                         "training_step": completed_steps,
                         "learning_rate": lr_scheduler.get_last_lr()[0],
@@ -937,7 +936,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     if args.load_balancing_loss:
                         logger_str += f" Aux Loss: {global_metrics[19]}"
                         metrics_to_log["aux_loss"] = global_metrics[19]
-
                     logger.info(logger_str)
                     if args.with_tracking:
                         accelerator.log(metrics_to_log, step=completed_steps)
