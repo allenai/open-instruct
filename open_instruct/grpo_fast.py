@@ -1470,8 +1470,7 @@ def calculate_utilization_metrics(
     response_lengths: list[int],
     total_generation_time: float,
     samples_per_prompt: int,
-    num_engines: int,
-    num_gpus_per_engine: int,
+    num_inference_gpus: int,
     training_time: float,
     num_training_gpus: int,
 ) -> dict:
@@ -1483,8 +1482,7 @@ def calculate_utilization_metrics(
         response_lengths: List of response lengths
         total_generation_time: Total time taken for generation (for actor metrics)
         samples_per_prompt: Number of samples generated per prompt
-        num_engines: Number of vLLM engines for inference
-        num_gpus_per_engine: Number of GPUs assigned to each vLLM engine (tensor parallel size)
+        num_inference_gpus: Number of GPUs used for inference
         training_time: Time taken for training step (for learner metrics)
         num_training_gpus: Number of GPUs used for training (for learner metrics)
 
@@ -1498,30 +1496,42 @@ def calculate_utilization_metrics(
         f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
     )
 
-    num_inference_gpus = num_engines * num_gpus_per_engine
-
-    actor_metrics = model_dims.calculate_actor_utilization(
-        prompt_lengths=prompt_lengths,
-        response_lengths=response_lengths,
-        total_generation_time=total_generation_time,
-        samples_per_prompt=samples_per_prompt,
-        num_inference_gpus=num_inference_gpus,
-        num_engines=num_engines,
-        num_gpus_per_engine=num_gpus_per_engine,
+    # Calculate FLOPs and memory bytes for inference
+    actor_total_flops = model_dims.flops(prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt)
+    actor_total_memory_bytes = model_dims.memory_bytes(
+        prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt
     )
 
-    learner_metrics = model_dims.calculate_learner_utilization(
-        prompt_lengths=prompt_lengths,
-        response_lengths=response_lengths,
-        training_time=training_time,
-        samples_per_prompt=samples_per_prompt,
-        num_training_gpus=num_training_gpus,
+    # Calculate MFU and MBU accounting for multiple GPUs
+    flops_per_second = actor_total_flops / total_generation_time
+    bytes_per_second = actor_total_memory_bytes / total_generation_time
+    # Scale device capabilities by number of GPUs
+    total_device_flops = model_dims.device_flops * num_inference_gpus
+    total_device_bandwidth = model_dims.device_memory_bandwidth * num_inference_gpus
+    actor_mfu = 100 * flops_per_second / total_device_flops
+    actor_mbu = 100 * bytes_per_second / total_device_bandwidth
+
+    # Calculate learner/training metrics
+    # For training, we need to use total sequence lengths (prompt + response) since training
+    # processes the full sequences, not separate prefill/decode operations
+    total_sequence_lengths = [
+        prompt_lengths[i // samples_per_prompt] + response_len for i, response_len in enumerate(response_lengths)
+    ]
+
+    # For training FLOPs, pass total sequence lengths as prompt_lengths with response_lengths=None
+    training_flops = model_dims.flops(
+        prompt_lengths=total_sequence_lengths,
+        response_lengths=None,
+        samples_per_prompt=1,  # Already expanded in total_sequence_lengths
+        is_training=True,
     )
 
-    utilization_metrics = {f"actor_{k}": v for k, v in actor_metrics.items()}
-    utilization_metrics["learner_mfu"] = learner_metrics["mfu"]
+    # Calculate training MFU
+    training_flops_per_second = training_flops / training_time
+    total_training_device_flops = model_dims.device_flops * num_training_gpus
+    learner_mfu = 100 * training_flops_per_second / total_training_device_flops
 
-    return utilization_metrics
+    return {"actor_mfu": actor_mfu, "actor_mbu": actor_mbu, "learner_mfu": learner_mfu}
 
 
 def accumulate_inference_batches(
@@ -2479,6 +2489,7 @@ def one_training_step(
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
 
+    num_actor_gpus = args.vllm_num_engines * args.vllm_tensor_parallel_size
     total_generation_time = data_thread_metrics["time/getting_response"]
 
     utilization_metrics = calculate_utilization_metrics(
@@ -2487,8 +2498,7 @@ def one_training_step(
         response_lengths=response_lengths,
         total_generation_time=total_generation_time,
         samples_per_prompt=args.num_samples_per_prompt_rollout,
-        num_engines=args.vllm_num_engines,
-        num_gpus_per_engine=args.vllm_tensor_parallel_size,
+        num_inference_gpus=num_actor_gpus,
         training_time=train_timer.duration,
         num_training_gpus=args.world_size,
     )
