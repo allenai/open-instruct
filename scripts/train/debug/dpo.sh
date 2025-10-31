@@ -29,5 +29,6 @@ uv run python mason.py \
     --logging_steps 1 \
     --dataset_mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
     --add_bos \
+    --chat_template_name olmo \
     --seed 123
     # --with_tracking
