@@ -10,7 +10,7 @@ jobs:
 
   unit-tests:
     name: Run unit tests
-    runs-on: ubuntu-latest
+    runs-on: 8-Core-XL-Runner-Ubuntu-Latest
     timeout-minutes: 20
     steps:
 
@@ -23,4 +23,6 @@ jobs:
       - name: Set up Python
         run: uv sync --frozen
       - name: Run unit tests
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: uv run --frozen pytest
