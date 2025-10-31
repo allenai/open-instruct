@@ -3,9 +3,11 @@ BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 
 uv run python mason.py \
     --cluster ai2/neptune \
+    --description "Single GPU DPO run, for debugging purposes." \
     --workspace ai2/tulu-thinker \
     --priority high \
-    --image "$BEAKER_IMAGE" --pure_docker_mode \
+    --image "$BEAKER_IMAGE" \
+    --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
     --budget ai2/oe-adapt \
@@ -30,5 +32,5 @@ uv run python mason.py \
     --dataset_mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
     --add_bos \
     --chat_template_name olmo \
-    --seed 123
-    # --with_tracking
+    --seed 123 \
+    --with_tracking
