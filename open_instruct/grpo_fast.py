@@ -1808,6 +1808,9 @@ def data_preparation_thread(
 
         total_prompts_kept = 0
         total_prompts_filtered = 0
+        solved_prompts_filtered = 0
+        zero_prompts_filtered = 0
+        noresample_prompts_filtered = 0
         prompts_to_request = target_prompt_count
         getting_response_time = 0.0
 
@@ -1889,6 +1892,7 @@ def data_preparation_thread(
                     solved_indices = np.where(solved_expanded_mask)[0]
                     solved_prompt_indices = batch_step[solved_indices.tolist()].indices
                     train_iterator.exclude_indices(list(set(solved_prompt_indices)))
+                    noresample_prompts_filtered += solved_mask.sum()
 
                 non_zero_std_mask = scores_per_prompt_step.std(axis=-1) != 0
                 expanded_mask = np.repeat(non_zero_std_mask, per_prompt_rollout)
@@ -1896,7 +1900,12 @@ def data_preparation_thread(
 
                 num_zero_std_prompts = (~non_zero_std_mask).sum()
                 num_filtered_responses = len(scores_step) - len(non_zero_indices)
+
+                # Count groups with all zero rewards
+                zero_prompts_filtered += (scores_per_prompt_step == 0).all(axis=-1).sum()
+                solved_prompts_filtered += (scores_per_prompt_step == max_possible_score).all(axis=-1).sum()
                 total_prompts_filtered += num_zero_std_prompts
+
                 if num_filtered_responses > 0:
                     logger.info(
                         f"[Zero-gradient filtering] Filtered {num_zero_std_prompts} prompts with zero std "
@@ -2065,8 +2074,6 @@ def data_preparation_thread(
         if len(scores) == 0:
             logger.warning(f"No responses with non-zero advantages in batch {training_step}.")
 
-        scores_per_prompt = scores.reshape(-1, per_prompt_rollout)
-
         max_possible_score = 0
         if args.apply_verifiable_reward:
             max_possible_score += args.verification_reward
@@ -2081,16 +2088,6 @@ def data_preparation_thread(
         masks = aggregated_masks
         finish_reasons = aggregated_finish_reasons
         vllm_logprobs = aggregated_vllm_logprobs
-
-        # Count groups with all zero rewards
-        all_zero_groups = (scores_per_prompt == 0).all(axis=-1).sum()
-        all_solved_groups = (scores_per_prompt == max_possible_score).all(axis=-1).sum()
-        total_groups = len(scores_per_prompt)
-        logger.info(
-            f"[Reward Summary] Groups with all zero rewards: {all_zero_groups}/{total_groups} "
-            f" Groups with all solved rewards: {all_solved_groups}/{total_groups} "
-            f"({all_zero_groups / total_groups:.1%})"
-        )
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
@@ -2211,21 +2208,15 @@ def data_preparation_thread(
                 np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
             )
 
-            # Use the already calculated reward summary metrics for wandb
-            all_zero_groups_ratio = all_zero_groups / total_groups if total_groups > 0 else 0
-            all_solved_groups_ratio = all_solved_groups / total_groups if total_groups > 0 else 0
-
             metrics = {
                 "scores": np.array(scores).mean(),
                 "real_batch_size_ratio": real_batch_size_ratio,
                 "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
                 "packed_ratio": len(packed_sequences.query_responses) / len(responses) if len(responses) > 0 else 0,
-                "val/all_zero_reward_groups": all_zero_groups,
-                "val/all_zero_reward_groups_ratio": all_zero_groups_ratio,
-                "val/all_solved_reward_groups": all_solved_groups,
-                "val/all_solved_reward_groups_ratio": all_solved_groups_ratio,
+                "val/zero_filtered_groups": zero_prompts_filtered,
+                "val/solved_filtered_groups": solved_prompts_filtered,
                 "val/total_filtered_groups": total_prompts_filtered,
-                "val/total_reward_groups": total_groups,
+                "val/noresample_filtered_groups": noresample_prompts_filtered,
                 "val/sequence_lengths": sequence_lengths.mean(),
                 "val/sequence_lengths_min": sequence_lengths.min(),
                 "val/sequence_lengths_max": sequence_lengths.max(),
