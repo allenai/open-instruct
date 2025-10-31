@@ -1,8 +1,11 @@
+#!/bin/bash
+BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+
 python mason.py \
     --cluster ai2/neptune \
     --workspace ai2/tulu-thinker \
     --priority high \
-    --image nathanl/open_instruct_auto --pure_docker_mode \
+    --image "$BEAKER_IMAGE" --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
     --budget ai2/oe-adapt \
