@@ -458,8 +458,7 @@ def save_with_accelerate(
     # set the generation config to an empty setting to be safe.
     # we usually do greedy decoding for generation, so this should be okay.
     # otherwise, we get an error thrown at save time.
-    if "olmo" in chat_template_name:
-        # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
+    if chat_template_name and "olmo" in chat_template_name:
         logger.info(f"Detected olmo chat template: {chat_template_name}, updating model generation config.")
         model.generation_config = get_olmo3_generation_config(tokenizer)
     else:
