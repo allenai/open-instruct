@@ -49,7 +49,7 @@ from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
-from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
+from open_instruct.tools.utils.tool_classes import MaxCallsExceededTool, Tool
 from open_instruct.utils import ModelDims, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
@@ -160,6 +160,8 @@ async def process_request_async(
             break
 
         assert actor.executor is not None, f"executor is None for request {sub_request_id}"
+
+        logger.info(f"Tool {triggered_tool} triggered.")
 
         loop = asyncio.get_running_loop()
         tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
