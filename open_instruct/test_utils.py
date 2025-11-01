@@ -12,16 +12,61 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Copied from https://github.com/huggingface/alignment-handbook/blob/main/tests/test_data.py
+import json
+import pathlib
 import time
 import unittest
 from unittest import mock
 
 import pytest
+import torch
+import vllm
 from dateutil import parser
 from parameterized import parameterized
 
-from open_instruct import utils
+from open_instruct import grpo_fast, utils
 from open_instruct.finetune import FlatArguments
+
+
+def _load_mbu_test_cases():
+    test_data_path = pathlib.Path(__file__).parent / "test_data" / "mbu_reproduction_cases.json"
+    with open(test_data_path) as f:
+        data = json.load(f)
+    return [(name, case_data) for name, case_data in data.items()]
+
+
+MODEL_DIMS: dict[str, utils.ModelDims] = {
+    "Qwen/Qwen2.5-7B": utils.ModelDims(
+        num_layers=28,
+        hidden_size=3584,
+        intermediate_size=18944,
+        vocab_size=152064,
+        num_attn_heads=28,
+        head_dim=128,
+        num_kv_heads=4,
+        device_name="h100",
+    ),
+    "Qwen/Qwen2.5-1.5B": utils.ModelDims(
+        num_layers=28,
+        hidden_size=1536,
+        intermediate_size=8960,
+        vocab_size=151936,
+        num_attn_heads=12,
+        head_dim=128,
+        num_kv_heads=2,
+        device_name="h100",
+    ),
+    "Qwen/Qwen3-1.7B": utils.ModelDims(
+        num_layers=28,
+        hidden_size=2048,
+        intermediate_size=6144,
+        vocab_size=151936,
+        num_attn_heads=16,
+        head_dim=128,
+        num_kv_heads=8,
+        device_name="h100",
+    ),
+}
 
 
 class GetDatasetsTest(unittest.TestCase):
@@ -302,6 +347,138 @@ class TestFlatArguments(unittest.TestCase):
         (args,) = parser.parse_args_into_dataclasses(["--exp_name", "test"])
         self.assertIsInstance(args.additional_model_arguments, dict)
         self.assertFalse(args.additional_model_arguments)
+
+
+class TestModelDims(unittest.TestCase):
+    def test_qwen25_7b_flops_calculation(self):
+        sequence_length = 34048
+        model_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
+        total_flops = model_dims.flops([sequence_length], [1])
+        prefill_flops = model_dims.flops([sequence_length], None)
+        decode_flops = total_flops - prefill_flops
+        decode_flops_in_gflops = decode_flops / 1e9
+        self.assertAlmostEqual(decode_flops_in_gflops, 27.92, delta=0.01)
+
+    def test_qwen25_7b_memory_calculation(self):
+        sequence_length = 34048
+        batch_size = 16
+        model_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
+
+        embedding_params = model_dims.vocab_size * model_dims.hidden_size
+        weight_params = model_dims.num_params - embedding_params
+        lm_head_bytes = model_dims.vocab_size * model_dims.hidden_size
+        embedding_bytes = model_dims.hidden_size
+
+        total_bytes = weight_params / batch_size
+        total_bytes += lm_head_bytes + embedding_bytes
+        total_bytes += 2 * model_dims.num_kv_heads * model_dims.head_dim * model_dims.num_layers * sequence_length
+        total_bytes += 2 * model_dims.num_layers * model_dims.num_kv_heads * model_dims.head_dim
+        total_bytes *= 2
+
+        memory_in_gb = total_bytes / 1e9
+        self.assertAlmostEqual(memory_in_gb, 3.926, delta=0.01)
+
+    @parameterized.expand(_load_mbu_test_cases())
+    def test_mbu_reproduction(self, name, case_data):
+        metrics = grpo_fast.calculate_utilization_metrics(
+            model_dims=MODEL_DIMS[case_data["model_name"]],
+            prompt_lengths=case_data["prompt_lengths"],
+            response_lengths=case_data["response_lengths"],
+            total_generation_time=case_data["total_generation_time"],
+            samples_per_prompt=case_data["samples_per_prompt"],
+            num_engines=case_data["num_engines"],
+            num_gpus_per_engine=case_data["num_gpus_per_engine"],
+            training_time=case_data["training_time"],
+            num_training_gpus=case_data["num_training_gpus"],
+        )
+
+        self.assertLessEqual(metrics["actor_mfu"], 100)
+        self.assertLessEqual(metrics["actor_mbu"], 100)
+        self.assertLessEqual(metrics["learner_mfu"], 100)
+
+    @parameterized.expand(
+        [
+            ("two_engines_four_gpus_each", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 8, 2, 4, 4, 8.0, 4.0),
+            ("four_engines_two_gpus_each", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 8, 4, 2, 4, 8.0, 4.0),
+            ("single_engine_eight_gpus", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 8, 1, 8, 4, 8.0, 4.0),
+        ]
+    )
+    def test_multi_engine_utilization(
+        self,
+        name,
+        model_name,
+        num_prompts,
+        samples_per_prompt,
+        prompt_len,
+        response_len,
+        num_inference_gpus,
+        num_engines,
+        num_gpus_per_engine,
+        num_training_gpus,
+        total_generation_time,
+        training_time,
+    ):
+        prompt_lengths = [prompt_len] * num_prompts
+        response_lengths = [int(response_len)] * (num_prompts * samples_per_prompt)
+
+        metrics = grpo_fast.calculate_utilization_metrics(
+            model_dims=MODEL_DIMS[model_name],
+            prompt_lengths=prompt_lengths,
+            response_lengths=response_lengths,
+            total_generation_time=total_generation_time,
+            samples_per_prompt=samples_per_prompt,
+            num_engines=num_engines,
+            num_gpus_per_engine=num_gpus_per_engine,
+            training_time=training_time,
+            num_training_gpus=num_training_gpus,
+        )
+
+        self.assertLessEqual(
+            metrics["actor_mfu"],
+            100,
+            f"{name}: Actor MFU {metrics['actor_mfu']:.2f}% exceeded 100% "
+            f"(num_engines={num_engines}, num_gpus_per_engine={num_gpus_per_engine})",
+        )
+        self.assertLessEqual(
+            metrics["actor_mbu"],
+            100,
+            f"{name}: Actor MBU {metrics['actor_mbu']:.2f}% exceeded 100% "
+            f"(num_engines={num_engines}, num_gpus_per_engine={num_gpus_per_engine})",
+        )
+        self.assertLessEqual(metrics["learner_mfu"], 100)
+
+    def test_model_dims_match_vllm_config(self):
+        model_name = "Qwen/Qwen2.5-7B"
+        expected_dims = MODEL_DIMS[model_name]
+
+        mock_platform = mock.Mock()
+        mock_platform.device_type = "cuda"
+        mock_platform.is_cuda_alike.return_value = True
+        mock_platform.supported_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+        mock_platform.get_device_total_memory.return_value = 80 * 1024**3
+        mock_platform.get_device_name.return_value = "NVIDIA H100 80GB HBM3"
+
+        mock_model_cls = mock.Mock()
+        mock_model_cls.supports_multimodal.return_value = False
+        mock_model_cls.is_attention_free.return_value = False
+        mock_model_cls.is_attention_free = False
+
+        def mock_inspect_return(*args, **kwargs):
+            return mock_model_cls, "Qwen2ForCausalLM"
+
+        with (
+            mock.patch("vllm.platforms.current_platform", mock_platform),
+            mock.patch(
+                "vllm.model_executor.models.registry.ModelRegistry.inspect_model_cls", side_effect=mock_inspect_return
+            ),
+            mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
+        ):
+            engine_args = vllm.EngineArgs(model=model_name, load_format="dummy", max_model_len=512)
+            vllm_config = engine_args.create_engine_config()
+            vllm_dims = utils.ModelDims.from_vllm_config(vllm_config)
+        vllm_dims.device_name = "h100"
+
+        self.assertEqual(vllm_dims, expected_dims)
 
 
 # useful for checking if public datasets are still available
