@@ -217,7 +217,8 @@ async def process_request_async(
 
     if actor.tools:
         complete_output.mask = masks
-        complete_output.num_calls = num_calls
+        # Convert num_calls dict (per-tool counts) to total count for RequestInfo compatibility
+        complete_output.num_calls = sum(num_calls.values()) if isinstance(num_calls, dict) else num_calls
         complete_output.timeout = timeout
         complete_output.tool_error = tool_error
         complete_output.tool_output = tool_output
