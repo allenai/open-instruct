@@ -5,6 +5,7 @@ import argparse
 import json
 
 from datasets import load_dataset
+import open_instruct.utils as open_instruct_utils
 from transformers import AutoTokenizer
 
 parser = argparse.ArgumentParser()
@@ -28,7 +29,7 @@ metric_map = {
 
 if __name__ == "__main__":
     # load reference data
-    reference_dataset = load_dataset("hamishivi/alpaca-farm-davinci-003-2048-token")
+    reference_dataset = load_dataset("hamishivi/alpaca-farm-davinci-003-2048-token", num_proc=open_instruct_utils.max_num_processes())
     reference_dataset = [x["output"] for x in reference_dataset["train"]]
     # load candidate data
     with open(args.candidate_file, "r") as f:

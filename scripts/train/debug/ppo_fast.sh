@@ -1,4 +1,4 @@
-python open_instruct/ppo_fast.py \
+python open_instruct/ppo.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \

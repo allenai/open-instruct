@@ -76,6 +76,14 @@ logger = logger_utils.setup_logger(__name__)
 DataClassType = NewType("DataClassType", Any)
 
 
+def max_num_processes() -> int:
+    """Returns a reasonable default number of processes to run for multiprocessing."""
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    else:
+        return os.cpu_count() or 1
+
+
 def repeat_each(seq, k):
     """Repeat each element in a sequence k times."""
     return [item for item in seq for _ in range(k)]
@@ -316,13 +324,13 @@ def get_datasets(
         for split in splits:
             # if dataset ends with .json or .jsonl, load from file
             if ds.endswith(".json") or ds.endswith(".jsonl"):
-                dataset = load_dataset("json", data_files=ds, split=split)
+                dataset = load_dataset("json", data_files=ds, split=split, num_proc=max_num_processes())
             elif ds.endswith(".parquet"):
-                dataset = load_dataset("parquet", data_files=ds, split=split)
+                dataset = load_dataset("parquet", data_files=ds, split=split, num_proc=max_num_processes())
             else:
                 try:
                     # Try first if dataset on a Hub repo
-                    dataset = load_dataset(ds, ds_config, split=split)
+                    dataset = load_dataset(ds, ds_config, split=split, num_proc=max_num_processes())
                 except DatasetGenerationError:
                     # If not, check local dataset
                     dataset = load_from_disk(os.path.join(ds, split))
@@ -530,11 +538,11 @@ def combine_dataset(
     for (ds, frac_or_samples), ds_config, split in zip(dataset_mixer.items(), configs, splits):
         # if dataset ends with .json or .jsonl, load from file
         if ds.endswith(".json") or ds.endswith(".jsonl"):
-            dataset = load_dataset("json", data_files=ds, split=split)
+            dataset = load_dataset("json", data_files=ds, split=split, num_proc=max_num_processes())
         else:
             try:
                 # Try first if dataset on a Hub repo
-                dataset = load_dataset(ds, ds_config, split=split)
+                dataset = load_dataset(ds, ds_config, split=split, num_proc=max_num_processes())
             except DatasetGenerationError:
                 # If not, check local dataset
                 dataset = load_from_disk(os.path.join(ds, split))
@@ -2171,7 +2179,6 @@ class ModelDims:
         response_lengths: list[int],
         total_generation_time: float,
         samples_per_prompt: int,
-        num_inference_gpus: int,
         num_engines: int,
         num_gpus_per_engine: int,
     ) -> dict[str, float]:
@@ -2180,7 +2187,7 @@ class ModelDims:
             total_generation_time,
             response_lengths=response_lengths,
             samples_per_prompt=samples_per_prompt,
-            num_gpus=num_inference_gpus,
+            num_gpus=num_engines * num_gpus_per_engine,
         )
         actor_mbu = self.calculate_mbu(
             prompt_lengths,
@@ -2199,7 +2206,6 @@ class ModelDims:
             prompt_lengths,
             response_lengths,
             samples_per_prompt,
-            num_inference_gpus,
             num_engines,
             num_gpus_per_engine,
         )
@@ -2212,7 +2218,6 @@ class ModelDims:
             prompt_lengths,
             response_lengths,
             samples_per_prompt,
-            num_inference_gpus,
             num_engines,
             num_gpus_per_engine,
         )
@@ -2312,7 +2317,6 @@ def check_calculation(
     prompt_lengths: list[int],
     response_lengths: list[int] | None,
     samples_per_prompt: int,
-    num_gpus: int,
     num_engines: int,
     num_gpus_per_engine: int,
 ) -> None:
@@ -2345,7 +2349,6 @@ def check_calculation(
         f"\n"
         f"Timing and GPU info:\n"
         f"  timing: {timing:.6f}s\n"
-        f"  num_gpus: {num_gpus}\n"
         f"  num_engines: {num_engines}\n"
         f"  num_gpus_per_engine: {num_gpus_per_engine}\n"
         f"  full_device_name: {full_device_name}\n"
