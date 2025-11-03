@@ -554,11 +554,6 @@ def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: 
     return padded_tensor
 
 
-def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
-    for i in range(len(tensors_list)):
-        tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
-
-
 class ShufflingIterator:
     def __init__(self, data: np.ndarray, batch_size: int, seed: int | None = None):
         self.data = data.copy()
@@ -914,13 +909,17 @@ class PolicyTrainerRayProcess(RayProcess):
         num_mini_batches: int,
     ):
         args = self.args
-        to_device_inplace(collated_query_responses, self.device)
-        to_device_inplace(collated_tool_masks, self.device)
-        to_device_inplace(collated_attention_masks, self.device)
-        to_device_inplace(collated_position_ids, self.device)
-        to_device_inplace(collated_advantages, self.device)
-        to_device_inplace(collated_response_masks, self.device)
-        to_device_inplace(collated_vllm_logprobs, self.device)
+        for tensors_list in [
+            collated_query_responses,
+            collated_tool_masks,
+            collated_attention_masks,
+            collated_position_ids,
+            collated_advantages,
+            collated_response_masks,
+            collated_vllm_logprobs,
+        ]:
+            for i in range(len(tensors_list)):
+                tensors_list[i] = tensors_list[i].to(self.device, non_blocking=True)
         # accumulation steps should always be at least 1
         accumulation_steps = max(math.ceil(len(collated_query_responses) / num_mini_batches - 0.5), 1)
         leftover = len(collated_query_responses) % accumulation_steps
