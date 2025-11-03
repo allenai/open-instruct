@@ -1,4 +1,4 @@
-exp_name="0302_qwen2.5_7B_math_grpo_fast1_${RANDOM}"
+exp_name="0302_qwen2.5_7B_math_grpo1_${RANDOM}"
 python mason.py \
     --cluster ai2/jupiter  \
     --workspace ai2/tulu-3-dev \
@@ -7,11 +7,11 @@ python mason.py \
     --num_nodes 2 \
     --max_retries 0 \
     --budget ai2/oe-adapt \
-    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --exp_name 0302_qwen2.5_7B_math_grpo_fast1_1317 \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo.py \
+    --exp_name 0302_qwen2.5_7B_math_grpo1_1317 \
     --beta 0.0 \
     --number_samples_per_prompt 16 \
-    --output_dir /weka/oe-adapt-default/costah/models/0302_qwen2.5_7B_math_grpo_fast1_1317 \
+    --output_dir /weka/oe-adapt-default/costah/models/0302_qwen2.5_7B_math_grpo1_1317 \
     --oe_eval_tasks minerva_math::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning \
     --save_freq 40 \
     --no_try_launch_beaker_eval_jobs \

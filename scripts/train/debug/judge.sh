@@ -1,7 +1,7 @@
 export HOSTED_VLLM_API_BASE=http://saturn-cs-aus-230.reviz.ai2.in:8001/v1
 
 # new version
-python open_instruct/grpo_fast.py \
+python open_instruct/grpo.py \
     --dataset_mixer_list faezeb/tulu_3_rewritten_100k-no-math 20000 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k 32 \
@@ -46,7 +46,7 @@ python open_instruct/grpo_fast.py \
 
 # 8192
 # initial saurabh version
-# python open_instruct/grpo_fast.py \
+# python open_instruct/grpo.py \
 #     --dataset_mixer_list faezeb/tulu_3_rewritten_100k-no-math 512 \
 #     --dataset_mixer_list_splits train \
 #     --dataset_mixer_eval_list ai2-adapt-dev/general-thoughts-100k-rewritten-v2-ifeval 16 \

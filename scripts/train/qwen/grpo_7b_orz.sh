@@ -4,23 +4,23 @@ python mason.py \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
-    --num_nodes 2 \
+    --num_nodes 4 \
     --budget ai2/oe-adapt \
-    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --exp_name qwen2.5_7b_grpo_fast_zero \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo.py \
+    --exp_name qwen2.5_7b_grpo_zero_orz \
     --beta 0.0 \
-    --num_unique_prompts_rollout 48 \
-    --num_samples_per_prompt_rollout 16 \
+    --num_unique_prompts_rollout 128 \
+    --num_samples_per_prompt_rollout 64 \
     --kl_estimator kl3 \
     --learning_rate 5e-7 \
-    --dataset_mixer_list ai2-adapt-dev/math_ground_truth_zs 1.0 \
+    --dataset_mixer_list ai2-adapt-dev/rlvr_open_reasoner_math 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list ai2-adapt-dev/math_ground_truth_zs 16 \
+    --dataset_mixer_eval_list ai2-adapt-dev/rlvr_open_reasoner_math 16 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 2048 \
+    --max_token_length 8192 \
     --max_prompt_token_length 2048 \
-    --response_length 4096 \
-    --pack_length 6144 \
+    --response_length 8192 \
+    --pack_length 16384 \
     --model_name_or_path Qwen/Qwen2.5-7B \
     --stop_strings "</answer>" \
     --apply_r1_style_format_reward True \
@@ -31,17 +31,18 @@ python mason.py \
     --oe_eval_tasks minerva_math::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning \
     --oe_eval_max_length 8192 \
     --temperature 1.0 \
-    --total_episodes 5000000 \
-    --deepspeed_stage 3 \
+    --masked_mean_axis 1 \
+    --total_episodes 10000000 \
+    --deepspeed_stage 2 \
     --per_device_train_batch_size 1 \
     --num_mini_batches 1 \
-    --num_learners_per_node 4 \
+    --num_learners_per_node 8 8 \
     --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
-    --vllm_num_engines 12 \
+    --vllm_num_engines 16 \
     --lr_scheduler_type linear \
-    --seed 1 \
-    --local_eval_every 30 \
+    --seed 3 \
+    --local_eval_every 5 \
     --save_freq 40 \
     --try_launch_beaker_eval_jobs_on_weka \
     --gradient_checkpointing \

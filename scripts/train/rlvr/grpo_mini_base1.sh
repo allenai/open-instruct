@@ -1,5 +1,5 @@
 exp_name="base_smollm_grpo_${RANDOM}"
-python open_instruct/grpo_fast.py \
+python open_instruct/grpo.py \
     --exp_name $exp_name \
     --output_dir output/dummy \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 1.0 \

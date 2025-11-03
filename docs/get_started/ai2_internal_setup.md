@@ -105,7 +105,7 @@ When submitting to the `ai2/augusta` cluster, mason will try to read your model 
 The [/scripts/train](/scripts/train) directory contains many examples on how to launch jobs with mason.py. Sometimes the commands can get long and hard to manage, so we wrote a script called [update_command_args.py](/update_command_args.py) that can be used to add or update arguments in a shell script. For example,
 
 ```bash
-python update_command_args.py scripts/train/tulu3/grpo_fast_8b.sh \
+python update_command_args.py scripts/train/tulu3/grpo_8b.sh \
     --cluster ai2/augusta \
     --priority normal \
     --image costah/open_instruct_dev0320_11  --non_stop_penalty False | uv run bash
@@ -118,8 +118,8 @@ As another example, you can run something like this for a learning rate search:
 
 ```bash
 for lr in 1e-6 1e-5 1e-4; do
-    python update_command_args.py scripts/train/tulu3/grpo_fast_8b.sh \
-        --exp_name grpo_fast_8b_lr_${lr} \
+    python update_command_args.py scripts/train/tulu3/grpo_8b.sh \
+        --exp_name grpo_8b_lr_${lr} \
         --learning_rate $lr \
         --image costah/open_instruct_dev0320_11 --non_stop_penalty False | uv run bash
 done

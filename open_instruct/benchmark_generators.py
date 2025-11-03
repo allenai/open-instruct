@@ -2,8 +2,8 @@
 """
 Benchmark script for testing vLLM generator performance.
 
-This script loads datasets in the same way as grpo_fast.py, sets up a generator
-like in test_grpo_fast.py, and streams results to/from the generator to measure
+This script loads datasets in the same way as grpo.py, sets up a generator
+like in test_grpo.py, and streams results to/from the generator to measure
 performance.
 """
 
@@ -27,7 +27,7 @@ import torch.utils.flop_counter
 import vllm
 from ray.util import queue as ray_queue
 
-from open_instruct import dataset_transformation, grpo_fast, logger_utils, model_utils, utils, vllm_utils
+from open_instruct import dataset_transformation, grpo, logger_utils, model_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.queue_types import PromptRequest
 
@@ -116,7 +116,7 @@ def get_git_commit() -> str:
 
 
 def save_benchmark_results_to_csv(
-    results: list[dict[str, Any]], total_time: float, args: grpo_fast.Args, model_config: model_utils.ModelConfig
+    results: list[dict[str, Any]], total_time: float, args: grpo.Args, model_config: model_utils.ModelConfig
 ) -> None:
     """Save benchmark results to CSV file."""
     git_commit = get_git_commit()
@@ -199,8 +199,8 @@ def free_all_gpu_memory(device: int | str = 0) -> None:
     logger.info(f"[GPU {dev.index}] {free / gib:.2f} GiB free of {total / gib:.2f} GiB after cleanup")
 
 
-def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation.TokenizerConfig) -> datasets.Dataset:
-    """Set up the dataset using the same pipeline as grpo_fast.py."""
+def setup_dataset(args: grpo.Args, tokenizer_config: dataset_transformation.TokenizerConfig) -> datasets.Dataset:
+    """Set up the dataset using the same pipeline as grpo.py."""
     logger.info("Loading and processing dataset...")
 
     # Transform function arguments
@@ -229,7 +229,7 @@ def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation
 
 
 def setup_vllm_engines(
-    args: grpo_fast.Args,
+    args: grpo.Args,
     tokenizer_config: dataset_transformation.TokenizerConfig,
     model_config: model_utils.ModelConfig,
     max_model_len: int,
@@ -274,7 +274,7 @@ def setup_vllm_engines(
 
 
 def simulate_weight_sync(
-    actor_manager: ray.actor.ActorHandle, vllm_engines: list[ray.actor.ActorHandle], args: grpo_fast.Args
+    actor_manager: ray.actor.ActorHandle, vllm_engines: list[ray.actor.ActorHandle], args: grpo.Args
 ) -> float:
     """Simulate weight sync by pausing all actors.
 
@@ -348,7 +348,7 @@ def run_benchmark(
     param_prompt_Q: ray_queue.Queue,
     inference_results_Q: ray_queue.Queue,
     actor_manager: ray.actor.ActorHandle,
-    args: grpo_fast.Args,
+    args: grpo.Args,
     model_config: model_utils.ModelConfig,
     timestamp: int,
     num_batches: int = 5,
@@ -565,7 +565,7 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
 def print_summary(
     results: list[dict[str, Any]],
     total_time: float,
-    args: grpo_fast.Args,
+    args: grpo.Args,
     model_config: model_utils.ModelConfig,
     model_dims: utils.ModelDims,
 ) -> None:
@@ -642,9 +642,7 @@ def cleanup(vllm_engines: list[ray.actor.ActorHandle], actor_manager: ray.actor.
 def main() -> None:
     """Main benchmark function."""
     # Parse arguments using ArgumentParserPlus
-    parser = utils.ArgumentParserPlus(
-        (grpo_fast.Args, dataset_transformation.TokenizerConfig, model_utils.ModelConfig)
-    )
+    parser = utils.ArgumentParserPlus((grpo.Args, dataset_transformation.TokenizerConfig, model_utils.ModelConfig))
 
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
 

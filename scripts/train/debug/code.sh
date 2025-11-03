@@ -1,4 +1,4 @@
-python open_instruct/grpo_fast.py \
+python open_instruct/grpo.py \
     --exp_name "test" \
     --beta 0.01 \
     --num_unique_prompts_rollout 48 \

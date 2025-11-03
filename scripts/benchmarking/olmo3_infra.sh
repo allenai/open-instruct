@@ -32,7 +32,7 @@ for split_var in mixin_it_up; do
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         --env LITELLM_LOG="ERROR" \
         --budget ai2/oe-adapt \
-        --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
+        --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
 	--async_steps=4 \

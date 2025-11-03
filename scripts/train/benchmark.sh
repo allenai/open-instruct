@@ -47,7 +47,7 @@ python update_command_args.py scripts/train/tulu3/ppo_8b.sh \
     --image costah/open_instruct_dev_uv13 | uv run bash
 
 # 2 nodes
-python update_command_args.py scripts/train/tulu3/grpo_fast_8b.sh \
+python update_command_args.py scripts/train/tulu3/grpo_8b.sh \
     --cluster ai2/augusta \
     --wandb_project_name open_instruct_public \
     --priority normal \
@@ -55,7 +55,7 @@ python update_command_args.py scripts/train/tulu3/grpo_fast_8b.sh \
     --image costah/open_instruct_dev0320_11 | uv run bash
 
 # 1 node
-python update_command_args.py scripts/train/tulu3/grpo_fast_8b_single_node.sh \
+python update_command_args.py scripts/train/tulu3/grpo_8b_single_node.sh \
     --cluster ai2/augusta \
     --wandb_project_name open_instruct_public \
     --priority normal \
@@ -67,13 +67,13 @@ python update_command_args.py scripts/train/tulu3/grpo_fast_8b_single_node.sh \
 # Qwen
 
 # 2 nodes
-python update_command_args.py scripts/train/qwen/grpo_fast_7b.sh \
+python update_command_args.py scripts/train/qwen/grpo_7b.sh \
     --cluster ai2/augusta \
     --wandb_project_name open_instruct_public \
     --priority urgent | uv run bash
 
 # 4 nodes
-python update_command_args.py scripts/train/qwen/grpo_fast_7b_orz.sh \
+python update_command_args.py scripts/train/qwen/grpo_7b_orz.sh \
     --cluster ai2/augusta \
     --wandb_project_name open_instruct_public \
     --image costah/open_instruct_dev_0405 \
@@ -96,7 +96,7 @@ python update_command_args.py scripts/train/qwen/grpo_7b.sh \
     --image costah/open_instruct_dev_0410_ww_1 | uv run bash
 
 # 1 node
-python update_command_args.py scripts/train/qwen/grpo_fast_3b_single_node.sh \
+python update_command_args.py scripts/train/qwen/grpo_3b_single_node.sh \
     --cluster ai2/augusta \
     --wandb_project_name open_instruct_public \
     --priority normal \
@@ -104,7 +104,7 @@ python update_command_args.py scripts/train/qwen/grpo_fast_3b_single_node.sh \
 
 
 # 8 nodes
-python update_command_args.py scripts/train/qwen/grpo_fast_32b.sh \
+python update_command_args.py scripts/train/qwen/grpo_32b.sh \
     --cluster ai2/augusta \
     --wandb_project_name open_instruct_public \
     --priority high | uv run bash
@@ -113,7 +113,7 @@ python update_command_args.py scripts/train/qwen/grpo_fast_32b.sh \
 # Llama3
 
 # 4 nodes
-python update_command_args.py scripts/train/llama3/grpo_fast_7b_math.sh \
+python update_command_args.py scripts/train/llama3/grpo_7b_math.sh \
     --cluster ai2/augusta \
     --wandb_project_name open_instruct_public \
     --priority high | uv run bash
@@ -157,14 +157,14 @@ python update_command_args.py scripts/train/olmo2/dpo_13b.sh \
     --image costah/open_instruct_dev0320_11 | uv run bash
 
 # 2 nodes
-python update_command_args.py scripts/train/olmo2/grpo_fast_7b_zero.sh \
+python update_command_args.py scripts/train/olmo2/grpo_7b_zero.sh \
     --cluster ai2/augusta \
     --wandb_project_name open_instruct_public \
     --priority urgent \
     --image costah/open_instruct_dev0327_4 | uv run bash
 
 # 2 nodes
-python update_command_args.py scripts/train/olmo2/grpo_fast_13b_zero.sh \
+python update_command_args.py scripts/train/olmo2/grpo_13b_zero.sh \
     --cluster ai2/augusta \
     --wandb_project_name open_instruct_public \
     --priority urgent \

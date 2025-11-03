@@ -4,12 +4,12 @@ python mason.py \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
-    --num_nodes 2 \
+    --num_nodes 1 \
     --budget ai2/oe-adapt \
-    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --exp_name tulu3.1_8b_grpo_fast \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo.py \
+    --exp_name tulu3.1_8b_grpo \
     --beta 0.01 \
-    --num_unique_prompts_rollout 48 \
+    --num_unique_prompts_rollout 64 \
     --num_samples_per_prompt_rollout 16 \
     --try_launch_beaker_eval_jobs_on_weka \
     --kl_estimator kl3 \
@@ -35,11 +35,12 @@ python mason.py \
     --num_learners_per_node 6 \
     --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
-    --vllm_num_engines 10 \
+    --vllm_num_engines 2 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --local_eval_every 25 \
+    --local_eval_every 20 \
     --save_freq 40 \
     --gradient_checkpointing \
+    --gather_whole_model False \
     --with_tracking

@@ -6,12 +6,12 @@ GRPO is an online RL method used in [DeepSeek R1 paper](https://arxiv.org/abs/25
 
 ## Implemented Variants
 
-- `grpo_fast.py` is a faster variant using [packing techniques](https://huggingface.co/blog/sirluk/llm-sequence-packing).
+- `grpo.py` is a faster variant using [packing techniques](https://huggingface.co/blog/sirluk/llm-sequence-packing).
 - `grpo_vllm_thread_ray_gtrl.py` is a more vanilla GRPO implementation, using vLLM and Ray.
 
 
 
-## `grpo_fast.py`
+## `grpo.py`
 
 This implementation has the following features:
 
@@ -19,17 +19,17 @@ This implementation has the following features:
 - Uses a thread-based approach to parallelize the training and inference processes, based on [Asynchronous RLHF](https://arxiv.org/abs/2410.18252).
 - Uses a data preparation thread to prepare the data for the training process.
 
-In simpler tasks, we see 2x faster training, and even 10x faster for more complex tasks. With `grpo_fast.py`, we can run crank up `number_samples_per_prompt` and train on really large batch sizes.
+In simpler tasks, we see 2x faster training, and even 10x faster for more complex tasks. With `grpo.py`, we can run crank up `number_samples_per_prompt` and train on really large batch sizes.
 
 It implements additional optimizations:
 
-* `grpo_fast.py` also implements an optimization to skip zero gradient batches. If we solve a prompt 100% correct or 0% correct, the std of the group is 0. So `adv = (score - score.mean()) / (score.std + 1e-5) = 0 / 1e-5 = 0`, causing 0 gradients. `grpo_fast.py` will skip these batches before packing the sequences.
+* `grpo.py` also implements an optimization to skip zero gradient batches. If we solve a prompt 100% correct or 0% correct, the std of the group is 0. So `adv = (score - score.mean()) / (score.std + 1e-5) = 0 / 1e-5 = 0`, causing 0 gradients. `grpo.py` will skip these batches before packing the sequences.
 
-![](grpo/grpo_fast_gradient.png)
+![](grpo/grpo_gradient.png)
 
 Figure taken from [this discord thread by @the_real_jrb](https://discord.com/channels/1179127597926469703/1208183216843005962/1357712190957682839)
 
-* `grpo_fast.py` only applies the verification reward if the format reward is enabled (via `--additive_format_reward False` by default). See ([allenai/open-instruct/pull/659](https://github.com/allenai/open-instruct/pull/659)). A direct additive format reward is undesirable. In GRPO, the scale of the rewards is not relevant due to group normalization. For example, a group of [0, 0, 0, 0, 10], [0, 0, 0, 0, 11], [0, 0, 0, 0, 1] reward will have the same advantage.
+* `grpo.py` only applies the verification reward if the format reward is enabled (via `--additive_format_reward False` by default). See ([allenai/open-instruct/pull/659](https://github.com/allenai/open-instruct/pull/659)). A direct additive format reward is undesirable. In GRPO, the scale of the rewards is not relevant due to group normalization. For example, a group of [0, 0, 0, 0, 10], [0, 0, 0, 0, 11], [0, 0, 0, 0, 1] reward will have the same advantage.
 
 Now imagine there are cases where the model generates a really long response (8k) gen length, but only get the format reward right, GRPO will push up the probs for this long response even though the response is not really correct. As a result, when using the format reward directly, we see the response length of unsolved prompts to fluctuate significantly, causing stability issues.
 
@@ -41,9 +41,9 @@ You can run the script in a single GPU mode to debug the training process.
 
 ```bash
 # single GPU
-bash scripts/train/debug/grpo_fast.sh
+bash scripts/train/debug/grpo.sh
 # 3 GPU: 2 for training, 1 for inference (a more realistic setting for async training)
-bash scripts/train/debug/grpo_fast_3_gpu.sh
+bash scripts/train/debug/grpo_3_gpu.sh
 ```
 
 ### Reproduce `allenai/Llama-3.1-Tulu-3.1-8B` (1 Nodes)
@@ -51,16 +51,16 @@ bash scripts/train/debug/grpo_fast_3_gpu.sh
 You can reproduce our `allenai/Llama-3.1-Tulu-3.1-8B` model by running the following command:
 
 ```bash
-bash scripts/train/tulu3/grpo_fast_8b_single_node.sh
+bash scripts/train/tulu3/grpo_8b_single_node.sh
 ```
 
 ???+ info
 
-    Here the `grpo_fast.py` actually use 6 GPUs for training and 2 GPUs for inference, so it's using less hardware but runs faster than `grpo_vllm_thread_ray_gtrl.py` which uses 2 nodes (12 GPUs for training and 4 GPUs for inference).
+    Here the `grpo.py` actually use 6 GPUs for training and 2 GPUs for inference, so it's using less hardware but runs faster than `grpo_vllm_thread_ray_gtrl.py` which uses 2 nodes (12 GPUs for training and 4 GPUs for inference).
 
 
-![grpo_tulu3_8b](grpo/tulu3.1_8b_grpo_fast.png)
-![grpo_tulu3_8b_time](grpo/tulu3.1_8b_grpo_fast-time.png)
+![grpo_tulu3_8b](grpo/tulu3.1_8b_grpo.png)
+![grpo_tulu3_8b_time](grpo/tulu3.1_8b_grpo-time.png)
 
 ??? note "👉 Tracked WandB Experiments (Click to expand)"
     
@@ -70,13 +70,13 @@ bash scripts/train/tulu3/grpo_fast_8b_single_node.sh
 
     Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
 
-    ![grpo_plot](grpo/tulu3.1_8b_grpo_fast_eval_curve.png)
+    ![grpo_plot](grpo/tulu3.1_8b_grpo_eval_curve.png)
 
 ???+ info
 
     Based on our internal evaluation, the GRPO model is roughly on par with the original `allenai/Llama-3.1-Tulu-3.1-8B` model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training. 
 
-    ![grpo_plot](grpo/tulu3.1_8b_grpo_fast_eval.png)
+    ![grpo_plot](grpo/tulu3.1_8b_grpo_eval.png)
 
 
 ???+ info
@@ -89,12 +89,12 @@ bash scripts/train/tulu3/grpo_fast_8b_single_node.sh
 We have
 
 ```bash
-bash scripts/train/qwen/grpo_fast_7b.sh
+bash scripts/train/qwen/grpo_7b.sh
 ```
 
 
-![grpo_qwen2.5_7B_works](grpo/qwen2.5_7b_grpo_fast_zero.png)
-![grpo_qwen2.5_7B_works_time](grpo/qwen2.5_7b_grpo_fast_zero-time.png)
+![grpo_qwen2.5_7B_works](grpo/qwen2.5_7b_grpo_zero.png)
+![grpo_qwen2.5_7B_works_time](grpo/qwen2.5_7b_grpo_zero-time.png)
 
 
 ??? note "👉 Tracked WandB Experiments (Click to expand)"
@@ -106,7 +106,7 @@ bash scripts/train/qwen/grpo_fast_7b.sh
 
     Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
 
-    ![grpo_plot](grpo/qwen2.5_7b_grpo_fast_zero_eval_curve.png)
+    ![grpo_plot](grpo/qwen2.5_7b_grpo_zero_eval_curve.png)
 
 ???+ info
 
@@ -120,12 +120,12 @@ bash scripts/train/qwen/grpo_fast_7b.sh
 We have
 
 ```bash
-bash scripts/train/olmo2/grpo_fast_7b_zero.sh
+bash scripts/train/olmo2/grpo_7b_zero.sh
 ```
 
 
-![grpo_olmo2_7b_zero](grpo/olmo2_7b_grpo_fast_zero.png)
-![grpo_olmo2_7b_zero_time](grpo/olmo2_7b_grpo_fast_zero-time.png)
+![grpo_olmo2_7b_zero](grpo/olmo2_7b_grpo_zero.png)
+![grpo_olmo2_7b_zero_time](grpo/olmo2_7b_grpo_zero-time.png)
 
 ??? note "👉 Tracked WandB Experiments (Click to expand)"
     
@@ -135,7 +135,7 @@ bash scripts/train/olmo2/grpo_fast_7b_zero.sh
 
     Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
 
-    ![grpo_plot](grpo/olmo2_7b_grpo_fast_zero_eval_curve.png)
+    ![grpo_plot](grpo/olmo2_7b_grpo_zero_eval_curve.png)
 
 
 ???+ info
@@ -148,12 +148,12 @@ bash scripts/train/olmo2/grpo_fast_7b_zero.sh
 We have
 
 ```bash
-bash scripts/train/olmo2/grpo_fast_13b_zero.sh
+bash scripts/train/olmo2/grpo_13b_zero.sh
 ```
 
 
-![grpo_olmo2_13b_zero](grpo/olmo2_13b_grpo_fast_zero.png)
-![grpo_olmo2_13b_zero_time](grpo/olmo2_13b_grpo_fast_zero-time.png)
+![grpo_olmo2_13b_zero](grpo/olmo2_13b_grpo_zero.png)
+![grpo_olmo2_13b_zero_time](grpo/olmo2_13b_grpo_zero-time.png)
 
 ??? note "👉 Tracked WandB Experiments (Click to expand)"
     
@@ -163,7 +163,7 @@ bash scripts/train/olmo2/grpo_fast_13b_zero.sh
 
     Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
 
-    ![grpo_plot](grpo/olmo2_13b_grpo_fast_zero_eval_curve.png)
+    ![grpo_plot](grpo/olmo2_13b_grpo_zero_eval_curve.png)
 
 
 ???+ info
@@ -175,7 +175,7 @@ bash scripts/train/olmo2/grpo_fast_13b_zero.sh
 
 ### Training Metrics
 
-See the Training Metrics for `grpo_vllm_thread_ray_gtrl.py` below for general metrics. `grpo_fast.py` includes the following additional metrics:
+See the Training Metrics for `grpo_vllm_thread_ray_gtrl.py` below for general metrics. `grpo.py` includes the following additional metrics:
 
 
 * `other/real_batch_size_ratio`: In GRPO, as we train we actually get smaller and smaller batch sizes. This is because if we solve a prompt 100% correct or 0% correct, the std of the group is 0. So `adv = (score - score.mean()) / (score.std + 1e-5) = 0 / 1e-5 = 0`, causing 0 gradients. This metric is the ratio of the samples that have gradients vs the total number of samples,
