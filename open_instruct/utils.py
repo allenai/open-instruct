@@ -2206,7 +2206,6 @@ class ModelDims:
             prompt_lengths,
             response_lengths,
             samples_per_prompt,
-            num_inference_gpus,
             num_engines,
             num_gpus_per_engine,
         )
@@ -2219,7 +2218,6 @@ class ModelDims:
             prompt_lengths,
             response_lengths,
             samples_per_prompt,
-            num_inference_gpus,
             num_engines,
             num_gpus_per_engine,
         )
