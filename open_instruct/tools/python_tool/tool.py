@@ -14,12 +14,15 @@ class PythonCodeTool(Tool):
         code_tool_api_endpoint: str | None = None,
         start_str: str = "<code>",
         end_str: str = "</code>",
+        name: str | None = None,
         *args,
         **kwargs,
     ):
         # Prefer explicit api_endpoint, fall back to code_tool_api_endpoint
         self.api_endpoint = api_endpoint or code_tool_api_endpoint
-        super().__init__("PythonCodeTool", start_str=start_str, end_str=end_str, *args, **kwargs)
+        # Use provided name if given (e.g., registry name 'code'), otherwise default to 'PythonCodeTool'
+        tool_name = name if name is not None else "code"
+        super().__init__(tool_name, start_str=start_str, end_str=end_str, *args, **kwargs)
 
     def __call__(self, prompt: str) -> ToolOutput:
         r"""
