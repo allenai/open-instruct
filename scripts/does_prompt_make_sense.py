@@ -6,6 +6,7 @@ from typing import Optional
 
 import pandas as pd
 from datasets import load_dataset
+import open_instruct.utils as open_instruct_utils
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm_asyncio
 from transformers import AutoTokenizer, HfArgumentParser
@@ -110,7 +111,7 @@ def llm_judge(ljc: LLMJudgeConfig, df: pd.DataFrame):
 
 if __name__ == "__main__":
     args, ljc = HfArgumentParser((Args, LLMJudgeConfig)).parse_args_into_dataclasses()
-    raw_dataset = load_dataset("allenai/tulu-v2-sft-mixture", split="train")
+    raw_dataset = load_dataset("allenai/tulu-v2-sft-mixture", split="train", num_proc=open_instruct_utils.max_num_processes())
     raw_dataset = raw_dataset.select(range(64))
     tokenizer = AutoTokenizer.from_pretrained("allenai/llama-3-tulu-2-8b")
     ds = raw_dataset.map(

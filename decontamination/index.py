@@ -6,6 +6,8 @@ from datasets import load_dataset
 from elasticsearch import Elasticsearch, helpers
 from tqdm import tqdm
 
+import open_instruct.utils as open_instruct_utils
+
 
 def create_text_index(es, index_name):
     mappings = {
@@ -45,7 +47,7 @@ def create_vector_index(es, index_name):
 
 
 def read_dataset(dataset_name, split, messages_field, query_filter, query_field):
-    dataset = load_dataset(dataset_name, split=split)
+    dataset = load_dataset(dataset_name, split=split, num_proc=open_instruct_utils.max_num_processes())
     data_to_index = []
 
     query_filter_key, query_filter_value = query_filter.split(":")

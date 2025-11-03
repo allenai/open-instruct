@@ -76,6 +76,14 @@ logger = logger_utils.setup_logger(__name__)
 DataClassType = NewType("DataClassType", Any)
 
 
+def max_num_processes() -> int:
+    """Returns a reasonable default number of processes to run for multiprocessing."""
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    else:
+        return os.cpu_count() or 1
+
+
 def repeat_each(seq, k):
     """Repeat each element in a sequence k times."""
     return [item for item in seq for _ in range(k)]
@@ -316,13 +324,13 @@ def get_datasets(
         for split in splits:
             # if dataset ends with .json or .jsonl, load from file
             if ds.endswith(".json") or ds.endswith(".jsonl"):
-                dataset = load_dataset("json", data_files=ds, split=split)
+                dataset = load_dataset("json", data_files=ds, split=split, num_proc=max_num_processes())
             elif ds.endswith(".parquet"):
-                dataset = load_dataset("parquet", data_files=ds, split=split)
+                dataset = load_dataset("parquet", data_files=ds, split=split, num_proc=max_num_processes())
             else:
                 try:
                     # Try first if dataset on a Hub repo
-                    dataset = load_dataset(ds, ds_config, split=split)
+                    dataset = load_dataset(ds, ds_config, split=split, num_proc=max_num_processes())
                 except DatasetGenerationError:
                     # If not, check local dataset
                     dataset = load_from_disk(os.path.join(ds, split))
@@ -530,11 +538,11 @@ def combine_dataset(
     for (ds, frac_or_samples), ds_config, split in zip(dataset_mixer.items(), configs, splits):
         # if dataset ends with .json or .jsonl, load from file
         if ds.endswith(".json") or ds.endswith(".jsonl"):
-            dataset = load_dataset("json", data_files=ds, split=split)
+            dataset = load_dataset("json", data_files=ds, split=split, num_proc=max_num_processes())
         else:
             try:
                 # Try first if dataset on a Hub repo
-                dataset = load_dataset(ds, ds_config, split=split)
+                dataset = load_dataset(ds, ds_config, split=split, num_proc=max_num_processes())
             except DatasetGenerationError:
                 # If not, check local dataset
                 dataset = load_from_disk(os.path.join(ds, split))
