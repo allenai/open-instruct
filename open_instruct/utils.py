@@ -2245,16 +2245,7 @@ class ModelDims:
         learner_mfu = 100 * training_flops_per_second / total_training_device_flops
 
         check_calculation(
-            learner_mfu,
-            "Learner MFU",
-            self,
-            training_time,
-            total_sequence_lengths,
-            None,
-            1,
-            num_training_gpus,
-            1,
-            num_training_gpus,
+            learner_mfu, "Learner MFU", self, training_time, total_sequence_lengths, None, 1, 1, num_training_gpus
         )
 
         return {"mfu": learner_mfu}
@@ -2301,7 +2292,6 @@ def check_calculation(
     prompt_lengths: list[int],
     response_lengths: list[int] | None,
     samples_per_prompt: int,
-    num_gpus: int,
     num_engines: int,
     num_gpus_per_engine: int,
 ) -> None:
