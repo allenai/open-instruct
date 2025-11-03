@@ -721,6 +721,7 @@ class LLMRayActor:
         return self._run_async(self.llm_engine.reset_prefix_cache())
 
     def ready(self) -> bool:
+        self.check_background_threads()
         return True
 
     def check_background_threads(self) -> None:
