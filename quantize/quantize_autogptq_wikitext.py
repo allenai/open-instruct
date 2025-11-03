@@ -18,10 +18,12 @@ from auto_gptq import AutoGPTQForCausalLM, BaseQuantizeConfig
 from datasets import load_dataset
 from transformers import AutoTokenizer
 
+import open_instruct.utils as open_instruct_utils
+
 
 def get_wikitext2(nsamples, seed, seqlen, model):
-    traindata = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
-    testdata = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
+    traindata = load_dataset("wikitext", "wikitext-2-raw-v1", split="train", num_proc=open_instruct_utils.max_num_processes())
+    testdata = load_dataset("wikitext", "wikitext-2-raw-v1", split="test", num_proc=open_instruct_utils.max_num_processes())
 
     tokenizer = AutoTokenizer.from_pretrained(model, use_fast=False)
     trainenc = tokenizer("\n\n".join(traindata["text"]), return_tensors="pt")

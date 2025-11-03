@@ -20,6 +20,7 @@ import argparse
 import json
 
 from datasets import load_dataset
+import open_instruct.utils as open_instruct_utils
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
@@ -89,7 +90,7 @@ def main():
     args = parser.parse_args()
 
     # 1. Load and slice dataset
-    ds = load_dataset(args.dataset, split=args.split)
+    ds = load_dataset(args.dataset, split=args.split, num_proc=open_instruct_utils.max_num_processes())
     ds = ds.shuffle(seed=42)  # so we dont just take first n samples
     up_to = min(args.offset + args.size, len(ds))
     subset = ds.select(range(args.offset, up_to))
@@ -133,7 +134,7 @@ def main():
                 out_f.write(json.dumps(enriched, ensure_ascii=False) + "\n")
 
     if args.push_to_hub is not None:
-        dataset = load_dataset(args.dataset, split=args.split)
+        dataset = load_dataset(args.dataset, split=args.split, num_proc=open_instruct_utils.max_num_processes())
         dataset.push_to_hub(args.push_to_hub)
 
 

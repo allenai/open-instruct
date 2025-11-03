@@ -46,6 +46,7 @@ import time
 from typing import List
 
 from datasets import load_dataset
+import open_instruct.utils as open_instruct_utils
 from openai import AzureOpenAI
 from pydantic import BaseModel, ConfigDict
 
@@ -79,10 +80,10 @@ def extract_python_code(model_output: str) -> str:
 
 
 hf_datasets = {
-    "taco": load_dataset("BAAI/TACO", trust_remote_code=True),
-    "apps": load_dataset("codeparrot/apps", trust_remote_code=True),
-    "code_contests": load_dataset("deepmind/code_contests"),
-    "open-r1/codeforces": load_dataset("open-r1/codeforces")
+    "taco": load_dataset("BAAI/TACO", trust_remote_code=True, num_proc=open_instruct_utils.max_num_processes()),
+    "apps": load_dataset("codeparrot/apps", trust_remote_code=True, num_proc=open_instruct_utils.max_num_processes()),
+    "code_contests": load_dataset("deepmind/code_contests", num_proc=open_instruct_utils.max_num_processes()),
+    "open-r1/codeforces": load_dataset("open-r1/codeforces", num_proc=open_instruct_utils.max_num_processes())
 }
 
 def get_question(ds_name, split, index):
@@ -199,7 +200,7 @@ def find_cached_results(id: str):
 
 def main():
     global SAMPLE_LIMIT
-    input_dataset = load_dataset(INPUT_HF_DATASET, split=SPLIT)
+    input_dataset = load_dataset(INPUT_HF_DATASET, split=SPLIT, num_proc=open_instruct_utils.max_num_processes())
 
     # First get all unique IDs
     unique_ids = set()
