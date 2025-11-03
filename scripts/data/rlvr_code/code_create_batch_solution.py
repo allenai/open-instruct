@@ -34,6 +34,7 @@ import os
 import time
 
 from datasets import load_dataset
+import open_instruct.utils as open_instruct_utils
 from openai import AzureOpenAI
 
 client = AzureOpenAI(
@@ -106,7 +107,7 @@ def create_batch_file(prompts):
 
 def main():
     global SAMPLE_LIMIT
-    input_dataset = load_dataset(INPUT_HF_DATASET, split=SPLIT)
+    input_dataset = load_dataset(INPUT_HF_DATASET, split=SPLIT, num_proc=open_instruct_utils.max_num_processes())
 
     print(f"Found {len(input_dataset)} total rows")
 

@@ -3,6 +3,7 @@ import re
 from typing import Dict
 
 from datasets import Sequence, Value, load_dataset
+import open_instruct.utils as open_instruct_utils
 
 """
 Script to remove mentions of a date cutoff from post-training datasets.
@@ -79,7 +80,7 @@ def main():
     parser.add_argument("--output-entity", type=str, help="Output entity (org/user) for the filtered dataset. If not provided, uses the same entity as the input dataset.")
     args = parser.parse_args()
 
-    dataset = load_dataset(args.dataset)
+    dataset = load_dataset(args.dataset, num_proc=open_instruct_utils.max_num_processes())
 
     split_name = args.split
     split_data = dataset[split_name]
