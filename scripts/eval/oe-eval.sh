@@ -90,9 +90,10 @@ fi
 
 # cluster/weka mount logic: default true (to use non-augusta)
 # if model starts with gs://, set evaluate_on_weka to false.
+# If specified CLUSTER contains augusta, set evaluate_on_weka to false
 # All the logic is now handled internally, the flag is useless but keeping for backwards compatibility since people have scripts with it
 EVALUATE_ON_WEKA="true"
-if [[ "$MODEL_LOCATION" == gs://* ]]; then
+if [[ "$MODEL_LOCATION" == gs://* || "$CLUSTER" == *augusta* ]]; then
     EVALUATE_ON_WEKA="false"
 fi
 
