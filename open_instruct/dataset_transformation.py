@@ -1774,7 +1774,7 @@ def get_cached_dataset_tulu_with_statistics(
     system_prompt_override: Optional[str] = None,
 ) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
     if dataset_config_hash is None:
-        dcs = load_datasetconfigs(
+        dcs = load_dataset_configs(
             dataset_mixer_list,
             dataset_mixer_list_splits,
             dataset_transform_fn,
