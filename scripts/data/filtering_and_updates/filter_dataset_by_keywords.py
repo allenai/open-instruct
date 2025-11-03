@@ -82,16 +82,17 @@ PATTERNS = [
     
     # Pattern: Any sentence containing "DeepSeek-R1" or "DeepSeek R1" (case-insensitive)
     # Less restrictive: bounded but allows more at the start
-    r"(?i)[^.!?]{0,500}?\bDeepSeek[\s-]?R1\b[^.!?]{0,100}[.!?]",
+    # r"(?i)[^.!?]{0,250}?\bDeepSeek[\s-]?R1\b[^.!?]{0,100}[.!?]",
+    r"(?i)[^.!?]{0,250}?\bDeepSeek\b[^.!?]{0,100}[.!?]",
 
     # Pattern: Anything with the word "Qwen" (case-insensitive)
     # Less restrictive: bounded but allows more at the start
-    r"(?i)[^.!?]{0,500}?\bQwen\b[^.!?]{0,100}[.!?]",
+    r"(?i)[^.!?]{0,250}?\bQwen\b[^.!?]{0,100}[.!?]",
     
     # Pattern: Any sentence containing "Alibaba Qwen" (case-insensitive) or Alibaba Cloud
     # Less restrictive: bounded but allows more at the start
-    r"(?i)[^.!?]{0,500}?\bAlibaba\s+Qwen\b[^.!?]{0,100}[.!?]",
-    r"(?i)[^.!?]{0,500}?\bAlibaba\s+Cloud\b[^.!?]{0,100}[.!?]",
+    r"(?i)[^.!?]{0,250}?\bAlibaba\s+Qwen\b[^.!?]{0,100}[.!?]",
+    r"(?i)[^.!?]{0,250}?\bAlibaba\s+Cloud\b[^.!?]{0,100}[.!?]",
 ]
 
 def should_be_filtered_by_advanced_patterns(example, column="messages", verbose=False, filter_user_turns=False):
@@ -185,7 +186,7 @@ def main():
     
     try:
         # Try standard loading first
-        dataset = load_dataset(input_dataset, split="train")
+        dataset = load_dataset(input_dataset, split="train", num_proc=132)
     except:
         try:
             # Fallback to direct parquet loading
@@ -201,7 +202,7 @@ def main():
     # First filter without debugging
     filtered_dataset = dataset.filter(
         lambda ex: not should_be_filtered_combined(ex, column=args.column, verbose=False, filter_user_turns=filter_user_turns),
-        num_proc=int(192/2)
+        num_proc=132
     )
     print(f"Filtered size: {len(filtered_dataset)}")
     print(f"Removed {len(dataset) - len(filtered_dataset)} examples")
@@ -210,7 +211,7 @@ def main():
     if len(dataset) > len(filtered_dataset):
         print("\nCollecting example filtered instances...")
         examples_found = 0
-        print_within = min(10000, len(dataset))
+        print_within = min(1000, len(dataset))
         for example in dataset.select(range(print_within)):
             if should_be_filtered_combined(example, column=args.column, verbose=True, filter_user_turns=filter_user_turns):
                 # Show the example
@@ -220,9 +221,9 @@ def main():
     
     
     # Upload
-    full_name = f"{output_dataset}"
+    full_name = f"{output_dataset}".replace("Qwen__Qwen3-32Bchosen_Qwen__Qwen3-0.6B","victoriag-qwen-redo").replace("gpt-4ochosen_gpt-3.5-turbo-0125rejected","victoriag-redo")
     print(f"Uploading to: {full_name}")
-    filtered_dataset.push_to_hub(full_name, private=True)
+    filtered_dataset.push_to_hub(full_name, private=True, num_proc=132)
     print("Done!")
 
 if __name__ == "__main__":
