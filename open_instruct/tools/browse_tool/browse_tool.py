@@ -16,15 +16,15 @@ class BrowseTool(Tool):
         crawl_fn: Callable[[str], Optional[str]],
         api_endpoint: str | None = None,
         max_context_chars: int = 2000,
+        start_str: str = "<url>",
+        end_str: str = "</url>",
         *args,
         **kwargs,
     ):
         self.crawl_fn = crawl_fn
         self.api_endpoint = api_endpoint
-        self.start_str = kwargs.pop("start_str", "<url>")
-        self.end_str = kwargs.pop("end_str", "</url>")
         self.max_context_chars = max_context_chars
-        super().__init__(*args, **kwargs, start_str=self.start_str, end_str=self.end_str)
+        super().__init__("BrowseTool", start_str=start_str, end_str=end_str, *args, **kwargs)
 
     def __call__(self, prompt: str) -> ToolOutput:
         # Find URL blocks using regex
@@ -99,7 +99,13 @@ class BrowseTool(Tool):
 
 class Crawl4aiBrowseTool(BrowseTool):
     def __init__(self, *args, **kwargs):
-        super().__init__(crawl4ai_crawl_url, *args, **kwargs, start_str="<url_crawl4ai>", end_str="</url_crawl4ai>")
+        super().__init__(
+            crawl4ai_crawl_url,
+            *args,
+            **kwargs,
+            start_str="<url_crawl4ai>",
+            end_str="</url_crawl4ai>"
+        )
         # If the CRAWL4AI_API_URL environment variable is set, use it as the API endpoint
         if os.environ.get("CRAWL4AI_API_URL") is not None:
             self.api_endpoint = os.environ.get("CRAWL4AI_API_URL")

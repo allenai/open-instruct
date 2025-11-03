@@ -210,30 +210,26 @@ class ToolUseLLM(LLM):
                                     f"len(concat_outputs[output.request_id].outputs[0].token_ids): {len(concat_outputs[output.request_id].outputs[0].token_ids)}"
                                 )
                         masks[output.request_id].extend([1] * len(o.token_ids))
-                        for stop_str in self.single_n_sampling_params.stop:
-                            if (
-                                o.text.endswith(stop_str)
-                                and stop_str in self.tools
-                                and num_calls[output.request_id] < self.max_tool_calls[stop_str]
-                            ):
-                                # Schedule tool call asynchronously
-                                tool = self.tools[stop_str]
-                                future = self.executor.submit(tool, o.text)
-                                self.pending_tool_futures[output.request_id] = (future, o, output)
-                                output_processed = True
-                                break
-                            elif (
-                                o.text.endswith(stop_str)
-                                and stop_str in self.tools
-                                and num_calls[output.request_id] >= self.max_tool_calls[stop_str]
-                            ):
-                                # If the tool has been called too many times, we tell the model it has exceeded the limit.
-                                # use a dummy tool object to keep things simple.
-                                tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
-                                future = self.executor.submit(tool, o.text)
-                                self.pending_tool_futures[output.request_id] = (future, o, output)
-                                output_processed = True
-                                break
+                        # Use tool.is_triggered() for flexible trigger detection
+                        for stop_str, tool in self.tools.items():
+                            if tool.is_triggered(o.text):
+                                if num_calls[output.request_id] < self.max_tool_calls.get(stop_str, 4):
+                                    # Schedule tool call asynchronously
+                                    future = self.executor.submit(tool, o.text)
+                                    self.pending_tool_futures[output.request_id] = (future, o, output)
+                                    output_processed = True
+                                    break
+                                elif num_calls[output.request_id] >= self.max_tool_calls.get(stop_str, 4):
+                                    # If the tool has been called too many times, use MaxCallsExceededTool
+                                    # Preserve the original tool's delimiters
+                                    exceeded_tool = MaxCallsExceededTool(
+                                        start_str=tool.start_str,
+                                        end_str=tool.end_str
+                                    )
+                                    future = self.executor.submit(exceeded_tool, o.text)
+                                    self.pending_tool_futures[output.request_id] = (future, o, output)
+                                    output_processed = True
+                                    break
                         if not output_processed:
                             outputs.append(output)
                             if use_tqdm:

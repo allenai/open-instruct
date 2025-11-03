@@ -58,7 +58,9 @@ class ToolActor:
     ):
         init_kwargs = init_kwargs or {}
         # Resolve class path via registry if tool_name is provided
+        registry_name = None
         if tool_name is not None:
+            registry_name = tool_name  # Store the registry key
             resolved = TOOL_CLASS_REGISTRY.get(tool_name)
             if resolved is None:
                 raise ValueError(f"Unknown tool_name '{tool_name}'. Registered: {list(TOOL_CLASS_REGISTRY.keys())}")
@@ -76,8 +78,21 @@ class ToolActor:
         except (TypeError, ValueError):
             # If signature introspection fails, fall back to provided kwargs
             filtered_kwargs = init_kwargs
+        
+        # If tool_name (registry key) is provided and tool accepts 'name' parameter, use registry name
+        if registry_name is not None:
+            # Check if the tool constructor accepts a 'name' parameter
+            try:
+                sig = inspect.signature(tool_cls.__init__)
+                if 'name' in sig.parameters and 'name' not in filtered_kwargs:
+                    # Only override if name wasn't explicitly provided in init_kwargs
+                    filtered_kwargs['name'] = registry_name
+            except (TypeError, ValueError):
+                pass  # If we can't inspect, continue without overriding
+        
         tool: Tool = tool_cls(**filtered_kwargs)
         self._tool = tool
+        self._registry_name = registry_name  # Store for reference
 
     def get_start_str(self) -> str:
         return getattr(self._tool, "start_str", "")
@@ -90,3 +105,15 @@ class ToolActor:
 
     def call(self, prompt: str) -> ToolOutput:
         return self._tool(prompt)
+
+    def is_triggered(self, prompt: str) -> bool:
+        return self._tool.is_triggered(prompt)
+
+    def get_name(self) -> str:
+        return self._tool.get_name()
+    
+    def to_vllm_function_format(self) -> Optional[Dict[str, Any]]:
+        """Get vLLM function calling format for this tool, if supported."""
+        if hasattr(self._tool, "to_vllm_function_format") and callable(self._tool.to_vllm_function_format):
+            return self._tool.to_vllm_function_format()
+        return None

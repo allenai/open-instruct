@@ -2204,24 +2204,38 @@ def create_model_and_optimizer(
     tool_objects = {}
     tool_max_conc = args.tool_max_concurrency
 
-    def _register_actor_backed_tool(class_path: str, init_kwargs: dict):
-        actor = ToolActor.options(max_concurrency=tool_max_conc).remote(class_path=class_path, init_kwargs=init_kwargs)
+    def _register_actor_backed_tool(tool_name: str, class_path: str, init_kwargs: dict):
+        actor = ToolActor.options(max_concurrency=tool_max_conc).remote(
+            tool_name=tool_name, class_path=class_path, init_kwargs=init_kwargs
+        )
+        tool_name_from_actor = ray.get(actor.get_name.remote())
+        # Ensure tool name matches registry name
+        if tool_name_from_actor != tool_name:
+            logger.warning(
+                f"Tool name mismatch: registry name '{tool_name}' vs tool.get_name() '{tool_name_from_actor}'. "
+                f"Using registry name '{tool_name}' for consistency."
+            )
+            tool_name_from_actor = tool_name
         start = ray.get(actor.get_start_str.remote())
         stop_strings = ray.get(actor.get_stop_strings.remote())
-        # If the tool provides multiple stop strings, register each as an entry.
+        # Tools dict is keyed by end_str for stop string checking during generation
+        # But tracking (max_tool_calls, num_calls) uses tool name (registry name)
         for end_str in stop_strings:
-            tool_objects[end_str] = ToolProxy(actor_handle=actor, start_str=start, end_str=end_str)
+            tool_proxy = ToolProxy(actor_handle=actor, start_str=start, end_str=end_str, name=tool_name_from_actor)
+            # Store by end_str for stop string checking (this is what vllm_utils expects)
+            tool_objects[end_str] = tool_proxy
             # Add tool end string to stop_strings
             args.stop_strings.append(end_str)
 
     # Register tools via actors
     if args.tools:
-        for tool in args.tools:
-            class_path = TOOL_CLASS_REGISTRY.get(tool.lower(), None)
+        for tool_registry_name in args.tools:
+            registry_key = tool_registry_name.lower()
+            class_path = TOOL_CLASS_REGISTRY.get(registry_key, None)
             if class_path is None:
-                raise ValueError(f"Unknown tool: {tool}")
-            # Pass the entire args namespace; ToolActor will filter valid kwargs
-            _register_actor_backed_tool(class_path=class_path, init_kwargs=vars(args))
+                raise ValueError(f"Unknown tool: {tool_registry_name}")
+            # Pass the registry name so the tool is created with the correct name
+            _register_actor_backed_tool(tool_name=registry_key, class_path=class_path, init_kwargs=vars(args))
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,

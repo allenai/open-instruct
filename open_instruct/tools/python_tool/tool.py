@@ -19,7 +19,7 @@ class PythonCodeTool(Tool):
     ):
         # Prefer explicit api_endpoint, fall back to code_tool_api_endpoint
         self.api_endpoint = api_endpoint or code_tool_api_endpoint
-        super().__init__(start_str=start_str, end_str=end_str, *args, **kwargs)
+        super().__init__("PythonCodeTool", start_str=start_str, end_str=end_str, *args, **kwargs)
 
     def __call__(self, prompt: str) -> ToolOutput:
         r"""

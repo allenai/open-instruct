@@ -153,15 +153,19 @@ async def process_request_async(
         if not actor.tools or not actor.max_tool_calls:
             break
 
-        triggered_tool, stop_str = get_triggered_tool(
+        triggered_tools = get_triggered_tool(
             output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
         )
-        if triggered_tool is None:
+        if not triggered_tools:
             break
 
         assert actor.executor is not None, f"executor is None for request {sub_request_id}"
 
-        logger.info(f"Tool {triggered_tool} triggered.")
+        logger.info(f"Tools {[tool.get_name() for tool in triggered_tools]} triggered.")
+
+        # TODO: handle multiple triggered tools.
+        assert len(triggered_tools) == 1, f"Expected exactly 1 triggered tool, got {len(triggered_tools)} for request {sub_request_id}"
+        triggered_tool = triggered_tools[0]
 
         loop = asyncio.get_running_loop()
         tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
@@ -174,7 +178,7 @@ async def process_request_async(
         tool_runtime += tool_result.runtime
 
         tool_output_token_ids = actor.llm_engine.tokenizer.encode(
-            "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+            tool_result.start_str + tool_result.output + tool_result.end_str, add_special_tokens=False
         )
 
         tool_output_token_ids, excess, prompt_and_tool_output = _truncate_tool_output_tokens(
@@ -280,28 +284,38 @@ def get_triggered_tool(
     output_text: str,
     tools: dict[str, Tool],
     max_tool_calls: dict[str, int],
-    num_calls: int,
-    sampling_params: vllm.SamplingParams,
+    num_calls: dict[str, int],
 ) -> tuple[Tool | None, str | None]:
     """Check if any tool was triggered and return the tool and stop_str if found.
 
     Args:
         output_text: The generated text to check for tool triggers
-        tools: Dictionary mapping stop strings to Tool instances
-        max_tool_calls: Dictionary mapping stop strings to their call limits
-        num_calls: Current number of tool calls for this request
-        sampling_params: Sampling parameters containing stop strings
+        tools: Dictionary mapping stop strings (end_str) to Tool instances
+        max_tool_calls: Dictionary mapping tool names (matching registry names) to their call limits
+        num_calls: Dictionary mapping tool names to current number of calls for this request
+        sampling_params: Sampling parameters containing stop strings (not used, but kept for compatibility)
 
     Returns:
-        Tuple of (tool, stop_str) if a tool was triggered, (None, None) otherwise.
+        List of triggered tools (may be empty, or contain MaxCallsExceededTool if limit reached).
     """
-    for stop_str in sampling_params.stop:
-        if stop_str in tools and output_text.endswith(stop_str):
-            if num_calls < max_tool_calls.get(stop_str, 0):
-                return tools[stop_str], stop_str
-            else:
-                return MaxCallsExceededTool(start_str="<tool>", end_str="</tool>"), stop_str
-    return None, None
+    triggered_tools = []
+    for tool in tools.values():
+        trigger_result = tool.is_triggered(output_text)
+        # Handle both bool and ToolCallInfo return types
+        is_triggered = trigger_result if isinstance(trigger_result, bool) else trigger_result.triggered
+        if is_triggered:
+            triggered_tools.append(tool)
+    # for each triggered tool, check if it has been called too many times.
+    for idx, tool in enumerate(triggered_tools):
+        if num_calls.get(tool.get_name(), 0) >= max_tool_calls.get(tool.get_name(), 0):
+            # Create MaxCallsExceededTool with the same delimiters as the original tool
+            triggered_tools[idx] = MaxCallsExceededTool(
+                start_str=tool.start_str,
+                end_str=tool.end_str
+            )
+        else:
+            num_calls[tool.get_name()] += 1    
+    return triggered_tools
 
 
 def process_completed_request(request_id, outs, current_time, tools, request_metadata):
@@ -800,16 +814,26 @@ def create_vllm_engines(
     use_fp8_kv_cache=False,
     inflight_updates: bool = False,
 ) -> list[LLMRayActor]:
-    # Convert max_tool_calls to a dict mapping tool end strings to their limits
+    # Convert max_tool_calls to a dict mapping tool names to their limits
+    # Tools are tracked by name (matching registry name), not by end_str
     if tools:
-        assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
-            "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
+        # Get unique tools by name (tools dict may have multiple end_str -> same tool mappings)
+        unique_tools = {}
+        for tool in tools.values():
+            tool_name = tool.get_name()
+            if tool_name not in unique_tools:
+                unique_tools[tool_name] = tool
+        
+        num_unique_tools = len(unique_tools)
+        assert len(max_tool_calls) == 1 or len(max_tool_calls) == num_unique_tools, (
+            f"max_tool_calls must have length 1 (applies to all tools) or same length as unique tools "
+            f"({num_unique_tools} unique tools: {list(unique_tools.keys())})"
         )
-        # tool key is the end_str
+        # max_tool_calls_dict is keyed by tool name (matching registry name)
         if len(max_tool_calls) == 1:
-            max_tool_calls_dict = {end_str: max_tool_calls[0] for end_str in tools}
+            max_tool_calls_dict = {tool_name: max_tool_calls[0] for tool_name in unique_tools.keys()}
         else:
-            max_tool_calls_dict = {end_str: limit for end_str, limit in zip(tools.keys(), max_tool_calls)}
+            max_tool_calls_dict = {tool_name: limit for tool_name, limit in zip(unique_tools.keys(), max_tool_calls)}
     else:
         max_tool_calls_dict = {}
 
