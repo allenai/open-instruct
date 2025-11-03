@@ -15,6 +15,7 @@ import os
 import time
 
 from datasets import load_dataset
+import open_instruct.utils as open_instruct_utils
 from openai import AzureOpenAI
 from pydantic import BaseModel, ConfigDict
 
@@ -118,7 +119,7 @@ def create_batch_file(prompts):
             f.write(json.dumps(batch_request) + "\n")
 
 def grade_difficulty(dataset):
-    ds = load_dataset(dataset, split='train')
+    ds = load_dataset(dataset, split='train', num_proc=open_instruct_utils.max_num_processes())
     prompts = []
     for row in ds:
         problem = get_input(row)

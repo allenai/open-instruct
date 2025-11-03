@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 import tqdm
 from datasets import load_dataset
+import open_instruct.utils as open_instruct_utils
 from huggingface_hub import repo_exists
 from transformers import AutoTokenizer
 
@@ -33,7 +34,7 @@ def get_statistics_for_messages_data(
 ):
     if dataset is None:
         # load dataset
-        dataset = load_dataset("json", data_files={split: data_path})
+        dataset = load_dataset("json", data_files={split: data_path}, num_proc=open_instruct_utils.max_num_processes())
     # tokenize dataset
     tokenizer = AutoTokenizer.from_pretrained(tokenizer, use_fast=False)
     # get statistics
@@ -107,7 +108,7 @@ def get_statistics_for_prompt_completion_data(
 ):
     if dataset is None:
         # load dataset
-        dataset = load_dataset("json", data_files={split: data_path})
+        dataset = load_dataset("json", data_files={split: data_path}, num_proc=open_instruct_utils.max_num_processes())
     prompts = [instance["prompt"] for instance in dataset[split]]
     completions = [instance[response_key] for instance in dataset[split]]
     # tokenize dataset
@@ -162,7 +163,7 @@ if __name__ == "__main__":
 
     elif repo_exists(args.data_path, repo_type="dataset"):
 
-        dataset = load_dataset(args.data_path)
+        dataset = load_dataset(args.data_path, num_proc=open_instruct_utils.max_num_processes())
         sample = dataset[args.split][0]
     else:
         raise ValueError("Invalid data path - the data path should be either a dataset id or a path to a json file.")

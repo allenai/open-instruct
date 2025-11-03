@@ -1,6 +1,7 @@
 import argparse
 
 from datasets import load_dataset
+import open_instruct.utils as open_instruct_utils
 
 from scripts.data.sft.utils import convert_sft_dataset
 
@@ -81,7 +82,7 @@ if __name__ == "__main__":
         "for more information about this dataset and the license."
     )
 
-    ds = load_dataset("nvidia/Daring-Anteater")
+    ds = load_dataset("nvidia/Daring-Anteater", num_proc=open_instruct_utils.max_num_processes())
     if args.remove_subsets:
         ds = ds.filter(lambda x: x["dataset"] not in args.remove_subsets)
 
