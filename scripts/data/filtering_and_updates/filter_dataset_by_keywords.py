@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from datasets import load_dataset
+import open_instruct.utils as open_instruct_utils
 from huggingface_hub import hf_hub_download, list_repo_files
 import pyarrow.parquet as pq
 import pandas as pd
@@ -186,7 +187,7 @@ def main():
     
     try:
         # Try standard loading first
-        dataset = load_dataset(input_dataset, split="train", num_proc=132)
+        dataset = load_dataset(input_dataset, split="train", num_proc=open_instruct_utils.max_num_processes())
     except:
         try:
             # Fallback to direct parquet loading
@@ -202,7 +203,7 @@ def main():
     # First filter without debugging
     filtered_dataset = dataset.filter(
         lambda ex: not should_be_filtered_combined(ex, column=args.column, verbose=False, filter_user_turns=filter_user_turns),
-        num_proc=132
+        num_proc=open_instruct_utils.max_num_processes()
     )
     print(f"Filtered size: {len(filtered_dataset)}")
     print(f"Removed {len(dataset) - len(filtered_dataset)} examples")
@@ -221,9 +222,9 @@ def main():
     
     
     # Upload
-    full_name = f"{output_dataset}".replace("Qwen__Qwen3-32Bchosen_Qwen__Qwen3-0.6B","victoriag-qwen-redo").replace("gpt-4ochosen_gpt-3.5-turbo-0125rejected","victoriag-redo")
+    full_name = f"{output_dataset}"
     print(f"Uploading to: {full_name}")
-    filtered_dataset.push_to_hub(full_name, private=True, num_proc=132)
+    filtered_dataset.push_to_hub(full_name, private=True, num_proc=open_instruct_utils.max_num_processes())
     print("Done!")
 
 if __name__ == "__main__":
