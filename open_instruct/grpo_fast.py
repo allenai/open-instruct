@@ -92,7 +92,7 @@ from open_instruct.ground_truth_utils import (
     cleanup_all_llm_judge_clients,
     soft_format_reward_func,
 )
-from open_instruct.metrics import MetricsTracker
+from open_instruct.metrics import LossStatistics, MetricsTracker
 from open_instruct.model_utils import (
     Batch,
     ModelConfig,
@@ -134,81 +134,6 @@ from open_instruct.utils import (
 logger = logger_utils.setup_logger(__name__)
 
 INVALID_LOGPROB = 1.0
-
-
-class LossStatistics:
-    def __init__(self, num_batches: int, record_entropy: bool = False):
-        self.kl1_stats = torch.zeros(num_batches)
-        self.kl2_stats = torch.zeros(num_batches)
-        self.kl3_stats = torch.zeros(num_batches)
-        self.kl4_stats = torch.zeros(num_batches)
-        self.kl_loss_stats = torch.zeros(num_batches)
-        self.pg_clipfrac_stats = torch.zeros(num_batches)
-        self.pg_loss_stats = torch.zeros(num_batches)
-        self.loss_stats = torch.zeros(num_batches)
-        self.ratio_stats = torch.zeros(num_batches)
-        self.entropy_stats = torch.zeros(num_batches) if record_entropy else None
-        self.kl1 = None
-        self.kl2 = None
-        self.kl3 = None
-        self.kl4 = None
-
-    def update_kl_estimates(self, ref_logprobs_diff, ratio, mb_response_masks_bool, args):
-        self.kl1 = ref_logprobs_diff
-        self.kl2 = (ref_logprobs_diff) ** 2 / 2
-        self.kl3 = torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff
-        self.kl4 = ratio * ref_logprobs_diff
-
-    def kl(self, args):
-        if args.kl_estimator == "kl1":
-            return self.kl1
-        elif args.kl_estimator == "kl2":
-            return self.kl2
-        elif args.kl_estimator == "kl3":
-            return self.kl3
-        elif args.kl_estimator == "kl4":
-            return self.kl4
-
-    def update_stats(
-        self, i, mb_response_masks_bool, pg_losses, pg_losses2, pg_loss_max, ratio, loss, mb_entropy, args
-    ):
-        self.kl1_stats[i] = masked_mean(
-            self.kl1, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-        ).float()
-        self.kl2_stats[i] = masked_mean(
-            self.kl2, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-        ).float()
-        self.kl3_stats[i] = masked_mean(
-            self.kl3, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-        ).float()
-        self.kl4_stats[i] = masked_mean(
-            self.kl4, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-        ).float()
-        if args.kl_estimator == "kl1":
-            self.kl_loss_stats[i] = self.kl1_stats[i] * args.beta
-        elif args.kl_estimator == "kl2":
-            self.kl_loss_stats[i] = self.kl2_stats[i] * args.beta
-        elif args.kl_estimator == "kl3":
-            self.kl_loss_stats[i] = self.kl3_stats[i] * args.beta
-        elif args.kl_estimator == "kl4":
-            self.kl_loss_stats[i] = self.kl4_stats[i] * args.beta
-        self.pg_clipfrac_stats[i] = masked_mean(
-            (pg_losses2 > pg_losses).float(),
-            mb_response_masks_bool,
-            args.masked_mean_axis,
-            args.masked_mean_denominator,
-        )
-        self.pg_loss_stats[i] = masked_mean(
-            pg_loss_max, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-        )
-        self.loss_stats[i] = loss
-        self.ratio_stats[i] = masked_mean(
-            ratio, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-        )
-        if args.record_entropy and self.entropy_stats is not None:
-            self.entropy_stats[i] = masked_mean(
-                mb_entropy, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-            ).float()
 
 
 class ShutdownSentinel:
@@ -1035,8 +960,7 @@ class PolicyTrainerRayProcess(RayProcess):
         pg_loss_max = torch.max(pg_losses, pg_losses2)
 
         ref_logprobs_diff = (mb_new_logprobs - mb_ref_logprob).clamp(-40.0, 40.0)
-        loss_statistics.update_kl_estimates(ref_logprobs_diff, ratio, mb_response_masks_bool, args)
-        kl = loss_statistics.kl(args)
+        kl = loss_statistics.update_kl_estimates(i, ref_logprobs_diff, ratio, mb_response_masks_bool, args)
 
         loss = masked_mean(
             pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
@@ -1228,10 +1152,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     )
 
             with torch.no_grad():
-                self.local_metrics.add("objective/kl_avg", loss_statistics.kl1_stats.mean())
-                self.local_metrics.add("objective/kl2_avg", loss_statistics.kl2_stats.mean())
-                self.local_metrics.add("objective/kl3_avg", loss_statistics.kl3_stats.mean())
-                self.local_metrics.add("objective/kl4_avg", loss_statistics.kl4_stats.mean())
+                self.local_metrics.add("objective/kl_avg", loss_statistics.kl_stats[0].mean())
+                self.local_metrics.add("objective/kl2_avg", loss_statistics.kl_stats[1].mean())
+                self.local_metrics.add("objective/kl3_avg", loss_statistics.kl_stats[2].mean())
+                self.local_metrics.add("objective/kl4_avg", loss_statistics.kl_stats[3].mean())
                 self.local_metrics.add("loss/policy_avg", loss_statistics.pg_loss_stats.mean())
                 self.local_metrics.add("loss/kl_avg", loss_statistics.kl_loss_stats.mean())
                 self.local_metrics.add("loss/total_avg", loss_statistics.loss_stats.mean())
