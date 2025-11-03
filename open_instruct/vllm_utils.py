@@ -305,14 +305,16 @@ def get_triggered_tool(
             triggered_tools.append(tool)
     # for each triggered tool, check if it has been called too many times.
     for idx, tool in enumerate(triggered_tools):
-        if num_calls.get(tool.get_name(), 0) >= max_tool_calls.get(tool.get_name(), 0):
+        tool_name = tool.get_name()
+        if num_calls.get(tool_name, 0) >= max_tool_calls.get(tool_name, 0):
             # Create MaxCallsExceededTool with the same delimiters as the original tool
             triggered_tools[idx] = MaxCallsExceededTool(
                 start_str=tool.start_str,
                 end_str=tool.end_str
             )
         else:
-            num_calls[tool.get_name()] += 1    
+            # Initialize to 0 if key doesn't exist, then increment
+            num_calls[tool_name] = num_calls.get(tool_name, 0) + 1    
     return triggered_tools
 
 
