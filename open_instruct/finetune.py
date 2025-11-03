@@ -62,6 +62,7 @@ from open_instruct.utils import (
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
+    maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
 )
@@ -438,6 +439,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             },
         )
         wandb_tracker = accelerator.get_tracker("wandb")
+        maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url())
     else:
         wandb_tracker = None  # for later eval launching
 
@@ -727,7 +729,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     local_total_tokens_this_log_period = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
     local_pred_tokens_this_log_period = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
     total_token_including_padding = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
-    start_time = time.time()
+    start_time = time.perf_counter()
     skipped_batches = False
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
@@ -824,10 +826,12 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         "avg_tokens_per_batch": avg_tokens_per_batch,
                         "avg_tokens_per_batch_including_padding": avg_tokens_per_batch_including_padding,
                         "avg_pred_tokens_per_batch": avg_pred_tokens_per_batch,
-                        "per_device_tps": total_tokens / accelerator.num_processes / (time.time() - start_time),
+                        "per_device_tps": total_tokens
+                        / accelerator.num_processes
+                        / (time.perf_counter() - start_time),
                         "per_device_tps_including_padding": total_tokens_including_padding
                         / accelerator.num_processes
-                        / (time.time() - start_time),
+                        / (time.perf_counter() - start_time),
                         "reserved_mem_GiB": torch.cuda.max_memory_reserved(device=torch.cuda.current_device()) / 2**30,
                         "allocated_mem_GiB": torch.cuda.max_memory_allocated(device=torch.cuda.current_device())
                         / 2**30,
@@ -855,7 +859,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     avg_loss = sum_loss / total_fwd_passes
                     metrics_to_log["train_loss"] = avg_loss
                     if args.verbose:
-                        sec_per_step = (time.time() - start_time) / (completed_steps - resume_step)
+                        sec_per_step = (time.perf_counter() - start_time) / (completed_steps - resume_step)
                         steps_remaining = args.max_train_steps - completed_steps
                         secs_remaining = steps_remaining * sec_per_step
                         accelerator.print(
@@ -869,17 +873,23 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                             / args.logging_steps
                         )
                         logger.info(
-                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, Aux Loss: {avg_aux_loss}, TPS: {total_tokens / (time.time() - start_time)}"
+                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, Aux Loss: {avg_aux_loss}, TPS: {total_tokens / (time.perf_counter() - start_time)}"
                         )
                         metrics_to_log["aux_loss"] = avg_aux_loss
                     else:
                         logger.info(
-                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, TPS: {total_tokens / (time.time() - start_time)}"
+                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, TPS: {total_tokens / (time.perf_counter() - start_time)}"
                         )
                     if args.verbose:
                         accelerator.print(f"{metrics_to_log=}")
                     if args.with_tracking:
                         accelerator.log(metrics_to_log, step=completed_steps)
+                    maybe_update_beaker_description(
+                        current_step=completed_steps,
+                        total_steps=args.max_train_steps,
+                        start_time=start_time,
+                        wandb_url=wandb_tracker.run.get_url() if wandb_tracker is not None else None,
+                    )
                     total_loss = 0
                     total_aux_loss = 0
 
