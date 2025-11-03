@@ -2179,7 +2179,6 @@ class ModelDims:
         response_lengths: list[int],
         total_generation_time: float,
         samples_per_prompt: int,
-        num_inference_gpus: int,
         num_engines: int,
         num_gpus_per_engine: int,
     ) -> dict[str, float]:
@@ -2188,7 +2187,7 @@ class ModelDims:
             total_generation_time,
             response_lengths=response_lengths,
             samples_per_prompt=samples_per_prompt,
-            num_gpus=num_inference_gpus,
+            num_gpus=num_engines * num_gpus_per_engine,
         )
         actor_mbu = self.calculate_mbu(
             prompt_lengths,

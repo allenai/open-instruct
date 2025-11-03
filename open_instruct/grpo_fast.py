@@ -1498,14 +1498,11 @@ def calculate_utilization_metrics(
         f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
     )
 
-    num_inference_gpus = num_engines * num_gpus_per_engine
-
     actor_metrics = model_dims.calculate_actor_utilization(
         prompt_lengths=prompt_lengths,
         response_lengths=response_lengths,
         total_generation_time=total_generation_time,
         samples_per_prompt=samples_per_prompt,
-        num_inference_gpus=num_inference_gpus,
         num_engines=num_engines,
         num_gpus_per_engine=num_gpus_per_engine,
     )
