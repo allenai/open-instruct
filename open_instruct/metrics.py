@@ -64,6 +64,23 @@ class LossStatistics:
                 mb_entropy, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
             ).float()
 
+    def to_dict(self) -> dict[str, torch.Tensor]:
+        metrics = {
+            "objective/kl_avg": self.kl_stats[0].mean(),
+            "objective/kl2_avg": self.kl_stats[1].mean(),
+            "objective/kl3_avg": self.kl_stats[2].mean(),
+            "objective/kl4_avg": self.kl_stats[3].mean(),
+            "loss/policy_avg": self.pg_loss_stats.mean(),
+            "loss/kl_avg": self.kl_loss_stats.mean(),
+            "loss/total_avg": self.loss_stats.mean(),
+            "policy/clipfrac_avg": self.pg_clipfrac_stats.mean(),
+            "val/ratio": self.ratio_stats.mean(),
+            "val/ratio_var": self.ratio_stats.var(),
+        }
+        if self.entropy_stats is not None:
+            metrics["policy/entropy_avg"] = self.entropy_stats.mean()
+        return metrics
+
 
 class MetricsTracker:
     """A simple class to prellocate all metrics in an array
@@ -83,6 +100,11 @@ class MetricsTracker:
             self.current_idx += 1
 
         self.metrics[self.names2idx[name]] = value
+        return self
+
+    def add_dict(self, metrics_dict: dict[str, torch.Tensor]):
+        for k, v in metrics_dict.items():
+            self.add(k, v)
         return self
 
     def get_metrics_list(self) -> dict[str, float]:

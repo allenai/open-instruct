@@ -1152,18 +1152,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     )
 
             with torch.no_grad():
-                self.local_metrics.add("objective/kl_avg", loss_statistics.kl_stats[0].mean())
-                self.local_metrics.add("objective/kl2_avg", loss_statistics.kl_stats[1].mean())
-                self.local_metrics.add("objective/kl3_avg", loss_statistics.kl_stats[2].mean())
-                self.local_metrics.add("objective/kl4_avg", loss_statistics.kl_stats[3].mean())
-                self.local_metrics.add("loss/policy_avg", loss_statistics.pg_loss_stats.mean())
-                self.local_metrics.add("loss/kl_avg", loss_statistics.kl_loss_stats.mean())
-                self.local_metrics.add("loss/total_avg", loss_statistics.loss_stats.mean())
-                self.local_metrics.add("policy/clipfrac_avg", loss_statistics.pg_clipfrac_stats.mean())
-                self.local_metrics.add("val/ratio", loss_statistics.ratio_stats.mean())
-                self.local_metrics.add("val/ratio_var", loss_statistics.ratio_stats.var())
-                if args.record_entropy:
-                    self.local_metrics.add("policy/entropy_avg", loss_statistics.entropy_stats.mean())
+                self.local_metrics.add_dict(loss_statistics.to_dict())
                 self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
                 return self.local_metrics.get_metrics_list()
 
