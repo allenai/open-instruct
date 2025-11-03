@@ -27,7 +27,7 @@ uv run python mason.py \
        --budget ai2/oe-adapt \
        --no-host-networking \
        --gpus 1 \
-	   -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+	   -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo.py \
     --dataset_mixer_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 32 \

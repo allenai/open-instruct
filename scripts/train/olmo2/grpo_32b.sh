@@ -6,8 +6,8 @@ python mason.py \
     --preemptible \
     --num_nodes 8 \
     --budget ai2/oe-adapt \
-    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --exp_name olmo2_32b_grpo_fast_zero \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo.py \
+    --exp_name olmo2_32b_grpo_zero \
     --beta 0.0 \
     --num_unique_prompts_rollout 256 \
     --num_samples_per_prompt_rollout 64 \
@@ -17,21 +17,20 @@ python mason.py \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/math_ground_truth_zs 16 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 8192 \
+    --max_token_length 4096 \
     --max_prompt_token_length 2048 \
-    --response_length 8192 \
-    --pack_length 16384 \
-    --model_name_or_path allenai/open_instruct_dev \
-    --model_revision lc_7b_sft_pl_p1_idm_sft_bos__123__1742424298 \
-    --tokenizer_name_or_path allenai/OLMo-2-1124-13B \
-    --tokenizer_revision main \
+    --response_length 2048 \
+    --pack_length 4096 \
+    --model_name_or_path allenai/OLMo-2-32B-JALLYRUN-SOUP \
     --add_bos \
+    --stop_strings "</answer>" \
+    --apply_r1_style_format_reward True \
     --apply_verifiable_reward True \
     --non_stop_penalty True \
     --non_stop_penalty_value 0.0 \
     --chat_template_name r1_simple_chat_postpend_think \
     --oe_eval_tasks minerva_math::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning \
-    --oe_eval_max_length 8192 \
+    --oe_eval_max_length 4096 \
     --temperature 1.0 \
     --total_episodes 10000000 \
     --deepspeed_stage 3 \

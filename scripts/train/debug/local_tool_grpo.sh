@@ -1,5 +1,5 @@
 #!/bin/bash
-uv run open_instruct/grpo_fast.py \
+uv run open_instruct/grpo.py \
     --dataset_mixer_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 64 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 16 \

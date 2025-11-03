@@ -1,10 +1,10 @@
-export VLLM_ALLOW_INSECURE_SERIALIZATION=1
-export VLLM_DISABLE_COMPILE_CACHE=1
-export VLLM_USE_V1=1    
-uv run python open_instruct/grpo_fast.py \
-    --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
+# note: judge may not be alive, internal ai2 host.
+export HOSTED_VLLM_API_BASE=http://saturn-cs-aus-234.reviz.ai2.in:8001/v1
+
+uv run python open_instruct/grpo.py \
+    --dataset_mixer_list hamishivi/virtuoussy_multi_subject_rlvr 64 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
+    --dataset_mixer_eval_list hamishivi/virtuoussy_multi_subject_rlvr 16 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 512 \
     --response_length 512 \
@@ -35,5 +35,8 @@ uv run python open_instruct/grpo_fast.py \
     --gradient_checkpointing \
     --single_gpu_mode \
     --push_to_hub false \
-    --system_prompt_override_file scripts/train/debug/cute_debug_system_prompt.txt \
+    --llm_judge_model hosted_vllm/Qwen/Qwen3-32B \
+    --llm_judge_timeout 600 \
+    --llm_judge_max_tokens 2048 \
+    --llm_judge_max_context_length 32768 \
     # --with_tracking

@@ -22,14 +22,14 @@ console = Console()
 OPEN_INSTRUCT_COMMANDS = [
     "open_instruct/finetune.py",
     "open_instruct/dpo_tune_cache.py",
-    "open_instruct/grpo_fast.py",
+    "open_instruct/grpo.py",
     "open_instruct/ppo.py",
     "open_instruct/grpo_vllm_thread_ray_gtrl.py",
     "open_instruct/ppo_vllm_thread_ray_gtrl.py",
     "open_instruct/reward_modeling.py",
 ]
 
-OPEN_INSTRUCT_RESUMABLES = ["open_instruct/grpo_fast.py"]
+OPEN_INSTRUCT_RESUMABLES = ["open_instruct/grpo.py"]
 
 
 # ----------------------------------------------------------------------

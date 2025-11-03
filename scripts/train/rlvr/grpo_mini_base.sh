@@ -1,16 +1,17 @@
-exp_name="base_grpo_${RANDOM}"
-python open_instruct/grpo_vllm_thread_ray_gtrl.py \
+exp_name="base_smollm_grpo_${RANDOM}"
+python open_instruct/grpo.py \
     --exp_name $exp_name \
     --output_dir /weka/oe-adapt-default/costah/models/$exp_name \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 1.0 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 512 \
-    --max_prompt_token_length 512 \
-    --response_length 512 \
+    --max_token_length 256 \
+    --max_prompt_token_length 256 \
+    --response_length 128 \
+    --pack_length 2048 \
     --number_samples_per_prompt 4 \
-    --model_name_or_path EleutherAI/pythia-14m \
+    --model_name_or_path HuggingFaceTB/SmolLM2-135M \
     --stop_strings "</answer>" \
     --add_r1_style_format_reward \
     --non_stop_penalty False \
@@ -22,7 +23,7 @@ python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --sft_messages_key messages \
     --learning_rate 3e-7 \
     --total_episodes 1000000 \
-    --deepspeed_stage 3 \
+    --deepspeed_stage 2 \
     --per_device_train_batch_size 1 \
     --local_rollout_forward_batch_size 1 \
     --local_mini_batch_size 16 \
@@ -30,16 +31,16 @@ python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --num_epochs 1 \
     --actor_num_gpus_per_node 1 \
     --vllm_tensor_parallel_size 1 \
-    --beta 0.0 \
+    --beta 0.01 \
     --apply_verifiable_reward true \
     --seed 3 \
-    --num_evals 100 \
+    --local_eval_every 150 \
     --save_freq 100 \
     --reward_model_multiplier 0.0 \
     --no_try_launch_beaker_eval_jobs \
-    --single_gpu_mode \
     --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.5 \
+    --vllm_gpu_memory_utilization 0.3 \
     --vllm_enforce_eager \
     --gradient_checkpointing \
-    # --with_tracking
+    --single_gpu_mode \
+    --with_tracking

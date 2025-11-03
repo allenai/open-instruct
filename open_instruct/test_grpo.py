@@ -14,12 +14,12 @@ from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 from vllm import SamplingParams
 
-from open_instruct import grpo_fast, model_utils, utils
+from open_instruct import grpo, model_utils, utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.vllm_utils import create_vllm_engines
 
 
-class TestGrpoFastBase(unittest.TestCase):
+class TestGrpoBase(unittest.TestCase):
     """Base class with common test utilities."""
 
     def _get_resource_tracker_state(self):
@@ -192,7 +192,7 @@ class TestGrpoFastBase(unittest.TestCase):
         queue_size = max(len(queries), num_engines * 2)
         param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
         inference_results_Q = ray_queue.Queue(maxsize=queue_size)
-        pending_queries_map = grpo_fast.PendingQueriesMap()
+        pending_queries_map = grpo.PendingQueriesMap()
 
         # Track queues for cleanup
         self._ray_queues.extend([param_prompt_Q, inference_results_Q])
@@ -209,14 +209,14 @@ class TestGrpoFastBase(unittest.TestCase):
         # Calculate inference_batch_size based on number of queries and engines
         mock_args.inference_batch_size = max(1, len(queries) // num_engines)
 
-        grpo_fast.split_and_insert_batch(
+        grpo.split_and_insert_batch(
             batch, 0, training_step, pending_queries_map, param_prompt_Q, mock_generation_config, False
         )
 
         return param_prompt_Q, inference_results_Q, pending_queries_map
 
 
-class TestGrpoFastVLLM(TestGrpoFastBase):
+class TestGrpoFastVLLM(TestGrpoBase):
     def test_vllm_queue_system_single_prompt(self):
         """Test the new queue-based vLLM system with a single prompt 'What is the capital of France?'"""
         # Check if CUDA is available
@@ -497,7 +497,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         self.assertEqual(len(combined_result.responses), expected_responses)
 
 
-class GrpoIntegrationTests(TestGrpoFastBase):
+class GrpoIntegrationTests(TestGrpoBase):
     """Integration tests for GRPO with parallel processing."""
 
     @ray.remote
@@ -566,7 +566,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         mock_generation_config.n = num_samples_per_prompt
 
         mock_model_dims = self.create_mock_model_dims()
-        combined_result, batch, prompt_lengths, response_lengths = grpo_fast.accumulate_inference_batches(
+        combined_result, batch, prompt_lengths, response_lengths = grpo.accumulate_inference_batches(
             inference_results_Q,
             pending_queries_map,
             mock_args,
@@ -582,7 +582,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
     def test_thread_safety_pending_queries_map(self):
         """Test concurrent access to pending_queries_map."""
-        pending_queries_map = grpo_fast.PendingQueriesMap()
+        pending_queries_map = grpo.PendingQueriesMap()
         errors = []
         num_threads = 4
         entries_per_thread = 50
@@ -637,7 +637,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         # Track queue for cleanup
         self._ray_queues.append(inference_results_Q)
 
-        pending_queries_map = grpo_fast.PendingQueriesMap()
+        pending_queries_map = grpo.PendingQueriesMap()
 
         # Add entries to map
         for i in range(num_prompts):
@@ -661,7 +661,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                 mock_generation_config.n = 1
 
                 mock_model_dims = self.create_mock_model_dims()
-                grpo_fast.accumulate_inference_batches(
+                grpo.accumulate_inference_batches(
                     inference_results_Q,
                     pending_queries_map,
                     mock_args,
@@ -686,7 +686,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         self.assertEqual(len(pending_queries_map), 4)
 
 
-class TestStreamingAccumulation(TestGrpoFastBase):
+class TestStreamingAccumulation(TestGrpoBase):
     """Test the new streaming accumulation functionality."""
 
     def test_more_engines_than_queries(self):
@@ -697,7 +697,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_queries)
         param_prompt_Q = ray_queue.Queue(maxsize=num_queries)
-        pending_queries_map = grpo_fast.PendingQueriesMap()
+        pending_queries_map = grpo.PendingQueriesMap()
 
         # Track queue for cleanup
         self._ray_queues.append(param_prompt_Q)
@@ -713,7 +713,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         mock_args = MagicMock()
         mock_args.inference_batch_size = max(1, num_queries // num_engines)
 
-        grpo_fast.split_and_insert_batch(
+        grpo.split_and_insert_batch(
             batch,
             epoch_number=0,
             training_step=1,
@@ -748,7 +748,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_queries)
         param_prompt_Q = ray_queue.Queue(maxsize=num_queries)
-        pending_queries_map = grpo_fast.PendingQueriesMap()
+        pending_queries_map = grpo.PendingQueriesMap()
 
         # Track queue for cleanup
         self._ray_queues.append(param_prompt_Q)
@@ -764,7 +764,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         mock_args = MagicMock()
         mock_args.inference_batch_size = max(1, num_queries // num_engines + (1 if num_queries % num_engines else 0))
 
-        grpo_fast.split_and_insert_batch(
+        grpo.split_and_insert_batch(
             batch,
             epoch_number=0,
             training_step=1,
@@ -797,7 +797,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         # Create queues and maps
         inference_results_Q = ray_queue.Queue(maxsize=num_prompts)
-        pending_queries_map = grpo_fast.PendingQueriesMap()
+        pending_queries_map = grpo.PendingQueriesMap()
 
         # Track queue for cleanup
         self._ray_queues.append(inference_results_Q)
@@ -849,7 +849,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         # Create queues and maps
         inference_results_Q = ray_queue.Queue(maxsize=num_prompts)
-        pending_queries_map = grpo_fast.PendingQueriesMap()
+        pending_queries_map = grpo.PendingQueriesMap()
 
         # Track queue for cleanup
         self._ray_queues.append(inference_results_Q)
@@ -892,7 +892,7 @@ class TestShufflingIterator(unittest.TestCase):
 
         data = np.arange(100)
         batch_size = 10
-        iterator = grpo_fast.ShufflingIterator(data, batch_size, seed=42)
+        iterator = grpo.ShufflingIterator(data, batch_size, seed=42)
 
         # Get first batch
         batch1 = next(iterator)
@@ -913,7 +913,7 @@ class TestShufflingIterator(unittest.TestCase):
         seed = 42
 
         # Create original iterator
-        iter1 = grpo_fast.ShufflingIterator(data, batch_size, seed=seed)
+        iter1 = grpo.ShufflingIterator(data, batch_size, seed=seed)
 
         # Get a few batches
         _ = next(iter1)
@@ -934,7 +934,7 @@ class TestShufflingIterator(unittest.TestCase):
         batch5_original = next(iter1)
 
         # Create new iterator with different seed and restore state
-        iter2 = grpo_fast.ShufflingIterator(data, batch_size, seed=999)
+        iter2 = grpo.ShufflingIterator(data, batch_size, seed=999)
         iter2.set_state(state)
 
         # Get batches from restored iterator
@@ -952,7 +952,7 @@ class TestShufflingIterator(unittest.TestCase):
         batch_size = 5
 
         # Create iterator and complete one epoch
-        iterator = grpo_fast.ShufflingIterator(data, batch_size, seed=123)
+        iterator = grpo.ShufflingIterator(data, batch_size, seed=123)
         for _ in range(4):  # 20 / 5 = 4 batches per epoch
             next(iterator)
 
@@ -962,7 +962,7 @@ class TestShufflingIterator(unittest.TestCase):
         self.assertEqual(state["index"], 20)
 
         # Create new iterator and restore state
-        iter2 = grpo_fast.ShufflingIterator(data, batch_size, seed=456)
+        iter2 = grpo.ShufflingIterator(data, batch_size, seed=456)
         iter2.set_state(state)
 
         # Next batches should match
@@ -977,8 +977,8 @@ class TestShufflingIterator(unittest.TestCase):
         batch_size = 50
 
         # Create two iterators with same seed
-        iter1 = grpo_fast.ShufflingIterator(data, batch_size, seed=42)
-        _ = grpo_fast.ShufflingIterator(data, batch_size, seed=42)
+        iter1 = grpo.ShufflingIterator(data, batch_size, seed=42)
+        _ = grpo.ShufflingIterator(data, batch_size, seed=42)
 
         # Advance first iterator
         for _ in range(5):
@@ -986,7 +986,7 @@ class TestShufflingIterator(unittest.TestCase):
 
         # Save state and create new iterator with different seed
         state = iter1.get_state()
-        iter3 = grpo_fast.ShufflingIterator(data, batch_size, seed=999)
+        iter3 = grpo.ShufflingIterator(data, batch_size, seed=999)
 
         # Restore state - this should override the different seed
         iter3.set_state(state)
