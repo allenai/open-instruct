@@ -252,7 +252,9 @@ class Args:
     masked_mean_axis: int | None = None
     """the axis to compute the mean of the masked values"""
     masked_mean_denominator: float | None = None
-    """Optional constant denominator for masked_mean; if set, divides by this instead of mask.sum"""
+    """Optional constant denominator for masked_mean; if set, divides by this instead of mask.sum.
+    Special value -1 means use total_batch_tokens (computed across all ranks in distributed training).
+    When using -1, total_batch_tokens is gathered via allreduce across all ranks."""
     alpha: float = 0.6
     """The alpha value for doing polyak updates (ref_param = alpha * param + (1 - alpha) * ref_param)
     reference: [TR-DPO](https://huggingface.co/papers/2404.09656), but it's actually pretty commonly
@@ -1005,6 +1007,28 @@ class PolicyTrainerRayProcess(RayProcess):
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
+            # Calculate total tokens across all minibatches for proper loss normalization
+            # This ensures loss is normalized by total tokens in the entire batch, not just per-minibatch
+            # First, calculate tokens for this rank's data
+            local_total_batch_tokens = 0.0
+            for i in range(len(collated_query_responses)):
+                mb_response_masks = collated_response_masks[i]
+                mb_response_masks_bool = mb_response_masks[:, 1:].bool()
+                # Apply same masking logic as in loss computation
+                if args.mask_tool_use and args.tool_use:
+                    mb_tool_mask = collated_tool_masks[i]
+                    mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
+                local_total_batch_tokens += mb_response_masks_bool.sum().item()
+            
+            # Gather total tokens across all ranks if using distributed training and denominator is -1
+            # This ensures normalization is consistent across all ranks
+            if dist.is_available() and dist.is_initialized():
+                local_total_batch_tokens_tensor = torch.tensor(
+                    local_total_batch_tokens, dtype=torch.float32, device=self.device
+                )
+                dist.all_reduce(local_total_batch_tokens_tensor, op=dist.ReduceOp.SUM)
+                total_batch_tokens = local_total_batch_tokens_tensor.item()
+            
             kl1_stats = torch.zeros(len(collated_query_responses))
             kl2_stats = torch.zeros(len(collated_query_responses))
             kl3_stats = torch.zeros(len(collated_query_responses))
@@ -1149,12 +1173,19 @@ class PolicyTrainerRayProcess(RayProcess):
                         kl = kl4
 
                     # grpo change: directly subtract KL in loss (add)
+                    loss_values = pg_loss_max + (args.beta * kl)
+
+                    # Three loss cases:
+                    # masked_mean_denominator is set: we use sum and divide loss by this constant.
+                    # masked_mean_denominator is set to -1: we use sum and divide loss by total number of tokens in batch.
+                    # masked_mean_denominator is None, masked_mean_axis is None: we take mean across tokens in minibatch (old behaviour)
+                    # masked_mean_denominator is None, masked_mean_axis is 1: we use sample-wise averaging across the sequence axis.
                     loss = masked_mean(
-                        pg_loss_max + (args.beta * kl),
-                        mb_response_masks_bool,
-                        args.masked_mean_axis,
-                        args.masked_mean_denominator,
-                    )
+                            loss_values,
+                            mb_response_masks_bool,
+                            args.masked_mean_axis,
+                            args.masked_mean_denominator if args.masked_mean_denominator != -1 else total_batch_tokens,
+                        )
                     loss = loss / accumulation_steps
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
