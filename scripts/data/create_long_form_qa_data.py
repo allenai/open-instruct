@@ -21,8 +21,7 @@ def convert_deepseek_long_form_reasoning_to_rl_format():
     dataset = datasets.load_dataset(
         "glaiveai/reasoning-v1-20m",
         # cache_dir="/checkpoint/comem/rulin/cache/huggingface",
-        # download_timeout=1000
-    )["train"].select(range(1000000))
+        # download_timeout=1000, num_proc=max_num_processes())["train"].select(range(1000000))
     dataset = dataset.train_test_split(test_size=0.1, seed=42)
     train_data = dataset["train"]
     test_data = dataset["test"]
@@ -59,7 +58,7 @@ def convert_deepseek_long_form_reasoning_to_rl_format():
 
 def convert_os_to_rl_format():
     # Load the OS dataset
-    dataset = datasets.load_dataset("OpenSciLM/OS_Train_Data", split="train")
+    dataset = datasets.load_dataset("OpenSciLM/OS_Train_Data", split="train", num_proc=max_num_processes())
     # Remove rows with dataset=="hamishivi/rs-llama-3-stuff"
     dataset = dataset.filter(lambda x: x["dataset"] != "hamishivi/rs-llama-3-stuff")
     dataset = dataset.train_test_split(test_size=0.1, seed=42)

@@ -16,8 +16,6 @@ import string
 
 import openai
 from datasets import load_dataset
-
-# from openai import OpenAI
 from prompt_templates import (
     instruction_following,
     instruction_following_solution,
@@ -30,6 +28,8 @@ from prompt_templates import (
 )
 from tenacity import retry, stop_after_attempt, wait_random_exponential  # for exponential backofff
 from tqdm import tqdm
+
+import open_instruct.utils as open_instruct_utils
 
 
 @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
@@ -87,9 +87,9 @@ def main(args):
 
     # Load the dataset
     if args.dataset.endswith(".jsonl"):
-        persona_dataset = load_dataset("json", data_files=args.dataset)['train']
+        persona_dataset = load_dataset("json", data_files=args.dataset, num_proc=open_instruct_utils.max_num_processes())['train']
     else:
-        persona_dataset = load_dataset(args.dataset)['train']
+        persona_dataset = load_dataset(args.dataset, num_proc=open_instruct_utils.max_num_processes())['train']
 
     if args.sanity_check > 0:
         persona_dataset = persona_dataset.select(range(0, args.sanity_check))
