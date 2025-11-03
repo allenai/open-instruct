@@ -1700,7 +1700,7 @@ def get_cached_dataset(
     return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
 
 
-def load_datasetconfigs(
+def load_dataset_configs(
     dataset_mixer_list: List[str],
     dataset_mixer_list_splits: List[str],
     dataset_transform_fn: List[str],
