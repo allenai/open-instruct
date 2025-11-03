@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.8.0-devel-ubuntu22.04 AS build
+FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04
 
 ARG DEBIAN_FRONTEND="noninteractive"
 ENV TZ="America/Los_Angeles"
@@ -9,34 +9,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     git \
     make \
-    && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
-
-WORKDIR /stage/
-
-ENV UV_CACHE_DIR=/root/.cache/uv
-ENV HF_HUB_ENABLE_HF_TRANSFER=1
-ENV UV_COMPILE_BYTECODE=0
-
-# Install dependencies
-RUN --mount=type=cache,target=${UV_CACHE_DIR} \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-cache
-
-RUN uv run --no-sync -m nltk.downloader punkt punkt_tab
-
-FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04
-
-ARG DEBIAN_FRONTEND="noninteractive"
-ENV TZ="America/Los_Angeles"
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    wget \
-    git \
     sudo \
     nginx \
     && apt-get autoremove -y \
@@ -58,8 +30,8 @@ RUN wget https://www.mellanox.com/downloads/MFT/mft-${MFT_VER}-x86_64-deb.tgz &&
 
 ENV DOFED_VER=2.10.0
 ENV OS_VER=ubuntu2204
-RUN wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOFED_VER}/host/doca-host_${DOFED_VER}-093000-25.01-${OS_VER}_amd64.deb \
-    && dpkg -i doca-host_${DOFED_VER}-093000-25.01-${OS_VER}_amd64.deb && \
+RUN wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOFED_VER}/host/doca-host_${DOFED_VER}-093000-25.01-${OS_VER}_amd64.deb && \
+    dpkg -i doca-host_${DOFED_VER}-093000-25.01-${OS_VER}_amd64.deb && \
     apt-get update && apt-get -y install --no-install-recommends doca-ofed-userspace && \
     apt-get autoremove -y && \
     rm doca-host_${DOFED_VER}-093000-25.01-${OS_VER}_amd64.deb
@@ -85,15 +57,21 @@ RUN curl --silent \
     && tar -zxf beaker.tar.gz -C /usr/local/bin/ ./beaker \
     && rm beaker.tar.gz
 
-COPY --from=build /bin/uv /bin/uv
-COPY --from=build /bin/uvx /bin/uvx
-COPY --from=build /stage/.venv /stage/.venv
-COPY --from=build /root/nltk_data /root/nltk_data
+COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
 
 WORKDIR /stage/
 
+ENV UV_CACHE_DIR=/root/.cache/uv
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
+
+# Install dependencies
+RUN --mount=type=cache,target=${UV_CACHE_DIR} \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --frozen --no-cache
+
+RUN uv run --no-sync -m nltk.downloader punkt punkt_tab
 
 # Copy all application code at the end
 COPY configs configs
