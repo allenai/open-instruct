@@ -2324,7 +2324,6 @@ def check_calculation(
         f"\n"
         f"Timing and GPU info:\n"
         f"  timing: {timing:.6f}s\n"
-        f"  num_gpus: {num_gpus}\n"
         f"  num_engines: {num_engines}\n"
         f"  num_gpus_per_engine: {num_gpus_per_engine}\n"
         f"  full_device_name: {full_device_name}\n"
