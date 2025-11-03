@@ -118,7 +118,7 @@ async def process_request_async(
     accumulated_tokens = []
     accumulated_logprobs = []
     masks = []
-    num_calls = 0
+    num_calls = {}
     timeout = False
     tool_error = ""
     tool_output = ""
@@ -154,7 +154,7 @@ async def process_request_async(
             break
 
         triggered_tools = get_triggered_tool(
-            output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
+            output.text, actor.tools, actor.max_tool_calls, num_calls
         )
         if not triggered_tools:
             break
@@ -171,7 +171,6 @@ async def process_request_async(
         tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
 
         tool_called = True
-        num_calls += 1
         timeout = timeout or tool_result.timeout
         tool_error += "" if tool_result.error is None else tool_result.error
         tool_output += tool_result.output
@@ -285,7 +284,7 @@ def get_triggered_tool(
     tools: dict[str, Tool],
     max_tool_calls: dict[str, int],
     num_calls: dict[str, int],
-) -> tuple[Tool | None, str | None]:
+) -> list[Tool]:
     """Check if any tool was triggered and return the tool and stop_str if found.
 
     Args:
@@ -293,7 +292,6 @@ def get_triggered_tool(
         tools: Dictionary mapping stop strings (end_str) to Tool instances
         max_tool_calls: Dictionary mapping tool names (matching registry names) to their call limits
         num_calls: Dictionary mapping tool names to current number of calls for this request
-        sampling_params: Sampling parameters containing stop strings (not used, but kept for compatibility)
 
     Returns:
         List of triggered tools (may be empty, or contain MaxCallsExceededTool if limit reached).
