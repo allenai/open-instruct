@@ -1,6 +1,7 @@
 import argparse
 
 from datasets import Dataset, load_dataset
+import open_instruct.utils as open_instruct_utils
 
 from scripts.data.sft.utils import convert_sft_dataset
 
@@ -39,7 +40,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    ds = load_dataset("allenai/tulu-3-hardcoded-prompts")["train"]
+    ds = load_dataset("allenai/tulu-3-hardcoded-prompts", num_proc=open_instruct_utils.max_num_processes())["train"]
 
     readme_content = (
         "This dataset contains a set of hard-coded examples for Tulu, "

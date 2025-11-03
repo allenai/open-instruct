@@ -35,6 +35,7 @@ import os
 from typing import List
 
 from datasets import Dataset, load_dataset
+import open_instruct.utils as open_instruct_utils
 from openai import AzureOpenAI
 from pydantic import BaseModel
 
@@ -53,10 +54,10 @@ TARGET_LANGUAGS = ["JavaScript", "bash", "C++", "Go", "Java", "Rust", "Swift", "
 
 # needed for open-code-reasoning-2
 hf_datasets = {
-    "taco": load_dataset("BAAI/TACO", trust_remote_code=True),
-    "apps": load_dataset("codeparrot/apps", trust_remote_code=True),
-    "code_contests": load_dataset("deepmind/code_contests"),
-    "open-r1/codeforces": load_dataset("open-r1/codeforces")
+    "taco": load_dataset("BAAI/TACO", trust_remote_code=True, num_proc=open_instruct_utils.max_num_processes()),
+    "apps": load_dataset("codeparrot/apps", trust_remote_code=True, num_proc=open_instruct_utils.max_num_processes()),
+    "code_contests": load_dataset("deepmind/code_contests", num_proc=open_instruct_utils.max_num_processes()),
+    "open-r1/codeforces": load_dataset("open-r1/codeforces", num_proc=open_instruct_utils.max_num_processes())
 }
 
 def get_question(ds_name, split, index):

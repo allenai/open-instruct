@@ -9,10 +9,11 @@ python scripts/data/convert_general_thought_to_tulu_thinker.py
 import random
 
 from datasets import Dataset, load_dataset
+import open_instruct.utils as open_instruct_utils
 
 random_gen = random.Random(42)
 
-ds = load_dataset("natolambert/GeneralThought-430K-filtered", split="train")
+ds = load_dataset("natolambert/GeneralThought-430K-filtered", split="train", num_proc=open_instruct_utils.max_num_processes())
 new_data = []
 
 for sample in ds:

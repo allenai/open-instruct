@@ -66,7 +66,7 @@ from transformers import (
 )
 from transformers.utils.hub import _CACHED_NO_EXIST, TRANSFORMERS_CACHE, extract_commit_hash, try_to_load_from_cache
 
-from open_instruct.utils import hf_whoami
+from open_instruct.utils import hf_whoami, max_num_processes
 
 
 # ----------------------------------------------------------------------------
@@ -395,6 +395,46 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% if loop.last and add_generation_prompt %}"
         "{{ '<|im_start|>assistant\n<think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "olmo_thinker_no_think": (
+        "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
+        "{% if not has_system %}"
+        "{{ '<|im_start|>system\nYou are Olmo, a helpful AI assistant built by Ai2. Your date cutoff is December 2024, and your model weights are available at https://huggingface.co/allenai.<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|im_start|>system\n' + message['content'] }}"
+        "{% if message.get('functions', none) is not none %}"
+        "{{ ' <functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
+        "{% else %}"
+        "{{ ' You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'user' %}"
+        "{% if message.get('functions', none) is not none %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
+        "{% else %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ '<|im_start|>assistant\n' }}"
+        "{% if message.get('content', none) is not none %}"
+        "{{ message['content'] }}"
+        "{% endif %}"
+        "{% if message.get('function_calls', none) is not none %}"
+        "{{ '<function_calls>' + message['function_calls'] + '</function_calls>' }}"
+        "{% endif %}"
+        "{% if not loop.last %}"
+        "{{ '<|im_end|>' + '\n' }}"
+        "{% else %}"
+        "{{ eos_token }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'environment' %}"
+        "{{ '<|im_start|>environment\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|im_start|>assistant\n' }}"
         "{% endif %}"
         "{% endfor %}"
     ),
@@ -1379,16 +1419,25 @@ class DatasetConfig:
         # if the file exists locally, use the local file
         if os.path.exists(self.dataset_name) and self.dataset_name.endswith(".jsonl"):
             assert self.dataset_split == "train", "Only train split is supported for local jsonl files."
-            self.dataset = load_dataset("json", data_files=self.dataset_name, split=self.dataset_split)
+            self.dataset = load_dataset(
+                "json", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
+            )
         elif os.path.exists(self.dataset_name) and self.dataset_name.endswith(".parquet"):
             assert self.dataset_split == "train", "Only train split is supported for local parquet files."
-            self.dataset = load_dataset("parquet", data_files=self.dataset_name, split=self.dataset_split)
+            self.dataset = load_dataset(
+                "parquet", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
+            )
         else:
             # commit hash only works for hf datasets
             self.dataset_commit_hash = get_commit_hash(
                 self.dataset_name, self.dataset_revision, "README.md", "dataset"
             )
-            self.dataset = load_dataset(self.dataset_name, split=self.dataset_split, revision=self.dataset_revision)
+            self.dataset = load_dataset(
+                self.dataset_name,
+                split=self.dataset_split,
+                revision=self.dataset_revision,
+                num_proc=max_num_processes(),
+            )
         if self.dataset_range is None:
             dataset_range = len(self.dataset)
             self.update_range(dataset_range)
@@ -1512,7 +1561,12 @@ class DatasetTransformationCache:
                 print("dataset_skip_cache is True, so we will not load the dataset from cache")
             else:
                 # Use the split from the first dataset config as default
-                return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash)
+                return load_dataset(
+                    repo_name,
+                    split=DEFAULT_SPLIT_FOR_CACHED_DATASET,
+                    revision=self.config_hash,
+                    num_proc=max_num_processes(),
+                )
 
         print(f"Cache not found, transforming datasets...")
 
@@ -1565,7 +1619,9 @@ This is a cached dataset produced by https://github.com/allenai/open-instruct
 
         # NOTE: Load the dataset again to make sure it's downloaded to the HF cache
         print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{self.config_hash}")
-        return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash)
+        return load_dataset(
+            repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash, num_proc=max_num_processes()
+        )
 
 
 class LocalDatasetTransformationCache:

@@ -18,6 +18,7 @@ import argparse
 import logging
 import os
 from datasets import load_dataset
+import open_instruct.utils as open_instruct_utils
 
 from open_instruct import logger_utils
 
@@ -60,7 +61,7 @@ def main():
     args = parser.parse_args()
 
     logger.info("Loading dataset %s…", args.input_dataset)
-    ds = load_dataset(args.input_dataset, split="train")
+    ds = load_dataset(args.input_dataset, split="train", num_proc=open_instruct_utils.max_num_processes())
     logger.info("Loaded dataset with %d examples.", ds.num_rows)
 
     # 1) Filter out toxic examples

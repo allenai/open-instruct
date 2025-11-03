@@ -86,7 +86,7 @@ def main(args):
     logger.info(f"Loading dataset: {args.dataset_name}, split: {args.split}")
     dataset = None
     try:
-        dataset = datasets.load_dataset(args.dataset_name, split=args.split, streaming=args.streaming)
+        dataset = datasets.load_dataset(args.dataset_name, split=args.split, streaming=args.streaming, num_proc=max_num_processes())
         if args.streaming:
             logger.info("Processing in streaming mode.")
             if args.max_samples_streaming > 0:
