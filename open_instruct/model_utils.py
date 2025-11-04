@@ -519,9 +519,7 @@ def log_softmax_and_gather(logits: torch.Tensor, index: torch.Tensor) -> torch.T
     See https://github.com/allenai/open-instruct/pull/584
     """
     B, T, V = logits.shape
-    return -torch.nn.functional.cross_entropy(logits.reshape(-1, V), index.view(-1), reduction="none").view(
-        B, T
-    )
+    return -torch.nn.functional.cross_entropy(logits.reshape(-1, V), index.view(-1), reduction="none").view(B, T)
 
 
 @retry_on_exception()
