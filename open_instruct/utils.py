@@ -43,6 +43,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import defaultdict
 from collections.abc import Iterable
 from concurrent import futures
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
@@ -2366,3 +2367,29 @@ def check_calculation(
     )
 
     logger.warning(warning_message)
+
+
+def combine_reward_metrics(metric_records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Assumes same number of metric_records in each dict in the list"""
+    buckets = defaultdict(list)
+    for metrics, num_records in metric_records:
+        for key, value in metrics.items():
+            buckets[key].append((value, num_records))
+
+    combined: dict[str, Any] = {}
+    for key, records in buckets.items():
+        sample_value = records[0][0]
+        if isinstance(sample_value, np.ndarray):
+            combined[key] = [x for value, _ in records for x in value]
+        elif isinstance(sample_value, (list | tuple)):
+            concatenated: list[Any] = []
+            for value, _ in records:
+                concatenated.extend(list(value))
+            combined[key] = concatenated
+        elif isinstance(sample_value, (int | float | bool | np.integer | np.floating)):
+            # combine and get average value
+            combined[key] = sum(value for value in records) / len(records) if len(records) > 0 else sample_value
+        else:
+            # Fallback: keep the latest value if aggregation strategy is unclear.
+            combined[key] = records[-1][0]
+    return combined

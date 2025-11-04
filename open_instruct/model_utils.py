@@ -33,6 +33,7 @@ import transformers
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
 from huggingface_hub import HfApi
+from numpy.typing import NDArray
 from rich import print as rprint
 from rich.console import Console
 from rich.panel import Panel
@@ -56,6 +57,7 @@ class Batch:
     datasets: list[str]
     raw_queries: list[str] | None
     indices: list[int] | None
+    scores: list(float)
 
     def __getitem__(self, key: slice | int | list[int]) -> "Batch":
         """Enable indexing and slicing: batch[5], batch[start:end], or batch[[1,3,5]]."""

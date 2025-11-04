@@ -113,6 +113,7 @@ from open_instruct.utils import (
     _z3_params_to_fetch,
     calibrate_checkpoint_state_dir,
     clean_last_n_checkpoints_deepspeed,
+    combine_reward_metrics,
     download_latest_checkpoint_from_gs,
     get_beaker_whoami,
     get_eval_ds_config,
@@ -499,6 +500,13 @@ class Args:
                 assert self.mask_tool_use, (
                     "Must mask tool use when using vLLM logprobs or truncated importance sampling."
                 )
+
+        # Figure out max possible RLVR score
+        self.max_possible_score = 0
+        if self.apply_verifiable_reward:
+            self.max_possible_score += self.verification_reward
+        if self.apply_r1_style_format_reward and self.additive_format_reward:
+            self.max_possible_score += self.r1_style_format_reward
 
 
 def next_batch(dataset_indices: list[int], dataset: datasets.Dataset) -> Batch:
@@ -1528,9 +1536,12 @@ def accumulate_inference_batches(
     generation_config: vllm.SamplingParams,
     num_prompts: int,
     model_dims: utils.ModelDims,
+    tokenizer: PreTrainedTokenizer,
+    reward_fn: Callable,
     actor_manager=None,
     timeout: float | None = None,
-) -> tuple[GenerationResult, Batch]:
+    filter_zero_std_samples: bool = False,
+) -> tuple[GenerationResult, Batch, dict, list[int], list[int]]:
     """Accumulate multiple inference results into a single training batch.
 
     Args:
@@ -1553,13 +1564,19 @@ def accumulate_inference_batches(
     all_ground_truths = []
     all_datasets = []
     all_raw_queries = []
-    for _ in tqdm(
-        range(num_prompts),
+    all_reward_metrics = []
+    all_scores = []
+    total_filtered_prompts = 0
+    filtered_prompt_zero = 0
+    filtered_prompt_solved = 0
+    filtered_prompt_nonzero = 0
+    progress_bar = tqdm(
         total=num_prompts,
         desc=f"Accumulating results from {num_prompts} prompts",
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
-    ):
+    )
+    while len(results) < num_prompts:
         result = inference_results_Q.get(timeout=timeout)
 
         if isinstance(result, ShutdownSentinel):
@@ -1574,11 +1591,50 @@ def accumulate_inference_batches(
 
         query, ground_truth, dataset, raw_query = pending_queries_map.pop(result.dataset_index)
 
+        for i in range(len(result.finish_reasons)):
+            if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
+                result.responses[i].append(tokenizer.eos_token_id)
+                result.masks[i].append(1)
+                result.logprobs[i].append(float("nan"))
+
+        decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
+
+        k_queries = [query for _ in range(generation_config.n)]
+        k_ground_truths = [ground_truth for _ in range(generation_config.n)]
+        k_datasets = [dataset for _ in range(generation_config.n)]
+        k_decoded_queries = [raw_query for _ in range(generation_config.n)]
+
+        with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
+            scores, reward_metrics = asyncio.run(
+                reward_fn(
+                    result.responses,
+                    decoded_responses,
+                    Batch(ground_truths=k_ground_truths, datasets=k_datasets),
+                    result.finish_reasons,
+                    result.request_info,
+                    k_decoded_queries,
+                )
+            )
+
+        # Filter out zero std prompts
+        if filter_zero_std_samples and np.array(scores).std() == 0:
+            total_filtered_prompts += 1
+            if scores[0] == 0:
+                filtered_prompt_zero += 1
+            elif scores[0] == args.max_possible_score:
+                filtered_prompt_solved += 1
+            else:
+                filtered_prompt_nonzero += 1
+            continue
+
         results.append(result)
-        all_queries.append(query)
-        all_ground_truths.append(ground_truth)
-        all_datasets.append(dataset)
-        all_raw_queries.append(raw_query)
+        all_queries.extend(k_queries)
+        all_ground_truths.extend(k_ground_truths)
+        all_datasets.extend(k_datasets)
+        all_raw_queries.extend(k_decoded_queries)
+        all_scores.extend(scores)
+        all_reward_metrics.append(reward_metrics)
+        progress_bar.update(1)
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1615,7 +1671,7 @@ def accumulate_inference_batches(
 
         earliest_start_time = min(earliest_start_time, result.start_time)
 
-        prompt_lengths.append(len(all_queries[i]))
+        prompt_lengths.append(len(all_queries[i * generation_config.n]))
 
         for response in result.responses:
             response_lengths.append(len(response))
@@ -1667,8 +1723,12 @@ def accumulate_inference_batches(
         datasets=all_datasets,
         raw_queries=all_raw_queries,
         indices=None,  # Not meaningful for combined results
+        scores=all_scores,
     )
-    return combined_result, batch, prompt_lengths, response_lengths
+
+    combined_reward_metrics = combine_reward_metrics(all_reward_metrics, num_samples=generation_config.n)
+
+    return combined_result, batch, combined_reward_metrics, prompt_lengths, response_lengths
 
 
 def data_preparation_thread(
@@ -1687,14 +1747,17 @@ def data_preparation_thread(
     for training_step in range(resume_training_step, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
         with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
-            result, batch, prompt_lengths, response_lengths = accumulate_inference_batches(
+            result, batch, reward_metrics, prompt_lengths, response_lengths = accumulate_inference_batches(
                 inference_results_Q,
                 pending_queries_map,
                 args,
                 generation_config,
                 num_prompts=args.num_unique_prompts_rollout,
                 model_dims=model_dims,
+                tokenizer=tokenizer,
+                reward_fn=reward_fn,
                 actor_manager=actor_manager,
+                filter_zero_std_samples=args.active_sampling,
             )
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
@@ -1719,29 +1782,6 @@ def data_preparation_thread(
                 and not result.request_info.tool_errors[i]
                 for i in range(len(result.request_info.tool_outputs))
             ]
-        for i in range(len(result.finish_reasons)):
-            if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
-                result.responses[i].append(tokenizer.eos_token_id)
-                result.masks[i].append(1)
-                result.logprobs[i].append(float("nan"))
-        with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
-            decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
-            decoded_queries = batch.raw_queries
-            stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
-                result.finish_reasons
-            )
-
-        with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
-            scores, reward_metrics = asyncio.run(
-                reward_fn(
-                    result.responses,
-                    decoded_responses,
-                    batch,
-                    result.finish_reasons,
-                    result.request_info,
-                    decoded_queries,
-                )
-            )
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
@@ -1756,29 +1796,6 @@ def data_preparation_thread(
                 raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
-            # Here we get the max possible score for each prompt, and see how many prompts are unsolved
-            max_possible_score = 0
-            if args.apply_verifiable_reward:
-                max_possible_score += args.verification_reward
-            if args.apply_r1_style_format_reward and args.additive_format_reward:
-                max_possible_score += args.r1_style_format_reward
-            unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
-            # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
-            # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
-            non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
-            real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
-            expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
-            non_zero_gradient_index = np.where(expanded_mask)[0]
-
-            # Log zero-gradient filtering statistics
-            num_zero_std_prompts = (~non_zero_std_mask).sum()
-            num_filtered_responses = len(scores) - len(non_zero_gradient_index)
-            if num_filtered_responses > 0:
-                logger.info(
-                    f"[Zero-gradient filtering] Filtered {num_zero_std_prompts} prompts with zero std "
-                    f"({num_filtered_responses} responses). Retention rate: {len(non_zero_gradient_index) / len(scores):.2%}"
-                )
-
             advantages = advantages[non_zero_gradient_index]
             original_batch_size = len(scores)
             scores = scores[non_zero_gradient_index]
@@ -2539,15 +2556,18 @@ def maybe_evaluate(
         timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_every < 0) else 100
 
         # Accumulate evaluation results from all vLLM engines
-        eval_result, eval_batch, _, _ = accumulate_inference_batches(
+        eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
             evaluation_inference_results_Q,
             eval_pending_queries_map,
             args,
             eval_generation_config,
             num_prompts=num_eval_prompts,
             model_dims=model_dims,
+            tokenizer=tokenizer,
+            reward_fn=reward_fn,
             actor_manager=actor_manager,
             timeout=timeout,
+            filter_zero_std_samples=False,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -2559,21 +2579,21 @@ def maybe_evaluate(
             logger.info("[Main Thread] didn't get eval generation metrics")
 
         eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
-        eval_decoded_responses = tokenizer.batch_decode(eval_result.responses, skip_special_tokens=True)
-        eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_result.finish_reasons) / len(
-            eval_result.finish_reasons
-        )
+        # eval_decoded_responses = tokenizer.batch_decode(eval_result.responses, skip_special_tokens=True)
+        # eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_result.finish_reasons) / len(
+        #     eval_result.finish_reasons
+        # )
 
-        # get and log evaluation metrics
-        eval_scores, eval_reward_metrics = asyncio.run(
-            reward_fn(
-                eval_result.responses,
-                eval_decoded_responses,
-                eval_batch if eval_batch else Batch(queries=[], ground_truths=[], datasets=[], indices=None),
-                eval_result.finish_reasons,
-                eval_result.request_info,
-            )
-        )
+        # # get and log evaluation metrics
+        # eval_scores, eval_reward_metrics = asyncio.run(
+        #     reward_fn(
+        #         eval_result.responses,
+        #         eval_decoded_responses,
+        #         eval_batch if eval_batch else Batch(queries=[], ground_truths=[], datasets=[], indices=None),
+        #         eval_result.finish_reasons,
+        #         eval_result.request_info,
+        #     )
+        # )
         eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
         eval_metrics = {
             "eval/scores": np.array(eval_scores).mean(),
