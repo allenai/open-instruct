@@ -97,7 +97,24 @@ def dataset_id_from_experiment(experiment: Mapping[str, Any]) -> str:
         jobs = experiment["jobs"]
         if not jobs:
             raise KeyError
-        return jobs[0]["execution"]["result"]["beaker"]
+        
+        # Find the last successfully completed job (exitCode 0)
+        # Some experiments have multiple jobs when earlier jobs were preempted/canceled
+        # We want the most recent successful job
+        successful_job = None
+        for job in jobs:
+            try:
+                exit_code = job.get("status", {}).get("exitCode")
+                if exit_code == 0:
+                    successful_job = job
+            except (KeyError, TypeError):
+                continue
+        
+        if successful_job is not None:
+            return successful_job["execution"]["result"]["beaker"]
+        
+        # Fallback: if no successful job found, try the last job (most recent)
+        return jobs[-1]["execution"]["result"]["beaker"]
     except (KeyError, TypeError, IndexError):
         raise RuntimeError(f"Unable to locate dataset ID in experiment payload {experiment.get('id')}")
 
