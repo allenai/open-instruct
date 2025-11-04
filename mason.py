@@ -98,7 +98,7 @@ def parse_env_var(env_var_str: str) -> Dict[str, str]:
     return {"name": name, "value": value}
 
 
-def get_clusters(beaker_client: beaker.Beaker, selected_clusters: List[str]) -> ClusterConfig:
+def get_clusters(beaker_client: beaker.Beaker | None, selected_clusters: List[str]) -> ClusterConfig:
     """Get cluster properties for the user's selected clusters from Beaker API.
 
     Args:
@@ -109,7 +109,7 @@ def get_clusters(beaker_client: beaker.Beaker, selected_clusters: List[str]) -> 
         ClusterConfig with lists of which selected clusters have weka/gcp/interconnect properties
     """
     if beaker_client is None:
-        raise ValueError("You need access to Beaker to run mason.py")
+        return ClusterConfig(all_weka=False, any_weka=False, all_gcp=False, any_gcp=False, all_interconnect=False)
 
     num_weka = 0
     num_gcp = 0
@@ -782,12 +782,7 @@ def make_internal_command(
 
                 # Use Popen to get real-time output while also capturing it
                 process = subprocess.Popen(
-                    caching_command,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
+                    caching_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
                 )
 
                 stdout_data, stderr_data = [], []
@@ -816,11 +811,7 @@ def make_internal_command(
                 result = type(
                     "SubprocessResult",
                     (),
-                    {
-                        "returncode": process.returncode,
-                        "stdout": "".join(stdout_data),
-                        "stderr": "".join(stderr_data),
-                    },
+                    {"returncode": process.returncode, "stdout": "".join(stdout_data), "stderr": "".join(stderr_data)},
                 )
                 stdout = result.stdout
                 # Extract the cached dataset path from stdout if it exists
@@ -967,13 +958,9 @@ def main():
         beaker_secrets = []
         beaker_client = None
     else:
-        if args.workspace:
-            beaker_client = beaker.Beaker.from_env(default_workspace=args.workspace)
-        else:
-            beaker_client = beaker.Beaker.from_env()
+        beaker_client = beaker.Beaker.from_env(default_workspace=args.workspace)
         beaker_secrets = [secret.name for secret in beaker_client.secret.list()]
         whoami = beaker_client.user.get().name
-
     cluster_config = get_clusters(beaker_client, args.cluster)
     full_commands = [
         make_internal_command(command, args, whoami, is_external_user, cluster_config) for command in commands
