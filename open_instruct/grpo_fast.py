@@ -279,9 +279,9 @@ class Args:
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
 
-    active_fill_completions: bool = False
+    active_sampling: bool = False
     """Whether to refill the batch with *new prompts/completions* after filtering."""
-    active_fill_max_attempts: int = 3
+    active_sampling_max_attempts: int = 3
     """How many times to attempt to fill"""
 
     # Reward
@@ -1889,7 +1889,7 @@ def data_preparation_thread(
 
             prompts_kept_this_iter = len(scores) // per_prompt_rollout if per_prompt_rollout > 0 else 0
 
-            if not args.active_fill_completions:
+            if not args.active_sampling:
                 break
 
             collected_samples = sum(len(chunk.scores) for chunk in aggregation.chunks)
@@ -1898,11 +1898,11 @@ def data_preparation_thread(
             if prompts_remaining <= 0:
                 break
 
-            if prompts_kept_this_iter == 0 and fill_iteration > args.active_fill_max_attempts:
+            if prompts_kept_this_iter == 0 and fill_iteration > args.active_sampling_max_attempts:
                 total_responses = sum(len(chunk.kept_indices) for chunk in aggregation.chunks)
                 logger.warning(
                     "[Active fill completions] Unable to collect non-zero advantage prompts in iteration %d; "
-                    "set as max by args.active_fill_max_attempts, proceeding with existing batch of size %d.",
+                    "set as max by args.active_sampling_max_attempts, proceeding with existing batch of size %d.",
                     fill_iteration,
                     total_responses,
                 )
