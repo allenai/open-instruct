@@ -43,14 +43,13 @@ DEFAULT_ALIASES: Tuple[str, ...] = (
     "zebralogic::hamish_zs_reasoning_deepseek",
     "agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek",
     "minerva_math::hamish_zs_reasoning_deepseek",
-    "minerva_math_500::hamish_zs_reasoning_deepseek",
     "gsm8k::zs_cot_latex_deepseek",
     "omega_500:0-shot-chat_deepseek",
     "aime:zs_cot_r1::pass_at_32_2025_deepseek",
     "aime:zs_cot_r1::pass_at_32_2024_deepseek",
     "codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek",
     "mbppplus:0-shot-chat::tulu-thinker_deepseek",
-    "livecodebench_codegeneration::tulu-thinker_deepseek",
+    "livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags",
     "alpaca_eval_v3::hamish_zs_reasoning_deepseek",
     "ifeval::hamish_zs_reasoning_deepseek",
     "bfcl_all::std",
@@ -768,11 +767,19 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip DuckDB cache refresh and use existing cache as-is (useful for parallel execution).",
     )
+    parser.add_argument(
+        "--model-alias",
+        default=None,
+        help="Optional display name for the model (used in output files and summaries). Defaults to model_name.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+
+    # Use model_alias if provided, otherwise use model_name
+    display_name = args.model_alias if args.model_alias else args.model_name
 
     aliases: List[str] = []
     seen: set[str] = set()
@@ -811,7 +818,7 @@ def main() -> None:
     else:
         output_root = (
             Path.cwd() / "download_evals_analyze_lengths" / "data" /
-            f"{sanitize_name(args.model_name)}_eval_lengths"
+            f"{sanitize_name(display_name)}_eval_lengths"
         ).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
 
@@ -884,7 +891,8 @@ def main() -> None:
         print("\nNo model responses found across all analyzed datasets.")
 
     summary = {
-        "model_name": args.model_name,
+        "model_name": display_name,
+        "model_query_name": args.model_name,
         "lookup_sources": sources,
         "aliases": per_alias_summary,
         "missing_aliases": missing_aliases,
