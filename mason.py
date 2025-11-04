@@ -31,6 +31,13 @@ OPEN_INSTRUCT_COMMANDS = [
 
 OPEN_INSTRUCT_RESUMABLES = ["open_instruct/grpo_fast.py"]
 
+CACHE_EXCLUDED_ARGS = {
+    "--with_tracking": False,
+    "--checkpoint_state_freq": True,
+    "--checkpoint_state_dir": True,
+    "--gs_checkpoint_state_dir": True,
+}
+
 
 # ----------------------------------------------------------------------
 # Mason logic
@@ -458,12 +465,6 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                 except ValueError:
                     continue
 
-                CACHE_EXCLUDED_ARGS = {
-                    "--with_tracking": False,
-                    "--checkpoint_state_freq": True,
-                    "--checkpoint_state_dir": True,
-                    "--gs_checkpoint_state_dir": True,
-                }
                 filtered_command = build_command_without_args(command[idx:], CACHE_EXCLUDED_ARGS)
                 caching_command = "python " + " ".join(filtered_command) + " --cache_dataset_only"
                 console.log("📦📦📦 Running the caching command with `--cache_dataset_only`")
