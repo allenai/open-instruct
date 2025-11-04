@@ -76,7 +76,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
-from open_instruct import logger_utils, vllm_utils
+from open_instruct import data_filtering, logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
@@ -126,7 +126,6 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
-    repeat_each,
     sync_gs_bucket,
 )
 
@@ -1705,20 +1704,7 @@ def data_preparation_thread(
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
         if args.num_samples_per_prompt_rollout > 1:
-            batch = Batch(
-                queries=repeat_each(batch.queries, args.num_samples_per_prompt_rollout),
-                ground_truths=repeat_each(batch.ground_truths, args.num_samples_per_prompt_rollout),
-                datasets=repeat_each(batch.datasets, args.num_samples_per_prompt_rollout),
-                raw_queries=repeat_each(batch.raw_queries, args.num_samples_per_prompt_rollout),
-                indices=repeat_each(batch.indices, args.num_samples_per_prompt_rollout) if batch.indices else None,
-            )
-            good_outputs = [
-                len(result.request_info.tool_outputs[i]) > 0
-                and result.request_info.tool_calleds[i]
-                and not result.request_info.timeouts[i]
-                and not result.request_info.tool_errors[i]
-                for i in range(len(result.request_info.tool_outputs))
-            ]
+            batch = batch.repeat(args.num_samples_per_prompt_rollout)
         for i in range(len(result.finish_reasons)):
             if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
                 result.responses[i].append(tokenizer.eos_token_id)
@@ -1732,16 +1718,7 @@ def data_preparation_thread(
             )
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
-            scores, reward_metrics = asyncio.run(
-                reward_fn(
-                    result.responses,
-                    decoded_responses,
-                    batch,
-                    result.finish_reasons,
-                    result.request_info,
-                    decoded_queries,
-                )
-            )
+            scores, reward_metrics = asyncio.run(reward_fn(result, decoded_responses, batch, decoded_queries))
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
@@ -1756,102 +1733,53 @@ def data_preparation_thread(
                 raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
-            # Here we get the max possible score for each prompt, and see how many prompts are unsolved
             max_possible_score = 0
             if args.apply_verifiable_reward:
                 max_possible_score += args.verification_reward
             if args.apply_r1_style_format_reward and args.additive_format_reward:
                 max_possible_score += args.r1_style_format_reward
             unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
-            # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
-            # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
-            non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
-            real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
-            expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
-            non_zero_gradient_index = np.where(expanded_mask)[0]
 
-            # Log zero-gradient filtering statistics
-            num_zero_std_prompts = (~non_zero_std_mask).sum()
-            num_filtered_responses = len(scores) - len(non_zero_gradient_index)
-            if num_filtered_responses > 0:
+            rng = np.random.default_rng()
+            scores, advantages, responses, masks, batch, finish_reasons, vllm_logprobs, filter_stats = (
+                data_filtering.apply_sequence_filters(
+                    scores=scores,
+                    advantages=advantages,
+                    responses=result.responses,
+                    masks=result.masks,
+                    batch=batch,
+                    finish_reasons=result.finish_reasons,
+                    vllm_logprobs=result.logprobs,
+                    num_samples_per_prompt=args.num_samples_per_prompt_rollout,
+                    mask_truncated=args.mask_truncated_completions,
+                    fill_to_original_size=args.fill_completions,
+                    rng=rng,
+                )
+            )
+
+            zero_grad_stats = filter_stats["zero_gradient"]
+            real_batch_size_ratio = zero_grad_stats["real_batch_size_ratio"]
+            if zero_grad_stats["num_filtered_responses"] > 0:
                 logger.info(
-                    f"[Zero-gradient filtering] Filtered {num_zero_std_prompts} prompts with zero std "
-                    f"({num_filtered_responses} responses). Retention rate: {len(non_zero_gradient_index) / len(scores):.2%}"
+                    f"[Zero-gradient filtering] Filtered {zero_grad_stats['num_filtered_prompts']} prompts with zero std "
+                    f"({zero_grad_stats['num_filtered_responses']} responses). "
+                    f"Retention rate: {real_batch_size_ratio:.2%}"
                 )
 
-            advantages = advantages[non_zero_gradient_index]
-            original_batch_size = len(scores)
-            scores = scores[non_zero_gradient_index]
-            responses = [result.responses[i] for i in non_zero_gradient_index]
-            masks = [result.masks[i] for i in non_zero_gradient_index]
-            batch = batch[non_zero_gradient_index.tolist()]
-            finish_reasons = [result.finish_reasons[i] for i in non_zero_gradient_index]
-            vllm_logprobs = [result.logprobs[i] for i in non_zero_gradient_index]
-            if args.mask_truncated_completions:
-                stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
-                num_truncated = len(finish_reasons) - len(stop_idxes)
-                if num_truncated > 0:
-                    logger.info(
-                        f"[Truncated completions filtering] Filtered {num_truncated} responses that didn't finish with 'stop'. "
-                        f"Retention rate: {len(stop_idxes) / len(finish_reasons):.2%}"
-                    )
-                scores = scores[stop_idxes]
-                advantages = advantages[stop_idxes]
-                responses = [responses[i] for i in stop_idxes]
-                masks = [masks[i] for i in stop_idxes]
-                batch = batch[stop_idxes.tolist()]
-                finish_reasons = [finish_reasons[i] for i in stop_idxes]
-                vllm_logprobs = [vllm_logprobs[i] for i in stop_idxes]
+            truncated_stats = filter_stats["truncated"]
+            if truncated_stats["num_truncated"] > 0:
+                logger.info(
+                    f"[Truncated completions filtering] Filtered {truncated_stats['num_truncated']} responses that didn't finish with 'stop'. "
+                    f"Retention rate: {truncated_stats['retention_rate']:.2%}"
+                )
 
-            if args.fill_completions:
-                with Timer("⏱ [Data Preparation Thread] Refill completions"):
-                    current_batch_size = len(scores)
-                    original_prompt_cnt = original_batch_size // args.num_samples_per_prompt_rollout
-                    current_prompt_cnt = current_batch_size // args.num_samples_per_prompt_rollout
-                    need_to_fill_prompt = original_prompt_cnt - current_prompt_cnt
-                    k = args.num_samples_per_prompt_rollout
+            fill_stats = filter_stats["fill"]
+            if fill_stats["num_filled_prompts"] > 0:
+                logger.info(
+                    f"[Refill completions] Filled {fill_stats['num_filled_prompts']} prompts "
+                    f"({fill_stats['num_filled_responses']} responses) to maintain batch size"
+                )
 
-                    if need_to_fill_prompt > 0 and current_prompt_cnt > 0:
-                        scores_matrix = scores.reshape(current_prompt_cnt, k)
-                        stds = scores_matrix.std(axis=1) + 1e-8
-                        probs = stds / stds.sum()
-
-                        logger.info(
-                            f"[Refill completions] Need to fill {need_to_fill_prompt} prompts to maintain batch size. "
-                            f"Original: {original_prompt_cnt}, Current: {current_prompt_cnt}"
-                        )
-
-                        sampled_prompt_ids = np.random.choice(
-                            current_prompt_cnt, size=need_to_fill_prompt, replace=True, p=probs
-                        )
-
-                        sampled_indices = []
-                        for pid in sampled_prompt_ids:
-                            start = pid * k
-                            sampled_indices.extend(range(start, start + k))
-
-                        advantages = np.concatenate([advantages, advantages[sampled_indices]])
-                        scores = np.concatenate([scores, scores[sampled_indices]])
-                        responses += [responses[i] for i in sampled_indices]
-                        masks += [masks[i] for i in sampled_indices]
-
-                        sampled_batch = batch[sampled_indices]
-
-                        batch = Batch(
-                            queries=batch.queries + sampled_batch.queries,
-                            ground_truths=batch.ground_truths + sampled_batch.ground_truths,
-                            datasets=batch.datasets + sampled_batch.datasets,
-                            indices=batch.indices + sampled_batch.indices if batch.indices is not None else None,
-                        )
-
-                        finish_reasons += [finish_reasons[i] for i in sampled_indices]
-                        vllm_logprobs += [vllm_logprobs[i] for i in sampled_indices]
-
-                        logger.info(
-                            f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses"
-                        )
-
-            # Count groups with all zero rewards
             all_zero_groups = (scores_per_prompt == 0).all(axis=-1).sum()
             total_groups = len(scores_per_prompt)
             logger.info(
@@ -2008,7 +1936,7 @@ def data_preparation_thread(
                 "val/num_calls_rate": np.array(result.request_info.num_calls).mean(),
                 "val/timeouts_rate": np.array(result.request_info.timeouts).mean(),
                 "val/tool_errors_rate": np.array([len(item) > 0 for item in result.request_info.tool_errors]).mean(),
-                "val/good_outputs_rate": np.array(good_outputs).mean(),
+                "val/good_outputs_rate": np.mean(result.good_outputs()),
                 "val/tool_runtimes_rate": np.array(result.request_info.tool_runtimes).mean(),
                 "val/tool_calleds_rate": np.array(result.request_info.tool_calleds).mean(),
                 "time/getting_response": getting_response_time,
@@ -2567,11 +2495,9 @@ def maybe_evaluate(
         # get and log evaluation metrics
         eval_scores, eval_reward_metrics = asyncio.run(
             reward_fn(
-                eval_result.responses,
+                eval_result,
                 eval_decoded_responses,
                 eval_batch if eval_batch else Batch(queries=[], ground_truths=[], datasets=[], indices=None),
-                eval_result.finish_reasons,
-                eval_result.request_info,
             )
         )
         eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
@@ -2661,21 +2587,9 @@ def make_reward_fn(args: Args) -> Callable:
     reward_fn_mapping = build_all_verifiers(args)
 
     async def reward_fn(
-        responses: list[torch.Tensor],
-        decoded_responses: list[str],
-        batch: Batch,
-        finish_reasons: list[str],
-        infos: list[list[int]],
-        queries: list[str] | None = None,
+        result: GenerationResult, decoded_responses: list[str], batch: Batch, queries: list[str] | None = None
     ) -> list[float]:
-        timeouts = infos.timeouts
-        tool_errors = infos.tool_errors
-        tool_outputs = infos.tool_outputs
-        tool_calleds = infos.tool_calleds
-        good_outputs = [
-            len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
-            for i in range(len(tool_outputs))
-        ]
+        good_outputs = result.good_outputs()
         scores = [0] * len(decoded_responses)
         metrics = {}
 
@@ -2692,7 +2606,7 @@ def make_reward_fn(args: Args) -> Callable:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
                 verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
                     reward_fn_mapping,
-                    responses,
+                    result.responses,
                     decoded_responses,
                     batch,
                     reward_mult=args.verification_reward,
@@ -2726,9 +2640,9 @@ def make_reward_fn(args: Args) -> Callable:
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
         if args.non_stop_penalty:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty"):
-                assert len(finish_reasons) == len(scores)
-                for i in range(len(finish_reasons)):
-                    if finish_reasons[i] != "stop":
+                assert len(result.finish_reasons) == len(scores)
+                for i in range(len(result.finish_reasons)):
+                    if result.finish_reasons[i] != "stop":
                         scores[i] = args.non_stop_penalty_value
 
         return scores, metrics
