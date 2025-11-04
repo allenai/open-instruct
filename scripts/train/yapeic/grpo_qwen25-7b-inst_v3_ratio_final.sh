@@ -28,7 +28,6 @@ python mason.py \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list /weka/oe-training-default/yapeic/proc-data/data/dclm/tutorial_subset/grpo_data/v3_goal_resource_steps_low_variation_simple_template_ratio_with_format_10k_test.jsonl 1.0 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 1024 \
     --max_prompt_token_length 1024 \
     --response_length 3072 \
     --pack_length 4096 \
