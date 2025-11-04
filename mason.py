@@ -32,6 +32,13 @@ OPEN_INSTRUCT_COMMANDS = [
 
 OPEN_INSTRUCT_RESUMABLES = ["open_instruct/grpo_fast.py"]
 
+CACHE_EXCLUDED_ARGS = {
+    "--with_tracking": False,
+    "--checkpoint_state_freq": True,
+    "--checkpoint_state_dir": True,
+    "--gs_checkpoint_state_dir": True,
+}
+
 
 @dataclass
 class ClusterConfig:
@@ -42,6 +49,35 @@ class ClusterConfig:
 
 # ----------------------------------------------------------------------
 # Mason logic
+def build_command_without_args(command, args_to_remove):
+    """Build new command list excluding specified arguments.
+
+    Args:
+        command: List of command arguments
+        args_to_remove: Dict mapping argument names to boolean indicating if they have values
+                       e.g., {"--with_tracking": False, "--checkpoint_state_dir": True}
+
+    Returns:
+        New command list with specified arguments removed
+    """
+    result = []
+    skip_next = False
+
+    for i, item in enumerate(command):
+        if skip_next:
+            skip_next = False
+            continue
+
+        if item in args_to_remove:
+            if args_to_remove[item]:
+                skip_next = True
+            continue
+
+        result.append(item)
+
+    return result
+
+
 def parse_beaker_dataset(dataset_str):
     splt = dataset_str.split(":")
     if len(splt) != 2:
@@ -732,17 +768,95 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
     dataset_config_hashes = []
 
     if is_open_instruct_training:
-        command, dataset_cache_paths, dataset_config_hashes = maybe_cache_dataset(command, args)
+        from open_instruct.dataset_transformation import get_commit_hash
+        from open_instruct.utils import download_from_hf, gs_folder_exists, upload_to_gs_bucket
 
-        def find_list_idx(lst: List[str], item: str):
-            for i in range(len(lst)):
-                if item == lst[i]:
-                    return i
-            return -1
+        # HACK: Cache dataset logic:
+        # Here we basically try to run the tokenization full_command locally before running it on beaker
+        # We could in theory submit a cpu only job to beaker to do this, but that requires setting up
+        # dependency jobs somehow. Since tokenization is like ~5 minutes, we can just run it locally.
+        # Once it's cached, we don't need to cache it again.
 
-        for file in OPEN_INSTRUCT_COMMANDS:
-            idx = find_list_idx(command, file)
-            if idx != -1:
+        # Add the whoami parts if not already present
+        if not any("hf_entity" in c for c in command):
+            command.append("--hf_entity")
+            command.append("allenai")
+        if not any("wandb_entity" in c for c in command):
+            command.append("--wandb_entity")
+            command.append("ai2-llm")
+
+        dataset_cache_paths = []
+        dataset_config_hashes = []
+        if not args.no_auto_dataset_cache:
+            for file in OPEN_INSTRUCT_COMMANDS:
+                try:
+                    idx = command.index(file)
+                except ValueError:
+                    continue
+
+                filtered_command = build_command_without_args(command[idx:], CACHE_EXCLUDED_ARGS)
+                caching_command = "python " + " ".join(filtered_command) + " --cache_dataset_only"
+                console.log("📦📦📦 Running the caching command with `--cache_dataset_only`")
+                import subprocess
+
+                # Use Popen to get real-time output while also capturing it
+                process = subprocess.Popen(
+                    caching_command,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                )
+
+                stdout_data, stderr_data = [], []
+
+                # Set up select to monitor both stdout and stderr
+                streams = [process.stdout, process.stderr]
+                while True:
+                    # Wait for output on either stream
+                    reads = select.select(streams, [], [])[0]
+
+                    done = True
+                    for stream in reads:
+                        line = stream.readline()
+                        if line:
+                            done = False
+                            is_stdout = stream == process.stdout
+                            print(line.rstrip(), file=sys.stdout if is_stdout else sys.stderr)
+                            if is_stdout:
+                                stdout_data.append(line)
+                            else:
+                                stderr_data.append(line)
+
+                    if done and process.poll() is not None:
+                        break
+
+                result = type(
+                    "SubprocessResult",
+                    (),
+                    {
+                        "returncode": process.returncode,
+                        "stdout": "".join(stdout_data),
+                        "stderr": "".join(stderr_data),
+                    },
+                )
+                stdout = result.stdout
+                # Extract the cached dataset path from stdout if it exists
+                for line in stdout.splitlines():
+                    if "✅ Found cached dataset at" in line:
+                        dataset_cache_path = line.split("✅ Found cached dataset at")[1].strip()
+                        dataset_config_hash = dataset_cache_path.split("/")[-1]
+                        console.log(f"📦 Found cached dataset at: {dataset_cache_path}")
+                        console.log(f"📦 Found cached dataset config hash: {dataset_config_hash}")
+                        dataset_cache_paths.append(dataset_cache_path)
+                        dataset_config_hashes.append(dataset_config_hash)
+                stderr = result.stderr
+                return_code = result.returncode
+                if return_code != 0:
+                    raise Exception(f"Error code {return_code} when creating cached dataset")
+                console.log("✅✅✅ Finished running the caching command")
+
                 if file in OPEN_INSTRUCT_RESUMABLES and idx != -1 and len(args.auto_checkpoint_state_dir) > 0:
                     need_to_override_checkpoint_state_dir = True
                     default_checkpoint_state_freq = 200
