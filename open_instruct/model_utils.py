@@ -507,9 +507,7 @@ def save_with_accelerate(
     # customize model card (TODO (Costa): this can be prettier)
 
 
-torch.compile(dynamic=True)
-
-
+@torch.compile(dynamic=True)
 def log_softmax_and_gather(logits: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
     """
     torch compiled version of the common `log_softmax -> gather` operation.
