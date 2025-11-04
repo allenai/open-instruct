@@ -4,6 +4,7 @@ from typing import Any
 import numpy as np
 
 from open_instruct.model_utils import Batch
+from open_instruct.rl_utils import timer
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,7 @@ def maybe_fill_completions(
     )
 
 
+@timer("📦 [Data Preparation Thread] Filtering sequences")
 def apply_sequence_filters(
     scores: np.ndarray,
     advantages: np.ndarray,

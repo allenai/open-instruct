@@ -1729,32 +1729,25 @@ def data_preparation_thread(
             else:
                 raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
-        with Timer("📦 [Data Preparation Thread] Filtering sequences"):
-            scores, advantages, responses, masks, batch, finish_reasons, vllm_logprobs, filter_stats = (
-                data_filtering.apply_sequence_filters(
-                    scores=scores,
-                    advantages=advantages,
-                    responses=result.responses,
-                    masks=result.masks,
-                    batch=batch,
-                    finish_reasons=result.finish_reasons,
-                    vllm_logprobs=result.logprobs,
-                    num_samples_per_prompt=args.num_samples_per_prompt_rollout,
-                    mask_truncated=args.mask_truncated_completions,
-                    fill_to_original_size=args.fill_completions,
-                    apply_verifiable_reward=args.apply_verifiable_reward,
-                    verification_reward=args.verification_reward,
-                    apply_r1_style_format_reward=args.apply_r1_style_format_reward,
-                    additive_format_reward=args.additive_format_reward,
-                    r1_style_format_reward=args.r1_style_format_reward,
-                )
+        scores, advantages, responses, masks, batch, finish_reasons, vllm_logprobs, filter_stats = (
+            data_filtering.apply_sequence_filters(
+                scores=scores,
+                advantages=advantages,
+                responses=result.responses,
+                masks=result.masks,
+                batch=batch,
+                finish_reasons=result.finish_reasons,
+                vllm_logprobs=result.logprobs,
+                num_samples_per_prompt=args.num_samples_per_prompt_rollout,
+                mask_truncated=args.mask_truncated_completions,
+                fill_to_original_size=args.fill_completions,
+                apply_verifiable_reward=args.apply_verifiable_reward,
+                verification_reward=args.verification_reward,
+                apply_r1_style_format_reward=args.apply_r1_style_format_reward,
+                additive_format_reward=args.additive_format_reward,
+                r1_style_format_reward=args.r1_style_format_reward,
             )
-
-            max_possible_score = filter_stats["max_possible_score"]
-            unsolved_batch_size_ratio = filter_stats["unsolved_batch_size_ratio"]
-            real_batch_size_ratio = filter_stats["zero_gradient"]["real_batch_size_ratio"]
-            all_zero_groups = filter_stats["all_zero_groups"]
-            total_groups = filter_stats["total_groups"]
+        )
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
@@ -1869,23 +1862,31 @@ def data_preparation_thread(
         else:
             sequence_lengths = np.array([len(response) for response in responses])
             sequence_length_solved = (
-                np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == max_possible_score])
+                np.array([])
+                if np.all(scores == 0)
+                else np.array(sequence_lengths[scores == filter_stats["max_possible_score"]])
             )
             sequence_length_unsolved = (
-                np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
+                np.array([])
+                if np.all(scores == filter_stats["max_possible_score"])
+                else np.array(sequence_lengths[scores == 0])
             )
 
             # Use the already calculated reward summary metrics for wandb
-            all_zero_groups_ratio = all_zero_groups / total_groups if total_groups > 0 else 0
+            all_zero_groups_ratio = (
+                filter_stats["all_zero_groups"] / filter_stats["total_groups"]
+                if filter_stats["total_groups"] > 0
+                else 0
+            )
 
             metrics = {
                 "scores": np.array(scores).mean(),
-                "real_batch_size_ratio": real_batch_size_ratio,
-                "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
+                "real_batch_size_ratio": filter_stats["zero_gradient"]["real_batch_size_ratio"],
+                "unsolved_batch_size_ratio": filter_stats["unsolved_batch_size_ratio"],
                 "packed_ratio": len(packed_sequences.query_responses) / len(responses) if len(responses) > 0 else 0,
-                "val/all_zero_reward_groups": all_zero_groups,
+                "val/all_zero_reward_groups": filter_stats["all_zero_groups"],
                 "val/all_zero_reward_groups_ratio": all_zero_groups_ratio,
-                "val/total_reward_groups": total_groups,
+                "val/total_reward_groups": filter_stats["total_groups"],
                 "val/sequence_lengths": sequence_lengths.mean(),
                 "val/sequence_lengths_min": sequence_lengths.min(),
                 "val/sequence_lengths_max": sequence_lengths.max(),
