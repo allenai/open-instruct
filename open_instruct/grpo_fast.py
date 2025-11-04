@@ -1707,32 +1707,26 @@ def accumulate_inference_batches(
 
 
 def combine_reward_metrics(metric_records: list[tuple[Dict[str, Any], int]]) -> Dict[str, Any]:
-    if not metric_records:
-        return {}
-
-    buckets: Dict[str, list[tuple[Any, int]]] = {}
-    for metrics, weight in metric_records:
-        if not metrics:
-            continue
+    buckets = defaultdict(list)
+    total_num_records = 0
+    for metrics, num_records in metric_records:
+        total_num_records += num_records
         for key, value in metrics.items():
-            buckets.setdefault(key, []).append((value, weight))
+            buckets[key].append((value, num_records))
 
     combined: Dict[str, Any] = {}
     for key, records in buckets.items():
         sample_value = records[0][0]
         if isinstance(sample_value, np.ndarray):
-            combined[key] = np.concatenate([np.asarray(value) for value, _ in records])
+            combined[key] = [x for value, _ in records for x in value]
         elif isinstance(sample_value, (list, tuple)):
             concatenated: list[Any] = []
             for value, _ in records:
                 concatenated.extend(list(value))
             combined[key] = concatenated
         elif isinstance(sample_value, (int, float, bool, np.integer, np.floating)):
-            total_weight = sum(weight for _, weight in records)
-            if total_weight == 0:
-                combined[key] = float(sample_value)
-            else:
-                combined[key] = sum(float(value) * weight for value, weight in records) / total_weight
+            weighted_sum = sum(float(value) * num_records for value, num_records in records)
+            combined[key] = weighted_sum / total_num_records if total_num_records > 0 else sample_value
         else:
             # Fallback: keep the latest value if aggregation strategy is unclear.
             combined[key] = records[-1][0]
