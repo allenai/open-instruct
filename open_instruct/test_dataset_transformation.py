@@ -3,6 +3,7 @@ import os
 import shutil
 import tempfile
 import unittest
+import unittest.mock
 
 import datasets
 from parameterized import parameterized
@@ -63,7 +64,11 @@ class TestTokenizerEquality(unittest.TestCase):
 
 
 class TestConfigHash(unittest.TestCase):
-    def test_config_hash_different(self):
+    @unittest.mock.patch(
+        "open_instruct.dataset_transformation.TokenizerConfig.tokenizer", new_callable=unittest.mock.PropertyMock
+    )
+    def test_config_hash_different(self, mock_tokenizer):
+        mock_tokenizer.return_value = unittest.mock.MagicMock()
         tc = open_instruct.dataset_transformation.TokenizerConfig(
             tokenizer_name_or_path="meta-llama/Llama-3.1-8B", tokenizer_revision="main", chat_template_name="tulu"
         )
