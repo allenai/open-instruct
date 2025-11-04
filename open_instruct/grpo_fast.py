@@ -1753,13 +1753,8 @@ def data_preparation_thread(
             max_possible_score = filter_stats["max_possible_score"]
             unsolved_batch_size_ratio = filter_stats["unsolved_batch_size_ratio"]
             real_batch_size_ratio = filter_stats["zero_gradient"]["real_batch_size_ratio"]
-
-            all_zero_groups = (scores_per_prompt == 0).all(axis=-1).sum()
-            total_groups = len(scores_per_prompt)
-            logger.info(
-                f"[Reward Summary] Groups with all zero rewards: {all_zero_groups}/{total_groups} "
-                f"({all_zero_groups / total_groups:.1%})"
-            )
+            all_zero_groups = filter_stats["all_zero_groups"]
+            total_groups = filter_stats["total_groups"]
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(

@@ -155,6 +155,16 @@ def apply_sequence_filters(
     all_stats["max_possible_score"] = max_possible_score
     all_stats["unsolved_batch_size_ratio"] = unsolved_batch_size_ratio
 
+    scores_per_prompt = scores.reshape(-1, num_samples_per_prompt)
+    all_zero_groups = (scores_per_prompt == 0).all(axis=-1).sum()
+    total_groups = len(scores_per_prompt)
+    all_stats["all_zero_groups"] = all_zero_groups
+    all_stats["total_groups"] = total_groups
+    logger.info(
+        f"[Reward Summary] Groups with all zero rewards: {all_zero_groups}/{total_groups} "
+        f"({all_zero_groups / total_groups:.1%})"
+    )
+
     scores, advantages, responses, masks, batch, finish_reasons, vllm_logprobs, zero_grad_stats = (
         filter_zero_gradient_prompts(
             scores, advantages, responses, masks, batch, finish_reasons, vllm_logprobs, num_samples_per_prompt
