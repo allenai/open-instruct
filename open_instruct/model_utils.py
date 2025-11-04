@@ -519,10 +519,16 @@ def log_softmax_and_gather(logits: torch.Tensor, index: torch.Tensor) -> torch.T
     See https://github.com/allenai/open-instruct/pull/584
     """
     B, T, V = logits.shape
-    logger.info(f"log_softmax_and_gather - logits.shape: {logits.shape}, logits.stride(): {logits.stride()}, logits.is_contiguous(): {logits.is_contiguous()}")
-    logger.info(f"log_softmax_and_gather - index.shape: {index.shape}, index.stride(): {index.stride()}, index.is_contiguous(): {index.is_contiguous()}")
+    logger.info(
+        f"log_softmax_and_gather - logits.shape: {logits.shape}, logits.stride(): {logits.stride()}, logits.is_contiguous(): {logits.is_contiguous()}"
+    )
+    logger.info(
+        f"log_softmax_and_gather - index.shape: {index.shape}, index.stride(): {index.stride()}, index.is_contiguous(): {index.is_contiguous()}"
+    )
     logger.info(f"log_softmax_and_gather - B={B}, T={T}, V={V}")
-    return -torch.nn.functional.cross_entropy(logits.view(-1, V), index.view(-1), reduction="none").view(B, T)
+    return -torch.nn.functional.cross_entropy(logits.contiguous().view(-1, V), index.view(-1), reduction="none").view(
+        B, T
+    )
 
 
 @retry_on_exception()
