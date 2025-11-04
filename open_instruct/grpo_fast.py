@@ -1685,7 +1685,7 @@ def data_preparation_thread(
 ):
     for training_step in range(resume_training_step, num_training_steps + 1):
         # Streaming accumulation: collect results as they arrive
-        with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
+        with Timer("🚀 [Data Preparation Thread] Getting response ids") as response_timer:
             result, batch, prompt_lengths, response_lengths = accumulate_inference_batches(
                 inference_results_Q,
                 pending_queries_map,
@@ -1699,12 +1699,9 @@ def data_preparation_thread(
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
                 return
 
-        getting_response_time = timer.duration
-
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
-        if args.num_samples_per_prompt_rollout > 1:
-            batch = batch.repeat(args.num_samples_per_prompt_rollout)
+        batch = batch.repeat(args.num_samples_per_prompt_rollout)
         for i in range(len(result.finish_reasons)):
             if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
                 result.responses[i].append(tokenizer.eos_token_id)
@@ -1733,14 +1730,6 @@ def data_preparation_thread(
                 raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
-            max_possible_score = 0
-            if args.apply_verifiable_reward:
-                max_possible_score += args.verification_reward
-            if args.apply_r1_style_format_reward and args.additive_format_reward:
-                max_possible_score += args.r1_style_format_reward
-            unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
-
-            rng = np.random.default_rng()
             scores, advantages, responses, masks, batch, finish_reasons, vllm_logprobs, filter_stats = (
                 data_filtering.apply_sequence_filters(
                     scores=scores,
@@ -1753,32 +1742,17 @@ def data_preparation_thread(
                     num_samples_per_prompt=args.num_samples_per_prompt_rollout,
                     mask_truncated=args.mask_truncated_completions,
                     fill_to_original_size=args.fill_completions,
-                    rng=rng,
+                    apply_verifiable_reward=args.apply_verifiable_reward,
+                    verification_reward=args.verification_reward,
+                    apply_r1_style_format_reward=args.apply_r1_style_format_reward,
+                    additive_format_reward=args.additive_format_reward,
+                    r1_style_format_reward=args.r1_style_format_reward,
                 )
             )
 
-            zero_grad_stats = filter_stats["zero_gradient"]
-            real_batch_size_ratio = zero_grad_stats["real_batch_size_ratio"]
-            if zero_grad_stats["num_filtered_responses"] > 0:
-                logger.info(
-                    f"[Zero-gradient filtering] Filtered {zero_grad_stats['num_filtered_prompts']} prompts with zero std "
-                    f"({zero_grad_stats['num_filtered_responses']} responses). "
-                    f"Retention rate: {real_batch_size_ratio:.2%}"
-                )
-
-            truncated_stats = filter_stats["truncated"]
-            if truncated_stats["num_truncated"] > 0:
-                logger.info(
-                    f"[Truncated completions filtering] Filtered {truncated_stats['num_truncated']} responses that didn't finish with 'stop'. "
-                    f"Retention rate: {truncated_stats['retention_rate']:.2%}"
-                )
-
-            fill_stats = filter_stats["fill"]
-            if fill_stats["num_filled_prompts"] > 0:
-                logger.info(
-                    f"[Refill completions] Filled {fill_stats['num_filled_prompts']} prompts "
-                    f"({fill_stats['num_filled_responses']} responses) to maintain batch size"
-                )
+            max_possible_score = filter_stats["max_possible_score"]
+            unsolved_batch_size_ratio = filter_stats["unsolved_batch_size_ratio"]
+            real_batch_size_ratio = filter_stats["zero_gradient"]["real_batch_size_ratio"]
 
             all_zero_groups = (scores_per_prompt == 0).all(axis=-1).sum()
             total_groups = len(scores_per_prompt)
@@ -1939,7 +1913,7 @@ def data_preparation_thread(
                 "val/good_outputs_rate": np.mean(result.good_outputs()),
                 "val/tool_runtimes_rate": np.array(result.request_info.tool_runtimes).mean(),
                 "val/tool_calleds_rate": np.array(result.request_info.tool_calleds).mean(),
-                "time/getting_response": getting_response_time,
+                "time/getting_response": response_timer.duration,
                 **reward_metrics,
             }
 
