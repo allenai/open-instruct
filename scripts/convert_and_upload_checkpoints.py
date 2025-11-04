@@ -116,8 +116,19 @@ def _consolidate_with_zero_to_fp32(checkpoint_path: str) -> str | None:
     """
     bin_path = os.path.join(checkpoint_path, "pytorch_model.bin")
     pytorch_model_dir = os.path.join(checkpoint_path, "pytorch_model")
+    
+    # Look for zero_to_fp32.py in the checkpoint directory first, then in parent directory
     consolidate_script = os.path.join(checkpoint_path, "zero_to_fp32.py")
-    if not (os.path.isdir(pytorch_model_dir) and os.path.exists(consolidate_script)):
+    if not os.path.exists(consolidate_script):
+        # Try parent directory
+        parent_dir = os.path.dirname(checkpoint_path)
+        consolidate_script = os.path.join(parent_dir, "zero_to_fp32.py")
+    
+    # Check if we have DeepSpeed checkpoint files (zero_pp_rank_*_model_states.pt)
+    has_zero_files = any(f.startswith("zero_pp_rank_") and f.endswith("_model_states.pt") 
+                        for f in os.listdir(checkpoint_path))
+    
+    if not (has_zero_files and os.path.exists(consolidate_script)):
         return None
 
     print(f" -> Found DeepSpeed checkpoint in {checkpoint_path}. Consolidating weights...")
@@ -141,7 +152,7 @@ def _consolidate_with_zero_to_fp32(checkpoint_path: str) -> str | None:
         # First attempt: pass output as file
         try:
             result = subprocess.run(
-                ["python", "zero_to_fp32.py", ".", "pytorch_model.bin"],
+                ["python", consolidate_script, ".", "pytorch_model.bin"],
                 cwd=checkpoint_path,
                 check=True,
                 capture_output=True,
@@ -160,7 +171,7 @@ def _consolidate_with_zero_to_fp32(checkpoint_path: str) -> str | None:
             print(" -> File-mode consolidation failed. Retrying with directory output...")
             try:
                 result = subprocess.run(
-                    ["python", "zero_to_fp32.py", ".", "pytorch_model_fp32"],
+                    ["python", consolidate_script, ".", "pytorch_model_fp32"],
                     cwd=checkpoint_path,
                     check=True,
                     capture_output=True,
@@ -191,6 +202,151 @@ def _consolidate_with_zero_to_fp32(checkpoint_path: str) -> str | None:
         return None
 
     return None
+
+
+def _consolidate_with_zero_parent_and_tag(checkpoint_path: str) -> str | None:
+    """
+    Run zero_to_fp32.py from the PARENT directory, supplying the TAG equal to the
+    basename of checkpoint_path (e.g., global_step140). This matches DeepSpeed's
+    expected usage where './latest' lives in the parent and tags identify steps.
+
+    If successful, returns the path to a produced pytorch_model.bin inside the
+    checkpoint_path directory.
+    """
+    bin_path = os.path.join(checkpoint_path, "pytorch_model.bin")
+    tag = os.path.basename(os.path.normpath(checkpoint_path))
+    parent_dir = os.path.dirname(os.path.normpath(checkpoint_path))
+    script_path = os.path.join(parent_dir, "zero_to_fp32.py")
+
+    if not os.path.exists(script_path):
+        return None
+
+    # Quick heuristic: require zero_pp files to exist in the checkpoint dir
+    has_zero_files = any(
+        f.startswith("zero_pp_rank_") and f.endswith("_model_states.pt") for f in os.listdir(checkpoint_path)
+    )
+    if not has_zero_files:
+        return None
+
+    print(f" -> Using parent-driven consolidation via zero_to_fp32.py with tag '{tag}' from {parent_dir}...")
+    try:
+        # Patch zero_to_fp32.py for torch 2.6+ compatibility
+        try:
+            with open(script_path, "r") as f:
+                content = f.read()
+            original_line = "state_dict = torch.load(f, map_location=device)"
+            patched_line = "state_dict = torch.load(f, map_location=device, weights_only=False)"
+            if original_line in content:
+                content = content.replace(original_line, patched_line)
+                with open(script_path, "w") as f:
+                    f.write(content)
+        except Exception:
+            pass
+
+        # Call: python zero_to_fp32.py . <output> --tag <tag>
+        # Some variants take output dir, others file; try file first then dir
+        # Run from parent_dir so './latest' is found
+        try:
+            result = subprocess.run(
+                ["python", "zero_to_fp32.py", ".", f"{tag}/pytorch_model.bin", "--tag", tag],
+                cwd=parent_dir,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            if os.path.exists(bin_path):
+                return bin_path
+        except subprocess.CalledProcessError as e:
+            # Retry directory mode
+            try:
+                out_dir = os.path.join(checkpoint_path, "pytorch_model_fp32")
+                os.makedirs(out_dir, exist_ok=True)
+                result = subprocess.run(
+                    ["python", "zero_to_fp32.py", ".", f"{tag}/pytorch_model_fp32", "--tag", tag],
+                    cwd=parent_dir,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                candidate = os.path.join(out_dir, "pytorch_model.bin")
+                if os.path.exists(candidate):
+                    return candidate
+                index_json = os.path.join(out_dir, "pytorch_model.bin.index.json")
+                if os.path.exists(index_json):
+                    return out_dir
+            except subprocess.CalledProcessError:
+                return None
+    except Exception:
+        return None
+
+    return None
+
+def _consolidate_deepspeed_checkpoint(checkpoint_path: str) -> str | None:
+    """
+    Consolidate DeepSpeed ZeRO checkpoint files into a single pytorch_model.bin file.
+    Handles zero_pp_rank_*_model_states.pt files directly without needing zero_to_fp32.py.
+    """
+    bin_path = os.path.join(checkpoint_path, "pytorch_model.bin")
+    
+    # Check if we have DeepSpeed checkpoint files (zero_pp_rank_*_model_states.pt)
+    zero_files = [f for f in os.listdir(checkpoint_path) 
+                  if f.startswith("zero_pp_rank_") and f.endswith("_model_states.pt")]
+    
+    if not zero_files:
+        return None
+    
+    print(f" -> Found DeepSpeed ZeRO Stage 3 checkpoint in {checkpoint_path}. Consolidating sharded parameters...")
+    
+    try:
+        # For ZeRO Stage 3, model parameters are sharded across ranks
+        # We need to merge all rank files to reconstruct the full model
+        consolidated_state_dict = {}
+        
+        for zero_file in sorted(zero_files):
+            file_path = os.path.join(checkpoint_path, zero_file)
+            print(f" -> Loading {zero_file}...")
+            
+            # Load the checkpoint
+            checkpoint = torch.load(file_path, map_location="cpu", weights_only=False)
+            
+            # Extract model state dict (usually under 'module' key)
+            if 'module' in checkpoint:
+                state_dict = checkpoint['module']
+            elif 'state_dict' in checkpoint:
+                state_dict = checkpoint['state_dict']
+            elif 'model' in checkpoint:
+                state_dict = checkpoint['model']
+            else:
+                # Assume the checkpoint itself is the state dict
+                state_dict = checkpoint
+            
+            # For ZeRO Stage 3, each rank contains different parameters
+            # We need to merge them, but handle potential overlaps carefully
+            for key, value in state_dict.items():
+                if key in consolidated_state_dict:
+                    # If we have a duplicate key, check if the tensors are the same
+                    existing_value = consolidated_state_dict[key]
+                    if torch.equal(existing_value, value):
+                        # Same tensor, skip
+                        continue
+                    else:
+                        # Different tensors - this might be an issue
+                        print(f" -> WARNING: Different values for key {key} between ranks")
+                        # Keep the first one we encountered
+                        continue
+                consolidated_state_dict[key] = value
+        
+        print(f" -> Consolidated {len(consolidated_state_dict)} parameters from {len(zero_files)} rank files")
+        
+        # Save the consolidated state dict
+        print(f" -> Saving consolidated model to {bin_path}...")
+        torch.save(consolidated_state_dict, bin_path)
+        
+        return bin_path
+        
+    except Exception as e:
+        print(f" -> ERROR: Failed to consolidate DeepSpeed checkpoint {checkpoint_path}: {e}")
+        return None
 
 
 def _copy_weights_to_dir(weights_src_path: str, dst_dir: str) -> None:
@@ -398,8 +554,15 @@ def main():
                     state_dict = accelerator.get_state_dict(model)
                 except Exception as e:
                     print(f" -> accelerator.load_state failed: {e}")
-                    print(" -> Attempting consolidation with zero_to_fp32.py...")
-                    consolidated = _consolidate_with_zero_to_fp32(checkpoint_path)
+                    print(" -> Attempting consolidation using zero_to_fp32 from parent with tag...")
+                    # Preferred for ZeRO-3: run zero_to_fp32 from parent using the tag (folder name)
+                    consolidated = _consolidate_with_zero_parent_and_tag(checkpoint_path)
+                    if consolidated is None:
+                        print(" -> Parent+tag consolidation failed. Trying direct ZeRO-3 merge...")
+                        consolidated = _consolidate_deepspeed_checkpoint(checkpoint_path)
+                    if consolidated is None:
+                        print(" -> Direct merge failed. Trying in-place zero_to_fp32...")
+                        consolidated = _consolidate_with_zero_to_fp32(checkpoint_path)
                     if consolidated is not None:
                         print(f" -> Consolidated weights created: {consolidated}")
                         if os.path.isdir(consolidated):
