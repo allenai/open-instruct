@@ -42,9 +42,11 @@ CACHE_EXCLUDED_ARGS = {
 
 @dataclass
 class ClusterConfig:
-    weka: list[str]
-    gcp: list[str]
-    interconnect: list[str]
+    all_weka: bool
+    any_weka: bool
+    all_gcp: bool
+    any_gcp: bool
+    all_interconnect: bool
 
 
 # ----------------------------------------------------------------------
@@ -109,38 +111,25 @@ def get_clusters(beaker_client: beaker.Beaker, selected_clusters: List[str]) -> 
     if beaker_client is None:
         raise ValueError("You need access to Beaker to run mason.py")
 
-    weka_clusters = []
-    gcp_clusters = []
-    interconnect_clusters = []
+    num_weka = 0
+    num_gcp = 0
+    num_interconnect = 0
 
-    for cluster_full_name in selected_clusters:
-        cluster_short_name = cluster_full_name.replace("ai2/", "")
-        try:
-            cluster = beaker_client.cluster.get(cluster_short_name)
-        except Exception:
-            console.log(f"Warning: Could not get info for cluster {cluster_full_name}, skipping property checks")
-            continue
-
-        has_interconnect = False
-        has_gcp = False
-        has_weka = False
-
-        for tag in cluster.tags:
+    for cluster_name in selected_clusters:
+        for tag in beaker_client.cluster.get(cluster_name).tags:
             if tag.startswith("interconnect:"):
-                has_interconnect = True
+                num_interconnect += 1
             if tag.startswith("provider:gcp"):
-                has_gcp = True
+                num_gcp += 1
             if tag.startswith("storage:weka"):
-                has_weka = True
-
-        if has_interconnect:
-            interconnect_clusters.append(cluster_full_name)
-        if has_gcp:
-            gcp_clusters.append(cluster_full_name)
-        if has_weka:
-            weka_clusters.append(cluster_full_name)
-
-    return ClusterConfig(weka=weka_clusters, gcp=gcp_clusters, interconnect=interconnect_clusters)
+                num_weka += 1
+    return ClusterConfig(
+        all_weka=(num_weka == len(selected_clusters)),
+        any_weka=(num_weka > 0),
+        all_gcp=(num_gcp == len(selected_clusters)),
+        any_gcp=(num_gcp > 0),
+        all_interconnect=(num_interconnect == len(selected_clusters)),
+    )
 
 
 # by default, we turn off vllm compile cache
@@ -269,7 +258,6 @@ def get_args():
             "--non_resumable is not set, but the command is not in OPEN_INSTRUCT_RESUMABLES, so the job will not be resumable"
         )
     setattr(mason_args, "resumable", is_resumable)
-
     return mason_args, commands
 
 
@@ -356,7 +344,7 @@ def get_env_vars(
         env_vars.extend([beaker.BeakerEnvVar(name="PATH", value=os.getenv("PATH"))])
 
     # if all cluster is in weka, we mount the weka
-    if all(c in cluster_config.weka for c in cluster):
+    if cluster_config.all_weka:
         env_vars.extend(
             [
                 beaker.BeakerEnvVar(name="HF_HOME", value="/weka/oe-adapt-default/allennlp/.cache/huggingface"),
@@ -379,7 +367,7 @@ def get_env_vars(
             )
     # if all cluster is in gcp we add the following env
 
-    elif all(c in cluster_config.gcp for c in cluster):
+    elif cluster_config.all_gcp:
         env_vars.extend(
             [
                 beaker.BeakerEnvVar(name="HF_HOME", value="/filestore/.cache/huggingface"),
@@ -449,7 +437,7 @@ def get_datasets(beaker_datasets, cluster: List[str], cluster_config: ClusterCon
     """if pure docker mode we don't mount the NFS; so we can run it on jupiter2"""
     res = []
     # if all cluster is in weka, we mount the weka
-    if all(c in cluster_config.weka for c in cluster):
+    if cluster_config.all_weka:
         res = [
             beaker.BeakerDataMount(
                 source=beaker.BeakerDataSource(weka="oe-adapt-default"), mount_path="/weka/oe-adapt-default"
@@ -458,7 +446,7 @@ def get_datasets(beaker_datasets, cluster: List[str], cluster_config: ClusterCon
                 source=beaker.BeakerDataSource(weka="oe-training-default"), mount_path="/weka/oe-training-default"
             ),
         ]
-    elif all(c in cluster_config.gcp for c in cluster):
+    elif cluster_config.all_gcp:
         res = [
             beaker.BeakerDataMount(
                 source=beaker.BeakerDataSource(host_path="/mnt/filestore_1"), mount_path="/filestore"
@@ -517,12 +505,7 @@ def maybe_cache_dataset(command: List[str], args: argparse.Namespace) -> tuple[L
                 import subprocess
 
                 process = subprocess.Popen(
-                    caching_command,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
+                    caching_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
                 )
 
                 stdout_data, stderr_data = [], []
@@ -549,11 +532,7 @@ def maybe_cache_dataset(command: List[str], args: argparse.Namespace) -> tuple[L
                 result = type(
                     "SubprocessResult",
                     (),
-                    {
-                        "returncode": process.returncode,
-                        "stdout": "".join(stdout_data),
-                        "stderr": "".join(stderr_data),
-                    },
+                    {"returncode": process.returncode, "stdout": "".join(stdout_data), "stderr": "".join(stderr_data)},
                 )
                 stdout = result.stdout
                 for line in stdout.splitlines():
@@ -586,7 +565,7 @@ def maybe_override_output_dir(
     Returns:
         Modified command list
     """
-    if any(c in cluster_config.weka for c in args.cluster):
+    if cluster_config.any_weka:
         if len(args.auto_output_dir_path) > 0:
             need_to_override_output_dir = True
             for idx, cmd in enumerate(command):
@@ -634,7 +613,7 @@ def maybe_optimize_gcp_model_loading(
     from open_instruct.dataset_transformation import get_commit_hash
     from open_instruct.utils import download_from_hf, gs_folder_exists, upload_to_gs_bucket
 
-    if any(c in cluster_config.gcp for c in args.cluster):
+    if cluster_config.any_gcp:
         model_name_or_path = None
         for idx, cmd in enumerate(command):
             if cmd == "--model_name_or_path":
@@ -751,7 +730,9 @@ def escape_strings(command: List[str]) -> List[str]:
     return command
 
 
-def make_internal_command(command: List[str], args: argparse.Namespace, whoami: str, is_external_user: bool, cluster_config: ClusterConfig) -> str:
+def make_internal_command(
+    command: List[str], args: argparse.Namespace, whoami: str, is_external_user: bool, cluster_config: ClusterConfig
+) -> str:
     if "WANDB_ENTITY" in os.environ:
         command = [f"WANDB_ENTITY={os.environ['WANDB_ENTITY']}"] + command
     if "WANDB_PROJECT" in os.environ:
@@ -914,9 +895,11 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
     return full_command
 
 
-def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami: str, resumable: bool, cluster_config: ClusterConfig):
+def make_task_spec(
+    args, full_command: str, i: int, beaker_secrets: str, whoami: str, resumable: bool, cluster_config: ClusterConfig
+):
     # Add a check to ensure that the user is using the correct clusters for multi-node jobs
-    if args.num_nodes > 1 and not all(c in cluster_config.interconnect for c in args.cluster):
+    if args.num_nodes > 1 and not cluster_config.all_interconnect:
         confirmation = False
         while not confirmation:
             confirmation = input(
@@ -930,9 +913,6 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
                 )
             else:
                 print("Invalid input. Please enter 'y' or 'n'.")
-    if args.image == "ai2/cuda11.8-cudnn8-dev-ubuntu20.04" and any(c in cluster_config.gcp for c in args.cluster):
-        raise ValueError("GCP clusters do not have the dev filesystem, please use a proper image")
-
     if args.hostname is not None:
         constraints = beaker.BeakerConstraints(hostname=args.hostname)
     else:
@@ -995,7 +975,9 @@ def main():
         whoami = beaker_client.user.get().name
 
     cluster_config = get_clusters(beaker_client, args.cluster)
-    full_commands = [make_internal_command(command, args, whoami, is_external_user, cluster_config) for command in commands]
+    full_commands = [
+        make_internal_command(command, args, whoami, is_external_user, cluster_config) for command in commands
+    ]
     if is_external_user:
         console.rule("[bold red]Non-Ai2 User Detected[/bold red]")
         console.print(
