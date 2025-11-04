@@ -8,6 +8,7 @@ import select
 import string
 import sys
 import time
+from dataclasses import dataclass
 from typing import Dict, List
 
 import beaker
@@ -32,6 +33,13 @@ OPEN_INSTRUCT_COMMANDS = [
 OPEN_INSTRUCT_RESUMABLES = ["open_instruct/grpo_fast.py"]
 
 
+@dataclass
+class ClusterConfig:
+    weka: list[str]
+    gcp: list[str]
+    interconnect: list[str]
+
+
 # ----------------------------------------------------------------------
 # Mason logic
 def parse_beaker_dataset(dataset_str):
@@ -52,25 +60,31 @@ def parse_env_var(env_var_str: str) -> Dict[str, str]:
     return {"name": name, "value": value}
 
 
-def get_clusters(beaker_client: beaker.Beaker = None) -> tuple[list[str], list[str], list[str]]:
-    """Get cluster lists from Beaker API or return defaults.
+def get_clusters(beaker_client: beaker.Beaker, selected_clusters: List[str]) -> ClusterConfig:
+    """Get cluster properties for the user's selected clusters from Beaker API.
+
+    Args:
+        beaker_client: Beaker client instance
+        selected_clusters: List of cluster names the user wants to use
 
     Returns:
-        Tuple of (weka_clusters, gcp_clusters, interconnect_clusters)
+        ClusterConfig with lists of which selected clusters have weka/gcp/interconnect properties
     """
-    default_weka = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
-    default_gcp = ["ai2/augusta"]
-    default_interconnect = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/augusta"]
-
     if beaker_client is None:
-        return default_weka, default_gcp, default_interconnect
+        raise ValueError("You need access to Beaker to run mason.py")
 
     weka_clusters = []
     gcp_clusters = []
     interconnect_clusters = []
 
-    for cluster in beaker_client.cluster.list():
-        cluster_name = f"ai2/{cluster.name}"
+    for cluster_full_name in selected_clusters:
+        cluster_short_name = cluster_full_name.replace("ai2/", "")
+        try:
+            cluster = beaker_client.cluster.get(cluster_short_name)
+        except Exception:
+            console.log(f"Warning: Could not get info for cluster {cluster_full_name}, skipping property checks")
+            continue
+
         has_interconnect = False
         has_gcp = False
         has_weka = False
@@ -84,19 +98,14 @@ def get_clusters(beaker_client: beaker.Beaker = None) -> tuple[list[str], list[s
                 has_weka = True
 
         if has_interconnect:
-            interconnect_clusters.append(cluster_name)
+            interconnect_clusters.append(cluster_full_name)
         if has_gcp:
-            gcp_clusters.append(cluster_name)
+            gcp_clusters.append(cluster_full_name)
         if has_weka:
-            weka_clusters.append(cluster_name)
+            weka_clusters.append(cluster_full_name)
 
-    return weka_clusters, gcp_clusters, interconnect_clusters
+    return ClusterConfig(weka=weka_clusters, gcp=gcp_clusters, interconnect=interconnect_clusters)
 
-
-WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
-GCP_CLUSTERS = ["ai2/augusta"]
-
-INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/augusta"]
 
 # by default, we turn off vllm compile cache
 # torch compile caching seems consistently broken, but the actual compiling isn't.
@@ -271,6 +280,7 @@ def get_env_vars(
     num_nodes: int,
     additional_env_vars: List[Dict[str, str]],
     additional_secrets: List[Dict[str, str]],
+    cluster_config: ClusterConfig,
 ):
     additional_env_var_names = {var["name"] for var in additional_env_vars}
 
@@ -310,7 +320,7 @@ def get_env_vars(
         env_vars.extend([beaker.BeakerEnvVar(name="PATH", value=os.getenv("PATH"))])
 
     # if all cluster is in weka, we mount the weka
-    if all(c in WEKA_CLUSTERS for c in cluster):
+    if all(c in cluster_config.weka for c in cluster):
         env_vars.extend(
             [
                 beaker.BeakerEnvVar(name="HF_HOME", value="/weka/oe-adapt-default/allennlp/.cache/huggingface"),
@@ -333,7 +343,7 @@ def get_env_vars(
             )
     # if all cluster is in gcp we add the following env
 
-    elif all(c in GCP_CLUSTERS for c in cluster):
+    elif all(c in cluster_config.gcp for c in cluster):
         env_vars.extend(
             [
                 beaker.BeakerEnvVar(name="HF_HOME", value="/filestore/.cache/huggingface"),
@@ -399,11 +409,11 @@ def get_env_vars(
     return env_vars
 
 
-def get_datasets(beaker_datasets, cluster: List[str]):
+def get_datasets(beaker_datasets, cluster: List[str], cluster_config: ClusterConfig):
     """if pure docker mode we don't mount the NFS; so we can run it on jupiter2"""
     res = []
     # if all cluster is in weka, we mount the weka
-    if all(c in WEKA_CLUSTERS for c in cluster):
+    if all(c in cluster_config.weka for c in cluster):
         res = [
             beaker.BeakerDataMount(
                 source=beaker.BeakerDataSource(weka="oe-adapt-default"), mount_path="/weka/oe-adapt-default"
@@ -412,7 +422,7 @@ def get_datasets(beaker_datasets, cluster: List[str]):
                 source=beaker.BeakerDataSource(weka="oe-training-default"), mount_path="/weka/oe-training-default"
             ),
         ]
-    elif all(c in GCP_CLUSTERS for c in cluster):
+    elif all(c in cluster_config.gcp for c in cluster):
         res = [
             beaker.BeakerDataMount(
                 source=beaker.BeakerDataSource(host_path="/mnt/filestore_1"), mount_path="/filestore"
@@ -533,14 +543,14 @@ def maybe_override_output_dir(
     whoami: str,
     is_external_user: bool,
     is_open_instruct_training: bool,
-    weka_clusters: List[str],
+    cluster_config: ClusterConfig,
 ) -> List[str]:
     """Override output_dir for Weka clusters to enable auto-evaluation.
 
     Returns:
         Modified command list
     """
-    if any(c in weka_clusters for c in args.cluster):
+    if any(c in cluster_config.weka for c in args.cluster):
         if len(args.auto_output_dir_path) > 0:
             need_to_override_output_dir = True
             for idx, cmd in enumerate(command):
@@ -578,7 +588,7 @@ def maybe_optimize_gcp_model_loading(
     args: argparse.Namespace,
     dataset_cache_paths: List[str],
     dataset_config_hashes: List[str],
-    gcp_clusters: List[str],
+    cluster_config: ClusterConfig,
 ) -> List[str]:
     """Optimize model loading for GCP clusters by uploading to GCS and downloading on compute nodes.
 
@@ -588,7 +598,7 @@ def maybe_optimize_gcp_model_loading(
     from open_instruct.dataset_transformation import get_commit_hash
     from open_instruct.utils import download_from_hf, gs_folder_exists, upload_to_gs_bucket
 
-    if any(c in gcp_clusters for c in args.cluster):
+    if any(c in cluster_config.gcp for c in args.cluster):
         model_name_or_path = None
         for idx, cmd in enumerate(command):
             if cmd == "--model_name_or_path":
@@ -705,7 +715,7 @@ def escape_strings(command: List[str]) -> List[str]:
     return command
 
 
-def make_internal_command(command: List[str], args: argparse.Namespace, whoami: str, is_external_user: bool) -> str:
+def make_internal_command(command: List[str], args: argparse.Namespace, whoami: str, is_external_user: bool, cluster_config: ClusterConfig) -> str:
     if "WANDB_ENTITY" in os.environ:
         command = [f"WANDB_ENTITY={os.environ['WANDB_ENTITY']}"] + command
     if "WANDB_PROJECT" in os.environ:
@@ -756,10 +766,10 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                         command.append(str(default_checkpoint_state_freq))
 
         command = maybe_override_output_dir(
-            command, args, whoami, is_external_user, is_open_instruct_training, WEKA_CLUSTERS
+            command, args, whoami, is_external_user, is_open_instruct_training, cluster_config
         )
         command = maybe_optimize_gcp_model_loading(
-            command, args, dataset_cache_paths, dataset_config_hashes, GCP_CLUSTERS
+            command, args, dataset_cache_paths, dataset_config_hashes, cluster_config
         )
 
     command = escape_strings(command)
@@ -790,9 +800,9 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
     return full_command
 
 
-def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami: str, resumable: bool):
+def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami: str, resumable: bool, cluster_config: ClusterConfig):
     # Add a check to ensure that the user is using the correct clusters for multi-node jobs
-    if args.num_nodes > 1 and not all(c in INTERCONNECT_CLUSTERS for c in args.cluster):
+    if args.num_nodes > 1 and not all(c in cluster_config.interconnect for c in args.cluster):
         confirmation = False
         while not confirmation:
             confirmation = input(
@@ -802,11 +812,11 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
                 confirmation = True
             elif confirmation == "n":
                 raise ValueError(
-                    f"Interconnect clusters are required for multi-node jobs; please only use the following clusters: {INTERCONNECT_CLUSTERS}"
+                    f"Interconnect clusters are required for multi-node jobs; please only use the following clusters: {cluster_config.interconnect}"
                 )
             else:
                 print("Invalid input. Please enter 'y' or 'n'.")
-    if args.image == "ai2/cuda11.8-cudnn8-dev-ubuntu20.04" and any(c in GCP_CLUSTERS for c in args.cluster):
+    if args.image == "ai2/cuda11.8-cudnn8-dev-ubuntu20.04" and any(c in cluster_config.gcp for c in args.cluster):
         raise ValueError("GCP clusters do not have the dev filesystem, please use a proper image")
 
     if args.hostname is not None:
@@ -819,7 +829,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         command=["/bin/bash", "-c"],
         arguments=[full_command],
         result=beaker.BeakerResultSpec(path="/output"),
-        datasets=get_datasets(args.beaker_datasets, args.cluster),
+        datasets=get_datasets(args.beaker_datasets, args.cluster, cluster_config),
         context=beaker.BeakerTaskContext(
             priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
         ),
@@ -833,6 +843,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
             args.num_nodes,
             args.env,
             args.secret,
+            cluster_config,
         ),
         resources=beaker.BeakerTaskResources(gpu_count=args.gpus, shared_memory=args.shared_memory),
         replicas=args.num_nodes,
@@ -860,6 +871,7 @@ def main():
     if is_external_user:
         whoami = "external_user"
         beaker_secrets = []
+        beaker_client = None
     else:
         if args.workspace:
             beaker_client = beaker.Beaker.from_env(default_workspace=args.workspace)
@@ -868,7 +880,8 @@ def main():
         beaker_secrets = [secret.name for secret in beaker_client.secret.list()]
         whoami = beaker_client.user.get().name
 
-    full_commands = [make_internal_command(command, args, whoami, is_external_user) for command in commands]
+    cluster_config = get_clusters(beaker_client, args.cluster)
+    full_commands = [make_internal_command(command, args, whoami, is_external_user, cluster_config) for command in commands]
     if is_external_user:
         console.rule("[bold red]Non-Ai2 User Detected[/bold red]")
         console.print(
@@ -888,7 +901,7 @@ def main():
     experiment_spec = beaker.BeakerExperimentSpec(
         description=args.description,
         tasks=[
-            make_task_spec(args, full_command, i, beaker_secrets, whoami, args.resumable)
+            make_task_spec(args, full_command, i, beaker_secrets, whoami, args.resumable, cluster_config)
             for i, full_command in enumerate(full_commands)
         ],
         budget=args.budget,
