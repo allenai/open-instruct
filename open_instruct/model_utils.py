@@ -458,7 +458,7 @@ def save_with_accelerate(
     # set the generation config to an empty setting to be safe.
     # we usually do greedy decoding for generation, so this should be okay.
     # otherwise, we get an error thrown at save time.
-    if "olmo" in chat_template_name:
+    if chat_template_name and "olmo" in chat_template_name:
         # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
         logger.info(f"Detected olmo chat template: {chat_template_name}, updating model generation config.")
         model.generation_config = get_olmo3_generation_config(tokenizer)
@@ -519,7 +519,8 @@ def log_softmax_and_gather(logits: torch.Tensor, index: torch.Tensor) -> torch.T
     See https://github.com/allenai/open-instruct/pull/584
     """
     B, T, V = logits.shape
-    return -torch.nn.functional.cross_entropy(logits.view(-1, V), index.view(-1), reduction="none").view(B, T)
+    # We have to use reshape here to make sure that we have a contiguous tensor.
+    return -torch.nn.functional.cross_entropy(logits.reshape(-1, V), index.view(-1), reduction="none").view(B, T)
 
 
 @retry_on_exception()
