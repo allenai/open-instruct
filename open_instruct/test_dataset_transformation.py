@@ -64,11 +64,18 @@ class TestTokenizerEquality(unittest.TestCase):
 
 
 class TestConfigHash(unittest.TestCase):
+    @unittest.mock.patch("open_instruct.dataset_transformation.get_commit_hash")
+    @unittest.mock.patch("datasets.load_dataset")
     @unittest.mock.patch(
         "open_instruct.dataset_transformation.TokenizerConfig.tokenizer", new_callable=unittest.mock.PropertyMock
     )
-    def test_config_hash_different(self, mock_tokenizer):
+    def test_config_hash_different(self, mock_tokenizer, mock_load_dataset, mock_get_commit_hash):
         mock_tokenizer.return_value = unittest.mock.MagicMock()
+        mock_get_commit_hash.return_value = "fake_commit_hash"
+        mock_dataset = unittest.mock.MagicMock()
+        mock_dataset.__len__.return_value = 100
+        mock_load_dataset.return_value = mock_dataset
+
         tc = open_instruct.dataset_transformation.TokenizerConfig(
             tokenizer_name_or_path="meta-llama/Llama-3.1-8B", tokenizer_revision="main", chat_template_name="tulu"
         )
