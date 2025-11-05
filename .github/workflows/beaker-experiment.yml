@@ -340,15 +340,11 @@ jobs:
           DESCRIPTION="Created from commit: ${SHORT_SHA} (GitHub run ${GITHUB_RUN_ID})"
           BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 
-          UNIQUE_NAME="${BEAKER_TARGET_IMAGE}-${SHORT_SHA}-${GITHUB_RUN_ID}"
-          echo "Creating Beaker image ${UNIQUE_NAME} from local image ${SOURCE_IMAGE}."
-          beaker image create --name "$UNIQUE_NAME" "$SOURCE_IMAGE" --description "$DESCRIPTION"
-
-          echo "Renaming ${BEAKER_USER}/${BEAKER_TARGET_IMAGE} to release lock (if present)."
+          echo "Renaming ${BEAKER_USER}/${BEAKER_TARGET_IMAGE} to release prior alias (if present)."
           beaker image rename "${BEAKER_USER}/${BEAKER_TARGET_IMAGE}" "" || true
 
-          echo "Publishing ${BEAKER_TARGET_IMAGE} with updated image."
-          beaker image create --name "$BEAKER_TARGET_IMAGE" "$SOURCE_IMAGE" --description "$DESCRIPTION"
+          echo "Publishing ${BEAKER_TARGET_IMAGE} with updated image and description."
+          beaker image create --name "$BEAKER_TARGET_IMAGE" --description "$DESCRIPTION" "$SOURCE_IMAGE"
 
       - name: Summary
         if: always()
