@@ -38,6 +38,15 @@ class GenerationResult:
     start_time: float | None = None
     logprobs: list[list[float]] | None = None
 
+    def good_outputs(self) -> list[bool]:
+        return [
+            len(self.request_info.tool_outputs[i]) > 0
+            and self.request_info.tool_calleds[i]
+            and not self.request_info.timeouts[i]
+            and not self.request_info.tool_errors[i]
+            for i in range(len(self.request_info.tool_outputs))
+        ]
+
 
 @dataclass
 class PromptRequest:

@@ -1,7 +1,8 @@
 # flake8: noqa
+import functools
 import time
 from dataclasses import dataclass
-from typing import Generic, List, Optional, TypeVar
+from typing import Callable, Generic, List, Optional, TypeVar
 
 import numpy as np
 import torch
@@ -29,6 +30,25 @@ class Timer:
         self.duration = self.end_time - self.start_time
         if not self.noop:
             logger.info(f"{self.description}: {self.duration:.3f} seconds")
+
+
+def timer(description: str, noop: bool = False) -> Callable:
+    """A decorator for timing function execution"""
+
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            start_time = time.perf_counter()
+            result = func(*args, **kwargs)
+            end_time = time.perf_counter()
+            duration = end_time - start_time
+            if not noop:
+                logger.info(f"{description}: {duration:.3f} seconds")
+            return result
+
+        return wrapper
+
+    return decorator
 
 
 @dataclass

@@ -42,7 +42,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from open_instruct import logger_utils
 from open_instruct.ground_truth_utils import VerifierFunction
-from open_instruct.utils import retry_on_exception
+from open_instruct.utils import repeat_each, retry_on_exception
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -86,6 +86,30 @@ class Batch:
                 raw_queries=[self.raw_queries[i] for i in key],
                 indices=[self.indices[i] for i in key] if self.indices else None,
             )
+
+    def concatenate(self, other: "Batch") -> "Batch":
+        """Concatenate this batch with another batch."""
+        return Batch(
+            queries=self.queries + other.queries,
+            ground_truths=self.ground_truths + other.ground_truths,
+            datasets=self.datasets + other.datasets,
+            raw_queries=(
+                self.raw_queries + other.raw_queries
+                if self.raw_queries is not None and other.raw_queries is not None
+                else None
+            ),
+            indices=(self.indices + other.indices if self.indices is not None and other.indices is not None else None),
+        )
+
+    def repeat(self, k: int) -> "Batch":
+        """Repeat each element in the batch k times."""
+        return Batch(
+            queries=repeat_each(self.queries, k),
+            ground_truths=repeat_each(self.ground_truths, k),
+            datasets=repeat_each(self.datasets, k),
+            raw_queries=repeat_each(self.raw_queries, k) if self.raw_queries is not None else None,
+            indices=repeat_each(self.indices, k) if self.indices is not None else None,
+        )
 
 
 @dataclass
