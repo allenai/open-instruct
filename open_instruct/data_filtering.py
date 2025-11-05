@@ -3,7 +3,9 @@ from typing import Any
 
 import numpy as np
 
+from open_instruct.grpo_fast import Args
 from open_instruct.model_utils import Batch
+from open_instruct.queue_types import GenerationResult
 from open_instruct.rl_utils import timer
 
 logger = logging.getLogger(__name__)
@@ -128,36 +130,21 @@ def maybe_fill_completions(
 
 @timer("📦 [Data Preparation Thread] Filtering sequences")
 def apply_sequence_filters(
-    scores: np.ndarray,
-    advantages: np.ndarray,
-    responses: list[list[int]],
-    masks: list[list[int]],
-    batch: Batch,
-    finish_reasons: list[str],
-    vllm_logprobs: list[Any],
-    *,
-    num_samples_per_prompt: int,
-    mask_truncated: bool,
-    fill_to_original_size: bool,
-    apply_verifiable_reward: bool = False,
-    verification_reward: float = 0.0,
-    apply_r1_style_format_reward: bool = False,
-    additive_format_reward: bool = False,
-    r1_style_format_reward: float = 0.0,
+    scores: np.ndarray, advantages: np.ndarray, result: GenerationResult, batch: Batch, args: Args
 ) -> tuple[np.ndarray, np.ndarray, list, list, Batch, list, list, dict[str, Any]]:
     original_batch_size = len(scores)
     all_stats = {}
 
     max_possible_score = 0
-    if apply_verifiable_reward:
-        max_possible_score += verification_reward
-    if apply_r1_style_format_reward and additive_format_reward:
-        max_possible_score += r1_style_format_reward
+    if args.apply_verifiable_reward:
+        max_possible_score += args.verification_reward
+    if args.apply_r1_style_format_reward and args.additive_format_reward:
+        max_possible_score += args.r1_style_format_reward
     unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
     all_stats["max_possible_score"] = max_possible_score
     all_stats["unsolved_batch_size_ratio"] = unsolved_batch_size_ratio
 
-    scores_per_prompt = scores.reshape(-1, num_samples_per_prompt)
+    scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
     all_zero_groups = (scores_per_prompt == 0).all(axis=-1).sum()
     total_groups = len(scores_per_prompt)
     all_stats["all_zero_groups"] = all_zero_groups
@@ -169,7 +156,14 @@ def apply_sequence_filters(
 
     scores, advantages, responses, masks, batch, finish_reasons, vllm_logprobs, zero_grad_stats = (
         filter_zero_gradient_prompts(
-            scores, advantages, responses, masks, batch, finish_reasons, vllm_logprobs, num_samples_per_prompt
+            scores,
+            advantages,
+            result.responses,
+            result.masks,
+            batch,
+            result.finish_reasons,
+            result.logprobs,
+            args.num_samples_per_prompt_rollout,
         )
     )
     all_stats["zero_gradient"] = zero_grad_stats
@@ -184,7 +178,7 @@ def apply_sequence_filters(
 
     scores, advantages, responses, masks, batch, finish_reasons, vllm_logprobs, truncated_stats = (
         maybe_mask_truncated_completions(
-            scores, advantages, responses, masks, batch, finish_reasons, vllm_logprobs, mask_truncated
+            scores, advantages, responses, masks, batch, finish_reasons, vllm_logprobs, args.mask_truncated_completions
         )
     )
     all_stats["truncated"] = truncated_stats
@@ -195,7 +189,7 @@ def apply_sequence_filters(
             f"Retention rate: {truncated_stats['retention_rate']:.2%}"
         )
 
-    target_prompt_count = original_batch_size // num_samples_per_prompt
+    target_prompt_count = original_batch_size // args.num_samples_per_prompt_rollout
     scores, advantages, responses, masks, batch, finish_reasons, vllm_logprobs, fill_stats = maybe_fill_completions(
         scores,
         advantages,
@@ -205,8 +199,8 @@ def apply_sequence_filters(
         finish_reasons,
         vllm_logprobs,
         target_prompt_count,
-        num_samples_per_prompt,
-        fill_to_original_size,
+        args.num_samples_per_prompt_rollout,
+        args.fill_completions,
     )
     all_stats["fill"] = fill_stats
 

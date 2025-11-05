@@ -1731,21 +1731,7 @@ def data_preparation_thread(
 
         scores, advantages, responses, masks, batch, finish_reasons, vllm_logprobs, filter_stats = (
             data_filtering.apply_sequence_filters(
-                scores=scores,
-                advantages=advantages,
-                responses=result.responses,
-                masks=result.masks,
-                batch=batch,
-                finish_reasons=result.finish_reasons,
-                vllm_logprobs=result.logprobs,
-                num_samples_per_prompt=args.num_samples_per_prompt_rollout,
-                mask_truncated=args.mask_truncated_completions,
-                fill_to_original_size=args.fill_completions,
-                apply_verifiable_reward=args.apply_verifiable_reward,
-                verification_reward=args.verification_reward,
-                apply_r1_style_format_reward=args.apply_r1_style_format_reward,
-                additive_format_reward=args.additive_format_reward,
-                r1_style_format_reward=args.r1_style_format_reward,
+                scores=scores, advantages=advantages, result=result, batch=batch, args=args
             )
         )
 
