@@ -566,7 +566,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         mock_generation_config.n = num_samples_per_prompt
 
         mock_model_dims = self.create_mock_model_dims()
-        combined_result, batch, prompt_lengths, response_lengths = grpo_fast.accumulate_inference_batches(
+        combined_result, batch, reward_metrics, batch_stats = grpo_fast.accumulate_inference_batches(
             inference_results_Q,
             pending_queries_map,
             mock_args,
