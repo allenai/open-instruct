@@ -74,19 +74,8 @@ jobs:
 
           for OUTPUT_KEY in "${!CHANGE_PATTERNS[@]}"; do
             PATTERN="${CHANGE_PATTERNS[$OUTPUT_KEY]}"
-            if grep -qE "$PATTERN" <<< "$CHANGED_FILES"; then
-              echo "${OUTPUT_KEY}=true" >> "$GITHUB_OUTPUT"
-              case "$OUTPUT_KEY" in
-                dpo_changed)
-                  echo "DPO files changed - will launch DPO experiment"
-                  ;;
-                finetune_changed)
-                  echo "Finetune file changed - will launch finetune experiment"
-                  ;;
-              esac
-            else
-              echo "${OUTPUT_KEY}=false" >> "$GITHUB_OUTPUT"
-            fi
+            MATCHED=$(grep -qE "$PATTERN" <<< "$CHANGED_FILES" && echo true || echo false)
+            echo "${OUTPUT_KEY}=${MATCHED}" >> "$GITHUB_OUTPUT"
           done
 
       - name: Setup Python environment
