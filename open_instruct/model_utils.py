@@ -89,17 +89,6 @@ class Batch:
 
 
 @dataclass
-class TrainingBatch:
-    query_responses: torch.Tensor
-    tool_masks: torch.Tensor
-    attention_masks: torch.Tensor
-    position_ids: torch.Tensor
-    advantages: torch.Tensor
-    response_masks: torch.Tensor
-    vllm_logprobs: torch.Tensor
-
-
-@dataclass
 class ModelConfig:
     model_name_or_path: str | None = None
     """The model checkpoint for weights initialization."""
