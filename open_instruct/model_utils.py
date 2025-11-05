@@ -56,6 +56,7 @@ class Batch:
     ground_truths: list[list[int]]
     datasets: list[str]
     raw_queries: list[str] | None
+    decoded_responses: list[str] | None
     indices: list[int] | None
     scores: list(float)
 
