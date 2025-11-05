@@ -3,8 +3,7 @@ name: Beaker Experiment Launch
 on:
   merge_group:
 
-  # Adding a comment to trigger a run.
-  workflow_dispatch:  # This allows us to manually trigger a build through the GitHub UI.
+  workflow_dispatch:
   # pull_request:
   #   branches: [main]
   #   paths:
@@ -25,13 +24,13 @@ jobs:
   launch-experiment:
     name: Launch Beaker Experiment
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
-    timeout-minutes: 35
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Need full history to get commit author info
+          fetch-depth: 0
 
       - name: Checkout oe-eval-internal
         uses: actions/checkout@v4
@@ -46,15 +45,35 @@ jobs:
         id: get-trigger-info
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            # Get the commit author for push events
             AUTHOR_NAME=$(git log -1 --pretty=format:'%an')
             echo "trigger_info=Push by ${AUTHOR_NAME}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            # Get the user who triggered the manual dispatch
             echo "trigger_info=Manual dispatch by ${{ github.actor }}" >> $GITHUB_OUTPUT
           else
-            # For scheduled runs
             echo "trigger_info=Scheduled run" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get changed files using git diff
+        id: changed-files
+        run: |
+          TARGET_BRANCH="main"
+          COMMON_ANCESTOR=$(git merge-base HEAD origin/${TARGET_BRANCH})
+
+          CHANGED_FILES=$(git diff --name-only ${COMMON_ANCESTOR} HEAD)
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+
+          echo "dpo_changed=false" >> $GITHUB_OUTPUT
+          echo "finetune_changed=false" >> $GITHUB_OUTPUT
+
+          if echo "$CHANGED_FILES" | grep -qE "open_instruct/(dpo_tune_cache|dpo_utils)\.py"; then
+            echo "dpo_changed=true" >> $GITHUB_OUTPUT
+            echo "DPO files changed - will launch DPO experiment"
+          fi
+
+          if echo "$CHANGED_FILES" | grep -q "open_instruct/finetune\.py"; then
+            echo "finetune_changed=true" >> $GITHUB_OUTPUT
+            echo "Finetune file changed - will launch finetune experiment"
           fi
 
       - name: Setup Python environment
@@ -69,109 +88,219 @@ jobs:
         uses: allenai/setup-beaker@v2
         with:
           token: ${{ secrets.BEAKER_TOKEN }}
-          workspace: ai2/tulu-thinker
+          workspace: ai2/open-instruct-dev
 
       - name: Install dependencies
         run: |
-          # Install development dependencies needed for mason.py
           uv sync --frozen
 
-      - name: Build image and launch experiment
+      - name: Build image and launch experiments
         id: launch
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DPO_CHANGED: ${{ steps.changed-files.outputs.dpo_changed }}
+          FINETUNE_CHANGED: ${{ steps.changed-files.outputs.finetune_changed }}
         run: |
           set -euo pipefail
 
-          # Make scripts executable
-          chmod +x scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh
+          chmod +x scripts/train/build_image_and_launch.sh
+          chmod +x scripts/train/debug/single_gpu_on_beaker.sh
+          chmod +x scripts/train/debug/dpo.sh
+          chmod +x scripts/train/debug/finetune.sh
 
-          echo "Building Docker image and launching experiment..."
+          echo "Building Docker image and launching experiments..."
           echo "Git commit: $(git rev-parse --short HEAD)"
 
-          # Build image and launch experiment
-          # Use tee to both stream output and capture it for parsing
-          ./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_integration_test.sh 2>&1 | tee /tmp/beaker_output.log || {
+          EXPERIMENT_IDS=()
+          EXPERIMENT_NAMES=()
+
+          echo "=== Launching single_gpu_on_beaker.sh (always runs) ==="
+          ./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh 2>&1 | tee /tmp/beaker_output_single_gpu.log || {
             EXIT_CODE=$?
-            echo "ERROR: build_image_and_launch.sh failed with exit code $EXIT_CODE"
+            echo "ERROR: single_gpu_on_beaker.sh failed with exit code $EXIT_CODE"
             exit $EXIT_CODE
           }
 
-          # Extract experiment ID from the saved output
-          EXPERIMENT_ID=$(grep -oP 'https://beaker.org/ex/\K[a-zA-Z0-9]+' /tmp/beaker_output.log | tail -1)
+          EXPERIMENT_ID=$(grep -oP 'https://beaker.org/ex/\K[a-zA-Z0-9]+' /tmp/beaker_output_single_gpu.log | tail -1)
           if [ -z "$EXPERIMENT_ID" ]; then
-            echo "ERROR: Failed to extract experiment ID from output"
-            echo "DEBUG: Full output log:"
-            cat /tmp/beaker_output.log
-            echo "---"
-            echo "Please check that the experiment was created successfully."
+            echo "ERROR: Failed to extract experiment ID from single_gpu_on_beaker.sh output"
+            cat /tmp/beaker_output_single_gpu.log
             exit 1
           fi
+          EXPERIMENT_IDS+=("$EXPERIMENT_ID")
+          EXPERIMENT_NAMES+=("single_gpu_on_beaker")
+          echo "Launched single_gpu_on_beaker experiment: $EXPERIMENT_ID"
 
-          echo "experiment_id=$EXPERIMENT_ID" >> $GITHUB_OUTPUT
-          echo "Experiment ID: $EXPERIMENT_ID"
-          echo "Experiment URL: https://beaker.org/ex/$EXPERIMENT_ID"
+          if [ "$DPO_CHANGED" = "true" ]; then
+            echo "=== Launching dpo.sh (DPO files changed) ==="
+            ./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo.sh 2>&1 | tee /tmp/beaker_output_dpo.log || {
+              EXIT_CODE=$?
+              echo "ERROR: dpo.sh failed with exit code $EXIT_CODE"
+              exit $EXIT_CODE
+            }
 
-      - name: Wait for Beaker experiment completion
+            EXPERIMENT_ID=$(grep -oP 'https://beaker.org/ex/\K[a-zA-Z0-9]+' /tmp/beaker_output_dpo.log | tail -1)
+            if [ -z "$EXPERIMENT_ID" ]; then
+              echo "ERROR: Failed to extract experiment ID from dpo.sh output"
+              cat /tmp/beaker_output_dpo.log
+              exit 1
+            fi
+            EXPERIMENT_IDS+=("$EXPERIMENT_ID")
+            EXPERIMENT_NAMES+=("dpo")
+            echo "Launched DPO experiment: $EXPERIMENT_ID"
+          fi
+
+          if [ "$FINETUNE_CHANGED" = "true" ]; then
+            echo "=== Launching finetune.sh (finetune.py changed) ==="
+            ./scripts/train/build_image_and_launch.sh scripts/train/debug/finetune.sh 2>&1 | tee /tmp/beaker_output_finetune.log || {
+              EXIT_CODE=$?
+              echo "ERROR: finetune.sh failed with exit code $EXIT_CODE"
+              exit $EXIT_CODE
+            }
+
+            EXPERIMENT_ID=$(grep -oP 'https://beaker.org/ex/\K[a-zA-Z0-9]+' /tmp/beaker_output_finetune.log | tail -1)
+            if [ -z "$EXPERIMENT_ID" ]; then
+              echo "ERROR: Failed to extract experiment ID from finetune.sh output"
+              cat /tmp/beaker_output_finetune.log
+              exit 1
+            fi
+            EXPERIMENT_IDS+=("$EXPERIMENT_ID")
+            EXPERIMENT_NAMES+=("finetune")
+            echo "Launched finetune experiment: $EXPERIMENT_ID"
+          fi
+
+          echo "experiment_ids=${EXPERIMENT_IDS[*]}" >> $GITHUB_OUTPUT
+          echo "experiment_names=${EXPERIMENT_NAMES[*]}" >> $GITHUB_OUTPUT
+          echo "All experiments launched successfully!"
+          echo "Experiment IDs: ${EXPERIMENT_IDS[*]}"
+
+      - name: Wait for all Beaker experiments completion
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
         run: |
-          EXPERIMENT_ID="${{ steps.launch.outputs.experiment_id }}"
-          echo "Waiting for experiment $EXPERIMENT_ID to complete..."
+          EXPERIMENT_IDS=(${{ steps.launch.outputs.experiment_ids }})
+          EXPERIMENT_NAMES=(${{ steps.launch.outputs.experiment_names }})
 
-          # Maximum wait time: 20 minutes (1200 seconds)
+          echo "Waiting for ${#EXPERIMENT_IDS[@]} experiments to complete..."
+          for i in "${!EXPERIMENT_IDS[@]}"; do
+            echo "  - ${EXPERIMENT_NAMES[$i]}: ${EXPERIMENT_IDS[$i]} (https://beaker.org/ex/${EXPERIMENT_IDS[$i]})"
+          done
+
           MAX_WAIT_TIME=1200
           CHECK_INTERVAL=30
           ELAPSED_TIME=0
 
+          declare -A EXPERIMENT_STATUS
+          for exp_id in "${EXPERIMENT_IDS[@]}"; do
+            EXPERIMENT_STATUS[$exp_id]="running"
+          done
+
           while [ $ELAPSED_TIME -lt $MAX_WAIT_TIME ]; do
-            # Get job status directly
-            JOB_STATUS=$(beaker experiment get $EXPERIMENT_ID --format json | jq -r '.[0].jobs[0].status' 2>/dev/null || echo "null")
+            echo "=== Check at ${ELAPSED_TIME}s ==="
 
-            # Check if exitCode exists (experiment is done)
-            if [ "$JOB_STATUS" = "null" ]; then
-              EXIT_CODE="pending"
-            else
-              EXIT_CODE=$(echo "$JOB_STATUS" | jq -r '.exitCode // "pending"')
-            fi
+            ALL_DONE=true
+            ANY_FAILED=false
 
-            if [ "$EXIT_CODE" = "pending" ]; then
-              echo "=== Experiment still running (elapsed: ${ELAPSED_TIME}s) ==="
-            else
-              echo "=== Experiment finished with exit code: $EXIT_CODE (elapsed: ${ELAPSED_TIME}s) ==="
-            fi
+            for i in "${!EXPERIMENT_IDS[@]}"; do
+              EXP_ID="${EXPERIMENT_IDS[$i]}"
+              EXP_NAME="${EXPERIMENT_NAMES[$i]}"
 
-            # Stream new logs since last check
-            echo "--- Recent logs ---"
-            beaker experiment logs $EXPERIMENT_ID 2>/dev/null | tail -n 50 || echo "No logs available yet"
-            echo "--- End of logs ---"
+              if [ "${EXPERIMENT_STATUS[$EXP_ID]}" != "running" ]; then
+                continue
+              fi
 
-            # Check if experiment has completed
-            if [ "$EXIT_CODE" != "pending" ]; then
-              if [ "$EXIT_CODE" = "0" ]; then
-                echo "✅ Experiment completed successfully!"
-                # Show final logs
-                echo "=== Final logs ==="
-                beaker experiment logs $EXPERIMENT_ID | tail -n 100
-                exit 0
+              JOB_STATUS=$(beaker experiment get $EXP_ID --format json | jq -r '.[0].jobs[0].status' 2>/dev/null || echo "null")
+
+              if [ "$JOB_STATUS" = "null" ]; then
+                EXIT_CODE="pending"
               else
-                echo "❌ Experiment failed with exit code $EXIT_CODE"
-                # Show error logs
-                echo "=== Error logs ==="
-                beaker experiment logs $EXPERIMENT_ID | tail -n 200
+                EXIT_CODE=$(echo "$JOB_STATUS" | jq -r '.exitCode // "pending"')
+              fi
+
+              if [ "$EXIT_CODE" = "pending" ]; then
+                echo "  [$EXP_NAME] Still running..."
+                ALL_DONE=false
+              else
+                if [ "$EXIT_CODE" = "0" ]; then
+                  echo "  [$EXP_NAME] ✅ Completed successfully (exit code: 0)"
+                  EXPERIMENT_STATUS[$EXP_ID]="success"
+                else
+                  echo "  [$EXP_NAME] ❌ Failed with exit code: $EXIT_CODE"
+                  EXPERIMENT_STATUS[$EXP_ID]="failed"
+                  ANY_FAILED=true
+                  ALL_DONE=false
+                fi
+              fi
+            done
+
+            if $ALL_DONE; then
+              echo ""
+              echo "=== All experiments completed ==="
+              for i in "${!EXPERIMENT_IDS[@]}"; do
+                EXP_ID="${EXPERIMENT_IDS[$i]}"
+                EXP_NAME="${EXPERIMENT_NAMES[$i]}"
+                STATUS="${EXPERIMENT_STATUS[$EXP_ID]}"
+                echo "  [$EXP_NAME] $STATUS"
+              done
+
+              if $ANY_FAILED; then
+                echo ""
+                echo "❌ One or more experiments failed. Showing error logs:"
+                for i in "${!EXPERIMENT_IDS[@]}"; do
+                  EXP_ID="${EXPERIMENT_IDS[$i]}"
+                  EXP_NAME="${EXPERIMENT_NAMES[$i]}"
+                  if [ "${EXPERIMENT_STATUS[$EXP_ID]}" = "failed" ]; then
+                    echo ""
+                    echo "=== Error logs for $EXP_NAME (${EXP_ID}) ==="
+                    beaker experiment logs $EXP_ID | tail -n 200
+                  fi
+                done
                 exit 1
+              else
+                echo ""
+                echo "✅ All experiments completed successfully!"
+                exit 0
               fi
             fi
 
-            # Wait before next check
             sleep $CHECK_INTERVAL
             ELAPSED_TIME=$((ELAPSED_TIME + CHECK_INTERVAL))
           done
 
-          echo "⏱️ Timeout: Experiment did not complete within 20 minutes"
+          echo ""
+          echo "⏱️ Timeout: Not all experiments completed within 20 minutes"
+          echo "Final status:"
+          for i in "${!EXPERIMENT_IDS[@]}"; do
+            EXP_ID="${EXPERIMENT_IDS[$i]}"
+            EXP_NAME="${EXPERIMENT_NAMES[$i]}"
+            echo "  [$EXP_NAME] ${EXPERIMENT_STATUS[$EXP_ID]}"
+          done
           exit 1
+
+      - name: Delete huge unnecessary tools folder
+        run: rm -rf /opt/hostedtoolcache /usr/share/dotnet "$AGENT_TOOLSDIRECTORY" /usr/local/lib/android/sdk/ndk
+
+      - name: Check remaining disk space
+        run: df -h
+
+      - name: Build final image
+        run: |
+          docker build --platform=linux/amd64 \
+            --build-arg GIT_COMMIT="$(git rev-parse --short HEAD)" \
+            --build-arg GIT_BRANCH="${GITHUB_REF#refs/heads/}" \
+            -t open_instruct .
+
+      - name: Check image
+        run: docker run --rm open_instruct
+
+      - name: Push image to Beaker
+        uses: ./.github/actions/push
+        with:
+          image: open_instruct
+          beaker: open_instruct_auto
+          latest: true
 
       - name: Summary
         if: always()
@@ -179,13 +308,21 @@ jobs:
           echo "## Beaker Experiment Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Trigger:** ${{ steps.get-trigger-info.outputs.trigger_info }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Docker Image:** Built locally by build_image_and_launch.sh" >> $GITHUB_STEP_SUMMARY
-          if [ -n "${{ steps.launch.outputs.experiment_id }}" ]; then
-            echo "**Beaker Experiment:** [View on Beaker](https://beaker.org/ex/${{ steps.launch.outputs.experiment_id }})" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Experiments Launched:" >> $GITHUB_STEP_SUMMARY
+
+          EXPERIMENT_IDS=(${{ steps.launch.outputs.experiment_ids }})
+          EXPERIMENT_NAMES=(${{ steps.launch.outputs.experiment_names }})
+
+          for i in "${!EXPERIMENT_IDS[@]}"; do
+            EXP_ID="${EXPERIMENT_IDS[$i]}"
+            EXP_NAME="${EXPERIMENT_NAMES[$i]}"
+            echo "- **$EXP_NAME**: [View on Beaker](https://beaker.org/ex/$EXP_ID)" >> $GITHUB_STEP_SUMMARY
+          done
+
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ "${{ job.status }}" = "success" ]; then
-            echo "✅ **Status:** Experiment completed successfully!" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **Status:** All experiments completed successfully and image pushed!" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ **Status:** Experiment failed or timed out" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **Status:** Experiments failed or timed out (image not pushed)" >> $GITHUB_STEP_SUMMARY
           fi
