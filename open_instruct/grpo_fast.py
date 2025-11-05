@@ -556,7 +556,11 @@ def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: 
 
 @Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker")
 def prepare_collated_data_for_workers(
-    packed_sequences: PackedSequences, world_size: int, per_device_train_batch_size: int, pad_token_id: int, pin_memory: bool = True
+    packed_sequences: PackedSequences,
+    world_size: int,
+    per_device_train_batch_size: int,
+    pad_token_id: int,
+    pin_memory: bool = True,
 ) -> list[dict[str, list[torch.Tensor]]]:
     """Distributes and collates packed sequences for distributed training.
 
@@ -602,16 +606,24 @@ def prepare_collated_data_for_workers(
             collated_query_responses.append(
                 collate_fn([per_device_packed_query_responses[idx] for idx in micro_range], pad_token_id, pin_memory)
             )
-            collated_tool_masks.append(collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0, pin_memory))
+            collated_tool_masks.append(
+                collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0, pin_memory)
+            )
             collated_attention_masks.append(
                 collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0, pin_memory)
             )
-            collated_position_ids.append(collate_fn([per_device_packed_position_ids[idx] for idx in micro_range], 0, pin_memory))
+            collated_position_ids.append(
+                collate_fn([per_device_packed_position_ids[idx] for idx in micro_range], 0, pin_memory)
+            )
             collated_response_masks.append(
                 collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0, pin_memory)
             )
-            collated_advantages.append(collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0, pin_memory))
-            collated_vllm_logprobs.append(collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0, pin_memory))
+            collated_advantages.append(
+                collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0, pin_memory)
+            )
+            collated_vllm_logprobs.append(
+                collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0, pin_memory)
+            )
         collated_data.append(
             {
                 "collated_query_responses": collated_query_responses,

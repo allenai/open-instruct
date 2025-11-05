@@ -6,8 +6,6 @@ import time
 import unittest
 from unittest.mock import MagicMock, Mock
 
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-
 import numpy as np
 import ray
 import torch
@@ -19,8 +17,6 @@ from vllm import SamplingParams
 from open_instruct import grpo_fast, model_utils, rl_utils, utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.vllm_utils import create_vllm_engines
-
-torch.set_default_device("cpu")
 
 
 class TestGrpoFastBase(unittest.TestCase):
@@ -68,11 +64,6 @@ class TestGrpoFastBase(unittest.TestCase):
 
         # Track Ray queues for cleanup
         self._ray_queues = []
-
-        # Disable MPS to avoid pin_memory issues on macOS
-        if hasattr(torch.backends, 'mps'):
-            self._original_mps_available = torch.backends.mps.is_available
-            torch.backends.mps.is_available = lambda: False
 
         utils.check_runtime_leaks()
 
@@ -130,10 +121,6 @@ class TestGrpoFastBase(unittest.TestCase):
         else:
             os.environ["NCCL_CUMEM_ENABLE"] = self._original_nccl_cumem
 
-        # Restore MPS availability
-        if hasattr(torch.backends, 'mps') and hasattr(self, '_original_mps_available'):
-            torch.backends.mps.is_available = self._original_mps_available
-
     def create_test_data(self, num_prompts, prefix="", start_idx=0):
         """Create test data with consistent naming."""
         indices = list(range(start_idx, start_idx + num_prompts))
@@ -176,14 +163,14 @@ class TestGrpoFastBase(unittest.TestCase):
         """Create mock PackedSequences for testing."""
         lengths = [seq_length - (i % 3) if variable_length else seq_length for i in range(batch_size)]
         return rl_utils.PackedSequences(
-            query_responses=[torch.full((length,), i, dtype=torch.long, device="cpu") for i, length in enumerate(lengths)],
-            attention_masks=[torch.ones((length, length), dtype=torch.long, device="cpu") for length in lengths],
-            response_masks=[torch.ones(length, dtype=torch.long, device="cpu") for length in lengths],
+            query_responses=[torch.full((length,), i, dtype=torch.long) for i, length in enumerate(lengths)],
+            attention_masks=[torch.ones(length, dtype=torch.long) for length in lengths],
+            response_masks=[torch.ones(length, dtype=torch.long) for length in lengths],
             original_responses=[[i] * seq_length for i in range(batch_size)],
-            tool_masks=[torch.zeros(length, dtype=torch.long, device="cpu") for length in lengths],
-            advantages=[torch.randn(length, device="cpu") for length in lengths],
-            position_ids=[torch.arange(length, dtype=torch.long, device="cpu") for length in lengths],
-            vllm_logprobs=[torch.randn(length, device="cpu") for length in lengths],
+            tool_masks=[torch.zeros(length, dtype=torch.long) for length in lengths],
+            advantages=[torch.randn(length) for length in lengths],
+            position_ids=[torch.arange(length, dtype=torch.long) for length in lengths],
+            vllm_logprobs=[torch.randn(length) for length in lengths],
         )
 
     def create_mock_result(self, dataset_index, epoch_number, num_samples_per_prompt=1):
@@ -1028,15 +1015,17 @@ class TestShufflingIterator(unittest.TestCase):
 class TestDataPreparation(TestGrpoFastBase):
     """Test prepare_collated_data_for_workers function."""
 
-    @parameterized.expand([
-        (16, 4, 2, 10, False, 0),
-        (32, 8, 4, 20, False, 0),
-        (8, 2, 1, 5, False, 0),
-        (17, 4, 2, 10, False, 0),
-        (25, 8, 3, 15, False, 0),
-        (4, 1, 4, 10, False, 0),
-        (8, 2, 2, 10, True, 999),
-    ])
+    @parameterized.expand(
+        [
+            (16, 4, 2, 10, False, 0),
+            (32, 8, 4, 20, False, 0),
+            (8, 2, 1, 5, False, 0),
+            (17, 4, 2, 10, False, 0),
+            (25, 8, 3, 15, False, 0),
+            (4, 1, 4, 10, False, 0),
+            (8, 2, 2, 10, True, 999),
+        ]
+    )
     def test_distribution_and_structure(
         self, batch_size, world_size, per_device_train_batch_size, seq_length, variable_length, pad_token_id
     ):
@@ -1061,7 +1050,9 @@ class TestDataPreparation(TestGrpoFastBase):
 
         expected_samples_per_worker = batch_size // world_size
         samples_per_worker = batch_size // world_size
-        expected_num_microbatches = (samples_per_worker + per_device_train_batch_size - 1) // per_device_train_batch_size
+        expected_num_microbatches = (
+            samples_per_worker + per_device_train_batch_size - 1
+        ) // per_device_train_batch_size
 
         for worker_data in result:
             self.assertIsInstance(worker_data, dict)
@@ -1073,7 +1064,7 @@ class TestDataPreparation(TestGrpoFastBase):
             num_microbatches = len(worker_data["collated_query_responses"])
             self.assertEqual(num_microbatches, expected_num_microbatches)
 
-            for key, value in worker_data.items():
+            for value in worker_data.values():
                 self.assertIsInstance(value, list)
                 self.assertEqual(len(value), expected_num_microbatches)
                 for i, tensor in enumerate(value):
