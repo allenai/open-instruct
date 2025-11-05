@@ -68,9 +68,10 @@ jobs:
           declare -A CHANGE_PATTERNS=(
             [dpo_changed]="open_instruct/(dpo_tune_cache|dpo_utils)\.py"
             [finetune_changed]="open_instruct/finetune\.py"
+            [grpo_changed]="(^|/)Dockerfile$|(^|/)mason\.py$|^open_instruct/"
           )
 
-          for OUTPUT_KEY in "${!CHANGE_PATTERNS[@]}"; do
+          for OUTPUT_KEY in dpo_changed finetune_changed grpo_changed; do
             PATTERN="${CHANGE_PATTERNS[$OUTPUT_KEY]}"
             MATCHED=$(grep -qE "$PATTERN" <<< "$CHANGED_FILES" && echo true || echo false)
             echo "${OUTPUT_KEY}=${MATCHED}" >> "$GITHUB_OUTPUT"
@@ -103,6 +104,7 @@ jobs:
           GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           DPO_CHANGED: ${{ steps.changed-files.outputs.dpo_changed }}
           FINETUNE_CHANGED: ${{ steps.changed-files.outputs.finetune_changed }}
+          GRPO_CHANGED: ${{ steps.changed-files.outputs.grpo_changed }}
         run: |
           set -euo pipefail
 
@@ -143,6 +145,7 @@ jobs:
 
           EXPERIMENT_DEFINITIONS=(
             "single_gpu_on_beaker|scripts/train/debug/single_gpu_on_beaker.sh|always|Launching single_gpu_on_beaker.sh (always runs)"
+            "grpo|scripts/train/debug/grpo.sh|${GRPO_CHANGED}|Launching grpo.sh (core files changed)"
             "dpo|scripts/train/debug/dpo.sh|${DPO_CHANGED}|Launching dpo.sh (DPO files changed)"
             "finetune|scripts/train/debug/finetune.sh|${FINETUNE_CHANGED}|Launching finetune.sh (finetune.py changed)"
           )
