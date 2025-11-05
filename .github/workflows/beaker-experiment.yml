@@ -3,7 +3,8 @@ name: Beaker Experiment Launch
 on:
   merge_group:
 
-  workflow_dispatch:
+  # Adding a comment to trigger a run.
+  workflow_dispatch:  # This allows us to manually trigger a build through the GitHub UI.
   # pull_request:
   #   branches: [main]
   #   paths:
@@ -30,7 +31,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # Need full history to get commit author info
 
       - name: Checkout oe-eval-internal
         uses: actions/checkout@v4
@@ -45,11 +46,14 @@ jobs:
         id: get-trigger-info
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
+            # Get the commit author for push events
             AUTHOR_NAME=$(git log -1 --pretty=format:'%an')
             echo "trigger_info=Push by ${AUTHOR_NAME}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Get the user who triggered the manual dispatch
             echo "trigger_info=Manual dispatch by ${{ github.actor }}" >> $GITHUB_OUTPUT
           else
+            # For scheduled runs
             echo "trigger_info=Scheduled run" >> $GITHUB_OUTPUT
           fi
 
@@ -92,6 +96,7 @@ jobs:
 
       - name: Install dependencies
         run: |
+          # Install development dependencies needed for mason.py
           uv sync --frozen
 
       - name: Build image and launch experiments
@@ -105,6 +110,7 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Make scripts executable
           chmod +x scripts/train/build_image_and_launch.sh
           chmod +x scripts/train/debug/single_gpu_on_beaker.sh
           chmod +x scripts/train/debug/dpo.sh
@@ -116,17 +122,24 @@ jobs:
           EXPERIMENT_IDS=()
           EXPERIMENT_NAMES=()
 
+          # Always launch single_gpu_on_beaker.sh
           echo "=== Launching single_gpu_on_beaker.sh (always runs) ==="
+          # Build image and launch experiment
+          # Use tee to both stream output and capture it for parsing
           ./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh 2>&1 | tee /tmp/beaker_output_single_gpu.log || {
             EXIT_CODE=$?
             echo "ERROR: single_gpu_on_beaker.sh failed with exit code $EXIT_CODE"
             exit $EXIT_CODE
           }
 
+          # Extract experiment ID from the saved output
           EXPERIMENT_ID=$(grep -oP 'https://beaker.org/ex/\K[a-zA-Z0-9]+' /tmp/beaker_output_single_gpu.log | tail -1)
           if [ -z "$EXPERIMENT_ID" ]; then
             echo "ERROR: Failed to extract experiment ID from single_gpu_on_beaker.sh output"
+            echo "DEBUG: Full output log:"
             cat /tmp/beaker_output_single_gpu.log
+            echo "---"
+            echo "Please check that the experiment was created successfully."
             exit 1
           fi
           EXPERIMENT_IDS+=("$EXPERIMENT_ID")
