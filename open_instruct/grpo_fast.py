@@ -557,6 +557,24 @@ def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: 
 def prepare_collated_data_for_workers(
     packed_sequences: PackedSequences, world_size: int, per_device_train_batch_size: int, pad_token_id: int
 ) -> list[dict[str, list[torch.Tensor]]]:
+    """Distributes and collates packed sequences for distributed training.
+
+    Splits packed sequences across workers, randomly shuffles each worker's data,
+    and collates into micro-batches for training.
+
+    Args:
+        packed_sequences: Packed training sequences containing query responses,
+            tool masks, attention masks, position IDs, advantages, response masks,
+            and vllm logprobs.
+        world_size: Number of distributed workers.
+        per_device_train_batch_size: Batch size for each device's micro-batch.
+        pad_token_id: Token ID used for padding sequences.
+
+    Returns:
+        List of dictionaries, one per worker, each containing collated tensors
+        for query_responses, tool_masks, attention_masks, position_ids,
+        advantages, response_masks, and vllm_logprobs.
+    """
     B = len(packed_sequences.query_responses) // world_size
     collated_data = []
     for i in range(world_size):
