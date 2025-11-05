@@ -575,7 +575,7 @@ def prepare_collated_data_for_workers(
         for query_responses, tool_masks, attention_masks, position_ids,
         advantages, response_masks, and vllm_logprobs.
     """
-    B = len(packed_sequences.query_responses) // world_size
+    B = len(packed_sequences.query_responses) // world_size  # essentially doing `drop_last=True`, which is fine.
     collated_data = []
     for i in range(world_size):
         per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
@@ -586,6 +586,7 @@ def prepare_collated_data_for_workers(
         per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
         per_device_packed_vllm_logprobs = packed_sequences.vllm_logprobs[B * i : B * (i + 1)]
 
+        # Shuffle the batch and collate the data
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
         collated_query_responses = []
         collated_tool_masks = []
