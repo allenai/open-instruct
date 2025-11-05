@@ -554,6 +554,7 @@ def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: 
     return padded_tensor
 
 
+@Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker")
 def prepare_collated_data_for_workers(
     packed_sequences: PackedSequences, world_size: int, per_device_train_batch_size: int, pad_token_id: int
 ) -> list[dict[str, list[torch.Tensor]]]:
@@ -1974,11 +1975,10 @@ def data_preparation_thread(
                         packed_sequences.response_masks.append(dummy_response_mask)
                         packed_sequences.advantages.append(dummy_advantage)
 
-        with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
-            collated_data = prepare_collated_data_for_workers(
-                packed_sequences, args.world_size, args.per_device_train_batch_size, tokenizer.pad_token_id
-            )
-            B = len(packed_sequences.query_responses) // args.world_size
+        collated_data = prepare_collated_data_for_workers(
+            packed_sequences, args.world_size, args.per_device_train_batch_size, tokenizer.pad_token_id
+        )
+        B = len(packed_sequences.query_responses) // args.world_size
 
         # Create a result package with metrics and data
         if len(responses) == 0:

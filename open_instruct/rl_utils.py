@@ -1,4 +1,5 @@
 # flake8: noqa
+import contextlib
 import time
 from dataclasses import dataclass
 from typing import Generic, List, Optional, TypeVar
@@ -13,12 +14,13 @@ T = TypeVar("T")
 logger = logger_utils.setup_logger(__name__)
 
 
-class Timer:
-    """A context manager for timing code blocks"""
+@dataclass
+class Timer(contextlib.ContextDecorator):
+    """A context manager and decorator for timing code blocks"""
 
-    def __init__(self, description: str, noop: bool = False):
-        self.description = description
-        self.noop = noop
+    description: str
+    noop: bool = False
+    start_time: float | None = None
 
     def __enter__(self):
         self.start_time = time.perf_counter()
