@@ -527,7 +527,8 @@ def compare_logprobs(
     new_logprobs: torch.Tensor,
     old_logprobs: torch.Tensor,
     mask: torch.Tensor,
-    args: Namespace,
+    masked_mean_axis: int | None,
+    masked_mean_denominator: float | None,
     metrics_tracker: MetricsTracker,
 ) -> None:
     """Compare locally computed log probabilities with reference log probabilities.
@@ -539,7 +540,8 @@ def compare_logprobs(
         new_logprobs: Locally computed log probabilities (shape: [batch, seq_len])
         old_logprobs: Reference log probabilities from behavior policy (shape: [batch, seq_len])
         mask: Boolean mask indicating valid response tokens (shape: [batch, seq_len])
-        args: Training arguments containing masked_mean_axis and masked_mean_denominator
+        masked_mean_axis: Axis for masked mean reduction
+        masked_mean_denominator: Denominator for masked mean computation
         metrics_tracker: MetricsTracker instance for recording debug metrics
     """
     with torch.no_grad():
@@ -552,8 +554,8 @@ def compare_logprobs(
         reverse_kl = masked_mean(
             torch.expm1(old_logprobs - new_logprobs) + (old_logprobs - new_logprobs),
             mask,
-            args.masked_mean_axis,
-            args.masked_mean_denominator,
+            masked_mean_axis,
+            masked_mean_denominator,
         )
         metrics_tracker.add("debug/vllm_vs_local_logprob_diff_mean", mean_diff)
         metrics_tracker.add("debug/vllm_vs_local_logprob_diff_max", max_diff)
@@ -562,12 +564,12 @@ def compare_logprobs(
 
 
 def maybe_apply_importance_sampling(
-    pg_losses: torch.Tensor,
-    pg_losses2: torch.Tensor,
+    unclipped_pg_loss: torch.Tensor,
+    clipped_pg_loss: torch.Tensor,
     old_logprobs: torch.Tensor,
     vllm_logprobs: torch.Tensor | None,
     response_mask: torch.Tensor,
-    args: Namespace,
+    args: Args,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Apply truncated importance sampling (TIS) to policy gradient losses if enabled.
 
@@ -576,18 +578,18 @@ def maybe_apply_importance_sampling(
     high variance in gradient estimates.
 
     Args:
-        pg_losses: Unclipped policy gradient losses (shape: [batch, seq_len])
-        pg_losses2: Clipped policy gradient losses (shape: [batch, seq_len])
+        unclipped_pg_loss: Unclipped policy gradient losses (shape: [batch, seq_len])
+        clipped_pg_loss: Clipped policy gradient losses (shape: [batch, seq_len])
         old_logprobs: Log probabilities from current policy (shape: [batch, seq_len])
         vllm_logprobs: Log probabilities from behavior policy, or None (shape: [batch, seq_len])
         response_mask: Boolean mask indicating valid response tokens (shape: [batch, seq_len])
         args: Training arguments containing truncated_importance_sampling_ratio_cap
 
     Returns:
-        Tuple of (potentially scaled pg_losses, potentially scaled pg_losses2)
+        Tuple of (potentially scaled unclipped_pg_loss, potentially scaled clipped_pg_loss)
     """
     if args.truncated_importance_sampling_ratio_cap <= 0 or vllm_logprobs is None:
-        return pg_losses, pg_losses2
+        return unclipped_pg_loss, clipped_pg_loss
 
     old_logprobs_mask = old_logprobs != INVALID_LOGPROB
     vllm_logprobs_mask = vllm_logprobs != INVALID_LOGPROB
@@ -612,26 +614,26 @@ def maybe_apply_importance_sampling(
         importance_ratio = torch.where(valid_mask, torch.exp(logprob_diff), importance_ratio)
         importance_ratio = torch.clamp(importance_ratio, max=args.truncated_importance_sampling_ratio_cap)
 
-    pg_losses = pg_losses * importance_ratio
-    pg_losses2 = pg_losses2 * importance_ratio
+    unclipped_pg_loss = unclipped_pg_loss * importance_ratio
+    clipped_pg_loss = clipped_pg_loss * importance_ratio
 
-    return pg_losses, pg_losses2
+    return unclipped_pg_loss, clipped_pg_loss
 
 
 def calculate_loss(
-    model: Any,
+    model: deepspeed.DeepSpeedEngine,
     i: int,
     loss_statistics: LossStatistics,
-    mb_new_logprobs: torch.Tensor,
-    mb_old_logprobs: torch.Tensor,
-    mb_ref_logprob: torch.Tensor,
-    mb_advantages: torch.Tensor,
-    mb_response_masks_bool: torch.Tensor,
-    mb_vllm_logprobs: torch.Tensor | None,
-    mb_entropy: torch.Tensor,
+    local_logprobs: torch.Tensor,
+    old_logprobs: torch.Tensor,
+    ref_logprob: torch.Tensor,
+    advantages: torch.Tensor,
+    response_masks_bool: torch.Tensor,
+    vllm_logprobs: torch.Tensor | None,
+    entropy: torch.Tensor,
     accumulation_steps: int,
     local_step: int,
-    args: Namespace,
+    args: Args,
 ) -> int:
     """Calculate and apply GRPO loss for a single minibatch.
 
@@ -643,13 +645,13 @@ def calculate_loss(
         model: Model wrapper with backward() and step() methods (e.g., DeepSpeed engine)
         i: Minibatch index for tracking statistics
         loss_statistics: LossStatistics object to accumulate training metrics
-        mb_new_logprobs: Log probabilities from current policy (shape: [batch, seq_len])
-        mb_old_logprobs: Log probabilities from old/cached policy (shape: [batch, seq_len])
-        mb_ref_logprob: Log probabilities from reference model (shape: [batch, seq_len])
-        mb_advantages: Advantage estimates for policy gradient (shape: [batch, seq_len+1])
-        mb_response_masks_bool: Boolean mask for valid response tokens (shape: [batch, seq_len])
-        mb_vllm_logprobs: Log probabilities from behavior policy, or None (shape: [batch, seq_len])
-        mb_entropy: Entropy of the policy distribution (shape: [batch, seq_len])
+        local_logprobs: Log probabilities from current policy (shape: [batch, seq_len])
+        old_logprobs: Log probabilities from old/cached policy (shape: [batch, seq_len])
+        ref_logprob: Log probabilities from reference model (shape: [batch, seq_len])
+        advantages: Advantage estimates for policy gradient (shape: [batch, seq_len+1])
+        response_masks_bool: Boolean mask for valid response tokens (shape: [batch, seq_len])
+        vllm_logprobs: Log probabilities from behavior policy, or None (shape: [batch, seq_len])
+        entropy: Entropy of the policy distribution (shape: [batch, seq_len])
         accumulation_steps: Number of gradient accumulation steps before optimizer update
         local_step: Current local training step (used to determine when to step optimizer)
         args: Training arguments containing hyperparameters
@@ -657,7 +659,7 @@ def calculate_loss(
     Returns:
         Updated local_step (incremented by 1)
     """
-    logprobs_diff = mb_new_logprobs - mb_old_logprobs
+    logprobs_diff = local_logprobs - old_logprobs
     ratio = torch.exp(logprobs_diff)
 
     # PPO clipped surrogate objective: we compute two losses and take the element-wise maximum.
@@ -666,20 +668,20 @@ def calculate_loss(
     # Taking the maximum implements a pessimistic bound that prevents the policy from
     # deviating too far from the old policy. The clipfrac metric tracks how often clipping
     # is active (clipped_pg_loss > unclipped_pg_loss), which indicates constraint saturation.
-    unclipped_pg_loss = -mb_advantages[:, 1:] * ratio
-    clipped_pg_loss = -mb_advantages[:, 1:] * torch.clamp(ratio, 1.0 - args.clip_lower, 1.0 + args.clip_higher)
+    unclipped_pg_loss = -advantages[:, 1:] * ratio
+    clipped_pg_loss = -advantages[:, 1:] * torch.clamp(ratio, 1.0 - args.clip_lower, 1.0 + args.clip_higher)
 
     unclipped_pg_loss, clipped_pg_loss = maybe_apply_importance_sampling(
-        unclipped_pg_loss, clipped_pg_loss, mb_old_logprobs, mb_vllm_logprobs, mb_response_masks_bool, args
+        unclipped_pg_loss, clipped_pg_loss, old_logprobs, vllm_logprobs, response_masks_bool, args
     )
 
     pg_loss_max = torch.max(unclipped_pg_loss, clipped_pg_loss)
 
-    ref_logprobs_diff = (mb_new_logprobs - mb_ref_logprob).clamp(-40.0, 40.0)
-    kl = loss_statistics.update_kl_estimates(i, ref_logprobs_diff, ratio, mb_response_masks_bool, args)
+    ref_logprobs_diff = (local_logprobs - ref_logprob).clamp(-40.0, 40.0)
+    kl = loss_statistics.update_kl_estimates(i, ref_logprobs_diff, ratio, response_masks_bool, args)
 
     loss = masked_mean(
-        pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+        pg_loss_max + (args.beta * kl), response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
     )
     loss = loss / accumulation_steps
     model.backward(loss)
@@ -688,7 +690,7 @@ def calculate_loss(
 
     with torch.no_grad():
         loss_statistics.update_stats(
-            i, mb_response_masks_bool, unclipped_pg_loss, clipped_pg_loss, pg_loss_max, ratio, loss, mb_entropy, args
+            i, response_masks_bool, unclipped_pg_loss, clipped_pg_loss, pg_loss_max, ratio, loss, entropy, args
         )
 
     return local_step + 1
@@ -1183,10 +1185,13 @@ class PolicyTrainerRayProcess(RayProcess):
                     mb_vllm_logprobs = torch.nan_to_num(mb_vllm_logprobs, nan=INVALID_LOGPROB)
 
                     compare_logprobs(
-                        mb_local_logprobs, mb_vllm_logprobs, mb_response_masks_bool, args, self.local_metrics
+                        mb_local_logprobs,
+                        mb_vllm_logprobs,
+                        mb_response_masks_bool,
+                        args.masked_mean_axis,
+                        args.masked_mean_denominator,
+                        self.local_metrics,
                     )
-
-                    mb_new_logprobs = mb_local_logprobs
 
                     # Cache the old logprobs
                     if num_mini_batches > 1:
@@ -1211,7 +1216,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.model,
                         i,
                         loss_statistics,
-                        mb_new_logprobs,
+                        mb_local_logprobs,
                         mb_old_logprobs,
                         mb_ref_logprob,
                         mb_advantages,
