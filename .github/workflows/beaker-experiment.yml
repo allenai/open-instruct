@@ -169,8 +169,35 @@ jobs:
             exit 1
           fi
 
+          GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          SANITIZED_BRANCH=$(echo "$GIT_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]' | sed 's/^-//')
+          INTEGRATION_IMAGE="open-instruct-integration-test-${SANITIZED_BRANCH}"
+          echo "Integration image tag: ${INTEGRATION_IMAGE}"
+
+          if ! docker image inspect "$INTEGRATION_IMAGE" >/dev/null 2>&1; then
+            echo "Local image ${INTEGRATION_IMAGE} not found; attempting to pull from Beaker."
+            BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+            if beaker image pull "$BEAKER_USER/$INTEGRATION_IMAGE"; then
+              for CANDIDATE in "$BEAKER_USER/$INTEGRATION_IMAGE" "ai2/$BEAKER_USER/$INTEGRATION_IMAGE"; do
+                if docker image inspect "$CANDIDATE" >/dev/null 2>&1; then
+                  docker tag "$CANDIDATE" "$INTEGRATION_IMAGE"
+                  break
+                fi
+              done
+            else
+              echo "ERROR: Unable to pull ${BEAKER_USER}/${INTEGRATION_IMAGE} from Beaker."
+              exit 1
+            fi
+          fi
+
+          if ! docker image inspect "$INTEGRATION_IMAGE" >/dev/null 2>&1; then
+            echo "ERROR: Integration image ${INTEGRATION_IMAGE} unavailable locally after build/pull."
+            exit 1
+          fi
+
           echo "experiment_ids=${EXPERIMENT_IDS[*]}" >> $GITHUB_OUTPUT
           echo "experiment_names=${EXPERIMENT_NAMES[*]}" >> $GITHUB_OUTPUT
+          echo "integration_image=${INTEGRATION_IMAGE}" >> $GITHUB_OUTPUT
           echo "All experiments launched successfully!"
           echo "Experiment IDs: ${EXPERIMENT_IDS[*]}"
 
@@ -299,28 +326,29 @@ jobs:
           done
           exit 1
 
-      - name: Delete huge unnecessary tools folder
-        run: rm -rf /opt/hostedtoolcache /usr/share/dotnet "$AGENT_TOOLSDIRECTORY" /usr/local/lib/android/sdk/ndk
-
-      - name: Check remaining disk space
-        run: df -h
-
-      - name: Build final image
-        run: |
-          docker build --platform=linux/amd64 \
-            --build-arg GIT_COMMIT="$(git rev-parse --short HEAD)" \
-            --build-arg GIT_BRANCH="${GITHUB_REF#refs/heads/}" \
-            -t open_instruct .
-
       - name: Check image
-        run: docker run --rm open_instruct
+        run: docker run --rm ${{ steps.launch.outputs.integration_image }}
 
       - name: Push image to Beaker
-        uses: ./.github/actions/push
-        with:
-          image: open_instruct
-          beaker: open_instruct_auto
-          latest: true
+        env:
+          BEAKER_TARGET_IMAGE: open_instruct_auto
+          SOURCE_IMAGE: ${{ steps.launch.outputs.integration_image }}
+        run: |
+          set -euo pipefail
+
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          DESCRIPTION="Created from commit: ${SHORT_SHA} (GitHub run ${GITHUB_RUN_ID})"
+          BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+
+          UNIQUE_NAME="${BEAKER_TARGET_IMAGE}-${SHORT_SHA}-${GITHUB_RUN_ID}"
+          echo "Creating Beaker image ${UNIQUE_NAME} from local image ${SOURCE_IMAGE}."
+          beaker image create --name "$UNIQUE_NAME" "$SOURCE_IMAGE" --description "$DESCRIPTION"
+
+          echo "Renaming ${BEAKER_USER}/${BEAKER_TARGET_IMAGE} to release lock (if present)."
+          beaker image rename "${BEAKER_USER}/${BEAKER_TARGET_IMAGE}" "" || true
+
+          echo "Publishing ${BEAKER_TARGET_IMAGE} with updated image."
+          beaker image create --name "$BEAKER_TARGET_IMAGE" "$SOURCE_IMAGE" --description "$DESCRIPTION"
 
       - name: Summary
         if: always()
