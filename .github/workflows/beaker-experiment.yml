@@ -25,7 +25,7 @@ jobs:
   launch-experiment:
     name: Launch Beaker Experiment
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
-    timeout-minutes: 60
+    timeout-minutes: 35
 
     steps:
       - name: Checkout repository
