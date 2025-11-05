@@ -215,116 +215,39 @@ jobs:
             exit 0
           fi
 
-          echo "Waiting for ${#EXPERIMENT_IDS[@]} experiments to complete..."
-          for i in "${!EXPERIMENT_IDS[@]}"; do
-            echo "  - ${EXPERIMENT_NAMES[$i]}: ${EXPERIMENT_IDS[$i]} (https://beaker.org/ex/${EXPERIMENT_IDS[$i]})"
-          done
+          declare -a FAILED_IDS=()
+          declare -a FAILED_NAMES=()
 
-          MAX_WAIT_TIME=1200
-          CHECK_INTERVAL=30
-          ELAPSED_TIME=0
-
-          declare -A EXPERIMENT_STATUS
-          for EXP_ID in "${EXPERIMENT_IDS[@]}"; do
-            EXPERIMENT_STATUS[$EXP_ID]="running"
-          done
-
-          get_exit_code() {
-            local EXP_ID="$1"
-            local RESPONSE EXIT_CODE
-
-            if ! RESPONSE=$(beaker experiment get "$EXP_ID" --format json 2>/dev/null); then
-              echo "pending"
-              return
-            fi
-
-            EXIT_CODE=$(echo "$RESPONSE" | jq -r '.[0].jobs[0].status.exitCode // "pending"' 2>/dev/null || echo "pending")
-            EXIT_CODE=${EXIT_CODE:-pending}
-            if [ "$EXIT_CODE" = "null" ]; then
-              echo "pending"
-            else
-              echo "$EXIT_CODE"
-            fi
-          }
-
-          ANY_FAILED=false
-
-          while [ $ELAPSED_TIME -lt $MAX_WAIT_TIME ]; do
-            echo "=== Check at ${ELAPSED_TIME}s ==="
-
-            ALL_DONE=true
-
-            for i in "${!EXPERIMENT_IDS[@]}"; do
-              EXP_ID="${EXPERIMENT_IDS[$i]}"
-              EXP_NAME="${EXPERIMENT_NAMES[$i]}"
-
-              if [ "${EXPERIMENT_STATUS[$EXP_ID]}" != "running" ]; then
-                continue
-              fi
-
-              EXIT_CODE=$(get_exit_code "$EXP_ID")
-
-              case "$EXIT_CODE" in
-                pending)
-                  echo "  [$EXP_NAME] Still running..."
-                  ALL_DONE=false
-                  ;;
-                0)
-                  echo "  [$EXP_NAME] ✅ Completed successfully (exit code: 0)"
-                  EXPERIMENT_STATUS[$EXP_ID]="success"
-                  ;;
-                *)
-                  echo "  [$EXP_NAME] ❌ Failed with exit code: $EXIT_CODE"
-                  EXPERIMENT_STATUS[$EXP_ID]="failed"
-                  ANY_FAILED=true
-                  ALL_DONE=false
-                  ;;
-              esac
-            done
-
-            if $ALL_DONE; then
-              echo ""
-              echo "=== All experiments completed ==="
-              for i in "${!EXPERIMENT_IDS[@]}"; do
-                EXP_ID="${EXPERIMENT_IDS[$i]}"
-                EXP_NAME="${EXPERIMENT_NAMES[$i]}"
-                STATUS="${EXPERIMENT_STATUS[$EXP_ID]}"
-                echo "  [$EXP_NAME] $STATUS"
-              done
-
-              if $ANY_FAILED; then
-                echo ""
-                echo "❌ One or more experiments failed. Showing error logs:"
-                for i in "${!EXPERIMENT_IDS[@]}"; do
-                  EXP_ID="${EXPERIMENT_IDS[$i]}"
-                  EXP_NAME="${EXPERIMENT_NAMES[$i]}"
-                  if [ "${EXPERIMENT_STATUS[$EXP_ID]}" = "failed" ]; then
-                    echo ""
-                    echo "=== Error logs for $EXP_NAME (${EXP_ID}) ==="
-                    beaker experiment logs "$EXP_ID" | tail -n 200
-                  fi
-                done
-                exit 1
-              fi
-
-              echo ""
-              echo "✅ All experiments completed successfully!"
-              exit 0
-            fi
-
-            sleep "$CHECK_INTERVAL"
-            ELAPSED_TIME=$((ELAPSED_TIME + CHECK_INTERVAL))
-          done
-
-          echo ""
-          echo "⏱️ Timeout: Not all experiments completed within 20 minutes"
-          echo "Final status:"
           for i in "${!EXPERIMENT_IDS[@]}"; do
             EXP_ID="${EXPERIMENT_IDS[$i]}"
-            EXP_NAME="${EXPERIMENT_NAMES[$i]}"
-            echo "  [$EXP_NAME] ${EXPERIMENT_STATUS[$EXP_ID]}"
+            EXP_NAME="${EXPERIMENT_NAMES[$i]:-experiment_$i}"
+
+            echo "Waiting for ${EXP_NAME} (${EXP_ID}) to succeed..."
+            if beaker experiment await "$EXP_ID" 0 succeeded --index --timeout 20m --interval 30s; then
+              echo "  [${EXP_NAME}] ✅ succeeded"
+              continue
+            fi
+
+            echo "  [${EXP_NAME}] ❌ did not reach succeeded status within timeout"
+            FAILED_IDS+=("$EXP_ID")
+            FAILED_NAMES+=("$EXP_NAME")
           done
-          exit 1
+
+          if [ ${#FAILED_IDS[@]} -gt 0 ]; then
+            echo ""
+            echo "❌ One or more experiments failed or timed out. Showing logs:"
+            for i in "${!FAILED_IDS[@]}"; do
+              EXP_ID="${FAILED_IDS[$i]}"
+              EXP_NAME="${FAILED_NAMES[$i]}"
+              echo ""
+              echo "=== Error logs for ${EXP_NAME} (${EXP_ID}) ==="
+              beaker experiment logs "$EXP_ID" | tail -n 200 || true
+            done
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ All experiments completed successfully!"
 
       - name: Check image
         run: docker run --rm ${{ steps.launch.outputs.integration_image }}
