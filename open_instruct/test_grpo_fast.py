@@ -1043,7 +1043,7 @@ class TestDataPreparation(TestGrpoFastBase):
         """Test data distribution, structure, micro-batch collation, and padding."""
         packed_sequences = self.create_mock_packed_sequences(batch_size, seq_length, variable_length)
         result = grpo_fast.prepare_collated_data_for_workers(
-            packed_sequences, world_size, per_device_train_batch_size, pad_token_id
+            packed_sequences, world_size, per_device_train_batch_size, pad_token_id, pin_memory=False
         )
 
         self.assertIsInstance(result, list)
