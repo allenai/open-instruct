@@ -15,6 +15,7 @@ uv run python mason.py \
 	--description "Large (multi-node) test script." \
         --timeout 3600 \
         --max_retries 0 \
+        --gs_model_name "stego32" \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
 	--env NCCL_NVLSTREE_MAX_CHUNKSIZE=131072 \
         --budget ai2/oe-adapt \
