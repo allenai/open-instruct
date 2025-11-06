@@ -54,7 +54,7 @@ def build_command_without_args(command, args_to_remove):
     result = []
     skip_next = False
 
-    for i, item in enumerate(command):
+    for item in command:
         if skip_next:
             skip_next = False
             continue
@@ -518,7 +518,6 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                         console.log(f"📦 Found cached dataset config hash: {dataset_config_hash}")
                         dataset_cache_paths.append(dataset_cache_path)
                         dataset_config_hashes.append(dataset_config_hash)
-                stderr = result.stderr
                 return_code = result.returncode
                 if return_code != 0:
                     raise Exception(f"Error code {return_code} when creating cached dataset")
@@ -528,13 +527,10 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     need_to_override_checkpoint_state_dir = True
                     default_checkpoint_state_freq = 200
                     for idx, cmd in enumerate(command):
-                        if cmd == "--checkpoint_state_dir":
-                            if idx + 1 < len(command):
-                                if "/weka/" in command[idx + 1]:
-                                    need_to_override_checkpoint_state_dir = False
-                        if cmd == "--checkpoint_state_freq":
-                            if idx + 1 < len(command):
-                                default_checkpoint_state_freq = command[idx + 1]
+                        if cmd == "--checkpoint_state_dir" and idx + 1 < len(command) and "/weka/" in command[idx + 1]:
+                            need_to_override_checkpoint_state_dir = False
+                        if cmd == "--checkpoint_state_freq" and idx + 1 < len(command):
+                            default_checkpoint_state_freq = command[idx + 1]
 
                     if need_to_override_checkpoint_state_dir and is_open_instruct_training and not is_external_user:
                         new_checkpoint_state_dir = f"{args.auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
@@ -553,10 +549,9 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
             if len(args.auto_output_dir_path) > 0:
                 need_to_override_output_dir = True
                 for idx, cmd in enumerate(command):
-                    if cmd == "--output_dir":
-                        if "/weka/" in command[idx + 1]:
-                            need_to_override_output_dir = False
-                            break
+                    if cmd == "--output_dir" and "/weka/" in command[idx + 1]:
+                        need_to_override_output_dir = False
+                        break
                 if need_to_override_output_dir and is_open_instruct_training and not is_external_user:
                     new_output_dir = f"{args.auto_output_dir_path}/{whoami}/"
                     console.log(
