@@ -623,7 +623,7 @@ def maybe_apply_importance_sampling(
     return unclipped_pg_loss, clipped_pg_loss
 
 
-def calculate_loss(
+def calculate_loss_and_backward(
     model: deepspeed.DeepSpeedEngine,
     i: int,
     loss_statistics: LossStatistics,
@@ -638,14 +638,13 @@ def calculate_loss(
     local_step: int,
     args: Args,
 ) -> int:
-    """Calculate and apply GRPO loss for a single minibatch.
+    """Calculate GRPO loss and perform backward pass for a single minibatch.
 
     Computes the policy gradient loss using the clipped surrogate objective from PPO,
-    combines it with a KL penalty term, performs the backward pass, and optionally
-    steps the optimizer.
+    combines it with a KL penalty term, and performs the backward pass.
 
     Args:
-        model: Model wrapper with backward() and step() methods (e.g., DeepSpeed engine)
+        model: Model wrapper with backward() method (e.g., DeepSpeed engine)
         i: Minibatch index for tracking statistics
         loss_statistics: LossStatistics object to accumulate training metrics
         local_logprobs: Log probabilities from current policy (shape: [batch, seq_len])
@@ -688,8 +687,6 @@ def calculate_loss(
     )
     loss = loss / accumulation_steps
     model.backward(loss)
-    if (local_step + 1) % accumulation_steps == 0:
-        model.step()
 
     with torch.no_grad():
         loss_statistics.update_stats(
@@ -1298,7 +1295,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         f"response_mask sum={mb_response_masks_bool.sum()}"
                     )
 
-                    local_step = calculate_loss(
+                    local_step = calculate_loss_and_backward(
                         self.model,
                         i,
                         loss_statistics,
@@ -1313,6 +1310,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         local_step,
                         args,
                     )
+                    if local_step % accumulation_steps == 0:
+                        self.model.step()
 
             local_metrics |= loss_statistics.to_dict()
             local_metrics["lr"] = self.scheduler.get_last_lr()[0]
