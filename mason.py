@@ -54,7 +54,7 @@ def build_command_without_args(command, args_to_remove):
     result = []
     skip_next = False
 
-    for i, item in enumerate(command):
+    for item in command:
         if skip_next:
             skip_next = False
             continue
@@ -345,7 +345,6 @@ def get_env_vars(
                     # NOTE: For single-node training we still need all of these settings and we also
                     # need host networking enabled so that the ethernet interface names don't change.
                     beaker.BeakerEnvVar(name="NCCL_CROSS_NIC", value="0"),
-                    # beaker.BeakerEnvVar(name="NCCL_ALGO", value="Ring,Tree"),
                     beaker.BeakerEnvVar(name="NCCL_PROTO", value="Simple,LL128"),
                     beaker.BeakerEnvVar(name="NCCL_MIN_NCHANNELS", value="4"),
                     beaker.BeakerEnvVar(name="NCCL_P2P_NET_CHUNKSIZE", value="524288"),
@@ -360,12 +359,9 @@ def get_env_vars(
                     beaker.BeakerEnvVar(name="NCCL_NET_GDR_LEVEL", value="PIX"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING", value="0"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS", value="600000"),
-                    # beaker.BeakerEnvVar(name="NCCL_NVLS_ENABLE", value="0"),
                     beaker.BeakerEnvVar(name="NCCL_USE_SNAP", value="1"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_USE_LLCM", value="1"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY", value="/dev/aperture_devices"),
-                    # NOTE: This path var must be set prior to launching Python
-                    # beaker.BeakerEnvVar(name="LD_LIBRARY_PATH", value=r"/var/lib/tcpxo/lib64:${LD_LIBRARY_PATH}"),
                     beaker.BeakerEnvVar(name="NCCL_TUNER_PLUGIN", value="libnccl-tuner.so"),
                     beaker.BeakerEnvVar(
                         name="NCCL_TUNER_CONFIG_PATH", value="/var/lib/tcpxo/lib64/a3plus_tuner_config_ll128.textproto"
@@ -518,7 +514,6 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                         console.log(f"📦 Found cached dataset config hash: {dataset_config_hash}")
                         dataset_cache_paths.append(dataset_cache_path)
                         dataset_config_hashes.append(dataset_config_hash)
-                stderr = result.stderr
                 return_code = result.returncode
                 if return_code != 0:
                     raise Exception(f"Error code {return_code} when creating cached dataset")
@@ -528,13 +523,10 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     need_to_override_checkpoint_state_dir = True
                     default_checkpoint_state_freq = 200
                     for idx, cmd in enumerate(command):
-                        if cmd == "--checkpoint_state_dir":
-                            if idx + 1 < len(command):
-                                if "/weka/" in command[idx + 1]:
-                                    need_to_override_checkpoint_state_dir = False
-                        if cmd == "--checkpoint_state_freq":
-                            if idx + 1 < len(command):
-                                default_checkpoint_state_freq = command[idx + 1]
+                        if cmd == "--checkpoint_state_dir" and idx + 1 < len(command) and "/weka/" in command[idx + 1]:
+                            need_to_override_checkpoint_state_dir = False
+                        if cmd == "--checkpoint_state_freq" and idx + 1 < len(command):
+                            default_checkpoint_state_freq = command[idx + 1]
 
                     if need_to_override_checkpoint_state_dir and is_open_instruct_training and not is_external_user:
                         new_checkpoint_state_dir = f"{args.auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
@@ -553,10 +545,9 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
             if len(args.auto_output_dir_path) > 0:
                 need_to_override_output_dir = True
                 for idx, cmd in enumerate(command):
-                    if cmd == "--output_dir":
-                        if "/weka/" in command[idx + 1]:
-                            need_to_override_output_dir = False
-                            break
+                    if cmd == "--output_dir" and "/weka/" in command[idx + 1]:
+                        need_to_override_output_dir = False
+                        break
                 if need_to_override_output_dir and is_open_instruct_training and not is_external_user:
                     new_output_dir = f"{args.auto_output_dir_path}/{whoami}/"
                     console.log(
