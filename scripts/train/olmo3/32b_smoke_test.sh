@@ -9,21 +9,21 @@ uv run python mason.py \
         --image "$BEAKER_IMAGE" \
 	--pure_docker_mode \
         --workspace ai2/open-instruct-dev \
+        --gs_model_name "stego32" \
         --priority urgent \
 	--preemptible \
         --num_nodes 4 \
 	--description "Large (multi-node) test script." \
         --timeout 3600 \
         --max_retries 0 \
-        --gs_model_name "stego32" \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-	--env NCCL_NVLSTREE_MAX_CHUNKSIZE=131072 \
+        --env CUDA_LAUNCH_BLOCKING=1 \
         --budget ai2/oe-adapt \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 16 \
-        --num_unique_prompts_rollout 32 \
+        --num_unique_prompts_rollout 64 \
         --num_mini_batches 1 \
         --num_epochs 1 \
         --learning_rate 5e-7 \
@@ -36,9 +36,8 @@ uv run python mason.py \
         --max_prompt_token_length 2048 \
         --response_length 4096 \
         --pack_length 20480 \
-	--model_name_or_path "/weka/oe-adapt-default/finbarrt/stego32/step358000-hf" \
-        --tokenizer_name_or_path "allenai/OLMo-2-1124-7B" \
-	--add_bos \
+        --model_name_or_path "/weka/oe-adapt-default/finbarrt/stego32/step358000-hf" \
+	--tokenizer_name_or_path "allenai/OLMo-2-1124-7B" \
         --chat_template_name tulu_thinker \
 	--inflight_updates True \
         --stop_strings "</answer>" \
@@ -47,8 +46,9 @@ uv run python mason.py \
         --verbose False \
         --ground_truths_key ground_truth \
         --sft_messages_key messages \
-        --total_episodes 10_000 \
-        --deepspeed_stage 2 \
+        --total_episodes 200_000 \
+	--gather_whole_model False \
+        --deepspeed_stage 3 \
         --num_learners_per_node 8 8 8 \
         --vllm_num_engines 2 \
         --vllm_tensor_parallel_size 4 \
@@ -57,6 +57,7 @@ uv run python mason.py \
         --code_api_url \$CODE_API_URL/test_program \
         --seed 1 \
         --local_eval_every 1 \
+	--add_bos \
         --gradient_checkpointing \
         --try_launch_beaker_eval_jobs_on_weka True \
         --with_tracking \
