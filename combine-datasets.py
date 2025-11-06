@@ -103,3 +103,6 @@ for elem in if_ds_ood["train"]:
         "domain": "ifeval",
         "in_distribution": True
     })
+
+eval_dataset = Dataset.from_list(new_elems)
+eval_dataset.push_to_hub("jacobmorrison/social-rl-eval-prompts")
