@@ -54,7 +54,7 @@ def build_command_without_args(command, args_to_remove):
     result = []
     skip_next = False
 
-    for _i, item in enumerate(command):
+    for item in command:
         if skip_next:
             skip_next = False
             continue
