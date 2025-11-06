@@ -92,7 +92,7 @@ from open_instruct.ground_truth_utils import (
     cleanup_all_llm_judge_clients,
     soft_format_reward_func,
 )
-from open_instruct.metrics import LossStatistics, MetricsTracker
+from open_instruct.metrics import LossStatistics
 from open_instruct.model_utils import (
     Batch,
     ModelConfig,
@@ -529,11 +529,10 @@ def compare_logprobs(
     mask: torch.Tensor,
     masked_mean_axis: int | None,
     masked_mean_denominator: float | None,
-    metrics_tracker: MetricsTracker,
-) -> None:
+) -> dict[str, float]:
     """Compare locally computed log probabilities with reference log probabilities.
 
-    Computes statistics on the difference between two sets of log probabilities and records
+    Computes statistics on the difference between two sets of log probabilities and returns
     debugging metrics including mean/max/std differences and reverse KL divergence.
 
     Args:
@@ -542,7 +541,9 @@ def compare_logprobs(
         mask: Boolean mask indicating valid response tokens (shape: [batch, seq_len])
         masked_mean_axis: Axis for masked mean reduction
         masked_mean_denominator: Denominator for masked mean computation
-        metrics_tracker: MetricsTracker instance for recording debug metrics
+
+    Returns:
+        Dictionary of debug metrics
     """
     with torch.no_grad():
         valid_mask = mask & ~torch.isnan(old_logprobs)
@@ -557,10 +558,12 @@ def compare_logprobs(
             masked_mean_axis,
             masked_mean_denominator,
         )
-        metrics_tracker.add("debug/vllm_vs_local_logprob_diff_mean", mean_diff)
-        metrics_tracker.add("debug/vllm_vs_local_logprob_diff_max", max_diff)
-        metrics_tracker.add("debug/vllm_vs_local_logprob_diff_std", std_diff)
-        metrics_tracker.add("debug/vllm_local_reverse_kl", reverse_kl)
+        return {
+            "debug/vllm_vs_local_logprob_diff_mean": mean_diff.item(),
+            "debug/vllm_vs_local_logprob_diff_max": max_diff.item(),
+            "debug/vllm_vs_local_logprob_diff_std": std_diff.item(),
+            "debug/vllm_local_reverse_kl": reverse_kl.item(),
+        }
 
 
 def maybe_apply_importance_sampling(
@@ -1009,7 +1012,6 @@ class PolicyTrainerRayProcess(RayProcess):
             else:
                 self.ref_policy.load_state_dict(state_dict)
             logger.info(f"{self.rank=}: Loaded reference policy checkpoint from {self.ref_policy_checkpoint_path}")
-        self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
         return optimization_steps_done
 
     def forward(
@@ -1147,6 +1149,7 @@ class PolicyTrainerRayProcess(RayProcess):
         num_mini_batches: int,
     ):
         args = self.args
+        local_metrics = {}
         to_device_inplace(collated_query_responses, self.device)
         to_device_inplace(collated_tool_masks, self.device)
         to_device_inplace(collated_attention_masks, self.device)
@@ -1268,13 +1271,12 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Replace any remaining NaN values (query tokens in packed sequences are set to NaN by pack_sequences in rl_utils.py)
                     mb_vllm_logprobs = torch.nan_to_num(mb_vllm_logprobs, nan=INVALID_LOGPROB)
 
-                    compare_logprobs(
+                    local_metrics |= compare_logprobs(
                         mb_local_logprobs,
                         mb_vllm_logprobs,
                         mb_response_masks_bool,
                         args.masked_mean_axis,
                         args.masked_mean_denominator,
-                        self.local_metrics,
                     )
 
                     # Cache the old logprobs
@@ -1312,10 +1314,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         args,
                     )
 
-            with torch.no_grad():
-                self.local_metrics.add_dict(loss_statistics.to_dict())
-                self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
-                return self.local_metrics.get_metrics_list()
+            local_metrics |= loss_statistics.to_dict()
+            local_metrics["lr"] = self.scheduler.get_last_lr()[0]
+            return local_metrics
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
         args = self.args

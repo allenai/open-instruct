@@ -113,92 +113,24 @@ class LossStatistics:
                 mb_entropy, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
             ).float()
 
-    def to_dict(self) -> dict[str, torch.Tensor]:
+    def to_dict(self) -> dict[str, float]:
         """Convert accumulated statistics to a metrics dictionary.
 
         Returns:
             Dictionary mapping metric names to their averaged values across all minibatches
         """
         metrics = {
-            "objective/kl_avg": self.kl_stats[0].mean(),
-            "objective/kl2_avg": self.kl_stats[1].mean(),
-            "objective/kl3_avg": self.kl_stats[2].mean(),
-            "objective/kl4_avg": self.kl_stats[3].mean(),
-            "loss/policy_avg": self.pg_loss_stats.mean(),
-            "loss/kl_avg": self.kl_loss_stats.mean(),
-            "loss/total_avg": self.loss_stats.mean(),
-            "policy/clipfrac_avg": self.pg_clipfrac_stats.mean(),
-            "val/ratio": self.ratio_stats.mean(),
-            "val/ratio_var": self.ratio_stats.var(),
+            "objective/kl_avg": self.kl_stats[0].mean().item(),
+            "objective/kl2_avg": self.kl_stats[1].mean().item(),
+            "objective/kl3_avg": self.kl_stats[2].mean().item(),
+            "objective/kl4_avg": self.kl_stats[3].mean().item(),
+            "loss/policy_avg": self.pg_loss_stats.mean().item(),
+            "loss/kl_avg": self.kl_loss_stats.mean().item(),
+            "loss/total_avg": self.loss_stats.mean().item(),
+            "policy/clipfrac_avg": self.pg_clipfrac_stats.mean().item(),
+            "val/ratio": self.ratio_stats.mean().item(),
+            "val/ratio_var": self.ratio_stats.var().item(),
         }
         if self.entropy_stats is not None:
-            metrics["policy/entropy_avg"] = self.entropy_stats.mean()
+            metrics["policy/entropy_avg"] = self.entropy_stats.mean().item()
         return metrics
-
-
-class MetricsTracker:
-    """Preallocated tensor-based metrics storage for efficient distributed reduction.
-
-    Stores all metrics in a single preallocated tensor to enable efficient all-reduce
-    operations in distributed training. Maintains a mapping from metric names to
-    tensor indices for fast access.
-    """
-
-    def __init__(self, max_metrics: int = 32, device: str = "cuda"):
-        """Initialize metrics tracker.
-
-        Args:
-            max_metrics: Maximum number of unique metrics to track
-            device: Device to allocate metrics tensor on (default: "cuda")
-        """
-        self.metrics = torch.zeros(max_metrics, device=device)
-        self.names2idx = {}
-        self.current_idx = 0
-        self.max_metrics = max_metrics
-
-    def add(self, name: str, value: torch.tensor):
-        """Add or update a metric value.
-
-        If the metric name is new, allocates a new index in the metrics tensor.
-        If the metric already exists, updates its value at the existing index.
-
-        Args:
-            name: Metric name (e.g., "loss/policy_avg")
-            value: Metric value (scalar tensor or convertible to tensor)
-
-        Returns:
-            Self for method chaining
-
-        Raises:
-            ValueError: If max_metrics limit is exceeded
-        """
-        if name not in self.names2idx:
-            if self.current_idx >= self.max_metrics:
-                raise ValueError(f"Exceeded maximum number of metrics ({self.max_metrics})")
-            self.names2idx[name] = self.current_idx
-            self.current_idx += 1
-
-        self.metrics[self.names2idx[name]] = value
-        return self
-
-    def add_dict(self, metrics_dict: dict[str, torch.Tensor]):
-        """Add multiple metrics from a dictionary.
-
-        Args:
-            metrics_dict: Dictionary mapping metric names to values
-
-        Returns:
-            Self for method chaining
-        """
-        for k, v in metrics_dict.items():
-            self.add(k, v)
-        return self
-
-    def get_metrics_list(self) -> dict[str, float]:
-        """Convert tracked metrics to a dictionary of Python floats.
-
-        Returns:
-            Dictionary mapping metric names to their float values
-        """
-        metrics_list = self.metrics.tolist()
-        return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
