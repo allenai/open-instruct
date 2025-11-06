@@ -1282,10 +1282,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     else:
                         with torch.no_grad():
                             if epoch_idx == 0:
-                                if args.use_vllm_logprobs:
-                                    old_logprobs[i] = mb_vllm_logprobs
-                                else:
-                                    old_logprobs[i] = mb_local_logprobs.detach()
+                                old_logprobs[i] = (
+                                    mb_vllm_logprobs if args.use_vllm_logprobs else mb_local_logprobs.detach()
+                                )
                             mb_old_logprobs = old_logprobs[i]
 
                     old_logprobs_mask = mb_old_logprobs != INVALID_LOGPROB
