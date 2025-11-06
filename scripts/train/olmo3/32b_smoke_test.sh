@@ -37,6 +37,7 @@ uv run python mason.py \
         --pack_length 20480 \
 	--model_name_or_path "/weka/oe-adapt-default/finbarrt/stego32/step358000-hf" \
         --tokenizer_name_or_path "allenai/OLMo-2-1124-7B" \
+	--add_bos \
         --chat_template_name tulu_thinker \
 	--inflight_updates True \
         --stop_strings "</answer>" \
