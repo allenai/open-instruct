@@ -31,9 +31,45 @@ OPEN_INSTRUCT_COMMANDS = [
 
 OPEN_INSTRUCT_RESUMABLES = ["open_instruct/grpo_fast.py"]
 
+CACHE_EXCLUDED_ARGS = {
+    "--with_tracking": False,
+    "--checkpoint_state_freq": True,
+    "--checkpoint_state_dir": True,
+    "--gs_checkpoint_state_dir": True,
+}
+
 
 # ----------------------------------------------------------------------
 # Mason logic
+def build_command_without_args(command, args_to_remove):
+    """Build new command list excluding specified arguments.
+
+    Args:
+        command: List of command arguments
+        args_to_remove: Dict mapping argument names to boolean indicating if they have values
+                       e.g., {"--with_tracking": False, "--checkpoint_state_dir": True}
+
+    Returns:
+        New command list with specified arguments removed
+    """
+    result = []
+    skip_next = False
+
+    for i, item in enumerate(command):
+        if skip_next:
+            skip_next = False
+            continue
+
+        if item in args_to_remove:
+            if args_to_remove[item]:
+                skip_next = True
+            continue
+
+        result.append(item)
+
+    return result
+
+
 def parse_beaker_dataset(dataset_str):
     splt = dataset_str.split(":")
     if len(splt) != 2:
@@ -411,18 +447,6 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
         # We could in theory submit a cpu only job to beaker to do this, but that requires setting up
         # dependency jobs somehow. Since tokenization is like ~5 minutes, we can just run it locally.
         # Once it's cached, we don't need to cache it again.
-        def find_list_idx(lst: List[str], item: str):
-            for i in range(len(lst)):
-                if item == lst[i]:
-                    return i
-            return -1
-
-        def remove_arg_from_list(lst: List[str], item: str, remove_value: bool = False):
-            idx = find_list_idx(lst, item)
-            if idx != -1 and idx + 1 < len(lst):
-                if remove_value:
-                    lst.pop(idx + 1)
-                lst.pop(idx)
 
         # Add the whoami parts if not already present
         if not any("hf_entity" in c for c in command):
@@ -436,76 +460,73 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
         dataset_config_hashes = []
         if not args.no_auto_dataset_cache:
             for file in OPEN_INSTRUCT_COMMANDS:
-                # add cache_dataset_only to the command
-                idx = find_list_idx(command, file)
-                if idx != -1:
-                    # then try executing the same command with
-                    caching_command = command.copy()
-                    remove_arg_from_list(caching_command, "--with_tracking", False)
-                    remove_arg_from_list(caching_command, "--checkpoint_state_freq", True)
-                    remove_arg_from_list(caching_command, "--checkpoint_state_dir", True)
-                    remove_arg_from_list(caching_command, "--gs_checkpoint_state_dir", True)
-                    caching_command = "python " + " ".join(caching_command[idx:]) + " --cache_dataset_only"
-                    console.log("📦📦📦 Running the caching command with `--cache_dataset_only`")
-                    import subprocess
+                try:
+                    idx = command.index(file)
+                except ValueError:
+                    continue
 
-                    # Use Popen to get real-time output while also capturing it
-                    process = subprocess.Popen(
-                        caching_command,
-                        shell=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                        bufsize=1,
-                    )
+                filtered_command = build_command_without_args(command[idx:], CACHE_EXCLUDED_ARGS)
+                caching_command = "python " + " ".join(filtered_command) + " --cache_dataset_only"
+                console.log("📦📦📦 Running the caching command with `--cache_dataset_only`")
+                import subprocess
 
-                    stdout_data, stderr_data = [], []
+                # Use Popen to get real-time output while also capturing it
+                process = subprocess.Popen(
+                    caching_command,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                )
 
-                    # Set up select to monitor both stdout and stderr
-                    streams = [process.stdout, process.stderr]
-                    while True:
-                        # Wait for output on either stream
-                        reads = select.select(streams, [], [])[0]
+                stdout_data, stderr_data = [], []
 
-                        done = True
-                        for stream in reads:
-                            line = stream.readline()
-                            if line:
-                                done = False
-                                is_stdout = stream == process.stdout
-                                print(line.rstrip(), file=sys.stdout if is_stdout else sys.stderr)
-                                if is_stdout:
-                                    stdout_data.append(line)
-                                else:
-                                    stderr_data.append(line)
+                # Set up select to monitor both stdout and stderr
+                streams = [process.stdout, process.stderr]
+                while True:
+                    # Wait for output on either stream
+                    reads = select.select(streams, [], [])[0]
 
-                        if done and process.poll() is not None:
-                            break
+                    done = True
+                    for stream in reads:
+                        line = stream.readline()
+                        if line:
+                            done = False
+                            is_stdout = stream == process.stdout
+                            print(line.rstrip(), file=sys.stdout if is_stdout else sys.stderr)
+                            if is_stdout:
+                                stdout_data.append(line)
+                            else:
+                                stderr_data.append(line)
 
-                    result = type(
-                        "SubprocessResult",
-                        (),
-                        {
-                            "returncode": process.returncode,
-                            "stdout": "".join(stdout_data),
-                            "stderr": "".join(stderr_data),
-                        },
-                    )
-                    stdout = result.stdout
-                    # Extract the cached dataset path from stdout if it exists
-                    for line in stdout.splitlines():
-                        if "✅ Found cached dataset at" in line:
-                            dataset_cache_path = line.split("✅ Found cached dataset at")[1].strip()
-                            dataset_config_hash = dataset_cache_path.split("/")[-1]
-                            console.log(f"📦 Found cached dataset at: {dataset_cache_path}")
-                            console.log(f"📦 Found cached dataset config hash: {dataset_config_hash}")
-                            dataset_cache_paths.append(dataset_cache_path)
-                            dataset_config_hashes.append(dataset_config_hash)
-                    stderr = result.stderr
-                    return_code = result.returncode
-                    if return_code != 0:
-                        raise Exception(f"Error code {return_code} when creating cached dataset")
-                    console.log("✅✅✅ Finished running the caching command")
+                    if done and process.poll() is not None:
+                        break
+
+                result = type(
+                    "SubprocessResult",
+                    (),
+                    {
+                        "returncode": process.returncode,
+                        "stdout": "".join(stdout_data),
+                        "stderr": "".join(stderr_data),
+                    },
+                )
+                stdout = result.stdout
+                # Extract the cached dataset path from stdout if it exists
+                for line in stdout.splitlines():
+                    if "✅ Found cached dataset at" in line:
+                        dataset_cache_path = line.split("✅ Found cached dataset at")[1].strip()
+                        dataset_config_hash = dataset_cache_path.split("/")[-1]
+                        console.log(f"📦 Found cached dataset at: {dataset_cache_path}")
+                        console.log(f"📦 Found cached dataset config hash: {dataset_config_hash}")
+                        dataset_cache_paths.append(dataset_cache_path)
+                        dataset_config_hashes.append(dataset_config_hash)
+                stderr = result.stderr
+                return_code = result.returncode
+                if return_code != 0:
+                    raise Exception(f"Error code {return_code} when creating cached dataset")
+                console.log("✅✅✅ Finished running the caching command")
 
                 if file in OPEN_INSTRUCT_RESUMABLES and idx != -1 and len(args.auto_checkpoint_state_dir) > 0:
                     need_to_override_checkpoint_state_dir = True

@@ -73,6 +73,7 @@ from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 from open_instruct.utils import (
     ArgumentParserPlus,
+    ModelDims,
     clean_last_n_checkpoints,
     get_last_checkpoint_path,
     get_wandb_tags,
@@ -659,6 +660,16 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     elif args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
 
+    model_dims = ModelDims(
+        num_layers=config.num_hidden_layers,
+        hidden_size=config.hidden_size,
+        intermediate_size=config.intermediate_size,
+        vocab_size=config.vocab_size,
+        num_attn_heads=config.num_attention_heads,
+        head_dim=config.hidden_size // config.num_attention_heads,
+        num_kv_heads=getattr(config, "num_key_value_heads", config.num_attention_heads),
+    )
+
     # debugging tool for fewer samples
     if args.max_train_samples is not None:
         max_train_samples = min(len(train_dataset), args.max_train_samples)
@@ -820,8 +831,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
 
-    local_metrics = torch.zeros((20), device=accelerator.device)
+    local_metrics = torch.zeros((21), device=accelerator.device)
     episode = 0
+    mfu_interval_start = time.perf_counter()
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
         train_dataloader.set_epoch(epoch)
@@ -903,6 +915,10 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     if args.load_balancing_loss:
                         local_metrics[19] += weighted_aux_loss
 
+                    chosen_lengths = (batch["chosen_labels"] != -100).sum(dim=1)
+                    rejected_lengths = (batch["rejected_labels"] != -100).sum(dim=1)
+                    local_metrics[20] += chosen_lengths.sum() + rejected_lengths.sum()
+
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
                 progress_bar.update(1)
@@ -912,6 +928,18 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     global_metrics = accelerator.reduce(local_metrics, reduction="mean")
                     global_metrics /= args.gradient_accumulation_steps * args.logging_steps
                     global_metrics = global_metrics.tolist()
+
+                    mfu_interval_end = time.perf_counter()
+                    training_time = mfu_interval_end - mfu_interval_start
+                    total_tokens = int(global_metrics[20])
+                    avg_sequence_length = total_tokens / (
+                        args.per_device_train_batch_size
+                        * accelerator.num_processes
+                        * args.gradient_accumulation_steps
+                        * args.logging_steps
+                        * 2
+                    )
+
                     metrics_to_log = {
                         "training_step": completed_steps,
                         "learning_rate": lr_scheduler.get_last_lr()[0],
@@ -936,6 +964,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     if args.load_balancing_loss:
                         logger_str += f" Aux Loss: {global_metrics[19]}"
                         metrics_to_log["aux_loss"] = global_metrics[19]
+
+                    metrics_to_log["mfu"] = model_dims.approximate_learner_utilization(
+                        total_tokens=total_tokens,
+                        avg_sequence_length=avg_sequence_length,
+                        training_time=training_time,
+                        num_training_gpus=accelerator.num_processes,
+                    )["mfu"]
+
                     logger.info(logger_str)
                     if args.with_tracking:
                         accelerator.log(metrics_to_log, step=completed_steps)
@@ -947,6 +983,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     )
                     # Reset the local metrics
                     local_metrics.zero_()
+                    mfu_interval_start = mfu_interval_end
 
                 if isinstance(checkpointing_steps, int) and completed_steps % checkpointing_steps == 0:
                     output_dir = f"step_{completed_steps}"
