@@ -267,8 +267,8 @@ class Args:
     mask_truncated_completions: bool = False
     """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
 
-    fill_completions: bool = False
-    """Whether to refill the batchsize with after filtering."""
+    active_sampling: bool = False
+    """Whether to continue sampling responses until you get a full batch."""
 
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
@@ -507,6 +507,13 @@ class Args:
         if self.apply_r1_style_format_reward and self.additive_format_reward:
             self.max_possible_score += self.r1_style_format_reward
 
+        if self.active_sampling:
+            assert self.async_steps > 1, (
+                "With active_sampling, you should set async_steps > 1 to account for filtering of the first batch. "
+                "Otherwise, your generator only generates only one batch worth of prompts and a single filtered "
+                "prompt will cause the trainer to stall waiting for more data  . "
+            )
+
 
 def next_batch(dataset_indices: list[int], dataset: datasets.Dataset) -> Batch:
     """Extract next batch of data based on indices."""
@@ -517,6 +524,8 @@ def next_batch(dataset_indices: list[int], dataset: datasets.Dataset) -> Batch:
         datasets=data_next[VERIFIER_SOURCE_KEY],
         raw_queries=data_next[RAW_PROMPT_KEY],
         indices=dataset_indices,
+        decoded_responses=None,
+        scores=None,
     )
 
 
@@ -1582,7 +1591,7 @@ def accumulate_inference_batches(
     filtered_prompt_nonzero = 0
     progress_bar = tqdm(
         total=num_prompts,
-        desc=f"Accumulating results from {num_prompts} prompts",
+        desc=f"Accumulating Responses and Rewarding {num_prompts} prompts",
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     )
@@ -1612,19 +1621,28 @@ def accumulate_inference_batches(
         k_queries = [query for _ in range(generation_config.n)]
         k_ground_truths = [ground_truth for _ in range(generation_config.n)]
         k_datasets = [dataset for _ in range(generation_config.n)]
-        k_decoded_queries = [raw_query for _ in range(generation_config.n)]
+        k_raw_queries = [raw_query for _ in range(generation_config.n)]
 
-        with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
-            scores, reward_metrics = asyncio.run(
-                reward_fn(
-                    result.responses,
-                    decoded_responses,
-                    Batch(ground_truths=k_ground_truths, datasets=k_datasets),
-                    result.finish_reasons,
-                    result.request_info,
-                    k_decoded_queries,
-                )
+        # with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
+        scores, reward_metrics = asyncio.run(
+            reward_fn(
+                result.responses,
+                decoded_responses,
+                # note that you only need ground_truths and datasets for the reward model
+                Batch(
+                    queries=None,
+                    ground_truths=k_ground_truths,
+                    datasets=k_datasets,
+                    raw_queries=None,
+                    decoded_responses=None,
+                    indices=None,
+                    scores=None,
+                ),
+                result.finish_reasons,
+                result.request_info,
+                k_raw_queries,
             )
+        )
 
         # Filter out zero std prompts
         if filter_zero_std_samples and np.array(scores).std() == 0:
@@ -1641,7 +1659,7 @@ def accumulate_inference_batches(
         all_queries.extend(k_queries)
         all_ground_truths.extend(k_ground_truths)
         all_datasets.extend(k_datasets)
-        all_raw_queries.extend(k_decoded_queries)
+        all_raw_queries.extend(k_raw_queries)
         all_decoded_responses.extend(decoded_responses)
         all_scores.extend(scores)
         all_reward_metrics.append(reward_metrics)
@@ -1738,7 +1756,7 @@ def accumulate_inference_batches(
         scores=all_scores,
     )
 
-    combined_reward_metrics = combine_reward_metrics(all_reward_metrics, num_samples=generation_config.n)
+    combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
 
     batch_stats = BatchStatistics(
         prompt_lengths=prompt_lengths,
@@ -1747,6 +1765,9 @@ def accumulate_inference_batches(
         filtered_prompts_zero=filtered_prompt_zero,
         filtered_prompts_solved=filtered_prompt_solved,
         filtered_prompts_nonzero=filtered_prompt_nonzero,
+    )
+    logging.info(
+        f"[Data Preparation Thread] Calculating rewards took {combined_reward_metrics['time/reward']} seconds"
     )
 
     return combined_result, batch, combined_reward_metrics, batch_stats
@@ -2651,8 +2672,11 @@ def make_reward_fn(args: Args) -> Callable:
         scores = [0] * len(decoded_responses)
         metrics = {}
 
+        reward_time = 0
         if args.apply_r1_style_format_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
+            with Timer(
+                "[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward", noop=True
+            ) as timer:
                 format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
                 if len(format_scores) != len(scores):
                     raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
@@ -2660,8 +2684,12 @@ def make_reward_fn(args: Args) -> Callable:
                     scores[i] = format_scores[i] + scores[i]
                 metrics["val/format_scores"] = np.array(format_scores).mean()
 
+            reward_time += timer.duration
+
         if args.apply_verifiable_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
+            with Timer(
+                "[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward", noop=True
+            ) as timer:
                 verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
                     reward_fn_mapping,
                     responses,
@@ -2695,13 +2723,21 @@ def make_reward_fn(args: Args) -> Callable:
                     metrics[f"objective/{key}_reward"] = np_value.mean()
                     metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
 
+            reward_time += timer.duration
+
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
         if args.non_stop_penalty:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty"):
+            with Timer(
+                "[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty", noop=True
+            ) as timer:
                 assert len(finish_reasons) == len(scores)
                 for i in range(len(finish_reasons)):
                     if finish_reasons[i] != "stop":
                         scores[i] = args.non_stop_penalty_value
+
+            reward_time += timer.duration
+
+        metrics["time/reward"] = reward_time
 
         return scores, metrics
 

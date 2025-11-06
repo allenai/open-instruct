@@ -2369,21 +2369,21 @@ def check_calculation(
     logger.warning(warning_message)
 
 
-def combine_reward_metrics(metric_records: list[dict[str, Any]]) -> dict[str, Any]:
+def combine_reward_metrics(reward_metrics: list[dict[str, Any]]) -> dict[str, Any]:
     """Assumes same number of metric_records in each dict in the list"""
     buckets = defaultdict(list)
-    for metrics, num_records in metric_records:
+    for metrics in reward_metrics:
         for key, value in metrics.items():
-            buckets[key].append((value, num_records))
+            buckets[key].append(value)
 
     combined: dict[str, Any] = {}
     for key, records in buckets.items():
-        sample_value = records[0][0]
+        sample_value = records[0]
         if isinstance(sample_value, np.ndarray):
-            combined[key] = [x for value, _ in records for x in value]
+            combined[key] = [x for value in records for x in value]
         elif isinstance(sample_value, (list | tuple)):
             concatenated: list[Any] = []
-            for value, _ in records:
+            for value in records:
                 concatenated.extend(list(value))
             combined[key] = concatenated
         elif isinstance(sample_value, (int | float | bool | np.integer | np.floating)):
@@ -2391,5 +2391,5 @@ def combine_reward_metrics(metric_records: list[dict[str, Any]]) -> dict[str, An
             combined[key] = sum(value for value in records) / len(records) if len(records) > 0 else sample_value
         else:
             # Fallback: keep the latest value if aggregation strategy is unclear.
-            combined[key] = records[-1][0]
+            combined[key] = records[-1]
     return combined
