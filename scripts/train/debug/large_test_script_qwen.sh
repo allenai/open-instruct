@@ -1,0 +1,95 @@
+#!/bin/bash
+# Note: This was originally a script that Saurabh came up to run some experiments.
+# Finbarr has been using it a lot for testing, so we thought we'd check it in.
+num_prompts=25376
+exp_name=rlvr_ace_fn_and_og_ocr_stdio_from_base_with_perf_penalty
+BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+uv run python mason.py \
+        --cluster ai2/augusta \
+        --image "$BEAKER_IMAGE" \
+	--pure_docker_mode \
+        --workspace ai2/open-instruct-dev \
+        --gs_model_name "qwen25-7b" \
+        --priority urgent \
+	--preemptible \
+        --num_nodes 4 \
+	--description "Large (multi-node) test script." \
+        --timeout 3600 \
+        --max_retries 0 \
+	--env VLLM_LOGGING_LEVEL=DEBUG \
+        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+        --env CUDA_LAUNCH_BLOCKING=1 \
+	--env NCCL_NVLSTREE_MAX_CHUNKSIZE=131072 \
+	--env NCCL_CROSS_NIC=0 \
+	--env NCCL_ALGO=Ring,Tree \
+	--env NCCL_PROTO=Simple,LL128 \
+	--env NCCL_MIN_NCHANNELS=4 \
+	--env NCCL_P2P_NET_CHUNKSIZE=524288 \
+	--env NCCL_P2P_PCI_CHUNKSIZE=524288 \
+	--env NCCL_P2P_NVL_CHUNKSIZE=1048576 \
+	--env NCCL_FASTRAK_NUM_FLOWS=2 \
+	--env NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL=0 \
+	--env NCCL_BUFFSIZE=8388608 \
+	--env NCCL_FASTRAK_USE_SNAP=1 \
+	--env CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
+	--env NCCL_NET_GDR_LEVEL=PIX \
+	--env NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING=0 \
+	--env NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS=3600000 \
+	--env NCCL_NVLS_ENABLE=0 \
+	--env NCCL_USE_SNAP=1 \
+	--env NCCL_FASTRAK_USE_LLCM=1 \
+	--env NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY=/dev/aperture_devices \
+	--env NCCL_TUNER_PLUGIN=libnccl-tuner.so \
+	--env NCCL_TUNER_CONFIG_PATH=/var/lib/tcpxo/lib64/a3plus_tuner_config_ll128.textproto \
+	--env NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE=/var/lib/tcpxo/lib64/a3plus_guest_config_ll128.textproto \
+	--env NCCL_FASTRAK_CTRL_DEV=enp0s12 \
+	--env NCCL_FASTRAK_IFNAME=enp6s0,enp7s0,enp13s0,enp14s0,enp134s0,enp135s0,enp141s0,enp142s0 \
+	--env NCCL_SOCKET_IFNAME=enp0s12 \
+	--env NCCL_DEBUG_SUBSYS=INIT,NET \
+        --budget ai2/oe-adapt \
+        --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
+        --exp_name ${exp_name} \
+        --beta 0.0 \
+        --num_samples_per_prompt_rollout 16 \
+        --num_unique_prompts_rollout 64 \
+        --num_mini_batches 1 \
+        --num_epochs 1 \
+        --learning_rate 5e-7 \
+        --per_device_train_batch_size 1 \
+        --kl_estimator kl3 \
+        --dataset_mixer_list saurabh5/rlvr_acecoder_filtered ${num_prompts} saurabh5/open-code-reasoning-rlvr-stdio ${num_prompts} \
+        --dataset_mixer_list_splits train \
+        --dataset_mixer_eval_list saurabh5/rlvr_acecoder_filtered 8 saurabh5/open-code-reasoning-rlvr-stdio 8 \
+        --dataset_mixer_eval_list_splits train \
+        --max_prompt_token_length 2048 \
+        --response_length 4096 \
+        --pack_length 20480 \
+        --model_name_or_path Qwen/Qwen2.5-7 \
+        --chat_template_name tulu_thinker \
+	--inflight_updates True \
+        --stop_strings "</answer>" \
+        --non_stop_penalty False \
+        --temperature 1.0 \
+        --verbose False \
+        --ground_truths_key ground_truth \
+        --sft_messages_key messages \
+        --total_episodes 200_000 \
+	--gather_whole_model False \
+        --deepspeed_stage 3 \
+        --num_learners_per_node 8 8 8 \
+        --vllm_num_engines 2 \
+        --vllm_tensor_parallel_size 4 \
+        --lr_scheduler_type constant \
+        --apply_verifiable_reward true \
+        --code_api_url \$CODE_API_URL/test_program \
+        --seed 1 \
+        --local_eval_every 1 \
+        --gradient_checkpointing \
+        --try_launch_beaker_eval_jobs_on_weka True \
+        --with_tracking \
+	--update_progress_every 1 \
+        --vllm_enable_prefix_caching \
+        --oe_eval_max_length 32768 \
+        --oe_eval_tasks "codex_humanevalplus:0-shot-chat-v1::tulu-thinker,mbppplus:0-shot-chat::tulu-thinker,livecodebench_codegeneration::tulu-thinker" \
+        --dataset_skip_cache True \
+	--push_to_hub False
