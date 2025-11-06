@@ -19,6 +19,32 @@ uv run python mason.py \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         --env CUDA_LAUNCH_BLOCKING=1 \
 	--env NCCL_NVLSTREE_MAX_CHUNKSIZE=131072 \
+	--env NCCL_CROSS_NIC=0 \
+	--env NCCL_ALGO=Ring,Tree \
+	--env NCCL_PROTO=Simple,LL128 \
+	--env NCCL_MIN_NCHANNELS=4 \
+	--env NCCL_P2P_NET_CHUNKSIZE=524288 \
+	--env NCCL_P2P_PCI_CHUNKSIZE=524288 \
+	--env NCCL_P2P_NVL_CHUNKSIZE=1048576 \
+	--env NCCL_FASTRAK_NUM_FLOWS=2 \
+	--env NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL=0 \
+	--env NCCL_BUFFSIZE=8388608 \
+	--env NCCL_FASTRAK_USE_SNAP=1 \
+	--env CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
+	--env NCCL_NET_GDR_LEVEL=PIX \
+	--env NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING=0 \
+	--env NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS=3600000 \
+	--env NCCL_NVLS_ENABLE=0 \
+	--env NCCL_USE_SNAP=1 \
+	--env NCCL_FASTRAK_USE_LLCM=1 \
+	--env NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY=/dev/aperture_devices \
+	--env NCCL_TUNER_PLUGIN=libnccl-tuner.so \
+	--env NCCL_TUNER_CONFIG_PATH=/var/lib/tcpxo/lib64/a3plus_tuner_config_ll128.textproto \
+	--env NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE=/var/lib/tcpxo/lib64/a3plus_guest_config_ll128.textproto \
+	--env NCCL_FASTRAK_CTRL_DEV=enp0s12 \
+	--env NCCL_FASTRAK_IFNAME=enp6s0,enp7s0,enp13s0,enp14s0,enp134s0,enp135s0,enp141s0,enp142s0 \
+	--env NCCL_SOCKET_IFNAME=enp0s12 \
+	--env NCCL_DEBUG_SUBSYS=INIT,NET \
         --budget ai2/oe-adapt \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
