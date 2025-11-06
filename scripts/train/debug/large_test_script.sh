@@ -5,7 +5,7 @@ num_prompts=25376
 exp_name=rlvr_ace_fn_and_og_ocr_stdio_from_base_with_perf_penalty
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 uv run python mason.py \
-        --cluster ai2/augusta \
+        --cluster ai2/jupiter \
         --image "$BEAKER_IMAGE" \
 	--pure_docker_mode \
         --workspace ai2/open-instruct-dev \
@@ -16,7 +16,6 @@ uv run python mason.py \
         --timeout 3600 \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-        --env NCCL_DEBUG="INFO" \
         --budget ai2/oe-adapt \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
@@ -47,8 +46,8 @@ uv run python mason.py \
         --total_episodes 10_000 \
         --deepspeed_stage 2 \
         --num_learners_per_node 8 \
-        --vllm_num_engines 4 \
-        --vllm_tensor_parallel_size 2 \
+        --vllm_num_engines 8 \
+        --vllm_tensor_parallel_size 1 \
         --lr_scheduler_type constant \
         --apply_verifiable_reward true \
         --code_api_url \$CODE_API_URL/test_program \
