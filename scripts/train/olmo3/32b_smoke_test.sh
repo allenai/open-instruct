@@ -18,6 +18,7 @@ uv run python mason.py \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         --env CUDA_LAUNCH_BLOCKING=1 \
+	--env NCCL_NVLSTREE_MAX_CHUNKSIZE=131072 \
         --budget ai2/oe-adapt \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
