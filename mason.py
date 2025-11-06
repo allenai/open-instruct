@@ -345,7 +345,6 @@ def get_env_vars(
                     # NOTE: For single-node training we still need all of these settings and we also
                     # need host networking enabled so that the ethernet interface names don't change.
                     beaker.BeakerEnvVar(name="NCCL_CROSS_NIC", value="0"),
-                    # beaker.BeakerEnvVar(name="NCCL_ALGO", value="Ring,Tree"),
                     beaker.BeakerEnvVar(name="NCCL_PROTO", value="Simple,LL128"),
                     beaker.BeakerEnvVar(name="NCCL_MIN_NCHANNELS", value="4"),
                     beaker.BeakerEnvVar(name="NCCL_P2P_NET_CHUNKSIZE", value="524288"),
@@ -360,12 +359,9 @@ def get_env_vars(
                     beaker.BeakerEnvVar(name="NCCL_NET_GDR_LEVEL", value="PIX"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING", value="0"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS", value="600000"),
-                    # beaker.BeakerEnvVar(name="NCCL_NVLS_ENABLE", value="0"),
                     beaker.BeakerEnvVar(name="NCCL_USE_SNAP", value="1"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_USE_LLCM", value="1"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY", value="/dev/aperture_devices"),
-                    # NOTE: This path var must be set prior to launching Python
-                    # beaker.BeakerEnvVar(name="LD_LIBRARY_PATH", value=r"/var/lib/tcpxo/lib64:${LD_LIBRARY_PATH}"),
                     beaker.BeakerEnvVar(name="NCCL_TUNER_PLUGIN", value="libnccl-tuner.so"),
                     beaker.BeakerEnvVar(
                         name="NCCL_TUNER_CONFIG_PATH", value="/var/lib/tcpxo/lib64/a3plus_tuner_config_ll128.textproto"
