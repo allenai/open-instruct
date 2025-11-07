@@ -67,7 +67,7 @@ for elem in math_ds_ood["train"]:
             }
         ],
         "domain": "math",
-        "in_distribution": True
+        "in_distribution": False
     })
 
 code_ds_ood = load_dataset("jacobmorrison/rlvr_code_ood")
@@ -84,7 +84,7 @@ for elem in code_ds_ood["train"]:
             }
         ],
         "domain": "code",
-        "in_distribution": True
+        "in_distribution": False
     })
 
 if_ds_ood = load_dataset("jacobmorrison/rlvr_if_ood")
@@ -101,7 +101,7 @@ for elem in if_ds_ood["train"]:
             }
         ],
         "domain": "ifeval",
-        "in_distribution": True
+        "in_distribution": False
     })
 
 eval_dataset = Dataset.from_list(new_elems)
