@@ -1710,7 +1710,6 @@ def accumulate_inference_batches(
         k_datasets = repeat_each(dataset, generation_config.n)
         k_raw_queries = repeat_each(raw_query, generation_config.n)
 
-        # with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
         scores, reward_metrics = asyncio.run(
             reward_fn(
                 result.responses,
