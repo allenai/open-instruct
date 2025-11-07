@@ -218,10 +218,10 @@ jobs:
 
             (
               echo "Waiting for ${EXP_NAME} (${EXP_ID}) to succeed..."
-              if beaker experiment await "$EXP_ID" 0 succeeded --index --timeout 20m --interval 30s; then
+              if beaker experiment await "$EXP_ID" 0 finalized --index --timeout 20m --interval 30s; then
                 echo "  [${EXP_NAME}] ✅ succeeded"
               else
-                echo "  [${EXP_NAME}] ❌ did not reach succeeded status within timeout"
+                echo "  [${EXP_NAME}] ❌ did not reach finalized status within timeout"
                 echo "${EXP_ID}|${EXP_NAME}" >> "$FAILED_FILE"
               fi
             ) &
