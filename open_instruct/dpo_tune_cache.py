@@ -971,14 +971,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         logger_str += f" Aux Loss: {global_metrics[19]}"
                         metrics_to_log["aux_loss"] = global_metrics[19]
 
-                    metrics_to_log["mfu"] = model_dims.approximate_learner_utilization(
+                    metrics_to_log["perf/mfu"] = model_dims.approximate_learner_utilization(
                         total_tokens=total_tokens,
                         avg_sequence_length=avg_sequence_length,
                         training_time=training_time,
                         num_training_gpus=accelerator.num_processes,
                     )["mfu"]
-                    metrics_to_log["tokens_per_second/step"] = step_tokens_per_second
-                    metrics_to_log["tokens_per_second/total"] = total_tokens_per_second
+                    metrics_to_log["perf/tokens_per_second_step"] = step_tokens_per_second
+                    metrics_to_log["perf/tokens_per_second_total"] = total_tokens_per_second
 
                     logger.info(logger_str)
                     if args.with_tracking:
