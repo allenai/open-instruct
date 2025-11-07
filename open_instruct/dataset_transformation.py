@@ -438,7 +438,7 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
-    "olmo_thinker_no_think_final": (
+    "olmo_thinker_no_think_sft_tokenization": (
         "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
         "{% if not has_system %}"
         "{{ '<|im_start|>system\nYou are a helpful AI assistant.<|im_end|>\n' }}"
