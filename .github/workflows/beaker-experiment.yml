@@ -71,7 +71,7 @@ jobs:
             [grpo_changed]="(^|/)Dockerfile$|(^|/)mason\.py$|^open_instruct/"
           )
 
-          for OUTPUT_KEY in dpo_changed finetune_changed grpo_changed; do
+          for OUTPUT_KEY in "${!CHANGE_PATTERNS[@]}"; do
             PATTERN="${CHANGE_PATTERNS[$OUTPUT_KEY]}"
             MATCHED=$(grep -qE "$PATTERN" <<< "$CHANGED_FILES" && echo true || echo false)
             echo "${OUTPUT_KEY}=${MATCHED}" >> "$GITHUB_OUTPUT"
