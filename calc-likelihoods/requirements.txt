@@ -1,0 +1,8 @@
+torch>=2.0.0
+transformers>=4.30.0
+datasets>=2.12.0
+pandas>=1.5.0
+matplotlib>=3.5.0
+seaborn>=0.12.0
+tqdm>=4.65.0
+numpy>=1.23.0
