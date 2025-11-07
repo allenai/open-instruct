@@ -1086,5 +1086,241 @@ class TestDataPreparation(TestGrpoFastBase):
                     self.assertTrue(torch.all(row[first_pad_idx:] == pad_token_id))
 
 
+class TestCompareLogprobs(unittest.TestCase):
+    @parameterized.expand(
+        [
+            (
+                torch.tensor([[1.0, 2.0, 3.0]]),
+                torch.tensor([[1.1, 2.1, 3.1]]),
+                torch.tensor([[True, True, True]]),
+                None,
+                None,
+            ),
+            (
+                torch.tensor([[1.0, 2.0], [3.0, 4.0]]),
+                torch.tensor([[1.2, 2.2], [3.2, 4.2]]),
+                torch.tensor([[True, True], [True, True]]),
+                None,
+                None,
+            ),
+        ]
+    )
+    def test_basic_functionality(self, new_logprobs, old_logprobs, mask, masked_mean_axis, masked_mean_denominator):
+        result = grpo_fast.compare_logprobs(
+            new_logprobs, old_logprobs, mask, masked_mean_axis, masked_mean_denominator
+        )
+        self.assertIsInstance(result, dict)
+        self.assertIn("debug/vllm_vs_local_logprob_diff_mean", result)
+        self.assertIn("debug/vllm_vs_local_logprob_diff_max", result)
+        self.assertIn("debug/vllm_vs_local_logprob_diff_std", result)
+        self.assertIn("debug/vllm_local_reverse_kl", result)
+        self.assertGreater(result["debug/vllm_vs_local_logprob_diff_mean"], 0.0)
+
+    def test_with_nan_values(self):
+        new_logprobs = torch.tensor([[1.0, 2.0, 3.0]])
+        old_logprobs = torch.tensor([[1.1, float("nan"), 3.1]])
+        mask = torch.tensor([[True, True, True]])
+        result = grpo_fast.compare_logprobs(new_logprobs, old_logprobs, mask, None, None)
+        self.assertIsInstance(result, dict)
+        self.assertFalse(torch.isnan(torch.tensor(result["debug/vllm_vs_local_logprob_diff_mean"])))
+
+    def test_multiple_elements(self):
+        new_logprobs = torch.tensor([[1.0, 2.0, 3.0, 4.0]])
+        old_logprobs = torch.tensor([[1.1, 2.1, 3.1, 4.1]])
+        mask = torch.tensor([[True, True, True, True]])
+        result = grpo_fast.compare_logprobs(new_logprobs, old_logprobs, mask, None, None)
+        self.assertIsInstance(result, dict)
+        self.assertGreater(result["debug/vllm_vs_local_logprob_diff_mean"], 0.0)
+        self.assertGreater(result["debug/vllm_vs_local_logprob_diff_std"], 0.0)
+
+
+class TestMaybeApplyImportanceSampling(unittest.TestCase):
+    def test_early_return_zero_cap(self):
+        unclipped = torch.tensor([[-1.0, -2.0]])
+        clipped = torch.tensor([[-1.1, -2.1]])
+        old_logprobs = torch.tensor([[-0.5, -0.6]])
+        vllm_logprobs = torch.tensor([[-0.4, -0.5]])
+        mask = torch.tensor([[True, True]])
+        mock_args = Mock()
+        mock_args.truncated_importance_sampling_ratio_cap = 0.0
+        result_unclipped, result_clipped = grpo_fast.maybe_apply_importance_sampling(
+            unclipped, clipped, old_logprobs, vllm_logprobs, mask, mock_args
+        )
+        self.assertTrue(torch.equal(result_unclipped, unclipped))
+        self.assertTrue(torch.equal(result_clipped, clipped))
+
+    def test_early_return_none_vllm_logprobs(self):
+        unclipped = torch.tensor([[-1.0, -2.0]])
+        clipped = torch.tensor([[-1.1, -2.1]])
+        old_logprobs = torch.tensor([[-0.5, -0.6]])
+        mask = torch.tensor([[True, True]])
+        mock_args = Mock()
+        mock_args.truncated_importance_sampling_ratio_cap = 2.0
+        result_unclipped, result_clipped = grpo_fast.maybe_apply_importance_sampling(
+            unclipped, clipped, old_logprobs, None, mask, mock_args
+        )
+        self.assertTrue(torch.equal(result_unclipped, unclipped))
+        self.assertTrue(torch.equal(result_clipped, clipped))
+
+    def test_importance_ratio_computation(self):
+        unclipped = torch.tensor([[-1.0, -2.0]])
+        clipped = torch.tensor([[-1.0, -2.0]])
+        old_logprobs = torch.tensor([[-2.0, -2.0]])
+        vllm_logprobs = torch.tensor([[-3.0, -3.0]])
+        mask = torch.tensor([[True, True]])
+        mock_args = Mock()
+        mock_args.truncated_importance_sampling_ratio_cap = 10.0
+        result_unclipped, result_clipped = grpo_fast.maybe_apply_importance_sampling(
+            unclipped, clipped, old_logprobs, vllm_logprobs, mask, mock_args
+        )
+        expected_ratio = torch.exp(torch.tensor([[1.0, 1.0]]))
+        self.assertTrue(torch.allclose(result_unclipped, unclipped * expected_ratio))
+        self.assertTrue(torch.allclose(result_clipped, clipped * expected_ratio))
+
+    def test_ratio_capping(self):
+        unclipped = torch.tensor([[-1.0, -1.0]])
+        clipped = torch.tensor([[-1.0, -1.0]])
+        old_logprobs = torch.tensor([[-2.0, -2.0]])
+        vllm_logprobs = torch.tensor([[-7.0, -7.0]])
+        mask = torch.tensor([[True, True]])
+        mock_args = Mock()
+        mock_args.truncated_importance_sampling_ratio_cap = 2.0
+        result_unclipped, result_clipped = grpo_fast.maybe_apply_importance_sampling(
+            unclipped, clipped, old_logprobs, vllm_logprobs, mask, mock_args
+        )
+        self.assertTrue(torch.all(result_unclipped / unclipped <= 2.0))
+        self.assertTrue(torch.all(result_clipped / clipped <= 2.0))
+
+    def test_logprob_diff_clamping(self):
+        unclipped = torch.tensor([[-1.0, -1.0]])
+        clipped = torch.tensor([[-1.0, -1.0]])
+        old_logprobs = torch.tensor([[-2.0, -17.0]])
+        vllm_logprobs = torch.tensor([[-17.0, -2.0]])
+        mask = torch.tensor([[True, True]])
+        mock_args = Mock()
+        mock_args.truncated_importance_sampling_ratio_cap = 1000.0
+        result_unclipped, result_clipped = grpo_fast.maybe_apply_importance_sampling(
+            unclipped, clipped, old_logprobs, vllm_logprobs, mask, mock_args
+        )
+        max_expected_ratio = torch.exp(torch.tensor(10.0))
+        min_expected_ratio = torch.exp(torch.tensor(-10.0))
+        self.assertTrue(torch.all(result_unclipped / unclipped <= max_expected_ratio))
+        self.assertTrue(torch.all(result_unclipped / unclipped >= min_expected_ratio))
+
+
+class TestCalculateLossAndBackward(unittest.TestCase):
+    def test_basic_loss_computation(self):
+        mock_model = Mock()
+        mock_model.backward = Mock()
+        loss_statistics = Mock()
+        loss_statistics.update_kl_estimates = Mock(return_value=torch.tensor(0.5))
+        loss_statistics.update_stats = Mock()
+        local_logprobs = torch.tensor([[1.0, 2.0]])
+        old_logprobs = torch.tensor([[0.9, 1.9]])
+        ref_logprob = torch.tensor([[0.8, 1.8]])
+        advantages = torch.tensor([[0.0, 1.0, 1.0]])
+        response_masks_bool = torch.tensor([[True, True]])
+        entropy = torch.tensor([[0.5, 0.5]])
+        mock_args = Mock()
+        mock_args.clip_lower = 0.2
+        mock_args.clip_higher = 0.2
+        mock_args.beta = 0.1
+        mock_args.masked_mean_axis = None
+        mock_args.masked_mean_denominator = None
+        mock_args.truncated_importance_sampling_ratio_cap = 0.0
+        result = grpo_fast.calculate_loss_and_backward(
+            mock_model,
+            0,
+            loss_statistics,
+            local_logprobs,
+            old_logprobs,
+            ref_logprob,
+            advantages,
+            response_masks_bool,
+            None,
+            entropy,
+            1,
+            0,
+            mock_args,
+        )
+        mock_model.backward.assert_called_once()
+        self.assertEqual(result, 1)
+
+    def test_gradient_accumulation(self):
+        mock_model = Mock()
+        mock_model.backward = Mock()
+        loss_statistics = Mock()
+        loss_statistics.update_kl_estimates = Mock(return_value=torch.tensor(0.5))
+        loss_statistics.update_stats = Mock()
+        local_logprobs = torch.tensor([[1.0, 2.0]])
+        old_logprobs = torch.tensor([[0.9, 1.9]])
+        ref_logprob = torch.tensor([[0.8, 1.8]])
+        advantages = torch.tensor([[0.0, 1.0, 1.0]])
+        response_masks_bool = torch.tensor([[True, True]])
+        entropy = torch.tensor([[0.5, 0.5]])
+        mock_args = Mock()
+        mock_args.clip_lower = 0.2
+        mock_args.clip_higher = 0.2
+        mock_args.beta = 0.1
+        mock_args.masked_mean_axis = None
+        mock_args.masked_mean_denominator = None
+        mock_args.truncated_importance_sampling_ratio_cap = 0.0
+        grpo_fast.calculate_loss_and_backward(
+            mock_model,
+            0,
+            loss_statistics,
+            local_logprobs,
+            old_logprobs,
+            ref_logprob,
+            advantages,
+            response_masks_bool,
+            None,
+            entropy,
+            4,
+            0,
+            mock_args,
+        )
+        mock_model.backward.assert_called_once()
+        loss_arg = mock_model.backward.call_args[0][0]
+        self.assertIsInstance(loss_arg, torch.Tensor)
+
+    def test_advantages_slicing(self):
+        mock_model = Mock()
+        mock_model.backward = Mock()
+        loss_statistics = Mock()
+        loss_statistics.update_kl_estimates = Mock(return_value=torch.tensor(0.5))
+        loss_statistics.update_stats = Mock()
+        local_logprobs = torch.tensor([[1.0, 2.0, 3.0]])
+        old_logprobs = torch.tensor([[1.0, 2.0, 3.0]])
+        ref_logprob = torch.tensor([[1.0, 2.0, 3.0]])
+        advantages = torch.tensor([[0.0, 1.0, 1.0, 1.0]])
+        response_masks_bool = torch.tensor([[True, True, True]])
+        entropy = torch.tensor([[0.5, 0.5, 0.5]])
+        mock_args = Mock()
+        mock_args.clip_lower = 0.2
+        mock_args.clip_higher = 0.2
+        mock_args.beta = 0.1
+        mock_args.masked_mean_axis = None
+        mock_args.masked_mean_denominator = None
+        mock_args.truncated_importance_sampling_ratio_cap = 0.0
+        result = grpo_fast.calculate_loss_and_backward(
+            mock_model,
+            0,
+            loss_statistics,
+            local_logprobs,
+            old_logprobs,
+            ref_logprob,
+            advantages,
+            response_masks_bool,
+            None,
+            entropy,
+            1,
+            0,
+            mock_args,
+        )
+        mock_model.backward.assert_called_once()
+        self.assertEqual(result, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
