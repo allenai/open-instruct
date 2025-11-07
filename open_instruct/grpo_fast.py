@@ -2077,6 +2077,7 @@ def data_preparation_thread(
                 "B": B,
                 "prompt_lengths": batch_stats.prompt_lengths,
                 "response_lengths": batch_stats.response_lengths,
+                "num_filtered_prompts": batch_stats.filtered_prompts,
             }
         )
 
@@ -2364,12 +2365,21 @@ def load_data_from_packing_thread(
         num_total_tokens += num_step_tokens
         prompt_lengths = packed_data["prompt_lengths"]
         response_lengths = packed_data["response_lengths"]
+        num_filtered_prompts = packed_data["num_filtered_prompts"]
 
     data_thread_metrics["time/trainer_idling"] = timer.duration
     if B == 0:
         logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
         return None, data_thread_metrics, num_total_tokens, 0, None, None
-    return collated_data, data_thread_metrics, num_total_tokens, num_step_tokens, prompt_lengths, response_lengths
+    return (
+        collated_data,
+        data_thread_metrics,
+        num_total_tokens,
+        num_step_tokens,
+        prompt_lengths,
+        response_lengths,
+        num_filtered_prompts,
+    )
 
 
 def weight_sync_thread(
@@ -2920,6 +2930,7 @@ def run_training(
     else:
         num_total_tokens = 0
 
+    num_prompts_to_refill = 0
     training_start_time = time.perf_counter()  # Track overall training start time
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
@@ -2941,20 +2952,32 @@ def run_training(
         health_check_fn()
         health_check_time = time.perf_counter() - health_check_start
 
-        logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
-        weight_sync_trigger_event.set()
+        (
+            collated_data,
+            data_thread_metrics,
+            num_total_tokens,
+            num_step_tokens,
+            prompt_lengths,
+            response_lengths,
+            num_filtered_prompts,
+        ) = load_data_from_packing_thread(packed_sequences_Q, num_total_tokens, stop_event, health_check_fn)
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-        batch = next_batch(next(iter_dataloader), train_dataset)
-        split_and_insert_batch(
-            batch,
-            iter_dataloader.epoch_number,
-            training_step,
-            pending_queries_map,
-            param_prompt_Q,
-            generation_configs["train"],
-            is_eval=False,
-        )
+        num_prompts_to_refill += args.num_unique_prompts_rollout + num_filtered_prompts
+
+        while num_prompts_to_refill >= args.num_unique_prompts_rollout:
+            batch = next_batch(next(iter_dataloader), train_dataset)
+            split_and_insert_batch(
+                batch,
+                iter_dataloader.epoch_number,
+                training_step,
+                pending_queries_map,
+                param_prompt_Q,
+                generation_configs["train"],
+                is_eval=False,
+            )
+            num_prompts_to_refill -= args.num_unique_prompts_rollout
+
         if (
             training_step % args.local_eval_every == 0
             and eval_batch is not None
@@ -2969,10 +2992,6 @@ def run_training(
                 generation_configs["eval"],
                 is_eval=True,
             )
-
-        collated_data, data_thread_metrics, num_total_tokens, num_step_tokens, prompt_lengths, response_lengths = (
-            load_data_from_packing_thread(packed_sequences_Q, num_total_tokens, stop_event, health_check_fn)
-        )
         if collated_data is None:
             continue
 
@@ -3005,6 +3024,9 @@ def run_training(
             actor_manager,
             iter_dataloader,
         )
+
+        logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
+        weight_sync_trigger_event.set()
 
         # Checkpoint after one_training_step (or even if it was skipped)
         # This ensures we checkpoint progress even if the exact checkpoint step has no data
