@@ -127,6 +127,7 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
+    repeat_each,
     sync_gs_bucket,
 )
 
@@ -1704,10 +1705,10 @@ def accumulate_inference_batches(
         decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
         # TODO(finbarrtimbers): Make PendingQueriesMap.pop return a Batch, and add a Batch.repeat method.
-        k_queries = [query for _ in range(generation_config.n)]
-        k_ground_truths = [ground_truth for _ in range(generation_config.n)]
-        k_datasets = [dataset for _ in range(generation_config.n)]
-        k_raw_queries = [raw_query for _ in range(generation_config.n)]
+        k_queries = repeat_each(query, generation_config.n)
+        k_ground_truths = repeat_each(ground_truth, generation_config.n)
+        k_datasets = repeat_each(dataset, generation_config.n)
+        k_raw_queries = repeat_each(raw_query, generation_config.n)
 
         # with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
         scores, reward_metrics = asyncio.run(
@@ -1723,7 +1724,7 @@ def accumulate_inference_batches(
         )
 
         # Filter out zero std prompts
-        if filter_zero_std_samples and np.array(scores).std() == 0:
+        if filter_zero_std_samples and np.std(scores) == 0:
             total_filtered_prompts += 1
             if scores[0] == 0:
                 filtered_prompt_zero += 1
@@ -1845,7 +1846,7 @@ def accumulate_inference_batches(
         filtered_prompts_nonzero=filtered_prompt_nonzero,
     )
     logging.info(
-        f"[Data Preparation Thread] Calculating rewards took {combined_reward_metrics.get('time/reward', 0)} seconds"
+        f"[Data Preparation Thread] Calculating rewards took {combined_reward_metrics['time/reward']} seconds"
     )
 
     return combined_result, batch, combined_reward_metrics, batch_stats

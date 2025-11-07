@@ -215,7 +215,7 @@ class TestGrpoFastBase(unittest.TestCase):
             queries: list[str] | None = None,
         ) -> (list[float], dict[str, Any]):
             num_responses = len(responses)
-            return [i / num_responses for i in range(num_responses)], {}
+            return [i / num_responses for i in range(num_responses)], {"time/reward": 0.0}
 
         return tokenizer, reward_fn
 
