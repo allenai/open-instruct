@@ -1891,8 +1891,7 @@ def data_preparation_thread(
 
         getting_response_time = timer.duration
         scores = np.array(batch.scores)
-        # ------------------------------------------------------------------------------------------------
-        # Pack sequences
+
         if args.num_samples_per_prompt_rollout > 1:
             good_outputs = [
                 len(result.request_info.tool_outputs[i]) > 0
@@ -1913,15 +1912,6 @@ def data_preparation_thread(
             else:
                 raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
-        # with Timer("📦 [Data Preparation Thread] Filtering sequences"):
-        # advantages = advantages[non_zero_gradient_index]
-        # original_batch_size = len(scores)
-        # scores = scores[non_zero_gradient_index]
-        # responses = [result.responses[i] for i in non_zero_gradient_index]
-        # masks = [result.masks[i] for i in non_zero_gradient_index]
-        # batch = batch[non_zero_gradient_index.tolist()]
-        # finish_reasons = [result.finish_reasons[i] for i in non_zero_gradient_index]
-        # vllm_logprobs = [result.logprobs[i] for i in non_zero_gradient_index]
         if args.mask_truncated_completions:
             stop_idxes = torch.tensor(
                 [i for i in range(len(result.finish_reasons)) if result.finish_reasons[i] == "stop"]
@@ -2962,7 +2952,6 @@ def run_training(
             num_filtered_prompts,
         ) = load_data_from_packing_thread(packed_sequences_Q, num_total_tokens, stop_event, health_check_fn)
 
-        episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
         num_prompts_to_refill += args.num_unique_prompts_rollout + num_filtered_prompts
 
         while num_prompts_to_refill >= args.num_unique_prompts_rollout:
@@ -2994,6 +2983,8 @@ def run_training(
             )
         if collated_data is None:
             continue
+
+        episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
 
         for metrics_Q in [generate_metrics_Q, weight_sync_metrics_Q]:
             try:
