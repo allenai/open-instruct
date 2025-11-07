@@ -2,10 +2,8 @@
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 
 uv run python mason.py \
-    --cluster ai2/neptune \
     --cluster ai2/saturn \
     --cluster ai2/jupiter \
-    --cluster ai2/prior \
     --description "Single GPU DPO run, for debugging purposes." \
     --workspace ai2/tulu-thinker \
     --priority high \
