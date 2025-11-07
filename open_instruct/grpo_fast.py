@@ -2334,7 +2334,7 @@ def load_data_from_packing_thread(
         while True:
             if stop_event.is_set():
                 logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
-                return None, {}, num_total_tokens, 0, None, None
+                return None, {}, num_total_tokens, 0, None, None, 0
             try:
                 packed_data = packed_sequences_Q.get(timeout=30.0)
                 break
@@ -2353,7 +2353,7 @@ def load_data_from_packing_thread(
     data_thread_metrics["time/trainer_idling"] = timer.duration
     if B == 0:
         logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-        return None, data_thread_metrics, num_total_tokens, 0, None, None
+        return None, data_thread_metrics, num_total_tokens, 0, None, None, 0
     return (
         collated_data,
         data_thread_metrics,
