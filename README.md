@@ -1,3 +1,4 @@
+[![codecov](https://codecov.io/gh/allenai/open-insruct/branch/main/graph/badge.svg?token=UAP786D58M)](https://codecov.io/gh/allenai/open-instruct)
 [![Beaker Experiment Launch](https://github.com/allenai/open-instruct/actions/workflows/beaker-experiment.yml/badge.svg)](https://github.com/allenai/open-instruct/actions/workflows/beaker-experiment.yml) [![build_open_instruct](https://github.com/allenai/open-instruct/actions/workflows/push-image.yml/badge.svg)](https://github.com/allenai/open-instruct/actions/workflows/push-image.yml)
 
 # Training Open Instruction-Following Language Models
