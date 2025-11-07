@@ -146,6 +146,7 @@ def batch_generate(
 def process_dataset(
     dataset_name: str,
     model_name: str,
+    tokenizer_name: str,
     output_path: str,
     num_gpus: int = 1,
     num_responses: int = 1,
@@ -205,7 +206,7 @@ def process_dataset(
     if apply_chat_template_flag:
         print("Loading tokenizer for chat template...")
         tokenizer = AutoTokenizer.from_pretrained(
-            model_name,
+            tokenizer_name,
             trust_remote_code=True
         )
         
@@ -298,6 +299,12 @@ def main():
         type=str,
         required=True,
         help="Model name or path (e.g., 'mistralai/Mistral-7B-Instruct-v0.2')"
+    )
+    parser.add_argument(
+        "--tokenizer_name",
+        type=str,
+        required=True,
+        help="Tokenizer name or path (e.g., 'mistralai/Mistral-7B-Instruct-v0.2')"
     )
     parser.add_argument(
         "--output_path",
@@ -396,6 +403,7 @@ def main():
     process_dataset(
         dataset_name=args.dataset_name,
         model_name=args.model_name,
+        tokenizer_name=args.tokenizer_name,
         output_path=args.output_path,
         num_gpus=args.num_gpus,
         num_responses=args.num_responses,
