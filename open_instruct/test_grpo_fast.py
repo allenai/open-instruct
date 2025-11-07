@@ -198,6 +198,24 @@ class TestGrpoFastBase(unittest.TestCase):
             logprobs=[[0.0, 0.0, 0.0] for _ in range(total_responses)],
         )
 
+    def create_mock_tokenizer_and_reward_fn(self):
+        # Set up dummy tokenizer
+        tokenizer_name = "EleutherAI/pythia-14m"  # Using a small model for testing
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+
+        # Set up dummy reward fn
+        def reward_fn(
+            responses: list[torch.Tensor],
+            decoded_responses: list[str],
+            batch,
+            finish_reasons: list[str],
+            infos: list[list[int]],
+            queries: list[str] | None = None,
+        ) -> list[float]:
+            return [1.0 for _ in range(len(responses))]
+
+        return tokenizer, reward_fn
+
     def setup_and_split_batch(
         self, queries, ground_truths, datasets, raw_queries, indices, num_engines, training_step=1
     ):
@@ -561,23 +579,11 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         num_prompts = 16
         num_samples_per_prompt = 4
 
-        # Set up dummy tokenizer
-        tokenizer_name = "EleutherAI/pythia-14m"  # Using a small model for testing
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-
-        # Set up dummy reward fn
-        def reward_fn(
-            responses: list[torch.Tensor],
-            decoded_responses: list[str],
-            batch,
-            finish_reasons: list[str],
-            infos: list[list[int]],
-            queries: list[str] | None = None,
-        ) -> list[float]:
-            return [1.0 for _ in range(len(responses))]
-
         # Create test data
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_prompts)
+
+        # Create mock tokenizer and reward
+        tokenizer, reward_fn = self.create_mock_tokenizer_and_reward_fn()
 
         # Setup and split batch
         param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_split_batch(
@@ -666,6 +672,9 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         num_engines = 4
         num_prompts = 16
 
+        # Create mock tokenizer and reward
+        tokenizer, reward_fn = self.create_mock_tokenizer_and_reward_fn()
+
         # Setup with results from only 3 engines
         # Queue size must be large enough for all results being put before accumulation starts
         expected_results = 3 * (num_prompts // num_engines)  # 3 engines * 4 results each = 12
@@ -705,6 +714,8 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                     generation_config=mock_generation_config,
                     num_prompts=num_prompts,
                     model_dims=mock_model_dims,
+                    tokenizer=tokenizer,
+                    reward_fn=reward_fn,
                 )
                 completed.set()
             except Exception:
