@@ -208,9 +208,9 @@ def main():
     )
     
     # Save results
-    results_df.to_csv("/mnt/user-data/outputs/log_likelihood_results.csv", index=False)
+    results_df.to_csv("calc-likelihoods/log_likelihood_results-100.csv", index=False)
     print("\n" + "="*80)
-    print("Results saved to: /mnt/user-data/outputs/log_likelihood_results.csv")
+    print("Results saved to: calc-likelihoods/log_likelihood_results-100.csv")
     print("="*80)
     
     # Display summary statistics
