@@ -561,6 +561,21 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         num_prompts = 16
         num_samples_per_prompt = 4
 
+        # Set up dummy tokenizer
+        tokenizer_name = "EleutherAI/pythia-14m"  # Using a small model for testing
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+
+        # Set up dummy reward fn
+        def reward_fn(
+            responses: list[torch.Tensor],
+            decoded_responses: list[str],
+            batch,
+            finish_reasons: list[str],
+            infos: list[list[int]],
+            queries: list[str] | None = None,
+        ) -> list[float]:
+            return [1.0 for _ in range(len(responses))]
+
         # Create test data
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_prompts)
 
@@ -593,6 +608,8 @@ class GrpoIntegrationTests(TestGrpoFastBase):
             generation_config=mock_generation_config,
             num_prompts=num_prompts,
             model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            reward_fn=reward_fn,
         )
 
         # Verify results work correctly even with out-of-order processing
