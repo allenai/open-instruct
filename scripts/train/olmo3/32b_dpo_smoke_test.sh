@@ -39,4 +39,5 @@ uv run python mason.py \
     --gradient_checkpointing \
     --report_to wandb \
     --chat_template_name olmo123 \
-    --with_tracking
+    --with_tracking \
+    --dataset_skip_cache
