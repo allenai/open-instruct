@@ -499,10 +499,10 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 }
             },
         )
-        wandb_tracker = accelerator.get_tracker("wandb")
-        maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None)
 
     if accelerator.is_main_process:
+        wandb_tracker = accelerator.get_tracker("wandb")
+        maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None)
         pprint([args, tc])
 
     init_gpu_memory = None
@@ -975,12 +975,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     logger.info(logger_str)
                     if args.with_tracking:
                         accelerator.log(metrics_to_log, step=completed_steps)
-                    maybe_update_beaker_description(
-                        current_step=completed_steps,
-                        total_steps=args.max_train_steps,
-                        start_time=start_time,
-                        wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None,
-                    )
+                    if accelerator.is_main_process:
+                        maybe_update_beaker_description(
+                            current_step=completed_steps,
+                            total_steps=args.max_train_steps,
+                            start_time=start_time,
+                            wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None,
+                        )
                     # Reset the local metrics
                     local_metrics.zero_()
                     mfu_interval_start = mfu_interval_end
