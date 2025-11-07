@@ -1703,6 +1703,7 @@ def accumulate_inference_batches(
 
         decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
+        # TODO(finbarrtimbers): Make PendingQueriesMap.pop return a Batch, and add a Batch.repeat method.
         k_queries = [query for _ in range(generation_config.n)]
         k_ground_truths = [ground_truth for _ in range(generation_config.n)]
         k_datasets = [dataset for _ in range(generation_config.n)]
