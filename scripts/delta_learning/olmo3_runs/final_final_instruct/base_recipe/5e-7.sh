@@ -5,9 +5,9 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
 	--gs_model_name $EXP_NAME \
     --workspace ai2/olmo-instruct \
     --priority urgent \
-    --image scottg/open_instruct_dev --pure_docker_mode \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
-    --num_nodes 2 \
+    --num_nodes 4 \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
     --gpus 8 -- accelerate launch \
@@ -33,7 +33,7 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
         allenai/self-talk-truncated-gpt-deduped 2500 \
     --max_seq_length 16384 \
     --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 8 \
+    --gradient_accumulation_steps 4 \
     --learning_rate 5e-7 \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
@@ -45,9 +45,4 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --use_flash_attn \
     --gradient_checkpointing \
     --report_to wandb \
-    --chat_template_name olmo123 \
-    --with_tracking \
-    --eval_workspace olmo-instruct \
-    --oe_eval_gpu_multiplier 2 \
-    --oe_eval_max_length 32768 \
-    --oe_eval_tasks mmlu:cot::hamish_zs_reasoning_deepseek,popqa::hamish_zs_reasoning_deepseek,simpleqa::tulu-thinker_deepseek,bbh:cot::hamish_zs_reasoning_deepseek_v2,gpqa:0shot_cot::hamish_zs_reasoning_deepseek,zebralogic::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,minerva_math::hamish_zs_reasoning_deepseek,gsm8k::zs_cot_latex_deepseek,omega_500:0-shot-chat_deepseek,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,bfcl_all::std
+    --chat_template_name olmo123

@@ -1,7 +1,7 @@
 MODEL_NAME=/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/olmo3-hparam-search/olmo3-final-on-olmo3-sft-1103-base-1
-EXP_NAME=olmo3-instruct-final-dpo-base-7e-7
+EXP_NAME=olmo3-instruct-final-dpo-base-no_ch_filter-5e-7
 python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
-	--cluster ai2/jupiter ai2/ceres \
+	--cluster ai2/jupiter \
 	--gs_model_name $EXP_NAME \
     --workspace ai2/olmo-instruct \
     --priority urgent \
@@ -21,8 +21,8 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --model_name_or_path $MODEL_NAME \
     --tokenizer_name $MODEL_NAME \
     --use_slow_tokenizer False \
-    --dataset_mixer_list allenai/olmo-3-preference-mix-deltas-complement2-grafmix-DECON-qwen32b-keyword-filtered-chinese-filtered 125000 \
-        allenai/dpo-yolo1-200k-gpt4.1-2w2s-maxdelta_rejected-DECON-rm-gemma3-kwd-ftd-chinese-filtered 125000 \
+    --dataset_mixer_list allenai/olmo-3-preference-mix-deltas-complement2-grafmix-DECON-qwen32b-keyword-filtered 125000 \
+        allenai/dpo-yolo1-200k-gpt4.1-2w2s-maxdelta_rejected-DECON-rm-gemma3-kwd-ftd 125000 \
         allenai/general_responses_dev_8maxturns_truncated2048_victoriag-qwenrejected-keyword-filtered-cn-ftd 1250 \
         allenai/paraphrase_train_dev_8maxturns_truncated2048_victoriag-qwen-redorejected-keyword-filtered-cn-ftd 938 \
         allenai/repeat_tulu_5maxturns_big_truncated2048_victoriagrejected-keyword-filtered-cn-ftd 312 \
@@ -34,7 +34,7 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --max_seq_length 16384 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
-    --learning_rate 7e-7 \
+    --learning_rate 5e-7 \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
