@@ -1851,7 +1851,7 @@ def accumulate_inference_batches(
         filtered_prompts_nonzero=filtered_prompt_nonzero,
     )
     logging.info(
-        f"[Data Preparation Thread] Calculating rewards took {combined_reward_metrics['time/reward']} seconds"
+        f"[Data Preparation Thread] Calculating rewards took {combined_reward_metrics.get('time/reward', 0)} seconds"
     )
 
     return combined_result, batch, combined_reward_metrics, batch_stats
