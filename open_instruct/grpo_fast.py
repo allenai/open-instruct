@@ -1892,25 +1892,24 @@ def data_preparation_thread(
         getting_response_time = timer.duration
         scores = np.array(batch.scores)
 
-        if args.num_samples_per_prompt_rollout > 1:
-            good_outputs = [
-                len(result.request_info.tool_outputs[i]) > 0
-                and result.request_info.tool_calleds[i]
-                and not result.request_info.timeouts[i]
-                and not result.request_info.tool_errors[i]
-                for i in range(len(result.request_info.tool_outputs))
-            ]
-            scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
-            mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
-            mean_grouped_rewards = np.repeat(mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
-            std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            std_grouped_rewards = np.repeat(std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
-            if args.advantage_normalization_type == "standard":
-                advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
-            elif args.advantage_normalization_type == "centered":
-                advantages = scores - mean_grouped_rewards
-            else:
-                raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
+        good_outputs = [
+            len(result.request_info.tool_outputs[i]) > 0
+            and result.request_info.tool_calleds[i]
+            and not result.request_info.timeouts[i]
+            and not result.request_info.tool_errors[i]
+            for i in range(len(result.request_info.tool_outputs))
+        ]
+        scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
+        mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
+        mean_grouped_rewards = np.repeat(mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
+        std_grouped_rewards = scores_per_prompt.std(axis=-1)
+        std_grouped_rewards = np.repeat(std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
+        if args.advantage_normalization_type == "standard":
+            advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
+        elif args.advantage_normalization_type == "centered":
+            advantages = scores - mean_grouped_rewards
+        else:
+            raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
         if args.mask_truncated_completions:
             stop_idxes = torch.tensor(
