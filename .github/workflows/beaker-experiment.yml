@@ -215,37 +215,42 @@ jobs:
             exit 0
           fi
 
-          declare -a FAILED_IDS=()
-          declare -a FAILED_NAMES=()
+          FAILED_FILE=$(mktemp)
+          declare -A PIDS
 
           for i in "${!EXPERIMENT_IDS[@]}"; do
             EXP_ID="${EXPERIMENT_IDS[$i]}"
             EXP_NAME="${EXPERIMENT_NAMES[$i]:-experiment_$i}"
 
-            echo "Waiting for ${EXP_NAME} (${EXP_ID}) to succeed..."
-            if beaker experiment await "$EXP_ID" 0 succeeded --index --timeout 20m --interval 30s; then
-              echo "  [${EXP_NAME}] ✅ succeeded"
-              continue
-            fi
-
-            echo "  [${EXP_NAME}] ❌ did not reach succeeded status within timeout"
-            FAILED_IDS+=("$EXP_ID")
-            FAILED_NAMES+=("$EXP_NAME")
+            (
+              echo "Waiting for ${EXP_NAME} (${EXP_ID}) to succeed..."
+              if beaker experiment await "$EXP_ID" 0 succeeded --index --timeout 20m --interval 30s; then
+                echo "  [${EXP_NAME}] ✅ succeeded"
+              else
+                echo "  [${EXP_NAME}] ❌ did not reach succeeded status within timeout"
+                echo "${EXP_ID}|${EXP_NAME}" >> "$FAILED_FILE"
+              fi
+            ) &
+            PIDS[$i]=$!
           done
 
-          if [ ${#FAILED_IDS[@]} -gt 0 ]; then
+          for pid in "${PIDS[@]}"; do
+            wait "$pid" || true
+          done
+
+          if [ -s "$FAILED_FILE" ]; then
             echo ""
             echo "❌ One or more experiments failed or timed out. Showing logs:"
-            for i in "${!FAILED_IDS[@]}"; do
-              EXP_ID="${FAILED_IDS[$i]}"
-              EXP_NAME="${FAILED_NAMES[$i]}"
+            while IFS='|' read -r EXP_ID EXP_NAME; do
               echo ""
               echo "=== Error logs for ${EXP_NAME} (${EXP_ID}) ==="
               beaker experiment logs "$EXP_ID" | tail -n 200 || true
-            done
+            done < "$FAILED_FILE"
+            rm -f "$FAILED_FILE"
             exit 1
           fi
 
+          rm -f "$FAILED_FILE"
           echo ""
           echo "✅ All experiments completed successfully!"
 
