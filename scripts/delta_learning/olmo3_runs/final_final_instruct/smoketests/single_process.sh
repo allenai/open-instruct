@@ -1,13 +1,13 @@
 MODEL_NAME=/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/olmo3-hparam-search/olmo3-final-on-olmo3-sft-1103-base-1
-EXP_NAME=olmo3-instruct-final-dpo-base-no_ch_filter-1e-6
+EXP_NAME=olmo3-instruct-final-dpo-base-smoke_1proc
 python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
-	--cluster ai2/jupiter \
+	--cluster ai2/augusta \
 	--gs_model_name $EXP_NAME \
     --workspace ai2/olmo-instruct \
     --priority urgent \
     --image scottg/open_instruct_dev --pure_docker_mode \
     --preemptible \
-    --num_nodes 4 \
+    --num_nodes 2 \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
     --gpus 8 -- accelerate launch \
@@ -21,19 +21,11 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --model_name_or_path $MODEL_NAME \
     --tokenizer_name $MODEL_NAME \
     --use_slow_tokenizer False \
-    --dataset_mixer_list allenai/olmo-3-preference-mix-deltas-complement2-grafmix-DECON-qwen32b-keyword-filtered 125000 \
-        allenai/dpo-yolo1-200k-gpt4.1-2w2s-maxdelta_rejected-DECON-rm-gemma3-kwd-ftd 125000 \
-        allenai/general_responses_dev_8maxturns_truncated2048_victoriag-qwenrejected-keyword-filtered-cn-ftd 1250 \
-        allenai/paraphrase_train_dev_8maxturns_truncated2048_victoriag-qwen-redorejected-keyword-filtered-cn-ftd 938 \
-        allenai/repeat_tulu_5maxturns_big_truncated2048_victoriagrejected-keyword-filtered-cn-ftd 312 \
-        allenai/self-talk_gpt3.5_gpt4o_prefpairs_truncated2048_victoriagrejected-keyword-filtered-cn-ftd 2500 \
-        allenai/general-responses-truncated-gpt-dedup 1250 \
-        allenai/paraphrase-truncated-gpt-dedup 938 \
-        allenai/repeat-truncated-gpt-dedup 312 \
-        allenai/self-talk-truncated-gpt-deduped 2500 \
+    --dataset_mixer_list allenai/olmo-3-preference-mix-deltas-complement2-grafmix-DECON-qwen32b-keyword-filtered 2500 \
+        allenai/dpo-yolo1-200k-gpt4.1-2w2s-maxdelta_rejected-DECON-rm-gemma3-kwd-ftd 2500 \
     --max_seq_length 16384 \
     --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 4 \
+    --gradient_accumulation_steps 2 \
     --learning_rate 1e-6 \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
