@@ -1,14 +1,13 @@
 import argparse
+import hashlib
 import os
 import random
-import hashlib
 import re
 import secrets
 import select
 import string
 import sys
 import time
-from typing import Dict, List
 
 import beaker
 from rich.console import Console
@@ -55,7 +54,7 @@ def build_command_without_args(command, args_to_remove):
     result = []
     skip_next = False
 
-    for i, item in enumerate(command):
+    for item in command:
         if skip_next:
             skip_next = False
             continue
@@ -78,7 +77,7 @@ def parse_beaker_dataset(dataset_str):
     return {"mount_path": splt[0], "beaker": splt[1]}
 
 
-def parse_env_var(env_var_str: str) -> Dict[str, str]:
+def parse_env_var(env_var_str: str) -> dict[str, str]:
     """Parse environment variable string in the format 'name=value'"""
     if "=" not in env_var_str:
         raise argparse.ArgumentTypeError(f"Environment variable must be in format 'name=value', got: {env_var_str}")
@@ -205,7 +204,7 @@ def get_args():
     mason_args, command_args = parser.parse_known_args()
     commands = parse_commands(command_args)
 
-    def _commands_include_resumable_target(cmds: List[List[str]]) -> bool:
+    def _commands_include_resumable_target(cmds: list[list[str]]) -> bool:
         for cmd in cmds:
             for target in OPEN_INSTRUCT_RESUMABLES:
                 if target in cmd:
@@ -218,7 +217,7 @@ def get_args():
         console.log(
             "--non_resumable is not set, but the command is not in OPEN_INSTRUCT_RESUMABLES, so the job will not be resumable"
         )
-    setattr(mason_args, "resumable", is_resumable)
+    mason_args.resumable = is_resumable
 
     return mason_args, commands
 
@@ -234,7 +233,7 @@ def generate_id(length: int = 8) -> str:
 global_wandb_id = generate_id()
 
 
-def parse_commands(command_args: List[str]) -> List[List[str]]:
+def parse_commands(command_args: list[str]) -> list[list[str]]:
     """the inputs are ['--', 'which', 'python', '--', 'echo', 'hello'], and this function converts it into [['which', 'python'], ['echo', 'hello']]"""
     if command_args[0] != "--":
         msg = (
@@ -259,13 +258,13 @@ def parse_commands(command_args: List[str]) -> List[List[str]]:
 
 def get_env_vars(
     pure_docker_mode: bool,
-    cluster: List[str],
-    beaker_secrets: List[str],
+    cluster: list[str],
+    beaker_secrets: list[str],
     whoami: str,
     resumable: bool,
     num_nodes: int,
-    additional_env_vars: List[Dict[str, str]],
-    additional_secrets: List[Dict[str, str]],
+    additional_env_vars: list[dict[str, str]],
+    additional_secrets: list[dict[str, str]],
 ):
     additional_env_var_names = {var["name"] for var in additional_env_vars}
 
@@ -343,14 +342,15 @@ def get_env_vars(
         if num_nodes > 1:
             env_vars.extend(
                 [
-                    beaker.BeakerEnvVar(name="LD_LIBRARY_PATH", value=r"/var/lib/tcpxo/lib64:${LD_LIBRARY_PATH}"),
+                    # NOTE: For single-node training we still need all of these settings and we also
+                    # need host networking enabled so that the ethernet interface names don't change.
                     beaker.BeakerEnvVar(name="NCCL_CROSS_NIC", value="0"),
-                    beaker.BeakerEnvVar(name="NCCL_ALGO", value="Ring,Tree"),
-                    beaker.BeakerEnvVar(name="NCCL_PROTO", value="Simple"),
+                    beaker.BeakerEnvVar(name="NCCL_PROTO", value="Simple,LL128"),
                     beaker.BeakerEnvVar(name="NCCL_MIN_NCHANNELS", value="4"),
                     beaker.BeakerEnvVar(name="NCCL_P2P_NET_CHUNKSIZE", value="524288"),
                     beaker.BeakerEnvVar(name="NCCL_P2P_PCI_CHUNKSIZE", value="524288"),
                     beaker.BeakerEnvVar(name="NCCL_P2P_NVL_CHUNKSIZE", value="1048576"),
+                    beaker.BeakerEnvVar(name="NCCL_NVLSTREE_MAX_CHUNKSIZE", value="131072"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_NUM_FLOWS", value="2"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL", value="0"),
                     beaker.BeakerEnvVar(name="NCCL_BUFFSIZE", value="8388608"),
@@ -358,25 +358,26 @@ def get_env_vars(
                     beaker.BeakerEnvVar(name="CUDA_VISIBLE_DEVICES", value="0,1,2,3,4,5,6,7"),
                     beaker.BeakerEnvVar(name="NCCL_NET_GDR_LEVEL", value="PIX"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING", value="0"),
+                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS", value="600000"),
+                    beaker.BeakerEnvVar(name="NCCL_USE_SNAP", value="1"),
+                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_USE_LLCM", value="1"),
+                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY", value="/dev/aperture_devices"),
                     beaker.BeakerEnvVar(name="NCCL_TUNER_PLUGIN", value="libnccl-tuner.so"),
                     beaker.BeakerEnvVar(
-                        name="NCCL_TUNER_CONFIG_PATH", value="/var/lib/tcpxo/lib64/a3plus_tuner_config.textproto"
+                        name="NCCL_TUNER_CONFIG_PATH", value="/var/lib/tcpxo/lib64/a3plus_tuner_config_ll128.textproto"
                     ),
                     beaker.BeakerEnvVar(
                         name="NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE",
-                        value="/var/lib/tcpxo/lib64/a3plus_guest_config.textproto",
+                        value="/var/lib/tcpxo/lib64/a3plus_guest_config_ll128.textproto",
                     ),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS", value="600000"),
-                    beaker.BeakerEnvVar(name="NCCL_NVLS_ENABLE", value="0"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_CTRL_DEV", value="enp0s12"),
                     beaker.BeakerEnvVar(
                         name="NCCL_FASTRAK_IFNAME",
                         value="enp6s0,enp7s0,enp13s0,enp14s0,enp134s0,enp135s0,enp141s0,enp142s0",
                     ),
                     beaker.BeakerEnvVar(name="NCCL_SOCKET_IFNAME", value="enp0s12"),
-                    beaker.BeakerEnvVar(name="NCCL_USE_SNAP", value="1"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_USE_LLCM", value="1"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY", value="/dev/aperture_devices"),
+                    # Add COLL here to log all collective operations. Extreamly verbose, dont use for production.
+                    beaker.BeakerEnvVar(name="NCCL_DEBUG_SUBSYS", value="INIT,NET"),
                 ]
             )
     # don't mount anything; assume no cache
@@ -394,7 +395,7 @@ def get_env_vars(
     return env_vars
 
 
-def get_datasets(beaker_datasets, cluster: List[str]):
+def get_datasets(beaker_datasets, cluster: list[str]):
     """if pure docker mode we don't mount the NFS; so we can run it on jupiter2"""
     res = []
     # if all cluster is in weka, we mount the weka
@@ -422,7 +423,7 @@ def get_datasets(beaker_datasets, cluster: List[str]):
     return res
 
 
-def make_internal_command(command: List[str], args: argparse.Namespace, whoami: str, is_external_user: bool) -> str:
+def make_internal_command(command: list[str], args: argparse.Namespace, whoami: str, is_external_user: bool) -> str:
     # pass through WANDB_ENTITY and WANDB_PROJECT
     if "WANDB_ENTITY" in os.environ:
         command = [f"WANDB_ENTITY={os.environ['WANDB_ENTITY']}"] + command
@@ -472,12 +473,7 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
 
                 # Use Popen to get real-time output while also capturing it
                 process = subprocess.Popen(
-                    caching_command,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
+                    caching_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
                 )
 
                 stdout_data, stderr_data = [], []
@@ -506,11 +502,7 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                 result = type(
                     "SubprocessResult",
                     (),
-                    {
-                        "returncode": process.returncode,
-                        "stdout": "".join(stdout_data),
-                        "stderr": "".join(stderr_data),
-                    },
+                    {"returncode": process.returncode, "stdout": "".join(stdout_data), "stderr": "".join(stderr_data)},
                 )
                 stdout = result.stdout
                 # Extract the cached dataset path from stdout if it exists
@@ -522,7 +514,6 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                         console.log(f"📦 Found cached dataset config hash: {dataset_config_hash}")
                         dataset_cache_paths.append(dataset_cache_path)
                         dataset_config_hashes.append(dataset_config_hash)
-                stderr = result.stderr
                 return_code = result.returncode
                 if return_code != 0:
                     raise Exception(f"Error code {return_code} when creating cached dataset")
@@ -532,13 +523,10 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                     need_to_override_checkpoint_state_dir = True
                     default_checkpoint_state_freq = 200
                     for idx, cmd in enumerate(command):
-                        if cmd == "--checkpoint_state_dir":
-                            if idx + 1 < len(command):
-                                if "/weka/" in command[idx + 1]:
-                                    need_to_override_checkpoint_state_dir = False
-                        if cmd == "--checkpoint_state_freq":
-                            if idx + 1 < len(command):
-                                default_checkpoint_state_freq = command[idx + 1]
+                        if cmd == "--checkpoint_state_dir" and idx + 1 < len(command) and "/weka/" in command[idx + 1]:
+                            need_to_override_checkpoint_state_dir = False
+                        if cmd == "--checkpoint_state_freq" and idx + 1 < len(command):
+                            default_checkpoint_state_freq = command[idx + 1]
 
                     if need_to_override_checkpoint_state_dir and is_open_instruct_training and not is_external_user:
                         new_checkpoint_state_dir = f"{args.auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
@@ -557,10 +545,9 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
             if len(args.auto_output_dir_path) > 0:
                 need_to_override_output_dir = True
                 for idx, cmd in enumerate(command):
-                    if cmd == "--output_dir":
-                        if "/weka/" in command[idx + 1]:
-                            need_to_override_output_dir = False
-                            break
+                    if cmd == "--output_dir" and "/weka/" in command[idx + 1]:
+                        need_to_override_output_dir = False
+                        break
                 if need_to_override_output_dir and is_open_instruct_training and not is_external_user:
                     new_output_dir = f"{args.auto_output_dir_path}/{whoami}/"
                     console.log(

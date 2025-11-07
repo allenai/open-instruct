@@ -2,6 +2,7 @@ FROM nvidia/cuda:12.8.0-devel-ubuntu22.04
 
 ARG DEBIAN_FRONTEND="noninteractive"
 ENV TZ="America/Los_Angeles"
+ENV LANG=en_US.UTF-8
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
