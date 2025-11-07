@@ -52,9 +52,6 @@ jobs:
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             # Get the user who triggered the manual dispatch
             echo "trigger_info=Manual dispatch by ${{ github.actor }}" >> $GITHUB_OUTPUT
-          else
-            # For scheduled runs
-            echo "trigger_info=Scheduled run" >> $GITHUB_OUTPUT
           fi
 
       - name: Get changed files using git diff
@@ -80,7 +77,7 @@ jobs:
       - name: Setup Python environment
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
@@ -107,8 +104,6 @@ jobs:
           GRPO_CHANGED: ${{ steps.changed-files.outputs.grpo_changed }}
         run: |
           set -euo pipefail
-
-          chmod +x scripts/train/build_image_and_launch.sh scripts/train/debug/*.sh
 
           echo "Building Docker image and launching experiments..."
           echo "Git commit: $(git rev-parse --short HEAD)"
@@ -145,7 +140,6 @@ jobs:
 
           EXPERIMENT_DEFINITIONS=(
             "single_gpu_on_beaker|scripts/train/debug/single_gpu_on_beaker.sh|always|Launching single_gpu_on_beaker.sh (always runs)"
-            "grpo|scripts/train/debug/grpo.sh|${GRPO_CHANGED}|Launching grpo.sh (core files changed)"
             "dpo|scripts/train/debug/dpo.sh|${DPO_CHANGED}|Launching dpo.sh (DPO files changed)"
             "finetune|scripts/train/debug/finetune.sh|${FINETUNE_CHANGED}|Launching finetune.sh (finetune.py changed)"
           )
