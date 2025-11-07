@@ -19,7 +19,8 @@ LAUNCH_CMD="accelerate launch \
     --dataset_mixer_list allenai/tulu-3-sft-personas-algebra 100 \
     --add_bos \
     --seed 123 \
-    --chat_template_name tulu"
+    --chat_template_name tulu \
+    --push_to_hub false"
 
 if [ -n "$1" ]; then
     BEAKER_IMAGE="$1"
