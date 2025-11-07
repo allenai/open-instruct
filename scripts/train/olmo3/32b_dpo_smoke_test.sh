@@ -1,4 +1,4 @@
-MODEL_NAME=/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/olmo3-hparam-search/olmo3-final-on-olmo3-sft-1103-base-1
+MODEL_NAME=/weka/oe-adapt-default/finbarrt/stego32/step358000-hf
 EXP_NAME=olmo3-instruct-final-dpo-base-smoke_new_mason2
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 uv run python mason.py \
@@ -9,7 +9,7 @@ uv run python mason.py \
     --image "$BEAKER_IMAGE" --pure_docker_mode \
     --env TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=3600 \
     --preemptible \
-    --num_nodes 2 \
+    --num_nodes 8 \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
     --gpus 8 -- accelerate launch \
@@ -39,4 +39,5 @@ uv run python mason.py \
     --gradient_checkpointing \
     --report_to wandb \
     --chat_template_name olmo123 \
-    --with_tracking
+    --with_tracking \
+    --dataset_skip_cache

@@ -833,6 +833,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     local_metrics = torch.zeros((21), device=accelerator.device)
     episode = 0
+    total_tokens_processed = 0
     mfu_interval_start = time.perf_counter()
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
@@ -932,6 +933,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     mfu_interval_end = time.perf_counter()
                     training_time = mfu_interval_end - mfu_interval_start
                     total_tokens = int(global_metrics[20])
+                    total_tokens_processed += total_tokens
                     avg_sequence_length = total_tokens / (
                         args.per_device_train_batch_size
                         * accelerator.num_processes
@@ -939,6 +941,10 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         * args.logging_steps
                         * 2
                     )
+
+                    step_tokens_per_second = total_tokens / training_time
+                    total_time_elapsed = time.perf_counter() - start_time
+                    total_tokens_per_second = total_tokens_processed / total_time_elapsed
 
                     metrics_to_log = {
                         "training_step": completed_steps,
@@ -965,12 +971,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         logger_str += f" Aux Loss: {global_metrics[19]}"
                         metrics_to_log["aux_loss"] = global_metrics[19]
 
-                    metrics_to_log["mfu"] = model_dims.approximate_learner_utilization(
+                    metrics_to_log["perf/mfu"] = model_dims.approximate_learner_utilization(
                         total_tokens=total_tokens,
                         avg_sequence_length=avg_sequence_length,
                         training_time=training_time,
                         num_training_gpus=accelerator.num_processes,
                     )["mfu"]
+                    metrics_to_log["perf/tokens_per_second_step"] = step_tokens_per_second
+                    metrics_to_log["perf/tokens_per_second_total"] = total_tokens_per_second
 
                     logger.info(logger_str)
                     if args.with_tracking:
