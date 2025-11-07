@@ -399,6 +399,8 @@ def main():
     if args.num_responses < 1 or args.num_responses > 5:
         raise ValueError("num_responses must be between 1 and 5")
     
+    print(args)
+    
     # Process dataset
     process_dataset(
         dataset_name=args.dataset_name,

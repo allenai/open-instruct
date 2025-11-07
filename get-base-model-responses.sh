@@ -11,5 +11,5 @@ python get-responses-from-model.py \
   --top_p 1.0 \
   --max_tokens 16384 \
   --max_model_len 32768 \
-  --apply_chat_template true \
+  --apply_chat_template \
   --messages_column "messages"
