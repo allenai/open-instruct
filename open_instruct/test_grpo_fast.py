@@ -204,7 +204,7 @@ class TestGrpoFastBase(unittest.TestCase):
         tokenizer_name = "EleutherAI/pythia-14m"  # Using a small model for testing
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
-        # Set up dummy reward fn
+        # Set up dummy reward fn that will guarantee nonzero std
         async def reward_fn(
             responses: list[torch.Tensor],
             decoded_responses: list[str],
@@ -213,7 +213,8 @@ class TestGrpoFastBase(unittest.TestCase):
             infos: list[list[int]],
             queries: list[str] | None = None,
         ) -> (list[float], dict[str, Any]):
-            return [1.0 for _ in range(len(responses))], {}
+            num_responses = len(responses)
+            return [i / num_responses for i in range(num_responses)], {}
 
         return tokenizer, reward_fn
 
