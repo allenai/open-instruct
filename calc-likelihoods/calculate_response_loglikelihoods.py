@@ -110,8 +110,13 @@ def evaluate_models_on_dataset(
 
 
     for model_name in model_names:
+        if "Olmo" in model_name:
+            save_name = "step_0"
+        else:
+            save_name = model_name.replace("/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/", "").strip()
         print(f"\n{'='*80}")
         print(f"Loading model: {model_name}")
+        print(f"Save name: {save_name}")
         print(f"{'='*80}")
         
         try:            
@@ -196,6 +201,26 @@ def main():
     # Replace with your actual model names
     model_names = [
         "allenai/Olmo-3-1025-7B",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_50",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_100",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_150",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_200",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_250",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_300",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_350",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_400",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_450",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_500",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_550",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_600",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_650",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_700",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_750",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_800",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_850",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_900",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_950",
+        "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_1000",
         # Add your models here
     ]
     
