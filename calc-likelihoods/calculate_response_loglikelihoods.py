@@ -152,6 +152,8 @@ def evaluate_models_on_dataset(
                         "sample_id": idx,
                         "prompt": prompt,
                         "response": response,
+                        "in_distribution": sample["in_distribution"],
+                        "domain": sample["domain"],
                         "avg_log_likelihood": avg_log_likelihood,
                         "num_response_tokens": num_tokens,
                         "perplexity": np.exp(-avg_log_likelihood) if avg_log_likelihood != 0 else float('inf')
