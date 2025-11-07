@@ -212,7 +212,13 @@ class TestGrpoFastBase(unittest.TestCase):
         self._ray_queues.extend([param_prompt_Q, inference_results_Q])
 
         batch = model_utils.Batch(
-            queries=queries, ground_truths=ground_truths, datasets=datasets, raw_queries=raw_queries, indices=indices
+            queries=queries,
+            ground_truths=ground_truths,
+            datasets=datasets,
+            raw_queries=raw_queries,
+            indices=indices,
+            decoded_responses=None,
+            scores=None,
         )
 
         mock_generation_config = MagicMock()
@@ -717,7 +723,13 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         self._ray_queues.append(param_prompt_Q)
 
         batch = model_utils.Batch(
-            queries=queries, ground_truths=ground_truths, datasets=datasets, raw_queries=raw_queries, indices=indices
+            queries=queries,
+            ground_truths=ground_truths,
+            datasets=datasets,
+            raw_queries=raw_queries,
+            indices=indices,
+            decoded_responses=None,
+            scores=None,
         )
 
         mock_generation_config = MagicMock()
@@ -768,7 +780,13 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         self._ray_queues.append(param_prompt_Q)
 
         batch = model_utils.Batch(
-            queries=queries, ground_truths=ground_truths, datasets=datasets, raw_queries=raw_queries, indices=indices
+            queries=queries,
+            ground_truths=ground_truths,
+            datasets=datasets,
+            raw_queries=raw_queries,
+            indices=indices,
+            decoded_responses=None,
+            scores=None,
         )
 
         mock_generation_config = MagicMock()
