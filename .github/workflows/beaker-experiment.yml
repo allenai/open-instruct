@@ -5,14 +5,6 @@ on:
 
   # Adding a comment to trigger a run.
   workflow_dispatch:  # This allows us to manually trigger a build through the GitHub UI.
-  # pull_request:
-  #   branches: [main]
-  #   paths:
-  #     - 'open_instruct/**'
-  #     - '!open_instruct/README.md'
-  #     - 'requirements.txt'
-  #     - 'Dockerfile'
-  #     - '.github/workflows/beaker-experiment.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -139,19 +131,19 @@ jobs:
           }
 
           EXPERIMENT_DEFINITIONS=(
-            "single_gpu_on_beaker|scripts/train/debug/single_gpu_on_beaker.sh|always|Launching single_gpu_on_beaker.sh (always runs)"
-            "dpo|scripts/train/debug/dpo.sh|${DPO_CHANGED}|Launching dpo.sh (DPO files changed)"
-            "finetune|scripts/train/debug/finetune.sh|${FINETUNE_CHANGED}|Launching finetune.sh (finetune.py changed)"
+            "grpo|scripts/train/debug/grpo_integration_test.sh|always"
+            "dpo|scripts/train/debug/dpo_integration_test.sh|${DPO_CHANGED}"
+            "sft|scripts/train/debug/sft_integration-test.sh|${FINETUNE_CHANGED}"
           )
 
           for DEFINITION in "${EXPERIMENT_DEFINITIONS[@]}"; do
-            IFS='|' read -r EXP_NAME EXP_SCRIPT EXP_CONDITION EXP_MESSAGE <<< "$DEFINITION"
+            IFS='|' read -r EXP_NAME EXP_SCRIPT EXP_CONDITION <<< "$DEFINITION"
             if [ "$EXP_CONDITION" != "true" ] && [ "$EXP_CONDITION" != "always" ]; then
               echo "Skipping ${EXP_NAME} experiment (condition not met)"
               continue
             fi
 
-            echo "=== ${EXP_MESSAGE} ==="
+            echo "=== Launching ${EXP_NAME} ==="
             if ! launch_and_capture "$EXP_SCRIPT" "$EXP_NAME"; then
               EXIT_CODE=$?
               exit $EXIT_CODE
