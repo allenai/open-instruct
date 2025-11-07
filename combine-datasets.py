@@ -4,7 +4,7 @@ new_elems = []
 
 math_ds_id = load_dataset("jacobmorrison/math-prompts-used")
 
-for elem in math_ds_id["train"]:
+for elem in math_ds_id["train"][:1000]:
     prompt = elem["prompt"]
     if prompt.startswith("user: "):
         prompt = prompt[6:].strip()
@@ -21,7 +21,7 @@ for elem in math_ds_id["train"]:
 
 code_ds_id = load_dataset("jacobmorrison/code-prompts-used")
 
-for elem in code_ds_id["train"]:
+for elem in code_ds_id["train"][:1000]:
     prompt = elem["prompt"]
     if prompt.startswith("user: "):
         prompt = prompt[6:].strip()
@@ -38,7 +38,7 @@ for elem in code_ds_id["train"]:
 
 if_ds_id = load_dataset("jacobmorrison/if-prompts-used")
 
-for elem in if_ds_id["train"]:
+for elem in if_ds_id["train"][:1000]:
     prompt = elem["prompt"]
     if prompt.startswith("user: "):
         prompt = prompt[6:].strip()
@@ -55,7 +55,7 @@ for elem in if_ds_id["train"]:
 
 math_ds_ood = load_dataset("jacobmorrison/rlvr_math_ood")
 
-for elem in math_ds_ood["train"]:
+for elem in math_ds_ood["train"][:1000]:
     prompt = elem["messages"][0]["content"]
     if prompt.startswith("user: "):
         prompt = prompt[6:].strip()
@@ -72,7 +72,7 @@ for elem in math_ds_ood["train"]:
 
 code_ds_ood = load_dataset("jacobmorrison/rlvr_code_ood")
 
-for elem in code_ds_ood["train"]:
+for elem in code_ds_ood["train"][:1000]:
     prompt = elem["messages"][0]["content"]
     if prompt.startswith("user: "):
         prompt = prompt[6:].strip()
@@ -89,7 +89,7 @@ for elem in code_ds_ood["train"]:
 
 if_ds_ood = load_dataset("jacobmorrison/rlvr_if_ood")
 
-for elem in if_ds_ood["train"]:
+for elem in if_ds_ood["train"][:1000]:
     prompt = elem["messages"][0]["content"]
     if prompt.startswith("user: "):
         prompt = prompt[6:].strip()
