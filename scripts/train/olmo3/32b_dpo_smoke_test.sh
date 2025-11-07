@@ -1,5 +1,5 @@
 MODEL_NAME=/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/olmo3-hparam-search/olmo3-final-on-olmo3-sft-1103-base-1
-EXP_NAME=olmo3-instruct-final-dpo-base-smoke_new_mason
+EXP_NAME=olmo3-instruct-final-dpo-base-smoke_new_mason2
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 uv run python mason.py \
 	--cluster ai2/augusta \
