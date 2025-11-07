@@ -7,6 +7,7 @@ uv run python mason.py \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" --pure_docker_mode \
+    --env TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=3600 \
     --preemptible \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
