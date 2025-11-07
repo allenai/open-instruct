@@ -61,13 +61,15 @@ docker build . \
 	--build-arg GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD) \
 	-t open_instruct_dev
 
-# if you are internally at AI2, you can create a beaker image like this:
-beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
-beaker image delete $beaker_user/open_instruct_dev
-beaker image create open_instruct_dev -n open_instruct_dev -w ai2/$beaker_user
+# If you are internal to AI2, you can create a beaker image like this:
+./scripts/train/build_image_and_launch.sh
+
+# You can also launch your experiments using this command if they are set up
+# to take the image name as an arg. An example is scripts/train/debug/single_gpu_on_beaker.sh.
+./scripts/train/build_image_and_launch.sh ./scripts/train/$MY_EXPERIMENT.sh
 ```
 
-If you are internally at AI2, you may launch experiments using our always-up-to-date auto-built image `nathanl/open_instruct_auto`.
+If you are internal to AI2, you may launch experiments using our always-up-to-date auto-built image `nathanl/open_instruct_auto`.
 
 
 ## Training
@@ -109,13 +111,9 @@ bash scripts/train/rlvr/tulu_rlvr.sh
 We release our scripts for measuring the overlap between instruction tuning datasets and evaluation datasets in `./decontamination`. See the [README](./decontamination/README.md) for more details.
 
 ### Developing
-When submitting a PR to this repo, we check the core code in `open_instruct/` for style with the following:
-```
-make style
-make quality
-```
+When submitting a PR to this repo, we check the core code in `open_instruct/` for style by running `make style && make quality`.
 
-Run the tests with `uv run pytest`.
+You can run the tests with `uv run pytest`.
 
 ### Repo structure
 ```
@@ -128,7 +126,6 @@ Run the tests with `uv run pytest`.
 ├── eval/                       <- Evaluation suite for fine-tuned models
 ├── human_eval/                 <- Human evaluation interface (not maintained)
 ├── open_instruct/              <- Source code (flat)
-├── quantize/                   <- Scripts for quantization
 ├── scripts/                    <- Core training and evaluation scripts
 └── Dockerfile                  <- Dockerfile
 ```
@@ -139,9 +136,6 @@ Run the tests with `uv run pytest`.
 This codebase is licensed under Apache 2.0 as given in [LICENSE](./LICENSE).
 
 The license we use for V1 models released (along with the base model licenses) can be found in [assets/model_licenses/tulu_license.txt](./assets/model_licenses/tulu_license.txt) - just replace `<MODELNAME>` with the actual model name (i.e., the name on HuggingFace).
-
-V2 models are licensed under the [low-risk AI2 ImpACT license](https://allenai.org/licenses/impact-lr). See [here](https://allenai.org/impact-license) for more details.
-
 
 ## Acknowledgements
 
