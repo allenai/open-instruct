@@ -133,7 +133,7 @@ jobs:
           EXPERIMENT_DEFINITIONS=(
             "grpo|scripts/train/debug/grpo_integration_test.sh|always"
             "dpo|scripts/train/debug/dpo_integration_test.sh|${DPO_CHANGED}"
-            "sft|scripts/train/debug/sft_integration-test.sh|${FINETUNE_CHANGED}"
+            "sft|scripts/train/debug/sft_integration_test.sh|${FINETUNE_CHANGED}"
           )
 
           for DEFINITION in "${EXPERIMENT_DEFINITIONS[@]}"; do
