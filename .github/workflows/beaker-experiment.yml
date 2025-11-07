@@ -211,7 +211,7 @@ jobs:
             EXP_NAME="${EXPERIMENT_NAMES[$i]:-experiment_$i}"
 
             (
-              echo "Waiting for ${EXP_NAME} (${EXP_ID}) to succeed..."
+              echo "Waiting for ${EXP_NAME} to succeed: https://beaker.org/ex/${EXP_ID}"
               if beaker experiment await "$EXP_ID" 0 finalized --index --timeout 20m --interval 30s; then
                 echo "  [${EXP_NAME}] ✅ succeeded"
               else
