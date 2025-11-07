@@ -1694,6 +1694,7 @@ def accumulate_inference_batches(
 
         query, ground_truth, dataset, raw_query = pending_queries_map.pop(result.dataset_index)
 
+        # TODO(finbarrtimbers): Move this to LLMRayActor.
         for i in range(len(result.finish_reasons)):
             if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
                 result.responses[i].append(tokenizer.eos_token_id)
