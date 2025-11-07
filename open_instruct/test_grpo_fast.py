@@ -14,7 +14,7 @@ from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 from vllm import SamplingParams
 
-from open_instruct import grpo_fast, model_utils, utils
+from open_instruct import grpo_fast, model_utils, rl_utils, utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.vllm_utils import create_vllm_engines
 
@@ -158,6 +158,20 @@ class TestGrpoFastBase(unittest.TestCase):
         mock_dims.memory_bytes = Mock(return_value=1e9)  # Return 1 GB
 
         return mock_dims
+
+    def create_mock_packed_sequences(self, batch_size: int, seq_length: int, variable_length: bool = False):
+        """Create mock PackedSequences for testing."""
+        lengths = [seq_length - (i % 3) if variable_length else seq_length for i in range(batch_size)]
+        return rl_utils.PackedSequences(
+            query_responses=[torch.full((length,), i, dtype=torch.long) for i, length in enumerate(lengths)],
+            attention_masks=[torch.ones(length, dtype=torch.long) for length in lengths],
+            response_masks=[torch.ones(length, dtype=torch.long) for length in lengths],
+            original_responses=[[i] * seq_length for i in range(batch_size)],
+            tool_masks=[torch.zeros(length, dtype=torch.long) for length in lengths],
+            advantages=[torch.randn(length) for length in lengths],
+            position_ids=[torch.arange(length, dtype=torch.long) for length in lengths],
+            vllm_logprobs=[torch.randn(length) for length in lengths],
+        )
 
     def create_mock_result(self, dataset_index, epoch_number, num_samples_per_prompt=1):
         """Create a mock GenerationResult."""
@@ -996,6 +1010,80 @@ class TestShufflingIterator(unittest.TestCase):
             batch1 = next(iter1)
             batch3 = next(iter3)
             self.assertEqual(batch1, batch3)
+
+
+class TestDataPreparation(TestGrpoFastBase):
+    """Test prepare_collated_data_for_workers function."""
+
+    @parameterized.expand(
+        [
+            (16, 4, 2, 10, False, 0),
+            (32, 8, 4, 20, False, 0),
+            (8, 2, 1, 5, False, 0),
+            (17, 4, 2, 10, False, 0),
+            (25, 8, 3, 15, False, 0),
+            (4, 1, 4, 10, False, 0),
+            (8, 2, 2, 10, True, 999),
+        ]
+    )
+    def test_distribution_and_structure(
+        self, batch_size, world_size, per_device_train_batch_size, seq_length, variable_length, pad_token_id
+    ):
+        """Test data distribution, structure, micro-batch collation, and padding."""
+        packed_sequences = self.create_mock_packed_sequences(batch_size, seq_length, variable_length)
+        result = grpo_fast.prepare_collated_data_for_workers(
+            packed_sequences, world_size, per_device_train_batch_size, pad_token_id, pin_memory=False
+        )
+
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), world_size)
+
+        expected_keys = {
+            "collated_query_responses",
+            "collated_tool_masks",
+            "collated_attention_masks",
+            "collated_position_ids",
+            "collated_advantages",
+            "collated_response_masks",
+            "collated_vllm_logprobs",
+        }
+
+        expected_samples_per_worker = batch_size // world_size
+        samples_per_worker = batch_size // world_size
+        expected_num_microbatches = (
+            samples_per_worker + per_device_train_batch_size - 1
+        ) // per_device_train_batch_size
+
+        for worker_data in result:
+            self.assertIsInstance(worker_data, dict)
+            self.assertEqual(set(worker_data.keys()), expected_keys)
+
+            total_samples = sum(len(batch) for batch in worker_data["collated_query_responses"])
+            self.assertEqual(total_samples, expected_samples_per_worker)
+
+            num_microbatches = len(worker_data["collated_query_responses"])
+            self.assertEqual(num_microbatches, expected_num_microbatches)
+
+            for value in worker_data.values():
+                self.assertIsInstance(value, list)
+                self.assertEqual(len(value), expected_num_microbatches)
+                for i, tensor in enumerate(value):
+                    self.assertIsInstance(tensor, torch.Tensor)
+                    if i < expected_num_microbatches - 1:
+                        self.assertEqual(len(tensor), per_device_train_batch_size)
+                    else:
+                        self.assertLessEqual(len(tensor), per_device_train_batch_size)
+
+            if not variable_length:
+                continue
+
+            for batch in worker_data["collated_query_responses"]:
+                for row in batch:
+                    padding_mask = row == pad_token_id
+                    if not padding_mask.any():
+                        continue
+                    first_pad_idx = padding_mask.nonzero(as_tuple=True)[0][0].item()
+                    self.assertTrue(torch.all(row[first_pad_idx:] == pad_token_id))
 
 
 if __name__ == "__main__":
