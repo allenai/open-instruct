@@ -4,6 +4,7 @@ import random
 import threading
 import time
 import unittest
+from typing import Any
 from unittest.mock import MagicMock, Mock
 
 import numpy as np
@@ -204,15 +205,15 @@ class TestGrpoFastBase(unittest.TestCase):
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
         # Set up dummy reward fn
-        def reward_fn(
+        async def reward_fn(
             responses: list[torch.Tensor],
             decoded_responses: list[str],
             batch,
             finish_reasons: list[str],
             infos: list[list[int]],
             queries: list[str] | None = None,
-        ) -> list[float]:
-            return [1.0 for _ in range(len(responses))]
+        ) -> (list[float], dict[str, Any]):
+            return [1.0 for _ in range(len(responses))], {}
 
         return tokenizer, reward_fn
 

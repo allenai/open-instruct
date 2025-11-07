@@ -2698,7 +2698,7 @@ def make_reward_fn(args: Args) -> Callable:
         finish_reasons: list[str],
         infos: list[list[int]],
         queries: list[str] | None = None,
-    ) -> list[float]:
+    ) -> (list[float], dict[str, Any]):
         timeouts = infos.timeouts
         tool_errors = infos.tool_errors
         tool_outputs = infos.tool_outputs
