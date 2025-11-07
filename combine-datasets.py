@@ -2,7 +2,7 @@ from datasets import load_dataset, Dataset
 
 new_elems = []
 
-math_ds_id = load_dataset("jacobmorrison/math-prompts-used", split="train[:1000]")
+math_ds_id = load_dataset("jacobmorrison/math-prompts-used", split="train[:100]")
 
 for elem in math_ds_id:
     prompt = elem["prompt"]
@@ -19,7 +19,7 @@ for elem in math_ds_id:
         "in_distribution": True
     })
 
-code_ds_id = load_dataset("jacobmorrison/code-prompts-used", split="train[:1000]")
+code_ds_id = load_dataset("jacobmorrison/code-prompts-used", split="train[:100]")
 
 for elem in code_ds_id:
     prompt = elem["prompt"]
@@ -36,7 +36,7 @@ for elem in code_ds_id:
         "in_distribution": True
     })
 
-if_ds_id = load_dataset("jacobmorrison/if-prompts-used", split="train[:1000]")
+if_ds_id = load_dataset("jacobmorrison/if-prompts-used", split="train[:100]")
 
 for elem in if_ds_id:
     prompt = elem["prompt"]
@@ -53,7 +53,7 @@ for elem in if_ds_id:
         "in_distribution": True
     })
 
-math_ds_ood = load_dataset("jacobmorrison/rlvr_math_ood", split="train[:1000]")
+math_ds_ood = load_dataset("jacobmorrison/rlvr_math_ood", split="train[:100]")
 
 for elem in math_ds_ood:
     prompt = elem["messages"][0]["content"]
@@ -70,7 +70,7 @@ for elem in math_ds_ood:
         "in_distribution": False
     })
 
-code_ds_ood = load_dataset("jacobmorrison/rlvr_code_ood", split="train[:1000]")
+code_ds_ood = load_dataset("jacobmorrison/rlvr_code_ood", split="train[:100]")
 
 for elem in code_ds_ood:
     prompt = elem["messages"][0]["content"]
@@ -87,7 +87,7 @@ for elem in code_ds_ood:
         "in_distribution": False
     })
 
-if_ds_ood = load_dataset("jacobmorrison/rlvr_if_ood", split="train[:1000]")
+if_ds_ood = load_dataset("jacobmorrison/rlvr_if_ood", split="train[:100]")
 
 for elem in if_ds_ood:
     prompt = elem["messages"][0]["content"]
@@ -105,4 +105,4 @@ for elem in if_ds_ood:
     })
 
 eval_dataset = Dataset.from_list(new_elems)
-eval_dataset.push_to_hub("jacobmorrison/social-rl-eval-prompts")
+eval_dataset.push_to_hub("jacobmorrison/social-rl-eval-prompts-100")
