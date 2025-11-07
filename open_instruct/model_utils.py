@@ -264,7 +264,8 @@ async def apply_verifiable_reward(
     reward_fn_mapping: dict[str, VerifierFunction],
     responses: list[torch.Tensor],
     decoded_responses: list[str],
-    batch: Batch,
+    ground_truths: list[float],
+    datasets: list[str],
     reward_mult: int = 10,
     queries: list[str] | None = None,
 ):
@@ -276,7 +277,7 @@ async def apply_verifiable_reward(
     task_metadata = []
 
     for i, (tok_prediction, prediction, ground_truth, dataset, query) in enumerate(
-        zip(responses, decoded_responses, batch.ground_truths, batch.datasets, queries)
+        zip(responses, decoded_responses, ground_truths, datasets, queries)
     ):
         # allow multiple ground truths and datasets for a single response
 

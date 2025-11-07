@@ -208,7 +208,8 @@ class TestGrpoFastBase(unittest.TestCase):
         async def reward_fn(
             responses: list[torch.Tensor],
             decoded_responses: list[str],
-            batch,
+            ground_truths: list[Any],
+            datasets: list[str],
             finish_reasons: list[str],
             infos: list[list[int]],
             queries: list[str] | None = None,

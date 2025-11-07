@@ -1712,16 +1712,8 @@ def accumulate_inference_batches(
             reward_fn(
                 result.responses,
                 decoded_responses,
-                # note that you only need ground_truths and datasets for the reward model
-                Batch(
-                    queries=None,
-                    ground_truths=k_ground_truths,
-                    datasets=k_datasets,
-                    raw_queries=None,
-                    decoded_responses=None,
-                    indices=None,
-                    scores=None,
-                ),
+                k_ground_truths,
+                k_datasets,
                 result.finish_reasons,
                 result.request_info,
                 k_raw_queries,
@@ -1989,7 +1981,7 @@ def data_preparation_thread(
             real_num_responses = len(result.responses)
             expected_num_responses = args.num_samples_per_prompt_rollout * args.num_unique_prompts_rollout
 
-            solved_num_responses = (scores < args.max_possible_score).sum()
+            unsolved_num_responses = (scores < args.max_possible_score).sum()
             sequence_lengths = np.array([len(response) for response in result.responses])
             sequence_length_solved = (
                 np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == args.max_possible_score])
@@ -2007,7 +1999,7 @@ def data_preparation_thread(
             metrics = {
                 "scores": scores.mean(),
                 "real_batch_size_ratio": real_num_responses / expected_num_responses,
-                "unsolved_batch_size_ratio": solved_num_responses / real_num_responses,
+                "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
                 "packed_ratio": len(packed_sequences.query_responses) / real_num_responses,
                 "val/solve_rate_hist": None,
                 "val/total_reward_groups": real_num_responses / args.num_samples_per_prompt_rollout,
@@ -2683,7 +2675,8 @@ def make_reward_fn(args: Args) -> Callable:
     async def reward_fn(
         responses: list[torch.Tensor],
         decoded_responses: list[str],
-        batch: Batch,
+        ground_truths: list[Any],
+        datasets: list[str],
         finish_reasons: list[str],
         infos: list[list[int]],
         queries: list[str] | None = None,
@@ -2721,7 +2714,8 @@ def make_reward_fn(args: Args) -> Callable:
                     reward_fn_mapping,
                     responses,
                     decoded_responses,
-                    batch,
+                    ground_truths,
+                    datasets,
                     reward_mult=args.verification_reward,
                     queries=queries,
                 )
