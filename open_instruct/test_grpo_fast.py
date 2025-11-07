@@ -622,7 +622,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         )
 
         # Verify results work correctly even with out-of-order processing
-        self.assertEqual(len(batch.queries), num_prompts)
+        self.assertEqual(len(batch.queries), num_prompts * num_samples_per_prompt)
         self.assertEqual(len(combined_result.responses), num_prompts * num_samples_per_prompt)
         self.assertEqual(len(pending_queries_map), 0)
 
