@@ -188,6 +188,8 @@ jobs:
           echo "Experiment IDs: ${EXPERIMENT_IDS[*]}"
 
       - name: Wait for all Beaker experiments completion
+        id: wait
+        if: success() && steps.launch.outputs.experiment_ids != ''
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
         run: |
@@ -197,8 +199,8 @@ jobs:
           EXPERIMENT_NAMES=(${{ steps.launch.outputs.experiment_names }})
 
           if [ ${#EXPERIMENT_IDS[@]} -eq 0 ]; then
-            echo "No experiments detected; nothing to wait for."
-            exit 0
+            echo "ERROR: No experiments detected despite launch step succeeding."
+            exit 1
           fi
 
           FAILED_FILE=$(mktemp)
@@ -227,11 +229,17 @@ jobs:
           if [ -s "$FAILED_FILE" ]; then
             echo ""
             echo "❌ One or more experiments failed or timed out. Showing logs:"
+            FAILED_EXP_IDS=()
+            FAILED_EXP_NAMES=()
             while IFS='|' read -r EXP_ID EXP_NAME; do
               echo ""
               echo "=== Error logs for ${EXP_NAME} (${EXP_ID}) ==="
               beaker experiment logs "$EXP_ID" | tail -n 200 || true
+              FAILED_EXP_IDS+=("$EXP_ID")
+              FAILED_EXP_NAMES+=("$EXP_NAME")
             done < "$FAILED_FILE"
+            echo "failed_experiment_ids=${FAILED_EXP_IDS[*]}" >> $GITHUB_OUTPUT
+            echo "failed_experiment_names=${FAILED_EXP_NAMES[*]}" >> $GITHUB_OUTPUT
             rm -f "$FAILED_FILE"
             exit 1
           fi
@@ -241,9 +249,17 @@ jobs:
           echo "✅ All experiments completed successfully!"
 
       - name: Check image
-        run: docker run --rm ${{ steps.launch.outputs.integration_image }}
+        if: success()
+        run: |
+          IMAGE="${{ steps.launch.outputs.integration_image }}"
+          if [ -z "$IMAGE" ]; then
+            echo "ERROR: No integration image specified"
+            exit 1
+          fi
+          docker run --rm "$IMAGE"
 
       - name: Push image to Beaker
+        if: success()
         env:
           BEAKER_TARGET_IMAGE: open_instruct_auto
           SOURCE_IMAGE: ${{ steps.launch.outputs.integration_image }}
@@ -271,11 +287,26 @@ jobs:
 
           EXPERIMENT_IDS=(${{ steps.launch.outputs.experiment_ids }})
           EXPERIMENT_NAMES=(${{ steps.launch.outputs.experiment_names }})
+          FAILED_EXP_IDS="${{ steps.wait.outputs.failed_experiment_ids }}"
+          FAILED_EXP_NAMES="${{ steps.wait.outputs.failed_experiment_names }}"
+
+          declare -A FAILED_MAP
+          if [ -n "$FAILED_EXP_NAMES" ]; then
+            FAILED_IDS=($FAILED_EXP_IDS)
+            FAILED_NAMES=($FAILED_EXP_NAMES)
+            for i in "${!FAILED_NAMES[@]}"; do
+              FAILED_MAP["${FAILED_NAMES[$i]}"]="${FAILED_IDS[$i]}"
+            done
+          fi
 
           for i in "${!EXPERIMENT_IDS[@]}"; do
             EXP_ID="${EXPERIMENT_IDS[$i]}"
             EXP_NAME="${EXPERIMENT_NAMES[$i]}"
-            echo "- **$EXP_NAME**: [View on Beaker](https://beaker.org/ex/$EXP_ID)" >> $GITHUB_STEP_SUMMARY
+            if [ -n "${FAILED_MAP[$EXP_NAME]}" ]; then
+              echo "- **$EXP_NAME** ❌: [View on Beaker](https://beaker.org/ex/$EXP_ID)" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- **$EXP_NAME** ✅: [View on Beaker](https://beaker.org/ex/$EXP_ID)" >> $GITHUB_STEP_SUMMARY
+            fi
           done
 
           echo "" >> $GITHUB_STEP_SUMMARY
