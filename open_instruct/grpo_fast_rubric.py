@@ -2316,11 +2316,12 @@ if __name__ == "__main__":
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating adaptive rubric reward"):
                 adaptive_rubric_scores = await _generate_instance_wise_adaptive_rubrics(decoded_responses, ground_truths, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer)
                 # Update ground truths with adaptive rubrics and incorporate rubric buffer
-                ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, avg_num_active_buffer_rubrics, rubric_buffer = update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubric_scores, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer)
+                ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, avg_num_active_buffer_rubrics, rubric_buffer, skipped_count = update_ground_truths_with_adaptive_rubrics(ground_truths, adaptive_rubric_scores, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer)
                 metrics["objective/valid_adaptive_rubric_rate"] = valid_adaptive_rubric_rate
                 metrics["objective/avg_num_ground_truths"] = avg_num_ground_truths
                 metrics["objective/avg_num_adaptive_rubrics"] = avg_num_adaptive_rubrics
                 metrics["objective/avg_num_active_buffer_rubrics"] = avg_num_active_buffer_rubrics
+                metrics["objective/skipped_adaptive_rubrics"] = skipped_count
                 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):

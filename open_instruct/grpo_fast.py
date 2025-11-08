@@ -2649,11 +2649,12 @@ if __name__ == "__main__":
                     adaptive_rubric_scores_data = all_adaptive_rubrics
                 
                 # Update ground truths with adaptive rubrics and incorporate rubric buffer
-                ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, avg_num_active_buffer_rubrics, rubric_buffer = update_ground_truths_with_adaptive_rubrics(ground_truths, all_adaptive_rubrics, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer)
+                ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, avg_num_active_buffer_rubrics, rubric_buffer, skipped_count = update_ground_truths_with_adaptive_rubrics(ground_truths, all_adaptive_rubrics, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer)
                 metrics["objective/valid_adaptive_rubric_rate"] = valid_adaptive_rubric_rate
                 metrics["objective/avg_num_ground_truths"] = avg_num_ground_truths
                 metrics["objective/avg_num_adaptive_rubrics"] = avg_num_adaptive_rubrics
                 metrics["objective/avg_num_active_buffer_rubrics"] = avg_num_active_buffer_rubrics
+                metrics["objective/skipped_adaptive_rubrics"] = skipped_count
                 
                 
         if args.apply_verifiable_reward:

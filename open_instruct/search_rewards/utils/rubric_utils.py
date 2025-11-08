@@ -470,9 +470,11 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, all_adaptive_rubri
     
     # Track processed queries to avoid duplicate buffer updates
     processed_queries = set()
+    skipped_count = 0
     
     for i, (ground_truth, adaptive_rubrics) in enumerate(zip(ground_truths, expanded_adaptive_rubrics)):
         if adaptive_rubrics is None:
+            skipped_count += 1
             continue
         
         # Handle the case where ground_truth is wrapped in a list
@@ -550,8 +552,13 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, all_adaptive_rubri
             
         valid_adaptive_rubric_rate += 1.0
     
-    valid_adaptive_rubric_rate /= len(ground_truths)
-    avg_num_ground_truths = sum(num_ground_truths) / len(num_ground_truths)
-    avg_num_adaptive_rubrics = sum(num_adaptive_rubrics) / len(num_adaptive_rubrics)
+    # Log warning if all adaptive rubrics were skipped (likely due to generation failures)
+    if skipped_count > 0:
+        print(f"⚠️  Warning: Skipped {skipped_count}/{len(expanded_adaptive_rubrics)} adaptive rubrics (None values - likely JSON parsing failures)")
+    
+    # Handle empty lists to avoid division by zero
+    valid_adaptive_rubric_rate = valid_adaptive_rubric_rate / len(ground_truths) if len(ground_truths) > 0 else 0.0
+    avg_num_ground_truths = sum(num_ground_truths) / len(num_ground_truths) if len(num_ground_truths) > 0 else 0.0
+    avg_num_adaptive_rubrics = sum(num_adaptive_rubrics) / len(num_adaptive_rubrics) if len(num_adaptive_rubrics) > 0 else 0.0
     avg_num_active_buffer_rubrics = sum(num_active_buffer_rubrics) / len(num_active_buffer_rubrics) if num_active_buffer_rubrics else 0.0
-    return ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, avg_num_active_buffer_rubrics, rubric_buffer
+    return ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, avg_num_active_buffer_rubrics, rubric_buffer, skipped_count
