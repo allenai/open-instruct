@@ -22,15 +22,15 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --tokenizer_name $MODEL_NAME \
     --use_slow_tokenizer False \
     --dataset_mixer_list allenai/olmo-3-preference-mix-deltas-complement2-grafmix-DECON-qwen32b-kwd-ftd-ch-ftd-lbc100 125000 \
-          allenai/dpo-yolo1-200k-gpt4.1-2w2s-maxdelta_rejected-DECON-rm-gemma3-kwd-ftd-ch-ftd-lbc100 125000 \
-          allenai/general_responses_dev_8maxturns_truncated2048_victoriag-qwenrejected-keyword-filtered-cn-ftd 1250 \
-	  allenai/paraphrase_train_dev_8maxturns_truncated2048_victoriag-qwen-redorejected-keyword-filtered-cn-ftd 938 \
-	  allenai/repeat_tulu_5maxturns_big_truncated2048_victoriagrejected-keyword-filtered-cn-ftd 312 \
-	  allenai/self-talk_gpt3.5_gpt4o_prefpairs_truncated2048_victoriagrejected-keyword-filtered-cn-ftd 2500 \
-	  allenai/general-responses-truncated-gpt-dedup 1250 \
-	  allenai/paraphrase-truncated-gpt-dedup 938 \
-	  allenai/repeat-truncated-gpt-dedup 312 \
-	  allenai/self-talk-truncated-gpt-deduped 2500 \
+        allenai/dpo-yolo1-200k-gpt4.1-2w2s-maxdelta_rejected-DECON-rm-gemma3-kwd-ftd-ch-ftd-lbc100 125000 \
+        allenai/general_responses_dev_8mt_trunc2048_victoriag-qwenrejected-kw-ftd-cn-ftd-lenbias-100 1250 \
+        allenai/paraphrase_train_dev_8mt_trunc2048_victoriag-qwen-redorejected-kw-ftd-cn-ftd-lenbias-100 938 \
+        allenai/repeat_tulu_5maxturns_big_truncated2048_victoriagrejected-kw-ftd-cn-ftd-lenbias-100 312 \
+        allenai/self-talk_gpt3.5_gpt4o_prefpairs_truncated2048_victoriagrejected-kw-ftd-cn-ftd-lenbias-100 1617 \
+        allenai/general-responses-truncated-gpt-dedup-lenbias-100 1250 \
+        allenai/paraphrase-truncated-gpt-dedup-lenbias-100 938 \
+        allenai/repeat-truncated-gpt-dedup-lenbias-100 312 \
+        allenai/self-talk-truncated-gpt-deduped-lenbias-100 1663 \
     --max_seq_length 16384 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 8 \
