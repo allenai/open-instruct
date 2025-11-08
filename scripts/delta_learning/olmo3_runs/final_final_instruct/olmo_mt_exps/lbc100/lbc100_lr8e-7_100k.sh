@@ -1,13 +1,13 @@
 MODEL_NAME=/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/olmo3-hparam-search/olmo3-final-on-olmo3-sft-1103-base-1
 EXP_NAME=olmo3-instruct-final-dpo-lbc100-s88-100k-lr8e-7
 python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
-	--cluster ai2/jupiter \
+	--cluster ai2/augusta \
 	--gs_model_name $EXP_NAME \
     --workspace ai2/olmo-instruct \
     --priority urgent \
     --image scottg/open_instruct_dev --pure_docker_mode \
     --preemptible \
-    --num_nodes 4 \
+    --num_nodes 2 \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
     --gpus 8 -- accelerate launch \

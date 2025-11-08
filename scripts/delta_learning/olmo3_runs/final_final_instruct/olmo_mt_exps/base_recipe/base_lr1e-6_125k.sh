@@ -7,7 +7,7 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --priority urgent \
     --image scottg/open_instruct_dev --pure_docker_mode \
     --preemptible \
-    --num_nodes 4 \
+    --num_nodes 2 \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
     --gpus 8 -- accelerate launch \
