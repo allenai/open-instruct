@@ -1705,10 +1705,10 @@ def accumulate_inference_batches(
         decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
         # TODO(finbarrtimbers): Make PendingQueriesMap.pop return a Batch, and add a Batch.repeat method.
-        k_queries = repeat_each(query, generation_config.n)
-        k_ground_truths = repeat_each(ground_truth, generation_config.n)
-        k_datasets = repeat_each(dataset, generation_config.n)
-        k_raw_queries = repeat_each(raw_query, generation_config.n)
+        k_queries = repeat_each([query], generation_config.n)
+        k_ground_truths = repeat_each([ground_truth], generation_config.n)
+        k_datasets = repeat_each([dataset], generation_config.n)
+        k_raw_queries = repeat_each([raw_query], generation_config.n)
 
         scores, reward_metrics = asyncio.run(
             reward_fn(
