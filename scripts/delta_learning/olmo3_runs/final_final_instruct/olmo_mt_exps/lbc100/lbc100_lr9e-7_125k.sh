@@ -48,7 +48,7 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
     --chat_template_name olmo123 \
     --with_tracking \
     --seed 88 \
-    --eval_workspace olmo-instruct \
+    --eval_workspace ai2/olmo-instruct \
     --oe_eval_gpu_multiplier 2 \
     --oe_eval_max_length 32768 \
-    --oe_eval_tasks mmlu:cot::hamish_zs_reasoning_deepseek,popqa::hamish_zs_reasoning_deepseek,simpleqa::tulu-thinker_deepseek,bbh:cot::hamish_zs_reasoning_deepseek_v2,gpqa:0shot_cot::hamish_zs_reasoning_deepseek,zebralogic::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,minerva_math::hamish_zs_reasoning_deepseek,gsm8k::zs_cot_latex_deepseek,omega_500:0-shot-chat_deepseek,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,bfcl_all::std
+    --eval_priority urgent
