@@ -372,7 +372,7 @@ Generate only the most impactful, non-redundant rubrics revealing meaningful qua
 """
 
 
-async def generate_instance_wise_adaptive_rubrics(question, response_list, existing_rubrics=None):
+async def generate_instance_wise_adaptive_rubrics(question, response_list, existing_rubrics=None, model_name=os.environ.get("RUBRIC_GENERATION_MODEL", "gpt-4.1")):
     
     prompt_suffix = f"Question: {question}\n\nResponses:\n"
     for i, response in enumerate(response_list):
@@ -385,7 +385,7 @@ async def generate_instance_wise_adaptive_rubrics(question, response_list, exist
     
     try:
         resp = await run_litellm_async(
-                model_name="gpt-4.1",
+                model_name=model_name,
                 user_prompt=prompt,
             )
 
@@ -429,7 +429,7 @@ async def _generate_instance_wise_adaptive_rubrics(responses, ground_truths, num
         answer_list = [extract_answer_context_citations(response)[1] for response in response_list]
         answer_list = [answer for answer in answer_list if answer is not None]
         # Create task for parallel execution
-        task = generate_instance_wise_adaptive_rubrics(question, response_list, existing_rubrics_str)
+        task = generate_instance_wise_adaptive_rubrics(question, response_list, existing_rubrics_str, model_name=os.environ.get("RUBRIC_GENERATION_MODEL", "gpt-4.1"))
         tasks.append(task)
     
     # Execute all tasks in parallel
