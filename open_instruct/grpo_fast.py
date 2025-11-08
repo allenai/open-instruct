@@ -1731,6 +1731,9 @@ def accumulate_inference_batches(
                 filtered_prompt_solved += 1
             else:
                 filtered_prompt_nonzero += 1
+            logging.debug(
+                f"[Data Preparation Thread] Filtered prompt with reward std 0, total filtered {total_filtered_prompts}"
+            )
             continue
 
         results.append(result)
