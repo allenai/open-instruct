@@ -5,7 +5,7 @@ python /weka/oe-adapt-default/scottg/olmo/open-instruct/mason.py \
 	--gs_model_name $EXP_NAME \
     --workspace ai2/olmo-instruct \
     --priority urgent \
-    --image scottg/open_instruct_dev --pure_docker_mode \
+    --image scottg/open_instruct_dev_11072025 --pure_docker_mode \
     --preemptible \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
