@@ -8,3 +8,6 @@
 - To run the `./scripts/train/build_image_and_launch.sh` script, you must commit the current changes.
 - Launch tool use experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/tool_grpo_fast.sh`.
 - Launch multi-node non-tool experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/large_test_script.sh`.
+
+# Style
+- Never remove comments unless they have become outdated. Try to preserve all comments when possible.
