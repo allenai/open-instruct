@@ -389,6 +389,7 @@ async def generate_instance_wise_adaptive_rubrics(question, response_list, exist
                 user_prompt=prompt,
             )
 
+        print(f"Response: {resp}")
         obj = extract_json_from_response(resp)
         print(f"Generated instance-wise adaptive rubrics: {obj}")
     except Exception as e:
