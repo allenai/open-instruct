@@ -34,32 +34,35 @@ def _get_litellm_semaphore() -> asyncio.Semaphore:
 
 
 def extract_json_from_response(response: str) -> Optional[Dict[str, Any]]:
-    json_start = response.find("{")
     json_end = response.rfind("}") + 1
-    if json_start == -1 or json_end == -1:
+    if json_end == 0:
         return None
-
-    json_str = response[json_start:json_end]
     
-    try:
-        return json.loads(json_str)
-    except json.JSONDecodeError:
+    # Try to find valid JSON by testing different starting positions
+    json_start = response.find("{")
+    while json_start != -1 and json_start < json_end:
+        json_str = response[json_start:json_end]
+        
         try:
-            # Clean the JSON string of potential invisible characters and extra whitespace
-            cleaned_json = json_str.strip().encode('utf-8').decode('utf-8-sig')
-            return json.loads(cleaned_json)
+            return json.loads(json_str)
         except json.JSONDecodeError:
             try:
-                # Fix doubled braces (e.g., '{{' -> '{', '}}' -> '}')
-                fixed_braces = json_str.replace('{{', '{').replace('}}', '}')
-                return json.loads(fixed_braces)
+                # Clean the JSON string of potential invisible characters and extra whitespace
+                cleaned_json = json_str.strip().encode('utf-8').decode('utf-8-sig')
+                return json.loads(cleaned_json)
             except json.JSONDecodeError:
                 try:
-                    # Last resort: try adding closing brackets (for incomplete arrays/objects)
-                    return json.loads(json_str + "]}")
+                    # Fix doubled braces (e.g., '{{' -> '{', '}}' -> '}')
+                    fixed_braces = json_str.replace('{{', '{').replace('}}', '}')
+                    return json.loads(fixed_braces)
                 except json.JSONDecodeError:
-                    LOGGER.warning(f"Could not decode JSON from response: {repr(json_str)}")
-                    return None
+                    # Try next { position
+                    json_start = response.find("{", json_start + 1)
+                    continue
+        break
+    
+    LOGGER.warning(f"Could not decode JSON from response: {repr(response)}")
+    return None
 
 
 def run_chatopenai(
