@@ -384,6 +384,7 @@ async def generate_instance_wise_adaptive_rubrics(question, response_list, exist
     prompt = INSTANCE_WISE_RUBRIC_GENERATION_PROMPT + prompt_suffix
     
     try:
+        print(f"Prompt: {prompt}")
         resp = await run_litellm_async(
                 model_name=model_name,
                 user_prompt=prompt,
