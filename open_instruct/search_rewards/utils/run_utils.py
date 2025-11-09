@@ -257,12 +257,12 @@ async def run_litellm_async(
 
     # Set default parameters
     chat_kwargs["temperature"] = chat_kwargs.get("temperature", 0)
-    chat_kwargs["max_tokens"] = chat_kwargs.get("max_tokens", 800)
+    chat_kwargs["max_tokens"] = chat_kwargs.get("max_tokens", 32768)
     chat_kwargs["top_p"] = chat_kwargs.get("top_p", 1.0)
     chat_kwargs["frequency_penalty"] = chat_kwargs.get("frequency_penalty", 0.0)
     chat_kwargs["presence_penalty"] = chat_kwargs.get("presence_penalty", 0.0)
     chat_kwargs["num_retries"] = chat_kwargs.get("num_retries", 5)
-    chat_kwargs["fallbacks"] = chat_kwargs.get("fallbacks", ["gpt-4.1-mini"])
+    chat_kwargs["fallbacks"] = chat_kwargs.get("fallbacks", [])
 
     # Prepare messages
     if messages is not None:
