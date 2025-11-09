@@ -452,6 +452,8 @@ class Args:
     """Whether to evaluate the closed book answer"""
     apply_adaptive_rubric_reward: bool = False
     """Whether to apply adaptive rubric reward"""
+    use_full_responses_for_adaptive_rubric: bool = False
+    """Whether to use full responses when generating adaptive rubrics"""
     normalize_rubric_scores: bool = False
     """Whether to normalize the rubric scores per rubric"""
     use_rubric_buffer: bool = False
@@ -2642,7 +2644,7 @@ if __name__ == "__main__":
 
         if args.apply_adaptive_rubric_reward and is_training:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating adaptive rubric reward"):
-                all_adaptive_rubrics = await _generate_instance_wise_adaptive_rubrics(decoded_responses, ground_truths, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer)
+                all_adaptive_rubrics = await _generate_instance_wise_adaptive_rubrics(decoded_responses, ground_truths, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer, use_full_responses=args.use_full_responses_for_adaptive_rubric)
                 
                 # Store adaptive rubric scores for saving if requested
                 if args.save_adaptive_rubrics:
