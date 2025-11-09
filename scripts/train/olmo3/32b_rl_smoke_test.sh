@@ -45,7 +45,7 @@ uv run python mason.py \
         --verbose False \
         --ground_truths_key ground_truth \
         --sft_messages_key messages \
-        --total_episodes 200_000 \
+        --total_episodes 10240 \
 	--gather_whole_model False \
         --deepspeed_stage 3 \
         --num_learners_per_node 8 8 8 \

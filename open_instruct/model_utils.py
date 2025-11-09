@@ -55,7 +55,9 @@ class Batch:
     ground_truths: list[list[int]]
     datasets: list[str]
     raw_queries: list[str] | None
+    decoded_responses: list[str] | None
     indices: list[int] | None
+    scores: list[float] | None
 
     def __getitem__(self, key: slice | int | list[int]) -> "Batch":
         """Enable indexing and slicing: batch[5], batch[start:end], or batch[[1,3,5]]."""
@@ -262,7 +264,8 @@ async def apply_verifiable_reward(
     reward_fn_mapping: dict[str, VerifierFunction],
     responses: list[torch.Tensor],
     decoded_responses: list[str],
-    batch: Batch,
+    ground_truths: list[float],
+    datasets: list[str],
     reward_mult: int = 10,
     queries: list[str] | None = None,
 ):
@@ -274,7 +277,7 @@ async def apply_verifiable_reward(
     task_metadata = []
 
     for i, (tok_prediction, prediction, ground_truth, dataset, query) in enumerate(
-        zip(responses, decoded_responses, batch.ground_truths, batch.datasets, queries)
+        zip(responses, decoded_responses, ground_truths, datasets, queries)
     ):
         # allow multiple ground truths and datasets for a single response
 
@@ -308,7 +311,7 @@ async def apply_verifiable_reward(
     # Execute all tasks in parallel
     if async_tasks:
         reward_results = await asyncio.gather(*async_tasks)
-        logger.info(f"Applied {len(reward_results)} ground truth rewards in parallel 🤗")
+        logger.debug(f"Applied {len(reward_results)} ground truth rewards in parallel 🤗")
     else:
         reward_results = []
 
