@@ -431,7 +431,7 @@ async def _generate_instance_wise_adaptive_rubrics(responses, ground_truths, num
         answer_list = [extract_answer_context_citations(response)[1] for response in response_list]
         answer_list = [answer for answer in answer_list if answer is not None]
         # Create task for parallel execution
-        task = generate_instance_wise_adaptive_rubrics(question, response_list, existing_rubrics_str, model_name=os.environ.get("RUBRIC_GENERATION_MODEL", "gpt-4.1"))
+        task = generate_instance_wise_adaptive_rubrics(question, answer_list, existing_rubrics_str, model_name=os.environ.get("RUBRIC_GENERATION_MODEL", "gpt-4.1"))
         tasks.append(task)
     
     # Execute all tasks in parallel
