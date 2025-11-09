@@ -292,8 +292,9 @@ async def run_litellm_async(
                 model=model_name,
                 **chat_kwargs,
             )
-    except:
+    except Exception as e:
         # if we get an error, return an empty string
+        print(f"Error in run_litellm_async: {e}")
         return ""
 
     return response.choices[0].message.content
