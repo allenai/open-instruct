@@ -1,6 +1,6 @@
 MODEL_NAME=/weka/oe-adapt-default/finbarrt/stego32/step358000-hf
 NUM_NODES=8
-
+BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 #for LR in 4e-8 5e-8 6e-8 7e-8 8e-8 9e-8 1e-7 2e-7
 for LR in 1e-7
 do
@@ -10,7 +10,7 @@ do
         --gs_model_name $EXP_NAME \
         --workspace ai2/olmo-instruct \
         --priority urgent \
-        --image scottg/open_instruct_dev_11092025 --pure_docker_mode \
+	--image "$BEAKER_IMAGE" --pure_docker_mode \
         --preemptible \
         --num_nodes $NUM_NODES \
         --budget ai2/oe-adapt \
