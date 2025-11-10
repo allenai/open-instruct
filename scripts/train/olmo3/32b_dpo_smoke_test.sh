@@ -1,3 +1,4 @@
+BEAKER_IMAGE=$1
 MODEL_NAME=/weka/oe-adapt-default/finbarrt/stego32/step358000-hf
 NUM_NODES=8
 for LR in 5e-8
@@ -8,7 +9,7 @@ do
        --gs_model_name $EXP_NAME \
        --workspace ai2/olmo-instruct \
        --priority urgent \
-       --image scottg/open_instruct_dev_11092025 --pure_docker_mode \
+       --image $BEAKER_IMAGE --pure_docker_mode \
        --env TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=3600 \
         --env TORCH_NCCL_AVOID_RECORD_STREAMS=1 \
         --env TORCH_DIST_INIT_BARRIER=1 \
