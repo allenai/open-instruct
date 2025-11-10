@@ -138,6 +138,7 @@ class TestGrpoFastBase(unittest.TestCase):
         mock_args.vllm_tensor_parallel_size = 1
         mock_args.num_samples_per_prompt_rollout = num_samples
         mock_args.verbose = False
+        mock_args.max_possible_score = 1.0
         return mock_args
 
     def create_mock_model_dims(self):
