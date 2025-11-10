@@ -78,17 +78,14 @@ from open_instruct.utils import (
     ArgumentParserPlus,
     ModelDims,
     clean_last_n_checkpoints,
-    download_from_gs_bucket,
     get_last_checkpoint_path,
     get_wandb_tags,
-    gs_folder_exists,
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
     maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
-    upload_to_gs_bucket,
 )
 
 logger = get_logger(__name__)
@@ -364,8 +361,6 @@ class FlatArguments:
     """Whether to try to save the model to Beaker dataset `/output` after training"""
     gs_bucket_path: str | None = None
     """The path to the gs bucket to save the model to"""
-    gs_ref_logprobs_cache_dir: str | None = "ref_logprobs_cache"
-    """The path in the gs bucket to save the reference logprobs cache to"""
     oe_eval_tasks: list[str] | None = None
     """The beaker evaluation tasks to launch"""
     oe_eval_max_length: int = 4096
@@ -459,13 +454,9 @@ def get_ref_logprobs_cache_path(
 
 
 def maybe_save_ref_logprobs_to_disk(
-    cache_path: str | None,
-    epoch_cached_reference_chosen_logps: list,
-    epoch_cached_reference_rejected_logps: list,
-    gs_bucket_path: str | None = None,
-    gs_ref_logprobs_cache_dir: str | None = None
+    cache_path: str | None, epoch_cached_reference_chosen_logps: list, epoch_cached_reference_rejected_logps: list
 ) -> None:
-    """Save reference logprobs to disk if cache_path is provided. Also upload to GCS if gs_bucket_path is provided."""
+    """Save reference logprobs to disk if cache_path is provided."""
     if cache_path is None:
         return
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
@@ -475,41 +466,12 @@ def maybe_save_ref_logprobs_to_disk(
     }
     torch.save(cache_data, cache_path)
     logger.info(f"Saved reference logprobs cache to {cache_path}")
-    
-    # Upload to GCS if gs_bucket_path is provided
-    if gs_bucket_path is not None:
-        # Construct the GCS path: gs://bucket/path/ref_logprobs_cache/filename.pt
-        cache_filename = os.path.basename(cache_path)
-        # Create GCS path: gs_bucket_path/ref_logprobs_cache/cache_filename
-        gs_cache_path = f"{gs_bucket_path.rstrip('/')}/{gs_ref_logprobs_cache_dir.strip('/')}/{cache_filename}"
-        try:
-            upload_to_gs_bucket(cache_path, gs_cache_path)
-            logger.info(f"Uploaded reference logprobs cache to {gs_cache_path}")
-        except Exception as e:
-            logger.warning(f"Failed to upload cache to GCS: {e}")
 
 
-def load_ref_logprobs_from_disk(cache_path: str, gs_bucket_path: str | None = None, gs_ref_logprobs_cache_dir: str | None = None) -> tuple:
-    """Load reference logprobs from disk. If not found locally and gs_bucket_path is provided, try downloading from GCS."""
+def load_ref_logprobs_from_disk(cache_path: str) -> tuple:
+    """Load reference logprobs from disk."""
     if not os.path.exists(cache_path):
-        # Try downloading from GCS if gs_bucket_path is provided
-        if gs_bucket_path is not None:
-            cache_filename = os.path.basename(cache_path)
-            gs_cache_path = f"{gs_bucket_path.rstrip('/')}/{gs_ref_logprobs_cache_dir.strip('/')}/{cache_filename}"
-            try:
-                if gs_folder_exists(gs_cache_path):
-                    logger.info(f"Cache not found locally, downloading from {gs_cache_path}")
-                    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-                    download_from_gs_bucket(gs_cache_path, cache_path)
-                    logger.info(f"Downloaded reference logprobs cache from {gs_cache_path}")
-                else:
-                    logger.info(f"Cache not found in GCS at {gs_cache_path}")
-                    return None, None
-            except Exception as e:
-                logger.warning(f"Failed to download cache from GCS: {e}")
-                return None, None
-        else:
-            return None, None
+        return None, None
     logger.info(f"Loading reference logprobs cache from {cache_path}")
     cache_data = torch.load(cache_path)
     return (cache_data["epoch_cached_reference_chosen_logps"], cache_data["epoch_cached_reference_rejected_logps"])
@@ -544,7 +506,7 @@ def maybe_load_reference_logprobs_from_disk(
         args.seed
     )
     epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = load_ref_logprobs_from_disk(
-        cache_location, gs_bucket_path=args.gs_bucket_path, gs_ref_logprobs_cache_dir=args.gs_ref_logprobs_cache_dir
+        cache_location
     )
 
     if epoch_cached_reference_chosen_logps is not None:
@@ -1039,7 +1001,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 forward_fn,
             )
             maybe_save_ref_logprobs_to_disk(
-                cache_location, epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps, gs_bucket_path=args.gs_bucket_path, gs_ref_logprobs_cache_dir=args.gs_ref_logprobs_cache_dir
+                cache_location, epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps
             )
             accelerator.wait_for_everyone()
 
