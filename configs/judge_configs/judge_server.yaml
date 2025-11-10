@@ -1,6 +1,6 @@
 version: v2
 budget: ai2/oe-adapt
-description: "VLLM Server qwen3 8b rl rag judge"
+description: "VLLM Server qwen3 32b judge"
 tasks:
   - name: "vllm-job"
     image:
@@ -9,13 +9,14 @@ tasks:
     command: ["/bin/sh", "-c"]
     arguments:
       [
-        "pip install 'vllm==0.10.2' && \
-          VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 vllm serve Qwen/Qwen3-8B \
-            --tensor-parallel-size 1 \
+        "pip install 'vllm<11' && \
+          VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 vllm serve Qwen/Qwen3-32B \
+            --tensor-parallel-size 4 \
+            --max-model-len 32768 \
             --trust-remote-code \
-            --port 8003 \
-            --max-model-len 365840 \
-            --enforce-eager"
+            --enforce-eager \
+            --chat-template /weka/oe-adapt-default/hamishi/qwen_no_think_config.jinja \
+            --port 8001"
       ]
     datasets:
       - mountPath: /weka/oe-adapt-default
@@ -25,7 +26,7 @@ tasks:
       cluster:
         - ai2/ceres
     resources:
-      gpuCount: 1
+      gpuCount: 4
     context:
       priority: urgent
       preemptible: False
