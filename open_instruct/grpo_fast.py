@@ -448,7 +448,9 @@ class Args:
                 assert self.masked_mean_denominator == "token", (
                     f"masked_mean_denominator string value must be 'token' or number, got {self.masked_mean_denominator}"
                 )
-                assert self.masked_mean_axis is None, "masked_mean_axis must not be provided when using 'token' normalization"
+                assert self.masked_mean_axis is None, (
+                    "masked_mean_axis must not be provided when using 'token' normalization"
+                )
             else:
                 assert self.masked_mean_denominator > 0, (
                     f"masked_mean_denominator (={self.masked_mean_denominator}) must be greater than 0!"
@@ -1321,9 +1323,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         # for stats computation, for now no denominator is used
                         # unless masked_mean_denominator is a numeric value.
                         stats_denominator = (
-                            args.masked_mean_denominator
-                            if args.masked_mean_denominator != "token"
-                            else None
+                            args.masked_mean_denominator if args.masked_mean_denominator != "token" else None
                         )
                         # NOTE: in packed implementation, kl calculation are averages over response tokens
                         kl1_stats[i] = masked_mean(
