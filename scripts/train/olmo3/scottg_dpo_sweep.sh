@@ -37,7 +37,7 @@ do
         --concatenated_forward False \
         --max_seq_length 16384 \
         --per_device_train_batch_size 1 \
-        --gradient_accumulation_steps $((128 / NUM_NODES * 8)) \
+        --gradient_accumulation_steps 1 \
         --learning_rate $LR \
         --lr_scheduler_type linear \
         --warmup_ratio 0.1 \
