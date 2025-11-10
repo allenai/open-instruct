@@ -19,6 +19,7 @@ DPO tuning script. Adapted from our finetuning script.
 # isort: off
 import contextlib
 import os
+import re
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
@@ -154,6 +155,19 @@ class FlatArguments:
     )
     sync_each_batch: bool = False
     """Optionaly sync grads every batch when using grad accumulation. Can significantly reduce memory costs."""
+    zero_stage: int | None = field(
+        default=None,
+        metadata={
+            "help": "DeepSpeed ZeRO optimization stage (0, 1, 2, or 3). If None, DeepSpeed config must be provided via accelerate launch."
+        },
+    )
+    offload_optimizer: bool = field(
+        default=False,
+        metadata={"help": "Offload optimizer states to CPU to save GPU memory. Only used if zero_stage is set."},
+    )
+    offload_param: bool = field(
+        default=False, metadata={"help": "Offload parameters to CPU to save GPU memory. Only used with zero_stage 3."}
+    )
     low_cpu_mem_usage: bool = field(
         default=False,
         metadata={
@@ -192,6 +206,9 @@ class FlatArguments:
     """Whether to skip the cache."""
     dataset_mix_dir: str | None = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
+    )
+    ref_logprobs_cache_dir: str | None = field(
+        default=None, metadata={"help": "Directory to cache reference logprobs. If None, no disk caching is used."}
     )
     dataset_config_name: str | None = field(
         default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
@@ -388,6 +405,17 @@ class FlatArguments:
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
 
+        if self.zero_stage is not None:
+            if self.zero_stage not in [0, 1, 2, 3]:
+                raise ValueError(f"zero_stage must be 0, 1, 2, or 3, got {self.zero_stage}")
+            if self.offload_param and self.zero_stage != 3:
+                raise ValueError("offload_param can only be used with zero_stage 3")
+            if self.clip_grad_norm > 0:
+                logger.warning(
+                    "clip_grad_norm is set but will be ignored when using DeepSpeed. "
+                    "Use gradient_clipping in DeepSpeed config instead (set to 'auto' by default)."
+                )
+
         # Parse in args that could be `dict` sent in from the CLI as a string
         for dict_feld in self._VALID_DICT_FIELDS:
             passed_value = getattr(self, dict_feld)
@@ -541,6 +569,74 @@ def build_reference_logprobs_cache(
     return cache
 
 
+def get_ref_logprobs_cache_path(cache_dir: str, model_name_or_path: str, dataset_config_hash: str) -> str:
+    """Generate the cache file path for reference logprobs."""
+    model_name_sanitized = re.sub(r"[^\w\-_]", "_", model_name_or_path)
+    cache_filename = f"{model_name_sanitized}_{dataset_config_hash}.pt"
+    return os.path.join(cache_dir, cache_filename)
+
+
+def save_ref_logprobs_to_disk(
+    cache_path: str, epoch_cached_reference_chosen_logps: list, epoch_cached_reference_rejected_logps: list
+) -> None:
+    """Save reference logprobs to disk."""
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    cache_data = {
+        "epoch_cached_reference_chosen_logps": epoch_cached_reference_chosen_logps,
+        "epoch_cached_reference_rejected_logps": epoch_cached_reference_rejected_logps,
+    }
+    torch.save(cache_data, cache_path)
+    logger.info(f"Saved reference logprobs cache to {cache_path}")
+
+
+def load_ref_logprobs_from_disk(cache_path: str) -> tuple:
+    """Load reference logprobs from disk."""
+    if not os.path.exists(cache_path):
+        return None, None
+    logger.info(f"Loading reference logprobs cache from {cache_path}")
+    cache_data = torch.load(cache_path)
+    return (cache_data["epoch_cached_reference_chosen_logps"], cache_data["epoch_cached_reference_rejected_logps"])
+
+
+def build_deepspeed_config(zero_stage: int, offload_optimizer: bool = False, offload_param: bool = False) -> dict:
+    """Build a DeepSpeed configuration dict from the provided settings."""
+    config = {
+        "bf16": {"enabled": "auto"},
+        "zero_optimization": {
+            "stage": zero_stage,
+            "overlap_comm": True,
+            "contiguous_gradients": True,
+            "reduce_bucket_size": "auto",
+        },
+        "gradient_accumulation_steps": "auto",
+        "gradient_clipping": "auto",
+        "steps_per_print": 1e5,
+        "train_batch_size": "auto",
+        "train_micro_batch_size_per_gpu": "auto",
+        "wall_clock_breakdown": False,
+    }
+
+    if zero_stage == 3:
+        config["zero_optimization"].update(
+            {
+                "sub_group_size": 1e9,
+                "stage3_prefetch_bucket_size": "auto",
+                "stage3_param_persistence_threshold": "auto",
+                "stage3_max_live_parameters": 1e9,
+                "stage3_max_reuse_distance": 1e9,
+                "stage3_gather_16bit_weights_on_model_save": True,
+            }
+        )
+
+    if offload_optimizer:
+        config["zero_optimization"]["offload_optimizer"] = {"device": "cpu", "pin_memory": True}
+
+    if offload_param:
+        config["zero_optimization"]["offload_param"] = {"device": "cpu", "pin_memory": True}
+
+    return config
+
+
 def main(args: FlatArguments, tc: TokenizerConfig):
     # ------------------------------------------------------------
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
@@ -562,6 +658,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             zero_hpz_partition_size=args.zero_hpz_partition_size,
         )
         deepspeed_plugin = DeepSpeedPlugin(hf_ds_config=deepspeed_config)
+        logger.info(f"Using DeepSpeed with ZeRO stage {args.zero_stage}, offload_optimizer={args.offload_optimizer}, offload_param={args.offload_param}")
 
     accelerator = Accelerator(
         dataloader_config=dataloader_config,

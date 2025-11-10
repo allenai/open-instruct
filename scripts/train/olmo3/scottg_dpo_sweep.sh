@@ -11,16 +11,16 @@ do
         --priority urgent \
         --max_retries 5 \
         --image scottg/open_instruct_dev_11092025 --pure_docker_mode \
-        --env TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=3600 \
-        --env TORCH_NCCL_AVOID_RECORD_STREAMS=1 \
-        --env TORCH_DIST_INIT_BARRIER=1 \
-        --env NCCL_ALGO=Ring,Tree \
-        --env NCCL_NVLS_ENABLE=0 \
+        --env NCCL_LIB_DIR=/var/lib/tcpxo/lib64 \
+        --env LD_LIBRARY_PATH=/var/lib/tcpxo/lib64:$LD_LIBRARY_PATH \
+        --env NCCL_PROTO=Simple,LL128 \
+        --env NCCL_TUNER_CONFIG_PATH=/var/lib/tcpxo/lib64/a3plus_tuner_config_ll128.textproto \
+        --env NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE=/var/lib/tcpxo/lib64/a3plus_guest_config_ll128.textproto \
         --preemptible \
         --num_nodes $NUM_NODES \
         --budget ai2/oe-adapt \
         --no_auto_dataset_cache \
-        --gpus 8 -- accelerate launch \
+        --gpus 8 -- source /var/lib/tcpxo/lib64/nccl-env-profile.sh \&\& accelerate launch \
         --mixed_precision bf16 \
         --num_processes 8 \
         --use_deepspeed \
