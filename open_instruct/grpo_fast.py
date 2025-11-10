@@ -448,6 +448,7 @@ class Args:
                 assert self.masked_mean_denominator == "token", (
                     f"masked_mean_denominator string value must be 'token' or number, got {self.masked_mean_denominator}"
                 )
+                assert self.masked_mean_axis is None, "masked_mean_axis must not be provided when using 'token' normalization"
             else:
                 assert self.masked_mean_denominator > 0, (
                     f"masked_mean_denominator (={self.masked_mean_denominator}) must be greater than 0!"
@@ -1139,7 +1140,7 @@ class PolicyTrainerRayProcess(RayProcess):
                                 mb_tool_mask = collated_tool_masks[i]
                                 mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
                             local_group_tokens += mb_response_masks_bool.sum().item()
-                        
+
                         # Gather total tokens across all ranks for this accumulation group
                         if dist.is_available() and dist.is_initialized():
                             dist.barrier()
@@ -1150,7 +1151,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             accumulation_group_tokens[group_start] = local_group_tokens_tensor.item()
                         else:
                             accumulation_group_tokens[group_start] = local_group_tokens
-                
+
                 for i in range(len(collated_query_responses)):
                     mb_ref_logprob = collated_ref_logprobs[i]
                     mb_query_responses = collated_query_responses[i]
@@ -1161,13 +1162,13 @@ class PolicyTrainerRayProcess(RayProcess):
                     # if masking snippets, do it here.
                     if args.mask_tool_use and args.tool_use:
                         mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
-                    
+
                     # Get total tokens for this accumulation group if using "token" normalization
                     # This ensures all minibatches in the accumulation group are normalized by the same total
                     if args.masked_mean_denominator == "token":
                         group_start = (i // accumulation_steps) * accumulation_steps
                         total_batch_tokens = accumulation_group_tokens[group_start]
-                    
+
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
                     mb_local_logprobs, mb_entropy = self.forward(
@@ -1299,11 +1300,13 @@ class PolicyTrainerRayProcess(RayProcess):
                     # masked_mean_denominator is None, masked_mean_axis is None: we take mean across tokens in minibatch (old behaviour)
                     # masked_mean_denominator is None, masked_mean_axis is 1: we use sample-wise averaging across the sequence axis.
                     loss = masked_mean(
-                            loss_values,
-                            mb_response_masks_bool,
-                            args.masked_mean_axis,
-                            args.masked_mean_denominator if args.masked_mean_denominator != "token" else total_batch_tokens,
-                        )
+                        loss_values,
+                        mb_response_masks_bool,
+                        args.masked_mean_axis,
+                        args.masked_mean_denominator
+                        if args.masked_mean_denominator != "token"
+                        else total_batch_tokens,
+                    )
                     # When using global normalization (masked_mean_denominator == "token"), total_batch_tokens is the sum
                     # of tokens across all minibatches in the accumulation group. Since we normalize by this total,
                     # we should NOT divide by accumulation_steps (the normalization already accounts for all minibatches).
@@ -1315,9 +1318,12 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.model.step()
                     local_step += 1
                     with torch.no_grad():
-                        # Convert "token" to total_batch_tokens for statistics computation
+                        # for stats computation, for now no denominator is used
+                        # unless masked_mean_denominator is a numeric value.
                         stats_denominator = (
-                            args.masked_mean_denominator if args.masked_mean_denominator != "token" else total_batch_tokens
+                            args.masked_mean_denominator
+                            if args.masked_mean_denominator != "token"
+                            else None
                         )
                         # NOTE: in packed implementation, kl calculation are averages over response tokens
                         kl1_stats[i] = masked_mean(
