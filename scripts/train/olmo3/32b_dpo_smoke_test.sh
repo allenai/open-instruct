@@ -31,6 +31,7 @@ do
        --use_slow_tokenizer False \
        --dataset_mixer_list allenai/olmo-3-preference-mix-deltas_reasoning-scottmix-DECON-keyword-filtered 10000       \
        allenai/dpo-yolo1-200k-gpt4.1-2w2s-maxdelta_rejected-DECON-rm-gemma3-kwd-ftd 1000 \
+       --max_train_samples 150000 \
        --dataset_skip_cache \
        --zero_stage 2 \
         --concatenated_forward False \
