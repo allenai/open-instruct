@@ -1113,37 +1113,6 @@ class PolicyTrainerRayProcess(RayProcess):
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
-            # Calculate total tokens across all minibatches for proper loss normalization
-            # This ensures loss is normalized by total tokens in the entire batch, not just per-minibatch
-            # First, calculate tokens for this rank's data
-            local_total_batch_tokens = 0.0
-            for i in range(len(collated_query_responses)):
-                mb_response_masks = collated_response_masks[i]
-                mb_response_masks_bool = mb_response_masks[:, 1:].bool()
-                # Apply same masking logic as in loss computation
-                if args.mask_tool_use and args.tool_use:
-                    mb_tool_mask = collated_tool_masks[i]
-                    mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
-                local_total_batch_tokens += mb_response_masks_bool.sum().item()
-            
-            # Gather total tokens across all ranks if using distributed training and denominator is "token"
-            # This ensures normalization is consistent across all ranks
-            if args.masked_mean_denominator == "token":
-                if dist.is_available() and dist.is_initialized():
-                    # Ensure all ranks have computed local_total_batch_tokens before all_reduce
-                    dist.barrier()
-                    local_total_batch_tokens_tensor = torch.tensor(
-                        local_total_batch_tokens, dtype=torch.float32, device=self.device
-                    )
-                    dist.all_reduce(local_total_batch_tokens_tensor, op=dist.ReduceOp.SUM, group=None)
-                    total_batch_tokens = local_total_batch_tokens_tensor.item()
-                    if self.rank == 0:
-                        logger.debug(f"[Rank {self.rank}]: total_batch_tokens across all ranks={total_batch_tokens:.0f}")
-
-                else:
-                    # Non-distributed case: total_batch_tokens is just local tokens
-                    total_batch_tokens = local_total_batch_tokens
-            
             kl1_stats = torch.zeros(len(collated_query_responses))
             kl2_stats = torch.zeros(len(collated_query_responses))
             kl3_stats = torch.zeros(len(collated_query_responses))
@@ -1155,6 +1124,33 @@ class PolicyTrainerRayProcess(RayProcess):
             ratio_stats = torch.zeros(len(collated_query_responses))
             entropy_stats = torch.zeros(len(collated_query_responses))
             for epoch_idx in range(args.num_epochs):
+                # Pre-compute total tokens for each accumulation group if using "token" normalization
+                # This ensures all minibatches in an accumulation group are normalized by the same total
+                accumulation_group_tokens = {}
+                if args.masked_mean_denominator == "token":
+                    for group_start in range(0, len(collated_query_responses), accumulation_steps):
+                        group_end = min(group_start + accumulation_steps, len(collated_query_responses))
+                        # Calculate local tokens for all minibatches in this accumulation group
+                        local_group_tokens = 0.0
+                        for i in range(group_start, group_end):
+                            mb_response_masks = collated_response_masks[i]
+                            mb_response_masks_bool = mb_response_masks[:, 1:].bool()
+                            if args.mask_tool_use and args.tool_use:
+                                mb_tool_mask = collated_tool_masks[i]
+                                mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
+                            local_group_tokens += mb_response_masks_bool.sum().item()
+                        
+                        # Gather total tokens across all ranks for this accumulation group
+                        if dist.is_available() and dist.is_initialized():
+                            dist.barrier()
+                            local_group_tokens_tensor = torch.tensor(
+                                local_group_tokens, dtype=torch.float32, device=self.device
+                            )
+                            dist.all_reduce(local_group_tokens_tensor, op=dist.ReduceOp.SUM, group=None)
+                            accumulation_group_tokens[group_start] = local_group_tokens_tensor.item()
+                        else:
+                            accumulation_group_tokens[group_start] = local_group_tokens
+                
                 for i in range(len(collated_query_responses)):
                     mb_ref_logprob = collated_ref_logprobs[i]
                     mb_query_responses = collated_query_responses[i]
@@ -1165,6 +1161,13 @@ class PolicyTrainerRayProcess(RayProcess):
                     # if masking snippets, do it here.
                     if args.mask_tool_use and args.tool_use:
                         mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
+                    
+                    # Get total tokens for this accumulation group if using "token" normalization
+                    # This ensures all minibatches in the accumulation group are normalized by the same total
+                    if args.masked_mean_denominator == "token":
+                        group_start = (i // accumulation_steps) * accumulation_steps
+                        total_batch_tokens = accumulation_group_tokens[group_start]
+                    
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
                     mb_local_logprobs, mb_entropy = self.forward(
@@ -1301,10 +1304,10 @@ class PolicyTrainerRayProcess(RayProcess):
                             args.masked_mean_axis,
                             args.masked_mean_denominator if args.masked_mean_denominator != "token" else total_batch_tokens,
                         )
-                    # When using global normalization (masked_mean_denominator == "token"), total_batch_tokens already
-                    # includes tokens from all ranks and all minibatches, so we should NOT divide by accumulation_steps.
-                    # For other normalization modes, we divide by accumulation_steps to properly scale gradients
-                    # for gradient accumulation.
+                    # When using global normalization (masked_mean_denominator == "token"), total_batch_tokens is the sum
+                    # of tokens across all minibatches in the accumulation group. Since we normalize by this total,
+                    # we should NOT divide by accumulation_steps (the normalization already accounts for all minibatches).
+                    # For other normalization modes, we divide by accumulation_steps to properly scale gradients.
                     if args.masked_mean_denominator != "token":
                         loss = loss / accumulation_steps
                     self.model.backward(loss)
