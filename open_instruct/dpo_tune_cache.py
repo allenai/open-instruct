@@ -437,10 +437,13 @@ def get_cache_ref_logprobs(
     return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps
 
 
-def get_ref_logprobs_cache_path(cache_dir: str, model_name_or_path: str, dataset_config_hash: str) -> str:
+def get_ref_logprobs_cache_path(
+    cache_dir: str, model_name_or_path: str, dataset_config_hash: str, max_train_samples: int | None = None
+) -> str:
     """Generate the cache file path for reference logprobs."""
     model_name_sanitized = re.sub(r"[^\w\-_]", "_", model_name_or_path)
-    cache_filename = f"{model_name_sanitized}_{dataset_config_hash}.pt"
+    samples_str = f"_samples{max_train_samples}" if max_train_samples is not None else ""
+    cache_filename = f"{model_name_sanitized}_{dataset_config_hash}{samples_str}.pt"
     return os.path.join(cache_dir, cache_filename)
 
 
@@ -924,11 +927,15 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             )
             config_hash = compute_config_hash(dcs, tc)
             cache_location = get_ref_logprobs_cache_path(
-                args.ref_logprobs_cache_dir, args.model_name_or_path, config_hash
+                args.ref_logprobs_cache_dir, args.model_name_or_path, config_hash, args.max_train_samples
             )
             epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = load_ref_logprobs_from_disk(
                 cache_location
             )
+            if epoch_cached_reference_chosen_logps is not None:
+                num_epochs = len(epoch_cached_reference_chosen_logps)
+                num_batches = len(epoch_cached_reference_chosen_logps[0]) if num_epochs > 0 else 0
+                logger.info(f"Loaded cached reference logprobs: {num_epochs} epochs, {num_batches} batches per epoch")
         else:
             cache_location = None
             epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = None, None
