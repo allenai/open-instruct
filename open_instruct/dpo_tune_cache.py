@@ -565,12 +565,17 @@ def build_reference_logprobs_cache(
 
 
 def get_ref_logprobs_cache_path(
-    cache_dir: str, model_name_or_path: str, dataset_config_hash: str, max_train_samples: int | None = None
+    cache_dir: str,
+    model_name_or_path: str,
+    dataset_config_hash: str,
+    max_train_samples: int | None = None,
+    world_size: int = 1,
+    process_rank: int = 0,
 ) -> str:
     """Generate the cache file path for reference logprobs."""
     model_name_sanitized = re.sub(r"[^\w\-_]", "_", model_name_or_path)
     samples_str = f"_samples{max_train_samples}" if max_train_samples is not None else ""
-    cache_filename = f"{model_name_sanitized}_{dataset_config_hash}{samples_str}.pt"
+    cache_filename = f"{model_name_sanitized}_{dataset_config_hash}_ws{world_size}_rank{process_rank}{samples_str}.pt"
     return os.path.join(cache_dir, cache_filename)
 
 
@@ -599,7 +604,7 @@ def load_ref_logprobs_from_disk(cache_path: str) -> tuple:
 
 
 def maybe_load_reference_logprobs_from_disk(
-    args: FlatArguments, tc: TokenizerConfig
+    args: FlatArguments, tc: TokenizerConfig, accelerator
 ) -> tuple[list | None, list | None, str | None]:
     """Load reference logprobs from disk if cache directory is configured."""
     if args.ref_logprobs_cache_dir is None:
@@ -616,7 +621,12 @@ def maybe_load_reference_logprobs_from_disk(
     )
     config_hash = compute_config_hash(dcs, tc)
     cache_location = get_ref_logprobs_cache_path(
-        args.ref_logprobs_cache_dir, args.model_name_or_path, config_hash, args.max_train_samples
+        args.ref_logprobs_cache_dir,
+        args.model_name_or_path,
+        config_hash,
+        args.max_train_samples,
+        accelerator.num_processes,
+        accelerator.process_index,
     )
     epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = load_ref_logprobs_from_disk(
         cache_location
