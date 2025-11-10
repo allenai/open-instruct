@@ -1758,6 +1758,9 @@ def accumulate_inference_batches(
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
             iter_dataloader.exclude_index(result.dataset_index)
             total_no_resampled += 1
+            logging.debug(
+                f"[Data Preparation Thread] Prompt solved at {percent_solved}, will be excluded from resampling, total no resampled: {total_no_resampled}"
+            )
 
         # Filter out zero std prompts
         if filter_zero_std_samples and np.std(scores) == 0:
