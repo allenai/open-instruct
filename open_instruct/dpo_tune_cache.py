@@ -649,15 +649,16 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         if accelerator.is_main_process and is_beaker_job():
             experiment_config.update(vars(beaker_config))
         experiment_config.update(vars(tc))
+
+        wandb_tags = []
+        if accelerator.is_main_process:
+            wandb_tags = get_wandb_tags()
+
         accelerator.init_trackers(
             args.wandb_project_name,
             experiment_config,
             init_kwargs={
-                "wandb": {
-                    "name": args.exp_name,
-                    "entity": args.wandb_entity,
-                    "tags": [args.exp_name] + get_wandb_tags(),
-                }
+                "wandb": {"name": args.exp_name, "entity": args.wandb_entity, "tags": [args.exp_name] + wandb_tags}
             },
         )
 
