@@ -1,3 +1,5 @@
+BEAKER_IMAGE=$1
+
 MODEL_NAME=/weka/oe-adapt-default/jacobm/olmo3/32b-merge-configs/checkpoints/32b-2e-5-5e-5
 NUM_NODES=16
 #for LR in 8e-8 6e-8 1e-7 4e-8 2e-8 2e-7 8e-9 4e-7 5e-8
@@ -10,7 +12,7 @@ do
         --workspace ai2/olmo-instruct \
         --priority urgent \
         --max_retries 5 \
-        --image scottg/open_instruct_dev_11092025 --pure_docker_mode \
+        --image $BEAKER_IMAGE --pure_docker_mode \
         --env NCCL_LIB_DIR=/var/lib/tcpxo/lib64 \
         --env LD_LIBRARY_PATH=/var/lib/tcpxo/lib64:$LD_LIBRARY_PATH \
         --env NCCL_PROTO=Simple,LL128 \
@@ -36,7 +38,7 @@ do
         --dataset_skip_cache \
 	--zero_stage 2 \
 	--ref_logprobs_cache_dir "/filestore/.cache/" \
-        --concatenated_forward False \
+        --concatenated_forward True \
         --max_seq_length 16384 \
         --per_device_train_batch_size 1 \
         --gradient_accumulation_steps 1 \
