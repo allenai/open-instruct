@@ -9,7 +9,7 @@ export model_path=TODO
 
 python mason.py \
     --budget ai2/oe-adapt \
-    --cluster ai2/jupiter \
+    --cluster ai2/augusta \
     --image ${beaker_image} \
     --pure_docker_mode \
     --workspace ai2/olmo-instruct \
