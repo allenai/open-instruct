@@ -270,7 +270,7 @@ class Args:
 
     active_sampling: bool = False
     """Whether to continue sampling responses until you get a full batch."""
-    no_positive_resampling_rate: float | None = None
+    no_resampling_pass_rate: float | None = None
     """If the response to a prompt is solved at a rate higher than this, do not resample this prompt again"""
 
     record_entropy: bool = False
@@ -1667,7 +1667,7 @@ def accumulate_inference_batches(
     actor_manager=None,
     timeout: float | None = None,
     filter_zero_std_samples: bool = False,
-    no_resample_positive_rate: float | None = None,
+    no_resampling_pass_rate: float | None = None,
     iter_dataloader: ShufflingIterator | None = None,
 ) -> tuple[GenerationResult, Batch, dict, BatchStatistics]:
     """Accumulate multiple inference results into a single training batch.
@@ -1680,9 +1680,9 @@ def accumulate_inference_batches(
         num_prompts: Number of prompts to accumulate
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
         filter_zero_std:samples: Whether to filter samples with zero reward std and continue sampling
-        no_resample_positive_rate: Optional rate at which to note samples solved at greater than this rate
+        no_resampling_pass_rate: Optional rate at which to note samples solved at greater than this rate
             and exclude them from futher sampling
-        iter_dataloader: Optional, used for no_resample_positive_rate
+        iter_dataloader: Optional, used for no_resampling_pass_rate
 
     Raises:
         queue.Empty: If timeout is specified and no data is available within timeout.
@@ -1755,7 +1755,7 @@ def accumulate_inference_batches(
 
         percent_solved = np.mean(scores).item() / args.max_possible_score
         # Don't resample prompt that was solved at more than no_resample_positive_rate
-        if no_resample_positive_rate is not None and percent_solved > no_resample_positive_rate:
+        if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
             iter_dataloader.exclude_index(result.dataset_index)
             total_no_resampled += 1
 
@@ -1922,7 +1922,7 @@ def data_preparation_thread(
                 reward_fn=reward_fn,
                 actor_manager=actor_manager,
                 filter_zero_std_samples=args.active_sampling,
-                no_resample_positive_rate=args.no_positive_resampling_rate,
+                no_resampling_pass_rate=args.no_resampling_pass_rate,
                 iter_dataloader=iter_dataloader,
             )
             if isinstance(result, ShutdownSentinel):
@@ -2620,7 +2620,7 @@ def maybe_evaluate(
             actor_manager=actor_manager,
             timeout=timeout,
             filter_zero_std_samples=False,
-            no_resample_positive_rate=None,
+            no_resampling_pass_rate=None,
             iter_dataloader=None,
         )
 
