@@ -12,6 +12,7 @@ do
         --workspace ai2/olmo-instruct \
         --priority urgent \
         --max_retries 5 \
+	--preemptible \
         --image $BEAKER_IMAGE --pure_docker_mode \
         --env NCCL_LIB_DIR=/var/lib/tcpxo/lib64 \
         --env LD_LIBRARY_PATH=/var/lib/tcpxo/lib64:$LD_LIBRARY_PATH \
