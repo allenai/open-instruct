@@ -30,6 +30,9 @@ do
        --use_slow_tokenizer False \
        --dataset_mixer_list allenai/olmo-3-preference-mix-deltas-complement2-grafmix-DECON-qwen32b-keyword-filtered 1000 \
        allenai/dpo-yolo1-200k-gpt4.1-2w2s-maxdelta_rejected-DECON-rm-gemma3-kwd-ftd 1000 \
+       --dataset_skip_cache \
+       --zero_stage 2 \
+       --ref_logprobs_cache_dir "/filestore/.cache/" \
        --max_seq_length 16384 \
        --per_device_train_batch_size 1 \
        --gradient_accumulation_steps 2 \
@@ -45,6 +48,5 @@ do
        --gradient_checkpointing \
        --report_to wandb \
        --chat_template_name olmo123 \
-       --with_tracking \
-       --dataset_skip_cache
+       --with_tracking
 done
