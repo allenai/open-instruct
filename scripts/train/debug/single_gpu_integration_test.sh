@@ -33,7 +33,7 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path Qwen/Qwen2.5-0.5B \
+    --model_name_or_path Qwen/Qwen2.5-1.5B \
     --stop_strings "</answer>" \
     --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
