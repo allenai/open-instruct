@@ -415,6 +415,7 @@ async def _generate_instance_wise_adaptive_rubrics(responses, ground_truths, num
     
     # Prepare all tasks for parallel execution
     tasks = []
+    num_subsampled_answers_list = []
     for i in range(num_prompts):
         start_idx = i * num_samples_per_prompt_rollout
         end_idx = start_idx + num_samples_per_prompt_rollout
@@ -434,6 +435,7 @@ async def _generate_instance_wise_adaptive_rubrics(responses, ground_truths, num
         answer_list = [answer for answer in answer_list if answer is not None]
         # Create task for parallel execution
         if use_full_responses:
+            num_subsampled_answers_list.append(len(response_list))
             task = generate_instance_wise_adaptive_rubrics(question, response_list, existing_rubrics_str, model_name=os.environ.get("RUBRIC_GENERATION_MODEL", "gpt-4.1"))
         else:   
             if answer_length_limit_in_words is not None:
@@ -450,13 +452,14 @@ async def _generate_instance_wise_adaptive_rubrics(responses, ground_truths, num
                     else:
                         break
                 answer_list = selected_answers if selected_answers else answer_list[:2]
+            num_subsampled_answers_list.append(len(answer_list))
             task = generate_instance_wise_adaptive_rubrics(question, answer_list, existing_rubrics_str, model_name=os.environ.get("RUBRIC_GENERER_MODEL", "gpt-4.1"))
         tasks.append(task)
     
     # Execute all tasks in parallel
     adaptive_rubrics = await asyncio.gather(*tasks)
     
-    return adaptive_rubrics
+    return adaptive_rubrics, num_subsampled_answers_list
 
 
 def update_ground_truths_with_adaptive_rubrics(ground_truths, all_adaptive_rubrics, num_samples_per_prompt_rollout, rubric_buffer=None):

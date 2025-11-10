@@ -2646,7 +2646,7 @@ if __name__ == "__main__":
 
         if args.apply_adaptive_rubric_reward and is_training:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating adaptive rubric reward"):
-                all_adaptive_rubrics = await _generate_instance_wise_adaptive_rubrics(decoded_responses, ground_truths, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer, use_full_responses=args.use_full_responses_for_adaptive_rubric, answer_length_limit_in_words=args.answer_length_limit_in_words)
+                all_adaptive_rubrics, num_subsampled_answers_list = await _generate_instance_wise_adaptive_rubrics(decoded_responses, ground_truths, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer, use_full_responses=args.use_full_responses_for_adaptive_rubric, answer_length_limit_in_words=args.answer_length_limit_in_words)
                 
                 # Store adaptive rubric scores for saving if requested
                 if args.save_adaptive_rubrics:
@@ -2659,6 +2659,7 @@ if __name__ == "__main__":
                 metrics["objective/avg_num_adaptive_rubrics"] = avg_num_adaptive_rubrics
                 metrics["objective/avg_num_active_buffer_rubrics"] = avg_num_active_buffer_rubrics
                 metrics["objective/skipped_adaptive_rubrics"] = skipped_count
+                metrics["objective/avg_num_subsampled_answers_for_adaptive_rubric"] = sum(num_subsampled_answers_list) / len(num_subsampled_answers_list) if num_subsampled_answers_list else 0
                 
                 
         if args.apply_verifiable_reward:
