@@ -410,11 +410,6 @@ class FlatArguments:
                 raise ValueError(f"zero_stage must be 0, 1, 2, or 3, got {self.zero_stage}")
             if self.offload_param and self.zero_stage != 3:
                 raise ValueError("offload_param can only be used with zero_stage 3")
-            if self.clip_grad_norm > 0:
-                logger.warning(
-                    "clip_grad_norm is set but will be ignored when using DeepSpeed. "
-                    "Use gradient_clipping in DeepSpeed config instead (set to 'auto' by default)."
-                )
 
         # Parse in args that could be `dict` sent in from the CLI as a string
         for dict_feld in self._VALID_DICT_FIELDS:
