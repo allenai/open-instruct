@@ -35,7 +35,7 @@ do
         --dataset_mixer_list allenai/olmo-3-preference-mix-deltas_reasoning-scottmix-DECON-keyword-filtered 1.0 \
         --max_train_samples 150000 \
         --dataset_skip_cache \
-	--zero_stage 2 \
+	--zero_stage 3 \
 	--ref_logprobs_cache_dir "/filestore/.cache/" \
         --concatenated_forward False \
         --max_seq_length 16384 \
