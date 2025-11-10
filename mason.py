@@ -378,6 +378,10 @@ def get_env_vars(
                     beaker.BeakerEnvVar(name="NCCL_SOCKET_IFNAME", value="enp0s12"),
                     # Add COLL here to log all collective operations. Extreamly verbose, dont use for production.
                     beaker.BeakerEnvVar(name="NCCL_DEBUG_SUBSYS", value="INIT,NET"),
+                    beaker.BeakerEnvVar(
+                        name="LD_LIBRARY_PATH", value=f"/var/lib/tcpxo/lib64:{os.getenv(LD_LIBRARY_PATH, '')}"
+                    ),
+                    beaker.BeakerEnvVar(name=NCCL_LIB_DIR, value="/var/lib/tcpxo/lib64"),
                 ]
             )
     # don't mount anything; assume no cache
