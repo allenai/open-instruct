@@ -11,6 +11,11 @@ do
         --priority urgent \
         --max_retries 5 \
         --image scottg/open_instruct_dev_11092025 --pure_docker_mode \
+        --env TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=3600 \
+        --env TORCH_NCCL_AVOID_RECORD_STREAMS=1 \
+        --env TORCH_DIST_INIT_BARRIER=1 \
+        --env NCCL_ALGO=Ring,Tree \
+        --env NCCL_NVLS_ENABLE=0 \
         --preemptible \
         --num_nodes $NUM_NODES \
         --budget ai2/oe-adapt \
