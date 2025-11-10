@@ -1,4 +1,3 @@
-#MODEL_NAME=/weka/oe-adapt-default/jacobm/olmo3/32b-merge-configs/checkpoints/32b-2e-5-5e-5
 MODEL_NAME=/weka/oe-adapt-default/finbarrt/stego32/step358000-hf
 NUM_NODES=8
 
