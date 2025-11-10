@@ -14,7 +14,6 @@ tasks:
             --tensor-parallel-size 1 \
             --trust-remote-code \
             --port 8003 \
-            --max-model-len 365840 \
             --enforce-eager"
       ]
     datasets:
