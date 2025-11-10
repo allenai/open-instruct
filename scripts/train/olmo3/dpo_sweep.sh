@@ -8,7 +8,7 @@ do
     uv run python mason.py \
         --cluster ai2/augusta \
         --gs_model_name $EXP_NAME \
-        --workspace ai2/olmo-instruct \
+        --workspace ai2/open-instruct-dev \
         --priority urgent \
         --image scottg/open_instruct_dev_11092025 --pure_docker_mode \
         --preemptible \
