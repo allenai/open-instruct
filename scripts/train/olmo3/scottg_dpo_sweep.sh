@@ -38,7 +38,7 @@ do
         --dataset_skip_cache \
 	--zero_stage 2 \
 	--ref_logprobs_cache_dir "/filestore/.cache/" \
-        --concatenated_forward True \
+        --concatenated_forward False \
         --max_seq_length 16384 \
         --per_device_train_batch_size 1 \
         --gradient_accumulation_steps 1 \
