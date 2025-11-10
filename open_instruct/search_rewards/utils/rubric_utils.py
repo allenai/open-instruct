@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 from typing import Any, Dict, List, Tuple
 from collections import defaultdict
 
@@ -401,7 +402,7 @@ async def generate_instance_wise_adaptive_rubrics(question, response_list, exist
     return obj
 
 
-async def _generate_instance_wise_adaptive_rubrics(responses, ground_truths, num_samples_per_prompt_rollout, rubric_buffer=None, use_full_responses=False):
+async def _generate_instance_wise_adaptive_rubrics(responses, ground_truths, num_samples_per_prompt_rollout, rubric_buffer=None, use_full_responses=True, answer_length_limit_in_words=None):
     # Optimized: Use direct indexing instead of dictionary grouping
     # Responses are structured as [prompt1_resp1, prompt1_resp2, ..., prompt2_resp1, prompt2_resp2, ...]
     
@@ -435,6 +436,20 @@ async def _generate_instance_wise_adaptive_rubrics(responses, ground_truths, num
         if use_full_responses:
             task = generate_instance_wise_adaptive_rubrics(question, response_list, existing_rubrics_str, model_name=os.environ.get("RUBRIC_GENERATION_MODEL", "gpt-4.1"))
         else:   
+            if answer_length_limit_in_words is not None:
+                # Shuffle answers before selecting to get diverse subset
+                random.shuffle(answer_list)
+                # Select subset of answers that fits within word limit (minimum 2)
+                selected_answers = []
+                total_words = 0
+                for answer in answer_list:
+                    word_count = len(answer.split())
+                    if len(selected_answers) < 2 or total_words + word_count <= answer_length_limit_in_words:
+                        selected_answers.append(answer)
+                        total_words += word_count
+                    else:
+                        break
+                answer_list = selected_answers if selected_answers else answer_list[:2]
             task = generate_instance_wise_adaptive_rubrics(question, answer_list, existing_rubrics_str, model_name=os.environ.get("RUBRIC_GENERER_MODEL", "gpt-4.1"))
         tasks.append(task)
     
