@@ -5,13 +5,14 @@ num_prompts=25376
 exp_name=rlvr_ace_fn_and_og_ocr_stdio_from_base_with_perf_penalty
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 uv run python mason.py \
-        --cluster ai2/jupiter \
+        --cluster ai2/augusta \
         --image "$BEAKER_IMAGE" \
 	--pure_docker_mode \
         --workspace ai2/open-instruct-dev \
+        --gs_model_name "stego32" \
         --priority urgent \
 	--preemptible \
-        --num_nodes 2 \
+        --num_nodes 4 \
 	--description "Large (multi-node) test script." \
         --timeout 3600 \
         --max_retries 0 \
@@ -21,7 +22,7 @@ uv run python mason.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 16 \
-        --num_unique_prompts_rollout 32 \
+        --num_unique_prompts_rollout 64 \
         --num_mini_batches 1 \
         --num_epochs 1 \
         --learning_rate 5e-7 \
@@ -34,7 +35,8 @@ uv run python mason.py \
         --max_prompt_token_length 2048 \
         --response_length 4096 \
         --pack_length 20480 \
-        --model_name_or_path Qwen/Qwen2.5-7B \
+        --model_name_or_path "/weka/oe-adapt-default/finbarrt/stego32/step358000-hf" \
+	--tokenizer_name_or_path "allenai/OLMo-2-1124-7B" \
         --chat_template_name tulu_thinker \
 	--inflight_updates True \
         --stop_strings "</answer>" \
@@ -43,16 +45,18 @@ uv run python mason.py \
         --verbose False \
         --ground_truths_key ground_truth \
         --sft_messages_key messages \
-        --total_episodes 10_000 \
-        --deepspeed_stage 2 \
-        --num_learners_per_node 8 \
-        --vllm_num_engines 8 \
-        --vllm_tensor_parallel_size 1 \
+        --total_episodes 10240 \
+	--gather_whole_model False \
+        --deepspeed_stage 3 \
+        --num_learners_per_node 8 8 8 \
+        --vllm_num_engines 2 \
+        --vllm_tensor_parallel_size 4 \
         --lr_scheduler_type constant \
         --apply_verifiable_reward true \
         --code_api_url \$CODE_API_URL/test_program \
         --seed 1 \
         --local_eval_every 1 \
+	--add_bos \
         --gradient_checkpointing \
         --try_launch_beaker_eval_jobs_on_weka True \
         --with_tracking \
@@ -61,6 +65,4 @@ uv run python mason.py \
         --oe_eval_max_length 32768 \
         --oe_eval_tasks "codex_humanevalplus:0-shot-chat-v1::tulu-thinker,mbppplus:0-shot-chat::tulu-thinker,livecodebench_codegeneration::tulu-thinker" \
         --dataset_skip_cache True \
-        --active_sampling \
-        --async_steps 4 \
 	--push_to_hub False

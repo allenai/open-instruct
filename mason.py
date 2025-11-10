@@ -1,14 +1,13 @@
 import argparse
+import hashlib
 import os
 import random
-import hashlib
 import re
 import secrets
 import select
 import string
 import sys
 import time
-from typing import Dict, List
 
 import beaker
 from rich.console import Console
@@ -31,9 +30,45 @@ OPEN_INSTRUCT_COMMANDS = [
 
 OPEN_INSTRUCT_RESUMABLES = ["open_instruct/grpo_fast.py"]
 
+CACHE_EXCLUDED_ARGS = {
+    "--with_tracking": False,
+    "--checkpoint_state_freq": True,
+    "--checkpoint_state_dir": True,
+    "--gs_checkpoint_state_dir": True,
+}
+
 
 # ----------------------------------------------------------------------
 # Mason logic
+def build_command_without_args(command, args_to_remove):
+    """Build new command list excluding specified arguments.
+
+    Args:
+        command: List of command arguments
+        args_to_remove: Dict mapping argument names to boolean indicating if they have values
+                       e.g., {"--with_tracking": False, "--checkpoint_state_dir": True}
+
+    Returns:
+        New command list with specified arguments removed
+    """
+    result = []
+    skip_next = False
+
+    for item in command:
+        if skip_next:
+            skip_next = False
+            continue
+
+        if item in args_to_remove:
+            if args_to_remove[item]:
+                skip_next = True
+            continue
+
+        result.append(item)
+
+    return result
+
+
 def parse_beaker_dataset(dataset_str):
     splt = dataset_str.split(":")
     if len(splt) != 2:
@@ -42,7 +77,7 @@ def parse_beaker_dataset(dataset_str):
     return {"mount_path": splt[0], "beaker": splt[1]}
 
 
-def parse_env_var(env_var_str: str) -> Dict[str, str]:
+def parse_env_var(env_var_str: str) -> dict[str, str]:
     """Parse environment variable string in the format 'name=value'"""
     if "=" not in env_var_str:
         raise argparse.ArgumentTypeError(f"Environment variable must be in format 'name=value', got: {env_var_str}")
@@ -169,7 +204,7 @@ def get_args():
     mason_args, command_args = parser.parse_known_args()
     commands = parse_commands(command_args)
 
-    def _commands_include_resumable_target(cmds: List[List[str]]) -> bool:
+    def _commands_include_resumable_target(cmds: list[list[str]]) -> bool:
         for cmd in cmds:
             for target in OPEN_INSTRUCT_RESUMABLES:
                 if target in cmd:
@@ -182,7 +217,7 @@ def get_args():
         console.log(
             "--non_resumable is not set, but the command is not in OPEN_INSTRUCT_RESUMABLES, so the job will not be resumable"
         )
-    setattr(mason_args, "resumable", is_resumable)
+    mason_args.resumable = is_resumable
 
     return mason_args, commands
 
@@ -198,7 +233,7 @@ def generate_id(length: int = 8) -> str:
 global_wandb_id = generate_id()
 
 
-def parse_commands(command_args: List[str]) -> List[List[str]]:
+def parse_commands(command_args: list[str]) -> list[list[str]]:
     """the inputs are ['--', 'which', 'python', '--', 'echo', 'hello'], and this function converts it into [['which', 'python'], ['echo', 'hello']]"""
     if command_args[0] != "--":
         msg = (
@@ -223,13 +258,13 @@ def parse_commands(command_args: List[str]) -> List[List[str]]:
 
 def get_env_vars(
     pure_docker_mode: bool,
-    cluster: List[str],
-    beaker_secrets: List[str],
+    cluster: list[str],
+    beaker_secrets: list[str],
     whoami: str,
     resumable: bool,
     num_nodes: int,
-    additional_env_vars: List[Dict[str, str]],
-    additional_secrets: List[Dict[str, str]],
+    additional_env_vars: list[dict[str, str]],
+    additional_secrets: list[dict[str, str]],
 ):
     additional_env_var_names = {var["name"] for var in additional_env_vars}
 
@@ -307,14 +342,15 @@ def get_env_vars(
         if num_nodes > 1:
             env_vars.extend(
                 [
-                    beaker.BeakerEnvVar(name="LD_LIBRARY_PATH", value=r"/var/lib/tcpxo/lib64:${LD_LIBRARY_PATH}"),
+                    # NOTE: For single-node training we still need all of these settings and we also
+                    # need host networking enabled so that the ethernet interface names don't change.
                     beaker.BeakerEnvVar(name="NCCL_CROSS_NIC", value="0"),
-                    beaker.BeakerEnvVar(name="NCCL_ALGO", value="Ring,Tree"),
-                    beaker.BeakerEnvVar(name="NCCL_PROTO", value="Simple"),
+                    beaker.BeakerEnvVar(name="NCCL_PROTO", value="Simple,LL128"),
                     beaker.BeakerEnvVar(name="NCCL_MIN_NCHANNELS", value="4"),
                     beaker.BeakerEnvVar(name="NCCL_P2P_NET_CHUNKSIZE", value="524288"),
                     beaker.BeakerEnvVar(name="NCCL_P2P_PCI_CHUNKSIZE", value="524288"),
                     beaker.BeakerEnvVar(name="NCCL_P2P_NVL_CHUNKSIZE", value="1048576"),
+                    beaker.BeakerEnvVar(name="NCCL_NVLSTREE_MAX_CHUNKSIZE", value="131072"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_NUM_FLOWS", value="2"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL", value="0"),
                     beaker.BeakerEnvVar(name="NCCL_BUFFSIZE", value="8388608"),
@@ -322,25 +358,26 @@ def get_env_vars(
                     beaker.BeakerEnvVar(name="CUDA_VISIBLE_DEVICES", value="0,1,2,3,4,5,6,7"),
                     beaker.BeakerEnvVar(name="NCCL_NET_GDR_LEVEL", value="PIX"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING", value="0"),
+                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS", value="600000"),
+                    beaker.BeakerEnvVar(name="NCCL_USE_SNAP", value="1"),
+                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_USE_LLCM", value="1"),
+                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY", value="/dev/aperture_devices"),
                     beaker.BeakerEnvVar(name="NCCL_TUNER_PLUGIN", value="libnccl-tuner.so"),
                     beaker.BeakerEnvVar(
-                        name="NCCL_TUNER_CONFIG_PATH", value="/var/lib/tcpxo/lib64/a3plus_tuner_config.textproto"
+                        name="NCCL_TUNER_CONFIG_PATH", value="/var/lib/tcpxo/lib64/a3plus_tuner_config_ll128.textproto"
                     ),
                     beaker.BeakerEnvVar(
                         name="NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE",
-                        value="/var/lib/tcpxo/lib64/a3plus_guest_config.textproto",
+                        value="/var/lib/tcpxo/lib64/a3plus_guest_config_ll128.textproto",
                     ),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS", value="600000"),
-                    beaker.BeakerEnvVar(name="NCCL_NVLS_ENABLE", value="0"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_CTRL_DEV", value="enp0s12"),
                     beaker.BeakerEnvVar(
                         name="NCCL_FASTRAK_IFNAME",
                         value="enp6s0,enp7s0,enp13s0,enp14s0,enp134s0,enp135s0,enp141s0,enp142s0",
                     ),
                     beaker.BeakerEnvVar(name="NCCL_SOCKET_IFNAME", value="enp0s12"),
-                    beaker.BeakerEnvVar(name="NCCL_USE_SNAP", value="1"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_USE_LLCM", value="1"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY", value="/dev/aperture_devices"),
+                    # Add COLL here to log all collective operations. Extreamly verbose, dont use for production.
+                    beaker.BeakerEnvVar(name="NCCL_DEBUG_SUBSYS", value="INIT,NET"),
                 ]
             )
     # don't mount anything; assume no cache
@@ -358,7 +395,7 @@ def get_env_vars(
     return env_vars
 
 
-def get_datasets(beaker_datasets, cluster: List[str]):
+def get_datasets(beaker_datasets, cluster: list[str]):
     """if pure docker mode we don't mount the NFS; so we can run it on jupiter2"""
     res = []
     # if all cluster is in weka, we mount the weka
@@ -386,7 +423,7 @@ def get_datasets(beaker_datasets, cluster: List[str]):
     return res
 
 
-def make_internal_command(command: List[str], args: argparse.Namespace, whoami: str, is_external_user: bool) -> str:
+def make_internal_command(command: list[str], args: argparse.Namespace, whoami: str, is_external_user: bool) -> str:
     # pass through WANDB_ENTITY and WANDB_PROJECT
     if "WANDB_ENTITY" in os.environ:
         command = [f"WANDB_ENTITY={os.environ['WANDB_ENTITY']}"] + command
@@ -411,18 +448,6 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
         # We could in theory submit a cpu only job to beaker to do this, but that requires setting up
         # dependency jobs somehow. Since tokenization is like ~5 minutes, we can just run it locally.
         # Once it's cached, we don't need to cache it again.
-        def find_list_idx(lst: List[str], item: str):
-            for i in range(len(lst)):
-                if item == lst[i]:
-                    return i
-            return -1
-
-        def remove_arg_from_list(lst: List[str], item: str, remove_value: bool = False):
-            idx = find_list_idx(lst, item)
-            if idx != -1 and idx + 1 < len(lst):
-                if remove_value:
-                    lst.pop(idx + 1)
-                lst.pop(idx)
 
         # Add the whoami parts if not already present
         if not any("hf_entity" in c for c in command):
@@ -436,88 +461,72 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
         dataset_config_hashes = []
         if not args.no_auto_dataset_cache:
             for file in OPEN_INSTRUCT_COMMANDS:
-                # add cache_dataset_only to the command
-                idx = find_list_idx(command, file)
-                if idx != -1:
-                    # then try executing the same command with
-                    caching_command = command.copy()
-                    remove_arg_from_list(caching_command, "--with_tracking", False)
-                    remove_arg_from_list(caching_command, "--checkpoint_state_freq", True)
-                    remove_arg_from_list(caching_command, "--checkpoint_state_dir", True)
-                    remove_arg_from_list(caching_command, "--gs_checkpoint_state_dir", True)
-                    caching_command = "python " + " ".join(caching_command[idx:]) + " --cache_dataset_only"
-                    console.log("📦📦📦 Running the caching command with `--cache_dataset_only`")
-                    import subprocess
+                try:
+                    idx = command.index(file)
+                except ValueError:
+                    continue
 
-                    # Use Popen to get real-time output while also capturing it
-                    process = subprocess.Popen(
-                        caching_command,
-                        shell=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                        bufsize=1,
-                    )
+                filtered_command = build_command_without_args(command[idx:], CACHE_EXCLUDED_ARGS)
+                caching_command = "python " + " ".join(filtered_command) + " --cache_dataset_only"
+                console.log("📦📦📦 Running the caching command with `--cache_dataset_only`")
+                import subprocess
 
-                    stdout_data, stderr_data = [], []
+                # Use Popen to get real-time output while also capturing it
+                process = subprocess.Popen(
+                    caching_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
+                )
 
-                    # Set up select to monitor both stdout and stderr
-                    streams = [process.stdout, process.stderr]
-                    while True:
-                        # Wait for output on either stream
-                        reads = select.select(streams, [], [])[0]
+                stdout_data, stderr_data = [], []
 
-                        done = True
-                        for stream in reads:
-                            line = stream.readline()
-                            if line:
-                                done = False
-                                is_stdout = stream == process.stdout
-                                print(line.rstrip(), file=sys.stdout if is_stdout else sys.stderr)
-                                if is_stdout:
-                                    stdout_data.append(line)
-                                else:
-                                    stderr_data.append(line)
+                # Set up select to monitor both stdout and stderr
+                streams = [process.stdout, process.stderr]
+                while True:
+                    # Wait for output on either stream
+                    reads = select.select(streams, [], [])[0]
 
-                        if done and process.poll() is not None:
-                            break
+                    done = True
+                    for stream in reads:
+                        line = stream.readline()
+                        if line:
+                            done = False
+                            is_stdout = stream == process.stdout
+                            print(line.rstrip(), file=sys.stdout if is_stdout else sys.stderr)
+                            if is_stdout:
+                                stdout_data.append(line)
+                            else:
+                                stderr_data.append(line)
 
-                    result = type(
-                        "SubprocessResult",
-                        (),
-                        {
-                            "returncode": process.returncode,
-                            "stdout": "".join(stdout_data),
-                            "stderr": "".join(stderr_data),
-                        },
-                    )
-                    stdout = result.stdout
-                    # Extract the cached dataset path from stdout if it exists
-                    for line in stdout.splitlines():
-                        if "✅ Found cached dataset at" in line:
-                            dataset_cache_path = line.split("✅ Found cached dataset at")[1].strip()
-                            dataset_config_hash = dataset_cache_path.split("/")[-1]
-                            console.log(f"📦 Found cached dataset at: {dataset_cache_path}")
-                            console.log(f"📦 Found cached dataset config hash: {dataset_config_hash}")
-                            dataset_cache_paths.append(dataset_cache_path)
-                            dataset_config_hashes.append(dataset_config_hash)
-                    stderr = result.stderr
-                    return_code = result.returncode
-                    if return_code != 0:
-                        raise Exception(f"Error code {return_code} when creating cached dataset")
-                    console.log("✅✅✅ Finished running the caching command")
+                    if done and process.poll() is not None:
+                        break
+
+                result = type(
+                    "SubprocessResult",
+                    (),
+                    {"returncode": process.returncode, "stdout": "".join(stdout_data), "stderr": "".join(stderr_data)},
+                )
+                stdout = result.stdout
+                # Extract the cached dataset path from stdout if it exists
+                for line in stdout.splitlines():
+                    if "✅ Found cached dataset at" in line:
+                        dataset_cache_path = line.split("✅ Found cached dataset at")[1].strip()
+                        dataset_config_hash = dataset_cache_path.split("/")[-1]
+                        console.log(f"📦 Found cached dataset at: {dataset_cache_path}")
+                        console.log(f"📦 Found cached dataset config hash: {dataset_config_hash}")
+                        dataset_cache_paths.append(dataset_cache_path)
+                        dataset_config_hashes.append(dataset_config_hash)
+                return_code = result.returncode
+                if return_code != 0:
+                    raise Exception(f"Error code {return_code} when creating cached dataset")
+                console.log("✅✅✅ Finished running the caching command")
 
                 if file in OPEN_INSTRUCT_RESUMABLES and idx != -1 and len(args.auto_checkpoint_state_dir) > 0:
                     need_to_override_checkpoint_state_dir = True
                     default_checkpoint_state_freq = 200
                     for idx, cmd in enumerate(command):
-                        if cmd == "--checkpoint_state_dir":
-                            if idx + 1 < len(command):
-                                if "/weka/" in command[idx + 1]:
-                                    need_to_override_checkpoint_state_dir = False
-                        if cmd == "--checkpoint_state_freq":
-                            if idx + 1 < len(command):
-                                default_checkpoint_state_freq = command[idx + 1]
+                        if cmd == "--checkpoint_state_dir" and idx + 1 < len(command) and "/weka/" in command[idx + 1]:
+                            need_to_override_checkpoint_state_dir = False
+                        if cmd == "--checkpoint_state_freq" and idx + 1 < len(command):
+                            default_checkpoint_state_freq = command[idx + 1]
 
                     if need_to_override_checkpoint_state_dir and is_open_instruct_training and not is_external_user:
                         new_checkpoint_state_dir = f"{args.auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
@@ -536,10 +545,9 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
             if len(args.auto_output_dir_path) > 0:
                 need_to_override_output_dir = True
                 for idx, cmd in enumerate(command):
-                    if cmd == "--output_dir":
-                        if "/weka/" in command[idx + 1]:
-                            need_to_override_output_dir = False
-                            break
+                    if cmd == "--output_dir" and "/weka/" in command[idx + 1]:
+                        need_to_override_output_dir = False
+                        break
                 if need_to_override_output_dir and is_open_instruct_training and not is_external_user:
                     new_output_dir = f"{args.auto_output_dir_path}/{whoami}/"
                     console.log(

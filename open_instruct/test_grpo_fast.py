@@ -4,6 +4,7 @@ import random
 import threading
 import time
 import unittest
+from typing import Any
 from unittest.mock import MagicMock, Mock
 
 import numpy as np
@@ -14,7 +15,7 @@ from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 from vllm import SamplingParams
 
-from open_instruct import grpo_fast, model_utils, utils
+from open_instruct import grpo_fast, model_utils, rl_utils, utils
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.vllm_utils import create_vllm_engines
 
@@ -159,6 +160,20 @@ class TestGrpoFastBase(unittest.TestCase):
 
         return mock_dims
 
+    def create_mock_packed_sequences(self, batch_size: int, seq_length: int, variable_length: bool = False):
+        """Create mock PackedSequences for testing."""
+        lengths = [seq_length - (i % 3) if variable_length else seq_length for i in range(batch_size)]
+        return rl_utils.PackedSequences(
+            query_responses=[torch.full((length,), i, dtype=torch.long) for i, length in enumerate(lengths)],
+            attention_masks=[torch.ones(length, dtype=torch.long) for length in lengths],
+            response_masks=[torch.ones(length, dtype=torch.long) for length in lengths],
+            original_responses=[[i] * seq_length for i in range(batch_size)],
+            tool_masks=[torch.zeros(length, dtype=torch.long) for length in lengths],
+            advantages=[torch.randn(length) for length in lengths],
+            position_ids=[torch.arange(length, dtype=torch.long) for length in lengths],
+            vllm_logprobs=[torch.randn(length) for length in lengths],
+        )
+
     def create_mock_result(self, dataset_index, epoch_number, num_samples_per_prompt=1):
         """Create a mock GenerationResult."""
         total_responses = num_samples_per_prompt
@@ -184,6 +199,26 @@ class TestGrpoFastBase(unittest.TestCase):
             logprobs=[[0.0, 0.0, 0.0] for _ in range(total_responses)],
         )
 
+    def create_mock_tokenizer_and_reward_fn(self):
+        # Set up dummy tokenizer
+        tokenizer_name = "EleutherAI/pythia-14m"  # Using a small model for testing
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+
+        # Set up dummy reward fn that will guarantee nonzero std
+        async def reward_fn(
+            responses: list[torch.Tensor],
+            decoded_responses: list[str],
+            ground_truths: list[Any],
+            datasets: list[str],
+            finish_reasons: list[str],
+            infos: list[list[int]],
+            queries: list[str] | None = None,
+        ) -> (list[float], dict[str, Any]):
+            num_responses = len(responses)
+            return [i / num_responses for i in range(num_responses)], {"time/reward": 0.0}
+
+        return tokenizer, reward_fn
+
     def setup_and_split_batch(
         self, queries, ground_truths, datasets, raw_queries, indices, num_engines, training_step=1
     ):
@@ -198,7 +233,13 @@ class TestGrpoFastBase(unittest.TestCase):
         self._ray_queues.extend([param_prompt_Q, inference_results_Q])
 
         batch = model_utils.Batch(
-            queries=queries, ground_truths=ground_truths, datasets=datasets, raw_queries=raw_queries, indices=indices
+            queries=queries,
+            ground_truths=ground_truths,
+            datasets=datasets,
+            raw_queries=raw_queries,
+            indices=indices,
+            decoded_responses=None,
+            scores=None,
         )
 
         mock_generation_config = MagicMock()
@@ -544,6 +585,9 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         # Create test data
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_prompts)
 
+        # Create mock tokenizer and reward
+        tokenizer, reward_fn = self.create_mock_tokenizer_and_reward_fn()
+
         # Setup and split batch
         param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_split_batch(
             queries, ground_truths, datasets, raw_queries, indices, num_engines
@@ -566,17 +610,19 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         mock_generation_config.n = num_samples_per_prompt
 
         mock_model_dims = self.create_mock_model_dims()
-        combined_result, batch, prompt_lengths, response_lengths = grpo_fast.accumulate_inference_batches(
+        combined_result, batch, reward_metrics, batch_stats = grpo_fast.accumulate_inference_batches(
             inference_results_Q,
             pending_queries_map,
             mock_args,
             generation_config=mock_generation_config,
             num_prompts=num_prompts,
             model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            reward_fn=reward_fn,
         )
 
         # Verify results work correctly even with out-of-order processing
-        self.assertEqual(len(batch.queries), num_prompts)
+        self.assertEqual(len(batch.queries), num_prompts * num_samples_per_prompt)
         self.assertEqual(len(combined_result.responses), num_prompts * num_samples_per_prompt)
         self.assertEqual(len(pending_queries_map), 0)
 
@@ -629,6 +675,9 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         num_engines = 4
         num_prompts = 16
 
+        # Create mock tokenizer and reward
+        tokenizer, reward_fn = self.create_mock_tokenizer_and_reward_fn()
+
         # Setup with results from only 3 engines
         # Queue size must be large enough for all results being put before accumulation starts
         expected_results = 3 * (num_prompts // num_engines)  # 3 engines * 4 results each = 12
@@ -668,6 +717,8 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                     generation_config=mock_generation_config,
                     num_prompts=num_prompts,
                     model_dims=mock_model_dims,
+                    tokenizer=tokenizer,
+                    reward_fn=reward_fn,
                 )
                 completed.set()
             except Exception:
@@ -703,7 +754,13 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         self._ray_queues.append(param_prompt_Q)
 
         batch = model_utils.Batch(
-            queries=queries, ground_truths=ground_truths, datasets=datasets, raw_queries=raw_queries, indices=indices
+            queries=queries,
+            ground_truths=ground_truths,
+            datasets=datasets,
+            raw_queries=raw_queries,
+            indices=indices,
+            decoded_responses=None,
+            scores=None,
         )
 
         mock_generation_config = MagicMock()
@@ -754,7 +811,13 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         self._ray_queues.append(param_prompt_Q)
 
         batch = model_utils.Batch(
-            queries=queries, ground_truths=ground_truths, datasets=datasets, raw_queries=raw_queries, indices=indices
+            queries=queries,
+            ground_truths=ground_truths,
+            datasets=datasets,
+            raw_queries=raw_queries,
+            indices=indices,
+            decoded_responses=None,
+            scores=None,
         )
 
         mock_generation_config = MagicMock()
@@ -996,6 +1059,80 @@ class TestShufflingIterator(unittest.TestCase):
             batch1 = next(iter1)
             batch3 = next(iter3)
             self.assertEqual(batch1, batch3)
+
+
+class TestDataPreparation(TestGrpoFastBase):
+    """Test prepare_collated_data_for_workers function."""
+
+    @parameterized.expand(
+        [
+            (16, 4, 2, 10, False, 0),
+            (32, 8, 4, 20, False, 0),
+            (8, 2, 1, 5, False, 0),
+            (17, 4, 2, 10, False, 0),
+            (25, 8, 3, 15, False, 0),
+            (4, 1, 4, 10, False, 0),
+            (8, 2, 2, 10, True, 999),
+        ]
+    )
+    def test_distribution_and_structure(
+        self, batch_size, world_size, per_device_train_batch_size, seq_length, variable_length, pad_token_id
+    ):
+        """Test data distribution, structure, micro-batch collation, and padding."""
+        packed_sequences = self.create_mock_packed_sequences(batch_size, seq_length, variable_length)
+        result = grpo_fast.prepare_collated_data_for_workers(
+            packed_sequences, world_size, per_device_train_batch_size, pad_token_id, pin_memory=False
+        )
+
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), world_size)
+
+        expected_keys = {
+            "collated_query_responses",
+            "collated_tool_masks",
+            "collated_attention_masks",
+            "collated_position_ids",
+            "collated_advantages",
+            "collated_response_masks",
+            "collated_vllm_logprobs",
+        }
+
+        expected_samples_per_worker = batch_size // world_size
+        samples_per_worker = batch_size // world_size
+        expected_num_microbatches = (
+            samples_per_worker + per_device_train_batch_size - 1
+        ) // per_device_train_batch_size
+
+        for worker_data in result:
+            self.assertIsInstance(worker_data, dict)
+            self.assertEqual(set(worker_data.keys()), expected_keys)
+
+            total_samples = sum(len(batch) for batch in worker_data["collated_query_responses"])
+            self.assertEqual(total_samples, expected_samples_per_worker)
+
+            num_microbatches = len(worker_data["collated_query_responses"])
+            self.assertEqual(num_microbatches, expected_num_microbatches)
+
+            for value in worker_data.values():
+                self.assertIsInstance(value, list)
+                self.assertEqual(len(value), expected_num_microbatches)
+                for i, tensor in enumerate(value):
+                    self.assertIsInstance(tensor, torch.Tensor)
+                    if i < expected_num_microbatches - 1:
+                        self.assertEqual(len(tensor), per_device_train_batch_size)
+                    else:
+                        self.assertLessEqual(len(tensor), per_device_train_batch_size)
+
+            if not variable_length:
+                continue
+
+            for batch in worker_data["collated_query_responses"]:
+                for row in batch:
+                    padding_mask = row == pad_token_id
+                    if not padding_mask.any():
+                        continue
+                    first_pad_idx = padding_mask.nonzero(as_tuple=True)[0][0].item()
+                    self.assertTrue(torch.all(row[first_pad_idx:] == pad_token_id))
 
 
 if __name__ == "__main__":
