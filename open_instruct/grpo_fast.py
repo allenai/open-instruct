@@ -717,11 +717,9 @@ class ShufflingIterator:
         """Ensure the effective dataset size is divisible by batch_size and filter out all the indices excluded in the last epoch"""
         if self.exclude_list:
             mask = ~np.isin(self.data, self.exclude_list)
-            if mask.all():
-                return
-
             self.data = self.data[mask]
             self.exclude_list = []
+
         self.effective_size = len(self.data) - (len(self.data) % self.batch_size)
 
 
@@ -1679,9 +1677,9 @@ def accumulate_inference_batches(
         generation_config: Generation config containing n (number of samples per prompt)
         num_prompts: Number of prompts to accumulate
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
-        filter_zero_std:samples: Whether to filter samples with zero reward std and continue sampling
+        filter_zero_std_samples: Whether to filter samples with zero reward std and continue sampling
         no_resampling_pass_rate: Optional rate at which to note samples solved at greater than this rate
-            and exclude them from futher sampling
+            and exclude them from further sampling
         iter_dataloader: Optional, used for no_resampling_pass_rate
 
     Raises:
@@ -1879,6 +1877,7 @@ def accumulate_inference_batches(
     )
 
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
+    percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
 
     batch_stats = BatchStatistics(
         prompt_lengths=prompt_lengths,
@@ -1887,7 +1886,7 @@ def accumulate_inference_batches(
         filtered_prompts_zero=filtered_prompt_zero,
         filtered_prompts_solved=filtered_prompt_solved,
         filtered_prompts_nonzero=filtered_prompt_nonzero,
-        percent_solved_mean=np.mean(all_percent_solved),
+        percent_solved_mean=percent_solved_mean,
         no_resampled_prompts=total_no_resampled,
     )
     logging.info(
