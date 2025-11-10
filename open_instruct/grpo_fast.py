@@ -252,10 +252,10 @@ class Args:
     """the length of the pack (you should prob set to the max length of the model)"""
     masked_mean_axis: int | None = None
     """the axis to compute the mean of the masked values"""
-    masked_mean_denominator: float | None = None
+    masked_mean_denominator: float | str | None = None
     """Optional constant denominator for masked_mean; if set, divides by this instead of mask.sum.
-    Special value -1 means use total_batch_tokens (computed across all ranks in distributed training).
-    When using -1, total_batch_tokens is gathered via allreduce across all ranks."""
+    Special value "token" means use total_batch_tokens (computed across all ranks in distributed training).
+    When using "token", total_batch_tokens is gathered via allreduce across all ranks."""
     alpha: float = 0.6
     """The alpha value for doing polyak updates (ref_param = alpha * param + (1 - alpha) * ref_param)
     reference: [TR-DPO](https://huggingface.co/papers/2404.09656), but it's actually pretty commonly
@@ -444,9 +444,14 @@ class Args:
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
         if self.masked_mean_denominator is not None:
-            assert self.masked_mean_denominator > 0, (
-                f"masked_mean_denominator (={self.masked_mean_denominator}) must be greater than 0!"
-            )
+            if isinstance(self.masked_mean_denominator, str):
+                assert self.masked_mean_denominator == "token", (
+                    f"masked_mean_denominator string value must be 'token' or number, got {self.masked_mean_denominator}"
+                )
+            else:
+                assert self.masked_mean_denominator > 0, (
+                    f"masked_mean_denominator (={self.masked_mean_denominator}) must be greater than 0!"
+                )
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
@@ -1121,14 +1126,18 @@ class PolicyTrainerRayProcess(RayProcess):
                     mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
                 local_total_batch_tokens += mb_response_masks_bool.sum().item()
             
-            # Gather total tokens across all ranks if using distributed training and denominator is -1
+            # Gather total tokens across all ranks if using distributed training and denominator is "token"
             # This ensures normalization is consistent across all ranks
-            if dist.is_available() and dist.is_initialized():
-                local_total_batch_tokens_tensor = torch.tensor(
-                    local_total_batch_tokens, dtype=torch.float32, device=self.device
-                )
-                dist.all_reduce(local_total_batch_tokens_tensor, op=dist.ReduceOp.SUM)
-                total_batch_tokens = local_total_batch_tokens_tensor.item()
+            if args.masked_mean_denominator == "token":
+                if dist.is_available() and dist.is_initialized():
+                    local_total_batch_tokens_tensor = torch.tensor(
+                        local_total_batch_tokens, dtype=torch.float32, device=self.device
+                    )
+                    dist.all_reduce(local_total_batch_tokens_tensor, op=dist.ReduceOp.SUM)
+                    total_batch_tokens = local_total_batch_tokens_tensor.item()
+                else:
+                    # Non-distributed case: total_batch_tokens is just local tokens
+                    total_batch_tokens = local_total_batch_tokens
             
             kl1_stats = torch.zeros(len(collated_query_responses))
             kl2_stats = torch.zeros(len(collated_query_responses))
@@ -1278,16 +1287,21 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Three loss cases:
                     # masked_mean_denominator is set: we use sum and divide loss by this constant.
-                    # masked_mean_denominator is set to -1: we use sum and divide loss by total number of tokens in batch.
+                    # masked_mean_denominator is set to "token": we use sum and divide loss by total number of tokens in batch.
                     # masked_mean_denominator is None, masked_mean_axis is None: we take mean across tokens in minibatch (old behaviour)
                     # masked_mean_denominator is None, masked_mean_axis is 1: we use sample-wise averaging across the sequence axis.
                     loss = masked_mean(
                             loss_values,
                             mb_response_masks_bool,
                             args.masked_mean_axis,
-                            args.masked_mean_denominator if args.masked_mean_denominator != -1 else total_batch_tokens,
+                            args.masked_mean_denominator if args.masked_mean_denominator != "token" else total_batch_tokens,
                         )
-                    loss = loss / accumulation_steps
+                    # When using global normalization (masked_mean_denominator == "token"), total_batch_tokens already
+                    # includes tokens from all ranks and all minibatches, so we should NOT divide by accumulation_steps.
+                    # For other normalization modes, we divide by accumulation_steps to properly scale gradients
+                    # for gradient accumulation.
+                    if args.masked_mean_denominator != "token":
+                        loss = loss / accumulation_steps
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
                         self.model.step()
