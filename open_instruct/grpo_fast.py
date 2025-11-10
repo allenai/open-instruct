@@ -1130,11 +1130,16 @@ class PolicyTrainerRayProcess(RayProcess):
             # This ensures normalization is consistent across all ranks
             if args.masked_mean_denominator == "token":
                 if dist.is_available() and dist.is_initialized():
+                    # Ensure all ranks have computed local_total_batch_tokens before all_reduce
+                    dist.barrier()
                     local_total_batch_tokens_tensor = torch.tensor(
                         local_total_batch_tokens, dtype=torch.float32, device=self.device
                     )
-                    dist.all_reduce(local_total_batch_tokens_tensor, op=dist.ReduceOp.SUM)
+                    dist.all_reduce(local_total_batch_tokens_tensor, op=dist.ReduceOp.SUM, group=None)
                     total_batch_tokens = local_total_batch_tokens_tensor.item()
+                    if self.rank == 0:
+                        logger.debug(f"[Rank {self.rank}]: total_batch_tokens across all ranks={total_batch_tokens:.0f}")
+
                 else:
                     # Non-distributed case: total_batch_tokens is just local tokens
                     total_batch_tokens = local_total_batch_tokens
