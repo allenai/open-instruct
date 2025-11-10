@@ -493,6 +493,7 @@ def build_deepspeed_config(zero_stage: int, offload_optimizer: bool = False, off
                 "stage3_max_live_parameters": 1e9,
                 "stage3_max_reuse_distance": 1e9,
                 "stage3_gather_16bit_weights_on_model_save": True,
+                "zero_hpz_partition_size": 8,
             }
         )
 
