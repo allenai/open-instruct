@@ -18,7 +18,6 @@ do
         --env NCCL_PROTO=Simple,LL128 \
         --env NCCL_TUNER_CONFIG_PATH=/var/lib/tcpxo/lib64/a3plus_tuner_config_ll128.textproto \
         --env NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE=/var/lib/tcpxo/lib64/a3plus_guest_config_ll128.textproto \
-        --preemptible \
         --num_nodes $NUM_NODES \
         --budget ai2/oe-adapt \
         --no_auto_dataset_cache \
