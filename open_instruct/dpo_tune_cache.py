@@ -447,10 +447,12 @@ def get_ref_logprobs_cache_path(
     return os.path.join(cache_dir, cache_filename)
 
 
-def save_ref_logprobs_to_disk(
-    cache_path: str, epoch_cached_reference_chosen_logps: list, epoch_cached_reference_rejected_logps: list
+def maybe_save_ref_logprobs_to_disk(
+    cache_path: str | None, epoch_cached_reference_chosen_logps: list, epoch_cached_reference_rejected_logps: list
 ) -> None:
-    """Save reference logprobs to disk."""
+    """Save reference logprobs to disk if cache_path is provided."""
+    if cache_path is None:
+        return
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
     cache_data = {
         "epoch_cached_reference_chosen_logps": epoch_cached_reference_chosen_logps,
@@ -467,6 +469,59 @@ def load_ref_logprobs_from_disk(cache_path: str) -> tuple:
     logger.info(f"Loading reference logprobs cache from {cache_path}")
     cache_data = torch.load(cache_path)
     return (cache_data["epoch_cached_reference_chosen_logps"], cache_data["epoch_cached_reference_rejected_logps"])
+
+
+def maybe_load_reference_logprobs_from_disk(
+    args: FlatArguments, tc: TokenizerConfig
+) -> tuple[list | None, list | None, str | None]:
+    """Load reference logprobs from disk if cache directory is configured."""
+    if args.ref_logprobs_cache_dir is None:
+        return None, None, None
+
+    transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+    dcs = load_dataset_configs(
+        args.dataset_mixer_list,
+        args.dataset_mixer_list_splits,
+        args.dataset_transform_fn,
+        transform_fn_args,
+        args.dataset_target_columns,
+        args.seed,
+    )
+    config_hash = compute_config_hash(dcs, tc)
+    cache_location = get_ref_logprobs_cache_path(
+        args.ref_logprobs_cache_dir, args.model_name_or_path, config_hash, args.max_train_samples
+    )
+    epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = load_ref_logprobs_from_disk(
+        cache_location
+    )
+
+    if epoch_cached_reference_chosen_logps is not None:
+        num_epochs = len(epoch_cached_reference_chosen_logps)
+        num_batches = len(epoch_cached_reference_chosen_logps[0]) if num_epochs > 0 else 0
+
+        total_elements = sum(
+            sum(tensor.numel() for tensor in epoch_batches) for epoch_batches in epoch_cached_reference_chosen_logps
+        )
+        total_elements += sum(
+            sum(tensor.numel() for tensor in epoch_batches) for epoch_batches in epoch_cached_reference_rejected_logps
+        )
+
+        total_size_bytes = sum(
+            sum(tensor.element_size() * tensor.numel() for tensor in epoch_batches)
+            for epoch_batches in epoch_cached_reference_chosen_logps
+        )
+        total_size_bytes += sum(
+            sum(tensor.element_size() * tensor.numel() for tensor in epoch_batches)
+            for epoch_batches in epoch_cached_reference_rejected_logps
+        )
+        total_size_mb = total_size_bytes / (1024 * 1024)
+
+        logger.info(
+            f"Loaded cached reference logprobs: {num_epochs} epochs, {num_batches} batches per epoch, "
+            f"{total_elements} total logprobs, {total_size_mb:.2f} MB"
+        )
+
+    return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps, cache_location
 
 
 def build_deepspeed_config(zero_stage: int, offload_optimizer: bool = False, offload_param: bool = False) -> dict:
@@ -915,30 +970,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             raise NotImplementedError("seperate forward not implemented for packing/padding-free")
         forward_fn = partial(forward_fn, packing=True)
     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
-        if args.ref_logprobs_cache_dir is not None:
-            transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
-            dcs = load_dataset_configs(
-                args.dataset_mixer_list,
-                args.dataset_mixer_list_splits,
-                args.dataset_transform_fn,
-                transform_fn_args,
-                args.dataset_target_columns,
-                args.seed,
-            )
-            config_hash = compute_config_hash(dcs, tc)
-            cache_location = get_ref_logprobs_cache_path(
-                args.ref_logprobs_cache_dir, args.model_name_or_path, config_hash, args.max_train_samples
-            )
-            epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = load_ref_logprobs_from_disk(
-                cache_location
-            )
-            if epoch_cached_reference_chosen_logps is not None:
-                num_epochs = len(epoch_cached_reference_chosen_logps)
-                num_batches = len(epoch_cached_reference_chosen_logps[0]) if num_epochs > 0 else 0
-                logger.info(f"Loaded cached reference logprobs: {num_epochs} epochs, {num_batches} batches per epoch")
-        else:
-            cache_location = None
-            epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = None, None
+        epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps, cache_location = (
+            maybe_load_reference_logprobs_from_disk(args, tc)
+        )
 
         if epoch_cached_reference_chosen_logps is None:
             epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = get_cache_ref_logprobs(
@@ -951,8 +985,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 range(starting_epoch, args.num_train_epochs),
                 forward_fn,
             )
-            if cache_location is not None and accelerator.is_main_process:
-                save_ref_logprobs_to_disk(
+            if accelerator.is_main_process:
+                maybe_save_ref_logprobs_to_disk(
                     cache_location, epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps
                 )
                 accelerator.wait_for_everyone()
