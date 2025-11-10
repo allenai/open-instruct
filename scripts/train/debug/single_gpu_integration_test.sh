@@ -57,4 +57,6 @@ uv run python mason.py \
     --push_to_hub false \
     --active_sampling \
     --async_steps 8 \
+    --no_resampling_positive_rate 0.6 \
+    --verbose \
     --single_gpu_mode
