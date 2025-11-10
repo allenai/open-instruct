@@ -1,4 +1,4 @@
-MODEL_NAME=/weka/oe-adapt-default/saumyam/checkpoints/olmo2-7B-sft/rl-sft/olmo2.5-6T-LC-sigma-reasoning-mix-decontam-v2-special-tokens-v3-think-FIX
+MODEL_NAME=/weka/oe-adapt-default/finbarrt/stego32/step358000-hf
 NUM_NODES=8
 
 #for LR in 4e-8 5e-8 6e-8 7e-8 8e-8 9e-8 1e-7 2e-7
