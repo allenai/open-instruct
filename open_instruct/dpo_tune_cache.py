@@ -564,10 +564,13 @@ def build_reference_logprobs_cache(
     return cache
 
 
-def get_ref_logprobs_cache_path(cache_dir: str, model_name_or_path: str, dataset_config_hash: str) -> str:
+def get_ref_logprobs_cache_path(
+    cache_dir: str, model_name_or_path: str, dataset_config_hash: str, max_train_samples: int | None = None
+) -> str:
     """Generate the cache file path for reference logprobs."""
     model_name_sanitized = re.sub(r"[^\w\-_]", "_", model_name_or_path)
-    cache_filename = f"{model_name_sanitized}_{dataset_config_hash}.pt"
+    samples_str = f"_samples{max_train_samples}" if max_train_samples is not None else ""
+    cache_filename = f"{model_name_sanitized}_{dataset_config_hash}{samples_str}.pt"
     return os.path.join(cache_dir, cache_filename)
 
 
