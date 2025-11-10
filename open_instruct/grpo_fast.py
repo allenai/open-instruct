@@ -946,7 +946,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 group_name="openrlhf",
                 timeout=timedelta(minutes=self.args.backend_timeout),
             )
-            ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=60)
+            ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=600)
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
