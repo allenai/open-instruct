@@ -346,22 +346,12 @@ class FlatArguments:
     """The beaker evaluation tasks to launch"""
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
-<<<<<<< Updated upstream
-||||||| Stash base
-    oe_eval_gpu_multiplier: Optional[int] = None
-    """the multiplier for the number of GPUs for evaluation"""
-    eval_workspace: Optional[str] = "ai2/tulu-3-results"
-    """The workspace to launch evaluation jobs on"""
-    eval_priority: Optional[str] = "high"
-    """The priority of auto-launched evaluation jobs"""
-=======
     oe_eval_gpu_multiplier: int | None = None
     """the multiplier for the number of GPUs for evaluation"""
     eval_workspace: str | None = "ai2/tulu-3-results"
     """The workspace to launch evaluation jobs on"""
     eval_priority: str | None = "high"
     """The priority of auto-launched evaluation jobs"""
->>>>>>> Stashed changes
 
     def __post_init__(self):
         if self.dataset_name is None and self.dataset_mixer is None and self.dataset_mixer_list is None:
