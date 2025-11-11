@@ -170,7 +170,7 @@ def mock_data_generator_thread(
                 masks = []
 
                 for _ in range(args.num_generations):
-                    response_len = min(args.max_completion_len, random.randint(50, args.max_completion_len))
+                    response_len = args.max_completion_len
                     mock_response = torch.randint(0, model_dims.vocab_size, (response_len,)).tolist()
                     mock_responses.append(mock_response)
                     finish_reasons.append("stop" if random.random() > 0.1 else "length")
