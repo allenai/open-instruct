@@ -52,7 +52,7 @@ import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
 from accelerate.logging import get_logger
-from accelerate.utils import DeepSpeedPlugin, DistributedType, InitProcessGroupKwargs, set_seed
+from accelerate.utils import DeepSpeedPlugin, InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
@@ -161,8 +161,7 @@ class FlatArguments:
         },
     )
     zero_hpz_partition_size: Optional[int] = field(
-        default=8,
-        metadata={"help": "The partition size for ZeRO++ optimization. Only used if zero_stage is set."},
+        default=8, metadata={"help": "The partition size for ZeRO++ optimization. Only used if zero_stage is set."}
     )
     offload_optimizer: bool = field(
         default=False,
@@ -453,7 +452,10 @@ def get_cache_ref_logprobs(
         epoch_cached_reference_rejected_logps.append(cached_reference_rejected_logps)
     return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps
 
-def build_deepspeed_config(zero_stage: int, offload_optimizer: bool = False, offload_param: bool = False, hpz_partition_size: int = 8) -> dict:
+
+def build_deepspeed_config(
+    zero_stage: int, offload_optimizer: bool = False, offload_param: bool = False, hpz_partition_size: int = 8
+) -> dict:
     """Build a DeepSpeed configuration dict from the provided settings."""
     config = {
         "bf16": {"enabled": "auto"},
@@ -509,7 +511,10 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     deepspeed_plugin = None
     if args.zero_stage is not None:
         deepspeed_config = build_deepspeed_config(
-            zero_stage=args.zero_stage, offload_optimizer=args.offload_optimizer, offload_param=args.offload_param, hpz_partition_size=args.zero_hpz_partition_size
+            zero_stage=args.zero_stage,
+            offload_optimizer=args.offload_optimizer,
+            offload_param=args.offload_param,
+            hpz_partition_size=args.zero_hpz_partition_size,
         )
         deepspeed_plugin = DeepSpeedPlugin(hf_ds_config=deepspeed_config)
 
