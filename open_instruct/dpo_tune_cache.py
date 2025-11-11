@@ -52,7 +52,7 @@ import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
 from accelerate.logging import get_logger
-from accelerate.utils import InitProcessGroupKwargs, set_seed
+from accelerate.utils import DeepSpeedPlugin, DistributedType, InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
@@ -154,6 +154,23 @@ class FlatArguments:
     )
     sync_each_batch: bool = False
     """Optionaly sync grads every batch when using grad accumulation. Can significantly reduce memory costs."""
+    zero_stage: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "DeepSpeed ZeRO optimization stage (0, 1, 2, or 3). If None, DeepSpeed config must be provided via accelerate launch."
+        },
+    )
+    zero_hpz_partition_size: Optional[int] = field(
+        default=8,
+        metadata={"help": "The partition size for ZeRO++ optimization. Only used if zero_stage is set."},
+    )
+    offload_optimizer: bool = field(
+        default=False,
+        metadata={"help": "Offload optimizer states to CPU to save GPU memory. Only used if zero_stage is set."},
+    )
+    offload_param: bool = field(
+        default=False, metadata={"help": "Offload parameters to CPU to save GPU memory. Only used with zero_stage 3."}
+    )
     low_cpu_mem_usage: bool = field(
         default=False,
         metadata={
@@ -231,6 +248,13 @@ class FlatArguments:
     logging_steps: Optional[int] = field(
         default=None, metadata={"help": "Log the training loss and learning rate every logging_steps steps."}
     )
+    log_grad_norm: bool = field(
+        default=False,
+        metadata={
+            "help": "Compute and log gradient norm every logging interval. Enables extra GPU syncs and may slow training."
+        },
+    )
+
     lora_rank: int = field(default=64, metadata={"help": "The rank of lora."})
     lora_alpha: float = field(default=16, metadata={"help": "The alpha parameter of lora."})
     lora_dropout: float = field(default=0.1, metadata={"help": "The dropout rate of lora modules."})
@@ -365,6 +389,12 @@ class FlatArguments:
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
 
+        if self.zero_stage is not None:
+            if self.zero_stage not in [0, 1, 2, 3]:
+                raise ValueError(f"zero_stage must be 0, 1, 2, or 3, got {self.zero_stage}")
+            if self.offload_param and self.zero_stage != 3:
+                raise ValueError("offload_param can only be used with zero_stage 3")
+
         # Parse in args that could be `dict` sent in from the CLI as a string
         for dict_feld in self._VALID_DICT_FIELDS:
             passed_value = getattr(self, dict_feld)
@@ -417,6 +447,45 @@ def get_cache_ref_logprobs(
         epoch_cached_reference_rejected_logps.append(cached_reference_rejected_logps)
     return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps
 
+def build_deepspeed_config(zero_stage: int, offload_optimizer: bool = False, offload_param: bool = False, hpz_partition_size: int = 8) -> dict:
+    """Build a DeepSpeed configuration dict from the provided settings."""
+    config = {
+        "bf16": {"enabled": "auto"},
+        "zero_optimization": {
+            "stage": zero_stage,
+            "overlap_comm": True,
+            "contiguous_gradients": True,
+            "reduce_bucket_size": "auto",
+        },
+        "gradient_accumulation_steps": "auto",
+        "gradient_clipping": "auto",
+        "steps_per_print": 1e5,
+        "train_batch_size": "auto",
+        "train_micro_batch_size_per_gpu": "auto",
+        "wall_clock_breakdown": False,
+    }
+
+    if zero_stage == 3:
+        config["zero_optimization"].update(
+            {
+                "sub_group_size": 1e9,
+                "stage3_prefetch_bucket_size": "auto",
+                "stage3_param_persistence_threshold": "auto",
+                "stage3_max_live_parameters": 1e9,
+                "stage3_max_reuse_distance": 1e9,
+                "stage3_gather_16bit_weights_on_model_save": True,
+                "zero_hpz_partition_size": hpz_partition_size,
+            }
+        )
+
+    if offload_optimizer:
+        config["zero_optimization"]["offload_optimizer"] = {"device": "cpu", "pin_memory": True}
+
+    if offload_param:
+        config["zero_optimization"]["offload_param"] = {"device": "cpu", "pin_memory": True}
+
+    return config
+
 
 def main(args: FlatArguments, tc: TokenizerConfig):
     # ------------------------------------------------------------
@@ -430,6 +499,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # if you get timeouts (e.g. due to long tokenization) increase this.
     timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
     dataloader_config = DataLoaderConfiguration(use_seedable_sampler=True)
+
+    deepspeed_plugin = None
+    if args.zero_stage is not None:
+        deepspeed_config = build_deepspeed_config(
+            zero_stage=args.zero_stage, offload_optimizer=args.offload_optimizer, offload_param=args.offload_param, hpz_partition_size=args.zero_hpz_partition_size
+        )
+        deepspeed_plugin = DeepSpeedPlugin(hf_ds_config=deepspeed_config)
+
     accelerator = Accelerator(
         dataloader_config=dataloader_config,
         **accelerator_log_kwargs,
@@ -437,6 +514,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         gradient_accumulation_plugin=GradientAccumulationPlugin(
             num_steps=args.gradient_accumulation_steps, sync_each_batch=args.sync_each_batch
         ),
+        deepspeed_plugin=deepspeed_plugin,
     )
 
     # ------------------------------------------------------------
@@ -883,6 +961,12 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     weighted_aux_loss = args.load_balancing_weight * aux_loss
                     loss += weighted_aux_loss
                 accelerator.backward(loss)
+
+                # compute gradient norm before any clipping (only on sync steps to reduce overhead)
+                grad_norm_this_step = None
+                if args.log_grad_norm and accelerator.sync_gradients:
+                    grad_norm_this_step = accelerator.clip_grad_norm_(model.parameters(), float("inf"))
+
                 # clip gradient norm. don't do this with deepspeed
                 if accelerator.sync_gradients and args.clip_grad_norm > 0:
                     accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
@@ -892,6 +976,15 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
                 # We keep track of the loss at each logged step
                 with torch.no_grad():
+                    if grad_norm_this_step is not None and args.log_grad_norm:
+                        # scale by grad accumulation since we'll divide later to get a per-step average
+                        grad_norm_value = (
+                            grad_norm_this_step.item()
+                            if isinstance(grad_norm_this_step, torch.Tensor)
+                            else float(grad_norm_this_step)
+                        )
+                        local_metrics[8] += grad_norm_value * args.gradient_accumulation_steps
+
                     local_metrics[0] += loss
                     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                         chosen_rewards = (args.dpo_beta * (policy_chosen_logps - reference_chosen_logps)).mean()
@@ -926,6 +1019,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         "logps/chosen": global_metrics[6],
                         "logps/rejected": global_metrics[7],
                     }
+                    if args.log_grad_norm:
+                        metrics_to_log["grad_norm"] = global_metrics[8]
                     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                         metrics_to_log.update(
                             {
