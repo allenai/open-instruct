@@ -3,7 +3,7 @@ NUM_NODES=8
 BEAKER_IMAGE=$1
 
 LR=6e-8
-EXP_NAME="olmo3-32b-DPO-dbg-tr-shrd64-ofldopt-${LR}"
+EXP_NAME="olmo3-32b-DPO-dbg-tr-shrd64-ofldopt-sep-${LR}"
 
 HF_HUB_ENABLE_HF_TRANSFER=1 uv run python mason.py \
     --cluster ai2/augusta \
@@ -37,7 +37,7 @@ HF_HUB_ENABLE_HF_TRANSFER=1 uv run python mason.py \
     --max_train_samples 15000 \
     --dataset_skip_cache \
     --zero_stage 3 \
-    --concatenated_forward True \
+    --concatenated_forward False \
     --max_seq_length 16384 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 1 \
