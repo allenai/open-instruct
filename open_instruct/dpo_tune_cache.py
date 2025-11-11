@@ -33,7 +33,7 @@ import pathlib
 import random
 import shutil
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
@@ -247,6 +247,12 @@ class FlatArguments:
     learning_rate: float = field(default=2e-5, metadata={"help": "The initial learning rate for AdamW optimizer."})
     logging_steps: int | None = field(
         default=None, metadata={"help": "Log the training loss and learning rate every logging_steps steps."}
+    )
+    log_grad_norm: bool = field(
+        default=False,
+        metadata={
+            "help": "Compute and log gradient norm every logging interval. Enables extra GPU syncs and may slow training."
+        },
     )
     lora_rank: int = field(default=64, metadata={"help": "The rank of lora."})
     lora_alpha: float = field(default=16, metadata={"help": "The alpha parameter of lora."})
@@ -703,6 +709,16 @@ def build_deepspeed_config(zero_stage: int, offload_optimizer: bool = False, off
         config["zero_optimization"]["offload_param"] = {"device": "cpu", "pin_memory": True}
 
     return config
+
+
+def compute_grad_norm(parameters: Iterable[torch.nn.Parameter], device: torch.device) -> torch.Tensor:
+    """Compute the global L2 gradient norm across all parameters."""
+    total_norm = torch.zeros((), device="cpu")
+    for param in parameters:
+        if param.grad is None:
+            continue
+        total_norm += param.grad.detach().float().pow(2).sum().cpu()
+    return total_norm.sqrt().to(device)
 
 
 def main(args: FlatArguments, tc: TokenizerConfig):
@@ -1199,6 +1215,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     raise ValueError(f"Invalid dpo loss type {args.dpo_loss_type}.")
                 # TODO: metric logging
                 loss = losses.mean()
+                grad_norm = None
                 if args.load_balancing_loss:
                     weighted_aux_loss = args.load_balancing_weight * aux_loss
                     loss += weighted_aux_loss
@@ -1206,6 +1223,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 # clip gradient norm. don't do this with deepspeed
                 if accelerator.sync_gradients and args.clip_grad_norm > 0:
                     accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
+                if args.log_grad_norm and accelerator.sync_gradients:
+                    grad_norm = compute_grad_norm(model.parameters(), accelerator.device)
                 optimizer.step()
                 optimizer.zero_grad()
                 lr_scheduler.step()
@@ -1226,6 +1245,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         local_metrics["rewards/margin"] += margin
                     local_metrics["logps/chosen"] += policy_chosen_logps.mean()
                     local_metrics["logps/rejected"] += policy_rejected_logps.mean()
+                    if args.log_grad_norm and grad_norm is not None:
+                        local_metrics["grad_norm"] += grad_norm * args.gradient_accumulation_steps
                     if args.load_balancing_loss:
                         local_metrics["aux_loss"] += weighted_aux_loss
 
@@ -1270,6 +1291,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         "logps/chosen": global_metrics["logps/chosen"],
                         "logps/rejected": global_metrics["logps/rejected"],
                     }
+                    if args.log_grad_norm:
+                        metrics_to_log["grad_norm"] = global_metrics["grad_norm"]
                     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                         metrics_to_log.update(
                             {
