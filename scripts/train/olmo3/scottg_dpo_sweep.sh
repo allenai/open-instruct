@@ -3,7 +3,7 @@ BEAKER_IMAGE=$1
 MODEL_NAME=/weka/oe-adapt-default/jacobm/olmo3/32b-merge-configs/checkpoints/32b-2e-5-5e-5
 NUM_NODES=16
 #for LR in 8e-8 6e-8 1e-7 4e-8 2e-8 2e-7 8e-9 4e-7 5e-8
-for LR in 7e-8
+for LR in 1e-7
 do
     EXP_NAME="olmo3-32b-merge_2e5e-DPO-deltas-150k-${LR}"
     uv run python mason.py \
@@ -55,6 +55,5 @@ do
         --report_to wandb \
         --chat_template_name olmo123 \
         --with_tracking \
-        --oe_eval_max_length 32768 \
-        --oe_eval_tasks "gpqa:0shot_cot::qwen3-instruct,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,minerva_math_500::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,zebralogic::hamish_zs_reasoning_deepseek,bbh:cot::hamish_zs_reasoning_deepseek_v2,mmlu:cot::hamish_zs_reasoning_deepseek,popqa::hamish_zs_reasoning_deepseek"
+        --try_launch_beaker_eval_jobs False
 done
