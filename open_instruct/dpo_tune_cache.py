@@ -45,7 +45,7 @@ import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
 from accelerate.logging import get_logger
-from accelerate.utils import DeepSpeedPlugin, InitProcessGroupKwargs, set_seed
+from accelerate.utils import DeepSpeedPlugin, DistributedType, InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
@@ -590,11 +590,10 @@ def compute_grad_norm(model: torch.nn.Module, accelerator: Accelerator) -> torch
     Uses DeepSpeed's cached norm when available so ZeRO-sharded grads are handled correctly.
     Returns None if the norm cannot be computed (e.g., no grads yet).
     """
-    ds_plugin = accelerator.state.deepspeed_plugin if hasattr(accelerator.state, "deepspeed_plugin") else None
-    if ds_plugin is not None:
-        ds_engine = getattr(ds_plugin, "deepspeed_engine", None)
-        if ds_engine is not None and hasattr(ds_engine, "get_global_grad_norm"):
-            grad_norm = ds_engine.get_global_grad_norm()
+    if accelerator.distributed_type == DistributedType.DEEPSPEED:
+        ds_engine_wrapper = getattr(accelerator, "deepspeed_engine_wrapped", None)
+        if ds_engine_wrapper is not None and hasattr(ds_engine_wrapper, "get_global_grad_norm"):
+            grad_norm = ds_engine_wrapper.get_global_grad_norm()
             if grad_norm is not None:
                 return torch.as_tensor(grad_norm, device=accelerator.device, dtype=torch.float32)
 
