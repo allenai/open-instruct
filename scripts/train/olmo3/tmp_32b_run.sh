@@ -3,7 +3,7 @@
 
 export exp_name=test_olmo3_32b_rl_run_${RANDOM}
 export data_mix="hamishivi/math_rlvr_mixture_dpo 1.0 hamishivi/code_rlvr_mixture_dpo 1.0 hamishivi/IF_multi_constraints_upto5_filtered_dpo_0625_filter 30186 allenai/rlvr_general_mix-keyword-filtered 21387"
-export beaker_image=hamishivi/open_instruct_rl32_test6
+export beaker_image=hamishivi/open_instruct_rl32_test7
 export model_path=/weka/oe-adapt-default/hamishi/model_checkpoints/olmo3-merge-32b-1e-4-5e-5/olmo3-merge-32b-1e-4-5e-5/
 
 
@@ -16,7 +16,7 @@ python mason.py \
     --priority urgent \
     --gs_model_name "sft_olmo3_32b_rl_run_testing" \
     --preemptible \
-    --num_nodes 12 \
+    --num_nodes 18 \
     --gpus 8 \
     --max_retries 0 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
@@ -27,7 +27,7 @@ python mason.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 8 \
-        --num_unique_prompts_rollout 64 \
+        --num_unique_prompts_rollout 128 \
         --num_mini_batches 1 \
         --num_epochs 1 \
         --learning_rate 1e-6 \
@@ -50,7 +50,7 @@ python mason.py \
         --sft_messages_key messages \
         --total_episodes 10000000 \
         --deepspeed_stage 3 \
-        --num_learners_per_node 8 8 8 8 8 8 \
+        --num_learners_per_node 8 8 8 8 8 8 8 8 8 8 8 8 \
         --vllm_num_engines 6 \
         --gather_whole_model False \
         --vllm_tensor_parallel_size 8 \
