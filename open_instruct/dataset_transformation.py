@@ -101,6 +101,7 @@ def custom_cached_file(model_name_or_path: str, filename: str, revision: str = N
 def get_commit_hash(
     model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
 ) -> str:
+    logger.info(f"Getting commit hash for {model_name_or_path} with revision {revision} and filename {filename}")
     file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     commit_hash = extract_commit_hash(file, None)
     return commit_hash
