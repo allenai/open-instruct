@@ -3,7 +3,7 @@ NUM_NODES=8
 BEAKER_IMAGE=$1
 
 LR=6e-8
-EXP_NAME="olmo3-32b-DPO-debug-tylertest-offload-optimizer-shard8-${LR}"
+EXP_NAME="olmo3-32b-DPO-dbg-tr-ofldopt-shrd8-${LR}"
 
 HF_HUB_ENABLE_HF_TRANSFER=1 uv run python mason.py \
     --cluster ai2/augusta \
