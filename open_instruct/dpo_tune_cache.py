@@ -367,6 +367,8 @@ class FlatArguments:
     """The workspace to launch evaluation jobs on"""
     eval_priority: Optional[str] = "high"
     """The priority of auto-launched evaluation jobs"""
+    log_grad_norm: bool = False
+    """Whether to log the gradient norm"""
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -916,6 +918,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     weighted_aux_loss = args.load_balancing_weight * aux_loss
                     loss += weighted_aux_loss
                 accelerator.backward(loss)
+                grad_norm_this_step = None
+                if args.log_grad_norm and accelerator.sync_gradients:
+                    grad_norm_this_step = accelerator.clip_grad_norm_(model.parameters(), float("inf"))
                 # clip gradient norm. don't do this with deepspeed
                 if accelerator.sync_gradients and args.clip_grad_norm > 0:
                     accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
@@ -925,6 +930,15 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
                 # We keep track of the loss at each logged step
                 with torch.no_grad():
+                    if grad_norm_this_step is not None and args.log_grad_norm:
+                        # scale by grad accumulation since we'll divide later to get a per-step average
+                        grad_norm_value = (
+                            grad_norm_this_step.item()
+                            if isinstance(grad_norm_this_step, torch.Tensor)
+                            else float(grad_norm_this_step)
+                        )
+                        local_metrics[8] += grad_norm_value * args.gradient_accumulation_steps
+
                     local_metrics[0] += loss
                     if args.dpo_loss_type in ["dpo", "dpo_norm", "dpo_norm_chosen"]:
                         chosen_rewards = (args.dpo_beta * (policy_chosen_logps - reference_chosen_logps)).mean()
@@ -970,6 +984,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         "logps/chosen": global_metrics[6],
                         "logps/rejected": global_metrics[7],
                     }
+                    if args.log_grad_norm:
+                        metrics_to_log["grad_norm"] = global_metrics[8]
                     if args.dpo_loss_type in ["dpo", "dpo_norm", "dpo_norm_chosen"]:
                         metrics_to_log.update(
                             {
