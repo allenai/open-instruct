@@ -48,7 +48,8 @@ uv run python mason.py \
     --num_epochs 1 \
     --num_learners_per_node 1 \
     --vllm_tensor_parallel_size 1 \
-    --beta 0.01 \
+    --beta 0.0 \
+    --load_ref_policy false \
     --seed 3 \
     --local_eval_every 1 \
     --vllm_sync_backend gloo \
