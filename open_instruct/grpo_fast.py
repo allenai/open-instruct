@@ -1034,6 +1034,53 @@ class PolicyTrainerRayProcess(RayProcess):
         to_device_inplace(collated_advantages, self.device)
         to_device_inplace(collated_response_masks, self.device)
         to_device_inplace(collated_vllm_logprobs, self.device)
+        
+        # Pad all sequences to pack_length for debugging OOMs
+        # Use actual values instead of padding tokens to maximize memory usage
+        pack_length = args.pack_length
+        for i in range(len(collated_query_responses)):
+            current_length = collated_query_responses[i].shape[1]
+            if current_length < pack_length:
+                pad_length = pack_length - current_length
+                
+                # Pad query_responses with last token repeated (actual token values, not padding)
+                last_tokens = collated_query_responses[i][:, -1:].expand(-1, pad_length)
+                collated_query_responses[i] = torch.cat([collated_query_responses[i], last_tokens], dim=1)
+                
+                # Pad tool_masks with last value repeated
+                last_tool_mask = collated_tool_masks[i][:, -1:].expand(-1, pad_length)
+                collated_tool_masks[i] = torch.cat([collated_tool_masks[i], last_tool_mask], dim=1)
+                
+                # Pad attention_masks with 1 (so they're attended to, but response_mask will still mask from loss)
+                # Use the last attention mask value, or 1 if the last is 0
+                last_attn_mask = collated_attention_masks[i][:, -1:]
+                # If last is 0, use 1; otherwise use last value
+                pad_attn_mask = torch.where(last_attn_mask > 0, last_attn_mask, torch.ones_like(last_attn_mask))
+                pad_attn_mask = pad_attn_mask.expand(-1, pad_length)
+                collated_attention_masks[i] = torch.cat([collated_attention_masks[i], pad_attn_mask], dim=1)
+                
+                # Pad position_ids - increment from last position (continue sequence)
+                last_pos = collated_position_ids[i][:, -1:]
+                pad_positions = last_pos + torch.arange(1, pad_length + 1, device=last_pos.device, dtype=last_pos.dtype).unsqueeze(0)
+                collated_position_ids[i] = torch.cat([collated_position_ids[i], pad_positions], dim=1)
+                
+                # Pad response_masks with 1 (include padded positions in loss calculation for backprop)
+                collated_response_masks[i] = torch.nn.functional.pad(
+                    collated_response_masks[i], (0, pad_length), value=1
+                )
+                
+                # Pad advantages with last advantage value repeated (actual values)
+                last_advantage = collated_advantages[i][:, -1:].expand(-1, pad_length)
+                collated_advantages[i] = torch.cat([collated_advantages[i], last_advantage], dim=1)
+                
+                # Pad vllm_logprobs with last logprob value repeated (actual values)
+                # Use INVALID_LOGPROB if last value is NaN to avoid NaN propagation
+                last_logprob = collated_vllm_logprobs[i][:, -1:]
+                # Replace NaN with INVALID_LOGPROB before padding
+                last_logprob = torch.nan_to_num(last_logprob, nan=INVALID_LOGPROB)
+                last_logprob = last_logprob.expand(-1, pad_length)
+                collated_vllm_logprobs[i] = torch.cat([collated_vllm_logprobs[i], last_logprob], dim=1)
+        
         # accumulation steps should always be at least 1
         accumulation_steps = max(math.ceil(len(collated_query_responses) / num_mini_batches - 0.5), 1)
         leftover = len(collated_query_responses) % accumulation_steps
@@ -1107,9 +1154,24 @@ class PolicyTrainerRayProcess(RayProcess):
                         local_old_logprob = torch.masked_fill(
                             local_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB
                         )
+                    else:
+                        # Always compute local logprobs to fill in padded positions (which have INVALID_LOGPROB from vllm)
+                        local_old_logprob, _ = self.forward(
+                            self.model,
+                            query_response,
+                            attention_mask,
+                            position_id,
+                            pad_token_id,
+                            args.temperature,
+                            return_entropy=False,
+                        )
                     vllm_old_logprob = torch.masked_fill(vllm_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
                     vllm_old_logprob = torch.nan_to_num(vllm_old_logprob, nan=INVALID_LOGPROB)
                     if args.use_vllm_logprobs:
+                        # Use vllm logprobs for non-padded positions, local logprobs for padded positions
+                        # Padded positions have INVALID_LOGPROB in vllm_old_logprob, so replace them with local logprobs
+                        padded_mask = vllm_old_logprob == INVALID_LOGPROB
+                        vllm_old_logprob = torch.where(padded_mask, local_old_logprob, vllm_old_logprob)
                         old_logprobs[i] = vllm_old_logprob
                     else:
                         old_logprobs[i] = local_old_logprob
@@ -1183,7 +1245,10 @@ class PolicyTrainerRayProcess(RayProcess):
                         with torch.no_grad():
                             if epoch_idx == 0:
                                 if args.use_vllm_logprobs:
-                                    old_logprobs[i] = mb_vllm_logprobs
+                                    # Use vllm logprobs for non-padded positions, local logprobs for padded positions
+                                    # Padded positions have INVALID_LOGPROB in mb_vllm_logprobs, so replace them with local logprobs
+                                    padded_mask = mb_vllm_logprobs == INVALID_LOGPROB
+                                    old_logprobs[i] = torch.where(padded_mask, mb_local_logprobs.detach(), mb_vllm_logprobs)
                                 else:
                                     old_logprobs[i] = mb_local_logprobs.detach()
                             mb_old_logprobs = old_logprobs[i]
