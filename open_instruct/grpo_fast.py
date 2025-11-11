@@ -1254,6 +1254,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     pg_loss_max = torch.max(pg_losses, pg_losses2)
 
                     if args.load_ref_policy:
+                        mb_ref_logprob = collated_ref_logprobs[i]
                         ref_logprobs_diff = (mb_new_logprobs - mb_ref_logprob).clamp(-40.0, 40.0)
                         kl1 = ref_logprobs_diff
                         kl2 = (ref_logprobs_diff) ** 2 / 2
