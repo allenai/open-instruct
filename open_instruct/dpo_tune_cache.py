@@ -31,7 +31,7 @@ import os
 import random
 import shutil
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
@@ -584,14 +584,31 @@ def build_deepspeed_config(zero_stage: int, offload_optimizer: bool = False, off
     return config
 
 
-def compute_grad_norm(parameters: Iterable[torch.nn.Parameter], device: torch.device) -> torch.Tensor:
-    """Compute the global L2 gradient norm across all parameters."""
+def compute_grad_norm(model: torch.nn.Module, accelerator: Accelerator) -> torch.Tensor | None:
+    """
+    Compute the global L2 gradient norm across all parameters.
+    Uses DeepSpeed's cached norm when available so ZeRO-sharded grads are handled correctly.
+    Returns None if the norm cannot be computed (e.g., no grads yet).
+    """
+    ds_plugin = accelerator.state.deepspeed_plugin if hasattr(accelerator.state, "deepspeed_plugin") else None
+    if ds_plugin is not None:
+        ds_engine = getattr(ds_plugin, "deepspeed_engine", None)
+        if ds_engine is not None and hasattr(ds_engine, "get_global_grad_norm"):
+            grad_norm = ds_engine.get_global_grad_norm()
+            if grad_norm is not None:
+                return torch.as_tensor(grad_norm, device=accelerator.device, dtype=torch.float32)
+
+    unwrapped_model = accelerator.unwrap_model(model)
     total_norm = torch.zeros((), device="cpu")
-    for param in parameters:
+    has_grads = False
+    for param in unwrapped_model.parameters():
         if param.grad is None:
             continue
+        has_grads = True
         total_norm += param.grad.detach().float().pow(2).sum().cpu()
-    return total_norm.sqrt().to(device)
+    if not has_grads:
+        return None
+    return total_norm.sqrt().to(accelerator.device)
 
 
 def main(args: FlatArguments, tc: TokenizerConfig):
@@ -1097,7 +1114,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 if accelerator.sync_gradients and args.clip_grad_norm > 0:
                     accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
                 if args.log_grad_norm and accelerator.sync_gradients:
-                    grad_norm = compute_grad_norm(model.parameters(), accelerator.device)
+                    grad_norm = compute_grad_norm(model, accelerator)
                 optimizer.step()
                 optimizer.zero_grad()
                 lr_scheduler.step()
