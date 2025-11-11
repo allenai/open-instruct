@@ -55,5 +55,5 @@ HF_HUB_ENABLE_HF_TRANSFER=1 uv run python mason.py \
     --chat_template_name olmo123 \
     --with_tracking \
     --log_grad_norm True \
-    --zero_hpz_partition_size 64 \
+    --zero_hpz_partition_size 8 \
     --offload_optimizer True
