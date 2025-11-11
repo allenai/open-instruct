@@ -349,8 +349,8 @@ class Args:
     """vLLM top p for nucleus sampling"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
-    deepspeed_zpg: int = 32
-    """the deepspeed zpg value"""
+    deepspeed_zpg: int = 8
+    """the deepspeed zpg value. Higher values are more memory efficient but slower. Set to 1 to disable zpg, which uses less memory but is significantly slower. Ideally is set to the number of GPUs per node (usually 8, default)."""
     deepspeed_offload_param: bool = False
     """whether to offload parameters to CPU (reduces GPU memory usage)"""
     deepspeed_offload_optimizer: bool = False
