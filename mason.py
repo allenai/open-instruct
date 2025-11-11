@@ -440,8 +440,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
 
     is_open_instruct_training = any(cmd in command for cmd in OPEN_INSTRUCT_COMMANDS)
     if is_open_instruct_training:
-        from open_instruct.dataset_transformation import get_commit_hash
-        from open_instruct.utils import download_from_hf, gs_folder_exists, upload_to_gs_bucket
+        from open_instruct.utils import gs_folder_exists, upload_to_gs_bucket
 
         # HACK: Cache dataset logic:
         # Here we basically try to run the tokenization full_command locally before running it on beaker
@@ -589,18 +588,20 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     model_revision = command[idx + 1]
                     break
 
-            if os.path.exists(model_name_or_path):
-                path = model_name_or_path
-                assert args.gs_model_name is not None, "for local models to upload to gs, you must set --gs_model_name"
-                model_name_or_path = args.gs_model_name
-                commit_hash = hashlib.md5(model_name_or_path.encode("utf-8")).hexdigest()[:8]
-                console.log(
-                    f"Local model is already downloaded, using gs_model_name {model_name_or_path}, with hash of model path {commit_hash}"
-                )
-            else:
-                commit_hash = get_commit_hash(model_name_or_path, model_revision, "config.json", "model")
-                download_from_hf(model_name_or_path, model_revision)  # first download the model
-                path = download_from_hf(model_name_or_path, model_revision)  # then get the path
+            console.log(f"Model name or path: {model_name_or_path}")
+            # if os.path.exists(model_name_or_path):
+            path = model_name_or_path
+            assert args.gs_model_name is not None, "for local models to upload to gs, you must set --gs_model_name"
+            model_name_or_path = args.gs_model_name
+            commit_hash = hashlib.md5(model_name_or_path.encode("utf-8")).hexdigest()[:8]
+            console.log(
+                f"Local model is already downloaded, using gs_model_name {model_name_or_path}, with hash of model path {commit_hash}"
+            )
+            # else:
+            #     commit_hash = get_commit_hash(model_name_or_path, model_revision, "config.json", "model")
+            #     download_from_hf(model_name_or_path, model_revision)  # first download the model
+            #     path = download_from_hf(model_name_or_path, model_revision)  # then get the path
+
             gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_models/{model_name_or_path}/{commit_hash}"
             gs_folder = gs_folder_exists(
                 gs_saved_path
