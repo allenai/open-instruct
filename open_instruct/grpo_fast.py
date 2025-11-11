@@ -407,7 +407,7 @@ class Args:
     """the max generation length for evaluation for oe-eval"""
     oe_eval_beaker_image: str | None = None
     """the docker image for evaluation for oe-eval"""
-    oe_eval_gpu_multiplier: int = 1
+    oe_eval_gpu_multiplier: int | None = None
     """multiply the gpus used for each oe-eval task"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
