@@ -19,24 +19,24 @@ uv run python mason.py \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/mock_data_grpo_fast.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
-        --num_samples_per_prompt_rollout 16 \
-        --num_unique_prompts_rollout 64 \
+        --num_samples_per_prompt_rollout 8 \
+        --num_unique_prompts_rollout 128 \
         --num_mini_batches 1 \
         --num_epochs 1 \
-        --learning_rate 5e-7 \
+        --learning_rate 1e-6 \
         --per_device_train_batch_size 1 \
+        --output_dir /output \
         --kl_estimator kl3 \
-        --dataset_mixer_list saurabh5/rlvr_acecoder_filtered ${num_prompts} saurabh5/open-code-reasoning-rlvr-stdio ${num_prompts} \
+        --dataset_mixer_list hamishivi/math_rlvr_mixture_dpo 1.0 hamishivi/code_rlvr_mixture_dpo 1.0 hamishivi/IF_multi_constraints_upto5_filtered_dpo_0625_filter 30186 allenai/rlvr_general_mix-keyword-filtered 21387 \
         --dataset_mixer_list_splits train \
-        --dataset_mixer_eval_list saurabh5/rlvr_acecoder_filtered 8 saurabh5/open-code-reasoning-rlvr-stdio 8 \
-        --dataset_mixer_eval_list_splits train \
+        --dataset_mixer_eval_list hamishivi/omega-combined 8 allenai/IF_multi_constraints_upto5 8 saurabh5/rlvr_acecoder_filtered 8 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2 4 hamishivi/virtuoussy_multi_subject_rlvr 4 \
         --max_prompt_token_length 2048 \
-        --response_length 4096 \
-        --pack_length 20480 \
+        --response_length 32768 \
+        --pack_length 35840 \
         --model_name_or_path "/weka/oe-adapt-default/finbarrt/stego32/step358000-hf" \
 	--tokenizer_name_or_path "allenai/OLMo-2-1124-7B" \
         --chat_template_name tulu_thinker \
-	--inflight_updates True \
+	--inflight_updates true \
         --stop_strings "</answer>" \
         --non_stop_penalty False \
         --temperature 1.0 \
@@ -51,7 +51,7 @@ uv run python mason.py \
         --vllm_tensor_parallel_size 4 \
         --lr_scheduler_type constant \
         --apply_verifiable_reward true \
-        --code_api_url \$CODE_API_URL/test_program \
+        --code_api_url https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program \
         --seed 1 \
         --local_eval_every 1 \
 	--add_bos \
@@ -63,4 +63,16 @@ uv run python mason.py \
         --oe_eval_max_length 32768 \
         --oe_eval_tasks "codex_humanevalplus:0-shot-chat-v1::tulu-thinker,mbppplus:0-shot-chat::tulu-thinker,livecodebench_codegeneration::tulu-thinker" \
         --dataset_skip_cache True \
-	--push_to_hub False
+	--push_to_hub False \
+        --llm_judge_max_tokens 2048 \
+        --llm_judge_max_context_length 32768 \
+        --clip_higher 0.272 \
+        --allow_world_padding False \
+        --use_fp8_kv_cache False \
+        --code_pass_rate_reward_threshold 0.99 \
+        --checkpoint_state_freq 100 \
+        --backend_timeout 1200 \
+        --async_steps 8 \
+        --active_sampling \
+        --advantage_normalization_type centered \
+        --truncated_importance_sampling_ratio_cap 2.0
