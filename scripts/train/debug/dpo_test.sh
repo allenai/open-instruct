@@ -1,3 +1,4 @@
+MODEL_NAME=/weka/oe-adapt-default/jacobm/olmo3/32b-merge-configs/checkpoints/32b-1e-4-5e-5/
 NUM_NODES=8
 BEAKER_IMAGE=$1
 
@@ -6,11 +7,12 @@ EXP_NAME="olmo3-32b-DPO-debug-tylertest-${LR}"
 
 uv run python mason.py \
     --cluster ai2/augusta \
+    --gs_model_name olmo3-merge-32b-1e-4-5e-5 \
     --workspace ai2/olmo-instruct \
     --priority urgent \
     --max_retries 1 \
     --preemptible \
-    --image $1 \
+    --image $BEAKER_IMAGE \
     --pure_docker_mode \
     --env NCCL_LIB_DIR=/var/lib/tcpxo/lib64 \
     --env LD_LIBRARY_PATH=/var/lib/tcpxo/lib64:$LD_LIBRARY_PATH \
@@ -28,10 +30,11 @@ uv run python mason.py \
     --deepspeed_multinode_launcher standard \
     open_instruct/dpo_tune_cache.py \
     --exp_name $EXP_NAME \
-    --model_name_or_path /gs/ai2-llm/post-training/deletable_cache_models/olmo3-merge-32b-1e-4-5e-5/9dd46ba1 \
-    --tokenizer_name /weka/oe-adapt-default/jacobm/olmo3/32b-merge-configs/checkpoints/32b-1e-4-5e-5/ \
+    --model_name_or_path $MODEL_NAME \
+    --tokenizer_name $MODEL_NAME \
     --use_slow_tokenizer False \
-    --dataset_mixer_list allenai/olmo-3-preference-mix-deltas_reasoning-scottmix-DECON-keyword-filtered 16384 \
+    --dataset_mixer_list allenai/olmo-3-preference-mix-deltas_reasoning-scottmix-DECON-keyword-filtered 1.0 \
+    --max_train_samples 15000 \
     --dataset_skip_cache \
     --zero_stage 3 \
     --concatenated_forward True \
@@ -51,6 +54,5 @@ uv run python mason.py \
     --report_to wandb \
     --chat_template_name olmo123 \
     --with_tracking \
-    --try_launch_beaker_eval_jobs False \
+    --log_grad_norm True \
     --zero_hpz_partition_size 64
-    # --offload_optimizer True
