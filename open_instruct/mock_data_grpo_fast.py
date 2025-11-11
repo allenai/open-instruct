@@ -20,7 +20,6 @@ from open_instruct.grpo_fast import (
     ModelGroup,
     PolicyTrainerRayProcess,
     make_tokenizer,
-    setup_datasets,
     setup_experiment_tracking,
     setup_runtime_variables,
 )
@@ -57,11 +56,12 @@ def create_model_and_optimizer(args: Args, tokenizer_config: TokenizerConfig, mo
 def main(args: Args, tokenizer_config: TokenizerConfig, model_config: ModelConfig):
     logger.info("Starting mock_data_grpo_fast main")
 
-    tokenizer = make_tokenizer(tokenizer_config, model_config)
+    make_tokenizer(tokenizer_config, model_config)
     args = setup_runtime_variables(args)
 
-    beaker_config, wandb_url = setup_experiment_tracking(args, tokenizer_config, model_config)
-    train_dataset, eval_dataset = setup_datasets(args, tokenizer_config, tokenizer)
+    setup_experiment_tracking(args, tokenizer_config, model_config)
+
+    logger.info("Skipping dataset loading for mock OOM testing...")
 
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
