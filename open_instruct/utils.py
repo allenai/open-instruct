@@ -1189,7 +1189,7 @@ python scripts/submit_eval_jobs.py \
     if beaker_image is not None:
         command += f" --beaker_image {beaker_image}"
     if oe_eval_gpu_multiplier is not None:
-        command += f"--gpu_multiplier {oe_eval_gpu_multiplier}"
+        command += f" --gpu_multiplier {oe_eval_gpu_multiplier}"
     print(f"Launching eval jobs with command: {command}")
     process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
