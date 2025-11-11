@@ -275,7 +275,7 @@ def main(args: Args, tokenizer_config: TokenizerConfig, model_config: ModelConfi
         system_prompt_override=system_prompt_override,
     )
 
-    ray.init(address=args.ray_address, runtime_env={"env_vars": {"NCCL_DEBUG": "WARN"}}, ignore_reinit_error=True)
+    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
     inference_results_Q = ray_queue.Queue(maxsize=args.inference_results_queue_size)
     param_prompt_Q = ray_queue.Queue(maxsize=args.param_prompt_queue_size)
