@@ -164,6 +164,9 @@ class FlatArguments:
     offload_param: bool = field(
         default=False, metadata={"help": "Offload parameters to CPU to save GPU memory. Only used with zero_stage 3."}
     )
+    zero_hpz_partition_size: int = field(
+        default=8, metadata={"help": "Hierarchical partition size for ZeRO stage 3. Only used with zero_stage 3."}
+    )
     low_cpu_mem_usage: bool = field(
         default=False,
         metadata={
@@ -455,7 +458,9 @@ def get_ref_logprobs_cache_path(
     """Generate the cache file path for reference logprobs."""
     model_name_sanitized = re.sub(r"[^\w\-_]", "_", model_name_or_path)
     samples_str = f"_samples{max_train_samples}" if max_train_samples is not None else ""
-    cache_filename = f"{model_name_sanitized}_{dataset_config_hash}_ws{world_size}_rank{process_rank}{samples_str}_seed{seed}.pt"
+    cache_filename = (
+        f"{model_name_sanitized}_{dataset_config_hash}_ws{world_size}_rank{process_rank}{samples_str}_seed{seed}.pt"
+    )
     return os.path.join(cache_dir, cache_filename)
 
 
@@ -509,7 +514,7 @@ def maybe_load_reference_logprobs_from_disk(
         args.max_train_samples,
         accelerator.num_processes,
         accelerator.process_index,
-        args.seed
+        args.seed,
     )
     epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = load_ref_logprobs_from_disk(
         cache_location
@@ -544,7 +549,9 @@ def maybe_load_reference_logprobs_from_disk(
     return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps, cache_location
 
 
-def build_deepspeed_config(zero_stage: int, offload_optimizer: bool = False, offload_param: bool = False) -> dict:
+def build_deepspeed_config(
+    zero_stage: int, offload_optimizer: bool = False, offload_param: bool = False, zero_hpz_partition_size: int = 8
+) -> dict:
     """Build a DeepSpeed configuration dict from the provided settings."""
     config = {
         "bf16": {"enabled": "auto"},
@@ -571,7 +578,7 @@ def build_deepspeed_config(zero_stage: int, offload_optimizer: bool = False, off
                 "stage3_max_live_parameters": 1e9,
                 "stage3_max_reuse_distance": 1e9,
                 "stage3_gather_16bit_weights_on_model_save": True,
-                "zero_hpz_partition_size": 8,
+                "zero_hpz_partition_size": zero_hpz_partition_size,
             }
         )
 
@@ -626,7 +633,10 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     deepspeed_plugin = None
     if args.zero_stage is not None:
         deepspeed_config = build_deepspeed_config(
-            zero_stage=args.zero_stage, offload_optimizer=args.offload_optimizer, offload_param=args.offload_param
+            zero_stage=args.zero_stage,
+            offload_optimizer=args.offload_optimizer,
+            offload_param=args.offload_param,
+            zero_hpz_partition_size=args.zero_hpz_partition_size,
         )
         deepspeed_plugin = DeepSpeedPlugin(hf_ds_config=deepspeed_config)
 
