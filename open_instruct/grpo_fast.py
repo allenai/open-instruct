@@ -761,6 +761,18 @@ class PolicyTrainerRayProcess(RayProcess):
             zero_opt["sub_group_size"] = 1e9
             zero_opt["zero_hpz_partition_size"] = 8
             zero_opt["stage3_gather_16bit_weights_on_model_save"] = True
+            # Reduce communication bucket sizes to prevent OOM during reduce_scatter
+            # Smaller buckets use less temporary memory but may be slightly slower
+            if "reduce_bucket_size" in zero_opt and zero_opt["reduce_bucket_size"] == "auto":
+                zero_opt["reduce_bucket_size"] = 5e7  # 50M elements (default auto is often larger)
+            if "stage3_prefetch_bucket_size" in zero_opt and zero_opt["stage3_prefetch_bucket_size"] == "auto":
+                zero_opt["stage3_prefetch_bucket_size"] = 5e7  # 50M elements
+            ds_config["zero_optimization"] = zero_opt
+        # Also reduce reduce_bucket_size for non-stage-3 ZeRO to prevent OOM
+        elif ds_config["zero_optimization"]["stage"] in [1, 2]:
+            zero_opt = ds_config["zero_optimization"]
+            if "reduce_bucket_size" in zero_opt and zero_opt["reduce_bucket_size"] == "auto":
+                zero_opt["reduce_bucket_size"] = 5e7  # 50M elements
             ds_config["zero_optimization"] = zero_opt
         # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
         # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
@@ -1269,6 +1281,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         args.masked_mean_denominator,
                     )
                     loss = loss / accumulation_steps
+                    # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
+                    torch.cuda.empty_cache()
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
                         self.model.step()
