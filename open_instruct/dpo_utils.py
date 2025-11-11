@@ -31,6 +31,7 @@ from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_
 torch.backends.cuda.matmul.allow_tf32 = True
 
 
+@torch.compile(dynamic=True)
 def dpo_loss(
     policy_chosen_logps: torch.FloatTensor,
     policy_rejected_logps: torch.FloatTensor,
@@ -77,6 +78,7 @@ def dpo_loss(
     return losses, chosen_rewards, rejected_rewards
 
 
+@torch.compile(dynamic=True)
 def wpo_loss(
     policy_chosen_logps: torch.FloatTensor,
     policy_rejected_logps: torch.FloatTensor,
@@ -109,6 +111,7 @@ def wpo_loss(
 
 
 # From https://github.com/princeton-nlp/SimPO/blob/main/scripts/simpo_trainer.py#L560C1-L595C56
+@torch.compile(dynamic=True)
 def simpo_loss(
     policy_chosen_logps: torch.FloatTensor,
     policy_rejected_logps: torch.FloatTensor,
@@ -139,6 +142,7 @@ def simpo_loss(
     return losses, chosen_rewards, rejected_rewards
 
 
+@torch.compile(dynamic=True)
 def _get_batch_logps(
     logits: torch.FloatTensor, labels: torch.LongTensor, average_log_prob: bool = False
 ) -> torch.FloatTensor:
@@ -244,10 +248,13 @@ def concatenated_forward(
     }
     if output_router_logits:
         outputs = model(**inputs, output_router_logits=True)
-        logits = outputs.logits.to(torch.float32)
+        logits = outputs.logits.float()  # More memory efficient: convert in-place operation
         aux_loss = outputs.aux_loss
+        del outputs  # Delete original output immediately to free bf16 memory
     else:
-        logits = model(**inputs).logits.to(torch.float32)
+        outputs = model(**inputs)
+        logits = outputs.logits.float()  # More memory efficient: convert in-place operation
+        del outputs  # Delete original output immediately to free bf16 memory
         aux_loss = None
 
     if not packing:

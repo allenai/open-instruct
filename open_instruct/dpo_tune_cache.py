@@ -1231,6 +1231,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     )["mfu"]
                     metrics_to_log["perf/tokens_per_second_step"] = step_tokens_per_second
                     metrics_to_log["perf/tokens_per_second_total"] = total_tokens_per_second
+                    metrics_to_log["perf/total_tokens_processed"] = total_tokens_processed
 
                     logger.info(logger_str)
                     if args.with_tracking:
