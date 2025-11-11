@@ -116,6 +116,7 @@ from open_instruct.utils import (
     combine_reward_metrics,
     download_latest_checkpoint_from_gs,
     get_beaker_whoami,
+    get_eval_ds_config,
     get_optimizer_grouped_parameters,
     get_train_ds_config,
     get_wandb_tags,
@@ -864,23 +865,18 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
         self.model.train()
 
-        # reference model
-        ds_config = get_eval_ds_config(
-            offload=False,
-            # inference model only has stage 3 (sharding) or stage 0 (no sharding)
-            # stage 2 is optimizer sharding which doesn't apply to inference
-            stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
-            bf16=True,
-        )
-        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-        ds_config["gradient_accumulation_steps"] = 1
-        if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            dschf = HfDeepSpeedConfig(ds_config)
-        else:
-            dschf = None
-        logger.info(f"DeepSpeed config: {dschf=}")
-
         if args.load_ref_policy:
+            ds_config = get_eval_ds_config(
+                offload=False, stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0, bf16=True
+            )
+            ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
+            ds_config["gradient_accumulation_steps"] = 1
+            if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
+                dschf = HfDeepSpeedConfig(ds_config)
+            else:
+                dschf = None
+            logger.info(f"DeepSpeed config: {dschf=}")
+
             self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
                 model_config.model_name_or_path,
                 revision=model_config.model_revision,
@@ -1138,6 +1134,11 @@ class PolicyTrainerRayProcess(RayProcess):
             loss_stats = torch.zeros(len(collated_query_responses))
             ratio_stats = torch.zeros(len(collated_query_responses))
             entropy_stats = torch.zeros(len(collated_query_responses))
+            kl1_stats = torch.zeros(len(collated_query_responses))
+            kl2_stats = torch.zeros(len(collated_query_responses))
+            kl3_stats = torch.zeros(len(collated_query_responses))
+            kl4_stats = torch.zeros(len(collated_query_responses))
+            kl_loss_stats = torch.zeros(len(collated_query_responses))
             for epoch_idx in range(args.num_epochs):
                 for i in range(len(collated_query_responses)):
                     mb_query_responses = collated_query_responses[i]
@@ -2488,6 +2489,7 @@ def one_training_step(
     iter_dataloader: Iterator | None = None,
 ) -> None:
     """Train the model for one step."""
+    update_ref_policy_future = []
     with Timer("[Main Thread] 🗡️ Training") as train_timer:
         metrics_list, _ = ray_get_with_progress(
             [
