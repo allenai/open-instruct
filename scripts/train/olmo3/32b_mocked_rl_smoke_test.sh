@@ -70,7 +70,6 @@ uv run python mason.py \
         --allow_world_padding False \
         --use_fp8_kv_cache False \
         --code_pass_rate_reward_threshold 0.99 \
-        --checkpoint_state_freq 100 \
         --backend_timeout 1200 \
         --async_steps 8 \
         --active_sampling \
