@@ -34,6 +34,7 @@ from open_instruct.grpo_fast import (
     PolicyTrainerRayProcess,
     ShufflingIterator,
     data_preparation_thread,
+    make_tokenizer,
     next_batch,
     run_training,
 )
@@ -232,7 +233,7 @@ def create_model_and_optimizer(args: Args, tokenizer_config: TokenizerConfig, mo
 def main(args: Args, tokenizer_config: TokenizerConfig, model_config: ModelConfig):
     logger.info("Starting mock_data_grpo_fast main")
 
-    tokenizer = tokenizer_config.get_tokenizer()
+    tokenizer = make_tokenizer(tokenizer_config, model_config)
 
     if args.with_tracking:
         import wandb
