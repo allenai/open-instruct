@@ -258,6 +258,10 @@ class Args:
     reference: [TR-DPO](https://huggingface.co/papers/2404.09656), but it's actually pretty commonly
     used. E.g., [TD3](https://arxiv.org/abs/1802.09477) uses https://github.com/vwxyzjn/cleanrl/blob/dcc289fc6f0bda492fa7360a155262cf826b12a5/cleanrl/td3_continuous_action.py#L269
     """
+    ref_policy_update_freq: int | None = None
+    """How many training steps to take before updating the reference policy."""
+    load_ref_policy: bool = True
+    """Whether to load and use a reference policy for KL penalty calculation."""
     advantage_normalization_type: Literal["standard", "centered"] = "standard"
     """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
     divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
@@ -494,6 +498,11 @@ class Args:
             for tool in self.tools:
                 if tool not in ["search", "code"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
+        if not self.load_ref_policy and self.beta != 0.0:
+            raise ValueError(
+                "When load_ref_policy=False, beta must be 0.0. "
+                f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
+            )
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
             if self.use_vllm_logprobs or self.truncated_importance_sampling_ratio_cap > 0.0:
                 assert self.mask_tool_use, (
@@ -842,11 +851,58 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 logger.info(f"{self.rank=}: Restored RNG states from checkpoint")
 
+                self.ref_policy_checkpoint_path = None
+                if args.load_ref_policy and states.get("ref_policy_saved", False):
+                    ref_policy_dir = os.path.join(args.checkpoint_state_dir, "ref_policy")
+                    model_path = os.path.join(ref_policy_dir, "pytorch_model.bin")
+                    if os.path.exists(model_path):
+                        self.ref_policy_checkpoint_path = model_path
+                        logger.info(f"{self.rank=}: Will load reference policy from {model_path}")
+
                 logger.info(
                     f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}"
                 )
         self.model.train()
 
+        # reference model
+        ds_config = get_eval_ds_config(
+            offload=False,
+            # inference model only has stage 3 (sharding) or stage 0 (no sharding)
+            # stage 2 is optimizer sharding which doesn't apply to inference
+            stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
+            bf16=True,
+        )
+        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
+        ds_config["gradient_accumulation_steps"] = 1
+        if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
+            dschf = HfDeepSpeedConfig(ds_config)
+        else:
+            dschf = None
+        logger.info(f"DeepSpeed config: {dschf=}")
+
+        if args.load_ref_policy:
+            self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+                model_config.model_name_or_path,
+                revision=model_config.model_revision,
+                torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2",
+                use_cache=False,
+                **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
+            )
+            disable_dropout_in_model(self.ref_policy)
+            self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
+            self.ref_policy.eval()
+
+            if hasattr(self, "ref_policy_checkpoint_path") and self.ref_policy_checkpoint_path:
+                state_dict = torch.load(self.ref_policy_checkpoint_path, map_location=self.device)
+                if hasattr(self.ref_policy, "module"):
+                    self.ref_policy.module.load_state_dict(state_dict)
+                else:
+                    self.ref_policy.load_state_dict(state_dict)
+                logger.info(f"{self.rank=}: Loaded reference policy checkpoint from {self.ref_policy_checkpoint_path}")
+        else:
+            self.ref_policy = None
+            logger.info(f"{self.rank=}: Skipping reference policy loading (load_ref_policy=False)")
         self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
         return optimization_steps_done
 
@@ -963,6 +1019,17 @@ class PolicyTrainerRayProcess(RayProcess):
             all_refs.extend(refss)
         return all_refs
 
+    def update_ref_policy(self):
+        if not self.args.load_ref_policy:
+            return
+        for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
+            if self.args.deepspeed_stage == 3:
+                with deepspeed.zero.GatheredParameters([param, ref_param], modifier_rank=0):
+                    if deepspeed.comm.get_rank() == 0:
+                        ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
+            else:
+                ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
+
     def train(
         self,
         collated_query_responses,
@@ -998,6 +1065,32 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # recalculate the "real" number of mini-batches
         num_mini_batches = len(collated_query_responses) // accumulation_steps
+
+        collated_ref_logprobs = []
+        if args.load_ref_policy:
+            with Timer("Inference Calculation", noop=self.rank != 0), torch.no_grad():
+                for i in range(len(collated_query_responses)):
+                    query_response = collated_query_responses[i]
+                    tool_mask = collated_tool_masks[i]
+                    attention_mask = collated_attention_masks[i]
+                    position_id = collated_position_ids[i]
+                    response_mask = collated_response_masks[i]
+                    ref_logprob, _ = self.forward(
+                        self.ref_policy,
+                        query_response,
+                        attention_mask,
+                        position_id,
+                        pad_token_id,
+                        args.temperature,
+                        return_entropy=False,
+                    )
+                    if args.mask_tool_use and args.tool_use:
+                        response_mask = response_mask.bool() & tool_mask.bool()
+                    else:
+                        response_mask = response_mask.bool()
+                    ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
+                    collated_ref_logprobs.append(ref_logprob)
+                    torch.cuda.empty_cache()
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
         # from the generator (note that async mode means these are a bit diff!)
@@ -1160,15 +1253,57 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     pg_loss_max = torch.max(pg_losses, pg_losses2)
 
-                    loss = masked_mean(
-                        pg_loss_max, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                    )
+                    if args.load_ref_policy:
+                        ref_logprobs_diff = (mb_new_logprobs - mb_ref_logprob).clamp(-40.0, 40.0)
+                        kl1 = ref_logprobs_diff
+                        kl2 = (ref_logprobs_diff) ** 2 / 2
+                        kl3 = torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff
+                        kl4 = ratio * ref_logprobs_diff
+                        if args.kl_estimator == "kl1":
+                            kl = kl1
+                        elif args.kl_estimator == "kl2":
+                            kl = kl2
+                        elif args.kl_estimator == "kl3":
+                            kl = kl3
+                        elif args.kl_estimator == "kl4":
+                            kl = kl4
+                        loss = masked_mean(
+                            pg_loss_max + (args.beta * kl),
+                            mb_response_masks_bool,
+                            args.masked_mean_axis,
+                            args.masked_mean_denominator,
+                        )
+                    else:
+                        loss = masked_mean(
+                            pg_loss_max, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                        )
                     loss = loss / accumulation_steps
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
                         self.model.step()
                     local_step += 1
                     with torch.no_grad():
+                        if args.load_ref_policy:
+                            kl1_stats[i] = masked_mean(
+                                kl1, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                            ).float()
+                            kl2_stats[i] = masked_mean(
+                                kl2, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                            ).float()
+                            kl3_stats[i] = masked_mean(
+                                kl3, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                            ).float()
+                            kl4_stats[i] = masked_mean(
+                                kl4, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                            ).float()
+                            if args.kl_estimator == "kl1":
+                                kl_loss_stats[i] = kl1_stats[i] * args.beta
+                            elif args.kl_estimator == "kl2":
+                                kl_loss_stats[i] = kl2_stats[i] * args.beta
+                            elif args.kl_estimator == "kl3":
+                                kl_loss_stats[i] = kl3_stats[i] * args.beta
+                            elif args.kl_estimator == "kl4":
+                                kl_loss_stats[i] = kl4_stats[i] * args.beta
                         pg_clipfrac_stats[i] = masked_mean(
                             (pg_losses2 > pg_losses).float(),
                             mb_response_masks_bool,
@@ -1219,6 +1354,18 @@ class PolicyTrainerRayProcess(RayProcess):
         # Add RNG states to client_state
         client_state["rng_states"] = rng_states
         client_state["rank"] = self.rank
+
+        # Save reference policy checkpoint (model only, no optimizer)
+        if self.args.load_ref_policy and hasattr(self, "ref_policy") and self.ref_policy is not None:
+            ref_policy_dir = os.path.join(checkpoint_state_dir, "ref_policy")
+            os.makedirs(ref_policy_dir, exist_ok=True)
+
+            if self.rank == 0:
+                model_to_save = self.ref_policy.module if hasattr(self.ref_policy, "module") else self.ref_policy
+                torch.save(model_to_save.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
+                logger.info(f"Saved reference policy model to {ref_policy_dir}")
+
+            client_state["ref_policy_saved"] = True
 
         # Save the main model checkpoint with enhanced client state
         self.model.save_checkpoint(checkpoint_state_dir, client_state=client_state)
@@ -2350,6 +2497,15 @@ def one_training_step(
             ],
             desc=f"Running training step {training_step}",
         )
+        if (
+            args.load_ref_policy
+            and args.ref_policy_update_freq is not None
+            and training_step % args.ref_policy_update_freq == 0
+            and args.alpha > 0
+        ):
+            update_ref_policy_future.extend(
+                [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
+            )
 
     save_time = 0
     if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
