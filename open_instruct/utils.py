@@ -1167,7 +1167,7 @@ python scripts/submit_eval_jobs.py \
 --location {path} \
 --cluster {cluster} \
 --is_tuned \
---workspace "olmo-instruct" \
+--workspace "ai2/olmo-instruct" \
 --priority {eval_priority} \
 --preemptible \
 --use_hf_tokenizer_template \
