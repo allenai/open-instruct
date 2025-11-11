@@ -42,6 +42,7 @@ The main things we are looking for are:
 
 import copy
 import hashlib
+import logging
 import json
 import multiprocessing
 import os
@@ -68,6 +69,8 @@ from transformers.utils.hub import _CACHED_NO_EXIST, TRANSFORMERS_CACHE, extract
 
 from open_instruct.utils import hf_whoami, max_num_processes
 
+logger = logging.getLogger(__name__)
+
 
 # ----------------------------------------------------------------------------
 # Utilities
@@ -76,15 +79,19 @@ def custom_cached_file(model_name_or_path: str, filename: str, revision: str = N
     # local_file = os.path.join(model_name_or_path, filename)
 
     if os.path.isdir(model_name_or_path):
+        logger.info(f"Checking local file: {model_name_or_path}/{filename}")
         resolved_file = os.path.join(model_name_or_path, filename)
         if os.path.isfile(resolved_file):
             return resolved_file
         else:
             return None
     else:
+        logger.info(f"{model_name_or_path} is not a directory, checking cached file...")
+        logger.info(f"Checking cached file: {model_name_or_path}/{filename}")
         resolved_file = try_to_load_from_cache(
             model_name_or_path, filename, cache_dir=TRANSFORMERS_CACHE, revision=revision, repo_type=repo_type
         )
+        logger.info(f"Resolved file: {resolved_file}")
         # special return value from try_to_load_from_cache
         if resolved_file == _CACHED_NO_EXIST:
             return None

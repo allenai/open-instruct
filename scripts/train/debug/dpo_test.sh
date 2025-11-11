@@ -5,7 +5,7 @@ BEAKER_IMAGE=$1
 LR=6e-8
 EXP_NAME="olmo3-32b-DPO-debug-tylertest-${LR}"
 
-uv run python mason.py \
+HF_HUB_ENABLE_HF_TRANSFER=1 uv run python mason.py \
     --cluster ai2/augusta \
     --gs_model_name olmo3-merge-32b-1e-4-5e-5 \
     --workspace ai2/olmo-instruct \
