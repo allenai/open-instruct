@@ -248,11 +248,31 @@ def main(args: Args, tokenizer_config: TokenizerConfig, model_config: ModelConfi
         )
 
     logger.info("Loading datasets")
+
+    system_prompt_override = None
+    if args.system_prompt_override_file is not None:
+        logger.info(f"Loading system prompt override from {args.system_prompt_override_file}")
+        with open(args.system_prompt_override_file) as f:
+            system_prompt_override = f.read().strip()
+        logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
+
+    transform_fn_args = [
+        {"system_prompt_override": system_prompt_override},
+        {"max_prompt_token_length": args.max_prompt_token_length},
+    ]
+
     datasets = get_cached_dataset_tulu(
         dataset_mixer_list=args.dataset_mixer_list,
         dataset_mixer_list_splits=args.dataset_mixer_list_splits,
         tc=tokenizer_config,
+        dataset_transform_fn=args.dataset_transform_fn,
+        transform_fn_args=transform_fn_args,
+        dataset_cache_mode=args.dataset_cache_mode,
+        dataset_config_hash=args.dataset_config_hash,
+        hf_entity=args.hf_entity,
+        dataset_local_cache_dir=args.dataset_local_cache_dir,
         dataset_skip_cache=args.dataset_skip_cache,
+        system_prompt_override=system_prompt_override,
     )
 
     ray.init(address=args.ray_address, runtime_env={"env_vars": {"NCCL_DEBUG": "WARN"}}, ignore_reinit_error=True)
