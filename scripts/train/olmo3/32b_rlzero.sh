@@ -63,7 +63,7 @@ python open_instruct/grpo_fast.py \
     --chat_template_name olmo_thinker_dapo \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 512000 \
+    --total_episodes 25600 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 8 8 \
     --vllm_num_engines 16 \
