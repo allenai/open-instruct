@@ -63,17 +63,18 @@ python open_instruct/grpo_fast.py \
     --chat_template_name olmo_thinker_dapo \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 25600 \
+    --total_episodes 12800 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 8 8 \
-    --vllm_num_engines 16 \
-    --vllm_tensor_parallel_size 4 \
+    --vllm_num_engines 3 \
+    --gather_whole_model False \
+    --vllm_tensor_parallel_size 8 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --local_eval_every 100 \
-    --save_freq 100 \
-    --checkpoint_state_freq 100 \
+    --local_eval_every 25 \
+    --save_freq 25 \
+    --checkpoint_state_freq 25 \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \
@@ -83,4 +84,6 @@ python open_instruct/grpo_fast.py \
     --try_launch_beaker_eval_jobs_on_weka True \
     --eval_priority high \
     --oe_eval_tasks $EVALS \
-    --oe_eval_gpu_multiplier 4
+    --oe_eval_gpu_multiplier 4 \
+    --vllm_enforce_eager \
+    --deepspeed_zpg 32
