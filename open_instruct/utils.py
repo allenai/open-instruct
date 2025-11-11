@@ -1132,6 +1132,7 @@ def launch_ai2_evals_on_weka(
     gs_bucket_path: str | None = None,
     eval_priority: str | None = "normal",
     beaker_image: str | None = None,
+    oe_eval_gpu_multiplier: int = 1,
 ) -> None:
     weka_cluster = "ai2/saturn ai2/neptune"
     gcp_cluster = "ai2/augusta"
@@ -1167,6 +1168,7 @@ python scripts/submit_eval_jobs.py \
 --is_tuned \
 --workspace "tulu-3-results" \
 --priority {eval_priority} \
+--gpu_multiplier {oe_eval_gpu_multiplier} \
 --preemptible \
 --use_hf_tokenizer_template \
 --run_oe_eval_experiments \
