@@ -3,9 +3,9 @@ BEAKER_IMAGE=$1
 MODEL_NAME=/weka/oe-adapt-default/saumyam/checkpoints/olmo2-7B-sft/rl-sft/olmo3-32b-SFT-5e-5/step10790-hf
 NUM_NODES=16
 # for LR in 8e-8 7e-8 6e-8 9e-8 1e-7 5e-8 2e-7
-for LR in 8e-8
+for LR in 8e-7
 do
-    EXP_NAME="olmo3-32b-5e10790-DPO-deltas-10k-${LR}env"
+    EXP_NAME="olmo3-32b-5e10790-DPO-deltas-10k-${LR}env2"
     uv run python mason.py \
         --cluster ai2/augusta \
         --gs_model_name olmo3-32b-SFT-5e-5-step10790 \

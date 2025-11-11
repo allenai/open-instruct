@@ -3,9 +3,9 @@ BEAKER_IMAGE=$1
 MODEL_NAME=/weka/oe-adapt-default/saumyam/checkpoints/olmo2-7B-sft/rl-sft/olmo3-32b-SFT-5e-5/step10790-hf
 NUM_NODES=16
 # for LR in 8e-8 7e-8 6e-8 9e-8 1e-7 5e-8 2e-7
-for LR in 1e-4
+for LR in 1e-6
 do
-    EXP_NAME="olmo3-32b-5e10790-DPO-deltas-10k-${LR}-3"
+    EXP_NAME="olmo3-32b-5e10790-DPO-deltas-${LR}-overfit"
     uv run python mason.py \
         --cluster ai2/augusta \
         --gs_model_name olmo3-32b-SFT-5e-5-step10790 \
@@ -33,8 +33,7 @@ do
         --model_name_or_path $MODEL_NAME \
         --tokenizer_name $MODEL_NAME \
         --use_slow_tokenizer False \
-        --dataset_mixer_list allenai/olmo-3-preference-mix-deltas_reasoning-scottmix-DECON-keyword-filtered 1.0 \
-        --max_train_samples 10000 \
+        --dataset_mixer_list allenai/olmo-3-preference-mix-deltas_reasoning-scottmix-DECON-keyword-filtered 128 \
         --dataset_skip_cache \
 	--zero_stage 3 \
         --concatenated_forward False \
@@ -45,7 +44,7 @@ do
         --lr_scheduler_type linear \
         --warmup_ratio 0.1 \
         --weight_decay 0.0 \
-        --num_train_epochs 1 \
+        --num_train_epochs 10 \
         --logging_steps 1 \
         --dpo_loss_type dpo_norm \
         --dpo_beta 5 \
@@ -55,9 +54,9 @@ do
         --chat_template_name olmo123 \
         --with_tracking \
         --try_launch_beaker_eval_jobs False \
-        --log_grad_norm True \
-	--ref_logprobs_cache_dir "/filestore/.cache/"
+        --log_grad_norm True
 done
         # --oe_eval_max_length 32768 \
         # --oe_eval_tasks "gpqa:0shot_cot::qwen3-instruct,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,minerva_math_500::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,zebralogic::hamish_zs_reasoning_deepseek,bbh:cot::hamish_zs_reasoning_deepseek_v2,mmlu:cot::hamish_zs_reasoning_deepseek,popqa::hamish_zs_reasoning_deepseek"
 
+	# --ref_logprobs_cache_dir "/filestore/.cache/" \
