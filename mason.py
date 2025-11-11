@@ -782,21 +782,36 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
 
 def main():
     args, commands = get_args()
+    console.log("Parsed mason arguments and commands")
+
     # If the user is not in Ai2, we run the command as is
     config_path = os.path.expanduser("~/.beaker/config.yml")
+    console.log(f"Checking Beaker config at: {config_path}")
+
     is_external_user = not os.path.exists(config_path) and "BEAKER_TOKEN" not in os.environ
+    console.log(f"External user detected: {is_external_user}")
+
     if is_external_user:
         whoami = "external_user"
         beaker_secrets = []
+        console.log("Running as external user - no Beaker secrets available")
     else:
+        console.log("Running as internal AI2 user")
         if args.workspace:
+            console.log(f"Using workspace: {args.workspace}")
             beaker_client = beaker.Beaker.from_env(default_workspace=args.workspace)
         else:
+            console.log("Using default workspace")
             beaker_client = beaker.Beaker.from_env()
         beaker_secrets = [secret.name for secret in beaker_client.secret.list()]
         whoami = beaker_client.user.get().name
+        console.log(f"Authenticated as: {whoami}")
+        console.log(f"Available secrets: {len(beaker_secrets)}")
 
+    console.log("Generating internal commands...")
     full_commands = [make_internal_command(command, args, whoami, is_external_user) for command in commands]
+    console.log(f"Generated {len(full_commands)} command(s)")
+
     if is_external_user:
         console.rule("[bold red]Non-Ai2 User Detected[/bold red]")
         console.print(
@@ -822,6 +837,7 @@ def main():
         budget=args.budget,
         retry=beaker.BeakerRetrySpec(allowed_task_retries=args.max_retries),
     )
+    console.log("Creating Beaker experiment...")
     exp = beaker_client.experiment.create(spec=experiment_spec)
     console.log(f"Kicked off Beaker job. https://beaker.org/ex/{exp.experiment.id}")
 
