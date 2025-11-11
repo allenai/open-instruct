@@ -260,7 +260,7 @@ async def run_litellm_async(
 
     # Set default parameters
     chat_kwargs["temperature"] = chat_kwargs.get("temperature", 0)
-    chat_kwargs["max_tokens"] = chat_kwargs.get("max_tokens", 32768)
+    chat_kwargs["max_tokens"] = chat_kwargs.get("max_tokens", 16384)
     chat_kwargs["top_p"] = chat_kwargs.get("top_p", 1.0)
     chat_kwargs["frequency_penalty"] = chat_kwargs.get("frequency_penalty", 0.0)
     chat_kwargs["presence_penalty"] = chat_kwargs.get("presence_penalty", 0.0)
