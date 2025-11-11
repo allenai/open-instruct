@@ -3,7 +3,7 @@ NUM_NODES=8
 BEAKER_IMAGE=$1
 
 LR=6e-8
-EXP_NAME="olmo3-32b-DPO-dbg-tr-shrd8-${LR}"
+EXP_NAME="olmo3-32b-DPO-dbg-tr-shrd64-${LR}"
 
 HF_HUB_ENABLE_HF_TRANSFER=1 uv run python mason.py \
     --cluster ai2/augusta \
@@ -55,7 +55,7 @@ HF_HUB_ENABLE_HF_TRANSFER=1 uv run python mason.py \
     --chat_template_name olmo123 \
     --with_tracking \
     --log_grad_norm True \
-    --zero_hpz_partition_size 8
+    --zero_hpz_partition_size 64
 
     #  \
     # --offload_optimizer True
