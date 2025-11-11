@@ -1110,6 +1110,12 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     weighted_aux_loss = args.load_balancing_weight * aux_loss
                     loss += weighted_aux_loss
                 accelerator.backward(loss)
+
+                # compute gradient norm before any clipping (only on sync steps to reduce overhead)
+                grad_norm_this_step = None
+                if args.log_grad_norm and accelerator.sync_gradients:
+                    grad_norm_this_step = accelerator.clip_grad_norm_(model.parameters(), float("inf"))
+
                 # clip gradient norm. don't do this with deepspeed
                 if accelerator.sync_gradients and args.clip_grad_norm > 0:
                     accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
@@ -1121,6 +1127,15 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
                 # We keep track of the loss at each logged step
                 with torch.no_grad():
+                    if grad_norm_this_step is not None and args.log_grad_norm:
+                        # scale by grad accumulation since we'll divide later to get a per-step average
+                        grad_norm_value = (
+                            grad_norm_this_step.item()
+                            if isinstance(grad_norm_this_step, torch.Tensor)
+                            else float(grad_norm_this_step)
+                        )
+                        local_metrics[9] += grad_norm_value * args.gradient_accumulation_steps
+
                     local_metrics[0] += loss
                     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                         chosen_rewards = (args.dpo_beta * (policy_chosen_logps - reference_chosen_logps)).mean()
@@ -1181,6 +1196,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     }
                     if args.log_grad_norm:
                         metrics_to_log["grad_norm"] = global_metrics[8]
+                        metrics_to_log["grad_norm_tyler"] = global_metrics[9]
                     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                         metrics_to_log.update(
                             {
