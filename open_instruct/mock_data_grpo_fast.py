@@ -249,11 +249,10 @@ def main(args: Args, tokenizer_config: TokenizerConfig, model_config: ModelConfi
 
     logger.info("Loading datasets")
     datasets = get_cached_dataset_tulu(
-        args.dataset_mixer,
-        sanity_check=args.sanity_check,
-        sanity_check_size=args.sanity_check_size,
-        tokenizer_config=tokenizer_config,
-        regenerate_if_stale=False,
+        dataset_mixer_list=args.dataset_mixer_list,
+        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+        tc=tokenizer_config,
+        dataset_skip_cache=args.dataset_skip_cache,
     )
 
     ray.init(address=args.ray_address, runtime_env={"env_vars": {"NCCL_DEBUG": "WARN"}}, ignore_reinit_error=True)
