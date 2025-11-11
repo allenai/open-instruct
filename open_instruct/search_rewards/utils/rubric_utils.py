@@ -385,7 +385,6 @@ async def generate_instance_wise_adaptive_rubrics(question, response_list, exist
     prompt = INSTANCE_WISE_RUBRIC_GENERATION_PROMPT + prompt_suffix
     
     try:        
-        print("model name: ", model_name)
         resp = await run_litellm_async(
                 model_name=model_name,
                 user_prompt=prompt,
@@ -454,7 +453,7 @@ async def _generate_instance_wise_adaptive_rubrics(responses, ground_truths, num
                         break
                 answer_list = selected_answers if selected_answers else answer_list[:2]
             num_subsampled_answers_list.append(len(answer_list))
-            task = generate_instance_wise_adaptive_rubrics(question, answer_list, existing_rubrics_str, model_name=os.environ.get("RUBRIC_GENERER_MODEL", "gpt-4.1"))
+            task = generate_instance_wise_adaptive_rubrics(question, answer_list, existing_rubrics_str, model_name=os.environ.get("RUBRIC_GENERATION_MODEL", "gpt-4.1"))
         tasks.append(task)
     
     # Execute all tasks in parallel
