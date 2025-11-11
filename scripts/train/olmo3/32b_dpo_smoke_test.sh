@@ -6,8 +6,9 @@ MODEL_NAME=/weka/oe-adapt-default/jacobm/olmo3/32b-merge-configs/checkpoints/32b
 NUM_NODES=16
 EXP_NAME="olmo3-32b-merge_2e5e-DPO-deltas-150k-${LR}"
 uv run python mason.py \
+   --description "Olmo3 32B DPO Smoke Test on 150k samples" \
    --cluster ai2/augusta \
-   --gs_model_name $EXP_NAME \
+   --gs_model_name "olmo3-32b-merge_2e5e" \
    --workspace ai2/olmo-instruct \
    --priority urgent \
    --preemptible \
