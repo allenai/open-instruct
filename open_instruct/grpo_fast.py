@@ -753,27 +753,27 @@ class PolicyTrainerRayProcess(RayProcess):
         
         # Memory optimization for large models: reduce bucket sizes and max live parameters
         # to prevent OOM during communication operations (e.g., reduce_scatter)
-        if ds_config["zero_optimization"]["stage"] == 3:
-            zero_opt = ds_config["zero_optimization"]
-            # Override "auto" values with more conservative memory settings
-            zero_opt["stage3_max_live_parameters"] = 1e9
-            zero_opt["stage3_max_reuse_distance"] = 1e9
-            zero_opt["sub_group_size"] = 1e9
-            zero_opt["zero_hpz_partition_size"] = 8
-            zero_opt["stage3_gather_16bit_weights_on_model_save"] = True
-            # Reduce communication bucket sizes to prevent OOM during reduce_scatter
-            # Smaller buckets use less temporary memory but may be slightly slower
-            if "reduce_bucket_size" in zero_opt and zero_opt["reduce_bucket_size"] == "auto":
-                zero_opt["reduce_bucket_size"] = 5e7  # 50M elements (default auto is often larger)
-            if "stage3_prefetch_bucket_size" in zero_opt and zero_opt["stage3_prefetch_bucket_size"] == "auto":
-                zero_opt["stage3_prefetch_bucket_size"] = 5e7  # 50M elements
-            ds_config["zero_optimization"] = zero_opt
-        # Also reduce reduce_bucket_size for non-stage-3 ZeRO to prevent OOM
-        elif ds_config["zero_optimization"]["stage"] in [1, 2]:
-            zero_opt = ds_config["zero_optimization"]
-            if "reduce_bucket_size" in zero_opt and zero_opt["reduce_bucket_size"] == "auto":
-                zero_opt["reduce_bucket_size"] = 5e7  # 50M elements
-            ds_config["zero_optimization"] = zero_opt
+        # if ds_config["zero_optimization"]["stage"] == 3:
+        #     zero_opt = ds_config["zero_optimization"]
+        #     # Override "auto" values with more conservative memory settings
+        #     zero_opt["stage3_max_live_parameters"] = 1e9
+        #     zero_opt["stage3_max_reuse_distance"] = 1e9
+        #     zero_opt["sub_group_size"] = 1e9
+        #     zero_opt["zero_hpz_partition_size"] = 8
+        #     zero_opt["stage3_gather_16bit_weights_on_model_save"] = True
+        #     # Reduce communication bucket sizes to prevent OOM during reduce_scatter
+        #     # Smaller buckets use less temporary memory but may be slightly slower
+        #     if "reduce_bucket_size" in zero_opt and zero_opt["reduce_bucket_size"] == "auto":
+        #         zero_opt["reduce_bucket_size"] = 5e7  # 50M elements (default auto is often larger)
+        #     if "stage3_prefetch_bucket_size" in zero_opt and zero_opt["stage3_prefetch_bucket_size"] == "auto":
+        #         zero_opt["stage3_prefetch_bucket_size"] = 5e7  # 50M elements
+        #     ds_config["zero_optimization"] = zero_opt
+        # # Also reduce reduce_bucket_size for non-stage-3 ZeRO to prevent OOM
+        # elif ds_config["zero_optimization"]["stage"] in [1, 2]:
+        #     zero_opt = ds_config["zero_optimization"]
+        #     if "reduce_bucket_size" in zero_opt and zero_opt["reduce_bucket_size"] == "auto":
+        #         zero_opt["reduce_bucket_size"] = 5e7  # 50M elements
+        #     ds_config["zero_optimization"] = zero_opt
         # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
         # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
         # next line instructs transformers to partition the model directly over multiple gpus using
