@@ -981,10 +981,16 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # grpo change: directly subtract KL in loss (add)
                     loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
-                    loss = loss / accumulation_steps
-                    self.model.backward(loss)
-                    if (local_step + 1) % accumulation_steps == 0:
-                        self.model.step()
+                    
+                    # Skip backward/step if loss is NaN, but still log metrics
+                    if torch.isnan(loss):
+                        if self.rank == 0:
+                            print(f"⚠️ [Rank {self.rank}] Skipping backward/step due to NaN loss at local_step {local_step}, epoch {epoch_idx}, batch {i}")
+                    else:
+                        loss = loss / accumulation_steps
+                        self.model.backward(loss)
+                        if accumulation_steps > 0 and (local_step + 1) % accumulation_steps == 0:
+                            self.model.step()
                     local_step += 1
                     with torch.no_grad():
                         # NOTE: in packed implementation, kl calculation are averages over response tokens
