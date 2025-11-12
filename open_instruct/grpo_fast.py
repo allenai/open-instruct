@@ -870,6 +870,8 @@ class PolicyTrainerRayProcess(RayProcess):
         if args.load_ref_policy:
             ds_config = get_eval_ds_config(
                 offload=False,
+                # inference model only has stage 3 (sharding) or stage 0 (no sharding)
+                # stage 2 is optimizer sharding which doesn't apply to inference
                 stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
                 bf16=True,
                 per_device_train_batch_size=args.per_device_train_batch_size,
