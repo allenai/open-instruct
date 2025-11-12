@@ -2186,9 +2186,6 @@ def create_model_and_optimizer(
 
 def create_generation_configs(args: Args):
     """Create generation configs for training and evaluation."""
-    # For OOM testing: force maximum generation by setting min_tokens = max_tokens
-    # This ensures vLLM generates exactly response_length tokens
-    # Note: EOS tokens may still be generated but won't stop generation due to min_tokens
     generation_config = vllm.SamplingParams(
         temperature=args.temperature,
         top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
