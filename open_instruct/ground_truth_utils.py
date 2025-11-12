@@ -681,7 +681,7 @@ class LMJudgeVerifier(VerifierFunction):
         # Build prompt. For the procedure judge variants, we expect label to be a JSON with
         # {"goal": <str>, "reference_steps": <str>} and use final_answer as {steps}.
         # Otherwise, use the standard {input}/{output}/{label} formatting.
-        use_procedure_format = self.judge_type in {"procedure_judge", "procedure_judge_binary", "procedure_judge_ratio"}
+        use_procedure_format = self.judge_type in {"procedure_judge", "procedure_judge_binary", "procedure_judge_ratio", "procedure_judge_ratio_2"}
         if use_procedure_format:
             goal = ""
             reference_steps = ""
